@@ -165,16 +165,18 @@ Now Claude can:
 - Capture learnings
 - Navigate relationships
 
-## The Agent Workflow
+## The Memory Loop
 
 When working with Claude Code and Sibyl:
 
 ```
-1. SEARCH FIRST     -> sibyl search "topic"
-2. CHECK TASKS      -> sibyl task list --status doing
-3. WORK & CAPTURE   -> sibyl add "learning" "description"
-4. COMPLETE         -> sibyl task complete --learnings "..."
+1. RECALL    -> sibyl recall "topic"
+2. ACT       -> sibyl task start <id>
+3. REMEMBER  -> sibyl remember "learning" "description"
+4. REFLECT   -> sibyl reflect --persist --review < notes.md
 ```
+
+See [The Memory Loop](./memory-loop.md) for the cycle in full.
 
 ## Common Commands Reference
 
@@ -208,10 +210,10 @@ sibyl task list --csv
 
 Now that you have Sibyl running:
 
-1. **Read the Philosophy** - [Introduction](./index.md) explains the "search, work, capture" mindset
-2. **Understand the Graph** - [Knowledge Graph](./knowledge-graph.md) explains how entities connect
-3. **Set Up Claude** - [Claude Code Integration](./claude-code.md) for full AI agent support
-4. **Learn Entity Types** - [Entity Types](./entity-types.md) to know what to capture
+1. **Learn the Memory Loop** - [The Memory Loop](./memory-loop.md) explains recall, act, remember, reflect
+2. **Read the Philosophy** - [Introduction](./index.md) explains why context should survive the session
+3. **Understand the Graph** - [Knowledge Graph](./knowledge-graph.md) explains how entities connect
+4. **Set Up Claude** - [Claude Code Integration](./claude-code.md) for full AI agent support
 
 ## Tips for Success
 

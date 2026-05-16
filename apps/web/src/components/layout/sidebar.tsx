@@ -4,7 +4,8 @@ import { AnimatePresence, motion } from 'motion/react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect } from 'react';
-import { X } from '@/components/ui/icons';
+import { Github, Heart, X } from '@/components/ui/icons';
+import { Tooltip } from '@/components/ui/tooltip';
 import { APP_CONFIG, NAVIGATION } from '@/lib/constants';
 import { useMobileNav } from './mobile-nav-context';
 import { NavLink } from './nav-link';
@@ -47,7 +48,31 @@ function SidebarContent({ onNavClick }: SidebarContentProps) {
       </nav>
 
       {/* Footer */}
-      <div className="p-3 md:p-4 border-t border-sc-fg-subtle/10">
+      <div className="p-3 md:p-4 border-t border-sc-fg-subtle/10 space-y-2">
+        <div className="flex items-center justify-center gap-1">
+          <Tooltip content="GitHub">
+            <a
+              href={APP_CONFIG.GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-md p-1.5 text-sc-fg-subtle transition-colors hover:bg-sc-bg-highlight hover:text-sc-cyan"
+              aria-label="Sibyl on GitHub"
+            >
+              <Github width={15} height={15} />
+            </a>
+          </Tooltip>
+          <Tooltip content="Sponsor">
+            <a
+              href={APP_CONFIG.SPONSOR_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-md p-1.5 text-sc-fg-subtle transition-colors hover:bg-sc-bg-highlight hover:text-sc-coral"
+              aria-label="Sponsor Sibyl"
+            >
+              <Heart width={15} height={15} />
+            </a>
+          </Tooltip>
+        </div>
         <div className="flex items-center justify-center text-[10px] text-sc-fg-subtle">
           <span className="uppercase tracking-wider">
             {APP_CONFIG.NAME} v{APP_CONFIG.VERSION}

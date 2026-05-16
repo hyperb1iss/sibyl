@@ -22,11 +22,15 @@ Short-lived token for API authentication.
 {
   "sub": "user_uuid", // User ID
   "org": "org_uuid", // Organization ID (optional)
+  "sid": "session_uuid", // Session ID (optional)
   "typ": "access", // Token type
   "iat": 1704067200, // Issued at (Unix timestamp)
   "exp": 1704070800 // Expires at (Unix timestamp)
 }
 ```
+
+Access tokens may also carry an `org_role` claim and a `scopes` claim when the issuer includes
+them. The MCP server uses `org_role` to gate owner-only tools.
 
 **Default Expiry:** 60 minutes (configurable via `SIBYL_ACCESS_TOKEN_EXPIRE_MINUTES`)
 

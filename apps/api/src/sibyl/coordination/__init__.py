@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from sibyl.config import settings
+from sibyl_core.observability import telemetry_registry
 
 CoordinationBackend = Literal["local", "redis"]
 
@@ -48,4 +49,11 @@ async def get_coordination_health() -> dict[str, Any]:
             "error": "Health check failed",
         }
 
-    return {**health, **broker_health}
+    merged = {**health, **broker_health}
+    telemetry_registry().record_queue_health(
+        backend=str(merged.get("queue_backend") or backend),
+        queue_depth=int(merged.get("queue_depth") or 0),
+        queue_healthy=bool(merged.get("queue_healthy")),
+        worker_healthy=bool(merged.get("worker_healthy")),
+    )
+    return merged

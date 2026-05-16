@@ -34,6 +34,26 @@ Sibyl's design language: electric meets elegant. Neon hues over deep purple-blac
 | `--sc-fg-muted`   | `oklch(62% 0.035 280)` | Secondary text    |
 | `--sc-fg-subtle`  | `oklch(42% 0.03 280)`  | Disabled, borders |
 
+## Theming
+
+The web app ships two themes, switched via a `data-theme` attribute on the root:
+
+- `neon` is the dark default. Deep purple-black backgrounds, full-saturation neon
+  accents. The OKLCH values in the tables above are the `neon` palette.
+- `dawn` is the light theme. Soft lavender-gray backgrounds, deeper accent hues
+  tuned for contrast on light surfaces.
+
+```tsx
+import { ThemeToggle } from "@/components/ui/theme-toggle";
+
+// Cycles neon and dawn (also bound to Cmd+Shift+L)
+<ThemeToggle />;
+```
+
+Every `--sc-*` token is redefined per theme, so design-token usage adapts
+automatically. Hardcoded Tailwind colors do not, which is one more reason to
+stay on the tokens.
+
 ## Tailwind Usage
 
 ```tsx
@@ -82,6 +102,7 @@ import { Card, CardHeader, StatCard, CollapsibleCard } from '@/components/ui';
 <Card variant="default">Content</Card>
 <Card variant="elevated" glow>Elevated with glow</Card>
 <Card variant="interactive">Clickable card</Card>
+<Card variant="bordered">Transparent, ringed border</Card>
 <Card variant="error">Error state</Card>
 <Card variant="warning">Warning state</Card>
 <Card variant="success">Success state</Card>
@@ -353,6 +374,71 @@ import { Pagination, SimplePagination, PageSizeSelector } from '@/components/ui'
 
 // Page size selector
 <PageSizeSelector value={25} onChange={setPageSize} />
+```
+
+### Progress
+
+```tsx
+import { Progress, ScoreBar, CircularProgress } from '@/components/ui';
+
+// Linear progress bar
+<Progress value={62} max={100} />
+
+// Score bar for graded values (0 to 1)
+<ScoreBar score={0.82} size="sm" />
+
+// Circular progress indicator
+<CircularProgress value={45} size={48} />
+```
+
+### Spinner and Loading States
+
+```tsx
+import {
+  Spinner,
+  LoadingState,
+  Skeleton,
+  SkeletonCard,
+  SkeletonList,
+} from '@/components/ui';
+
+// Inline spinner
+<Spinner size="md" color="purple" />
+
+// Full loading state with message
+<LoadingState message="Loading memory..." />
+
+// Shaped skeletons for suspense fallbacks
+<Skeleton className="h-4 w-32" />
+<SkeletonCard />
+<SkeletonList count={5} />
+```
+
+### Toggle and Chips
+
+```tsx
+import { Toggle, FilterChip, TagChip, EntityTypeChip } from '@/components/ui';
+
+// Switch-style toggle with optional label
+<Toggle checked={on} onChange={setOn} label="Enable" size="md" />
+
+// Filter chip for facet selection
+<FilterChip active={selected} onClick={() => {}}>Patterns</FilterChip>
+
+// Tag chip
+<TagChip tag="auth" active={false} onClick={() => {}} />
+
+// Entity-type chip with icon, color, and optional count
+<EntityTypeChip entityType="pattern" active onClick={() => {}} count={12} />
+```
+
+### Markdown
+
+```tsx
+import { Markdown } from '@/components/ui';
+
+// Renders markdown with SilkCircuit-styled typography and code blocks
+<Markdown content={entity.description} />
 ```
 
 ## Animations

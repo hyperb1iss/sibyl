@@ -6,26 +6,37 @@ description: How to effectively capture learnings in Sibyl
 # Capturing Knowledge
 
 The value of Sibyl grows with every piece of knowledge you capture. This guide explains what to
-capture, how to capture it, and patterns for high-quality knowledge entries.
+capture, how to capture it, and patterns for high-quality knowledge entries. Capture is the
+**remember** step of the [memory loop](./memory-loop.md).
 
 ## The Philosophy
 
-### Search Before Implementing
+### Recall Before Implementing
 
-Before you write code, search the graph:
+Before you write code, pull working context:
 
 ```bash
-sibyl search "what you're building"
+sibyl recall "what you're building"
 sibyl search "error you hit" --type episode
 ```
 
 ### Capture What You Learn
 
-If it took time to figure out, save it:
+If it took time to figure out, save it. There are three ways, in rising order of ceremony:
 
 ```bash
-sibyl add "Descriptive title" "What, why, how, caveats"
+# Quickest: derive a title from the content
+sibyl capture "Surreal embedded mode is single-writer, fine for local dev"
+
+# Typed durable memory with an explicit kind
+sibyl remember "Chose SurrealDB" "One engine replaces three backends" --kind decision
+
+# Full control over type and metadata
+sibyl add "Descriptive title" "What, why, how, caveats" --type pattern
 ```
+
+`capture` and `remember` are the memory-loop verbs. `add` is the lower-level command
+with the widest set of flags.
 
 ### Complete With Learnings
 
@@ -85,7 +96,7 @@ sibyl add "Never commit .env" "Environment files must be gitignored" --type rule
 sibyl add "Redis pooling insight" \
   "Connection pool size must be >= concurrent requests" \
   --category database \
-  --languages python,redis
+  --language python --language redis
 ```
 
 ## Quality Guidelines
@@ -257,10 +268,10 @@ Pool exhaustion occurs when all connections are in use..."
 ### Include Error Messages
 
 ```bash
-sibyl add "FalkorDB WRONGTYPE error" \
+sibyl add "Redis WRONGTYPE error on key reuse" \
   "Error: WRONGTYPE Operation against a key holding the wrong kind of value
 
-This occurs when Redis returns a different data type than expected..."
+This occurs when a key is read as a type it was not written as..."
 ```
 
 ### Include Technology Names
@@ -320,6 +331,22 @@ add(
     category="resilience",
     languages=["python", "typescript"]
 )
+```
+
+### Using `remember` and `reflect`
+
+For the memory-loop tools:
+
+```python
+# Capture typed durable memory
+remember(
+    title="Chose SurrealDB for the runtime",
+    content="One engine replaces three backends...",
+    kind="decision"
+)
+
+# Distill raw session notes into reviewable candidates
+reflect(content="Long session notes...", persist=True, review=True)
 ```
 
 ### From Task Completion
@@ -396,6 +423,7 @@ Reason: Keeps business logic testable and reusable." \
 
 ## Next Steps
 
+- [The Memory Loop](./memory-loop.md) - Capture in the full cycle
 - [Entity Types](./entity-types.md) - Choose the right type
 - [Semantic Search](./semantic-search.md) - Find your knowledge
 - [Task Management](./task-management.md) - Capture in workflow

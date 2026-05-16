@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
@@ -11,6 +12,7 @@ from pydantic_ai.models import ModelSettings
 from sibyl_core.ai.clients import get_agent
 from sibyl_core.ai.errors import LLMError, classify_llm_exception
 from sibyl_core.ai.llm.config import LLMSurface
+from sibyl_core.observability import elapsed_ms, telemetry_registry
 
 
 class Generator:
@@ -30,6 +32,7 @@ class Generator:
         self._agent = agent
 
     async def generate(self, prompt: str, *, max_tokens: int | None = None) -> str:
+        started_at = time.perf_counter()
         try:
             agent = await self._get_agent()
             result = await agent.run(
@@ -37,11 +40,26 @@ class Generator:
                 output_type=str,
                 model_settings=_model_settings(max_tokens),
             )
+            telemetry_registry().record_llm_call(
+                surface=self.surface.value,
+                provider="runtime",
+                model=self.model_override or "default",
+                status="ok",
+                duration_ms=elapsed_ms(started_at),
+            )
             return result.output
         except Exception as exc:
+            telemetry_registry().record_llm_call(
+                surface=self.surface.value,
+                provider="runtime",
+                model=self.model_override or "default",
+                status="error",
+                duration_ms=elapsed_ms(started_at),
+            )
             raise self._classify(exc) from exc
 
     async def stream(self, prompt: str, *, max_tokens: int | None = None) -> AsyncIterator[str]:
+        started_at = time.perf_counter()
         try:
             agent = await self._get_agent()
             async with agent.run_stream(
@@ -51,7 +69,21 @@ class Generator:
             ) as stream:
                 async for text in stream.stream_text(delta=True):
                     yield text
+            telemetry_registry().record_llm_call(
+                surface=f"{self.surface.value}_stream",
+                provider="runtime",
+                model=self.model_override or "default",
+                status="ok",
+                duration_ms=elapsed_ms(started_at),
+            )
         except Exception as exc:
+            telemetry_registry().record_llm_call(
+                surface=f"{self.surface.value}_stream",
+                provider="runtime",
+                model=self.model_override or "default",
+                status="error",
+                duration_ms=elapsed_ms(started_at),
+            )
             raise self._classify(exc) from exc
 
     async def _get_agent(self) -> Agent[Any, Any]:

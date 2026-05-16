@@ -15,6 +15,7 @@ A context contains:
 ## Commands
 
 - `sibyl context` - Show current context
+- `sibyl context pack` - Compile a context pack for an agent
 - `sibyl context list` - List all contexts
 - `sibyl context show` - Show context details
 - `sibyl context create` - Create a context
@@ -37,9 +38,10 @@ sibyl context [options]
 
 ### Options
 
-| Option   | Short | Description |
-| -------- | ----- | ----------- |
-| `--json` | `-j`  | JSON output |
+| Option                 | Short | Description                                              |
+| ---------------------- | ----- | -------------------------------------------------------- |
+| `--json`               | `-j`  | JSON output                                              |
+| `--quick` / `--validate` |     | Show local server/org/project/auth status only          |
 
 ### Example
 
@@ -58,7 +60,59 @@ Output:
   Project:  proj_abc123 (linked)
 ```
 
-If a directory is linked, it shows `(linked)` next to the project.
+If a directory is linked, it shows `(linked)` next to the project. Use `--quick` for a fast
+local status check that skips fetching full project detail.
+
+---
+
+## context pack
+
+Compile a precise context pack for an agent. This is the lower-level command behind
+[`sibyl recall`](./recall.md): it builds a goal-scoped bundle of tasks, decisions, and graph
+neighbors. Use `recall` for everyday work and `context pack` when you need fine-grained control
+over the pack.
+
+### Synopsis
+
+```bash
+sibyl context pack <goal> [options]
+```
+
+### Arguments
+
+| Argument | Required | Description             |
+| -------- | -------- | ----------------------- |
+| `goal`   | Yes      | Agent goal or user task |
+
+### Options
+
+| Option            | Short | Default  | Description                                       |
+| ----------------- | ----- | -------- | ------------------------------------------------- |
+| `--intent`        | `-i`  | `build`  | Agent intent: build, plan, ideate, research, review, debug, decide, learn, general |
+| `--layer`         |       | `recall` | Context depth: `wake`, `recall`, `deep_search`    |
+| `--domain`        | `-d`  | (none)   | Domain/category to bias retrieval                 |
+| `--project`       | `-p`  | (auto)   | Project ID to scope context                       |
+| `--agent`         |       | (none)   | Agent diary identity to include                   |
+| `--all`           | `-a`  | false    | Use all accessible projects                       |
+| `--limit`         | `-l`  | 24       | Maximum total context items (1-50)                |
+| `--related`       |       | on       | Include one-hop related graph context (`--no-related`) |
+| `--related-limit` |       | 3        | Related items per context item (0-5)              |
+| `--markdown`      | `-m`  | false    | Output compact Markdown for agent injection       |
+| `--json`          | `-j`  | false    | JSON output                                       |
+
+### Examples
+
+```bash
+# Compile a context pack for a goal
+sibyl context pack "implement the password reset endpoint"
+
+# Markdown output for direct agent injection
+sibyl context pack "debug the auth refresh bug" --intent debug --markdown
+
+# Deep search with a wider item budget
+sibyl context pack "how synthesis verification works" \
+  --layer deep_search --limit 40
+```
 
 ---
 
@@ -445,5 +499,7 @@ insecure = true
 
 ## Related Commands
 
+- [`sibyl recall`](./recall.md) - Recall a working context pack (built on `context pack`)
+- [`sibyl auth login`](./auth.md) - Log in and create a context in one step
 - [`sibyl project link`](./project.md) - Link directory to project
 - [`sibyl config`](./index.md) - Configuration management

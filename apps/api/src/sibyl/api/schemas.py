@@ -1289,6 +1289,76 @@ class StatsResponse(BaseModel):
     total_relationships: int | None = None
 
 
+class TelemetryDurationSummary(BaseModel):
+    """Latency and error summary for a runtime surface."""
+
+    count: int = 0
+    errors: int = 0
+    slow: int = 0
+    error_rate: float = 0.0
+    avg_ms: float = 0.0
+    p50_ms: float = 0.0
+    p95_ms: float = 0.0
+    p99_ms: float = 0.0
+    max_ms: float = 0.0
+
+
+class TelemetryTrendPoint(BaseModel):
+    """Minute-bucketed runtime trend point for overview charts."""
+
+    timestamp: str
+    api_p95_ms: float = 0.0
+    surreal_p95_ms: float = 0.0
+    memory_p95_ms: float = 0.0
+    llm_p95_ms: float = 0.0
+    error_rate: float = 0.0
+    request_count: int = 0
+    query_count: int = 0
+    memory_count: int = 0
+    llm_count: int = 0
+
+
+class TelemetryEventResponse(BaseModel):
+    """Recent bounded runtime event."""
+
+    timestamp: str
+    category: str
+    status: str
+    duration_ms: float | None = None
+    value: float = 1.0
+    labels: dict[str, str] = Field(default_factory=dict)
+
+
+class TelemetryMetricResponse(BaseModel):
+    """Counter, gauge, or histogram snapshot."""
+
+    kind: str
+    name: str
+    labels: dict[str, str] = Field(default_factory=dict)
+    value: float | None = None
+    count: int | None = None
+    sum: float | None = None
+    min: float | None = None
+    max: float | None = None
+    avg: float | None = None
+    p50: float | None = None
+    p95: float | None = None
+    p99: float | None = None
+
+
+class TelemetrySummaryResponse(BaseModel):
+    """Runtime telemetry summary for the application overview."""
+
+    generated_at: str
+    window_seconds: int
+    uptime_seconds: float
+    summaries: dict[str, TelemetryDurationSummary]
+    trends: list[TelemetryTrendPoint]
+    recent_events: list[TelemetryEventResponse]
+    metrics: list[TelemetryMetricResponse]
+    rollups: list[dict[str, Any]] = Field(default_factory=list)
+
+
 # =============================================================================
 # WebSocket Event Schemas
 # =============================================================================

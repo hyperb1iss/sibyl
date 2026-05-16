@@ -33,9 +33,10 @@ Hooks are the magic that makes Sibyl invisible. They run automatically at specif
 
 **What it does:**
 
+- Packages a wake-up context bundle (`sibyl session bundle`)
 - Loads your active tasks (status: `doing`, `blocked`, `review`)
 - Shows your project context
-- Reminds the agent about capturing learnings
+- Reminds the agent about the memory loop
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -299,19 +300,19 @@ Help Claude avoid errors:
 | `sibyl task list --todo` | `sibyl task list --status todo`   |
 ```
 
-### Agent Loop Pattern
+### Memory Loop Pattern
 
-Teach feedback loops:
+Teach the recall, act, remember, reflect cycle:
 
 ```markdown
-## The Agent Feedback Loop
+## The Memory Loop
 
 \`\`\`
 
-1. SEARCH FIRST -> sibyl search "topic"
-2. CHECK TASKS -> sibyl task list --status doing
-3. WORK & CAPTURE -> sibyl add (for learnings)
-4. COMPLETE -> sibyl task complete --learnings "..." \`\`\`
+1. RECALL -> sibyl recall "topic"
+2. ACT -> sibyl task start <id>
+3. REMEMBER -> sibyl remember "Title" "What, why, how"
+4. REFLECT -> sibyl reflect --persist --review \`\`\`
 ```
 
 ## Skill Content Guidelines
@@ -508,6 +509,7 @@ sibyl task complete task_xyz --learnings "Key insights from review..." \`\`\`
 
 ## Next Steps
 
+- [The Memory Loop](./memory-loop.md) - The cycle hooks support
 - [Claude Code Integration](./claude-code.md) - Full MCP setup
 - [Agent Collaboration](./agent-collaboration.md) - Shared-assistant patterns
 - [Capturing Knowledge](./capturing-knowledge.md) - What to teach Claude

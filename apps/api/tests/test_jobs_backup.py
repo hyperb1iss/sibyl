@@ -215,7 +215,7 @@ async def test_run_backup_in_fully_surreal_mode_includes_runtime_snapshots(
         patch(
             "sibyl.jobs.backup._safe_broadcast",
             AsyncMock(),
-        ),
+        ) as broadcast,
         patch(
             "sibyl_core.tools.admin.create_backup",
             AsyncMock(return_value=graph_result),
@@ -233,10 +233,22 @@ async def test_run_backup_in_fully_surreal_mode_includes_runtime_snapshots(
     assert result["backup_id"] == "backup_fixed"
     assert result["database_dump_size_bytes"] == 0
     assert "pg_size_bytes" not in result
+    assert result["job_id"] == "backup:backup_fixed"
     export_auth.assert_awaited_once_with()
     export_content.assert_awaited_once_with()
     create_graph_backup.assert_awaited_once_with(organization_id=org_id)
     assert update_backup_db.await_count == 2
+    broadcast.assert_any_await(
+        backup_jobs.WSEvent.BACKUP_STARTED,
+        {
+            "backup_id": "backup_fixed",
+            "organization_id": org_id,
+            "job_id": "backup:backup_fixed",
+        },
+        org_id=org_id,
+    )
+    assert broadcast.await_args_list[-1].args[0] == backup_jobs.WSEvent.BACKUP_COMPLETE
+    assert broadcast.await_args_list[-1].args[1]["job_id"] == "backup:backup_fixed"
 
     archive_path = tmp_path / "sibyl_backup_fixed.tar.gz"
     assert archive_path.exists()

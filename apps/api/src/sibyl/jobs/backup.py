@@ -42,6 +42,10 @@ log = structlog.get_logger()
 BACKUP_VERSION = "2.0"
 
 
+def _backup_job_id(backup_id: str) -> str:
+    return f"backup:{backup_id}"
+
+
 @dataclass
 class BackupMetadata:
     """Metadata stored in each backup archive."""
@@ -183,6 +187,7 @@ async def run_backup(  # noqa: PLR0915
     start_time = time.time()
     started_at = datetime.now(UTC)
     backup_id = backup_id or generate_backup_id(organization_id)
+    job_id = _backup_job_id(backup_id)
     include_database_dump = _effective_include_database_dump(include_database_dump)
     include_auth_snapshot = _include_surreal_auth_snapshot()
     include_content_snapshot = _include_surreal_content_snapshot()
@@ -202,7 +207,7 @@ async def run_backup(  # noqa: PLR0915
 
     await _safe_broadcast(
         WSEvent.BACKUP_STARTED,
-        {"backup_id": backup_id, "organization_id": organization_id},
+        {"backup_id": backup_id, "organization_id": organization_id, "job_id": job_id},
         org_id=organization_id,
     )
 
@@ -351,6 +356,8 @@ async def run_backup(  # noqa: PLR0915
             result_data = {
                 "success": True,
                 "backup_id": backup_id,
+                "job_id": job_id,
+                "organization_id": organization_id,
                 "archive_path": str(archive_path),
                 "archive_size_bytes": archive_size,
                 "database_dump_size_bytes": database_dump_size,
@@ -380,13 +387,20 @@ async def run_backup(  # noqa: PLR0915
 
         await _safe_broadcast(
             WSEvent.BACKUP_FAILED,
-            {"backup_id": backup_id, "error": error_msg},
+            {
+                "backup_id": backup_id,
+                "organization_id": organization_id,
+                "job_id": job_id,
+                "error": error_msg,
+            },
             org_id=organization_id,
         )
 
         return {
             "success": False,
             "backup_id": backup_id,
+            "job_id": job_id,
+            "organization_id": organization_id,
             "error": error_msg,
             "duration_seconds": duration,
         }

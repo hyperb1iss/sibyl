@@ -220,7 +220,7 @@ Required record fields:
 `moon run bench-gate -- <artifact>.json --profile ai-memory` for a single uncommitted artifact.
 
 The canonical ledger for which rows are citable is
-`docs/architecture/SURREALDB_GRAPHITI_EXIT_BENCHMARK_EVIDENCE.md`. If a benchmark suite is missing
+`docs/_archive/SURREALDB_GRAPHITI_EXIT_BENCHMARK_EVIDENCE.md`. If a benchmark suite is missing
 from that ledger, add it there before citing the result anywhere else.
 
 ## Suggested PR Notes

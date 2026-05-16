@@ -1,330 +1,195 @@
 # Permission System Test Strategy
 
-Comprehensive testing strategy for Sibyl's multi-tier permission system.
+Testing strategy for Sibyl's multi-tier permission system.
 
 ## Permission Tiers Overview
 
+Sibyl scopes access at three levels: organization, project, and memory. Org and project each have
+an ordered role enum; project visibility controls who can see a project at all.
+
 ```
-Global Admin (future)
-    |
-Organization
-    |-- Owner (exactly 1, can transfer)
-    |-- Admin (many)
-    |-- Member
-    |-- Viewer
-    |
-Team (within org)
-    |-- Lead
-    |-- Member
-    |-- Viewer
-    |
-Project
-    |-- Private (user-only)
-    |-- Project-wide
-    |-- Org-wide
+Organization role (sibyl_core.auth.OrganizationRole)
+    |-- owner   (super admin within the org)
+    |-- admin
+    |-- member
+    |-- viewer
+
+Project role (sibyl_core.auth.ProjectRole)
+    |-- project_owner
+    |-- project_maintainer
+    |-- project_contributor
+    |-- project_viewer
+
+Project visibility (sibyl_core.auth.ProjectVisibility)
+    |-- private  (creator/explicit grants only)
+    |-- project  (project members)
+    |-- org      (every org member)
 ```
+
+Memory access adds a fourth axis through `MemoryScope` (private vs project) plus API-key memory
+scopes. Teams exist as `Team` entities with a `members` list; there is no separate team-role enum.
+OWNER is the cross-cutting super-admin role surfaced through `AuthContext`.
+
+## Test Layout
+
+Auth and permission tests live as flat `test_auth_*.py` modules in `apps/api/tests/`. Shared
+fixtures and factories are in `apps/api/tests/conftest.py`. Run the whole auth suite with a name
+filter:
+
+```bash
+moon run api:test -- -k auth
+```
+
+| File                                  | Focus                                              |
+| ------------------------------------- | -------------------------------------------------- |
+| `test_auth_authorization.py`          | Project-role hierarchy and `require_project_*`      |
+| `test_auth_context.py`                | `AuthContext` construction and role resolution      |
+| `test_auth_dependencies.py`           | FastAPI auth dependencies and guards                |
+| `test_auth_tenancy.py`                | Org isolation and namespace-per-org scoping         |
+| `test_auth_rls.py`                    | Row-level access enforcement                        |
+| `test_auth_api_keys.py`               | API key issue/verify lifecycle                      |
+| `test_auth_api_key_scopes_rest.py`    | API-key scope enforcement on REST endpoints         |
+| `test_auth_jwt.py`                    | JWT issue, verify, and expiry                       |
+| `test_auth_mcp_token_verifier.py`     | MCP bearer-token verification                       |
+| `test_auth_invitation_token.py`       | Org invitation token boundaries                     |
+| `test_auth_signup_locks.py`           | Signup race and lock handling                       |
+| `test_auth_session_cache.py`          | Session cache behavior and invalidation             |
+| `test_auth_errors.py`                 | Auth error mapping and safe responses               |
+| `test_auth_http.py`                   | End-to-end auth over the HTTP app                   |
+| `test_auth_flow_replay.py`            | Recorded auth-flow replay checks                    |
 
 ## Test Categories
 
-### 1. Unit Tests (Python/pytest)
+### 1. Project Authorization Logic
 
-**Location:** `/apps/api/tests/auth/`
+`test_auth_authorization.py` covers the project-role engine in `sibyl.auth.authorization`:
 
-**Files:**
+- `PROJECT_ROLE_LEVELS` ordering (`viewer < contributor < maintainer < owner`)
+- `_max_role` resolution across multiple grants
+- `require_project_read`, `require_project_write`, `require_project_admin`,
+  `require_project_role`
+- `list_accessible_project_graph_ids` for visibility-filtered listing
 
-- `test_permission_checker.py` - Core permission logic
-- `conftest.py` - Shared fixtures and factories
-
-**Coverage:**
-
-- Role hierarchy logic
-- Permission evaluation functions
-- Grant aggregation from multiple sources
-- API key scope enforcement
-- Edge cases (no org context, revoked access)
-
-**Example:**
+Example:
 
 ```python
-@pytest.mark.parametrize("role,action,expected", [
-    (OrganizationRole.OWNER, "delete", True),
-    (OrganizationRole.ADMIN, "delete", False),
-    (OrganizationRole.MEMBER, "delete", False),
-])
-def test_org_delete_permission(role, action, expected):
-    ctx = AuthContext(user=mock_user, org=mock_org, org_role=role)
-    assert can(ctx, "org:delete") == expected
+def test_role_levels_order() -> None:
+    assert PROJECT_ROLE_LEVELS[ProjectRole.VIEWER] < PROJECT_ROLE_LEVELS[ProjectRole.CONTRIBUTOR]
+    assert PROJECT_ROLE_LEVELS[ProjectRole.MAINTAINER] < PROJECT_ROLE_LEVELS[ProjectRole.OWNER]
 ```
 
-**Run:**
+Run:
 
 ```bash
-moon run api:test -- tests/auth/
+moon run api:test -- tests/test_auth_authorization.py
 ```
 
-### 2. Integration Tests (API)
+### 2. Organization Role Enforcement
 
-**Location:** `/apps/api/tests/auth/test_api_permissions.py`
+Org-role checks run through `AuthContext`. `test_auth_context.py` exercises context construction
+and role resolution; `test_auth_dependencies.py` covers the FastAPI guards that gate endpoints.
 
-**Coverage:**
+Owner-only operations include deleting the org, transferring ownership, and managing invitations.
+Admins manage members and roles but cannot delete the org.
 
-- Every endpoint with all role combinations
-- Cross-org access denial
-- Owner-only operations (billing, transfer, delete org)
-- Admin vs member operations
-- API key scope enforcement
+| Operation               | Owner | Admin | Member | Viewer |
+| ----------------------- | ----- | ----- | ------ | ------ |
+| Delete organization     | yes   | no    | no     | no     |
+| Transfer ownership      | yes   | no    | no     | no     |
+| Add/remove members      | yes   | yes   | no     | no     |
+| Create tasks/knowledge  | yes   | yes   | yes    | no     |
+| Read tasks/knowledge    | yes   | yes   | yes    | yes    |
 
-**Test Matrix:**
-
-| Endpoint                 | Owner | Admin | Member | Viewer |
-| ------------------------ | ----- | ----- | ------ | ------ |
-| DELETE /orgs/:slug       | 200   | 403   | 403    | 403    |
-| POST /orgs/:slug/members | 200   | 200   | 403    | 403    |
-| GET /orgs/:slug/billing  | 200   | 403   | 403    | 403    |
-| POST /tasks              | 200   | 200   | 200    | 403    |
-| GET /tasks               | 200   | 200   | 200    | 200    |
-
-**Example:**
-
-```python
-@pytest.mark.asyncio
-async def test_admin_cannot_delete_org(authenticated_client_factory, org_factory):
-    org, members = await org_factory.create_with_members(admin_count=1)
-    admin = members["admin"][0][0]
-    client = authenticated_client_factory(admin, org, OrganizationRole.ADMIN)
-
-    response = await client.delete(f"/api/orgs/{org.slug}")
-    assert response.status_code == 403
-```
-
-**Run:**
+Run:
 
 ```bash
-moon run api:test -- tests/auth/test_api_permissions.py
+moon run api:test -- tests/test_auth_context.py tests/test_auth_dependencies.py
 ```
 
-### 3. E2E Tests (Frontend/Playwright)
+### 3. Tenancy and Row-Level Isolation
 
-**Location:** `/apps/e2e/tests/test_permissions.py`
+`test_auth_tenancy.py` and `test_auth_rls.py` verify that org context is mandatory and that one org
+cannot read another's data. Each org maps to its own SurrealDB namespace (`org_<uuid_hex>`), so a
+missing or wrong `group_id` must fail rather than leak.
 
-**Coverage:**
+Coverage:
 
-- UI elements shown/hidden by role
-- Navigation guards
-- Permission-denied handling
-- Real-time permission updates
+- Cross-org reads denied
+- Queries without org context rejected
+- Namespace routing matches the authenticated org
 
-**Test Scenarios:**
-
-1. **Owner-only elements:**
-   - Delete Organization button
-   - Billing settings link
-   - Transfer Ownership option
-
-2. **Admin elements:**
-   - Add Member button
-   - Role change dropdown
-
-3. **Member elements:**
-   - Create Task button
-   - Add Knowledge button
-
-4. **Viewer elements:**
-   - Read-only indicator
-   - No edit buttons
-
-**Example:**
-
-```python
-@pytest.mark.asyncio
-async def test_delete_org_button_hidden_from_admin(logged_in_admin):
-    page = logged_in_admin
-    await page.goto(f"{FRONTEND_URL}/settings/danger")
-
-    delete_button = page.locator('button:has-text("Delete Organization")')
-    await expect(delete_button).not_to_be_visible()
-```
-
-**Run:**
+Run:
 
 ```bash
-moon run e2e:test -- tests/test_permissions.py
+moon run api:test -- tests/test_auth_tenancy.py tests/test_auth_rls.py
 ```
 
-### 4. WebSocket Tests
+### 4. API Key Scopes
 
-**Location:** `/apps/api/tests/auth/test_websocket_permissions.py`
+`test_auth_api_keys.py` covers the key lifecycle; `test_auth_api_key_scopes_rest.py` asserts scope
+enforcement on REST endpoints. Scopes include `mcp`, `api:read`, `api:write`, and the memory
+scopes. A read-scoped key must be rejected on write endpoints.
 
-**Coverage:**
+Run:
 
-- Permission invalidation events
-- Cache invalidation timing
-- Connection lifecycle with permission changes
-- Multi-tab synchronization
-
-**Test Scenarios:**
-
-1. **Permission invalidation:**
-   - Role change broadcasts event
-   - Org removal notifies user
-   - Team changes notify affected users
-
-2. **Timing:**
-   - Invalidation sent before cache clear
-   - Client receives before stale request
-   - Rapid changes coalesce
-
-3. **Connection lifecycle:**
-   - Rejected without auth
-   - Closed on org removal
-   - Survives role downgrade
-
-**Example:**
-
-```python
-@pytest.mark.asyncio
-async def test_role_change_broadcasts_invalidation():
-    manager = MockConnectionManager()
-    ws = MockWebSocket()
-    await manager.connect(ws, "user-123", "org-456")
-
-    await manager.broadcast_to_user("user-123", {
-        "type": "permission_invalidated",
-        "payload": {"reason": "role_changed", "new_role": "member"}
-    })
-
-    assert len(ws.messages_sent) == 1
-    message = json.loads(ws.messages_sent[0])
-    assert message["type"] == "permission_invalidated"
+```bash
+moon run api:test -- tests/test_auth_api_key_scopes_rest.py
 ```
 
-### 5. Edge Case Tests
+### 5. Token Verification
 
-**Location:** `/apps/api/tests/auth/test_edge_cases.py`
+JWT sessions (`test_auth_jwt.py`) back the web UI; MCP bearer tokens are verified by
+`test_auth_mcp_token_verifier.py`. Both cover issue, verify, expiry, and tampering.
 
-**Critical Scenarios:**
+Run:
 
-1. **Owner Transfer:**
-   - Transfer to admin
-   - Transfer to member
-   - Cannot transfer to non-member
-   - Original owner loses privileges
+```bash
+moon run api:test -- tests/test_auth_jwt.py tests/test_auth_mcp_token_verifier.py
+```
 
-2. **Role Downgrade During Session:**
-   - Admin demoted to member
-   - Owner demoted (with backup owner)
-   - Permissions update immediately
+### 6. End-to-End Tests
 
-3. **Team Removal Mid-Session:**
-   - User removed from team
-   - Team deleted entirely
-   - Cascade effects
+The `apps/e2e` package holds cross-surface tests, organized by surface:
 
-4. **Concurrent Changes:**
-   - Simultaneous role changes
-   - Removal while role changing
+- `apps/e2e/tests/api/` covers REST endpoint and health checks
+- `apps/e2e/tests/browser/` covers Playwright UI smoke flows
+- `apps/e2e/tests/cli/` covers CLI runner checks
 
-5. **Last Owner Protection:**
-   - Cannot demote last owner
-   - Cannot remove last owner
+Run:
+
+```bash
+moon run e2e:test
+```
+
+UI-level role assertions (which controls a role can see) belong in `apps/e2e/tests/browser/`. When
+adding role-gated UI, extend the browser suite rather than the API auth modules.
 
 ## Test Fixtures
 
-### User Factory
-
-```python
-@pytest.fixture
-def user_factory(db_session):
-    return UserFactory(session=db_session)
-
-# Usage
-user = await user_factory.create(email="test@example.com")
-user, org, membership = await user_factory.create_with_org(role=OrganizationRole.ADMIN)
-```
-
-### Organization Factory
-
-```python
-@pytest.fixture
-def org_factory(db_session, user_factory):
-    return OrgFactory(session=db_session, user_factory=user_factory)
-
-# Usage
-org, owner = await org_factory.create()
-org, members = await org_factory.create_with_members(
-    admin_count=2,
-    member_count=5,
-    viewer_count=3
-)
-```
-
-### Authenticated Client Factory
-
-```python
-@pytest.fixture
-def authenticated_client_factory(api_client):
-    def create(user, org, role):
-        return AuthenticatedClient(...)
-    return create
-
-# Usage
-client = authenticated_client_factory(user, org, OrganizationRole.ADMIN)
-response = await client.get("/api/tasks/")
-```
-
-### Multi-Org Setup
-
-```python
-@pytest.fixture
-async def multi_org_setup(org_factory, user_factory):
-    # Creates two orgs with members for cross-org testing
-    return MultiOrgSetup(
-        org_a=..., org_a_members=...,
-        org_b=..., org_b_members=...,
-        dual_member=...  # User in both orgs
-    )
-```
+`apps/api/tests/conftest.py` provides the shared fixtures and factories. Inspect it directly for
+current signatures before writing new tests, since fixture names evolve. Typical usage builds a
+user, attaches it to an org with a role, and issues an authenticated client or context for that
+combination. Cross-org tests must create genuinely separate orgs rather than reusing a fixture.
 
 ## Running Tests
 
-### All Permission Tests
-
 ```bash
-# Backend unit + integration
-moon run api:test -- tests/auth/
+# Whole auth suite by name filter
+moon run api:test -- -k auth
 
-# Frontend unit
-moon run web:test -- src/lib/permissions.test.ts
+# A single module
+moon run api:test -- tests/test_auth_authorization.py
 
-# E2E
-moon run e2e:test -- tests/test_permissions.py
-```
+# Coverage scoped to the auth package
+moon run api:test -- -k auth --cov=sibyl.auth --cov-report=html
 
-### Specific Test Categories
-
-```bash
-# Unit tests only
-moon run api:test -- tests/auth/test_permission_checker.py
-
-# API integration
-moon run api:test -- tests/auth/test_api_permissions.py
-
-# Edge cases
-moon run api:test -- tests/auth/test_edge_cases.py
-
-# WebSocket
-moon run api:test -- tests/auth/test_websocket_permissions.py
-```
-
-### Coverage Report
-
-```bash
-moon run api:test -- tests/auth/ --cov=sibyl.auth --cov-report=html
+# End-to-end suite
+moon run e2e:test
 ```
 
 ## CI Integration
 
-Add to `.github/workflows/test.yml`:
+The repository CI runs the package suites through moon. A focused permission job looks like:
 
 ```yaml
 permission-tests:
@@ -333,40 +198,26 @@ permission-tests:
     - uses: actions/checkout@v4
     - name: Start SurrealDB
       run: docker compose up -d surrealdb
-    - name: Run permission tests
-      run: |
-        moon run api:test -- tests/auth/ -v
-        moon run web:test -- src/lib/permissions.test.ts
-```
-
-## Test Data Seeding
-
-For E2E tests, seed the database with test users:
-
-```python
-# scripts/seed_test_users.py
-async def seed_test_users():
-    users = [
-        {"email": "owner@test.sibyl.dev", "role": "owner"},
-        {"email": "admin@test.sibyl.dev", "role": "admin"},
-        {"email": "member@test.sibyl.dev", "role": "member"},
-        {"email": "viewer@test.sibyl.dev", "role": "viewer"},
-    ]
-    # Create users and org memberships...
+    - name: Run auth tests
+      run: moon run api:test -- -k auth -v
 ```
 
 ## Common Gotchas
 
-1. **Async Session Management:** Always use `await db_session.flush()` after creating test data
-2. **Token Creation:** Test tokens bypass real JWT validation - ensure test mode is active
-3. **Cross-Org Tests:** Create truly separate orgs, don't reuse fixtures
-4. **WebSocket Mocking:** Use MockWebSocket for unit tests, real connections for integration
-5. **Permission Matrix Updates:** When adding new permissions, update all test matrices
+1. **Org context is mandatory.** Graph operations need a `group_id`; a missing one routes to the
+   wrong namespace or fails. Never assume a default org in tests.
+2. **Project roles are not visibility.** `ProjectRole` (owner/maintainer/contributor/viewer) governs
+   what a member can do; `ProjectVisibility` (private/project/org) governs who is a member at all.
+3. **Cross-org tests need separate orgs.** Reusing a single org fixture cannot prove isolation.
+4. **OWNER is cross-cutting.** The super-admin OWNER role bypasses many org-role checks; assert it
+   explicitly rather than folding it into org-admin cases.
+5. **Update matrices when adding permissions.** New gated operations should extend the role tables
+   in this document and the relevant `test_auth_*.py` module together.
 
 ## Future Enhancements
 
-- [ ] Project-level permission tests (private, project-wide, org-wide)
-- [ ] Team grant tests (team membership adding permissions)
-- [ ] Global admin role tests
-- [ ] Permission audit logging tests
-- [ ] Rate limit bypass for admin actions
+- Dedicated WebSocket permission-invalidation tests (role change broadcasts, cache timing)
+- Team-grant tests (team membership contributing project access)
+- Project-visibility matrix tests across private, project, and org scopes
+- Permission audit-logging coverage
+- A global-admin role tier above the organization

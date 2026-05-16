@@ -24,9 +24,9 @@ legacy runtimes. See [storage-modes.md](./storage-modes.md).
 SurrealDB is a multi-model database. Sibyl uses it as the native graph, content, auth, task, and
 memory store, with `org_<uuid_hex>` namespaces for per-org isolation. It provides:
 
-- **SurrealQL queries** — graph traversal, full-text, and vector search in one language
-- **HNSW vector indexes** — native embedding support for semantic recall
-- **Embedded or remote** — RocksDB for dev, WebSocket/HTTP for services
+- **SurrealQL queries**: graph traversal, full-text, and vector search in one language
+- **HNSW vector indexes**: native embedding support for semantic recall
+- **Embedded or remote**: RocksDB for dev, WebSocket/HTTP for services
 
 ### Legacy FalkorDB Archives
 
@@ -141,7 +141,7 @@ Each organization gets its own isolated namespace:
 manager = EntityManager(client, group_id=str(org.id))
 ```
 
-::: danger Always Scope by Organization Never query without org scope — it routes to the wrong
+::: danger Always Scope by Organization Never query without org scope. It routes to the wrong
 namespace or breaks isolation. :::
 
 ## Write Concurrency

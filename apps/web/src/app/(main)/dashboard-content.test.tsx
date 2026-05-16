@@ -9,6 +9,7 @@ const hooks = vi.hoisted(() => ({
   useProjects: vi.fn(),
   useSessionBundle: vi.fn(),
   useStats: vi.fn(),
+  useTelemetrySummary: vi.fn(),
   useTasks: vi.fn(),
   useCaptureMemory: vi.fn(),
 }));
@@ -24,6 +25,7 @@ vi.mock('@/components/dashboard', () => ({
 vi.mock('@/components/layout/capture-memory-context', () => hooks);
 
 vi.mock('@/components/metrics/charts', () => ({
+  PerformanceTrendChart: () => <div data-testid="performance-chart" />,
   VelocityLineChart: () => <div data-testid="velocity-chart" />,
 }));
 
@@ -90,6 +92,76 @@ describe('DashboardContent', () => {
       },
     });
     hooks.useOrgMetrics.mockReturnValue({ data: orgMetrics });
+    hooks.useTelemetrySummary.mockReturnValue({
+      data: {
+        generated_at: '2026-05-16T12:00:00Z',
+        window_seconds: 900,
+        uptime_seconds: 123,
+        summaries: {
+          api: {
+            count: 5,
+            errors: 0,
+            slow: 0,
+            error_rate: 0,
+            avg_ms: 24,
+            p50_ms: 20,
+            p95_ms: 42,
+            p99_ms: 45,
+            max_ms: 46,
+          },
+          surreal: {
+            count: 3,
+            errors: 0,
+            slow: 1,
+            error_rate: 0,
+            avg_ms: 60,
+            p50_ms: 50,
+            p95_ms: 80,
+            p99_ms: 82,
+            max_ms: 84,
+          },
+          memory: {
+            count: 2,
+            errors: 0,
+            slow: 0,
+            error_rate: 0,
+            avg_ms: 18,
+            p50_ms: 18,
+            p95_ms: 22,
+            p99_ms: 23,
+            max_ms: 24,
+          },
+          llm: {
+            count: 1,
+            errors: 0,
+            slow: 0,
+            error_rate: 0,
+            avg_ms: 300,
+            p50_ms: 300,
+            p95_ms: 300,
+            p99_ms: 300,
+            max_ms: 300,
+          },
+        },
+        trends: [
+          {
+            timestamp: '2026-05-16T12:00:00Z',
+            api_p95_ms: 42,
+            surreal_p95_ms: 80,
+            memory_p95_ms: 22,
+            llm_p95_ms: 300,
+            error_rate: 0,
+            request_count: 5,
+            query_count: 3,
+            memory_count: 2,
+            llm_count: 1,
+          },
+        ],
+        recent_events: [],
+        metrics: [],
+        rollups: [],
+      },
+    });
     hooks.useSessionBundle.mockReturnValue({
       data: {
         context: {
@@ -139,6 +211,20 @@ describe('DashboardContent', () => {
     expect(screen.getByText('3 in progress')).toBeInTheDocument();
     expect(screen.getByText('40% complete')).toBeInTheDocument();
     expect(hooks.useTasks).not.toHaveBeenCalled();
+  });
+
+  it('renders runtime performance telemetry on the overview page', () => {
+    render(<DashboardContent initialStats={initialStats} />);
+
+    const runtimeHeading = screen.getByText('Runtime Performance');
+    const thisWeekHeading = screen.getByText('This Week');
+
+    expect(runtimeHeading).toBeInTheDocument();
+    expect(screen.getByText('Surreal')).toBeInTheDocument();
+    expect(screen.getByTestId('performance-chart')).toBeInTheDocument();
+    expect(
+      thisWeekHeading.compareDocumentPosition(runtimeHeading) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
   });
 
   it('surfaces a capture-first quick action', async () => {

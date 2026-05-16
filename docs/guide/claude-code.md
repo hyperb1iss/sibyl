@@ -11,15 +11,25 @@ Code. This guide explains how to set up and use Sibyl as your AI agent's persist
 ## What is MCP?
 
 The Model Context Protocol (MCP) allows AI assistants like Claude to interact with external tools
-and data sources. Sibyl exposes 5 MCP tools:
+and data sources. Sibyl exposes 11 MCP tools:
 
-| Tool      | Purpose                   |
-| --------- | ------------------------- |
-| `search`  | Find knowledge by meaning |
-| `explore` | Navigate graph structure  |
-| `add`     | Create knowledge entries  |
-| `manage`  | Task workflow and admin   |
-| `logs`    | Developer log access      |
+| Tool               | Purpose                                                        |
+| ------------------ | -------------------------------------------------------------- |
+| `search`           | Unified semantic search across the graph and crawled docs      |
+| `context`          | Compile a working context pack (intent, wake/recall/deep)      |
+| `synthesis_plan`   | Plan source-grounded synthesis from authorized memory          |
+| `synthesis_draft`  | Draft, verify, and optionally remember a synthesis artifact    |
+| `synthesis_verify` | Verify citation, freshness, redaction, and gap coverage        |
+| `explore`          | Navigate the graph: list, related, traverse, dependencies      |
+| `add`              | Create knowledge entries (episodes, patterns, tasks, projects) |
+| `remember`         | Capture durable memory (decision, plan, idea, claim, ...)      |
+| `reflect`          | Reflect raw notes into reviewable memory candidates            |
+| `manage`           | State changes: task workflow, crawl, sync, analysis, admin     |
+| `logs`             | Recent server logs (OWNER role)                                |
+
+The four memory-loop tools (`context`, `remember`, `reflect`, and the `synthesis_*`
+family) implement the [memory loop](./memory-loop.md) for agents. `search`, `explore`,
+`add`, and `manage` cover retrieval and workflow.
 
 ## Configuration
 
@@ -103,21 +113,25 @@ SIBYL_MCP_AUTH_MODE=off
 
 ## The Agent Workflow
 
-### Research -> Do -> Reflect
+### The Memory Loop
 
 ```
-1. SEARCH FIRST     -> Search for existing knowledge
-2. CHECK TASKS      -> Find active work
-3. WORK & CAPTURE   -> Create knowledge as you learn
-4. COMPLETE         -> Capture learnings on completion
+1. RECALL           -> Pull working context with `context`
+2. ACT              -> Start a task, do the work
+3. REMEMBER         -> Capture decisions and learnings
+4. REFLECT          -> Distill session notes into candidates
 ```
+
+See [The Memory Loop](./memory-loop.md) for the cycle in full.
 
 ### Before Implementing
 
 ```python
-# Search for relevant patterns
+# Recall a working context pack for the goal
+context(goal="implement OAuth refresh", intent="build")
+
+# Or search directly for relevant patterns
 search("what you're building")
-search("common issues with OAuth")
 search("error handling patterns", types=["pattern"])
 ```
 
@@ -159,6 +173,43 @@ search(
     status="todo",                   # Filter tasks by status
     project="proj_abc",              # Scope to project
     limit=10                         # Max results
+)
+```
+
+### context
+
+Compile a working context pack for a goal. This is the recall step of the memory loop:
+
+```python
+context(
+    goal="implement OAuth refresh",
+    intent="build",       # build, plan, ideate, research, review, debug, decide, learn
+    layer="recall",       # wake (fast), recall (default), deep_search (wide)
+    project="proj_abc"    # Scope recall to a project
+)
+```
+
+### remember
+
+Capture durable, typed memory:
+
+```python
+remember(
+    title="Chose SurrealDB for the runtime",
+    content="One engine replaces three backends...",
+    kind="decision"       # decision, plan, idea, claim, episode, session, ...
+)
+```
+
+### reflect
+
+Distill raw notes into reviewable memory candidates:
+
+```python
+reflect(
+    content="Long session notes to distill...",
+    persist=True,         # Persist candidates into the graph
+    review=True           # Route to the review queue instead of direct promotion
 )
 ```
 
@@ -229,6 +280,23 @@ manage("stats")
 # Crawling
 manage("crawl", data={"url": "https://docs.example.com", "depth": 3})
 ```
+
+### synthesis_plan / synthesis_draft / synthesis_verify
+
+Draft verified documents grounded in your own memory:
+
+```python
+# Plan a section outline from authorized memory
+synthesis_plan(goal="How our auth system handles token refresh")
+
+# Draft and verify an artifact
+synthesis_draft(goal="Release runbook for sibyld")
+
+# Verify citation, freshness, redaction, and gap coverage
+synthesis_verify(goal="How our auth system handles token refresh")
+```
+
+See [Synthesis](./synthesis.md) for the three-stage flow in detail.
 
 ## Skills Integration
 
@@ -443,6 +511,7 @@ manage("complete_task", entity_id="task_oauth",
 
 ## Next Steps
 
+- [The Memory Loop](./memory-loop.md) - The cycle agents follow
 - [Skills Development](./skills.md) - Create custom skills
 - [MCP Configuration](./mcp-configuration.md) - Advanced configuration
 - [Agent Collaboration](./agent-collaboration.md) - Shared-assistant patterns

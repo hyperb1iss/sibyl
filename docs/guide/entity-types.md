@@ -5,8 +5,18 @@ description: All entity types available in Sibyl
 
 # Entity Types
 
-Sibyl supports various entity types for different kinds of knowledge. Understanding when to use each
-type helps keep your knowledge graph organized and searchable.
+Sibyl supports roughly 29 entity types for different kinds of knowledge. Understanding when to use
+each type helps keep your knowledge graph organized and searchable.
+
+The full set, as accepted by `--type` on `sibyl add` and `--kind` on `sibyl remember`:
+
+`pattern`, `rule`, `template`, `guide`, `tool`, `language`, `topic`, `episode`,
+`knowledge_source`, `config_file`, `slash_command`, `project`, `epic`, `task`, `team`,
+`error_pattern`, `milestone`, `source`, `document`, `procedure`, `community`, `note`, `domain`,
+`artifact`, `decision`, `plan`, `idea`, `claim`, `session`.
+
+You rarely touch most of them directly. The sections below cover the types you choose by hand;
+crawler, analysis, and reflection paths create the rest.
 
 ## Core Knowledge Types
 
@@ -41,7 +51,7 @@ Reusable coding patterns and best practices.
 ```bash
 sibyl add "Retry with exponential backoff" "Implementation pattern for resilient..." \
   --type pattern \
-  --languages python,typescript
+  --language python --language typescript
 ```
 
 **When to use:**
@@ -139,6 +149,108 @@ High-level concepts and knowledge areas.
 | -------------- | -------------------------- |
 | `parent_topic` | Parent topic for hierarchy |
 
+## Memory Loop Types
+
+These types are the vocabulary of the [memory loop](./memory-loop.md). They are the natural
+`--kind` values for `sibyl remember` and capture the durable thinking behind your work.
+
+### Decision
+
+A choice made and the reasoning behind it.
+
+```bash
+sibyl remember "Chose SurrealDB for the runtime" \
+  "One engine replaces three backends, cutting operational surface" \
+  --kind decision
+```
+
+**When to use:**
+
+- Architectural choices
+- Tool and library selections
+- Tradeoffs you want to be able to defend later
+
+### Plan
+
+An intended approach or sequence of work.
+
+```bash
+sibyl remember "Reflection OS rollout" "Phased per-org enablement" --kind plan
+```
+
+**When to use:**
+
+- Multi-step approaches before execution
+- Rollout and migration sequencing
+
+### Idea
+
+A possibility worth keeping but not yet acted on.
+
+```bash
+sibyl remember "Memory diff view" "Show what changed between two recalls" --kind idea
+```
+
+**When to use:**
+
+- Parking-lot thoughts
+- Future directions surfaced mid-task
+
+### Claim
+
+An assertion about how something behaves or should behave.
+
+```bash
+sibyl remember "Embedded Surreal is single-writer" \
+  "Multi-process local dev serializes through one writer" --kind claim
+```
+
+**When to use:**
+
+- Statements that synthesis should be able to cite and verify
+
+### Session
+
+A summary of a working session.
+
+```bash
+sibyl remember "Auth implementation session" "Completed OAuth callback..." --kind session
+```
+
+**When to use:**
+
+- End-of-session handoffs
+- Created automatically when `sibyl reflect --persist --source` stores raw notes
+
+### Artifact
+
+A produced output, such as a synthesized document.
+
+**When to use:**
+
+- Created by `sibyl synthesis remember` for verified synthesis output
+- Anything that is a deliverable rather than a raw learning
+
+### Note
+
+A free-form note. Notes attach to tasks or stand alone as raw memory.
+
+```bash
+# Task note
+sibyl note task_xyz "Found the root cause of the bug"
+
+# Standalone free note
+sibyl note "Surreal RPC path is /rpc, easy to forget"
+```
+
+**Properties (task notes):**
+
+| Field         | Description       |
+| ------------- | ----------------- |
+| `task_id`     | Parent task UUID  |
+| `author_type` | "agent" or "user" |
+| `author_name` | Author identifier |
+
 ## Task Management Types
 
 ### Task
@@ -209,7 +321,7 @@ sibyl project create --name "Auth System" --description "Authentication and auth
 Feature initiative grouping related tasks.
 
 ```bash
-sibyl epic create --name "OAuth Integration" --project proj_abc
+sibyl epic create --title "OAuth Integration" --project proj_abc
 ```
 
 **When to use:**
@@ -228,29 +340,6 @@ sibyl epic create --name "OAuth Integration" --project proj_abc
 | `project_id`      | Parent project UUID (required)                      |
 | `total_tasks`     | Tasks in epic                                       |
 | `completed_tasks` | Completed tasks                                     |
-
-### Note
-
-Timestamped notes on tasks.
-
-```bash
-sibyl task note task_xyz "Found the root cause of the bug"
-```
-
-**When to use:**
-
-- Progress updates
-- Findings during work
-- Observations
-- Agent/user communication
-
-**Properties:**
-
-| Field         | Description       |
-| ------------- | ----------------- |
-| `task_id`     | Parent task UUID  |
-| `author_type` | "agent" or "user" |
-| `author_name` | Author identifier |
 
 ## Documentation Types
 
@@ -357,6 +446,35 @@ Project timeline markers.
 | `end_date`    | Milestone end     |
 | `target_date` | Target completion |
 
+### Guide
+
+Team guidance and reference material.
+
+**When to use:**
+
+- Hard-won wisdom documents
+- Crawled guidance from a [knowledge repository](./knowledge-repository.md)
+- How-we-do-things references
+
+### Procedure
+
+A repeatable sequence of steps.
+
+**When to use:**
+
+- Runbooks and checklists
+- Operational processes
+- Anything you would otherwise rewrite from memory each time
+
+### Domain
+
+A bounded area of knowledge or responsibility.
+
+**When to use:**
+
+- Grouping knowledge by problem space
+- Lightweight taxonomy above categories
+
 ### Community
 
 Entity clusters from graph analysis.
@@ -375,6 +493,20 @@ Entity clusters from graph analysis.
 | `member_count` | Entities in community      |
 | `level`        | Hierarchy level            |
 
+## Infrastructure Types
+
+A handful of types exist for completeness and are created by specific paths rather than chosen by
+hand:
+
+| Type               | Created by                                                        |
+| ------------------ | ----------------------------------------------------------------- |
+| `knowledge_source` | Knowledge ingestion paths that register an origin for memory      |
+| `config_file`      | Capturing a configuration file as referenceable knowledge         |
+| `slash_command`    | Capturing a slash command definition                              |
+| `language`         | Programming-language nodes used for tagging and traversal         |
+
+They accept the same `--type` flag if you ever need them, but most workflows never do.
+
 ## Type Selection Guide
 
 | Scenario                       | Recommended Type |
@@ -382,11 +514,16 @@ Entity clusters from graph analysis.
 | "I just figured something out" | `episode`        |
 | "This is how we always do X"   | `pattern`        |
 | "This must never happen"       | `rule`           |
+| "We chose A over B, here's why"| `decision`       |
+| "Here's the approach I'll take"| `plan`           |
+| "Worth trying later"           | `idea`           |
+| "X behaves like this"          | `claim`          |
 | "I need to implement X"        | `task`           |
 | "X is a major feature area"    | `epic`           |
 | "X is a big initiative"        | `project`        |
 | "Here's useful external docs"  | `source`         |
 | "This error keeps happening"   | `error_pattern`  |
+| "A repeatable runbook"         | `procedure`      |
 | "Template for new services"    | `template`       |
 
 ## Creating Entities
@@ -429,6 +566,7 @@ curl -X POST http://localhost:3334/api/entities \
 
 ## Next Steps
 
+- [The Memory Loop](./memory-loop.md) - When to remember each type
 - [Task Management](./task-management.md) - Task lifecycle details
 - [Capturing Knowledge](./capturing-knowledge.md) - Best practices for adding knowledge
 - [Semantic Search](./semantic-search.md) - Finding entities

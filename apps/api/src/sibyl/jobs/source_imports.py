@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import structlog
 
+from sibyl.api.event_types import WSEvent
 from sibyl_core.auth import MemoryPolicyContext, authorize_memory_write
 from sibyl_core.models.sources import SourceImportCheckpoint, SourceRecord
 from sibyl_core.services.mailbox_adapter import ensure_mailbox_adapter_registered
@@ -113,6 +114,28 @@ _SOURCE_IMPORT_RUNS: dict[str, SourceImportRun] = {}
 def _store_run(run: SourceImportRun) -> None:
     run.touch()
     _SOURCE_IMPORT_RUNS[run.import_id] = run
+
+
+def _source_import_event_payload(run: SourceImportRun) -> dict[str, Any]:
+    payload = run.status_payload()
+    for field_name in ("created_at", "updated_at", "completed_at"):
+        value = payload.get(field_name)
+        if isinstance(value, datetime):
+            payload[field_name] = value.isoformat()
+    return payload
+
+
+async def _safe_broadcast_source_import(run: SourceImportRun) -> None:
+    try:
+        from sibyl.api.pubsub import publish_event
+
+        await publish_event(
+            WSEvent.SOURCE_IMPORT_UPDATED,
+            _source_import_event_payload(run),
+            org_id=run.organization_id,
+        )
+    except Exception:
+        log.debug("source_import_broadcast_failed", import_id=run.import_id)
 
 
 def _datetime_from_record(value: object) -> datetime | None:
@@ -266,6 +289,7 @@ async def _persist_run(run: SourceImportRun) -> None:
             error=str(exc),
             import_id=run.import_id,
         )
+    await _safe_broadcast_source_import(run)
 
 
 async def _load_persisted_run(
@@ -456,9 +480,7 @@ async def import_source_archive(
         "source_ids": list(result.source_ids),
         "dedupe_keys": list(result.dedupe_keys),
         "duplicate_dedupe_keys": list(result.duplicate_dedupe_keys),
-        "skipped_records": [
-            skipped.model_dump(mode="json") for skipped in result.skipped_records
-        ],
+        "skipped_records": [skipped.model_dump(mode="json") for skipped in result.skipped_records],
         "checkpoint": result_checkpoint.model_dump(mode="json"),
         "policy": {
             "privacy_class": result.policy.privacy_class.value,
@@ -622,7 +644,9 @@ async def resume_source_import(
     run.dedupe_keys.extend(str(key) for key in result["dedupe_keys"])
     run.duplicate_dedupe_keys.extend(str(key) for key in result["duplicate_dedupe_keys"])
     run.skipped_records.extend(result["skipped_records"])
-    for source_id, raw_memory_id in zip(result["source_ids"], result["raw_memory_ids"], strict=True):
+    for source_id, raw_memory_id in zip(
+        result["source_ids"], result["raw_memory_ids"], strict=True
+    ):
         run.raw_memory_by_source_id[str(source_id)] = str(raw_memory_id)
 
     if run.checkpoint.done:

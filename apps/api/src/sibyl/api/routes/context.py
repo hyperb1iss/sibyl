@@ -1,5 +1,6 @@
 """Agent context pack endpoints."""
 
+import time
 from typing import cast
 
 import structlog
@@ -22,6 +23,7 @@ from sibyl.auth.dependencies import get_auth_context, get_current_organization, 
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
+from sibyl_core.observability import elapsed_ms, telemetry_registry
 
 log = structlog.get_logger()
 _READ_ROLES = (
@@ -112,6 +114,7 @@ async def context_pack(
     ctx: AuthContext = Depends(get_auth_context),
 ) -> ContextPackResponse:
     """Compile a structured context pack for an agent goal."""
+    started_at = time.perf_counter()
     try:
         from sibyl_core.tools.context import (
             compile_context,
@@ -154,9 +157,20 @@ async def context_pack(
             include_related=request.include_related,
             related_limit=request.related_limit,
         )
+        telemetry_registry().record_memory_operation(
+            operation="context_pack",
+            status="ok",
+            duration_ms=elapsed_ms(started_at),
+            result_count=response.total_items,
+        )
         return response
 
     except (ProjectAccessDeniedError, ProjectAuthorizationError) as exc:
+        telemetry_registry().record_memory_operation(
+            operation="context_pack",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         await log_denied_render_audit(
             action="memory.context_pack.deny",
             user_id=ctx.user_id,
@@ -169,10 +183,25 @@ async def context_pack(
         )
         raise
     except HTTPException:
+        telemetry_registry().record_memory_operation(
+            operation="context_pack",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         raise
     except ValueError as e:
+        telemetry_registry().record_memory_operation(
+            operation="context_pack",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
+        telemetry_registry().record_memory_operation(
+            operation="context_pack",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         log.exception("context_pack_failed", goal=request.goal, error=str(e))
         raise HTTPException(
             status_code=500,
@@ -188,6 +217,7 @@ async def reflect_context(
     ctx: AuthContext = Depends(get_auth_context),
 ) -> ReflectionResponse:
     """Reflect raw notes into durable memory candidates."""
+    started_at = time.perf_counter()
     try:
         from sibyl_core.tools.core import (
             reflect_memory,
@@ -243,9 +273,20 @@ async def reflect_context(
             task_ids=request.task_ids,
             limit=request.limit,
         )
+        telemetry_registry().record_memory_operation(
+            operation="context_reflect",
+            status="ok",
+            duration_ms=elapsed_ms(started_at),
+            result_count=response.total_candidates,
+        )
         return response
 
     except (ProjectAccessDeniedError, ProjectAuthorizationError) as exc:
+        telemetry_registry().record_memory_operation(
+            operation="context_reflect",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         await log_denied_render_audit(
             action="memory.reflect.deny",
             user_id=ctx.user_id,
@@ -258,10 +299,25 @@ async def reflect_context(
         )
         raise
     except HTTPException:
+        telemetry_registry().record_memory_operation(
+            operation="context_reflect",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         raise
     except ValueError as e:
+        telemetry_registry().record_memory_operation(
+            operation="context_reflect",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
+        telemetry_registry().record_memory_operation(
+            operation="context_reflect",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         log.exception("context_reflect_failed", source_title=request.source_title, error=str(e))
         raise HTTPException(
             status_code=500,

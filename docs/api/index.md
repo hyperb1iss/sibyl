@@ -1,17 +1,21 @@
 # Sibyl API Reference
 
-Sibyl provides a dual-interface API: a 4-tool MCP interface for assistant clients and automation,
-plus a full REST API for applications and integrations.
+Sibyl provides a dual-interface API: an eleven-tool MCP interface for assistant clients and
+automation, plus a full REST API for applications and integrations. Both surfaces are served by the
+same daemon (`sibyld`) and share one SurrealDB-native runtime for graph, content, and auth.
 
 ## Architecture Overview
 
 ```
 Sibyl Combined App (Starlette, port 3334)
-|-- /api/*    --> FastAPI REST endpoints
-|-- /mcp      --> MCP streamable-http (4 tools)
+|-- /api/*    --> FastAPI REST endpoints (26 routers)
+|-- /mcp      --> MCP streamable-http transport (11 tools, 2 resources)
 |-- /ws       --> WebSocket for real-time updates
-'-- Lifespan  --> Background queue + session management
+'-- Lifespan  --> Coordination runtime + session management
 ```
+
+The coordination runtime is in-process by default. Set `SIBYL_COORDINATION_BACKEND=redis` for
+multi-process or distributed worker deployments.
 
 ## Base URL
 
@@ -24,27 +28,46 @@ Sibyl Combined App (Starlette, port 3334)
 
 ### MCP Tools (for Assistant Clients)
 
-The MCP interface exposes 4 consolidated tools that cover all Sibyl operations:
+The MCP interface exposes eleven tools that cover discovery, context, capture, synthesis, and
+administration. Tools are registered in `apps/api/src/sibyl/server.py`.
 
-| Tool      | Purpose                                              | Documentation                      |
-| --------- | ---------------------------------------------------- | ---------------------------------- |
-| `search`  | Semantic search across knowledge graph and documents | [mcp-search.md](./mcp-search.md)   |
-| `explore` | Navigate and browse graph structure                  | [mcp-explore.md](./mcp-explore.md) |
-| `add`     | Create new knowledge entities                        | [mcp-add.md](./mcp-add.md)         |
-| `manage`  | Lifecycle operations and administration              | [mcp-manage.md](./mcp-manage.md)   |
+| Tool               | Purpose                                                       | Documentation                          |
+| ------------------ | ------------------------------------------------------------- | --------------------------------------- |
+| `search`           | Semantic search across knowledge graph and documents          | [mcp-search.md](./mcp-search.md)        |
+| `context`          | Compile a structured context pack for an agent goal           | [mcp-context.md](./mcp-context.md)      |
+| `synthesis_plan`   | Plan a source-grounded synthesis outline                      | [mcp-synthesis.md](./mcp-synthesis.md)  |
+| `synthesis_draft`  | Draft, verify, and optionally remember a synthesis artifact   | [mcp-synthesis.md](./mcp-synthesis.md)  |
+| `synthesis_verify` | Verify citation, freshness, hidden-context, and gap coverage  | [mcp-synthesis.md](./mcp-synthesis.md)  |
+| `explore`          | Navigate and browse graph structure                          | [mcp-explore.md](./mcp-explore.md)      |
+| `add`              | Create new knowledge entities                                 | [mcp-add.md](./mcp-add.md)              |
+| `remember`         | Capture durable memory with verbatim raw provenance           | [mcp-remember.md](./mcp-remember.md)    |
+| `reflect`          | Reflect raw notes into reviewable memory candidates           | [mcp-reflect.md](./mcp-reflect.md)      |
+| `manage`           | Lifecycle operations and administration                       | [mcp-manage.md](./mcp-manage.md)        |
+| `logs`             | Recent server logs (OWNER role)                               | [mcp-logs.md](./mcp-logs.md)            |
 
 **MCP Endpoint:** `POST /mcp` (streamable-http transport)
 
+The MCP server also exposes two resources: `sibyl://health` (connectivity and entity counts) and
+`sibyl://stats` (knowledge graph statistics).
+
 ### REST API (for Applications)
 
-Full CRUD operations with OpenAPI documentation:
+The REST API spans 26 routers. The pages below cover the most commonly used surfaces; the full
+contract is in the OpenAPI schema.
 
-| Category | Endpoints                           | Documentation                          |
-| -------- | ----------------------------------- | -------------------------------------- |
-| Entities | `/api/entities/*`                   | [rest-entities.md](./rest-entities.md) |
-| Tasks    | `/api/tasks/*`                      | [rest-tasks.md](./rest-tasks.md)       |
-| Projects | `/api/entities?entity_type=project` | [rest-projects.md](./rest-projects.md) |
-| Search   | `/api/search`                       | [rest-search.md](./rest-search.md)     |
+| Category  | Endpoints                           | Documentation                            |
+| --------- | ----------------------------------- | ----------------------------------------- |
+| Entities  | `/api/entities/*`                   | [rest-entities.md](./rest-entities.md)    |
+| Tasks     | `/api/tasks/*`                      | [rest-tasks.md](./rest-tasks.md)          |
+| Projects  | `/api/entities?entity_type=project` | [rest-projects.md](./rest-projects.md)    |
+| Search    | `/api/search`, `/api/search/explore`| [rest-search.md](./rest-search.md)        |
+| Memory    | `/api/memory/*`, `/api/context/*`   | [rest-memory.md](./rest-memory.md)        |
+| Synthesis | `/api/synthesis/*`                  | [rest-synthesis.md](./rest-synthesis.md)  |
+
+Additional routers not covered by dedicated pages include `auth`, `users`, `epics`, `graph`,
+`crawler`, `rag`, `resolve`, `jobs`, `backups`, `settings`, `metrics`, `admin`, `logs`, `orgs`,
+`org_members`, `org_invitations`, `project_members`, `session`, and `setup`. All are described in
+the OpenAPI schema.
 
 **OpenAPI Spec:** Available at `/api/docs` (Swagger UI) and `/api/openapi.json`
 
@@ -85,11 +108,13 @@ curl -X POST https://api.example.com/mcp \
 
 ## Multi-Tenancy
 
-Sibyl is multi-tenant by design. Each organization gets:
+Sibyl is multi-tenant by design. Each organization gets a dedicated SurrealDB namespace
+(`org_<uuid_hex>`) that holds its graph, content, and auth records. Forgetting org context routes
+queries to the wrong namespace, so every authenticated request resolves an organization first.
 
-- Isolated SurrealDB namespace
+- Isolated SurrealDB namespace per organization
 - Scoped content, auth, and graph records
-- Scoped API access
+- Scoped API and MCP access
 
 **Organization Context:**
 
@@ -171,5 +196,8 @@ SIBYL_MCP_AUTH_MODE=auto  # auto, on, or off
 ## Next Steps
 
 - [MCP Search Tool](./mcp-search.md) - Start with semantic search
+- [MCP Context Tool](./mcp-context.md) - Compile context packs for agents
+- [MCP Synthesis Tools](./mcp-synthesis.md) - Source-grounded artifacts
 - [REST Entities API](./rest-entities.md) - CRUD operations
 - [JWT Authentication](./auth-jwt.md) - Set up authentication
+- [Authorization](./auth-authorization.md) - Roles, scopes, and isolation

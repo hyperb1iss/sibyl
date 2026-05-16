@@ -25,6 +25,7 @@ from sibyl import config as config_module
 from sibyl.auth.http import extract_bearer_token
 from sibyl.auth.jwt import JwtError, verify_access_token
 from sibyl.persistence.auth_runtime import validate_access_session
+from sibyl_core.observability import telemetry_registry
 
 log = structlog.get_logger()
 
@@ -65,9 +66,11 @@ class ConnectionManager:
             # Start heartbeat task if not running
             if self._heartbeat_task is None or self._heartbeat_task.done():
                 self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+            active = len(self.active_connections)
+        telemetry_registry().record_websocket_connections(active=active)
         log.info(
             "websocket_connected",
-            total_connections=len(self.active_connections),
+            total_connections=active,
             org_id=org_id,
         )
 
@@ -77,7 +80,9 @@ class ConnectionManager:
             self.active_connections = [
                 c for c in self.active_connections if c.websocket != websocket
             ]
-        log.info("websocket_disconnected", total_connections=len(self.active_connections))
+            active = len(self.active_connections)
+        telemetry_registry().record_websocket_connections(active=active)
+        log.info("websocket_disconnected", total_connections=active)
 
     async def broadcast(self, event: str, data: dict[str, Any], org_id: str | None = None) -> None:
         """Broadcast an event to clients in the same organization.
@@ -116,6 +121,10 @@ class ConnectionManager:
             await self.disconnect(ws)
 
         if connections:
+            telemetry_registry().record_websocket_broadcast(
+                event=event,
+                recipients=len(connections) - len(disconnected),
+            )
             log.debug(
                 "websocket_broadcast",
                 ws_event=event,

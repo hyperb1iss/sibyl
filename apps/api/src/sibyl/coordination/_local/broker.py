@@ -21,6 +21,7 @@ from sibyl.coordination.broker import (
     JobStatus,
 )
 from sibyl.jobs.worker import WorkerSettings
+from sibyl_core.observability import telemetry_registry
 
 log = structlog.get_logger()
 
@@ -480,6 +481,7 @@ class LocalQueueBroker:
                 record = None
             elif record.status in {JobStatus.QUEUED, JobStatus.IN_PROGRESS, JobStatus.COMPLETE}:
                 self._record_recent_job(job_id)
+                telemetry_registry().record_job_enqueued(function=function, created=False)
                 return EnqueueResult(job_id=job_id, created=False)
             else:
                 self._jobs.pop(job_id, None)
@@ -496,6 +498,7 @@ class LocalQueueBroker:
         )
         self._record_recent_job(job_id)
         await queue.put(job_id)
+        telemetry_registry().record_job_enqueued(function=function, created=True)
         return EnqueueResult(job_id=job_id, created=True)
 
     async def _worker_loop(self, worker_index: int) -> None:
@@ -521,7 +524,10 @@ class LocalQueueBroker:
                 queue.task_done()
 
     async def _run_job(self, record: LocalJobRecord) -> None:
+        import time
+
         function = self._functions[record.function]
+        started_at = time.perf_counter()
 
         try:
             result = await function(self._ctx, *record.args, **record.kwargs)
@@ -535,6 +541,11 @@ class LocalQueueBroker:
             record.error = str(e)
             record.result = None
             record.expires_at = record.finish_time + self._result_ttl
+            telemetry_registry().record_job_finished(
+                function=record.function,
+                status="error",
+                duration_ms=(time.perf_counter() - started_at) * 1000,
+            )
             log.exception("Local job failed", job_id=record.job_id, function=record.function)
             return
 
@@ -543,6 +554,11 @@ class LocalQueueBroker:
         record.result = result
         record.error = None
         record.expires_at = record.finish_time + self._result_ttl
+        telemetry_registry().record_job_finished(
+            function=record.function,
+            status="ok",
+            duration_ms=(time.perf_counter() - started_at) * 1000,
+        )
         log.info("Local job complete", job_id=record.job_id, function=record.function)
 
     def _purge_expired_jobs(self) -> None:

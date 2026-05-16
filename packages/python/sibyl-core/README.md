@@ -1,7 +1,7 @@
 # sibyl-core
 
-Core library for Sibyl. Domain models, graph operations, retrieval algorithms, and tool
-implementations. Shared foundation for the API server and CLI.
+Core library for Sibyl. Domain models, graph operations, retrieval algorithms, the AI
+substrate, and tool implementations. Shared foundation for the API server and CLI.
 
 ## Quick Reference
 
@@ -17,14 +17,17 @@ moon run core:test        # Pytest
 
 ## What's Here
 
-- **models/:** Domain entities (Task, Project, Epic, Source, etc.)
+- **models/:** Domain entities (Task, Project, Epic, Source, reflection, synthesis)
 - **graph/:** SurrealDB graph managers plus Graphiti compatibility adapters
-- **backends/surreal/:** SurrealDB driver, schema, and per-table ops
-- **retrieval/:** Native context retrieval, compatibility search, fusion, deduplication
-- **ai/:** Native provider substrate for LLM calls, model registry, validation, and surfaces
-- **tools/:** MCP tool implementations (search, explore, add, manage)
-- **tasks/:** Workflow engine, dependency resolution
-- **auth/:** JWT primitives, password hashing
+- **backends/surreal/:** SurrealDB driver, schema, and per-table operations
+- **retrieval/:** Native context-pack retrieval, compatibility search, fusion, dedup
+- **ai/:** Native LLM substrate, model registry, providers, validation
+- **embeddings/:** Embedding provider clients
+- **services/:** Memory loop, reflection, synthesis, autonomy, source adapters
+- **tools/:** MCP tool implementations
+- **tasks/:** Workflow engine and dependency resolution
+- **migrate/:** Migration archive merge and rewrite logic
+- **auth/:** JWT primitives and password hashing
 
 ## Structure
 
@@ -34,27 +37,23 @@ src/sibyl_core/
 │   ├── entities.py       # Entity, EntityType, base classes
 │   ├── tasks.py          # Task, Project, Epic, Milestone
 │   ├── sources.py        # Source, Document
+│   ├── context.py        # Context-pack models
+│   ├── reflection.py     # Reflection candidate models
+│   ├── synthesis.py      # Synthesis plan and artifact models
 │   └── responses.py      # API response models
 ├── graph/
-│   ├── client.py         # GraphClient (connection, write lock)
-│   ├── entities.py       # EntityManager (CRUD, search)
-│   └── relationships.py  # RelationshipManager
-├── retrieval/
-│   ├── native.py         # Surreal-native context-pack retrieval
-│   ├── hybrid.py         # Compatibility hybrid search orchestration
-│   └── fusion.py         # Score fusion (RRF)
+│   └── surreal/          # SurrealDB graph managers
+├── backends/surreal/     # Driver, schema, table operations
+├── retrieval/            # Native context retrieval, fusion (RRF), dedup
 ├── ai/
 │   ├── registry.py       # Curated LLM/embedding model registry
 │   ├── providers.py      # PydanticAI provider model factory
+│   ├── clients.py        # Scoped agent caching
 │   └── llm/              # Extractor, Generator, config sources
-├── tools/
-│   ├── search.py         # Semantic search
-│   ├── explore.py        # Graph navigation
-│   ├── add.py            # Entity creation
-│   └── manage.py         # Task workflow, admin
-└── tasks/
-    ├── workflow.py       # State machine, transitions
-    └── manager.py        # Task operations
+├── embeddings/           # Embedding provider clients
+├── services/             # Memory loop, reflection, synthesis, source adapters
+├── tools/                # MCP tool implementations
+└── tasks/                # Workflow state machine, dependency resolution
 ```
 
 ## Usage
@@ -91,8 +90,8 @@ results = await manager.search("authentication patterns", limit=20)
 
 ### Write Concurrency
 
-Write concurrency is handled by the active graph driver. The SurrealDB driver serializes WebSocket
-operations per client, and org-scoped graph access should use cloned drivers.
+The SurrealDB driver serializes WebSocket operations per client, and org-scoped graph
+access should use cloned drivers.
 
 ```python
 # Direct writes go through the active graph backend
@@ -133,22 +132,21 @@ generator = Generator(surface=LLMSurface.SYNTHESIS)
 draft = await generator.generate("Summarize this context pack.", max_tokens=512)
 ```
 
-The substrate uses PydanticAI under `sibyl_core.ai`, with provider API keys passed through provider
-objects rather than mutating `os.environ`. `Extractor[T]` handles structured output and classified
-LLM errors. `Generator` handles text generation and streaming. Surface-specific config is resolved
-through an `LLMConfigSource` so the API can provide database-backed settings while core stays pure.
+The substrate uses PydanticAI under `sibyl_core.ai`, with provider API keys passed
+through provider objects rather than mutating `os.environ`. `Extractor[T]` handles
+structured output and classified LLM errors. `Generator` handles text generation and
+streaming. Surface-specific config is resolved through an `LLMConfigSource` so the API
+can supply database-backed settings while core stays pure.
 
 ## Entity Types
 
-| Type | Description |
-|------|-------------|
-| `pattern` | Reusable coding patterns |
-| `episode` | Temporal learnings |
-| `task` | Work items with workflow |
-| `project` | Container for tasks |
-| `epic` | Feature-level grouping |
-| `source` | Documentation sources |
-| `document` | Crawled content |
+Sibyl models a broad set of entity types so memory stays structured. The registry
+lives in `models/entities.py` and covers, among others:
+
+- **Work:** `task`, `epic`, `project`, `milestone`
+- **Knowledge:** `pattern`, `episode`, `procedure`, `rule`, `guide`, `error_pattern`
+- **Memory:** `decision`, `plan`, `idea`, `claim`, `artifact`, `session`, `note`
+- **Sources:** `source`, `document`, `domain`, `community`
 
 ## Relationship Types
 
@@ -160,13 +158,12 @@ RelationshipType.APPLIES_TO, REQUIRES, CONFLICTS_WITH, SUPERSEDES
 
 # Task
 RelationshipType.BELONGS_TO, DEPENDS_ON, BLOCKS, REFERENCES
-
 ```
 
 ## Configuration
 
 ```bash
-SIBYL_LLM_PROVIDER=anthropic          # anthropic | gemini | openai
+SIBYL_LLM_PROVIDER=anthropic          # anthropic | openai
 SIBYL_LLM_MODEL=claude-haiku-4-5
 SIBYL_LLM_TEMPERATURE=0
 SIBYL_LLM_MAX_TOKENS=2048
@@ -182,7 +179,7 @@ SIBYL_ANTHROPIC_API_KEY=...           # LLM provider key
 SIBYL_OPENAI_API_KEY=sk-...           # LLM or embedding provider key
 SIBYL_GEMINI_API_KEY=...              # LLM or embedding provider key
 
-SIBYL_EMBEDDING_PROVIDER=openai     # openai | gemini
+SIBYL_EMBEDDING_PROVIDER=openai       # openai | gemini
 SIBYL_EMBEDDING_MODEL=text-embedding-3-small
 SIBYL_EMBEDDING_DIMENSIONS=1536
 SIBYL_GRAPH_EMBEDDING_PROVIDER=openai
@@ -190,34 +187,47 @@ SIBYL_GRAPH_EMBEDDING_MODEL=text-embedding-3-small
 SIBYL_GRAPH_EMBEDDING_DIMENSIONS=1024
 ```
 
-LLM settings are instance-wide in v0.10. Environment variables win over database settings and mark
-individual fields as locked. Per-organization LLM overrides are reserved for v0.11+.
+LLM settings are instance-wide. Environment variables win over database settings and
+mark individual fields as locked.
 
-Gemini embeddings default to `gemini-embedding-2`; Gemini keys can also come from `GEMINI_API_KEY`
-or `GOOGLE_API_KEY`. Changing embedding provider, model, or dimensions requires re-embedding
-existing graph and document vectors before comparing old and new search results.
+Gemini keys can also come from `GEMINI_API_KEY` or `GOOGLE_API_KEY`. Changing embedding
+provider, model, or dimensions requires re-embedding existing graph and document
+vectors before comparing old and new search results.
 
-To add a first-class LLM provider, add a provider factory branch in `sibyl_core.ai.providers`, add
-registry entries in `sibyl_core.ai.registry`, extend `LLMProviderName` and API DTOs, and add a live
-probe to `scripts/llm/verify_registry.py`.
+To add a first-class LLM provider, add a provider factory branch in
+`sibyl_core.ai.providers`, add registry entries in `sibyl_core.ai.registry`, extend
+`LLMProviderName` and the API DTOs, and add a live probe to
+`scripts/llm/verify_registry.py`.
 
 ## Key Patterns
 
-**Multi-tenancy:** Every operation requires org context
+**Multi-tenancy:** Every operation requires org context.
+
 ```python
 manager = EntityManager(client, group_id=str(org.id))
 ```
 
-**Node shapes:** Native retrieval queries direct Surreal records and projectable legacy
-`Episodic`/`Entity` records
+**Node shapes:** Native retrieval queries direct Surreal records and projectable
+legacy `Episodic`/`Entity` records.
+
 ```cypher
 WHERE (n:Episodic OR n:Entity) AND n.entity_type = $type
 ```
 
-**Creation paths:** direct native writes first, compatibility extraction when explicitly needed
+**Creation paths:** direct native writes first, compatibility extraction when
+explicitly needed.
+
 ```python
 await manager.create_direct(entity)  # Native write path, no LLM
 await manager.create(entity)         # Compatibility extraction path
+```
+
+## Compatibility Extra
+
+Graphiti support is an optional extra, not part of the default memory loop:
+
+```bash
+uv sync --extra compatibility    # installs graphiti-core for migration/compat surfaces
 ```
 
 ## Testing
@@ -237,13 +247,8 @@ moon run core:bench-live
 
 # Live context-pack smoke benchmark
 moon run core:bench-context
-
-# Save labeled artifacts for store-to-store comparison
-moon run core:bench-live -- --label surreal --metadata store=surreal
 ```
 
 `core:bench-live` probes the real `/api/search` path with CLI auth. `core:bench-context`
-probes `/api/context/pack`; pass a JSON case file to turn smoke checks into dogfood
-acceptance fixtures for coding handoffs, Haven recall, or other memory spaces. Both
-benchmarks are read-only. Saved reports can be compared with
-`uv run python benchmarks/compare_eval_reports.py <baseline.json> <candidate.json>`.
+probes `/api/context/pack`. Both benchmarks are read-only. Saved reports can be compared
+with `uv run python benchmarks/compare_eval_reports.py <baseline.json> <candidate.json>`.

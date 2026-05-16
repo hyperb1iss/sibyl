@@ -736,6 +736,66 @@ export interface StatsResponse {
   total_entities: number;
 }
 
+export interface TelemetryDurationSummary {
+  count: number;
+  errors: number;
+  slow: number;
+  error_rate: number;
+  avg_ms: number;
+  p50_ms: number;
+  p95_ms: number;
+  p99_ms: number;
+  max_ms: number;
+}
+
+export interface TelemetryTrendPoint {
+  timestamp: string;
+  api_p95_ms: number;
+  surreal_p95_ms: number;
+  memory_p95_ms: number;
+  llm_p95_ms: number;
+  error_rate: number;
+  request_count: number;
+  query_count: number;
+  memory_count: number;
+  llm_count: number;
+}
+
+export interface TelemetryEvent {
+  timestamp: string;
+  category: string;
+  status: string;
+  duration_ms: number | null;
+  value: number;
+  labels: Record<string, string>;
+}
+
+export interface TelemetryMetric {
+  kind: string;
+  name: string;
+  labels: Record<string, string>;
+  value?: number | null;
+  count?: number | null;
+  sum?: number | null;
+  min?: number | null;
+  max?: number | null;
+  avg?: number | null;
+  p50?: number | null;
+  p95?: number | null;
+  p99?: number | null;
+}
+
+export interface TelemetrySummaryResponse {
+  generated_at: string;
+  window_seconds: number;
+  uptime_seconds: number;
+  summaries: Record<string, TelemetryDurationSummary>;
+  trends: TelemetryTrendPoint[];
+  recent_events: TelemetryEvent[];
+  metrics: TelemetryMetric[];
+  rollups: Record<string, unknown>[];
+}
+
 // =============================================================================
 // Setup Wizard Types
 // =============================================================================
@@ -2226,6 +2286,17 @@ export const api = {
           skip_existing: skipExisting,
         }),
       }),
+  },
+
+  telemetry: {
+    summary: (params?: { window_seconds?: number; rollup_limit?: number }) => {
+      const search = new URLSearchParams();
+      if (params?.window_seconds) search.set('window_seconds', String(params.window_seconds));
+      if (params?.rollup_limit !== undefined)
+        search.set('rollup_limit', String(params.rollup_limit));
+      const suffix = search.toString();
+      return fetchApi<TelemetrySummaryResponse>(`/telemetry/summary${suffix ? `?${suffix}` : ''}`);
+    },
   },
 
   jobs: {

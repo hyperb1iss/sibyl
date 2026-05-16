@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Sequence
 from typing import Any
 
@@ -11,6 +12,7 @@ from pydantic_ai import Agent
 from sibyl_core.ai.clients import get_agent
 from sibyl_core.ai.errors import LLMError, classify_llm_exception
 from sibyl_core.ai.llm.config import LLMSurface
+from sibyl_core.observability import elapsed_ms, telemetry_registry
 
 
 class Extractor[T]:
@@ -32,11 +34,26 @@ class Extractor[T]:
         self._agent = agent
 
     async def extract(self, prompt: str) -> T:
+        started_at = time.perf_counter()
         try:
             agent = await self._get_agent()
             result = await agent.run(prompt)
+            telemetry_registry().record_llm_call(
+                surface=self.surface.value,
+                provider="runtime",
+                model=self.model_override or "default",
+                status="ok",
+                duration_ms=elapsed_ms(started_at),
+            )
             return result.output
         except Exception as exc:
+            telemetry_registry().record_llm_call(
+                surface=self.surface.value,
+                provider="runtime",
+                model=self.model_override or "default",
+                status="error",
+                duration_ms=elapsed_ms(started_at),
+            )
             raise self._classify(exc) from exc
 
     async def extract_many(

@@ -218,6 +218,11 @@ class Settings(BaseSettings):
         description="Rate limit storage backend (memory://, redis://host:port)",
     )
 
+    metrics_scrape_token: SecretStr = Field(
+        default=SecretStr(""),
+        description="Bearer token required for the root /metrics scrape endpoint outside local dev",
+    )
+
     # Email configuration (Resend)
     resend_api_key: SecretStr = Field(
         default=SecretStr(""),

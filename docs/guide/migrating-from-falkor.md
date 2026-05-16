@@ -6,7 +6,7 @@ description: CLI playbook for moving an existing install to SurrealDB
 # Migrating from FalkorDB
 
 Sibyl ships CLI tooling to move an organization (or a whole install) from the legacy FalkorDB +
-PostgreSQL stack to SurrealDB. The migration is an explicit, reversible operation — nothing happens
+PostgreSQL stack to SurrealDB. The migration is an explicit, reversible operation. Nothing happens
 automatically when you upgrade.
 
 SurrealDB is the default runtime now. Legacy graph/content data is a source-side migration concern
@@ -39,11 +39,11 @@ SIBYL_STORE=legacy sibyld migrate export \
 ```
 
 Run this from the v0.6 compatibility release or a preserved legacy source environment before
-upgrading the source install. Current v0.7 exports write a versioned archive containing:
+upgrading the source install. The export writes a versioned archive containing:
 
-- `graph.json` — Entities, relationships, and episodes from FalkorDB
-- `auth.json` / `content.json` — Structured auth and content payloads
-- `manifest.json` — Counts and checksums for verification
+- `graph.json`: entities, relationships, and episodes from FalkorDB
+- `auth.json` / `content.json`: structured auth and content payloads
+- `manifest.json`: counts and checksums for verification
 
 Older compatibility-release archives may also contain a retained `postgres.sql` payload for
 rehearsal or rollback validation. Current active backup and export commands do not create new
@@ -82,8 +82,8 @@ moon run migrate-rehearse -- /tmp/sibyl-migration.tar.gz --yes
 ```
 
 This imports and verifies an existing archive against the active Surreal target without touching
-your production target. It's the safest pre-cutover check — the rehearsal must pass green before the
-real run.
+your production target. It's the safest pre-cutover check, and the rehearsal must pass green before
+the real run.
 
 The rehearsal runs the deterministic auth-flow replay by default. It signs up users, rotates tokens,
 exercises API keys, invitations, org switching, device auth, logout revocation, session listing, and
@@ -177,7 +177,7 @@ If post-cutover verification reveals a problem:
 moon run auth-readonly -- --mode unfreeze --apply --yes
 ```
 
-3. The legacy stack is otherwise unchanged — the export is non-destructive.
+3. The legacy stack is otherwise unchanged. The export is non-destructive.
 4. File an issue with the archive manifest and the failing verification output.
 
 ## FAQ
@@ -190,7 +190,7 @@ SurrealDB runtime.
 whatever order suits your tenant sizing.
 
 **What about embedding models?** Embeddings are migrated verbatim. If you switch embedding models
-(`SIBYL_EMBEDDING_MODEL`), plan a re-indexing pass separately — the migration tool doesn't re-embed
+(`SIBYL_EMBEDDING_MODEL`), plan a re-indexing pass separately. The migration tool doesn't re-embed
 content.
 
 **Can I run both stacks in parallel?** Yes. Use different `COMPOSE_PROJECT_NAME` and port offsets

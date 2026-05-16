@@ -21,6 +21,11 @@ API keys provide:
 | `api:read`  | Read operations on `/api/*` (GET, HEAD, OPTIONS) |
 | `api:write` | All operations on `/api/*` (implies read)        |
 
+Beyond these access scopes, a key can also be bound to specific projects and memory spaces. Those
+bindings further restrict which projects and memory scopes the key can read or write, independent
+of the access scope. A key with no project or memory-space binding inherits the creating user's
+full access within the organization.
+
 ## Creating API Keys
 
 ### Via CLI

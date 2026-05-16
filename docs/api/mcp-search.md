@@ -23,30 +23,33 @@ interface SearchInput {
   category?: string; // Category/domain filter
 
   // Task-Specific Filters
-  status?: string; // Task status filter (comma-separated)
+  status?: string; // Task status filter
   project?: string; // Project ID filter
   assignee?: string; // Assignee name filter
 
   // Document-Specific Filters
-  source?: string; // Graph source_id filter
+  source?: string; // Alias for source_name
   source_id?: string; // Document source UUID filter
   source_name?: string; // Document source name (partial match)
 
   // Temporal
   since?: string; // ISO date or relative (7d, 2w)
+  temporal_decay_days?: number; // Half-life in days for recency decay
 
   // Pagination
   limit?: number; // 1-50, default 10
-  offset?: number; // Default 0
 
   // Control Flags
   include_content?: boolean; // Include full content (default true)
   include_documents?: boolean; // Search docs (default true)
   include_graph?: boolean; // Search graph (default true)
-  use_enhanced?: boolean; // Use hybrid retrieval (default true)
+  use_enhanced?: boolean; // Use enhanced retrieval with reranking (default true)
   boost_recent?: boolean; // Temporal boosting (default true)
 }
 ```
+
+The MCP `search` tool does not accept an `offset` argument. For paginated traversal use the REST
+`POST /api/search` endpoint, which exposes `offset`.
 
 ### Entity Types
 
@@ -76,20 +79,20 @@ interface SearchResponse {
   query: string;
   filters: Record<string, any>;
   graph_count: number; // Results from knowledge graph
-  document_count: number; // Results from documents
+  document_count: number; // Results from crawled documents
   limit: number;
-  offset: number;
+  offset: number; // Always 0 for MCP calls
   has_more: boolean;
   usage_hint: string; // Guidance for fetching full content
 }
 
 interface SearchResult {
-  id: string;
+  id: string; // Entity/chunk ID, use with `sibyl entity show <id>`
   type: string; // Entity type or "document"
   name: string;
   content: string; // Truncated preview
   score: number; // Relevance score (0-1)
-  source?: string; // Source file or doc source
+  source?: string; // Source name for documentation results
   url?: string; // URL for documents
   result_origin: "graph" | "document";
   metadata: Record<string, any>;
@@ -256,5 +259,6 @@ When `use_enhanced: true` (default), search uses hybrid retrieval:
 ## Related
 
 - [mcp-explore.md](./mcp-explore.md) - Graph traversal without search
+- [mcp-context.md](./mcp-context.md) - Compile a structured context pack for a goal
 - [mcp-add.md](./mcp-add.md) - Create new knowledge
 - [rest-search.md](./rest-search.md) - REST equivalent endpoint

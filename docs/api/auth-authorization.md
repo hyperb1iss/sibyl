@@ -14,34 +14,38 @@ Organization (org-level roles)
 
 **Key Concepts:**
 
-- **Organization Roles**: Admin, Member - inherited across all projects
-- **Project Roles**: Owner, Admin, Writer, Reader - scoped to specific projects
-- **Row-Level Security**: PostgreSQL RLS enforces data isolation
+- **Organization Roles**: `owner`, `admin`, `member`, `viewer` - inherited across all projects
+- **Project Roles**: `project_owner`, `project_maintainer`, `project_contributor`,
+  `project_viewer` - scoped to specific projects
+- **Org Isolation**: each organization has its own SurrealDB namespace, so cross-org data access
+  is impossible at the storage layer
 
 ## Role Hierarchy
 
 ### Organization Roles
 
-| Role     | Description                                  |
-| -------- | -------------------------------------------- |
-| `admin`  | Full organization access, can manage members |
-| `member` | Standard member, access based on projects    |
+| Role     | Description                                              |
+| -------- | -------------------------------------------------------- |
+| `owner`  | Super admin. Full org access, owner-only boundaries, logs |
+| `admin`  | Full organization access, can manage members             |
+| `member` | Standard member, project access based on assignments     |
+| `viewer` | Read-only member                                         |
 
-Organization admins implicitly have `owner` role on all projects.
+Organization owners and admins have full project access across the organization.
 
 ### Project Roles
 
-| Role     | Permissions                                      |
-| -------- | ------------------------------------------------ |
-| `owner`  | Full access, can delete project and manage roles |
-| `admin`  | Full access, can manage project members          |
-| `writer` | Create, update, delete entities within project   |
-| `reader` | Read-only access to project resources            |
+| Role                  | Permissions                                          |
+| --------------------- | ---------------------------------------------------- |
+| `project_owner`       | Full access, can delete the project and manage roles |
+| `project_maintainer`  | Full access, can manage project members              |
+| `project_contributor` | Create, update, delete entities within the project   |
+| `project_viewer`      | Read-only access to project resources                |
 
 **Role Inheritance:**
 
 ```
-owner > admin > writer > reader
+project_owner > project_maintainer > project_contributor > project_viewer
 ```
 
 Higher roles include all lower role permissions.
@@ -50,76 +54,83 @@ Higher roles include all lower role permissions.
 
 ### Project Access Check
 
-Every request is validated against effective role:
+Every request is validated against an effective role:
 
-```python
-# Authorization flow
-1. Resolve user from JWT/API key
+```
+1. Resolve user from JWT or API key
 2. Check organization membership
-3. Calculate effective project role:
-   - Org admin? → owner
-   - Direct project role? → that role
-   - Team membership? → highest team role
-   - Public project? → reader
-4. Compare against required permission
-5. Allow or deny with structured 403
+3. Calculate the effective project role:
+   - Org owner or admin? -> project_owner
+   - Direct project role? -> that role
+   - Team membership? -> highest team role
+   - Public project? -> project_viewer
+4. Compare against the required role
+5. Allow, or deny with a structured 403
 ```
 
 ### Effective Role Calculation
 
-Effective role is the maximum of:
+The effective project role is the maximum of:
 
-1. **Org admin** → Always `owner`
-2. **Direct assignment** → Role in `project_members` table
-3. **Team membership** → Highest role from team memberships
-4. **Public access** → `reader` if project is public
+1. **Org owner or admin** - resolves to `project_owner`
+2. **Direct assignment** - the role recorded for the user on the project
+3. **Team membership** - the highest role from the user's team memberships
+4. **Public access** - `project_viewer` if the project is public
 
-```python
-from sibyl.auth.authorization import get_effective_project_role
-
-role = await get_effective_project_role(session, user_id, project_id)
-# Returns: "owner" | "admin" | "writer" | "reader" | None
-```
+The resolved role is then compared against the role the route requires.
 
 ### Permission Dependencies
 
-| Action                  | Required Role |
-| ----------------------- | ------------- |
-| Read project            | `reader`      |
-| Create entities         | `writer`      |
-| Update entities         | `writer`      |
-| Delete entities         | `writer`      |
-| Manage project settings | `admin`       |
-| Manage project members  | `admin`       |
-| Delete project          | `owner`       |
-| Transfer ownership      | `owner`       |
+| Action                  | Minimum Role          |
+| ----------------------- | --------------------- |
+| Read project            | `project_viewer`      |
+| Create entities         | `project_contributor` |
+| Update entities         | `project_contributor` |
+| Delete entities         | `project_contributor` |
+| Manage project settings | `project_maintainer`  |
+| Manage project members  | `project_maintainer`  |
+| Delete project          | `project_owner`       |
+| Transfer ownership      | `project_owner`       |
 
 ## API Authorization
 
 ### Dependency Functions
 
+Organization-level access is gated with `require_org_role`. Project-level access uses
+`require_project_role` and its convenience shortcuts `require_project_read`, `require_project_write`,
+and `require_project_admin`.
+
 ```python
-from sibyl.auth.dependencies import (
-    require_project_reader,
-    require_project_writer,
-    require_project_admin,
-    require_project_owner,
+from sibyl.auth.dependencies import require_org_role
+from sibyl.auth.authorization import (
+    require_project_read,
+    require_project_write,
 )
+from sibyl_core.auth import OrganizationRole
 
 @router.get("/projects/{project_id}/entities")
 async def list_entities(
     project_id: str,
-    _: None = Depends(require_project_reader),  # Validates access
+    _project = Depends(require_project_read()),  # Requires project_viewer or higher
 ):
     ...
 
 @router.post("/projects/{project_id}/entities")
 async def create_entity(
     project_id: str,
-    _: None = Depends(require_project_writer),  # Write access required
+    _project = Depends(require_project_write()),  # Requires project_contributor or higher
+):
+    ...
+
+@router.get("/admin/system")
+async def admin_only(
+    _: None = Depends(require_org_role(OrganizationRole.OWNER, OrganizationRole.ADMIN)),
 ):
     ...
 ```
+
+`require_project_read` admits `project_viewer` and above, `require_project_write` admits
+`project_contributor` and above, and `require_project_admin` admits `project_maintainer` and above.
 
 ### Error Response (403 Forbidden)
 
@@ -132,8 +143,8 @@ When authorization fails, a structured error is returned:
   "message": "Insufficient permissions for project",
   "details": {
     "project_id": "proj_abc123",
-    "required_role": "writer",
-    "actual_role": "reader"
+    "required_role": "project_contributor",
+    "actual_role": "project_viewer"
   }
 }
 ```
@@ -146,63 +157,42 @@ When authorization fails, a structured error is returned:
 | `PROJECT_NOT_FOUND`     | Project doesn't exist or no access |
 | `ORG_ACCESS_DENIED`     | User not in organization           |
 
-## Row-Level Security (RLS)
+## Organization Isolation
 
-PostgreSQL RLS provides database-level isolation.
+Sibyl's default runtime is SurrealDB-native. Organization isolation is enforced by the storage
+layer through a namespace per organization.
 
-### How It Works
+### Namespace-Per-Org
 
-1. API sets session variables before each query:
+Each organization gets its own SurrealDB namespace, named `org_<uuid_hex>`. Graph, content, and
+auth records for an organization live entirely within that namespace.
 
-   ```sql
-   SET LOCAL app.user_id = 'user-uuid';
-   SET LOCAL app.org_id = 'org-uuid';
-   ```
+- Every authenticated request resolves an organization first, then operates inside that
+  organization's namespace.
+- A query issued in one namespace cannot see another organization's data. Cross-org leakage is
+  not possible at the storage layer.
+- The SurrealDB driver is cloned per organization (`driver.clone(group_id)`) so a single client
+  instance is never shared across namespaces.
 
-2. RLS policies filter rows automatically:
+### Application Scope
 
-   ```sql
-   -- Example policy on projects table
-   CREATE POLICY org_isolation ON projects
-     USING (organization_id::text = current_setting('app.org_id', true));
-   ```
-
-3. Queries only return allowed rows. No application filtering needed.
-
-### Protected Tables
-
-**Organization-scoped** (filtered by `app.org_id`):
-
-- `organizations`, `organization_members`
-- `projects`, `project_members`
-- `teams`, `team_members`
-- `api_keys`, `invitations`
-- `audit_logs`
-
-**User-scoped** (filtered by `app.user_id`):
-
-- `user_sessions`
-- `login_history`
-- `oauth_connections`
-
-### RLS in Queries
-
-RLS is transparent to application code:
+Application code always carries organization context. Graph operations require an explicit
+`group_id`, and there is no implicit default:
 
 ```python
-# Without RLS, you'd need:
-await session.execute(
-    select(Project).where(Project.organization_id == org_id)
-)
+from sibyl_core.graph import EntityManager
 
-# With RLS, just query. Policies handle filtering:
-await session.execute(select(Project))  # Only returns user's org projects
+manager = EntityManager(client, group_id=str(org.id))
 ```
 
-### Bypassing RLS
+Forgetting the organization scope routes a query to the wrong namespace or fails outright, rather
+than silently crossing tenants.
 
-Historical migration and archive operations use explicit migration commands rather than opening an
-application session:
+### PostgreSQL and Migration
+
+PostgreSQL is retained only for migration and archive rehearsal, not for the default runtime.
+Where PostgreSQL is used for rehearsal, row-level security policies provide org isolation within
+that database. Migration and archive operations use explicit `sibyld migrate` commands:
 
 ```bash
 sibyld migrate import migration-archive.tar.gz \
@@ -272,10 +262,10 @@ Teams provide group-based access control.
 Users inherit the highest role from their team memberships:
 
 ```
-User A → Team Alpha (writer) → Project X
-       → Team Beta (admin)  → Project X
+User A -> Team Alpha (project_contributor) -> Project X
+       -> Team Beta  (project_maintainer)  -> Project X
 
-Result: User A has admin on Project X
+Result: User A has project_maintainer on Project X
 ```
 
 ### Creating Teams
@@ -304,7 +294,7 @@ POST /api/teams/{team_id}/projects
 ```json
 {
   "project_id": "proj-uuid",
-  "role": "writer"
+  "role": "project_contributor"
 }
 ```
 
@@ -314,11 +304,11 @@ All team members inherit this role for the project.
 
 ### Defense in Depth
 
-1. **Authentication** - JWT/API key validates identity
+1. **Authentication** - JWT or API key validates identity
 2. **Authorization** - Role checks validate permissions
-3. **RLS** - Database enforces data isolation
+3. **Namespace isolation** - SurrealDB enforces per-org data isolation at the storage layer
 
-Even if application code has bugs, RLS prevents cross-org data access.
+Even if application code has a bug, the namespace boundary prevents cross-org data access.
 
 ### Audit Logging
 
@@ -330,16 +320,16 @@ Permission changes are logged:
   "actor_id": "admin-user-uuid",
   "target_id": "new-member-uuid",
   "project_id": "proj-uuid",
-  "role": "writer",
-  "timestamp": "2025-01-04T12:00:00Z"
+  "role": "project_contributor",
+  "timestamp": "2026-05-16T12:00:00Z"
 }
 ```
 
 ### Principle of Least Privilege
 
-- Default to `reader` for new project members
-- Require explicit elevation to `writer`/`admin`
-- Only project creators get `owner`
+- Default to `project_viewer` for new project members
+- Require explicit elevation to `project_contributor` or `project_maintainer`
+- Only project creators get `project_owner`
 
 ## CLI Authentication
 
@@ -354,11 +344,11 @@ The CLI stores credentials securely:
 # Login
 sibyl auth login
 
-# Check current user
-sibyl auth whoami
+# Check auth status
+sibyl auth status
 
-# Logout
-sibyl auth logout
+# Clear stored credentials
+sibyl auth clear-token
 ```
 
 ## Related

@@ -26,33 +26,35 @@ real work, and leave the graph smarter without Bliss babysitting a manual inbox.
 
 ## 2. Active Source Docs
 
-These docs remain active planning inputs:
+These living docs in `docs/architecture/` remain active planning inputs:
 
 - [`SIBYL_NORTHSTAR.md`](SIBYL_NORTHSTAR.md): product and architecture truth.
-- [`SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md`](SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md):
-  source-grounded synthesis, inspect, correction, import, and workspace product loops.
+- [`SIBYL_V012_REFLECTION_OS_PLAN.md`](SIBYL_V012_REFLECTION_OS_PLAN.md): current v0.12 Reflection OS
+  implementation plan.
 - [`PERMISSION_SYSTEM_AUDIT.md`](PERMISSION_SYSTEM_AUDIT.md): current auth, policy, project RBAC,
   MCP, and trust-surface audit.
-- [`SIBYL_LLM_SUBSTRATE_PLAN.md`](SIBYL_LLM_SUBSTRATE_PLAN.md): native model provider substrate
-  needed for extraction, reflection, synthesis, and hooks.
 - [`TASKIQ_MIGRATION_PLAN.md`](TASKIQ_MIGRATION_PLAN.md): coordination backend boundary and
   Redis-optional local runtime direction.
-- [`SURREALDB_GRAPHITI_EXIT_BENCHMARK_EVIDENCE.md`](SURREALDB_GRAPHITI_EXIT_BENCHMARK_EVIDENCE.md):
+
+These docs are release receipts or historical execution plans. They moved to `docs/_archive/` once
+their work shipped. They can still hold useful receipts and design contracts, but they do not
+override this roadmap or the Northstar when release status has changed:
+
+- [`SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md`](../_archive/SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md):
+  source-grounded synthesis, inspect, correction, import, and workspace product contracts shipped in
+  v0.9.
+- [`SIBYL_LLM_SUBSTRATE_PLAN.md`](../_archive/SIBYL_LLM_SUBSTRATE_PLAN.md): native model provider
+  substrate landed in v0.10.
+- [`SURREALDB_GRAPHITI_EXIT_BENCHMARK_EVIDENCE.md`](../_archive/SURREALDB_GRAPHITI_EXIT_BENCHMARK_EVIDENCE.md):
   benchmark evidence and public-claim rules.
-
-These docs are primarily release receipts or historical execution plans:
-
-- [`SURREALDB_NATIVE_MEMORY_CORE_SPEC.md`](SURREALDB_NATIVE_MEMORY_CORE_SPEC.md)
-- [`SURREALDB_V07_GRAPHITI_EXIT_AND_PURE_SURREAL_PLAN.md`](SURREALDB_V07_GRAPHITI_EXIT_AND_PURE_SURREAL_PLAN.md)
-- [`SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md`](SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md)
-- [`SIBYL_V08_PURE_SURREAL_CLOSURE_EXECUTION_PLAN.md`](SIBYL_V08_PURE_SURREAL_CLOSURE_EXECUTION_PLAN.md)
-- [`SURREALDB_PHASE1_BUGS.md`](SURREALDB_PHASE1_BUGS.md)
-- [`SURREALDB_PHASE2_AUTH_MIGRATION.md`](SURREALDB_PHASE2_AUTH_MIGRATION.md)
-- [`SURREALDB_PHASE2_LIVE_GATES.md`](SURREALDB_PHASE2_LIVE_GATES.md)
-- [`SURREALDB_PHASE3_BURNDOWN.md`](SURREALDB_PHASE3_BURNDOWN.md)
-
-Historical docs can still contain useful receipts, but they should not override this roadmap or the
-Northstar when release status has changed.
+- [`SURREALDB_NATIVE_MEMORY_CORE_SPEC.md`](../_archive/SURREALDB_NATIVE_MEMORY_CORE_SPEC.md)
+- [`SURREALDB_V07_GRAPHITI_EXIT_AND_PURE_SURREAL_PLAN.md`](../_archive/SURREALDB_V07_GRAPHITI_EXIT_AND_PURE_SURREAL_PLAN.md)
+- [`SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md`](../_archive/SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md)
+- [`SIBYL_V08_PURE_SURREAL_CLOSURE_EXECUTION_PLAN.md`](../_archive/SIBYL_V08_PURE_SURREAL_CLOSURE_EXECUTION_PLAN.md)
+- [`SURREALDB_PHASE1_BUGS.md`](../_archive/SURREALDB_PHASE1_BUGS.md)
+- [`SURREALDB_PHASE2_AUTH_MIGRATION.md`](../_archive/SURREALDB_PHASE2_AUTH_MIGRATION.md)
+- [`SURREALDB_PHASE2_LIVE_GATES.md`](../_archive/SURREALDB_PHASE2_LIVE_GATES.md)
+- [`SURREALDB_PHASE3_BURNDOWN.md`](../_archive/SURREALDB_PHASE3_BURNDOWN.md)
 
 ## 3. 1.0 Definition
 

@@ -466,17 +466,18 @@ Use uv for Python package management.
 
 ### 4. Review Periodically
 
-Guidance become stale. Schedule reviews:
+Guidance becomes stale. Schedule reviews:
 
 ```bash
-# Find old guidance
-sibyl search "" --type guide --before 6m
+# List captured guidance entities
+sibyl entity list --type guide
 
-# Review and update or archive
+# Review and update or archive stale entries
 ```
 
 ## Next Steps
 
+- [The Memory Loop](./memory-loop.md) - How captured guidance gets recalled
 - [Capturing Knowledge](./capturing-knowledge.md) - What to save
 - [Semantic Search](./semantic-search.md) - Finding guidance
 - [Skills & Hooks](./skills.md) - Automating guide access

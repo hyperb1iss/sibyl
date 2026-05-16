@@ -5,6 +5,7 @@ Hosts both MCP protocol at /mcp and REST API at /api/*.
 
 import contextlib
 import os
+import secrets
 
 # Disable Graphiti telemetry before any imports
 os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
@@ -14,9 +15,12 @@ from typing import TYPE_CHECKING
 
 import structlog
 from starlette.applications import Starlette
-from starlette.routing import Mount
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
+from starlette.routing import Mount, Route
 
 from sibyl.config import settings
+from sibyl_core.observability import telemetry_registry
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -51,6 +55,33 @@ async def _load_runtime_settings_from_db() -> list[str]:
     from sibyl.services.settings import load_runtime_settings_from_db
 
     return await load_runtime_settings_from_db()
+
+
+_METRICS_MEDIA_TYPE = "text/plain; version=0.0.4; charset=utf-8"
+
+
+async def _root_metrics(request: Request) -> PlainTextResponse:
+    if not _root_metrics_authorized(request):
+        return PlainTextResponse("not found\n", status_code=404)
+    return PlainTextResponse(
+        telemetry_registry().prometheus_text(),
+        media_type=_METRICS_MEDIA_TYPE,
+    )
+
+
+def _root_metrics_authorized(request: Request) -> bool:
+    token = settings.metrics_scrape_token.get_secret_value()
+    if token:
+        bearer = request.headers.get("authorization", "")
+        candidate = ""
+        if bearer.lower().startswith("bearer "):
+            candidate = bearer[7:].strip()
+        candidate = request.headers.get("x-sibyl-metrics-token", candidate)
+        return secrets.compare_digest(candidate, token)
+    if settings.environment != "development":
+        return False
+    client = request.client.host if request.client else ""
+    return client in {"127.0.0.1", "::1", "localhost"}
 
 
 def create_combined_app(  # noqa: PLR0915
@@ -269,6 +300,7 @@ def create_combined_app(  # noqa: PLR0915
     # Note: streamable_http_app() already routes to /mcp internally
     return Starlette(
         routes=[
+            Route("/metrics", _root_metrics, methods=["GET"]),
             Mount("/api", app=api_app, name="api"),
             Mount("/", app=mcp_app, name="mcp"),
         ],

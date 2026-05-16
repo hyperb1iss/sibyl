@@ -191,6 +191,24 @@ DEFINE FIELD IF NOT EXISTS updated_at ON system_settings TYPE datetime DEFAULT t
 
 DEFINE INDEX IF NOT EXISTS idx_system_settings_key ON system_settings FIELDS key UNIQUE;
 
+DEFINE TABLE IF NOT EXISTS telemetry_rollups SCHEMAFULL;
+ALTER TABLE IF EXISTS telemetry_rollups SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS uuid ON telemetry_rollups TYPE string;
+DEFINE FIELD IF NOT EXISTS bucket_key ON telemetry_rollups TYPE string;
+DEFINE FIELD IF NOT EXISTS bucket_start ON telemetry_rollups TYPE datetime;
+DEFINE FIELD IF NOT EXISTS window_seconds ON telemetry_rollups TYPE int DEFAULT 900;
+DEFINE FIELD IF NOT EXISTS uptime_seconds ON telemetry_rollups TYPE number DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS summaries ON telemetry_rollups TYPE object FLEXIBLE DEFAULT {{}};
+DEFINE FIELD IF NOT EXISTS trends ON telemetry_rollups TYPE array<object> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS metrics ON telemetry_rollups TYPE array<object> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS recent_events ON telemetry_rollups TYPE array<object> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS created_at ON telemetry_rollups TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS updated_at ON telemetry_rollups TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS idx_telemetry_rollups_uuid ON telemetry_rollups FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_telemetry_rollups_bucket_key ON telemetry_rollups FIELDS bucket_key UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_telemetry_rollups_bucket_start ON telemetry_rollups FIELDS bucket_start;
+
 DEFINE TABLE IF NOT EXISTS backup_settings SCHEMAFULL;
 ALTER TABLE IF EXISTS backup_settings SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON backup_settings TYPE string;

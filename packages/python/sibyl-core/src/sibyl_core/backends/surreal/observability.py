@@ -8,6 +8,7 @@ import time
 
 import structlog
 
+from sibyl_core.observability import telemetry_registry
 from sibyl_core.utils.log_safety import fingerprint_text
 
 log = structlog.get_logger()
@@ -127,6 +128,19 @@ def log_query(
     error: BaseException | None = None,
 ) -> None:
     statement = _primary_statement(query)
+    query_hash = _query_hash(query)
+    slow = error is None and elapsed >= _slow_query_threshold_ms()
+    status = "error" if error is not None else "ok"
+    telemetry_registry().record_surreal_query(
+        client=client_kind,
+        database=database,
+        statement=statement,
+        query_hash=query_hash,
+        elapsed_ms=elapsed,
+        retry_count=retry_count,
+        status=status,
+        slow=slow,
+    )
     fields: dict[str, object] = {
         "client": client_kind,
         "namespace": namespace,
@@ -137,7 +151,7 @@ def log_query(
         "statement": statement,
         "statement_count": _statement_count(query),
         "tables": _query_tables(query),
-        "query_hash": _query_hash(query),
+        "query_hash": query_hash,
     }
     if error is not None:
         log.warning("surreal_query_failed", **_error_log_fields(error), **fields)

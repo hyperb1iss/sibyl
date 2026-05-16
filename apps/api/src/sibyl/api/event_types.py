@@ -28,3 +28,4 @@ class WSEvent(StrEnum):
     GRAPH_UPDATED = "graph_updated"
     ENTITY_PENDING = "entity_pending"
     QUESTION_ANSWERED = "question_answered"
+    SOURCE_IMPORT_UPDATED = "source_import_updated"

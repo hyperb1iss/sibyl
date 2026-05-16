@@ -432,6 +432,7 @@ Blocked tasks should have clear reasons and be actively triaged.
 
 ## Next Steps
 
+- [The Memory Loop](./memory-loop.md) - Tasks as the act phase
 - [Project Organization](./project-organization.md) - Projects and epics
 - [Capturing Knowledge](./capturing-knowledge.md) - Learning capture patterns
 - [Claude Code Integration](./claude-code.md) - Agent task workflows

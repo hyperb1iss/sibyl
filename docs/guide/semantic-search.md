@@ -75,34 +75,34 @@ sibyl search "OAuth" --type task
 sibyl search "database" --type pattern,episode
 ```
 
-### Filtering by Status
+### Scoping the Search Space
 
-For tasks, filter by workflow status:
+The `search` command keeps a small, focused flag set:
+
+| Flag           | Purpose                                  |
+| -------------- | ---------------------------------------- |
+| `--type`       | Filter by entity type (comma-separated)  |
+| `--limit`      | Maximum results (default 10)             |
+| `--all`        | Search across all projects, not just the linked one |
+| `--graph-only` | Search graph memory only                 |
+| `--docs-only`  | Search crawled docs only                 |
+| `--json`       | Structured output                        |
 
 ```bash
-sibyl search "auth" --type task --status todo
-sibyl search "" --type task --status doing  # Empty query = list all
+# Search every project, not just the linked one
+sibyl search "rate limiting" --all
+
+# Graph memory only, no crawled docs
+sibyl search "OAuth callback" --graph-only
 ```
 
-### Filtering by Project
-
-Scope task searches to a project:
-
-```bash
-sibyl search "OAuth" --type task --project proj_abc123
-```
-
-### Other Filters
+`search` takes a required query. To list entities by structured filters such as
+status, project, or assignee, use `sibyl task list` or `sibyl entity list` instead.
 
 ```bash
-# By language
-sibyl search "async patterns" --language python
-
-# By category
-sibyl search "debugging" --category database
-
-# By assignee
-sibyl search "OAuth" --assignee alice
+# Listing, not searching: structured filters live on task/entity list
+sibyl task list --status todo --project proj_abc
+sibyl entity list --type pattern
 ```
 
 ## Search vs Explore
@@ -249,40 +249,44 @@ sibyl search "Python asyncio task cancellation handling"
 sibyl search "async tasks"
 ```
 
-### 3. Combine with Filters
+### 3. Narrow with Type
 
-Use type and project filters to narrow results:
+Use the type filter to focus a search:
 
 ```bash
-# Find patterns about auth in a specific project
-sibyl search "authentication" --type pattern --project proj_auth
+# Find patterns about authentication
+sibyl search "authentication" --type pattern
 ```
 
-### 4. Empty Query for Listing
+### 4. Use the Right Tool for Listing
 
-Use empty query with filters to list entities:
+`search` always takes a query. To enumerate entities by structured filters, use
+`task list` or `entity list`:
 
 ```bash
 # List all patterns
-sibyl search "" --type pattern
+sibyl entity list --type pattern
 
-# List all todo tasks in project
-sibyl search "" --type task --status todo --project proj_abc
+# List todo tasks in a project
+sibyl task list --status todo --project proj_abc
 ```
 
 ## Document Search
 
-Sibyl can also search crawled documentation:
+Sibyl can also search crawled documentation. By default a search covers both graph
+memory and crawled docs; narrow it with `--docs-only` or `--graph-only`:
 
 ```bash
-# Search documentation
-sibyl search "Next.js middleware" --source-name "next-docs"
+# Docs only
+sibyl search "Next.js middleware" --docs-only
 
-# Include documents in search
-sibyl search "routing" --include-documents
+# Graph memory only
+sibyl search "OAuth callback" --graph-only
 ```
 
-Document search uses the same hybrid approach over Surreal-backed document chunks.
+Document search uses the same hybrid approach over Surreal-backed document chunks. The
+MCP `search` tool exposes finer filters such as `source_name` for narrowing to a
+single crawled source.
 
 ## Understanding Results
 

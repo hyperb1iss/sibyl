@@ -53,11 +53,14 @@ from sibyl.api.routes import (
     setup_router,
     synthesis_router,
     tasks_router,
+    telemetry_router,
     users_router,
 )
 from sibyl.api.websocket import websocket_handler
 from sibyl.auth.middleware import AuthMiddleware
 from sibyl.config import settings
+from sibyl.services.telemetry import schedule_runtime_rollup_persist
+from sibyl_core.observability import telemetry_registry
 
 log = structlog.get_logger()
 
@@ -82,6 +85,13 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
             duration_ms=round(duration_ms, 2),
             client=request.client.host if request.client else None,
         )
+        telemetry_registry().record_api_request(
+            method=request.method,
+            route=_route_label(request),
+            status_code=response.status_code,
+            duration_ms=duration_ms,
+        )
+        schedule_runtime_rollup_persist()
         return response
 
 
@@ -117,6 +127,14 @@ def _install_llm_config_source() -> None:
     from sibyl.ai.llm.service import install_db_config_source
 
     install_db_config_source()
+
+
+def _route_label(request: Request) -> str:
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", None)
+    if isinstance(route_path, str) and route_path:
+        return route_path
+    return "/unmatched"
 
 
 @asynccontextmanager
@@ -381,6 +399,7 @@ def create_api_app() -> FastAPI:
     app.include_router(metrics_router)
     app.include_router(settings_router)
     app.include_router(synthesis_router)
+    app.include_router(telemetry_router)
     app.include_router(setup_router)
     app.include_router(users_router)
 

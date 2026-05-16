@@ -15,7 +15,7 @@ This guide covers the two main ways to run Sibyl:
 Sibyl requires the following:
 
 - **Python 3.13+** - Core backend language
-- **Node.js 22+** - For the web frontend
+- **Node.js 24** - For the web frontend
 - **Docker** - For local SurrealDB and optional dev services
 - **OpenAI API Key** - For generating embeddings
 
@@ -136,8 +136,9 @@ SIBYL_ANTHROPIC_API_KEY=...        # For LLM operations
 | `SIBYL_SURREAL_URL`          | -                        | SurrealDB server URL                        |
 | `SIBYL_LOG_LEVEL`            | `INFO`                   | Logging level                               |
 | `SIBYL_EMBEDDING_MODEL`      | `text-embedding-3-small` | OpenAI embedding model                      |
-| `SIBYL_SERVER_URL`           | -                        | Public server URL (for OAuth callbacks)     |
-| `SIBYL_FRONTEND_URL`         | -                        | Frontend URL (for redirects)                |
+| `SIBYL_PUBLIC_URL`           | `http://localhost:3337`  | Public base URL (OAuth callbacks, redirects)|
+| `SIBYL_SERVER_URL`           | derived                  | Override API base URL (defaults to public)  |
+| `SIBYL_FRONTEND_URL`         | derived                  | Override frontend URL (defaults to public)  |
 | `SIBYL_REDIS_HOST`           | `127.0.0.1`              | Redis/Valkey host when `coordination=redis` |
 | `SIBYL_POSTGRES_HOST`        | `localhost`              | Migration-only PostgreSQL host              |
 

@@ -4,6 +4,7 @@ from typing import Any
 
 from sibyl_core.backends.surreal import observability
 from sibyl_core.backends.surreal.driver import SurrealQueryError
+from sibyl_core.observability import telemetry_registry
 
 
 class FakeLog:
@@ -206,3 +207,30 @@ def test_failed_query_log_classifies_safe_surreal_errors(monkeypatch) -> None:
     assert fields["error_category"] == "parse_error"
     assert len(fields["error_hash"]) == 12
     assert "FLEXIBLE must be specified" not in str(fields)
+
+
+def test_log_query_records_runtime_telemetry(monkeypatch) -> None:
+    fake_log = FakeLog()
+    registry = telemetry_registry()
+    registry.reset()
+    monkeypatch.setattr(observability, "log", fake_log)
+    monkeypatch.setattr(observability, "_slow_query_threshold_ms", lambda: 500.0)
+
+    observability.log_query(
+        "SELECT * FROM raw_captures WHERE title = 'secret';",
+        client_kind="content",
+        namespace="sibyl_content",
+        database="content",
+        raw=False,
+        elapsed=750.0,
+        retry_count=2,
+    )
+
+    snapshot = registry.snapshot()
+
+    assert snapshot["summaries"]["surreal"]["count"] == 1
+    assert snapshot["summaries"]["surreal"]["slow"] == 1
+    assert "secret" not in str(snapshot)
+    assert any(
+        metric["name"] == "sibyl_surreal_query_retries_total" for metric in snapshot["metrics"]
+    )

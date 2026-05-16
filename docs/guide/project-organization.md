@@ -37,7 +37,7 @@ sibyl project create --name "Auth System" --description "Authentication and auth
 sibyl project create \
   --name "E-commerce API" \
   --description "Backend services for e-commerce platform" \
-  --repository-url "https://github.com/org/ecommerce-api"
+  --repo "https://github.com/org/ecommerce-api"
 ```
 
 ### Project Status
@@ -82,11 +82,11 @@ An epic groups related tasks within a project - a feature initiative or major de
 ### Creating Epics
 
 ```bash
-sibyl epic create --name "OAuth Integration" --project proj_abc
+sibyl epic create --title "OAuth Integration" --project proj_abc
 
 # With details
 sibyl epic create \
-  --name "OAuth Integration" \
+  --title "OAuth Integration" \
   --description "Add OAuth2 login with Google and GitHub" \
   --project proj_abc \
   --priority high
@@ -143,12 +143,12 @@ sibyl project link proj_abc123
 ### Checking Current Context
 
 ```bash
-sibyl context
+# Show every directory-to-project link
+sibyl project links
 
-# Shows:
-# - Linked project
-# - Current directory
-# - Active filters
+# Lists each linked directory and its project:
+# /home/user/auth-system    -> proj_abc123
+# /home/user/api            -> proj_xyz789
 ```
 
 ### Unlinking
@@ -157,15 +157,7 @@ sibyl context
 sibyl project unlink
 ```
 
-### Viewing All Links
-
-```bash
-sibyl project links
-
-# Example output:
-# /home/user/auth-system    -> proj_abc123
-# /home/user/api            -> proj_xyz789
-```
+To repair a stale link after a directory moves, use `sibyl project relink`.
 
 ### Context Priority
 
@@ -247,7 +239,7 @@ Use epics for sprint planning:
 
 ```bash
 # 1. Create epic for feature
-sibyl epic create --name "Q1 Auth Improvements" --project proj_abc
+sibyl epic create --title "Q1 Auth Improvements" --project proj_abc
 
 # 2. Add tasks to epic
 sibyl task create --title "..." --project proj_abc --epic epic_q1auth
@@ -359,7 +351,7 @@ sibyl task list --epic epic_oauth
 Match projects to repositories for clear ownership:
 
 ```bash
-sibyl project create --name "Auth API" --repository-url "https://github.com/org/auth-api"
+sibyl project create --name "Auth API" --repo "https://github.com/org/auth-api"
 ```
 
 ### 2. Meaningful Epic Names
@@ -368,11 +360,11 @@ Name epics after deliverables, not sprints:
 
 ```bash
 # GOOD
-sibyl epic create --name "OAuth Integration"
-sibyl epic create --name "Admin Dashboard"
+sibyl epic create --title "OAuth Integration"
+sibyl epic create --title "Admin Dashboard"
 
 # LESS GOOD
-sibyl epic create --name "Sprint 5"
+sibyl epic create --title "Sprint 5"
 ```
 
 ### 3. Link Your Directories
@@ -402,12 +394,14 @@ sibyl task list --no-epic
 Keep the active task list clean:
 
 ```bash
-# Archive completed projects
-sibyl project update proj_old --status archived
-
-# Or archive individual tasks
+# Archive individual tasks
 sibyl task archive task_old --reason "Completed: deployed to production"
+
+# Archive a finished epic
+sibyl epic archive epic_old
 ```
+
+Project status is managed through the web UI or the REST API.
 
 ## Configuration File
 

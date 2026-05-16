@@ -49,7 +49,7 @@ backend:
   replicaCount: 1
 
   image:
-    repository: ghcr.io/hyperb1iss/sibyl
+    repository: ghcr.io/hyperb1iss/sibyl-api
     pullPolicy: IfNotPresent
     # Defaults to chart appVersion if empty
     tag: ""
@@ -167,6 +167,11 @@ backend:
     SIBYL_LLM_MODEL: "claude-haiku-4-5"
     SIBYL_EMBEDDING_MODEL: "text-embedding-3-small"
     SIBYL_EMBEDDING_DIMENSIONS: "1536"
+    # BLAS/OpenMP thread caps keep native math libraries from oversubscribing pods
+    OPENBLAS_NUM_THREADS: "1"
+    OMP_NUM_THREADS: "1"
+    MKL_NUM_THREADS: "1"
+    NUMEXPR_NUM_THREADS: "1"
 ```
 
 ### Secrets
@@ -194,11 +199,16 @@ See [storage-modes.md](../guide/storage-modes.md) for the mode matrix.
 ```yaml
 backend:
   surreal:
+    # ws:// or http:// URL to an external SurrealDB instance
     url: "ws://surrealdb:8000/rpc"
     username: "root"
-    # Reference to secret containing password (auto-generated if empty)
+    # Reference to a secret containing the password.
+    # When empty, a password is auto-generated and stored in `<release>-surreal`.
     existingSecret: ""
+    # Secret key holding the password (only used when existingSecret is set)
     secretKey: "password"
+    # Inline password (ignored when existingSecret is set; auto-generated otherwise)
+    password: ""
     namespacePrefix: "org_"
     database: "graph"
 ```
@@ -215,8 +225,14 @@ backend:
     port: "6379"
     jobsDb: "1"
     rateLimitDb: "4"
-    existingSecret: "sibyl-secrets"
-    secretKey: "SIBYL_REDIS_PASSWORD"
+    # Reference to a secret containing the Redis/Valkey password
+    existingSecret: ""
+    secretKey: "password"
+    # Inline password (not recommended; prefer existingSecret)
+    password: ""
+    # Shared rate-limit storage URL.
+    # Leave empty to derive a redis:// URL from host/port/rateLimitDb.
+    rateLimitStorage: ""
 ```
 
 The chart emits a password-free `SIBYL_RATE_LIMIT_STORAGE` ConfigMap value and Sibyl injects the
@@ -440,8 +456,8 @@ coordinationBackend: "auto"
 backend:
   replicaCount: 3
   image:
-    repository: ghcr.io/hyperb1iss/sibyl
-    tag: "0.1.0"
+    repository: ghcr.io/hyperb1iss/sibyl-api
+    tag: "0.9.0"
     pullPolicy: Always
   existingSecret: sibyl-secrets
   surreal:

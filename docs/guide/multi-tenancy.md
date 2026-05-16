@@ -57,12 +57,17 @@ sibyl org list
 ### Switching Organizations
 
 ```bash
-# Set active organization
-sibyl org switch org_abc123
+# Set the active organization by slug
+sibyl org switch my-org
 
-# Check current organization
-sibyl org current
+# Create a new organization
+sibyl org create
+
+# Manage organization members
+sibyl org members
 ```
+
+`sibyl org list` shows the orgs you belong to and which one is active.
 
 ## Authentication and Authorization
 
@@ -184,23 +189,26 @@ Key route files handling organization context:
 
 ## CLI Organization Support
 
-### Switching Context
+### Switching Organization
 
 ```bash
-# Switch active organization
-sibyl org switch org_abc123
+# Switch the active organization by slug
+sibyl org switch my-org
 
-# Commands now use this org context
-sibyl task list  # Lists tasks in org_abc123
+# Commands now run in that org context
+sibyl task list  # Lists tasks in my-org
 ```
 
-### Per-Command Override
+### Per-Command Project Override
+
+The `--context` flag and `SIBYL_CONTEXT` override the active **project** for a single
+command, not the organization. Switch organizations with `sibyl org switch`.
 
 ```bash
-# Override context for single command
-sibyl --context org_xyz task list
+# Override project context for a single command
+sibyl --context proj_xyz task list
 # Or
-SIBYL_CONTEXT=org_xyz sibyl task list
+SIBYL_CONTEXT=proj_xyz sibyl task list
 ```
 
 ## Auth Schema

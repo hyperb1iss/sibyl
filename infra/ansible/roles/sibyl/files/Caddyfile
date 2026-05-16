@@ -1,0 +1,20 @@
+# Sibyl reverse proxy. TLS via Let's Encrypt over the Cloudflare
+# DNS-01 challenge, so the host needs no public inbound 80/443.
+
+{
+	acme_dns cloudflare {env.CF_API_TOKEN}
+}
+
+{$SIBYL_DOMAIN} {
+	handle /api/* {
+		reverse_proxy backend:3334
+	}
+
+	handle /mcp* {
+		reverse_proxy backend:3334
+	}
+
+	handle {
+		reverse_proxy frontend:3337
+	}
+}

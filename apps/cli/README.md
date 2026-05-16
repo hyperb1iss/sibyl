@@ -1,7 +1,8 @@
 # Sibyl CLI
 
-Command-line interface for Sibyl. REST API client with Rich terminal output, designed for humans,
-external assistants, and scripts.
+Command-line interface for Sibyl. A REST API client with Rich terminal output,
+designed for humans, external assistants, and scripts. The package is published as
+`sibyl-dev`; the executable is `sibyl`.
 
 ## Quick Reference
 
@@ -17,51 +18,87 @@ sibyl auth login
 sibyl project link <project_id>
 ```
 
-## Core Commands
+## The Memory Loop
 
 ```bash
-sibyl search "query"                    # Semantic search
-sibyl recall "goal"                     # Agent-ready context before work
-sibyl add "title" "content"             # Add knowledge
-sibyl capture "content"                 # Quick capture from the CLI
-sibyl remember "title" "content" --kind decision # Agent memory capture
-sibyl reflect "raw notes" --persist --review # Store source/candidates for promotion review
-sibyl session bundle                    # Wake up with active context
-sibyl task list --status todo,doing     # List tasks
-sibyl task start <id>                   # Start task
-sibyl task complete <id> --learnings "..." # Complete with learnings
+sibyl recall "goal"                          # Agent-ready context before work
+sibyl remember "title" "content" --kind decision  # Capture durable memory
+sibyl reflect "raw notes" --persist          # Distill notes into candidates
+sibyl capture "content"                      # Fast verbatim capture
+sibyl search "query"                         # Semantic search
+sibyl session bundle                         # Wake up with active context
+```
+
+## Task Workflow
+
+```bash
+sibyl task list --status todo,doing          # List tasks
+sibyl task start <id>                        # Start a task
+sibyl task complete <id> --learnings "..."   # Complete with learnings
 ```
 
 ## All Commands
 
-| Command    | Purpose                                                                                             |
-| ---------- | --------------------------------------------------------------------------------------------------- |
-| `health`   | Check API connectivity and health                                                                   |
-| `search`   | Semantic search                                                                                     |
-| `recall`   | Agent-ready Markdown or JSON context before work                                                    |
-| `add`      | Add knowledge                                                                                       |
-| `capture`  | Quick capture from CLI arguments or stdin                                                           |
-| `remember` | Capture decisions, plans, ideas, claims, artifacts, and session memory                              |
-| `reflect`  | Extract reviewable candidates from raw notes, optionally preserving the raw session source          |
-| `stats`    | Show knowledge graph statistics                                                                     |
-| `version`  | Show CLI version information                                                                        |
-| `task`     | Task lifecycle (list, show, create, start, block, unblock, review, complete, archive, update, note) |
-| `epic`     | Epic management (list, start, complete, roadmap)                                                    |
-| `project`  | Project management (list, link, create)                                                             |
-| `archive`  | Browse archived raw captures                                                                        |
-| `session`  | Package wake-up context for a session or agent                                                      |
-| `entity`   | Entity CRUD                                                                                         |
-| `explore`  | Graph navigation (related, traverse, dependencies, path)                                            |
-| `crawl`    | Documentation sources, crawling, and graph linking                                                  |
-| `debug`    | Debug tools for development                                                                         |
-| `dev`      | Devcontainer shell and lifecycle commands                                                           |
-| `auth`     | Login, logout, API keys                                                                             |
-| `org`      | Organization switching, member management                                                           |
-| `config`   | Configuration                                                                                       |
-| `context`  | Multi-server context management                                                                     |
-| `local`    | Manage a local Docker-based Sibyl instance                                                          |
-| `logs`     | Tail server logs                                                                                    |
-| `update`   | Update Sibyl components                                                                             |
+### Memory loop
+
+| Command    | Purpose                                                                |
+| ---------- | ---------------------------------------------------------------------- |
+| `recall`   | Compile an agent-ready Markdown or JSON context pack before work       |
+| `remember` | Capture decisions, plans, ideas, claims, artifacts, and session memory |
+| `reflect`  | Distill raw notes into reviewable memory candidates                    |
+| `search`   | Semantic search across graph memory and crawled docs                   |
+| `add`      | Add structured knowledge                                               |
+| `capture`  | Fast verbatim capture from arguments or stdin                          |
+| `note`     | Add a task note or capture a free note memory                          |
+| `session`  | Package wake-up context for a session or agent                         |
+
+### Work tracking
+
+| Command   | Purpose                                                                        |
+| --------- | ------------------------------------------------------------------------------ |
+| `task`    | Task lifecycle (list, show, create, start, block, unblock, review, complete, archive, update, note, notes) |
+| `epic`    | Epic management (list, show, create, start, complete, archive, update, roadmap, tasks) |
+| `project` | Projects and directory linking (list, show, create, progress, link, relink, unlink, links) |
+| `entity`  | Generic entity CRUD and bi-temporal history                                    |
+| `explore` | Graph navigation (related, traverse, dependencies, path)                        |
+| `stats`   | Knowledge graph statistics                                                      |
+
+### Sources & synthesis
+
+| Command     | Purpose                                                            |
+| ----------- | ------------------------------------------------------------------ |
+| `crawl`     | Documentation sources, crawling, document browsing, graph linking  |
+| `synthesis` | Source-grounded synthesis (plan, draft, verify, remember)          |
+| `archive`   | Browse archived raw quick captures                                 |
+
+### Memory governance
+
+| Command          | Purpose                                                       |
+| ---------------- | ------------------------------------------------------------- |
+| `memory-audit`   | Inspect memory audit receipts                                 |
+| `memory-inspect` | Inspect a memory source and its audit trail                   |
+| `memory-promote` | Preview or auto-review reflection candidate promotion         |
+| `memory-share`   | Preview memory sharing before enabling share writes           |
+| `memory-space`   | Memory-space inspection and agent-recall preview              |
+| `memory-review`  | Reflection review queue automation (drain, dream, status)     |
+
+### System
+
+| Command          | Purpose                                                  |
+| ---------------- | -------------------------------------------------------- |
+| `health`         | Check API connectivity and health                       |
+| `auth`           | Login, logout, tokens, API keys                          |
+| `org`            | Organization switching and member management            |
+| `context`        | Multi-server context bundles                             |
+| `config`         | CLI configuration                                        |
+| `local`          | Manage a local Docker-based Sibyl instance               |
+| `pending-writes` | Inspect and replay locally buffered writes               |
+| `logs`           | Tail server logs (requires OWNER role)                   |
+| `debug`          | Debug tools for development (requires OWNER role)        |
+| `dev`            | Devcontainer shell and lifecycle commands                |
+| `skill`          | Print or install the canonical Sibyl skill               |
+| `update`         | Update Sibyl components                                  |
+| `version`        | Show CLI version information                             |
 
 ## Output Formats
 
@@ -80,44 +117,39 @@ sibyl crawl ingest <source_id>
 sibyl crawl documents list --source <source_id>
 ```
 
-`--include` is the preferred spelling for crawl filters. `--pattern` still works for backward
-compatibility.
+`--include` is the preferred spelling for crawl filters. `--pattern` still works for
+backward compatibility.
 
-## Capture And Archive
+## Capturing Memory
 
 ```bash
 sibyl recall "ship the SurrealDB-native memory path" --intent build
 sibyl capture "Redis TTL mismatch caused the stale auth token bug"
-sibyl remember "Token TTL decision" "Keep refresh token TTL longer than access token TTL." --kind decision --domain auth
-sibyl remember "Worker routing decision" "Verifier agents run after non-trivial patches." --kind decision --task task_abc
+sibyl remember "Token TTL decision" \
+  "Keep refresh token TTL longer than access token TTL." --kind decision --domain auth
+sibyl remember "Worker routing decision" \
+  "Verifier agents run after non-trivial patches." --kind decision --task task_abc
 echo "Raw planning notes..." | sibyl reflect --title "Planning session" --persist --review --task task_abc
-sibyl archive list --surface cli
+sibyl archive list
 sibyl archive show <capture_id>
 ```
 
-In a linked project, `sibyl remember` also links to the single active `doing` task when exactly one
-exists. Use `--task` for explicit links or `--no-active-task` to capture project memory without a
-task edge. Persisted `sibyl reflect` output follows the same task-linking rules for its raw session
-source and extracted candidates.
+In a linked project, `sibyl remember` also links to the single active `doing` task
+when exactly one exists. Use `--task` for explicit links or `--no-active-task` to
+capture project memory without a task edge. Persisted `sibyl reflect` output follows
+the same task-linking rules for its raw session source and extracted candidates.
 
-`sibyl reflect` accepts either an argument or stdin. With `--persist --review`, Sibyl stores the raw
-notes and extracted candidates in the review queue with source IDs, confidence, extraction metadata,
-and suggested memory scope. Without `--review`, persisted reflection follows the server's active
-write mode. Add `--no-source` when the raw transcript is too noisy or sensitive, but the extracted
-candidates should still be saved.
-
-Persisted reflect output prints the source ID when one is stored, the candidate count, and each
-persisted candidate or review-capture ID:
-
-```bash
-cat session-notes.md | sibyl reflect --title "Build checkpoint" --intent build --persist --review
-cat session-notes.md | sibyl reflect --title "Private checkpoint" --persist --no-source
-```
+`sibyl reflect` accepts either an argument or stdin. With `--persist --review`, Sibyl
+stores the raw notes and extracted candidates in the review queue with source IDs,
+confidence, extraction metadata, and suggested memory scope. Without `--review`,
+persisted reflection follows the server's active write mode. Add `--no-source` when the
+raw transcript is too noisy or sensitive but the extracted candidates should still be
+saved.
 
 ## Context System
 
 ```bash
-# Override for single command
+# Override for a single command
 sibyl --context myproject task list
 SIBYL_CONTEXT=myproject sibyl task list
 
@@ -136,9 +168,9 @@ moon run cli:test         # Tests
 
 Terminal output uses the SilkCircuit palette:
 
-- `#e135ff` Electric Purple: Headers
-- `#80ffea` Neon Cyan: Interactions
-- `#ff6ac1` Coral: Data/IDs
+- `#e135ff` Electric Purple: headers
+- `#80ffea` Neon Cyan: interactions
+- `#ff6ac1` Coral: data and IDs
 - `#50fa7b` Success Green
 - `#ff6363` Error Red
 

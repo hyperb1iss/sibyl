@@ -1,28 +1,30 @@
 # MCP Tool: manage
 
-Lifecycle operations and administration for Sibyl entities. Handles task workflow, epic management,
-source operations, and analysis actions.
+State-changing operations for Sibyl entities. Handles task workflow, epic management, source
+operations, analysis, and admin actions through a single action-dispatched tool.
 
 ## Overview
 
 The `manage` tool handles state-changing operations organized by category:
 
-| Category          | Actions                                                                   |
-| ----------------- | ------------------------------------------------------------------------- |
-| Task Workflow     | start, block, unblock, submit_review, complete, archive, update, add_note |
-| Epic Workflow     | start, complete, archive, update                                          |
-| Source Operations | crawl, sync, refresh, link_graph                                          |
-| Analysis          | estimate, prioritize, detect_cycles, suggest                              |
+| Category          | Actions                                                                                   |
+| ----------------- | ----------------------------------------------------------------------------------------- |
+| Task Workflow     | `start_task`, `block_task`, `unblock_task`, `submit_review`, `complete_task`, `archive_task`, `update_task`, `add_note` |
+| Epic Workflow     | `start_epic`, `complete_epic`, `archive_epic`, `update_epic`                              |
+| Source Operations | `crawl`, `sync`, `refresh`, `link_graph`, `link_graph_status`                             |
+| Analysis          | `estimate`, `prioritize`, `detect_cycles`, `suggest`                                      |
+| Admin             | `health`, `stats`, `rebuild_index`                                                        |
 
-> **Note:** Task and epic workflow actions are deprecated in favor of REST endpoints
-> (`/api/tasks/{id}/*`). Source and analysis actions should still use this tool.
+For web applications, the REST task endpoints (`/api/tasks/{id}/*`) offer the same task workflow
+with finer-grained routes and authorization. The `manage` tool is the agent-facing equivalent and
+remains the only interface for source, analysis, and admin actions.
 
 ## Input Schema
 
 ```typescript
 interface ManageInput {
   action: string; // Action to perform
-  entity_id?: string; // Target entity ID
+  entity_id?: string; // Target entity ID (required for most actions)
   data?: Record<string, any>; // Action-specific data
 }
 ```
@@ -559,6 +561,43 @@ Suggest relevant knowledge for a task.
 }
 ```
 
+## Admin Actions
+
+### health
+
+Server health check.
+
+```json
+{
+  "name": "manage",
+  "arguments": { "action": "health" }
+}
+```
+
+### stats
+
+Knowledge graph statistics.
+
+```json
+{
+  "name": "manage",
+  "arguments": { "action": "stats" }
+}
+```
+
+### rebuild_index
+
+Rebuild search indices.
+
+```json
+{
+  "name": "manage",
+  "arguments": { "action": "rebuild_index" }
+}
+```
+
+The `sibyl://health` and `sibyl://stats` MCP resources expose the same data without an action call.
+
 ## Response Schema
 
 ```typescript
@@ -569,6 +608,7 @@ interface ManageResponse {
   message: string;
   data: Record<string, any>;
   timestamp: string;
+  policy_reason?: string; // Memory policy decision for project-scoped actions
 }
 ```
 
@@ -621,6 +661,7 @@ learning to the completed task.
 
 ## Related
 
-- [rest-tasks.md](./rest-tasks.md) - REST task endpoints (preferred for web apps)
+- [rest-tasks.md](./rest-tasks.md) - REST task endpoints (finer-grained for web apps)
 - [mcp-add.md](./mcp-add.md) - Create entities
 - [mcp-explore.md](./mcp-explore.md) - Navigate graph
+- [mcp-logs.md](./mcp-logs.md) - Server logs for debugging

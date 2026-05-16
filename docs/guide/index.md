@@ -12,12 +12,13 @@ hard-won debugging lessons into reusable project memory.
 
 This guide teaches you how to:
 
-1. **Set up your prompts**: Configure CLAUDE.md for effective workflows
-2. **Use skills and hooks**: Automatic context injection
-3. **Build a knowledge repository**: Centralize team patterns
-4. **Manage knowledge**: Through the web UI and CLI
-5. **Track execution**: Projects, epics, and tasks across sessions
-6. **Capture durable learnings**: Turn debugging into reusable memory
+1. **Run the memory loop**: Recall, act, remember, and reflect
+2. **Set up your prompts**: Configure CLAUDE.md for effective workflows
+3. **Use skills and hooks**: Automatic context injection
+4. **Build a knowledge repository**: Centralize team patterns
+5. **Manage knowledge**: Through the web UI and CLI
+6. **Track execution**: Projects, epics, and tasks across sessions
+7. **Synthesize artifacts**: Draft verified documents from your own memory
 
 ## The Philosophy
 
@@ -29,10 +30,11 @@ isn't structured or searchable.
 
 Sibyl fixes this by providing:
 
-- **Persistent Memory**: Knowledge stored in a graph database survives forever
+- **Persistent Memory**: Knowledge stored in a SurrealDB-native graph survives forever
+- **The Memory Loop**: Recall context, act, remember what you learn, reflect on it
 - **Semantic Search**: Find relevant patterns by meaning, not keywords
 - **Automatic Context**: Hooks inject knowledge without manual prompting
-- **Structured Workflows**: Skills teach the Research → Do → Reflect cycle
+- **Source-Grounded Synthesis**: Draft verified documents from your own memory
 
 ## The Architecture
 
@@ -81,22 +83,23 @@ filter to find what you need.
 
 **Semantic Search**: Find knowledge by meaning across all entity types, documentation, and code.
 
-## The Workflow
+## The Memory Loop
 
-Every effective Sibyl workflow follows the same cycle:
+Every effective Sibyl workflow follows the same cycle: **recall, act, remember,
+reflect.** Learn it once and the rest of Sibyl falls into place.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  RESEARCH                                               │
-│  Before implementing anything, search for existing      │
-│  patterns. Your past self (or teammates) may have       │
-│  already solved this problem.                           │
+│  RECALL                                                 │
+│  Before implementing anything, pull working context.    │
+│  Your past self (or teammates) may have already         │
+│  solved this problem.                                   │
 │                                                         │
-│  sibyl search "what you're about to implement"          │
+│  sibyl recall "what you're about to implement"          │
 └─────────────────────────┬───────────────────────────────┘
                           ▼
 ┌─────────────────────────────────────────────────────────┐
-│  DO                                                     │
+│  ACT                                                    │
 │  Work on your task with the context you found.          │
 │  Track progress with task lifecycle commands.           │
 │                                                         │
@@ -104,14 +107,17 @@ Every effective Sibyl workflow follows the same cycle:
 └─────────────────────────┬───────────────────────────────┘
                           ▼
 ┌─────────────────────────────────────────────────────────┐
-│  REFLECT                                                │
-│  When you finish, capture what you learned.             │
-│  Future sessions will thank you.                        │
+│  REMEMBER + REFLECT                                     │
+│  Capture what you learned, then distill session notes   │
+│  into durable memory. Future sessions will thank you.   │
 │                                                         │
 │  sibyl task complete task_xyz --learnings "..."         │
-│  sibyl add "Pattern Title" "What you discovered..."     │
+│  sibyl remember "Pattern Title" "What you discovered"   │
 └─────────────────────────────────────────────────────────┘
 ```
+
+The loop runs on the CLI, through MCP tools, and from hooks. See
+[The Memory Loop](./memory-loop) for the full cycle.
 
 ## What to Capture
 
@@ -185,6 +191,7 @@ tool calls.
 
 ### Core Concepts
 
-6. **[Knowledge Graph](./knowledge-graph)**: Understand the data model
-7. **[Task Management](./task-management)**: Track work across sessions
-8. **[Sources](./capturing-knowledge)**: Ingest external documentation
+6. **[The Memory Loop](./memory-loop)**: Recall, act, remember, reflect
+7. **[Knowledge Graph](./knowledge-graph)**: Understand the data model
+8. **[Task Management](./task-management)**: Track work across sessions
+9. **[Synthesis](./synthesis)**: Draft verified documents from your memory

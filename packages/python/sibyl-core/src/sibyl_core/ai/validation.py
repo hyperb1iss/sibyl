@@ -12,6 +12,7 @@ from pydantic_ai.exceptions import ModelHTTPError
 from sibyl_core.ai.errors import classify_llm_exception
 from sibyl_core.ai.llm.config import LLMConfig, LLMConfigSource, LLMProviderName, LLMSurface
 from sibyl_core.ai.providers import build_model, resolve_provider_model_id
+from sibyl_core.observability import telemetry_registry
 
 ValidationStatus = Literal[
     "valid",
@@ -80,6 +81,15 @@ async def check_provider_key(provider: LLMProviderName, key: str) -> KeyValidati
             )
         )
         latency_ms = _elapsed_ms(started_at)
+        telemetry_registry().record_llm_call(
+            surface="provider_key_validation",
+            provider=provider,
+            model=model,
+            status="valid",
+            duration_ms=latency_ms,
+            input_tokens=_input_tokens(result),
+            output_tokens=_output_tokens(result),
+        )
         return KeyValidationResult(
             provider=provider,
             model=model,
@@ -90,12 +100,20 @@ async def check_provider_key(provider: LLMProviderName, key: str) -> KeyValidati
             output_tokens=_output_tokens(result),
         )
     except Exception as exc:
+        latency_ms = _elapsed_ms(started_at)
+        telemetry_registry().record_llm_call(
+            surface="provider_key_validation",
+            provider=provider,
+            model=model,
+            status=_status_for_exception(exc),
+            duration_ms=latency_ms,
+        )
         return KeyValidationResult(
             provider=provider,
             model=model,
             status=_status_for_exception(exc),
             valid=False,
-            latency_ms=_elapsed_ms(started_at),
+            latency_ms=latency_ms,
             error=str(exc),
         )
 
@@ -116,6 +134,15 @@ async def check_model_availability(
     try:
         result = await _run_text_probe(config)
         latency_ms = _elapsed_ms(started_at)
+        telemetry_registry().record_llm_call(
+            surface="model_availability_validation",
+            provider=provider,
+            model=provider_model_id,
+            status="valid",
+            duration_ms=latency_ms,
+            input_tokens=_input_tokens(result),
+            output_tokens=_output_tokens(result),
+        )
         return ModelValidationResult(
             provider=provider,
             requested_model=provider_model_id,
@@ -127,12 +154,20 @@ async def check_model_availability(
             output_tokens=_output_tokens(result),
         )
     except Exception as exc:
+        latency_ms = _elapsed_ms(started_at)
+        telemetry_registry().record_llm_call(
+            surface="model_availability_validation",
+            provider=provider,
+            model=provider_model_id,
+            status=_status_for_exception(exc),
+            duration_ms=latency_ms,
+        )
         return ModelValidationResult(
             provider=provider,
             requested_model=provider_model_id,
             status=_status_for_exception(exc),
             valid=False,
-            latency_ms=_elapsed_ms(started_at),
+            latency_ms=latency_ms,
             error=str(exc),
         )
 
@@ -150,6 +185,15 @@ async def test_surface_config(
             "Return ok=true and a short summary confirming this Sibyl LLM surface is ready."
         )
         latency_ms = _elapsed_ms(started_at)
+        telemetry_registry().record_llm_call(
+            surface=surface.value,
+            provider=config.provider,
+            model=resolve_provider_model_id(config),
+            status="valid",
+            duration_ms=latency_ms,
+            input_tokens=_input_tokens(result),
+            output_tokens=_output_tokens(result),
+        )
         return SurfaceTestResult(
             surface=surface,
             provider=config.provider,
@@ -162,13 +206,21 @@ async def test_surface_config(
             output_tokens=_output_tokens(result),
         )
     except Exception as exc:
+        latency_ms = _elapsed_ms(started_at)
+        telemetry_registry().record_llm_call(
+            surface=surface.value,
+            provider=config.provider,
+            model=config.model,
+            status=_status_for_exception(exc),
+            duration_ms=latency_ms,
+        )
         return SurfaceTestResult(
             surface=surface,
             provider=config.provider,
             model=config.model,
             status=_status_for_exception(exc),
             valid=False,
-            latency_ms=_elapsed_ms(started_at),
+            latency_ms=latency_ms,
             error=str(exc),
         )
 

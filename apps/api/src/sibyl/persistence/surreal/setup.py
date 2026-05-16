@@ -114,7 +114,7 @@ async def require_setup_mode_or_auth(request: Request) -> None:
 
 
 async def require_setup_mode_or_admin(request: Request) -> AuthUser | None:
-    """Allow setup mode access, otherwise require an authenticated org owner/admin."""
+    """Allow setup mode access, otherwise require an authenticated global admin."""
     if await is_setup_mode():
         return None
 
@@ -130,10 +130,10 @@ async def require_setup_mode_or_admin(request: Request) -> AuthUser | None:
         ) from exc
 
     ctx = await build_auth_context(request, None)
-    if ctx.organization is None or ctx.org_role not in _ADMIN_ROLES:
+    if ctx.user.is_admin is not True:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin or owner role required",
+            detail="Global admin required",
         )
     return ctx.user
 

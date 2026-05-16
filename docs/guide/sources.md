@@ -143,15 +143,18 @@ Each document chunk includes:
 Documents are automatically included in search results:
 
 ```bash
-# Search across everything
+# Search across everything (graph memory + crawled docs)
 sibyl search "useState dependency array"
 
-# Search only documents (not knowledge graph)
-sibyl search "useState" --type document
+# Search only crawled docs, not graph memory
+sibyl search "useState" --docs-only
 
-# Search specific source
-sibyl search "hooks" --source "React Docs"
+# Search only graph memory, skip crawled docs
+sibyl search "useState" --graph-only
 ```
+
+To narrow a search to one crawled source by name, use the MCP `search` tool's
+`source_name` filter.
 
 ### Search Result Types
 
@@ -240,6 +243,26 @@ chunks. For example:
 ```bash
 sibyl crawl link-status
 ```
+
+## Source Import
+
+Crawling pulls documentation from the web. **Source import** is the other ingestion
+path: it brings structured external records into raw memory through an adapter.
+
+The first shipped adapter is the **mailbox adapter**, which ingests an mbox archive.
+Each message becomes a source record with its headers, body, and attachments captured
+and privacy-classified. Other adapters follow the same contract.
+
+Source import jobs are **resumable**. Each job checkpoints its progress, so a large
+archive can be ingested across multiple runs without re-processing records that
+already landed.
+
+The [memory workspace](./memory-workspace.md) tracks import jobs at `/memory/imports`,
+showing checkpoint progress and the records each source produced. Imported records are
+raw memory, scoped like every other memory and ready for reflection and recall.
+
+Configure where importable archives live with the `SIBYL_SOURCE_IMPORT_DIR`
+environment variable.
 
 ## Best Practices
 
@@ -348,6 +371,7 @@ sibyl crawl documents list --source source_abc123
 
 ## Next Steps
 
+- [Memory Workspace](./memory-workspace.md). Track import jobs in the web UI
 - [Semantic Search](./semantic-search.md). Search across documents and knowledge
 - [Entity Types](./entity-types.md). Understand document vs other types
 - [Capturing Knowledge](./capturing-knowledge.md). Add your own learnings

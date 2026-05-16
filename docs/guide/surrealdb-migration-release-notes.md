@@ -72,7 +72,7 @@ Use SurrealDB 3.x for the target runtime, and pin the exact server image/tag use
 before cutting over production.
 
 Release owners should execute the live gate checklist in
-`docs/architecture/SURREALDB_PHASE2_LIVE_GATES.md` before tagging the SurrealDB-first release.
+`docs/_archive/SURREALDB_PHASE2_LIVE_GATES.md` before tagging the SurrealDB-first release.
 
 `sibyld migrate auth-flow-compare` refuses to compare one API to itself by default. Start one
 legacy-auth API and one Surreal-auth API, then pass distinct `--postgres-base-url` and

@@ -15,16 +15,20 @@ humans and agents collaborate without leaking private memory.
 SurrealDB migration, Graphiti removal, FalkorDB/PostgreSQL deletion, and native retrieval are
 implementation threads inside this larger product direction.
 
-Executable plans:
+Active executable plan:
+
+- v1.0 automatic memory operating system: [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
+- v0.12 Reflection OS: [`SIBYL_V012_REFLECTION_OS_PLAN.md`](SIBYL_V012_REFLECTION_OS_PLAN.md)
+
+Shipped execution plans, kept in `docs/_archive/` as release receipts and design contracts:
 
 - v0.7 native memory core:
-  [`SURREALDB_NATIVE_MEMORY_CORE_SPEC.md`](SURREALDB_NATIVE_MEMORY_CORE_SPEC.md)
+  [`SURREALDB_NATIVE_MEMORY_CORE_SPEC.md`](../_archive/SURREALDB_NATIVE_MEMORY_CORE_SPEC.md)
 - v0.8 pure Surreal closure and memory trust:
-  [`SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md`](SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md)
-- Post-v0.8 synthesis and memory workspace:
-  [`SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md`](SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md)
-- Native LLM provider substrate: [`SIBYL_LLM_SUBSTRATE_PLAN.md`](SIBYL_LLM_SUBSTRATE_PLAN.md)
-- v1.0 automatic memory operating system: [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
+  [`SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md`](../_archive/SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md)
+- v0.9 synthesis and memory workspace:
+  [`SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md`](../_archive/SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md)
+- Native LLM provider substrate: [`SIBYL_LLM_SUBSTRATE_PLAN.md`](../_archive/SIBYL_LLM_SUBSTRATE_PLAN.md)
 
 ## Northstar
 

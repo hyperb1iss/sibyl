@@ -231,6 +231,32 @@ Exceptions include full stack traces in logs:
 
 ## Metrics Endpoints
 
+### Runtime Telemetry
+
+```
+GET /api/telemetry/summary
+GET /api/telemetry/prometheus
+GET /metrics
+```
+
+Sibyl records its own runtime telemetry in-process and persists bounded minute rollups in
+SurrealDB. The JSON summary powers the web overview page, while `/metrics` exposes
+Prometheus-compatible counters, gauges, and latency summaries for scrapers. Set
+`SIBYL_METRICS_SCRAPE_TOKEN` for non-local scraping and pass it as a bearer token or
+`X-Sibyl-Metrics-Token` header.
+
+Captured surfaces:
+
+- HTTP request counts, status families, and p50/p95/p99 latency
+- SurrealDB query counts, query hashes, slow-query counts, retries, and latency
+- Memory, context, recall, search, and explore operations
+- Background job enqueue and completion metrics
+- Crawler run duration, document counts, chunk counts, and errors
+- LLM call duration and token counts where providers report usage
+- Queue depth and worker health
+- WebSocket connection and broadcast activity
+- Process uptime, RSS, max RSS, and active thread count
+
 ### Project Metrics
 
 ```
@@ -283,8 +309,11 @@ spec:
       app.kubernetes.io/name: sibyl
   endpoints:
     - port: http
-      path: /api/health
+      path: /metrics
       interval: 30s
+      bearerTokenSecret:
+        name: sibyl-metrics
+        key: token
 ```
 
 ### Datadog

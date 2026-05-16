@@ -231,6 +231,60 @@ async def test_source_import_run_resumes_from_persisted_checkpoint(
 
 
 @pytest.mark.asyncio
+async def test_source_import_run_broadcasts_status_changes(tmp_path: Path) -> None:
+    mbox_path = _write_resume_mbox(tmp_path / "broadcast.mbox")
+    statuses: list[str] = []
+
+    async def fake_remember(**kwargs: object) -> RawMemory:
+        return _raw_memory_from_kwargs(dict(kwargs), raw_id=str(kwargs["source_id"]))
+
+    async def capture_status(run: source_imports.SourceImportRun) -> None:
+        statuses.append(run.status.value)
+
+    with (
+        patch(
+            "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
+            AsyncMock(return_value=None),
+        ),
+        patch(
+            "sibyl.jobs.source_imports._safe_broadcast_source_import",
+            AsyncMock(side_effect=capture_status),
+        ),
+    ):
+        first = await source_imports.start_source_import(
+            source_uri=str(mbox_path),
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            batch_size=1,
+            remember=fake_remember,
+        )
+
+    assert first["status"] == "paused"
+    assert statuses == ["pending", "running", "paused"]
+
+
+def test_source_import_event_payload_is_json_ready(tmp_path: Path) -> None:
+    run = source_imports.SourceImportRun(
+        import_id="source_import:test",
+        organization_id="org-1",
+        principal_id="user-1",
+        source_uri=str(tmp_path / "source.mbox"),
+        adapter_name="mbox",
+        options={},
+        policy_context=_policy_context(),
+        batch_size=100,
+        promotion_preview_approved=False,
+    )
+
+    payload = source_imports._source_import_event_payload(run)
+
+    assert payload["import_id"] == "source_import:test"
+    assert isinstance(payload["created_at"], str)
+    assert isinstance(payload["updated_at"], str)
+
+
+@pytest.mark.asyncio
 async def test_source_import_run_records_dedupe_without_duplicate_write(
     tmp_path: Path,
 ) -> None:
@@ -252,7 +306,7 @@ async def test_source_import_run_records_dedupe_without_duplicate_write(
             policy_context=_policy_context(),
             batch_size=1,
             remember=fake_remember,
-    )
+        )
     run = source_imports._SOURCE_IMPORT_RUNS[first["import_id"]]
     run.checkpoint = None
     run.status = source_imports.SourceImportStatus.PAUSED

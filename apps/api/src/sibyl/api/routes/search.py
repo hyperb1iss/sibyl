@@ -5,6 +5,7 @@ merging results by relevance score. Temporal queries expose bi-temporal
 edge metadata for point-in-time queries and conflict detection.
 """
 
+import time
 from dataclasses import asdict
 
 import structlog
@@ -24,6 +25,7 @@ from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
+from sibyl_core.observability import elapsed_ms, telemetry_registry
 
 log = structlog.get_logger()
 _READ_ROLES = (
@@ -60,6 +62,7 @@ async def search(
     - source_id/source_name: Filter documentation by source
     - include_documents/include_graph: Toggle which stores to search
     """
+    started_at = time.perf_counter()
     try:
         from sibyl_core.tools.core import search as core_search
 
@@ -102,11 +105,28 @@ async def search(
             organization_id=group_id,
         )
 
-        return SearchResponse(**asdict(result))
+        response = SearchResponse(**asdict(result))
+        telemetry_registry().record_search_operation(
+            surface="search",
+            status="ok",
+            duration_ms=elapsed_ms(started_at),
+            result_count=len(response.results),
+        )
+        return response
 
     except HTTPException:
+        telemetry_registry().record_search_operation(
+            surface="search",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         raise
     except Exception as e:
+        telemetry_registry().record_search_operation(
+            surface="search",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         log.exception("search_failed", query=request.query, error=str(e))
         raise HTTPException(status_code=500, detail="Search failed. Please try again.") from e
 
@@ -122,6 +142,7 @@ async def explore(
     Results are filtered to only include entities from projects the user
     can access, plus unassigned entities.
     """
+    started_at = time.perf_counter()
     try:
         from sibyl_core.tools.core import explore as core_explore
 
@@ -187,7 +208,7 @@ async def explore(
             else:
                 entities_list.append(entity)
 
-        return ExploreResponse(
+        response = ExploreResponse(
             mode=result.mode,
             entities=entities_list,
             total=result.total,
@@ -197,10 +218,27 @@ async def explore(
             has_more=getattr(result, "has_more", False),
             actual_total=getattr(result, "actual_total", None),
         )
+        telemetry_registry().record_search_operation(
+            surface=f"explore_{request.mode}",
+            status="ok",
+            duration_ms=elapsed_ms(started_at),
+            result_count=len(response.entities),
+        )
+        return response
 
     except HTTPException:
+        telemetry_registry().record_search_operation(
+            surface=f"explore_{request.mode}",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         raise
     except Exception as e:
+        telemetry_registry().record_search_operation(
+            surface=f"explore_{request.mode}",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         log.exception("explore_failed", mode=request.mode, error=str(e))
         raise HTTPException(status_code=500, detail="Explore failed. Please try again.") from e
 

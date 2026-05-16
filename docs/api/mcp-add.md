@@ -1,16 +1,20 @@
 # MCP Tool: add
 
-Add new knowledge to the Sibyl knowledge graph. Supports episodes (learnings), patterns, tasks,
-epics, and projects with automatic relationship discovery.
+Add new knowledge to the Sibyl knowledge graph. Supports episodes, patterns, procedures, tasks,
+epics, projects, and domain-general memories with automatic relationship discovery.
 
 ## Overview
 
 The `add` tool creates entities in the knowledge graph with:
 
-- Automatic embedding generation
-- Auto-discovery of related entities
-- Relationship creation (BELONGS_TO, DEPENDS_ON, RELATED_TO)
-- Auto-tagging based on content analysis
+- Embedding generation for semantic search
+- Auto-discovery of related entities (RELATED_TO edges, similarity >= 0.75)
+- Relationship creation from `related_to` and `depends_on`
+- Auto-tagging based on content analysis (for tasks)
+- Conflict detection against semantically similar existing knowledge
+
+The MCP `add` tool runs against the SurrealDB-native graph runtime. There is no Graphiti or
+FalkorDB processing stage in the default memory loop.
 
 ## Input Schema
 
@@ -18,7 +22,7 @@ The `add` tool creates entities in the knowledge graph with:
 interface AddInput {
   // Required
   title: string; // Short title (max 200 chars)
-  content: string; // Full content (max 50k chars)
+  content: string; // Full content (max 50,000 chars)
 
   // Entity Configuration
   entity_type?: string; // Default: "episode"
@@ -28,37 +32,49 @@ interface AddInput {
   related_to?: string[]; // Entity IDs to link (RELATED_TO)
   metadata?: Record<string, any>; // Additional structured data
 
-  // Task/Epic-Specific
-  project?: string; // Project ID (REQUIRED for tasks/epics)
-  epic?: string; // Epic ID for tasks
+  // Task-Specific
+  project?: string; // Project ID (REQUIRED for tasks and epics)
   priority?: string; // critical, high, medium, low, someday
   assignees?: string[]; // Assignee names
   due_date?: string; // ISO date format
   technologies?: string[]; // Technologies involved
-  depends_on?: string[]; // Task IDs for dependencies
+  depends_on?: string[]; // Task IDs for dependencies (DEPENDS_ON)
 
   // Project-Specific
   repository_url?: string; // Repository URL
 
   // Conflict Detection
   check_conflicts?: boolean; // Check for duplicates (default: true)
-  conflict_threshold?: number; // Similarity threshold 0-1 (default: 0.70)
-
-  // Execution Mode
-  sync?: boolean; // Wait for processing (default: false)
+  skip_conflicts?: boolean; // Skip detection for latency-sensitive captures (default: false)
+  conflict_threshold?: number; // Similarity score required to flag a conflict (default: 0.85)
 }
 ```
 
+The MCP `add` tool does not accept `sync` or `epic` arguments. To attach a task to an epic, create
+the task and then set its epic through the REST tasks endpoint or `manage("update_task", ...)`. To
+create an entity and wait for it to be queryable, use the REST `POST /api/entities?sync=true`
+endpoint.
+
 ### Entity Types
 
-| Type        | Description                     | Requirements           |
-| ----------- | ------------------------------- | ---------------------- |
-| `episode`   | Temporal learning (default)     | None                   |
-| `pattern`   | Coding pattern or best practice | None                   |
-| `procedure` | Step-by-step procedure          | None                   |
-| `task`      | Work item with workflow         | **Requires `project`** |
-| `epic`      | Feature initiative              | **Requires `project`** |
-| `project`   | Container for epics/tasks       | None                   |
+| Type        | Description                                       | Requirements           |
+| ----------- | ------------------------------------------------- | ---------------------- |
+| `episode`   | Temporal knowledge (default)                      | None                   |
+| `pattern`   | Coding pattern or best practice                   | None                   |
+| `procedure` | Repeatable workflow or runbook                    | None                   |
+| `decision`  | Chosen direction with rationale                   | None                   |
+| `plan`      | Strategy, sequencing, milestones, or project plan | None                   |
+| `idea`      | Brainstormed concept or unresolved option         | None                   |
+| `claim`     | Atomic fact or assertion with provenance          | None                   |
+| `artifact`  | File, object, document, asset, or work product    | None                   |
+| `session`   | Conversation or work-session checkpoint           | None                   |
+| `domain`    | Any modeled problem space                         | None                   |
+| `task`      | Work item with workflow state machine             | **Requires `project`** |
+| `epic`      | Feature initiative grouping tasks                 | **Requires `project`** |
+| `project`   | Container for related tasks                       | None                   |
+
+For capturing durable memory with verbatim raw provenance, prefer the
+[`remember`](./mcp-remember.md) tool over `add`.
 
 ### Priority Values
 
@@ -170,7 +186,6 @@ interface ConflictWarning {
     "content": "Handle the OAuth callback from GitHub:\n1. Validate state parameter\n2. Exchange code for access token\n3. Fetch user profile\n4. Create or link user account\n5. Issue session token",
     "entity_type": "task",
     "project": "proj_abc123",
-    "epic": "epic_oauth",
     "priority": "high",
     "technologies": ["python", "fastapi"],
     "depends_on": ["task_oauth_setup"]
@@ -228,22 +243,16 @@ When creating tasks, Sibyl automatically generates tags based on:
 
 ## Auto-Linking
 
-When `sync: true`, Sibyl automatically discovers and links to related entities:
+After the entity is created, Sibyl discovers and links semantically related entities. Auto-linking
+searches for:
 
-```json
-{
-  "name": "add",
-  "arguments": {
-    "title": "JWT validation middleware",
-    "content": "...",
-    "entity_type": "pattern",
-    "category": "authentication",
-    "sync": true
-  }
-}
-```
+- Patterns, rules, and templates with similarity >= 0.75
+- Matches against the entity title, content, technologies, and category
 
-**Response:**
+Auto-linked entities are connected with `RELATED_TO` edges. When the response message includes
+`(linked: N)`, `N` relationships were created.
+
+**Response with auto-links:**
 
 ```json
 {
@@ -254,70 +263,38 @@ When `sync: true`, Sibyl automatically discovers and links to related entities:
 }
 ```
 
-Auto-linking searches for:
+## Processing Model
 
-- Patterns with similarity >= 0.75
-- Rules related to the same domain
-- Templates with matching technologies
+The MCP `add` tool queues entity creation on the active coordination runtime and returns
+immediately. The coordination runtime is in-process by default, or a Redis worker when
+`SIBYL_COORDINATION_BACKEND=redis` is set.
 
-## Sync vs Async Mode
+- The response returns right away with the entity ID.
+- The entity becomes fully queryable once the worker finishes processing.
+- A queued response carries a message like `Queued: <title> (processing in background)`.
+- If the job queue is unavailable, `add` falls back to a synchronous write and the message reads
+  `Added (sync fallback): <title>`.
 
-### Async Mode (Default)
-
-```json
-{
-  "name": "add",
-  "arguments": {
-    "title": "...",
-    "content": "...",
-    "sync": false
-  }
-}
-```
-
-- Returns immediately with entity ID
-- Processing happens in the active coordination runtime (local in-process or Redis worker)
-- Entity may not be immediately queryable
-
-### Sync Mode
-
-```json
-{
-  "name": "add",
-  "arguments": {
-    "title": "...",
-    "content": "...",
-    "sync": true
-  }
-}
-```
-
-- Waits for Graphiti processing to complete
-- Entity is immediately available
-- Auto-linking is performed synchronously
-- **Use for tasks that need immediate workflow operations**
+To create an entity and block until it is queryable (for example, before immediate workflow
+operations), use the REST endpoint `POST /api/entities?sync=true` documented in
+[rest-entities.md](./rest-entities.md).
 
 ## Relationships Created
 
-### Task Relationships
+### From Request Parameters
 
-| Relationship | Target  | Condition                  |
-| ------------ | ------- | -------------------------- |
-| `BELONGS_TO` | Project | Always (required)          |
-| `BELONGS_TO` | Epic    | When `epic` provided       |
-| `DEPENDS_ON` | Task    | When `depends_on` provided |
+| Relationship | Target     | Condition                        |
+| ------------ | ---------- | -------------------------------- |
+| `RELATED_TO` | Any entity | For each ID in `related_to`      |
+| `DEPENDS_ON` | Task       | For each ID in `depends_on`      |
 
-### Epic Relationships
-
-| Relationship | Target  | Condition         |
-| ------------ | ------- | ----------------- |
-| `BELONGS_TO` | Project | Always (required) |
+Tasks and epics are bound to their project through the required `project` parameter.
 
 ### Auto-Discovered
 
-| Relationship | Source     | Target                              |
-| ------------ | ---------- | ----------------------------------- |
-| `RELATED_TO` | New entity | Semantically similar patterns/rules |
+| Relationship | Source     | Target                                     |
+| ------------ | ---------- | ------------------------------------------ |
+| `RELATED_TO` | New entity | Semantically similar patterns/rules/templates |
 
 ## Validation
 
@@ -326,8 +303,8 @@ Auto-linking searches for:
 | `title`    | Required, max 200 characters         |
 | `content`  | Required, max 50,000 characters      |
 | `project`  | Required for `task` and `epic` types |
-| `priority` | Must be valid priority value         |
-| `due_date` | Must be valid ISO date               |
+| `priority` | Must be a valid priority value       |
+| `due_date` | Must be a valid ISO date             |
 
 ## Error Handling
 
@@ -344,20 +321,24 @@ Auto-linking searches for:
 ### Create Task in Context
 
 ```
-1. explore(mode="list", types=["project"])
-2. explore(mode="list", types=["epic"], project="<project_id>")
-3. add(entity_type="task", project="<project_id>", epic="<epic_id>", ...)
+1. explore(mode="list", types=["project"])    // Find the project
+2. add(entity_type="task", project="<project_id>", ...)
+3. manage(action="start_task", entity_id="<task_id>")
 ```
 
 ### Capture Learning
 
 ```
 1. add(title="...", content="<detailed learning>", category="debugging")
-2. manage(action="start_task", entity_id="<task_id>")  // Continue work
 ```
+
+For durable memory that needs verbatim raw provenance and review, use
+[`remember`](./mcp-remember.md) or [`reflect`](./mcp-reflect.md) instead.
 
 ## Related
 
 - [mcp-explore.md](./mcp-explore.md) - Find projects and epics
 - [mcp-manage.md](./mcp-manage.md) - Task workflow operations
+- [mcp-remember.md](./mcp-remember.md) - Capture durable memory with raw provenance
 - [mcp-search.md](./mcp-search.md) - Find related knowledge
+- [rest-entities.md](./rest-entities.md) - REST entity creation with sync mode

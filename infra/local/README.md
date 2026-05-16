@@ -14,8 +14,8 @@ datastore and Valkey as the coordination plane for jobs, locks, pub/sub, and rat
 | Kong Operator | `kong/kong-operator`            | Gateway API implementation                  |
 | TiDB Operator | `pingcap/tidb-operator`         | Manages the TiKV cluster                    |
 | TiKV/PD       | `infra/local/tidb-cluster.yaml` | Distributed datastore for SurrealDB         |
-| SurrealDB     | `surrealdb/surrealdb`           | Graph, content, and auth store              |
-| Valkey        | `valkey/valkey`                 | Distributed coordination for Sibyl replicas |
+| SurrealDB     | `surrealdb-helm/surrealdb`      | Graph, content, and auth store              |
+| Valkey        | `valkey-helm/valkey`            | Distributed coordination for Sibyl replicas |
 | Sibyl         | `../../charts/sibyl`            | Backend, worker, and frontend deployments   |
 
 ## Shape
@@ -62,13 +62,16 @@ Docker and skips an explicit image load. Override with `SIBYL_CONTAINER_BUILDER=
 
 ## Manual Render Checks
 
+The Tiltfile registers these chart repos as `surrealdb-helm` and `valkey-helm`. The
+render checks below use the same aliases.
+
 ```bash
-helm template surrealdb surrealdb/surrealdb \
+helm template surrealdb surrealdb-helm/surrealdb \
   --version 0.4.0 \
   -n sibyl \
   -f surrealdb-values.yaml
 
-helm template valkey valkey/valkey \
+helm template valkey valkey-helm/valkey \
   --version 0.9.4 \
   -n sibyl \
   -f valkey-values.yaml

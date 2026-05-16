@@ -4,12 +4,14 @@ Unified semantic search across knowledge graph and crawled documentation.
 
 ## Overview
 
-The search endpoint provides:
+The search router provides three endpoints:
 
-- Semantic search using embeddings
-- Unified results from graph and documents
-- Filtering by entity type, language, status, etc.
-- Pagination support
+- `POST /api/search` - semantic search across the knowledge graph and crawled documents
+- `POST /api/search/explore` - graph navigation without semantic search
+- `POST /api/search/temporal` - bi-temporal edge history queries
+
+Search supports embedding-based ranking, unified graph and document results, filtering by entity
+type, language, and status, and pagination.
 
 **Base URL:** `/api/search`
 
@@ -26,6 +28,7 @@ All endpoints require authentication via:
 | --------- | ---------------------------- |
 | Search    | Owner, Admin, Member, Viewer |
 | Explore   | Owner, Admin, Member, Viewer |
+| Temporal  | Owner, Admin, Member, Viewer |
 
 ## Endpoints
 
@@ -134,7 +137,7 @@ curl -X POST "https://api.example.com/api/search" \
         "source_id": "source_uuid",
         "chunk_type": "paragraph",
         "heading_path": ["Exception Handling", "Async"],
-        "hint": "Use 'sibyl entity <id>' for full content"
+        "hint": "Use 'sibyl entity show <id>' for full content"
       }
     }
   ],
@@ -252,6 +255,73 @@ curl -X POST "https://api.example.com/api/search/explore" \
   "offset": 0,
   "has_more": false,
   "actual_total": 8
+}
+```
+
+### Temporal Query
+
+```http
+POST /api/search/temporal
+```
+
+Query the bi-temporal history of graph edges for point-in-time questions, timeline exploration, and
+conflict detection.
+
+**Request Body:**
+
+```json
+{
+  "mode": "history",
+  "entity_id": "topic_auth",
+  "as_of": "2026-03-15",
+  "include_expired": false,
+  "limit": 50
+}
+```
+
+**Request Schema:**
+
+| Field             | Type    | Required | Default   | Description                                  |
+| ----------------- | ------- | -------- | --------- | -------------------------------------------- |
+| `mode`            | string  | No       | `history` | `history`, `timeline`, or `conflicts`        |
+| `entity_id`       | string  | No       | -         | Entity to scope the temporal query           |
+| `as_of`           | string  | No       | -         | Point-in-time date for `history` mode        |
+| `include_expired` | boolean | No       | false     | Include expired edges                        |
+| `limit`           | integer | No       | 50        | Maximum edges to return                      |
+
+**Modes:**
+
+| Mode        | Answers                                                |
+| ----------- | ------------------------------------------------------ |
+| `history`   | Edges as they existed at `as_of`                       |
+| `timeline`  | All versions of edges over time (knowledge evolution)  |
+| `conflicts` | Invalidated or superseded facts                        |
+
+**Response:**
+
+```json
+{
+  "mode": "history",
+  "entity_id": "topic_auth",
+  "edges": [
+    {
+      "id": "edge_abc",
+      "name": "REQUIRES",
+      "source_id": "topic_auth",
+      "source_name": "Authentication",
+      "target_id": "rule_jwt",
+      "target_name": "JWT Validation Rules",
+      "created_at": "2026-01-10T10:00:00Z",
+      "expired_at": null,
+      "valid_at": "2026-01-10T10:00:00Z",
+      "invalid_at": null,
+      "fact": "Authentication requires JWT validation",
+      "is_current": true
+    }
+  ],
+  "total": 1,
+  "as_of": "2026-03-15T00:00:00Z",
+  "message": "1 edge as of 2026-03-15"
 }
 ```
 

@@ -9,6 +9,7 @@ Project management commands. Projects are the top-level container for tasks and 
 - `sibyl project create` - Create a project
 - `sibyl project progress` - Show project progress
 - `sibyl project link` - Link directory to project
+- `sibyl project relink` - Repair the link for the current directory
 - `sibyl project unlink` - Remove directory link
 - `sibyl project links` - List all directory links
 
@@ -287,6 +288,33 @@ The link is stored in `~/.sibyl/config.toml`:
 [paths]
 "/Users/bliss/dev/backend-api" = "proj_abc123"
 "/Users/bliss/dev/mobile-app" = "proj_xyz789"
+```
+
+---
+
+## project relink
+
+Repair the project link for the current directory. Use this when a link points at a stale or
+renamed project and you want to retarget it without unlinking first.
+
+### Synopsis
+
+```bash
+sibyl project relink [options]
+```
+
+### Options
+
+| Option   | Short | Default | Description                                       |
+| -------- | ----- | ------- | ------------------------------------------------- |
+| `--id`   |       | (none)  | Project ID, UUID, name, or slug to relink to      |
+| `--path` | `-p`  | cwd     | Directory path                                    |
+
+### Example
+
+```bash
+cd ~/dev/backend-api
+sibyl project relink --id backend-api
 ```
 
 ---

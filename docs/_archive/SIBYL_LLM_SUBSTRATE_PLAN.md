@@ -1,7 +1,7 @@
 # Sibyl Native LLM Substrate Plan
 
 Status: complete v4, verified for Wave 1 handoff. Author: Nova (Claude Opus 4.7) Date: 2026-05-15
-Target milestone: v0.10 Roadmap: [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
+Target milestone: v0.10 Roadmap: [`SIBYL_1_0_ROADMAP.md`](../architecture/SIBYL_1_0_ROADMAP.md)
 
 1.0 planning note: this substrate is required for automatic reflection, synthesis, and memory
 review. It should also replace remaining Graphiti-era extraction/model-provider seams as Graphiti is

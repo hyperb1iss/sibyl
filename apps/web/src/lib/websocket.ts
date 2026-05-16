@@ -3,6 +3,7 @@
  */
 
 import { env } from 'next-dynenv';
+import type { SourceImportStatusResponse } from './api';
 
 // =============================================================================
 // Event Payload Types (Discriminated Unions)
@@ -44,6 +45,13 @@ export interface CrawlCompletePayload {
   error?: string;
 }
 
+export interface CrawlSyncCompletePayload extends CrawlCompletePayload {
+  status?: string;
+  document_count?: number;
+  chunk_count?: number;
+  changes?: Record<string, string | null>;
+}
+
 /** Permission changed payload */
 export interface PermissionChangedPayload {
   user_id: string;
@@ -51,22 +59,101 @@ export interface PermissionChangedPayload {
   org_role?: string;
 }
 
+export interface NoteEventPayload {
+  id: string;
+  task_id: string;
+  op_id?: string;
+  author_type?: string;
+}
+
+export interface BackupEventPayload {
+  backup_id: string;
+  organization_id?: string;
+  job_id?: string;
+  error?: string;
+  success?: boolean;
+  archive_path?: string;
+  archive_size_bytes?: number;
+  duration_seconds?: number;
+}
+
+export interface GraphUpdatedPayload {
+  source_id?: string;
+  chunks_processed?: number;
+  new_entities_created?: number;
+  [key: string]: unknown;
+}
+
+export interface WebSocketErrorPayload {
+  message: string;
+}
+
+export interface WebSocketSubscribedPayload {
+  topics: string[];
+}
+
 /** Map event types to their payload types */
 export interface WebSocketEventPayloadMap {
   entity_created: EntityEventPayload;
   entity_updated: EntityEventPayload;
   entity_deleted: EntityEventPayload;
+  entity_pending: EntityEventPayload;
   search_complete: Record<string, unknown>;
   crawl_started: CrawlStartedPayload;
   crawl_progress: CrawlProgressPayload;
   crawl_complete: CrawlCompletePayload;
+  crawl_sync_complete: CrawlSyncCompletePayload;
   health_update: Record<string, unknown>;
   heartbeat: Record<string, unknown>;
   connection_status: ConnectionStatusPayload;
   permission_changed: PermissionChangedPayload;
+  note_pending: NoteEventPayload;
+  note_created: NoteEventPayload;
+  backup_started: BackupEventPayload;
+  backup_complete: BackupEventPayload;
+  backup_failed: BackupEventPayload;
+  graph_updated: GraphUpdatedPayload;
+  question_answered: Record<string, unknown>;
+  source_import_updated: SourceImportStatusResponse;
+  pong: Record<string, unknown>;
+  subscribed: WebSocketSubscribedPayload;
+  error: WebSocketErrorPayload;
 }
 
 export type WebSocketEventType = keyof WebSocketEventPayloadMap;
+
+export const WEBSOCKET_EVENT_TYPES = [
+  'entity_created',
+  'entity_updated',
+  'entity_deleted',
+  'entity_pending',
+  'search_complete',
+  'crawl_started',
+  'crawl_progress',
+  'crawl_complete',
+  'crawl_sync_complete',
+  'health_update',
+  'heartbeat',
+  'connection_status',
+  'permission_changed',
+  'note_pending',
+  'note_created',
+  'backup_started',
+  'backup_complete',
+  'backup_failed',
+  'graph_updated',
+  'question_answered',
+  'source_import_updated',
+  'pong',
+  'subscribed',
+  'error',
+] as const satisfies readonly WebSocketEventType[];
+
+const WEBSOCKET_EVENT_TYPE_SET = new Set<string>(WEBSOCKET_EVENT_TYPES);
+
+export function isWebSocketEventType(event: string): event is WebSocketEventType {
+  return WEBSOCKET_EVENT_TYPE_SET.has(event);
+}
 
 export interface WebSocketMessage<T extends WebSocketEventType = WebSocketEventType> {
   event: T;
@@ -173,7 +260,15 @@ class WebSocketClient {
 
     this.ws.onmessage = event => {
       try {
-        const message = JSON.parse(event.data) as WebSocketMessage;
+        const message = JSON.parse(event.data) as {
+          event?: unknown;
+          data?: unknown;
+          timestamp?: unknown;
+        };
+        if (typeof message.event !== 'string' || !isWebSocketEventType(message.event)) {
+          console.warn('[Sibyl WS] Ignoring unknown event:', message.event);
+          return;
+        }
 
         // Respond to server heartbeat to keep connection alive
         if (message.event === 'heartbeat') {
@@ -181,7 +276,6 @@ class WebSocketClient {
           return;
         }
 
-        // Type assertion: backend guarantees event/data pairs match
         this.dispatch(
           message.event,
           message.data as WebSocketEventPayloadMap[typeof message.event]

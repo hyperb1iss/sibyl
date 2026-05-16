@@ -22,6 +22,7 @@ from sibyl.coordination.broker import (
     JobInfo,
     JobStatus,
 )
+from sibyl_core.observability import telemetry_registry
 
 log = structlog.get_logger()
 
@@ -595,9 +596,11 @@ class RedisQueueBroker:
         job = await pool.enqueue_job(function, *args, _job_id=job_id, **kwargs)
         if job is None:
             await self._record_recent_job(pool, job_id)
+            telemetry_registry().record_job_enqueued(function=function, created=False)
             return EnqueueResult(job_id=job_id, created=False)
 
         await self._record_recent_job(pool, job.job_id)
+        telemetry_registry().record_job_enqueued(function=function, created=True)
         return EnqueueResult(job_id=job.job_id, created=True)
 
     async def _record_recent_job(self, pool: ArqRedis, job_id: str) -> None:

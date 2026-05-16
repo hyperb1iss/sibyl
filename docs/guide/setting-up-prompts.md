@@ -40,11 +40,12 @@ Sibyl is your knowledge graph, extended memory that persists across sessions.
 **Run `/sibyl` at the start of every session.** The skill provides full CLI guidance, task context,
 and relevant patterns. No exceptions.
 
-### Workflow
+### The Memory Loop
 
-1. **Research first**: Search for patterns, past learnings, known issues before implementing
-2. **Track tasks**: Never do significant work without a task. Update status as you go
-3. **Capture learnings**: When you solve something non-obvious, add it to the graph
+1. **Recall first**: Pull working context before you act, past sessions may have solved this
+2. **Act**: Do the work in a task so progress survives the session
+3. **Remember**: When you solve something non-obvious, capture it as durable memory
+4. **Reflect**: Distill session notes into reviewable memory candidates
 
 ### What to Capture
 
@@ -109,22 +110,22 @@ This project uses Sibyl as its knowledge repository.
 
 **Use `/sibyl`** for ALL Sibyl operations. This skill knows the correct patterns.
 
-### Research → Do → Reflect Cycle
+### The Memory Loop
 
 Every significant task follows this cycle:
 
-**1. RESEARCH** (before coding)
+**1. RECALL** (before coding)
 
-\`\`\` /sibyl search "topic" /sibyl explore patterns \`\`\`
+\`\`\` /sibyl recall "topic" \`\`\`
 
-**2. DO** (while coding)
+**2. ACT** (while coding)
 
 \`\`\` /sibyl task start <id> \`\`\`
 
-**3. REFLECT** (after completing)
+**3. REMEMBER + REFLECT** (after completing)
 
-\`\`\` /sibyl task complete <id> --learnings "What I learned" /sibyl add "Pattern Title" "What, why,
-how, caveats" \`\`\`
+\`\`\` /sibyl task complete <id> --learnings "What I learned" /sibyl remember "Pattern Title" "What,
+why, how, caveats" \`\`\`
 
 ## Quick Reference
 
@@ -162,9 +163,10 @@ Use consistent response format from `src/lib/responses.ts`.
 
 ## Real-World Examples
 
-### Sibyl's Own CLAUDE.md
+### A Real Project CLAUDE.md
 
-Here's the actual CLAUDE.md from the Sibyl project:
+Here's how a project that uses Sibyl as its own knowledge repository sets up its
+`CLAUDE.md`:
 
 ```markdown
 # Sibyl Development Guide
@@ -183,22 +185,22 @@ project memory through a unified graph, content, and auth runtime.
 **Use `/sibyl`** for ALL Sibyl operations. This skill knows the correct patterns and handles
 authentication properly.
 
-### Research → Do → Reflect Cycle
+### The Memory Loop
 
 Every significant task follows this cycle:
 
-**1. RESEARCH** (before coding)
+**1. RECALL** (before coding)
 
-\`\`\` /sibyl search "topic" /sibyl explore patterns \`\`\`
+\`\`\` /sibyl recall "topic" \`\`\`
 
-**2. DO** (while coding)
+**2. ACT** (while coding)
 
 \`\`\` /sibyl task start <id> \`\`\`
 
-**3. REFLECT** (after completing)
+**3. REMEMBER + REFLECT** (after completing)
 
-\`\`\` /sibyl task complete <id> --learnings "What I learned" /sibyl add "Pattern Title" "What, why,
-how, caveats" \`\`\`
+\`\`\` /sibyl task complete <id> --learnings "What I learned" /sibyl remember "Pattern Title" "What,
+why, how, caveats" \`\`\`
 
 ## Quick Reference
 

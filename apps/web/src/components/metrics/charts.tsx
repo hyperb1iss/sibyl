@@ -24,6 +24,7 @@ import type {
   AssigneeStats,
   TaskPriorityDistribution,
   TaskStatusDistribution,
+  TelemetryTrendPoint,
   TimeSeriesPoint,
 } from '@/lib/api';
 
@@ -263,6 +264,123 @@ export function VelocityLineChart({ data, className }: VelocityChartProps) {
             dot={{ fill: COLORS.green, strokeWidth: 0, r: 3 }}
             activeDot={{ r: 5, fill: COLORS.green, stroke: COLORS.bg, strokeWidth: 2 }}
             name="Completed"
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+// =============================================================================
+// Runtime Performance Chart
+// =============================================================================
+
+interface PerformanceTrendChartProps {
+  data: TelemetryTrendPoint[];
+  className?: string;
+}
+
+export function PerformanceTrendChart({ data, className }: PerformanceTrendChartProps) {
+  const chartData = data.map(point => ({
+    ...point,
+    displayTime: new Date(point.timestamp).toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+    error_rate_pct: Number((point.error_rate * 100).toFixed(2)),
+  }));
+
+  if (chartData.length === 0) {
+    return (
+      <div className={`flex items-center justify-center h-56 ${className}`}>
+        <p className="text-sc-fg-subtle text-sm">No runtime telemetry yet</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={className}>
+      <ResponsiveContainer width="100%" height={240}>
+        <LineChart data={chartData} margin={{ left: -8, right: 8, top: 10, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={`${COLORS.muted}20`} />
+          <XAxis
+            dataKey="displayTime"
+            tick={{ fill: COLORS.muted, fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            yAxisId="latency"
+            tick={{ fill: COLORS.muted, fontSize: 11 }}
+            axisLine={false}
+            tickLine={false}
+            width={44}
+          />
+          <YAxis
+            yAxisId="errors"
+            orientation="right"
+            tick={{ fill: COLORS.muted, fontSize: 11 }}
+            axisLine={false}
+            tickLine={false}
+            width={36}
+          />
+          <Tooltip content={<CustomTooltip />} />
+          <Legend
+            verticalAlign="bottom"
+            height={28}
+            formatter={(value: string) => <span className="text-xs text-sc-fg-muted">{value}</span>}
+          />
+          <Line
+            yAxisId="latency"
+            type="monotone"
+            dataKey="api_p95_ms"
+            stroke={COLORS.cyan}
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 4, fill: COLORS.cyan, strokeWidth: 0 }}
+            name="API p95 ms"
+          />
+          <Line
+            yAxisId="latency"
+            type="monotone"
+            dataKey="surreal_p95_ms"
+            stroke={COLORS.purple}
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 4, fill: COLORS.purple, strokeWidth: 0 }}
+            name="Surreal p95 ms"
+          />
+          <Line
+            yAxisId="latency"
+            type="monotone"
+            dataKey="memory_p95_ms"
+            stroke={COLORS.green}
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 4, fill: COLORS.green, strokeWidth: 0 }}
+            name="Memory p95 ms"
+          />
+          <Line
+            yAxisId="latency"
+            type="monotone"
+            dataKey="llm_p95_ms"
+            stroke={COLORS.coral}
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 4, fill: COLORS.coral, strokeWidth: 0 }}
+            name="LLM p95 ms"
+          />
+          <Line
+            yAxisId="errors"
+            type="monotone"
+            dataKey="error_rate_pct"
+            stroke={COLORS.red}
+            strokeWidth={2}
+            strokeDasharray="4 4"
+            dot={false}
+            activeDot={{ r: 4, fill: COLORS.red, strokeWidth: 0 }}
+            name="Error %"
           />
         </LineChart>
       </ResponsiveContainer>

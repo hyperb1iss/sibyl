@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { WelcomeBanner } from '@/components/dashboard';
 import { useCaptureMemory } from '@/components/layout/capture-memory-context';
-import { VelocityLineChart } from '@/components/metrics/charts';
+import { PerformanceTrendChart, VelocityLineChart } from '@/components/metrics/charts';
 import {
   Activity,
   ArrowRight,
@@ -23,12 +23,20 @@ import {
   Play,
   Search,
   Target,
+  Timer,
   TrendingUp,
   Zap,
 } from '@/components/ui/icons';
-import type { StatsResponse } from '@/lib/api';
+import type { StatsResponse, TelemetryDurationSummary } from '@/lib/api';
 import { ENTITY_COLORS, formatUptime } from '@/lib/constants';
-import { useHealth, useOrgMetrics, useProjects, useSessionBundle, useStats } from '@/lib/hooks';
+import {
+  useHealth,
+  useOrgMetrics,
+  useProjects,
+  useSessionBundle,
+  useStats,
+  useTelemetrySummary,
+} from '@/lib/hooks';
 import { useProjectFilters } from '@/lib/project-context';
 
 interface DashboardContentProps {
@@ -120,6 +128,16 @@ function sessionStatusTone(status: string): string {
   }
 }
 
+function formatLatency(value: number | undefined): string {
+  const latency = value ?? 0;
+  if (latency >= 1000) return `${(latency / 1000).toFixed(1)} s`;
+  return `${Math.round(latency)} ms`;
+}
+
+function formatCount(summary: TelemetryDurationSummary | undefined, unit: string): string {
+  return `${summary?.count ?? 0} ${unit}`;
+}
+
 export function DashboardContent({ initialStats }: DashboardContentProps) {
   const [mounted, setMounted] = useState(false);
   const { openCaptureMemory } = useCaptureMemory();
@@ -128,6 +146,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
   const { data: stats } = useStats(initialStats);
   const { data: projectsData } = useProjects();
   const { data: orgMetrics } = useOrgMetrics();
+  const { data: telemetry } = useTelemetrySummary({ window_seconds: 900, rollup_limit: 120 });
   const { data: sessionBundle, isLoading: sessionBundleLoading } = useSessionBundle({
     project_ids: projectFilters,
     task_limit: 4,
@@ -153,6 +172,10 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
   }, [orgMetrics]);
 
   const projectCount = projectsData?.entities?.length ?? 0;
+  const apiTelemetry = telemetry?.summaries.api;
+  const surrealTelemetry = telemetry?.summaries.surreal;
+  const memoryTelemetry = telemetry?.summaries.memory;
+  const llmTelemetry = telemetry?.summaries.llm;
   const sessionScopeLabel = projectFilters?.length
     ? projectFilters.length === 1
       ? 'Current project'
@@ -769,6 +792,64 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
           </ul>
         </div>
       )}
+
+      {/* Runtime Performance */}
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-cyan/10 border border-sc-cyan/20 flex items-center justify-center shrink-0">
+                <Timer width={16} height={16} className="text-sc-cyan sm:w-5 sm:h-5" />
+              </div>
+              <div>
+                <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary">
+                  Runtime Performance
+                </h2>
+                <p className="text-xs sm:text-sm text-sc-fg-muted">
+                  Live p95 latency and error trend
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:w-[520px]">
+            <div className="rounded-lg border border-sc-cyan/20 bg-sc-bg-elevated px-3 py-2">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-sc-fg-subtle">API</div>
+              <div className="mt-1 text-lg font-semibold text-sc-cyan">
+                {formatLatency(apiTelemetry?.p95_ms)}
+              </div>
+              <div className="text-xs text-sc-fg-muted">{formatCount(apiTelemetry, 'req')}</div>
+            </div>
+            <div className="rounded-lg border border-sc-purple/20 bg-sc-bg-elevated px-3 py-2">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-sc-fg-subtle">
+                Surreal
+              </div>
+              <div className="mt-1 text-lg font-semibold text-sc-purple">
+                {formatLatency(surrealTelemetry?.p95_ms)}
+              </div>
+              <div className="text-xs text-sc-fg-muted">
+                {formatCount(surrealTelemetry, 'queries')}
+              </div>
+            </div>
+            <div className="rounded-lg border border-sc-green/20 bg-sc-bg-elevated px-3 py-2">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-sc-fg-subtle">
+                Memory
+              </div>
+              <div className="mt-1 text-lg font-semibold text-sc-green">
+                {formatLatency(memoryTelemetry?.p95_ms)}
+              </div>
+              <div className="text-xs text-sc-fg-muted">{formatCount(memoryTelemetry, 'ops')}</div>
+            </div>
+            <div className="rounded-lg border border-sc-coral/20 bg-sc-bg-elevated px-3 py-2">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-sc-fg-subtle">LLM</div>
+              <div className="mt-1 text-lg font-semibold text-sc-coral">
+                {formatLatency(llmTelemetry?.p95_ms)}
+              </div>
+              <div className="text-xs text-sc-fg-muted">{formatCount(llmTelemetry, 'calls')}</div>
+            </div>
+          </div>
+        </div>
+        <PerformanceTrendChart data={telemetry?.trends ?? []} className="mt-4" />
+      </div>
     </div>
   );
 }

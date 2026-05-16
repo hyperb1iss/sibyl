@@ -72,6 +72,7 @@ export default defineConfig({
                     items: [
                         { text: 'Knowledge Graph', link: '/guide/knowledge-graph' },
                         { text: 'Entity Types', link: '/guide/entity-types' },
+                        { text: 'The Memory Loop', link: '/guide/memory-loop' },
                         { text: 'Semantic Search', link: '/guide/semantic-search' },
                         { text: 'Multi-Tenancy', link: '/guide/multi-tenancy' },
                     ],
@@ -86,10 +87,6 @@ export default defineConfig({
                             text: 'SurrealDB Release Notes',
                             link: '/guide/surrealdb-migration-release-notes',
                         },
-                        {
-                            text: 'SurrealDB Live Gates',
-                            link: '/architecture/SURREALDB_PHASE2_LIVE_GATES',
-                        },
                     ],
                 },
                 {
@@ -98,6 +95,8 @@ export default defineConfig({
                         { text: 'Task Management', link: '/guide/task-management' },
                         { text: 'Project Organization', link: '/guide/project-organization' },
                         { text: 'Capturing Knowledge', link: '/guide/capturing-knowledge' },
+                        { text: 'Synthesis', link: '/guide/synthesis' },
+                        { text: 'Memory Workspace', link: '/guide/memory-workspace' },
                         { text: 'External Sources', link: '/guide/sources' },
                     ],
                 },
@@ -114,33 +113,50 @@ export default defineConfig({
             '/cli/': [
                 { text: 'Overview', link: '/cli/' },
                 {
-                    text: 'Core Commands',
+                    text: 'Memory Loop',
                     items: [
+                        { text: 'recall', link: '/cli/recall' },
+                        { text: 'remember', link: '/cli/remember' },
+                        { text: 'reflect', link: '/cli/reflect' },
+                        { text: 'capture', link: '/cli/capture' },
                         { text: 'search', link: '/cli/search' },
                         { text: 'add', link: '/cli/add' },
-                        { text: 'explore', link: '/cli/explore' },
+                        { text: 'session', link: '/cli/session' },
+                        { text: 'archive', link: '/cli/archive' },
                     ],
                 },
                 {
-                    text: 'Task Commands',
+                    text: 'Work Tracking',
                     items: [
                         { text: 'task create', link: '/cli/task-create' },
                         { text: 'task list', link: '/cli/task-list' },
                         { text: 'task lifecycle', link: '/cli/task-lifecycle' },
-                    ],
-                },
-                {
-                    text: 'Project Commands',
-                    items: [
-                        { text: 'project', link: '/cli/project' },
-                        { text: 'context', link: '/cli/context' },
-                    ],
-                },
-                {
-                    text: 'Entity Commands',
-                    items: [
-                        { text: 'entity', link: '/cli/entity' },
                         { text: 'epic', link: '/cli/epic' },
+                        { text: 'project', link: '/cli/project' },
+                        { text: 'entity', link: '/cli/entity' },
+                        { text: 'explore', link: '/cli/explore' },
+                    ],
+                },
+                {
+                    text: 'Sources & Synthesis',
+                    items: [
+                        { text: 'crawl', link: '/cli/crawl' },
+                        { text: 'synthesis', link: '/cli/synthesis' },
+                    ],
+                },
+                {
+                    text: 'Memory Governance',
+                    items: [
+                        { text: 'memory', link: '/cli/memory' },
+                        { text: 'pending-writes', link: '/cli/pending-writes' },
+                    ],
+                },
+                {
+                    text: 'System',
+                    items: [
+                        { text: 'auth', link: '/cli/auth' },
+                        { text: 'org', link: '/cli/org' },
+                        { text: 'context', link: '/cli/context' },
                     ],
                 },
             ],
@@ -150,9 +166,14 @@ export default defineConfig({
                     text: 'MCP Tools',
                     items: [
                         { text: 'search', link: '/api/mcp-search' },
+                        { text: 'context', link: '/api/mcp-context' },
                         { text: 'explore', link: '/api/mcp-explore' },
                         { text: 'add', link: '/api/mcp-add' },
+                        { text: 'remember', link: '/api/mcp-remember' },
+                        { text: 'reflect', link: '/api/mcp-reflect' },
+                        { text: 'synthesis', link: '/api/mcp-synthesis' },
                         { text: 'manage', link: '/api/mcp-manage' },
+                        { text: 'logs', link: '/api/mcp-logs' },
                     ],
                 },
                 {
@@ -162,6 +183,8 @@ export default defineConfig({
                         { text: 'Tasks', link: '/api/rest-tasks' },
                         { text: 'Projects', link: '/api/rest-projects' },
                         { text: 'Search', link: '/api/rest-search' },
+                        { text: 'Memory', link: '/api/rest-memory' },
+                        { text: 'Synthesis', link: '/api/rest-synthesis' },
                     ],
                 },
                 {
@@ -169,6 +192,7 @@ export default defineConfig({
                     items: [
                         { text: 'JWT Auth', link: '/api/auth-jwt' },
                         { text: 'API Keys', link: '/api/auth-api-keys' },
+                        { text: 'Authorization', link: '/api/auth-authorization' },
                     ],
                 },
             ],

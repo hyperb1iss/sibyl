@@ -8,6 +8,10 @@ description: Multi-agent patterns with shared knowledge
 Sibyl enables multiple AI agents to share knowledge and coordinate work. This guide covers patterns
 for multi-agent collaboration.
 
+Every agent runs the same [memory loop](./memory-loop.md): recall before acting,
+remember what it learns, reflect on its session. Because the graph is shared, one
+agent's remember is the next agent's recall.
+
 ## Shared Knowledge Graph
 
 ### How It Works
@@ -168,11 +172,11 @@ add("Session summary - Auth implementation",
 
 ### Concurrent Edits
 
-Sibyl uses distributed locks to prevent conflicts:
+Sibyl serializes writes to the same entity with a per-entity lock in the API layer:
 
 ```python
-# If another agent is editing, you'll get a 409 error
-# Retry after a short delay
+# If another agent is editing the same entity, you'll get a 409 Conflict
+# Retry with backoff when contention is expected
 ```
 
 ### Knowledge Conflicts
@@ -435,6 +439,7 @@ add("Add refresh token rotation",
 
 ## Next Steps
 
+- [The Memory Loop](./memory-loop.md) - The cycle every agent shares
 - [Claude Code Integration](./claude-code.md) - Single agent setup
 - [Task Management](./task-management.md) - Task coordination
 - [Capturing Knowledge](./capturing-knowledge.md) - What to capture

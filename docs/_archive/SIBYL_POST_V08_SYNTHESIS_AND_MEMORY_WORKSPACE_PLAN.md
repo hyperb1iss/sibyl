@@ -3,7 +3,7 @@
 - Status: shipped as the v0.9 product foundation; still active as 1.0 source, synthesis, inspect,
   correction, import, and workspace design input.
 - Released in: `v0.9.0`
-- Current roadmap: [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
+- Current roadmap: [`SIBYL_1_0_ROADMAP.md`](../architecture/SIBYL_1_0_ROADMAP.md)
 - Depends on:
   - `docs/architecture/SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md`
   - `docs/architecture/SIBYL_V08_PURE_SURREAL_CLOSURE_EXECUTION_PLAN.md`

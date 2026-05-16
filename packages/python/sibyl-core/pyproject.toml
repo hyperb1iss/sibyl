@@ -14,14 +14,14 @@ name = "sibyl-core"
 dynamic = ["version"]
 description = "Core library for Sibyl - domain models, graph operations, and knowledge retrieval"
 readme = "README.md"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 requires-python = ">=3.13"
 authors = [{ name = "Stefanie Jane", email = "stef@hyperbliss.tech" }]
 keywords = ["knowledge-graph", "graph-rag", "persistent-memory", "task-workflow"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",
     "Typing :: Typed",

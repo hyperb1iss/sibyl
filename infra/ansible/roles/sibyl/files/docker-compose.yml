@@ -1,0 +1,101 @@
+# Sibyl single-host deployment stack: ghcr.io images fronted by Caddy,
+# which terminates TLS with a Let's Encrypt cert via the Cloudflare
+# DNS-01 challenge. Rendered config lives in the sibling .env. Managed
+# by the Ansible `sibyl` role and sibyl.service; not run by hand.
+
+name: sibyl
+
+services:
+  surrealdb:
+    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.0.5}
+    container_name: sibyl-surrealdb
+    command:
+      - start
+      - --log
+      - info
+      - --user
+      - ${SIBYL_SURREAL_USERNAME:-root}
+      - --pass
+      - ${SIBYL_SURREAL_PASSWORD:?set SIBYL_SURREAL_PASSWORD in .env}
+      - rocksdb:///data/sibyl.db
+    volumes:
+      - surreal_data:/data
+    healthcheck:
+      test: ["CMD", "/surreal", "is-ready", "--conn", "http://localhost:8000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    image: ghcr.io/hyperb1iss/sibyl-api:${SIBYL_VERSION:-0.9.0}
+    container_name: sibyl-backend
+    depends_on:
+      surrealdb:
+        condition: service_healthy
+    environment:
+      SIBYL_STORE: surreal
+      SIBYL_AUTH_STORE: surreal
+      SIBYL_COORDINATION_BACKEND: auto
+      SIBYL_SURREAL_URL: ws://surrealdb:8000/rpc
+      SIBYL_SURREAL_USERNAME: ${SIBYL_SURREAL_USERNAME:-root}
+      SIBYL_SURREAL_PASSWORD: ${SIBYL_SURREAL_PASSWORD:?set SIBYL_SURREAL_PASSWORD in .env}
+      SIBYL_JWT_SECRET: ${SIBYL_JWT_SECRET:?set SIBYL_JWT_SECRET in .env}
+      SIBYL_SERVER_URL: https://${SIBYL_DOMAIN:?set SIBYL_DOMAIN in .env}
+      SIBYL_FRONTEND_URL: https://${SIBYL_DOMAIN}/
+      SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY:?set SIBYL_OPENAI_API_KEY in .env}
+      SIBYL_ANTHROPIC_API_KEY: ${SIBYL_ANTHROPIC_API_KEY:?set SIBYL_ANTHROPIC_API_KEY in .env}
+      SIBYL_LLM_PROVIDER: anthropic
+      SIBYL_LLM_MODEL: claude-haiku-4-5
+      SIBYL_MCP_AUTH_MODE: ${SIBYL_MCP_AUTH_MODE:-on}
+      SIBYL_COOKIE_DOMAIN: ${SIBYL_DOMAIN}
+      SIBYL_COOKIE_SECURE: "true"
+      SIBYL_SERVER_HOST: 0.0.0.0
+      SIBYL_SERVER_PORT: "3334"
+    healthcheck:
+      test: ["CMD-SHELL", 'python -c "import httpx; httpx.get(''http://localhost:3334/api/health'')"']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  frontend:
+    image: ghcr.io/hyperb1iss/sibyl-web:${SIBYL_VERSION:-0.9.0}
+    container_name: sibyl-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_URL: https://${SIBYL_DOMAIN:?set SIBYL_DOMAIN in .env}
+      SIBYL_API_URL: http://backend:3334/api
+      NODE_ENV: production
+    restart: unless-stopped
+
+  caddy:
+    build:
+      context: ./caddy
+    container_name: sibyl-caddy
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SIBYL_DOMAIN: ${SIBYL_DOMAIN:?set SIBYL_DOMAIN in .env}
+      CF_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  surreal_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  default:
+    name: sibyl-network

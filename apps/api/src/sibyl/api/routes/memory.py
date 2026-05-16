@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -72,6 +73,7 @@ from sibyl_core.models.reflection import (
     memory_lifecycle_from_metadata,
     reflection_findings_from_metadata,
 )
+from sibyl_core.observability import elapsed_ms, telemetry_registry
 from sibyl_core.services.memory_autonomy import (
     ReflectionAutonomyDecision,
     ReflectionAutonomyOutcome,
@@ -1019,7 +1021,8 @@ def _correction_history(
     for event in audit_events:
         if not (
             event.action.startswith("memory.correction")
-            or event.action in {
+            or event.action
+            in {
                 "memory.hide",
                 "memory.redact",
                 "memory.restore",
@@ -1472,6 +1475,7 @@ async def remember_raw(
     if not principal_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
+    started_at = time.perf_counter()
     try:
         capture_surface = AGENT_DIARY_CAPTURE_SURFACE if request.diary else request.capture_surface
         source_id = request.source_id or f"{capture_surface}:manual"
@@ -1536,12 +1540,34 @@ async def remember_raw(
                 "tag_count": len(request.tags),
             },
         )
-        return _raw_memory_response(memory, policy_reason=write_decision.reason)
+        response = _raw_memory_response(memory, policy_reason=write_decision.reason)
+        telemetry_registry().record_memory_operation(
+            operation="remember_raw",
+            status="ok",
+            duration_ms=elapsed_ms(started_at),
+            result_count=1,
+        )
+        return response
     except ValueError as e:
+        telemetry_registry().record_memory_operation(
+            operation="remember_raw",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         raise HTTPException(status_code=400, detail=str(e)) from e
     except HTTPException:
+        telemetry_registry().record_memory_operation(
+            operation="remember_raw",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         raise
     except Exception as e:
+        telemetry_registry().record_memory_operation(
+            operation="remember_raw",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         log.exception("remember_raw_memory_failed", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to remember raw memory.") from e
 
@@ -1562,6 +1588,7 @@ async def recall_raw(
     if not principal_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
+    started_at = time.perf_counter()
     try:
         _validate_diary_request(
             diary=request.diary,
@@ -1617,7 +1644,7 @@ async def recall_raw(
                 "result_count": len(memories),
             },
         )
-        return RawMemoryRecallResponse(
+        response = RawMemoryRecallResponse(
             query=request.query,
             limit=request.limit,
             memories=[
@@ -1626,11 +1653,33 @@ async def recall_raw(
             ],
             policy_reason=read_decision.reason,
         )
+        telemetry_registry().record_memory_operation(
+            operation="recall_raw",
+            status="ok",
+            duration_ms=elapsed_ms(started_at),
+            result_count=len(response.memories),
+        )
+        return response
     except ValueError as e:
+        telemetry_registry().record_memory_operation(
+            operation="recall_raw",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         raise HTTPException(status_code=400, detail=str(e)) from e
     except HTTPException:
+        telemetry_registry().record_memory_operation(
+            operation="recall_raw",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         raise
     except Exception as e:
+        telemetry_registry().record_memory_operation(
+            operation="recall_raw",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
         log.exception("recall_raw_memory_failed", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to recall raw memory.") from e
 

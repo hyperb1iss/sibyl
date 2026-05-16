@@ -26,6 +26,7 @@ CONTENT_TABLES = (
     "api_idempotency_records",
     "source_imports",
     "system_settings",
+    "telemetry_rollups",
     "backup_settings",
     "backups",
 )

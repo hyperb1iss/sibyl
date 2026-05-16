@@ -4,12 +4,12 @@
 
 <p align="center">
   <strong>Build With Memory That Compounds</strong><br>
-  <sub>✦ Knowledge Graph + Task Workflow ✦</sub>
+  <sub>✦ Knowledge Graph + Agent Memory + Task Workflow ✦</sub>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Native_Memory-SurrealDB-e135ff?style=for-the-badge&logo=surrealdb&logoColor=white" alt="Native SurrealDB memory">
-  <img src="https://img.shields.io/badge/SurrealDB-Store-ff00a0?style=for-the-badge&logo=surrealdb&logoColor=white" alt="SurrealDB">
+  <img src="https://img.shields.io/badge/Memory-SurrealDB_Native-e135ff?style=for-the-badge&logo=surrealdb&logoColor=white" alt="SurrealDB-native memory">
+  <img src="https://img.shields.io/badge/Python-3.13-3776ab?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.13">
   <img src="https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/Next.js_16-Frontend-000000?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js">
   <img src="https://img.shields.io/badge/moon-Monorepo-af63d3?style=for-the-badge&logo=moonrepo&logoColor=white" alt="moon">
@@ -23,46 +23,49 @@
     <img src="https://img.shields.io/github/v/release/hyperb1iss/sibyl?style=flat-square&logo=github&logoColor=white" alt="Latest Release">
   </a>
   <a href="https://github.com/hyperb1iss/sibyl/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/hyperb1iss/sibyl?style=flat-square&logo=gnu&logoColor=white" alt="License">
+    <img src="https://img.shields.io/badge/License-AGPL_3.0-blue?style=flat-square&logo=gnu&logoColor=white" alt="License">
   </a>
 </p>
 
 <p align="center">
-  <a href="#-the-problem">Why Sibyl?</a> •
+  <a href="#-why-sibyl">Why Sibyl?</a> •
   <a href="#-quickstart">Quickstart</a> •
-  <a href="#-the-cli">CLI</a> •
-  <a href="#-web-ui">Web UI</a> •
-  <a href="#-faq">FAQ</a>
+  <a href="#-the-memory-loop">Memory Loop</a> •
+  <a href="#the-cli">CLI</a> •
+  <a href="#mcp-integration">MCP</a> •
+  <a href="#faq">FAQ</a>
 </p>
 
 ---
 
-## 🔮 The Vision
+## 🔮 Why Sibyl
 
-Persistent memory for your projects, tasks, and research. A collective intelligence that compounds
-with every session and makes your graph more useful over time.
+Persistent memory for your projects, tasks, and research. A collective intelligence
+that compounds with every session and makes your graph more useful over time.
 
-Most coding sessions start cold. No memory of what worked, what failed, or what you learned
-yesterday. Notes drift. Tasks scatter. Useful context disappears.
+Most coding sessions start cold. No memory of what worked, what failed, or what you
+learned yesterday. Notes drift. Tasks scatter. Useful context disappears.
 
 **Sibyl changes that.**
 
-A knowledge graph gives your work persistent memory. Epics and tasks structure execution. Search,
-docs ingestion, and graph exploration keep hard-won context close at hand for both humans and tools.
+A SurrealDB-native knowledge graph gives your work durable memory. Epics and tasks
+structure execution. A built-in agent memory loop (`recall → act → remember → reflect`)
+keeps hard-won context close at hand for humans and AI tools alike. Source-grounded
+synthesis turns what you already know into verified documents.
 
 **The whole becomes greater than the sum of its parts.**
 
 ## ✦ What You Get
 
-| Capability                     | What It Means                                                                                                |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| 🔮 **Collective Intelligence** | Every session compounds. The graph gets smarter as your team and tools capture real work                     |
-| 🎯 **Semantic Search**         | Find knowledge by meaning. "Authentication patterns" finds OAuth solutions even if "OAuth" isn't in the text |
-| 🔮 **Persistent Memory**       | What you learn today helps tomorrow. Patterns, decisions, and gotchas stay searchable across sessions        |
-| 🦋 **Task Workflow**           | Plan with epics and tasks. Track execution across sessions and teammates in one place                        |
-| 🌊 **Doc Ingestion**           | Crawl and index external documentation into your graph                                                       |
-| 💎 **Multi-Tenancy**           | Isolated graphs per organization. Enterprise-ready from day one                                              |
-| ⚡ **Graph Visualization**     | Interactive D3 visualization of your knowledge connections                                                   |
+| Capability | What It Means |
+| ---------- | ------------- |
+| 🔮 **Collective Intelligence** | Every session compounds. The graph gets smarter as your team and tools capture real work |
+| 🪄 **The Memory Loop** | `recall → act → remember → reflect` is built into the CLI, MCP, and hooks. Agents wake up with context and leave it behind |
+| 🎯 **Semantic Search** | Find knowledge by meaning. "Authentication patterns" finds OAuth solutions even when "OAuth" isn't in the text |
+| 🦋 **Task Workflow** | Plan with epics and tasks. Track execution across sessions and teammates in one place |
+| 🧪 **Source-Grounded Synthesis** | Draft verified documents from your own memory, with citation, freshness, and gap checks |
+| 🌊 **Doc & Source Ingestion** | Crawl documentation sites and import sources (like mailboxes) into the same graph |
+| 💎 **Multi-Tenancy** | Isolated graphs per organization, with role-based access. Enterprise-ready from day one |
 
 <table>
   <tr>
@@ -95,23 +98,16 @@ docs ingestion, and graph exploration keep hard-won context close at hand for bo
 curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
 ```
 
-Installs uv (if needed), installs sibyl-dev, starts Sibyl. Done.
+Installs uv (if needed), installs the `sibyl` CLI, and starts Sibyl. Done.
 
-### Manual Install (UV)
+### Manual Install
 
 ```bash
-uv tool install sibyl-dev
+uv tool install sibyl-dev      # or: pipx install sibyl-dev
 sibyl local start
 ```
 
-### Alternative: pipx
-
-```bash
-pipx install sibyl-dev
-sibyl local start
-```
-
-### CLI Commands
+### Lifecycle Commands
 
 ```bash
 sibyl local start    # Start all services
@@ -119,6 +115,7 @@ sibyl local stop     # Stop services
 sibyl local status   # Show running services
 sibyl local logs     # Follow logs
 sibyl local reset    # Nuke and start fresh
+sibyl local setup    # Install Claude/Codex skills + hooks
 ```
 
 ### First Five Minutes
@@ -126,18 +123,18 @@ sibyl local reset    # Nuke and start fresh
 Everything below runs against your local Sibyl stack. MCP wiring is optional.
 
 ```bash
-# Capture a fresh learning right away
-sibyl capture "Redis TTL mismatch caused the stale auth token bug" --type episode --tags auth,redis
+# Capture a learning the moment you find it
+sibyl remember "Stale auth token bug" \
+  "Redis TTL mismatch dropped the cached token early" --kind error_pattern
 
-# Search it back semantically
+# Pull it back as working context for your next session
+sibyl recall "auth token bug" --intent debug
+
+# Or search semantically across the whole graph
 sibyl search "stale auth token redis ttl"
 
 # Package wake-up context for the next coding session
 sibyl session bundle
-
-# Review raw captures that still need graph linkage
-sibyl archive list --surface cli
-# Then visit http://localhost:3337/archive?link=unlinked
 ```
 
 ### Development Setup
@@ -154,64 +151,24 @@ uv sync && pnpm install
 
 # Configure
 cp .env.example .env
-# Add SIBYL_JWT_SECRET and at least one LLM provider key
-# Embeddings can use SIBYL_OPENAI_API_KEY or SIBYL_GEMINI_API_KEY
+# Set SIBYL_JWT_SECRET (auto-generated in dev) and at least one LLM provider key.
+# Embeddings use SIBYL_OPENAI_API_KEY or SIBYL_GEMINI_API_KEY.
 
 # Install CLIs globally (editable, source changes reflect immediately)
 moon run install-dev
 
-# Launch the default (Surreal) local-dev path
+# Launch the default local-dev stack (SurrealDB + API + web)
 moon run dev
 
 # Verify
 curl http://localhost:3334/api/health
 ```
 
-`moon run dev` is the Surreal single-machine flow. It starts local SurrealDB and runs jobs plus
-schedules in-process under `sibyld serve`. Redis stays opt-in for multi-process or distributed dev
-work. Existing local legacy installs should be migrated from a previously exported archive with
-`sibyld migrate import <archive> --source-type legacy-archive --target-mode surreal`.
-
-### Retrieval Benchmarks
-
-```bash
-# Live artifact-producing evaluation against your running Sibyl stack
-moon run bench-live -- --label legacy --metadata store=legacy
-
-# Compare a later Surreal run against the legacy artifact
-moon run bench-live -- --label surreal --metadata store=surreal
-uv run python benchmarks/compare_eval_reports.py \
-  benchmarks/results/eval_unified_legacy_20260419_120000.json \
-  benchmarks/results/eval_unified_surreal_20260419_123000.json
-
-# Live read-only smoke and latency checks against the same stack
-moon run bench-live-smoke
-
-# Synthetic retrieval and ranking component benchmarks
-moon run bench-retrieval
-
-# Offline LongMemEval-style baseline (not the live runtime path)
-uv run python benchmarks/longmemeval_bench.py /path/to/longmemeval.json --mode hybrid
-```
-
-`bench-live` is the canonical runtime evaluation entry point. It exercises the real `/api/search`
-and RAG surfaces with your CLI auth context and writes JSON artifacts to `benchmarks/results/`
-unless you pass `--no-save`. Use `--label` and repeated `--metadata key=value` flags when you want
-to compare runs across stores or datasets.
-
-For graph migration drills, `sibyld export graph --org-id ...` now produces a restoreable graph
-artifact. That file can be loaded into the active graph runtime with `sibyld db restore ... --yes`
-before you run `bench-live`.
-
-`bench-live-smoke` keeps the existing read-only pytest latency and shape checks for local health
-verification.
-
-`bench-retrieval` and `benchmarks/longmemeval_bench.py` are intentionally offline. They are useful
-for relative tuning and apples-to-apples baselines, but they do not measure the production HTTP
-runtime path.
-
-See [`docs/testing/benchmark-methodology.md`](./docs/testing/benchmark-methodology.md) for the
-measurement ladder, artifact expectations, and how to avoid benchmark drift.
+`moon run dev` is the single-machine flow. When `SIBYL_SURREAL_URL` is unset it starts
+local SurrealDB, points the API at `ws://127.0.0.1:8000/rpc`, and stores data files in
+`.moon/cache/surreal-dev`. Jobs and schedules run in-process by default
+(`SIBYL_COORDINATION_BACKEND=local`). Set `SIBYL_SURREAL_URL` to connect to a hosted
+SurrealDB endpoint, including Surreal Cloud, instead.
 
 **Ports:**
 
@@ -222,50 +179,70 @@ measurement ladder, artifact expectations, and how to avoid benchmark drift.
 | SurrealDB    | 8000 | ws://localhost:8000/rpc |
 | Redis/Valkey | 6381 | optional                |
 
-## 🔮 Core Workflow
+## 🪄 The Memory Loop
 
-Sibyl is strongest when it stays close to the work itself:
+Sibyl is built around a durable loop that both humans and agents follow:
 
-1. **Capture knowledge** from debugging, implementation, and research
-2. **Search semantically** when you need the pattern again
-3. **Track execution** with projects, epics, and tasks
-4. **Ingest docs** so external references live beside internal learnings
-5. **Explore the graph** to see how ideas, tasks, and sources connect
+```
+recall ──▶ act ──▶ remember ──▶ reflect
+   ▲                                │
+   └────────────────────────────────┘
+```
 
-The happy path is local-first: start the stack, capture something useful, search it back, then add
-MCP clients or broader automation once the core loop feels good.
+1. **Recall** working context before you start. `sibyl recall "<goal>"` returns a
+   compact context pack: active work, decisions, plans, constraints, and recent
+   lessons, scoped to your linked project.
+2. **Act** with that context in hand.
+3. **Remember** durable knowledge as you learn it. `sibyl remember` stores decisions,
+   plans, ideas, claims, procedures, and gotchas so the next session does not
+   rediscover them.
+4. **Reflect** at clean breakpoints. `sibyl reflect` distills raw session notes into
+   reviewable memory candidates and can persist them into the graph.
+
+```bash
+sibyl recall "ship the context graph" --intent build
+sibyl remember "Use context packs" "Group memory before dispatching agents" --kind decision
+sibyl reflect "We decided X. Next we build Y." --title "Planning checkpoint" --persist
+```
+
+Memory is graded, auditable, and scoped. Raw captures stay verbatim, reflection
+candidates pass an automatic review before promotion, and a nightly dream-cycle keeps
+the graph consolidated. See [`docs/guide/capturing-knowledge.md`](docs/guide/capturing-knowledge.md).
 
 ## The CLI
 
-The CLI is the power-user interface. Clean output, optimized for scripting and durable project
-workflows.
+The CLI is the power-user interface. Clean output, built for scripting and durable
+project workflows.
 
 ```bash
-# Install globally
-moon run cli:install
-
-# Or install the published package directly
-uv tool install sibyl-dev
+uv tool install sibyl-dev    # published package
+moon run cli:install         # or install from source
 ```
 
-### Core Commands
+### Command Families
 
 ```bash
-# Search your knowledge
+# Memory loop
+sibyl recall "<goal>"                 # Compile working context
+sibyl remember "Title" "Body"         # Store durable memory
+sibyl reflect "<notes>" --persist     # Distill notes into candidates
+sibyl capture "<quick note>"          # Fast verbatim capture
 sibyl search "authentication patterns"
-sibyl search "OAuth" --type pattern
 
-# Add knowledge
-sibyl add "Redis connection pooling" "Pool size must be >= concurrent requests to avoid blocking"
+# Knowledge & graph
+sibyl add "Redis pooling" "Pool size must be >= concurrent requests"
+sibyl explore related ent_xyz         # Find connected entities
+sibyl entity show <id>                # Full content by ID
 
 # Task workflow
 sibyl task list --status todo,doing
 sibyl task start <task_id>
-sibyl task complete <task_id> --learnings "Key insight: always check TTL first"
+sibyl task complete <task_id> --learnings "Key insight: check TTL first"
 
-# Explore the graph
-sibyl explore related ent_xyz    # Find connected entities
-sibyl explore traverse ent_xyz   # Walk outward from an entity
+# Synthesis, sources, projects, orgs
+sibyl synthesis draft "Onboarding guide"
+sibyl crawl add "https://docs.example.com" --name "Example Docs"
+sibyl project link proj_xxx
 ```
 
 ### Task Workflow
@@ -280,23 +257,27 @@ backlog ──▶ todo ──▶ doing ──▶ review ──▶ done ──▶
 ### Output Formats
 
 ```bash
-sibyl task list                  # Table output (default)
-sibyl task list --json           # JSON for scripts
-sibyl task list --csv            # For spreadsheets
+sibyl task list           # Table output (default)
+sibyl task list --json    # JSON for scripts
+sibyl task list --csv     # For spreadsheets
 ```
 
-## Web UI
+Full command reference: [`docs/cli/`](docs/cli/).
+
+## 🦋 Web UI
 
 A full admin interface at `http://localhost:3337`:
 
 - **Dashboard:** Stats overview, recent activity, quick actions
 - **Tasks:** Kanban-style workflow with inline editing
-- **Graph:** Interactive D3 visualization of knowledge connections
+- **Graph:** Interactive force-directed visualization of knowledge connections
 - **Search:** Semantic search with filters
-- **Sources:** Configure documentation crawling
-- **Settings:** Organizations, API keys, preferences
+- **Memory:** The memory workspace, raw captures, source imports, and synthesis
+- **Sources:** Configure and inspect documentation crawling
+- **Settings:** Organizations, teams, API keys, security, LLM routing, backups
 
-**Built with:** Next.js 16, React 19, React Query, Tailwind CSS, SilkCircuit design system
+**Built with:** Next.js 16, React 19, React Query, Tailwind CSS 4, and the SilkCircuit
+design system.
 
 ## MCP Integration
 
@@ -316,44 +297,42 @@ Connect Claude Code, Cursor, or any MCP client to Sibyl:
 }
 ```
 
-### The 4-Tool API
+### The Tool API
 
-| Tool      | Purpose            | Examples                              |
-| --------- | ------------------ | ------------------------------------- |
-| `search`  | Find by meaning    | Patterns, tasks, docs, errors         |
-| `explore` | Navigate structure | List entities, traverse relationships |
-| `add`     | Create knowledge   | Episodes, patterns, tasks             |
-| `manage`  | Lifecycle & admin  | Task workflow, crawling, health       |
+Sibyl exposes eleven MCP tools, organized by what they do:
+
+| Tool | Purpose |
+| ---- | ------- |
+| `search` | Unified semantic search across graph and crawled docs |
+| `context` | Compile an agent context pack for a goal (intent + depth) |
+| `explore` | Navigate the graph: list, related, traverse, dependencies |
+| `add` | Create knowledge: episodes, patterns, tasks, projects |
+| `remember` | Capture durable memory: decisions, plans, ideas, claims |
+| `reflect` | Distill raw notes into reviewable memory candidates |
+| `synthesis_plan` | Plan source-grounded synthesis from authorized memory |
+| `synthesis_draft` | Draft, verify, and optionally remember an artifact |
+| `synthesis_verify` | Verify citation, freshness, and gap coverage |
+| `manage` | State changes: task lifecycle, crawling, analysis, admin |
+| `logs` | Recent server logs (requires OWNER role) |
 
 ### Claude Code Skills & Hooks
 
 Sibyl ships with [skills](https://docs.anthropic.com/en/docs/claude-code/skills) and
-[hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) for built-in Claude Code integration.
-
-**Install:**
+[hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) for built-in Claude Code
+integration.
 
 ```bash
-moon run skills:install    # Install /sibyl skill
+moon run skills:install    # Install the /sibyl skill
 moon run hooks:install     # Install context hooks
 ```
 
-**`/sibyl` skill:** Full CLI access from Claude Code:
+The `/sibyl` skill gives Claude Code full CLI access. Hooks inject context
+automatically:
 
-```bash
-/sibyl search "authentication patterns"
-/sibyl task list --status doing
-/sibyl add "OAuth insight" "Token refresh needs..."
-```
-
-**Hooks:** Automatic context injection:
-
-| Hook                 | Trigger        | Action                                                                |
-| -------------------- | -------------- | --------------------------------------------------------------------- |
-| **SessionStart**     | Session begins | Prints a compact session bundle with active tasks and relevant memory |
-| **UserPromptSubmit** | Every prompt   | Searches graph, injects relevant patterns                             |
-
-The `UserPromptSubmit` hook extracts keywords from your prompt, searches Sibyl, and injects matching
-patterns as context, so Claude always knows what you've learned before.
+| Hook | Trigger | Action |
+| ---- | ------- | ------ |
+| **SessionStart** | Session begins | Prints a compact session bundle with active tasks and relevant memory |
+| **UserPromptSubmit** | Every prompt | Searches the graph and injects relevant patterns as context |
 
 See [`skills/`](skills/) and [`hooks/`](hooks/) for implementation details.
 
@@ -362,26 +341,32 @@ See [`skills/`](skills/) and [`hooks/`](hooks/) for implementation details.
 ```
 sibyl/
 ├── apps/
-│   ├── api/              # FastAPI + MCP server (sibyld)
-│   ├── cli/              # REST client CLI (sibyl)
-│   └── web/              # Next.js 16 frontend
+│   ├── api/              # sibyld - FastAPI + MCP server daemon
+│   ├── cli/              # sibyl  - REST client CLI
+│   ├── web/              # Next.js 16 frontend
+│   └── e2e/              # End-to-end tests
 ├── packages/python/
-│   └── sibyl-core/       # Shared library (models, graph, tools)
+│   └── sibyl-core/       # Shared library (models, graph, ai, retrieval, services)
 ├── skills/               # Claude Code skills
-├── charts/               # Helm charts for K8s
-└── docs/                 # Documentation
+├── hooks/                # Claude Code context hooks
+├── charts/               # Helm chart for Kubernetes
+├── infra/                # Ansible self-host + local compose
+└── docs/                 # Documentation site (VitePress)
 ```
 
 **Stack:**
 
-- **Backend:** Python 3.13 / FastMCP / FastAPI / SurrealDB-native memory
+- **Backend:** Python 3.13 / FastAPI / FastMCP / SurrealDB-native runtime
 - **Frontend:** Next.js 16 / React 19 / React Query / Tailwind 4
-- **Storage:** SurrealDB (graph + content + auth, unified). PostgreSQL remains only for retained
-  migration/archive policy.
+- **Storage:** SurrealDB unifies graph, content, and auth. PostgreSQL is retained only
+  for migration and archive rehearsal.
+- **AI:** A native LLM substrate routes Anthropic, OpenAI, and Gemini per surface, with
+  pluggable embeddings.
+- **Coordination:** In-process by default; Redis/Valkey is optional for multi-process
+  or distributed deployments.
 - **Build:** moonrepo + uv (Python) + pnpm (TypeScript)
-- **Integrations:** Claude Code, MCP clients, and project-local hooks
-- **Compatibility:** Graphiti remains only for named fallback, compare, admin, and migration
-  surfaces while the native loop owns default context retrieval.
+- **Compatibility:** Graphiti is an optional extra (`sibyl-core[compatibility]`) used
+  only for named migration and compatibility surfaces, not the default memory loop.
 
 See [`docs/guide/why-surreal.md`](docs/guide/why-surreal.md) for the rationale and
 [`docs/guide/storage-modes.md`](docs/guide/storage-modes.md) for the mode matrix.
@@ -391,16 +376,14 @@ See [`docs/guide/why-surreal.md`](docs/guide/why-surreal.md) for the rationale a
 ### JWT Sessions (Web UI)
 
 ```bash
-SIBYL_JWT_SECRET=your-secret-key    # Required
-SIBYL_ACCESS_TOKEN_EXPIRE_MINUTES=60  # Optional (default: 60)
+SIBYL_JWT_SECRET=your-secret-key        # Required (auto-generated in dev)
+SIBYL_ACCESS_TOKEN_EXPIRE_MINUTES=60    # Optional (default: 60)
 ```
 
 ### API Keys (Programmatic Access)
 
 ```bash
-# Create via CLI
 sibyl auth api-key create --name "CI/CD" --scopes mcp,api:read
-
 # Scopes: mcp, api:read, api:write
 ```
 
@@ -411,9 +394,12 @@ SIBYL_GITHUB_CLIENT_ID=...
 SIBYL_GITHUB_CLIENT_SECRET=...
 ```
 
+MCP endpoints enforce Bearer auth when a JWT secret is set
+(`SIBYL_MCP_AUTH_MODE=auto`). See [`docs/api/`](docs/api/) for the full auth reference.
+
 ## Deployment
 
-### Docker Compose (Production)
+### Docker Compose
 
 ```bash
 docker compose -f docker-compose.prod.yml up -d
@@ -433,160 +419,100 @@ See [`docs/deployment/`](docs/deployment/) for detailed guides:
 - [Kubernetes](docs/deployment/kubernetes.md)
 - [Environment Variables](docs/deployment/environment.md)
 
-## Development
+## Knowledge Model
 
-```bash
-# Install CLIs globally (editable, picks up source changes)
-moon run install-dev
+Sibyl models a wide range of entity types so memory stays structured, not just a pile
+of notes:
 
-# Install CLIs globally (frozen copy, for CI / production)
-moon run install
+- **Work:** `task`, `epic`, `project`, `milestone`
+- **Knowledge:** `pattern`, `episode`, `procedure`, `rule`, `guide`, `error_pattern`
+- **Memory:** `decision`, `plan`, `idea`, `claim`, `artifact`, `session`, `note`
+- **Sources:** `source`, `document`, `domain`, `community`
 
-# Start everything (Surreal-first, default)
-moon run dev
-
-# Individual services
-moon run dev-api          # API only
-moon run dev-web          # Frontend only
-
-# Quality checks
-moon run api:test         # Run API tests
-moon run api:lint         # Lint
-moon run web:typecheck    # TypeScript check
-moon run core:check       # Full check on core library
-
-# Database
-moon run docker-up        # Start default local data services (SurrealDB)
-moon run docker-down      # Stop databases
-```
-
-`moon run dev` is the Surreal server-mode flow. When `SIBYL_SURREAL_URL` is unset it starts local
-SurrealDB, points the API at `ws://127.0.0.1:8000/rpc`, and stores local database files in
-`.moon/cache/surreal-dev`. Jobs and schedules run in-process by default with
-`SIBYL_COORDINATION_BACKEND=local`. Set `SURREAL_DATA_DIR=/your/path` if you want the local Docker
-volume somewhere else. Set `SIBYL_SURREAL_URL` to a hosted SurrealDB endpoint, including Surreal
-Cloud, to skip the local database and connect remotely instead.
-
-If you want Redis-backed coordination for multi-process dev, set `SIBYL_COORDINATION_BACKEND=redis`
-and start Redis explicitly:
-
-```bash
-docker compose --profile redis up -d surrealdb redis
-moon run dev
-```
-
-If local legacy data exists and no local Surreal data has been created yet, `moon run dev` prints
-the archive import path instead of starting SurrealDB. Import a previously exported archive with
-`uv run --directory apps/api sibyld migrate import <archive> --source-type legacy-archive
---target-mode surreal --yes --clean`, then start dev again. Use `--restore-database-dump` only
-for migration rehearsal or rollback validation with
-`--source-type legacy-archive --target-mode postgres-rehearsal`.
-
-## Entity Types
-
-| Type       | What It Holds                   |
-| ---------- | ------------------------------- |
-| `pattern`  | Reusable coding patterns        |
-| `episode`  | Temporal learnings, discoveries |
-| `task`     | Work items with full workflow   |
-| `project`  | Container for related work      |
-| `epic`     | Feature-level grouping          |
-| `rule`     | Sacred constraints, invariants  |
-| `source`   | Knowledge origins (URLs, repos) |
-| `document` | Crawled/ingested content        |
+The full registry and how types relate is documented in
+[`docs/guide/entity-types.md`](docs/guide/entity-types.md).
 
 ## FAQ
 
 ### Who is Sibyl for?
 
-**Solo developers** who want durable memory for projects and debugging. **Teams** who want shared
-knowledge that compounds. **Anyone** building with AI who is tired of repeating context every
-session.
+**Solo developers** who want durable memory for projects and debugging. **Teams** who
+want shared knowledge that compounds. **Anyone** building with AI who is tired of
+repeating context every session.
 
 ### Do I need AI agents to use Sibyl?
 
-No. The knowledge graph and task system are the core product: documentation, task tracking, captured
-learnings, and semantic search over what your team already knows.
+No. The knowledge graph and task system are the core product: documentation, task
+tracking, captured learnings, and semantic search over what your team already knows.
+AI agents make the memory loop automatic, but they are not required.
 
 ### How does it compare to Mem0 / LangMem / similar?
 
-Sibyl is **self-hosted and open source**. You own your data. It includes a full **task workflow
-system**, not just memory. It has a **web UI** for humans, not just APIs for machines. And it keeps
-knowledge, tasks, and docs connected in one graph instead of scattering them across tools.
+Sibyl is **self-hosted and open source**. You own your data. It includes a full **task
+workflow system**, not just memory. It has a **web UI** for humans, not just APIs for
+machines. And it keeps knowledge, tasks, and docs connected in one graph instead of
+scattering them across tools.
 
 ### What LLM APIs do I need?
 
-- **Anthropic, OpenAI, or Gemini** (required): For language-model surfaces such as crawler
-  extraction and synthesis
-- **OpenAI or Gemini** (required): For embeddings and semantic search
+- **Anthropic, OpenAI, or Gemini** (required): for language-model surfaces such as
+  crawler extraction, synthesis, and reflection.
+- **OpenAI or Gemini** (required): for embeddings and semantic search.
 
-The language-model provider and model can be configured globally or per surface with
-`SIBYL_LLM_PROVIDER`, `SIBYL_LLM_MODEL`, `SIBYL_LLM_CRAWLER_MODEL`, and
-`SIBYL_LLM_SYNTHESIS_MODEL`. The web admin settings page can also save instance-wide database
-settings when no environment override is active.
-
-OpenAI defaults to `text-embedding-3-small`; Gemini defaults to `gemini-embedding-2`. Changing
-embedding provider, model, or dimensions requires re-embedding existing graph and document vectors
-before comparing old and new search results.
-
-A typical solo developer uses ~$5/month in API costs.
-
-### Can multiple people collaborate?
-
-Yes. Organizations have isolated graphs with role-based access. Multiple users can share knowledge,
-assign tasks, and collaborate on the same graph.
+Providers and models are configurable globally or per surface through the native LLM
+substrate. The web admin settings page can also save instance-wide model routing. A
+typical solo developer uses around $5/month in API costs.
 
 ### Is it production-ready?
 
-Sibyl is in active development (v0.6.x). SurrealDB is now the default runtime for graph, content,
-and auth, with legacy FalkorDB/PostgreSQL paths retained only for migration and archive rehearsal.
-**We use Sibyl to build Sibyl**. Every feature, task, and learning you see here was tracked inside
-the system itself.
+Sibyl is in active development (v0.9.x, heading toward 1.0). SurrealDB is the default
+runtime for graph, content, and auth; legacy PostgreSQL paths are retained only for
+migration and archive rehearsal. **We use Sibyl to build Sibyl.** Every feature, task,
+and learning you see here was tracked inside the system itself.
 
 ## 🎯 Roadmap
 
-**Where we're headed after v0.6.0:**
+**Where we're headed after v0.9.0, toward 1.0:**
 
-- **Pure Surreal cleanup:** keep legacy services out of default runtime, charts, and docs while
-  closing the remaining archive rollback policy.
-- **Native memory loop:** run `recall -> act -> remember -> reflect` through measured SurrealDB
-  context packs, policy decisions, and default-native retrieval across CLI, MCP, API, prompt hooks,
-  and session startup.
-- **Context quality:** make wake, recall, and deep-search packs measurable for grounding,
-  permissions, latency, and token budgets.
-- **Graphiti exit:** expand the direct Surreal write paths, keep compatibility explicitly named, and
-  use the checked inventory to retire Graphiti dependencies deliberately.
-- **Human memory UX:** expose raw sources, visibility, correction, promotion, and agent access in
-  a way that feels legible instead of spooky.
+- **Reflection OS:** automatic reflection review, nightly dream-cycle maintenance, and
+  lifecycle findings that keep the graph consolidated without manual curation.
+- **Memory trust:** audit receipts, scoped memory spaces, promotion review, and sharing
+  controls so memory is legible instead of spooky.
+- **Synthesis:** richer source-grounded artifacts with citation, freshness, and gap
+  verification across more output types.
+- **Source ingestion:** more import adapters beyond mailboxes, with resumable jobs.
+- **Self-hosting:** one-command deploy on a tailnet with Ansible.
 
-The graph gets smarter. The workflow gets sharper.
+The graph gets smarter. The workflow gets sharper. See
+[`docs/architecture/SIBYL_1_0_ROADMAP.md`](docs/architecture/SIBYL_1_0_ROADMAP.md).
 
 ## 💜 Philosophy
 
-### Search Before Implementing
+### Recall Before You Act
 
-The graph knows things. Before you code:
+The graph knows things. Before you code, pull context:
 
 ```bash
-sibyl search "what you're building"
+sibyl recall "what you're building" --intent build
 sibyl search "error you hit" --type episode
 ```
 
 ### Work In Task Context
 
-Never do significant work outside a task. Tasks provide traceability, progress tracking, and
-knowledge linking.
+Never do significant work outside a task. Tasks provide traceability, progress
+tracking, and knowledge linking.
 
-### Capture What You Learn
+### Remember What You Learn
 
 If it took time to figure out, save it:
 
 ```bash
-sibyl add "Descriptive title" "What, why, how, caveats"
+sibyl remember "Descriptive title" "What, why, how, caveats" --kind decision
 ```
 
-**Bad:** "Fixed the bug" **Good:** "JWT refresh fails when Redis TTL expires. Root cause: token
-service doesn't handle WRONGTYPE. Fix: try/except with regeneration fallback."
+**Bad:** "Fixed the bug." **Good:** "JWT refresh fails when Redis TTL expires. Root
+cause: token service does not handle WRONGTYPE. Fix: try/except with regeneration
+fallback."
 
 ### Complete With Learnings
 
@@ -598,7 +524,7 @@ The graph should be smarter after every session.
 
 ## Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+We welcome contributions. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ```bash
 # Fork, clone, then:
@@ -611,7 +537,7 @@ moon run :check           # Lint + typecheck + test
 
 ## License
 
-AGPL-3.0. See [LICENSE](LICENSE)
+AGPL-3.0. See [LICENSE](LICENSE).
 
 ---
 
@@ -627,7 +553,7 @@ AGPL-3.0. See [LICENSE](LICENSE)
 
 <p align="center">
   <sub>
-    If Sibyl helps your team remember, give us a ⭐ or <a href="https://ko-fi.com/hyperb1iss">support the project</a>
+    If Sibyl helps your team remember, give us a star or <a href="https://ko-fi.com/hyperb1iss">support the project</a>
     <br><br>
     ✦ Built with obsession by <a href="https://hyperbliss.tech"><strong>Hyperbliss Technologies</strong></a> ✦
   </sub>

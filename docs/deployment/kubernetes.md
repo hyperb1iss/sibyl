@@ -72,8 +72,8 @@ backend:
   replicaCount: 2
 
   image:
-    repository: ghcr.io/hyperb1iss/sibyl
-    tag: "0.1.0"
+    repository: ghcr.io/hyperb1iss/sibyl-api
+    tag: "0.9.0"
     pullPolicy: Always
 
   # Reference pre-created secrets
@@ -93,8 +93,8 @@ backend:
     port: "6379"
     jobsDb: "1"
     rateLimitDb: "4"
-    existingSecret: sibyl-secrets
-    secretKey: SIBYL_REDIS_PASSWORD
+    existingSecret: sibyl-redis
+    secretKey: password
 
   env:
     SIBYL_SERVER_HOST: "0.0.0.0"
@@ -137,7 +137,7 @@ frontend:
 
   image:
     repository: ghcr.io/hyperb1iss/sibyl-web
-    tag: "0.1.0"
+    tag: "0.9.0"
 
   autoscaling:
     enabled: true

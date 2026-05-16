@@ -244,7 +244,7 @@ POST /api/search/explore
 Get project-level metrics:
 
 ```http
-GET /api/metrics/project/{project_id}
+GET /api/metrics/projects/{project_id}
 ```
 
 **Response:**

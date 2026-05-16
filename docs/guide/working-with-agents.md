@@ -56,11 +56,12 @@ Run `/sibyl` at the start of every session. This loads:
 - Relevant patterns and learnings
 - Project-specific knowledge
 
-### Workflow
+### The Memory Loop
 
-1. **Research first**: Search before implementing
-2. **Track tasks**: Never do significant work without a task
-3. **Capture learnings**: Add non-obvious discoveries to the graph
+1. **Recall first**: Pull working context before implementing
+2. **Act**: Track work in a task so progress survives the session
+3. **Remember**: Capture non-obvious discoveries as durable memory
+4. **Reflect**: Distill session notes into reviewable candidates
 ```
 
 See [Setting Up Prompts](./setting-up-prompts.md) for a complete template.
@@ -82,24 +83,24 @@ For direct tool access, add Sibyl to your MCP configuration:
 
 The CLI is preferred for most operations. It uses fewer tokens and is more expressive.
 
-## The Research → Do → Reflect Cycle
+## The Memory Loop
 
-Every effective session follows this pattern:
+Every effective session follows the same cycle: **recall, act, remember, reflect.**
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  1. RESEARCH                                                │
+│  1. RECALL                                                  │
 │                                                             │
-│  Before implementing anything, search for existing          │
-│  patterns. Your past self (or other agents) may have        │
-│  already solved this problem.                               │
+│  Before implementing anything, pull working context.        │
+│  Your past self (or other agents) may have already          │
+│  solved this problem.                                       │
 │                                                             │
-│  "Search sibyl for OAuth patterns"                          │
+│  "Recall context for the OAuth work"                        │
 │  "Check if we've solved this before"                        │
 └─────────────────────────┬───────────────────────────────────┘
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  2. DO                                                      │
+│  2. ACT                                                     │
 │                                                             │
 │  Work on your task with the context you found.              │
 │  Track progress with task lifecycle commands.               │
@@ -109,15 +110,17 @@ Every effective session follows this pattern:
 └─────────────────────────┬───────────────────────────────────┘
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  3. REFLECT                                                 │
+│  3. REMEMBER + REFLECT                                      │
 │                                                             │
-│  When you finish, capture what you learned.                 │
-│  Future sessions will thank you.                            │
+│  When you finish, capture what you learned, then            │
+│  reflect session notes into durable memory.                 │
 │                                                             │
 │  "Complete the task with learnings about redirect URIs"     │
-│  "Add a pattern for the retry logic we figured out"         │
+│  "Remember a pattern for the retry logic we figured out"    │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+See [The Memory Loop](./memory-loop.md) for the cycle in depth.
 
 ## Talking to Your Agent
 
@@ -177,6 +180,7 @@ When you discover something non-obvious:
 
 | When You Want To...       | Say...                                      |
 | ------------------------- | ------------------------------------------- |
+| Recall working context    | "Recall context for X before we start"      |
 | Search for patterns       | "Search sibyl for X"                        |
 | Check task status         | "What tasks are in progress?"               |
 | Start a task              | "Start the X task"                          |
@@ -351,6 +355,7 @@ Agent: [Captures learning]
 
 ## Next Steps
 
+- [The Memory Loop](./memory-loop.md) - The cycle in depth
 - [Setting Up Prompts](./setting-up-prompts.md) - Complete CLAUDE.md template
 - [Skills & Hooks](./skills.md) - Learn about the skill system
 - [Task Management](./task-management.md) - Full task workflow

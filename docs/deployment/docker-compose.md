@@ -55,28 +55,40 @@ SIBYL_COORDINATION_BACKEND=redis moon run dev
 
 ## Service Definitions
 
-The `docker-compose.yml` defines a Surreal-first local stack plus opt-in profiles:
+The root `docker-compose.yml` defines a Surreal-first local stack plus an opt-in `redis` profile.
+It runs only the data services; the API and web apps run natively for hot reload.
 
 ```yaml
 services:
   surrealdb:
     image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.0.5}
-    container_name: sibyl-surrealdb
+    container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-surrealdb
+    command:
+      [
+        "start", "--log", "info",
+        "--user", "${SIBYL_SURREAL_USERNAME:-root}",
+        "--pass", "${SIBYL_SURREAL_PASSWORD:-root}",
+        "${SIBYL_SURREAL_PATH:-rocksdb:///data/sibyl.db}",
+      ]
     ports:
-      - "8000:8000"
+      - "${SIBYL_SURREAL_PORT:-8000}:8000"
     volumes:
-      - ./.moon/cache/surreal-dev:/data
+      # `:U` chowns the bind mount to the container UID under rootless podman
+      - "${SURREAL_DATA_DIR:-./.moon/cache/surreal-dev}:/data:U"
 
   redis:
     image: valkey/valkey:8-alpine
-    container_name: sibyl-redis
+    container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-redis
     profiles: ["redis"]
     ports:
-      - "6381:6379"
+      - "${SIBYL_REDIS_PORT:-6381}:6379"
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
 ```
 
 The default image is pinned to SurrealDB server `v3.0.5` for reproducible local and CI behavior.
-Override `SIBYL_SURREAL_IMAGE` when rehearsing a newer server patch.
+Override `SIBYL_SURREAL_IMAGE` when rehearsing a newer server patch. The root compose stores
+SurrealDB data in a bind mount under `.moon/cache/surreal-dev` so it survives container churn and is
+easy to inspect.
 
 ## Port Mappings
 
@@ -189,31 +201,72 @@ services:
     ports:
       - "3337:3337"
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:3334
+      NEXT_PUBLIC_API_URL: ${SIBYL_SERVER_URL:-http://localhost:3334}
+      SIBYL_API_URL: http://backend:3334/api
     depends_on:
       backend:
         condition: service_healthy
 
-  # ... databases as above
+  surrealdb:
+    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.0.5}
+    ports:
+      - "${SIBYL_SURREAL_PORT:-8000}:8000"
+    volumes:
+      - surreal_data:/data
+    healthcheck:
+      test: ["CMD", "/surreal", "is-ready", "--conn", "http://localhost:8000"]
+
+volumes:
+  surreal_data:
 ```
+
+The production compose persists SurrealDB to a named Docker volume (`surreal_data`) rather than a
+bind mount. `NEXT_PUBLIC_API_URL` is the browser-facing API URL; `SIBYL_API_URL` is the in-network
+URL the Next.js server uses for SSR fetches.
+
+## Quickstart Compose (Zero-Config)
+
+For individual developers who want a running stack in minutes using pre-built images, use
+`docker-compose.quickstart.yml`. No `.env` file is required; API keys are entered through the web UI
+during onboarding and stored encrypted in the database.
+
+```bash
+# Start with pre-built images from ghcr.io
+docker compose -f docker-compose.quickstart.yml up -d
+
+# Open http://localhost:3337 and complete onboarding
+
+# Run alongside an existing dev setup on offset ports
+SIBYL_SERVER_PORT=3344 SIBYL_WEB_PORT=3347 SIBYL_SURREAL_PORT=8010 \
+  docker compose -f docker-compose.quickstart.yml -p sibyl-qs up -d
+```
+
+Differences from the production compose:
+
+- Pulls `ghcr.io/hyperb1iss/sibyl-api` and `sibyl-web` images instead of building locally
+- `SIBYL_JWT_SECRET` and `SIBYL_SETTINGS_KEY` auto-generate when unset (persisted in the
+  `sibyl_secrets` volume mounted at `/root/.sibyl`)
+- Runs with `SIBYL_ENVIRONMENT=development` and a `sibyl_quickstart` default Surreal password
+- The backend service is named `api` and the frontend `web`
 
 ## Volume Persistence
 
-The default Surreal local-dev path persists data in the bind mount configured by `SURREAL_DATA_DIR`
-or `.moon/cache/surreal-dev` by default.
+The root local-dev compose persists SurrealDB data in the bind mount configured by
+`SURREAL_DATA_DIR`, defaulting to `.moon/cache/surreal-dev`.
 
 ```bash
 # Inspect the default local Surreal data directory
 ls .moon/cache/surreal-dev
 ```
 
-Legacy services still use Docker volumes:
+The production and quickstart compose files persist SurrealDB to named Docker volumes
+(`surreal_data` and `sibyl_surreal`):
 
 ```bash
 docker volume ls | grep sibyl
 
 # Remove volumes (DESTROYS DATA)
-docker compose down -v
+docker compose -f docker-compose.prod.yml down -v
 ```
 
 ## Connecting to Databases

@@ -28,15 +28,18 @@ sibyl task show <task_id> [options]
 
 ### Arguments
 
-| Argument  | Required | Description  |
-| --------- | -------- | ------------ |
-| `task_id` | Yes      | Full task ID |
+| Argument  | Required | Description                       |
+| --------- | -------- | --------------------------------- |
+| `task_id` | Yes      | Task ID or unambiguous prefix     |
 
 ### Options
 
 | Option   | Short | Description |
 | -------- | ----- | ----------- |
 | `--json` | `-j`  | JSON output |
+
+Task ID arguments accept an unambiguous prefix, so `sibyl task show task_abc1` resolves as long
+as only one task matches.
 
 ### Example
 
@@ -239,11 +242,14 @@ sibyl task complete <task_id> [options]
 
 ### Options
 
-| Option        | Short | Description                        |
-| ------------- | ----- | ---------------------------------- |
-| `--hours`     | `-h`  | Actual hours spent                 |
-| `--learnings` | `-l`  | Key learnings (creates an episode) |
-| `--json`      | `-j`  | JSON output                        |
+| Option                  | Short | Default | Description                                     |
+| ----------------------- | ----- | ------- | ----------------------------------------------- |
+| `--hours`               | `-h`  | (none)  | Actual hours spent                              |
+| `--learnings` / `--note` | `-l` | (none)  | Key learnings (creates an episode)              |
+| `--learnings-file`      |       | (none)  | Read learnings from a file                      |
+| `--max-size`            |       | 1048576 | Maximum learnings file size in bytes            |
+| `--follow-symlinks`     |       | false   | Allow `--learnings-file` to read through symlinks |
+| `--json`                | `-j`  | false   | JSON output                                     |
 
 ### Basic Completion
 
@@ -286,6 +292,14 @@ This creates a linked episode in the knowledge graph. :::
 sibyl task complete task_abc123 \
   --hours 6.5 \
   --learnings "PostgreSQL connection pooling was the root cause. PgBouncer with transaction mode resolved the issue. Key insight: always check pool_mode when debugging connection timeouts."
+```
+
+### Learnings from a File
+
+For longer write-ups, read learnings from a file instead of an inline string:
+
+```bash
+sibyl task complete task_abc123 --hours 6.5 --learnings-file ./task-notes.md
 ```
 
 ---
@@ -350,19 +364,21 @@ sibyl task update <task_id> [options]
 
 | Option          | Short | Description                                                   |
 | --------------- | ----- | ------------------------------------------------------------- |
-| `--status`      | `-s`  | Status: backlog, todo, doing, blocked, review, done, archived |
+| `--status`      | `-s`  | Status: todo, doing, blocked, review, done                    |
 | `--priority`    | `-p`  | Priority: critical, high, medium, low, someday                |
 | `--complexity`  |       | Complexity: trivial, simple, medium, complex, epic            |
 | `--title`       |       | Task title                                                    |
-| `--description` | `-d`  | Task description                                              |
+| `--description` | `-d`  | Task description/content                                      |
 | `--assignee`    | `-a`  | Assignee                                                      |
-| `--epic`        | `-e`  | Epic ID                                                       |
+| `--epic`        | `-e`  | Epic ID to group under                                        |
 | `--feature`     | `-f`  | Feature area                                                  |
 | `--tags`        |       | Comma-separated tags (replaces existing)                      |
 | `--tech`        |       | Comma-separated technologies (replaces existing)              |
-| `--add-dep`     |       | Add dependency on another task (task ID)                      |
-| `--remove-dep`  |       | Remove dependency on another task (task ID)                   |
+| `--add-dep`     |       | Comma-separated task IDs to add as dependencies               |
+| `--remove-dep`  |       | Comma-separated task IDs to remove as dependencies            |
 | `--json`        | `-j`  | JSON output                                                   |
+
+To archive a task, use [`task archive`](#task-archive) rather than `task update --status`.
 
 ### Examples
 
@@ -390,22 +406,31 @@ sibyl task update task_abc123 --title "Fix JWT token refresh (URGENT)"
 
 ## task note
 
-Add a note to a task.
+Add a note to a task. Content can be passed positionally, piped via `-`, or read from a file.
 
 ### Synopsis
 
 ```bash
-sibyl task note <task_id> <content> [options]
+sibyl task note <task_id> [content] [options]
 ```
+
+### Arguments
+
+| Argument  | Required | Description                       |
+| --------- | -------- | --------------------------------- |
+| `task_id` | Yes      | Task ID or unambiguous prefix     |
+| `content` | No       | Note content or `-` for stdin     |
 
 ### Options
 
-| Option        | Short | Description                                 |
-| ------------- | ----- | ------------------------------------------- |
-| `--assistant` |       | Mark as assistant-authored (default: user)  |
-| `--agent`     |       | Backward-compatible alias for `--assistant` |
-| `--author`    | `-a`  | Author name/identifier                      |
-| `--json`      | `-j`  | JSON output                                 |
+| Option                   | Short | Default | Description                                     |
+| ------------------------ | ----- | ------- | ----------------------------------------------- |
+| `--content-file`         |       | (none)  | Read note content from a file                   |
+| `--max-size`             |       | 1048576 | Maximum content file size in bytes              |
+| `--follow-symlinks`      |       | false   | Allow `--content-file` to read through symlinks |
+| `--assistant` / `--agent` |      | false   | Mark as assistant-authored (default: user)      |
+| `--author`               | `-a`  | (none)  | Author name/identifier                          |
+| `--json`                 | `-j`  | false   | JSON output                                     |
 
 ### Examples
 
@@ -415,7 +440,13 @@ sibyl task note task_abc123 "Found the root cause - Redis connection timeout"
 
 # Add assistant note
 sibyl task note task_abc123 "Implementing the fix now" --assistant --author claude
+
+# Note from stdin
+git log -1 --format=%B | sibyl task note task_abc123 -
 ```
+
+The top-level [`sibyl note`](./remember.md) command wraps this: pass a task ID and it adds a task
+note, pass free text and it captures a note memory.
 
 ---
 
@@ -493,4 +524,5 @@ sibyl task complete task_abc123 \
 
 - [`sibyl task list`](./task-list.md) - List tasks
 - [`sibyl task create`](./task-create.md) - Create new task
+- [`sibyl recall`](./recall.md) - Recall a context pack before starting a task
 - [`sibyl search`](./search.md) - Find tasks semantically

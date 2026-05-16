@@ -13,9 +13,10 @@ Sibyl consists of four components plus one unified storage backend (SurrealDB by
 | **Worker**    | arq job queue processor             | -      |
 | **Frontend**  | Next.js 16 web UI                   | 3337   |
 | **SurrealDB** | Graph + content + auth (default)    | 8000\* |
-| **Postgres**  | Archive/import sidecar              | 5432\* |
+| **Postgres**  | Migration/archive rehearsal only    | 5433\* |
 
-\*Default internal ports. External mappings vary by deployment mode.
+\*Default internal ports. External mappings vary by deployment mode. PostgreSQL is not part of the
+default runtime; it is used only for explicit migration and archive-rehearsal flows.
 
 ```
                                    +------------------+
@@ -51,8 +52,8 @@ Sibyl consists of four components plus one unified storage backend (SurrealDB by
                                    +------------------+
 ```
 
-PostgreSQL remains only for archive import and temporary migration policy surfaces during Phase 3.
-See [storage-modes.md](../guide/storage-modes.md) and
+PostgreSQL is retained only for explicit migration and archive-rehearsal flows. It is not deployed
+by the default runtime. See [storage-modes.md](../guide/storage-modes.md) and
 [migrating-from-falkor.md](../guide/migrating-from-falkor.md).
 
 ## Deployment Modes

@@ -9,6 +9,7 @@ This is the worker entrypoint. Job implementations are in:
 - source_imports.py: import_source_archive
 """
 
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -16,6 +17,7 @@ from typing import Any
 import structlog
 from arq.connections import RedisSettings
 from arq.cron import cron
+from arq.jobs import Job
 
 from sibyl.config import settings
 
@@ -32,6 +34,7 @@ from sibyl.jobs.entities import (
 )
 from sibyl.jobs.reflection import run_reflection_dream_cycle, run_reflection_dream_cycle_all_orgs
 from sibyl.jobs.source_imports import import_source_archive
+from sibyl_core.observability import elapsed_ms, telemetry_registry
 
 log = structlog.get_logger()
 
@@ -87,6 +90,43 @@ async def startup(ctx: dict[str, Any]) -> None:
 async def shutdown(ctx: dict[str, Any]) -> None:  # noqa: ARG001
     """Worker shutdown - cleanup resources."""
     log.info("Job worker shutting down")
+
+
+async def job_start(ctx: dict[str, Any]) -> None:
+    ctx["telemetry_started_at"] = time.perf_counter()
+
+
+async def job_end(ctx: dict[str, Any]) -> None:
+    started_at = ctx.get("telemetry_started_at")
+    if not isinstance(started_at, float):
+        return
+    result = await _job_result_info(ctx)
+    telemetry_registry().record_job_finished(
+        function=_job_function_name(ctx, result),
+        status="ok" if getattr(result, "success", True) else "error",
+        duration_ms=elapsed_ms(started_at),
+    )
+
+
+async def _job_result_info(ctx: dict[str, Any]) -> Any | None:
+    job_id = ctx.get("job_id")
+    redis = ctx.get("redis")
+    if not isinstance(job_id, str) or redis is None:
+        return None
+    try:
+        return await Job(job_id, redis).result_info()
+    except Exception:
+        return None
+
+
+def _job_function_name(ctx: dict[str, Any], result: Any | None) -> str:
+    function = getattr(result, "function", None)
+    if isinstance(function, str) and function:
+        return function
+    job_id = ctx.get("job_id")
+    if isinstance(job_id, str) and job_id:
+        return job_id.split(":", 1)[0] or "unknown"
+    return "unknown"
 
 
 def _parse_cron_schedule(schedule: str) -> dict[str, int | set[int] | None]:
@@ -236,6 +276,8 @@ class WorkerSettings:
     # Lifecycle hooks
     on_startup = startup
     on_shutdown = shutdown
+    on_job_start = job_start
+    after_job_end = job_end
 
     # Worker settings
     max_jobs = 3  # Max concurrent jobs
@@ -270,6 +312,8 @@ async def run_worker_async() -> None:
             redis_settings=worker_settings,
             on_startup=WorkerSettings.on_startup,
             on_shutdown=WorkerSettings.on_shutdown,
+            on_job_start=WorkerSettings.on_job_start,
+            on_job_end=WorkerSettings.on_job_end,
             max_jobs=WorkerSettings.max_jobs,
             job_timeout=WorkerSettings.job_timeout,
             keep_result=WorkerSettings.keep_result,

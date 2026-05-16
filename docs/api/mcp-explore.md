@@ -19,34 +19,31 @@ The `explore` tool provides four modes:
 ```typescript
 interface ExploreInput {
   // Mode Selection
-  mode: "list" | "related" | "traverse" | "dependencies";
+  mode: "list" | "related" | "traverse" | "dependencies"; // default "list"
 
   // Entity Filtering (for list mode)
   types?: string[]; // Entity types to include
   language?: string; // Programming language filter
   category?: string; // Category/domain filter
 
-  // Task-Specific Filters
+  // Task-Specific Filters (for list mode with tasks)
   project?: string; // Project ID filter
-  epic?: string; // Epic ID filter
-  no_epic?: boolean; // Tasks without epic
-  status?: string; // Comma-separated statuses
-  priority?: string; // Comma-separated priorities
-  complexity?: string; // Comma-separated complexities
-  feature?: string; // Feature area filter
-  tags?: string; // Comma-separated tags (matches ANY)
-  include_archived?: boolean; // Include archived projects
+  status?: string; // Status filter (comma-separated)
 
   // Graph Traversal (for related/traverse/dependencies)
   entity_id?: string; // Starting entity ID
   relationship_types?: string[]; // Filter edge types
-  depth?: number; // Traversal depth (1-3)
+  depth?: number; // Traversal depth (1-3, default 1)
 
   // Pagination
   limit?: number; // 1-200, default 50
-  offset?: number; // Default 0
 }
 ```
+
+The MCP `explore` tool exposes the parameters above. Richer task filters (`epic`, `no_epic`,
+`priority`, `complexity`, `feature`, `tags`, `include_archived`) and an `offset` argument are
+available on the REST `POST /api/search/explore` endpoint, not the MCP tool. See
+[rest-search.md](./rest-search.md).
 
 ### Entity Types
 
@@ -57,16 +54,15 @@ pattern, rule, template, topic, episode, procedure, task, project, epic, source,
 ### Relationship Types
 
 ```
-DEPENDS_ON, BELONGS_TO, RELATED_TO, REFERENCES, IMPLEMENTED
+APPLIES_TO, REQUIRES, CONFLICTS_WITH, SUPERSEDES, DOCUMENTED_IN,
+ENABLES, BREAKS, PART_OF, RELATED_TO, DERIVED_FROM
 ```
 
-### Task Filters
+### Task Status Values
 
-| Filter       | Values                                                              |
-| ------------ | ------------------------------------------------------------------- |
-| `status`     | `backlog`, `todo`, `doing`, `blocked`, `review`, `done`, `archived` |
-| `priority`   | `critical`, `high`, `medium`, `low`, `someday`                      |
-| `complexity` | `trivial`, `simple`, `medium`, `complex`, `epic`                    |
+```
+backlog, todo, doing, blocked, review, done, archived
+```
 
 ## Response Schema
 
@@ -152,7 +148,7 @@ Browse entities by type with optional filters.
 }
 ```
 
-### List Tasks with Filters
+### List Tasks by Status
 
 ```json
 {
@@ -161,41 +157,12 @@ Browse entities by type with optional filters.
     "mode": "list",
     "types": ["task"],
     "project": "proj_abc123",
-    "status": "todo,doing",
-    "priority": "high,critical"
+    "status": "todo,doing"
   }
 }
 ```
 
-### List Unassigned Tasks
-
-```json
-{
-  "name": "explore",
-  "arguments": {
-    "mode": "list",
-    "types": ["task"],
-    "epic": "epic_xyz789",
-    "status": "backlog,todo"
-  }
-}
-```
-
-### List Tasks Without Epic
-
-```json
-{
-  "name": "explore",
-  "arguments": {
-    "mode": "list",
-    "types": ["task"],
-    "project": "proj_abc123",
-    "no_epic": true
-  }
-}
-```
-
-### Paginated List
+### List Patterns by Language
 
 ```json
 {
@@ -203,11 +170,14 @@ Browse entities by type with optional filters.
   "arguments": {
     "mode": "list",
     "types": ["pattern"],
-    "limit": 20,
-    "offset": 40
+    "language": "typescript",
+    "limit": 20
   }
 }
 ```
+
+For richer task filtering by priority, complexity, epic, or tags, use the REST
+`POST /api/search/explore` endpoint described in [rest-search.md](./rest-search.md).
 
 ## Mode: related
 
@@ -259,8 +229,8 @@ Find entities directly connected to a specific entity.
   "name": "explore",
   "arguments": {
     "mode": "related",
-    "entity_id": "task_123",
-    "relationship_types": ["DEPENDS_ON"]
+    "entity_id": "pattern_oauth",
+    "relationship_types": ["REQUIRES", "CONFLICTS_WITH"]
   }
 }
 ```
@@ -289,9 +259,9 @@ Multi-hop graph traversal from a starting entity.
   "name": "explore",
   "arguments": {
     "mode": "traverse",
-    "entity_id": "epic_xyz789",
+    "entity_id": "topic_auth",
     "depth": 2,
-    "relationship_types": ["BELONGS_TO", "DEPENDS_ON"]
+    "relationship_types": ["PART_OF", "RELATED_TO"]
   }
 }
 ```
@@ -407,3 +377,4 @@ Always start with project discovery:
 - [mcp-search.md](./mcp-search.md) - Semantic search with explore
 - [mcp-add.md](./mcp-add.md) - Create new entities
 - [mcp-manage.md](./mcp-manage.md) - Task lifecycle operations
+- [rest-search.md](./rest-search.md) - REST explore with richer task filters

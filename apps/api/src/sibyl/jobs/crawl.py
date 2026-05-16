@@ -3,6 +3,7 @@
 These jobs handle web crawling and source synchronization in the background.
 """
 
+import time
 from typing import Any
 from uuid import UUID
 
@@ -17,6 +18,7 @@ from sibyl.persistence.content_runtime import (
     save_crawl_source_record,
 )
 from sibyl_core.models import CrawlStatus
+from sibyl_core.observability import elapsed_ms, telemetry_registry
 
 log = structlog.get_logger()
 
@@ -60,6 +62,7 @@ async def crawl_source(
     """
     from sibyl.crawler import IngestionPipeline
 
+    started_at = time.perf_counter()
     log.info(
         "Starting crawl job",
         source_id=source_id,
@@ -151,6 +154,13 @@ async def crawl_source(
 
         # Broadcast completion
         await _safe_broadcast(WSEvent.CRAWL_COMPLETE, result, org_id=organization_id)
+        telemetry_registry().record_crawler_run(
+            status="ok" if stats.errors == 0 else "partial",
+            duration_ms=stats.duration_seconds * 1000,
+            documents=stats.documents_stored,
+            chunks=stats.chunks_created,
+            errors=stats.errors,
+        )
 
         log.info("Crawl job complete", **result)
         return result
@@ -172,6 +182,11 @@ async def crawl_source(
         )
 
         log.exception("Crawl job failed", source_id=source_id)
+        telemetry_registry().record_crawler_run(
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+            errors=1,
+        )
         raise
 
 
@@ -192,6 +207,7 @@ async def sync_source(
     Returns:
         Dict with sync results
     """
+    started_at = time.perf_counter()
     log.info("Starting sync job", source_id=source_id)
 
     source_uuid = UUID(source_id)
@@ -242,6 +258,12 @@ async def sync_source(
 
     log.info("Sync job complete", **result)
     await _safe_broadcast(WSEvent.CRAWL_SYNC_COMPLETE, result, org_id=organization_id)
+    telemetry_registry().record_crawler_run(
+        status="sync",
+        duration_ms=elapsed_ms(started_at),
+        documents=doc_count,
+        chunks=chunk_count,
+    )
     return result
 
 
