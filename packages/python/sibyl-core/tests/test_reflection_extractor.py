@@ -312,6 +312,19 @@ def test_reflection_lifecycle_decisions_prefer_explicit_supersession() -> None:
     assert result.reflection_findings[-1].kind == "supersession"
 
 
+def test_reflection_lifecycle_decisions_ignore_supersession_without_authorized_prior() -> None:
+    candidate = _grounded_candidate("Sibyl review is disabled and supersedes memory-1.")
+
+    [result] = apply_reflection_lifecycle_decisions(
+        [candidate],
+        prior_memories=[],
+    )
+
+    assert "supersedes_source_ids" not in result.metadata
+    assert "supersedes" not in result.metadata
+    assert all(finding.kind != "supersession" for finding in result.reflection_findings)
+
+
 def test_reflection_lifecycle_decisions_emit_stale_findings() -> None:
     candidate = _grounded_candidate("memory-1 is outdated.")
 
