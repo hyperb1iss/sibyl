@@ -149,13 +149,18 @@ async def require_settings_admin(request: Request) -> None:
 
 
 async def require_settings_owner(request: Request) -> None:
-    """Allow setup-mode bootstrap access, otherwise require an org owner."""
+    """Allow setup-mode bootstrap access, otherwise require a global admin.
+
+    Org owner/admin is insufficient: every user owns a personal
+    organization with the OWNER role, so an org-scoped check gates
+    nothing for instance-wide settings.
+    """
     if await is_setup_mode():
         return
 
     ctx = await build_auth_context(request, None)
-    if ctx.organization is None or ctx.org_role is not OrganizationRole.OWNER:
-        raise HTTPException(status_code=403, detail="Owner role required")
+    if ctx.user.is_admin is not True:
+        raise HTTPException(status_code=403, detail="Global admin required")
 
 
 __all__ = [
