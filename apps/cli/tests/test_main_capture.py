@@ -1,5 +1,6 @@
 """Tests for the root-level capture command."""
 
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -8,6 +9,8 @@ from typer.testing import CliRunner
 
 from sibyl_cli.client import SibylClient, SibylClientError
 from sibyl_cli.main import _derive_capture_title, _parse_id_args, app
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 class _FakeClientContext:
@@ -29,6 +32,10 @@ def _mock_capture_client(entity_id: str = "entity_123") -> MagicMock:
     mock_client.create_entity = AsyncMock(return_value={"id": entity_id})
     mock_client.explore = AsyncMock(return_value={"entities": []})
     return mock_client
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_ESCAPE_RE.sub("", text)
 
 
 def test_derive_capture_title_truncates_cleanly() -> None:
@@ -838,7 +845,10 @@ def test_remember_command_rejects_invalid_kind_before_api(
     result = runner.invoke(app, ["remember", "Bad type", "Nope.", "--kind", "foobar"])
 
     assert result.exit_code == 2
-    assert "Invalid value for '--kind'" in result.stderr
+    stderr = _strip_ansi(result.stderr)
+    assert "Invalid value for" in stderr
+    assert "kind" in stderr
+    assert "foobar" in stderr
     mock_client.remember_raw_memory.assert_not_awaited()
     mock_client.create_entity.assert_not_awaited()
     mock_resolve_project_from_cwd.assert_not_called()
@@ -1212,7 +1222,10 @@ def test_recall_command_rejects_invalid_intent_before_api(
     result = runner.invoke(app, ["recall", "audit the changes", "--intent", "vibes"])
 
     assert result.exit_code == 2
-    assert "Invalid value for '--intent'" in result.stderr
+    stderr = _strip_ansi(result.stderr)
+    assert "Invalid value for" in stderr
+    assert "intent" in stderr
+    assert "vibes" in stderr
     mock_client.context_pack.assert_not_awaited()
     mock_resolve_project_from_cwd.assert_not_called()
 
