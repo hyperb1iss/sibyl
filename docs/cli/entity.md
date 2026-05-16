@@ -16,30 +16,39 @@ episodes, templates, and other types.
 
 ## Entity Types
 
+Sibyl tracks around 29 entity types. The full set:
+
 | Type               | Description                            |
 | ------------------ | -------------------------------------- |
 | `pattern`          | Code patterns, best practices          |
-| `episode`          | Knowledge episodes, learnings          |
 | `rule`             | Rules and constraints                  |
 | `template`         | Code templates                         |
 | `guide`            | Team guidance, standards               |
 | `tool`             | Tools and utilities                    |
 | `language`         | Programming languages                  |
 | `topic`            | General topics                         |
+| `episode`          | Knowledge episodes, learnings          |
 | `knowledge_source` | External knowledge sources             |
 | `config_file`      | Configuration files                    |
 | `slash_command`    | Slash commands                         |
-| `task`             | Tasks (use `sibyl task` instead)       |
 | `project`          | Projects (use `sibyl project` instead) |
 | `epic`             | Epics (use `sibyl epic` instead)       |
+| `task`             | Tasks (use `sibyl task` instead)       |
 | `team`             | Team definitions                       |
 | `error_pattern`    | Error patterns and solutions           |
 | `milestone`        | Project milestones                     |
 | `source`           | Web sources                            |
 | `document`         | Crawled documents                      |
-| `community`        | Community groupings                    |
 | `procedure`        | Procedures and processes               |
+| `community`        | Community groupings                    |
 | `note`             | Standalone notes                       |
+| `domain`           | Knowledge domains                      |
+| `artifact`         | Produced outputs (synthesis, docs)     |
+| `decision`         | A choice made, with rationale          |
+| `plan`             | An intended sequence of work           |
+| `idea`             | An exploration or proposal             |
+| `claim`            | An assertion to be verified or cited   |
+| `session`          | Session-level memory or summary        |
 
 ---
 
@@ -314,11 +323,17 @@ sibyl entity history <entity_id> [options]
 
 | Option              | Short | Default   | Description                                         |
 | ------------------- | ----- | --------- | --------------------------------------------------- |
-| `--as-of`           | `-d`  | (now)     | Show state as of a specific datetime                |
+| `--as-of`           | `-d`  | (now)     | Point-in-time (ISO date, e.g. `2025-03-15`)         |
 | `--mode`            | `-m`  | `history` | Display mode: `history`, `timeline`, or `conflicts` |
-| `--include-expired` | `-e`  | false     | Include expired versions                            |
-| `--limit`           | `-n`  | 20        | Max results                                         |
+| `--include-expired` | `-e`  | false     | Include expired edges                               |
+| `--limit`           | `-n`  | 50        | Max results                                         |
 | `--json`            | `-j`  | false     | JSON output                                         |
+
+The history modes operate on edges over time:
+
+- `history` shows edges as they existed at a point in time (use `--as-of`).
+- `timeline` shows every version of edges over time, surfacing evolution.
+- `conflicts` finds invalidated or superseded facts.
 
 ### Examples
 
@@ -386,5 +401,6 @@ sibyl entity show ent_abc123
 ## Related Commands
 
 - [`sibyl add`](./add.md) - Quick knowledge capture (simpler interface)
+- [`sibyl remember`](./remember.md) - Typed memory-loop writes
 - [`sibyl search`](./search.md) - Semantic search
 - [`sibyl explore related`](./explore.md) - Graph exploration

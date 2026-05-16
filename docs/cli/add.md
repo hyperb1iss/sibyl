@@ -1,32 +1,52 @@
 # add
 
-Quick knowledge capture. Adds episodes, patterns, and other knowledge to the graph.
+Add knowledge to the graph. `add` creates episodes, patterns, and any other entity type with
+explicit title and content fields.
+
+For a single-blob quick capture, see [`capture`](./capture.md). For typed memory-loop writes
+(decisions, plans, claims), see [`remember`](./remember.md).
 
 ## Synopsis
 
 ```bash
-sibyl add <title> <content> [options]
+sibyl add [title] [content] [options]
 ```
+
+Title and content can be passed positionally or with the `--title` / `--content` flags. Content
+can also be read from a file with `--content-file`.
 
 ## Arguments
 
 | Argument  | Required | Description                 |
 | --------- | -------- | --------------------------- |
-| `title`   | Yes      | Title/name of the knowledge |
-| `content` | Yes      | Content/description         |
+| `title`   | No       | Title/name of the knowledge |
+| `content` | No       | Content/description         |
 
 ## Options
 
-| Option              | Short | Default   | Description                                                |
-| ------------------- | ----- | --------- | ---------------------------------------------------------- |
-| `--type`            | `-t`  | `episode` | Entity type to create                                      |
-| `--category`        | `-c`  | (none)    | Category for organization                                  |
-| `--language`        | `-l`  | (none)    | Programming language                                       |
-| `--tags`            |       | (none)    | Comma-separated tags                                       |
-| `--wait-searchable` |       | false     | Wait for the episode to become searchable before returning |
-| `--json`            | `-j`  | false     | Output as JSON                                             |
+| Option              | Short | Default   | Description                                              |
+| ------------------- | ----- | --------- | -------------------------------------------------------- |
+| `--title`           |       | (none)    | Title (alternative to the positional argument)           |
+| `--content`         |       | (none)    | Content (alternative to the positional argument)         |
+| `--content-file`    |       | (none)    | Read content from a file                                 |
+| `--max-size`        |       | 1048576   | Maximum content file size in bytes                       |
+| `--follow-symlinks` |       | false     | Allow `--content-file` to read through symlinks          |
+| `--type`            | `-t`  | `episode` | Entity type to create (see below)                        |
+| `--category`        | `-c`  | (none)    | Category for organization                                |
+| `--language`        | `-l`  | (none)    | Programming language                                     |
+| `--tags`            |       | (none)    | Comma-separated tags                                     |
+| `--project`         | `-p`  | (auto)    | Project ID                                               |
+| `--all-projects`    |       | false     | Do not auto-scope to the linked project                  |
+| `--related-to`      |       | (none)    | Comma-separated entity IDs to connect with `RELATED_TO`  |
+| `--task`            |       | (none)    | Comma-separated task IDs to connect with `RELATED_TO`    |
+| `--active-task`     |       | on        | Auto-link to the single active task (`--no-active-task`) |
+| `--wait-searchable` |       | false     | Wait until the entity is persisted and retrievable       |
+| `--skip-conflicts`  |       | false     | Skip semantic duplicate/conflict detection               |
+| `--json`            | `-j`  | false     | Output as JSON                                           |
 
 ## Entity Types
+
+`--type` accepts any of around 29 entity types. Common ones:
 
 | Type            | Use Case                                      |
 | --------------- | --------------------------------------------- |
@@ -36,6 +56,11 @@ sibyl add <title> <content> [options]
 | `guide`         | Team guidance, coding standards               |
 | `rule`          | Rules and constraints                         |
 | `template`      | Code templates                                |
+| `decision`      | A choice made, with rationale                 |
+| `plan`          | An intended sequence of work                  |
+| `procedure`     | A repeatable process                          |
+
+See [`sibyl entity`](./entity.md) for the complete list.
 
 ## Examples
 
@@ -79,6 +104,22 @@ sibyl add "Kubernetes Health Check Pattern" \
   --tags "kubernetes,devops,health-checks"
 ```
 
+### Content from a File
+
+```bash
+sibyl add "Migration runbook" --content-file ./runbook.md --type procedure
+```
+
+### Link to Tasks and Entities
+
+```bash
+sibyl add "Why we dropped the Postgres sidecar" \
+  "Surreal now holds graph, content, and auth in one store." \
+  --type decision \
+  --task task_abc123 \
+  --related-to ent_def456,ent_ghi789
+```
+
 ### JSON Output
 
 ```bash
@@ -109,13 +150,13 @@ sibyl add "Quick Note" "Remember to update the docs" --json
 
 ```bash
 # Gotcha
-sibyl add "Graphiti Node Labels" \
-  "Graphiti creates two node types: Episodic (from add_episode) and Entity (extracted). Queries must handle both: WHERE (n:Episodic OR n:Entity)" \
-  --type pattern --tags "graphiti,falkordb"
+sibyl add "Surreal driver per-org cloning" \
+  "The SurrealDB driver serializes queries through a per-client asyncio.Lock. Clone the driver per org with driver.clone(group_id) instead of sharing one instance." \
+  --type pattern --tags "surreal,concurrency"
 
 # Configuration quirk
-sibyl add "FalkorDB Port Conflict" \
-  "FalkorDB uses port 6380 by default to avoid Redis conflicts on 6379. Check docker-compose.yml if connections fail." \
+sibyl add "Surreal embedded mode storage" \
+  "Embedded SurrealDB uses RocksDB at .moon/cache/surreal-dev and is single-writer. Memory mode (memory://) is test-only." \
   --type episode --category config
 
 # Performance finding
@@ -143,6 +184,8 @@ This creates an episode linked to the task.
 
 ## Related Commands
 
+- [`sibyl capture`](./capture.md) - Quick capture with an auto-derived title
+- [`sibyl remember`](./remember.md) - Typed memory-loop writes (decisions, plans, claims)
 - [`sibyl search`](./search.md) - Find existing knowledge
 - [`sibyl entity create`](./entity.md) - More detailed entity creation
 - [`sibyl task complete`](./task-lifecycle.md) - Complete task with learnings

@@ -35,3 +35,9 @@ sibyl archive show 7f7b4b91-1cd8-47c5-a03e-59e2df96e6d0
 
 - The archive is populated by quick capture flows that send `metadata.capture_mode=quick`.
 - `list` shows summaries; `show` returns the full raw content.
+
+## Related Commands
+
+- [`sibyl capture`](./capture.md) - Quick capture that feeds the archive
+- [`sibyl remember`](./remember.md) - Typed memory-loop writes
+- [`sibyl memory`](./memory.md) - Inspect and audit raw memory sources

@@ -17,12 +17,17 @@ sibyl search <query> [options]
 
 ## Options
 
-| Option    | Short | Default | Description                          |
-| --------- | ----- | ------- | ------------------------------------ |
-| `--type`  | `-t`  | (all)   | Filter by entity type                |
-| `--limit` | `-l`  | 10      | Maximum results to return            |
-| `--all`   | `-a`  | false   | Search all projects (bypass context) |
-| `--json`  | `-j`  | false   | Output as JSON                       |
+| Option         | Short | Default | Description                          |
+| -------------- | ----- | ------- | ------------------------------------ |
+| `--type`       | `-t`  | (all)   | Filter by entity type                |
+| `--limit`      | `-l`  | 10      | Maximum results to return            |
+| `--all`        | `-a`  | false   | Search all projects (bypass context) |
+| `--graph-only` |       | false   | Search graph memory only             |
+| `--docs-only`  |       | false   | Search crawled docs only             |
+| `--json`       | `-j`  | false   | Output as JSON                       |
+
+Search spans both graph memory and crawled documents by default. Use `--graph-only` or
+`--docs-only` to restrict the surface.
 
 ## Entity Types
 
@@ -35,6 +40,9 @@ Common types to filter by:
 - `episode` - Knowledge episodes
 - `error_pattern` - Error patterns and solutions
 - `document` - Crawled documents
+- `decision`, `plan`, `idea`, `claim` - Memory-loop reasoning artifacts
+
+See [`sibyl entity`](./entity.md) for the full list of around 29 entity types.
 
 ## Examples
 
@@ -82,6 +90,16 @@ By default, search is scoped to the current project context. Use `--all` to sear
 
 ```bash
 sibyl search "deployment" --all
+```
+
+### Restrict the Search Surface
+
+```bash
+# Graph memory only (skip crawled docs)
+sibyl search "auth pattern" --graph-only
+
+# Crawled documentation only
+sibyl search "proto config" --docs-only
 ```
 
 ### JSON Output
@@ -187,6 +205,8 @@ sibyl search "auth" --all
 
 ## Related Commands
 
+- [`sibyl recall`](./recall.md) - Compile a working context pack for a goal
 - [`sibyl add`](./add.md) - Add new knowledge
 - [`sibyl explore related`](./explore.md) - Find related entities
 - [`sibyl entity show`](./entity.md) - View entity details
+- [`sibyl crawl documents`](./crawl.md) - Read crawled documents in full

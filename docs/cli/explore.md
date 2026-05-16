@@ -135,9 +135,9 @@ sibyl explore dependencies [entity_id] [options]
 
 ### Arguments
 
-| Argument    | Required | Description                  |
-| ----------- | -------- | ---------------------------- |
-| `entity_id` | No       | Task ID (or use `--project`) |
+| Argument    | Required | Description                       |
+| ----------- | -------- | --------------------------------- |
+| `entity_id` | No       | Task or Project ID (or use `--project`) |
 
 ### Options
 
