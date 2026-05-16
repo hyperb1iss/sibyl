@@ -287,64 +287,6 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
         </div>
       </div>
 
-      {/* Runtime Performance */}
-      <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-cyan/10 border border-sc-cyan/20 flex items-center justify-center shrink-0">
-                <Timer width={16} height={16} className="text-sc-cyan sm:w-5 sm:h-5" />
-              </div>
-              <div>
-                <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary">
-                  Runtime Performance
-                </h2>
-                <p className="text-xs sm:text-sm text-sc-fg-muted">
-                  Live p95 latency and error trend
-                </p>
-              </div>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:w-[520px]">
-            <div className="rounded-lg border border-sc-cyan/20 bg-sc-bg-elevated px-3 py-2">
-              <div className="text-[10px] uppercase tracking-[0.16em] text-sc-fg-subtle">API</div>
-              <div className="mt-1 text-lg font-semibold text-sc-cyan">
-                {formatLatency(apiTelemetry?.p95_ms)}
-              </div>
-              <div className="text-xs text-sc-fg-muted">{formatCount(apiTelemetry, 'req')}</div>
-            </div>
-            <div className="rounded-lg border border-sc-purple/20 bg-sc-bg-elevated px-3 py-2">
-              <div className="text-[10px] uppercase tracking-[0.16em] text-sc-fg-subtle">
-                Surreal
-              </div>
-              <div className="mt-1 text-lg font-semibold text-sc-purple">
-                {formatLatency(surrealTelemetry?.p95_ms)}
-              </div>
-              <div className="text-xs text-sc-fg-muted">
-                {formatCount(surrealTelemetry, 'queries')}
-              </div>
-            </div>
-            <div className="rounded-lg border border-sc-green/20 bg-sc-bg-elevated px-3 py-2">
-              <div className="text-[10px] uppercase tracking-[0.16em] text-sc-fg-subtle">
-                Memory
-              </div>
-              <div className="mt-1 text-lg font-semibold text-sc-green">
-                {formatLatency(memoryTelemetry?.p95_ms)}
-              </div>
-              <div className="text-xs text-sc-fg-muted">{formatCount(memoryTelemetry, 'ops')}</div>
-            </div>
-            <div className="rounded-lg border border-sc-coral/20 bg-sc-bg-elevated px-3 py-2">
-              <div className="text-[10px] uppercase tracking-[0.16em] text-sc-fg-subtle">LLM</div>
-              <div className="mt-1 text-lg font-semibold text-sc-coral">
-                {formatLatency(llmTelemetry?.p95_ms)}
-              </div>
-              <div className="text-xs text-sc-fg-muted">{formatCount(llmTelemetry, 'calls')}</div>
-            </div>
-          </div>
-        </div>
-        <PerformanceTrendChart data={telemetry?.trends ?? []} className="mt-4" />
-      </div>
-
       {/* Main Layout - Two independent columns */}
       <div className="flex flex-col lg:flex-row gap-4 sm:gap-6">
         {/* Left Column - Main content */}
@@ -850,6 +792,64 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
           </ul>
         </div>
       )}
+
+      {/* Runtime Performance */}
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-cyan/10 border border-sc-cyan/20 flex items-center justify-center shrink-0">
+                <Timer width={16} height={16} className="text-sc-cyan sm:w-5 sm:h-5" />
+              </div>
+              <div>
+                <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary">
+                  Runtime Performance
+                </h2>
+                <p className="text-xs sm:text-sm text-sc-fg-muted">
+                  Live p95 latency and error trend
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:w-[520px]">
+            <div className="rounded-lg border border-sc-cyan/20 bg-sc-bg-elevated px-3 py-2">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-sc-fg-subtle">API</div>
+              <div className="mt-1 text-lg font-semibold text-sc-cyan">
+                {formatLatency(apiTelemetry?.p95_ms)}
+              </div>
+              <div className="text-xs text-sc-fg-muted">{formatCount(apiTelemetry, 'req')}</div>
+            </div>
+            <div className="rounded-lg border border-sc-purple/20 bg-sc-bg-elevated px-3 py-2">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-sc-fg-subtle">
+                Surreal
+              </div>
+              <div className="mt-1 text-lg font-semibold text-sc-purple">
+                {formatLatency(surrealTelemetry?.p95_ms)}
+              </div>
+              <div className="text-xs text-sc-fg-muted">
+                {formatCount(surrealTelemetry, 'queries')}
+              </div>
+            </div>
+            <div className="rounded-lg border border-sc-green/20 bg-sc-bg-elevated px-3 py-2">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-sc-fg-subtle">
+                Memory
+              </div>
+              <div className="mt-1 text-lg font-semibold text-sc-green">
+                {formatLatency(memoryTelemetry?.p95_ms)}
+              </div>
+              <div className="text-xs text-sc-fg-muted">{formatCount(memoryTelemetry, 'ops')}</div>
+            </div>
+            <div className="rounded-lg border border-sc-coral/20 bg-sc-bg-elevated px-3 py-2">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-sc-fg-subtle">LLM</div>
+              <div className="mt-1 text-lg font-semibold text-sc-coral">
+                {formatLatency(llmTelemetry?.p95_ms)}
+              </div>
+              <div className="text-xs text-sc-fg-muted">{formatCount(llmTelemetry, 'calls')}</div>
+            </div>
+          </div>
+        </div>
+        <PerformanceTrendChart data={telemetry?.trends ?? []} className="mt-4" />
+      </div>
     </div>
   );
 }

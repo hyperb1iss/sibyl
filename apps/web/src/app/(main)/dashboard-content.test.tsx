@@ -216,9 +216,15 @@ describe('DashboardContent', () => {
   it('renders runtime performance telemetry on the overview page', () => {
     render(<DashboardContent initialStats={initialStats} />);
 
-    expect(screen.getByText('Runtime Performance')).toBeInTheDocument();
+    const runtimeHeading = screen.getByText('Runtime Performance');
+    const thisWeekHeading = screen.getByText('This Week');
+
+    expect(runtimeHeading).toBeInTheDocument();
     expect(screen.getByText('Surreal')).toBeInTheDocument();
     expect(screen.getByTestId('performance-chart')).toBeInTheDocument();
+    expect(
+      thisWeekHeading.compareDocumentPosition(runtimeHeading) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
   });
 
   it('surfaces a capture-first quick action', async () => {
