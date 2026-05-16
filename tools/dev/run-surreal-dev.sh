@@ -69,8 +69,35 @@ docker_is_podman_emulation() {
   [[ "${version,,}" == *podman* ]]
 }
 
+docker_compose_provider() {
+  local candidate=""
+
+  for candidate in \
+    "${SIBYL_DOCKER_COMPOSE_PROVIDER:-}" \
+    "$(command -v docker-compose 2>/dev/null || true)" \
+    /usr/lib/docker/cli-plugins/docker-compose \
+    /usr/local/lib/docker/cli-plugins/docker-compose \
+    /usr/libexec/docker/cli-plugins/docker-compose \
+    /usr/local/libexec/docker/cli-plugins/docker-compose; do
+    if [[ -n "$candidate" && -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 compose_command() {
   if docker_is_podman_emulation && command -v podman >/dev/null 2>&1; then
+    local provider=""
+
+    if provider="$(docker_compose_provider)"; then
+      printf 'env\nPODMAN_COMPOSE_WARNING_LOGS=false\nPODMAN_COMPOSE_PROVIDER=%s\npodman\ncompose\n' \
+        "$provider"
+      return 0
+    fi
+
     if command -v podman-compose >/dev/null 2>&1; then
       printf 'env\nPODMAN_COMPOSE_WARNING_LOGS=false\nPODMAN_COMPOSE_PROVIDER=%s\npodman\ncompose\n' \
         "$(command -v podman-compose)"

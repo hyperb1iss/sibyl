@@ -44,7 +44,7 @@ exit 1
     )
     docker.chmod(0o755)
 
-    for name in ("podman", "podman-compose"):
+    for name in ("podman", "podman-compose", "docker-compose"):
         binary = bin_dir / name
         binary.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
         binary.chmod(0o755)
@@ -138,7 +138,7 @@ def test_legacy_guard_warns_when_legacy_exists_without_surreal_marker(tmp_path: 
     assert "moon run dev-legacy" not in result.stdout
 
 
-def test_compose_command_prefers_quiet_podman_provider(tmp_path: Path) -> None:
+def test_compose_command_prefers_quiet_docker_compose_provider(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_podman_docker_stub(bin_dir)
@@ -163,7 +163,7 @@ def test_compose_command_prefers_quiet_podman_provider(tmp_path: Path) -> None:
     assert result.stdout.splitlines() == [
         "env",
         "PODMAN_COMPOSE_WARNING_LOGS=false",
-        f"PODMAN_COMPOSE_PROVIDER={bin_dir / 'podman-compose'}",
+        f"PODMAN_COMPOSE_PROVIDER={bin_dir / 'docker-compose'}",
         "podman",
         "compose",
     ]
