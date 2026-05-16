@@ -1,10 +1,36 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
+
+import pytest
+
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+pytestmark = pytest.mark.skipif(
+    importlib.util.find_spec("fastapi") is None,
+    reason="no-Graphiti default-loop smoke imports API entrypoints",
+)
+
+
+def _subprocess_env() -> dict[str, str]:
+    pythonpath = os.pathsep.join(
+        dict.fromkeys(
+            [
+                str(_REPO_ROOT / "apps/api/src"),
+                str(_REPO_ROOT / "apps/cli/src"),
+                *sys.path,
+            ]
+        )
+    )
+    return {
+        **os.environ,
+        "PYTHONPATH": pythonpath,
+        "SIBYL_REPO_ROOT": str(_REPO_ROOT),
+    }
 
 
 def test_default_memory_loop_runs_without_graphiti_imports() -> None:
@@ -329,12 +355,11 @@ async def main():
 
 asyncio.run(main())
 """
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
     result = subprocess.run(
         [sys.executable, "-c", textwrap.dedent(script)],
         check=False,
         cwd=os.getcwd(),
-        env=env,
+        env=_subprocess_env(),
         text=True,
         capture_output=True,
         timeout=60,
@@ -408,17 +433,11 @@ runpy.run_path(str(root / "apps/cli/src/sibyl_cli/data/hooks/user-prompt-submit.
 
 assert "graphiti_core" not in sys.modules
 """
-    repo_root = Path(__file__).resolve().parents[4]
-    env = {
-        **os.environ,
-        "PYTHONPATH": os.pathsep.join(sys.path),
-        "SIBYL_REPO_ROOT": str(repo_root),
-    }
     result = subprocess.run(
         [sys.executable, "-c", textwrap.dedent(script)],
         check=False,
         cwd=os.getcwd(),
-        env=env,
+        env=_subprocess_env(),
         text=True,
         capture_output=True,
         timeout=60,

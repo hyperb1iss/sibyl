@@ -198,81 +198,83 @@ async def test_native_reflection_write_contract_renders_context_pack(
     assert f"src={reflection.source_id}" in markdown
 
     response_snapshot = reflection_pack_to_dict(reflection)
-    assert response_snapshot == {
-        "source_title": "Native Reflection Contract",
-        "source_id": "session_e9790facb5f9",
+    assert response_snapshot["source_title"] == "Native Reflection Contract"
+    assert response_snapshot["source_id"] == "session_e9790facb5f9"
+    assert response_snapshot["intent"] == "build"
+    assert response_snapshot["domain"] == "sibyl"
+    assert response_snapshot["project"] == "project_native"
+    assert response_snapshot["total_candidates"] == 1
+    assert response_snapshot["persisted_count"] == 1
+    assert response_snapshot["usage_hint"] == (
+        "Review candidates, persist the durable ones, and keep raw session source as provenance."
+    )
+
+    candidate_snapshot = response_snapshot["candidates"][0]
+    assert candidate_snapshot["kind"] == "decision"
+    assert candidate_snapshot["title"] == (
+        "Decision: We decided native reflection promotion should bypass Graphiti add_episode an"
+    )
+    assert candidate_snapshot["content"] == (
+        "We decided native reflection promotion should bypass Graphiti "
+        "add_episode and write directly to Surreal graph records for context packs."
+    )
+    assert candidate_snapshot["reason"] == (
+        "captures a choice or direction future agents should preserve"
+    )
+    assert candidate_snapshot["confidence"] == 0.86
+    assert candidate_snapshot["tags"] == ["reflection", "decision", "sibyl"]
+    assert candidate_snapshot["raw_source_ids"] == ["session_e9790facb5f9"]
+    assert candidate_snapshot["suggested_memory_scope"] == "project"
+    assert candidate_snapshot["suggested_scope_key"] == "project_native"
+    assert candidate_snapshot["review_state"] == "pending"
+    assert candidate_snapshot["persisted_id"] == "decision_0a054f09f2ae"
+    assert candidate_snapshot["claim_records"] == []
+    assert candidate_snapshot["reflection_findings"] == []
+    assert candidate_snapshot["sensitivity_flags"] == []
+
+    metadata = candidate_snapshot["metadata"]
+    assert metadata["reflection_source_title"] == "Native Reflection Contract"
+    assert metadata["reflection_intent"] == "build"
+    assert metadata["reflection_index"] == 0
+    assert metadata["project_id"] == "project_native"
+    assert metadata["organization_id"] == group_id
+    assert metadata["capture_mode"] == "reflect"
+    assert metadata["capture_surface"] == "reflection"
+    assert metadata["remember_kind"] == "decision"
+    assert metadata["reflection_reason"] == (
+        "captures a choice or direction future agents should preserve"
+    )
+    assert metadata["reflection_confidence"] == 0.86
+    assert metadata["raw_source_ids"] == ["session_e9790facb5f9"]
+    assert metadata["source_ids"] == ["session_e9790facb5f9"]
+    assert metadata["suggested_memory_scope"] == "project"
+    assert metadata["suggested_scope_key"] == "project_native"
+    assert metadata["review_state"] == "pending"
+    assert metadata["extraction_prompt_metadata"] == {
+        "extractor": "sibyl_reflection_extractor",
+        "extractor_version": "v0.12",
         "intent": "build",
         "domain": "sibyl",
         "project": "project_native",
-        "candidates": [
-            {
-                "kind": "decision",
-                "title": (
-                    "Decision: We decided native reflection promotion should bypass "
-                    "Graphiti add_episode an"
-                ),
-                "content": (
-                    "We decided native reflection promotion should bypass Graphiti "
-                    "add_episode and write directly to Surreal graph records for "
-                    "context packs."
-                ),
-                "reason": "captures a choice or direction future agents should preserve",
-                "confidence": 0.86,
-                "tags": ["reflection", "decision", "sibyl"],
-                "metadata": {
-                    "reflection_source_title": "Native Reflection Contract",
-                    "reflection_intent": "build",
-                    "reflection_index": 0,
-                    "project_id": "project_native",
-                    "organization_id": group_id,
-                    "capture_mode": "reflect",
-                    "capture_surface": "reflection",
-                    "remember_kind": "decision",
-                    "reflection_reason": (
-                        "captures a choice or direction future agents should preserve"
-                    ),
-                    "reflection_confidence": 0.86,
-                    "raw_source_ids": ["session_e9790facb5f9"],
-                    "source_ids": ["session_e9790facb5f9"],
-                    "suggested_memory_scope": "project",
-                    "suggested_scope_key": "project_native",
-                    "review_state": "pending",
-                    "extraction_prompt_metadata": {
-                        "extractor": "sibyl_reflection_extractor",
-                        "extractor_version": "v0.12",
-                        "intent": "build",
-                        "domain": "sibyl",
-                        "project": "project_native",
-                        "limit": 12,
-                    },
-                    "domain": "sibyl",
-                    "reflection_source_id": "session_e9790facb5f9",
-                    "native_write_mode": "enabled",
-                    "memory_scope": "project",
-                    "scope_key": "project_native",
-                    "policy_allowed": True,
-                    "policy_reasons": [
-                        "same_scope_reflect_allowed",
-                        "same_scope_write_allowed",
-                    ],
-                    "policy_actions": ["reflect", "write"],
-                    "native_write_path": "reflection_promotion",
-                    "native_relationship_count": 3,
-                },
-                "raw_source_ids": ["session_e9790facb5f9"],
-                "suggested_memory_scope": "project",
-                "suggested_scope_key": "project_native",
-                "review_state": "pending",
-                "persisted_id": "decision_0a054f09f2ae",
-            }
-        ],
-        "total_candidates": 1,
-        "persisted_count": 1,
-        "usage_hint": (
-            "Review candidates, persist the durable ones, and keep raw session "
-            "source as provenance."
-        ),
+        "limit": 12,
     }
+    assert metadata["domain"] == "sibyl"
+    assert metadata["reflection_source_id"] == "session_e9790facb5f9"
+    assert metadata["native_write_mode"] == "enabled"
+    assert metadata["memory_scope"] == "project"
+    assert metadata["scope_key"] == "project_native"
+    assert metadata["policy_allowed"] is True
+    assert metadata["policy_reasons"] == [
+        "same_scope_reflect_allowed",
+        "same_scope_write_allowed",
+    ]
+    assert metadata["policy_actions"] == ["reflect", "write"]
+    assert metadata["native_write_path"] == "reflection_promotion"
+    assert metadata["native_relationship_count"] == 3
+    assert metadata["relationship_records"] == candidate_snapshot["relationship_records"]
+    assert metadata["relationship_records"][0]["relationship_type"] == "BELONGS_TO"
+    assert metadata["relationship_records"][0]["target_id"] == "project_native"
+    assert metadata["relationship_records"][0]["source_ids"] == ["session_e9790facb5f9"]
 
 
 @pytest.mark.asyncio
