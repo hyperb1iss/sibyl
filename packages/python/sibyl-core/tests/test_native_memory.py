@@ -761,6 +761,39 @@ async def test_promote_review_candidate_requires_broadest_mixed_scope_target(
 
 
 @pytest.mark.asyncio
+async def test_promote_review_candidate_denies_inaccessible_source_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = _raw_review_candidate(
+        memory_scope=MemoryScope.PROJECT,
+        scope_key="project_secret",
+        principal_id="victim-user",
+    )
+    source = _raw_review_candidate(id="source-1")
+    monkeypatch.setattr(
+        native_memory,
+        "get_raw_memory",
+        AsyncMock(side_effect=[candidate, source]),
+    )
+    persist = AsyncMock()
+    monkeypatch.setattr(native_memory, "persist_reflection_candidate_native", persist)
+
+    result = await promote_reflection_candidate_review(
+        candidate_id="candidate-1",
+        organization_id="org-1",
+        principal_id="attacker-user",
+        promote_to_scope="private",
+        accessible_projects=set(),
+    )
+
+    assert not result.success
+    assert result.reason == "unverified_membership"
+    assert result.memory_scope is MemoryScope.PROJECT
+    assert result.scope_key == "project_secret"
+    persist.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_promote_review_candidate_persists_native_record_and_marks_promoted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

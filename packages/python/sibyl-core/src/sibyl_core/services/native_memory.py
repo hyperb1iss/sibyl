@@ -361,6 +361,7 @@ async def promote_reflection_candidate_review(
         promote_to_scope_key=promote_to_scope_key,
         domain=domain,
         project=project,
+        accessible_projects=accessible_projects,
     )
     if isinstance(plan, NativeReflectionPromotionResult):
         return plan
@@ -450,6 +451,7 @@ async def preview_reflection_candidate_promotion(
         promote_to_scope_key=promote_to_scope_key,
         domain=domain,
         project=project,
+        accessible_projects=accessible_projects,
     )
     if isinstance(plan, NativeReflectionPromotionResult):
         return _promotion_preview_from_denial(plan)
@@ -1187,6 +1189,7 @@ async def _resolve_reflection_promotion_plan(
     promote_to_scope_key: str | None = None,
     domain: str | None = None,
     project: str | None = None,
+    accessible_projects: Iterable[str] | None = None,
 ) -> _NativeReflectionPromotionPlan | NativeReflectionPromotionResult:
     candidate_memory = await get_raw_memory(
         organization_id=organization_id,
@@ -1247,6 +1250,15 @@ async def _resolve_reflection_promotion_plan(
     )
     if ownership_denial is not None:
         return ownership_denial
+    source_scope_denial = _source_scope_denial(
+        input_memories,
+        candidate_id=candidate_memory.id,
+        principal_id=principal_id,
+        raw_source_ids=raw_source_ids,
+        accessible_projects=accessible_projects,
+    )
+    if source_scope_denial is not None:
+        return source_scope_denial
 
     target_scope = _coerce_promotion_scope(promote_to_scope)
     if target_scope is None:
@@ -1696,6 +1708,35 @@ def _principal_denial(
                 memory_scope=memory.memory_scope,
                 scope_key=memory.scope_key,
                 raw_source_ids=raw_source_ids,
+            )
+    return None
+
+
+def _source_scope_denial(
+    memories: Sequence[RawMemory],
+    *,
+    candidate_id: str,
+    principal_id: str | None,
+    raw_source_ids: list[str],
+    accessible_projects: Iterable[str] | None,
+) -> NativeReflectionPromotionResult | None:
+    for memory in memories:
+        read_decision = authorize_memory_read(
+            principal_id=principal_id,
+            memory_scope=memory.memory_scope,
+            scope_key=memory.scope_key,
+            accessible_projects=accessible_projects,
+        )
+        if not read_decision.allowed:
+            return _promotion_denied(
+                candidate_id=candidate_id,
+                reason=read_decision.reason,
+                review_state=memories[0].review_state,
+                memory_scope=memory.memory_scope,
+                scope_key=memory.scope_key,
+                raw_source_ids=raw_source_ids,
+                policy_decisions=(read_decision,),
+                metadata={"input_scopes": _scope_metadata(memories)},
             )
     return None
 
