@@ -201,6 +201,29 @@ def _serialize_raw_capture(capture: RawCaptureRecord) -> RawCaptureResponse:
     )
 
 
+def _raw_capture_visible_to_reader(
+    capture: RawCaptureRecord,
+    *,
+    reader_user_id: str | None,
+    accessible_projects: set[str],
+) -> bool:
+    metadata = capture.metadata or {}
+    memory_scope = str(metadata.get("memory_scope") or "private")
+
+    if memory_scope == "project":
+        project_id = str(metadata.get("scope_key") or metadata.get("project_id") or "").strip()
+        return bool(project_id and project_id in accessible_projects)
+
+    if memory_scope == "private":
+        owner = str(
+            metadata.get("principal_id")
+            or (str(capture.created_by_user_id) if capture.created_by_user_id else "")
+        ).strip()
+        return bool(owner and reader_user_id and owner == reader_user_id)
+
+    return True
+
+
 async def _list_all_entities_paginated(
     entity_manager: Any,
     *,
@@ -656,6 +679,7 @@ async def _fetch_related_entity_summaries(
 @router.get("/captures", response_model=RawCaptureListResponse)
 async def list_raw_captures(
     org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
     session: Any = Depends(get_content_read_session_dependency),
     entity_type: str | None = Query(default=None, description="Filter by entity type"),
     capture_surface: str | None = Query(default=None, description="Filter by capture surface"),
@@ -665,6 +689,7 @@ async def list_raw_captures(
 ) -> RawCaptureListResponse:
     """List archived raw quick captures for the current organization."""
     try:
+        accessible_projects = await _accessible_project_ids_for_read(ctx)
         captures, has_more = await content_runtime.list_raw_captures(
             session,
             organization_id=org.id,
@@ -674,6 +699,15 @@ async def list_raw_captures(
             limit=limit,
             offset=offset,
         )
+        captures = [
+            capture
+            for capture in captures
+            if _raw_capture_visible_to_reader(
+                capture,
+                reader_user_id=getattr(ctx, "user_id", None),
+                accessible_projects=accessible_projects,
+            )
+        ]
 
         return RawCaptureListResponse(
             captures=[_serialize_raw_capture_summary(capture) for capture in captures],
@@ -692,16 +726,22 @@ async def list_raw_captures(
 async def get_raw_capture(
     capture_id: UUID,
     org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
     session: Any = Depends(get_content_read_session_dependency),
 ) -> RawCaptureResponse:
     """Get a single archived raw quick capture."""
     try:
+        accessible_projects = await _accessible_project_ids_for_read(ctx)
         capture = await content_runtime.get_raw_capture(
             session,
             organization_id=org.id,
             capture_id=capture_id,
         )
-        if not capture:
+        if not capture or not _raw_capture_visible_to_reader(
+            capture,
+            reader_user_id=getattr(ctx, "user_id", None),
+            accessible_projects=accessible_projects,
+        ):
             raise HTTPException(status_code=404, detail=f"Raw capture not found: {capture_id}")
 
         return _serialize_raw_capture(capture)

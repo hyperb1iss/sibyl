@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -23,6 +23,12 @@ def _org() -> MagicMock:
     return org
 
 
+def _ctx(*, user_id: str) -> MagicMock:
+    ctx = MagicMock()
+    ctx.user_id = user_id
+    return ctx
+
+
 def _capture(
     *,
     org_id,
@@ -30,8 +36,15 @@ def _capture(
     surface: str,
     entity_type: str = "episode",
     review_state: str | None = None,
+    owner_id: UUID | None = None,
 ) -> RawCaptureRecord:
-    metadata = {"capture_mode": "quick", "capture_surface": surface}
+    owner_id = owner_id or uuid4()
+    metadata = {
+        "capture_mode": "quick",
+        "capture_surface": surface,
+        "memory_scope": "private",
+        "principal_id": str(owner_id),
+    }
     if review_state is not None:
         metadata["review_state"] = review_state
 
@@ -45,7 +58,7 @@ def _capture(
         tags=["alpha"],
         metadata=metadata,
         capture_surface=surface,
-        created_by_user_id=uuid4(),
+        created_by_user_id=owner_id,
         created_at=datetime(2026, 4, 14, 16, 0, tzinfo=UTC),
     )
 
@@ -54,9 +67,10 @@ def _capture(
 async def test_list_raw_captures_returns_paginated_summaries() -> None:
     org = _org()
     session = MagicMock()
+    reader_id = uuid4()
     captures = [
-        _capture(org_id=org.id, title="Newest", surface="dashboard"),
-        _capture(org_id=org.id, title="Older", surface="cli"),
+        _capture(org_id=org.id, title="Newest", surface="dashboard", owner_id=reader_id),
+        _capture(org_id=org.id, title="Older", surface="cli", owner_id=reader_id),
     ]
 
     with patch(
@@ -65,6 +79,7 @@ async def test_list_raw_captures_returns_paginated_summaries() -> None:
     ) as list_captures:
         response = await list_raw_captures(
             org=org,
+            ctx=_ctx(user_id=str(reader_id)),
             session=session,
             entity_type=None,
             capture_surface=None,
@@ -104,6 +119,7 @@ async def test_list_raw_captures_supports_review_state_filter() -> None:
     ) as list_captures:
         response = await list_raw_captures(
             org=org,
+            ctx=_ctx(user_id=str(captures[0].created_by_user_id)),
             session=session,
             entity_type=None,
             capture_surface=None,
@@ -126,7 +142,12 @@ async def test_get_raw_capture_returns_verbatim_content() -> None:
         "sibyl.api.routes.entities.content_runtime.get_raw_capture",
         AsyncMock(return_value=capture),
     ) as load_capture:
-        response = await get_raw_capture(capture.id, org=org, session=session)
+        response = await get_raw_capture(
+            capture.id,
+            org=org,
+            ctx=_ctx(user_id=str(capture.created_by_user_id)),
+            session=session,
+        )
 
     assert response.id == str(capture.id)
     assert response.title == "Quick memory"
@@ -148,7 +169,35 @@ async def test_get_raw_capture_raises_not_found_for_other_org() -> None:
     session.execute = AsyncMock(return_value=result)
 
     with pytest.raises(HTTPException) as exc:
-        await get_raw_capture(uuid4(), org=_org(), session=session)
+        await get_raw_capture(
+            uuid4(),
+            org=_org(),
+            ctx=_ctx(user_id=str(uuid4())),
+            session=session,
+        )
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_raw_capture_hides_other_users_private_capture() -> None:
+    org = _org()
+    capture = _capture(org_id=org.id, title="Someone else's note", surface="dashboard")
+    session = MagicMock()
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.content_runtime.get_raw_capture",
+            AsyncMock(return_value=capture),
+        ),
+        pytest.raises(HTTPException) as exc,
+    ):
+        await get_raw_capture(
+            capture.id,
+            org=org,
+            ctx=_ctx(user_id=str(uuid4())),
+            session=session,
+        )
 
     assert exc.value.status_code == 404
 
