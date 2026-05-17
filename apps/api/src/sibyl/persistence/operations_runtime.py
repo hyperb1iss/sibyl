@@ -43,6 +43,9 @@ if TYPE_CHECKING:
     class RequireSettingsAdmin(Protocol):
         def __call__(self, request: Request) -> Awaitable[None]: ...
 
+    class RequireSettingsOwner(Protocol):
+        def __call__(self, request: Request) -> Awaitable[None]: ...
+
     class RequireSetupModeOrAdmin(Protocol):
         def __call__(self, request: Request) -> Awaitable[object | None]: ...
 
@@ -52,6 +55,7 @@ if TYPE_CHECKING:
     get_setup_status: GetSetupStatus
     is_setup_mode: IsSetupMode
     require_settings_admin: RequireSettingsAdmin
+    require_settings_owner: RequireSettingsOwner
     require_setup_mode_or_admin: RequireSetupModeOrAdmin
     require_setup_mode_or_auth: RequireSetupModeOrAuth
 
@@ -61,6 +65,7 @@ _AUTH_RUNTIME_EXPORTS = [
     "get_setup_status",
     "is_setup_mode",
     "require_settings_admin",
+    "require_settings_owner",
     "require_setup_mode_or_admin",
     "require_setup_mode_or_auth",
 ]
@@ -76,6 +81,7 @@ __all__ = [
     "get_setup_status",
     "is_setup_mode",
     "require_settings_admin",
+    "require_settings_owner",
     "require_setup_mode_or_admin",
     "require_setup_mode_or_auth",
     "list_backups",

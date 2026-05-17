@@ -149,7 +149,9 @@ async def test_require_setup_mode_or_admin_accepts_global_admin(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("role", [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.MEMBER])
+@pytest.mark.parametrize(
+    "role", [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.MEMBER]
+)
 async def test_require_setup_mode_or_admin_accepts_global_admin_in_any_org_role(
     monkeypatch: pytest.MonkeyPatch,
     role: OrganizationRole,
@@ -223,6 +225,75 @@ async def test_require_setup_mode_or_admin_rejects_non_admin_context(
     assert exc_info.value.detail == "Global admin required"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "role",
+    [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.MEMBER],
+)
+async def test_require_settings_owner_accepts_global_admin(
+    monkeypatch: pytest.MonkeyPatch,
+    role: OrganizationRole,
+) -> None:
+    monkeypatch.setattr(surreal_setup, "is_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        surreal_setup,
+        "build_auth_context",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                organization=object(),
+                org_role=role,
+                user=SimpleNamespace(is_admin=True),
+            )
+        ),
+    )
+
+    assert await surreal_setup.require_settings_owner(_request()) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("organization", "role"),
+    [
+        (object(), OrganizationRole.OWNER),
+        (object(), OrganizationRole.ADMIN),
+        (object(), OrganizationRole.MEMBER),
+        (None, OrganizationRole.OWNER),
+    ],
+)
+async def test_require_settings_owner_rejects_non_global_admin(
+    monkeypatch: pytest.MonkeyPatch,
+    organization: object | None,
+    role: OrganizationRole,
+) -> None:
+    monkeypatch.setattr(surreal_setup, "is_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        surreal_setup,
+        "build_auth_context",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                organization=organization,
+                org_role=role,
+                user=SimpleNamespace(is_admin=False),
+            )
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_setup.require_settings_owner(_request())
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Global admin required"
+
+
+@pytest.mark.asyncio
+async def test_require_settings_owner_allows_setup_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(surreal_setup, "is_setup_mode", AsyncMock(return_value=True))
+
+    assert await surreal_setup.require_settings_owner(_request()) is None
+
+
 def test_surreal_setup_exports_neutral_runtime_surface() -> None:
     assert surreal_setup.__all__ == [
         "SetupStatus",
@@ -232,6 +303,7 @@ def test_surreal_setup_exports_neutral_runtime_surface() -> None:
         "get_setup_status",
         "is_setup_mode",
         "require_settings_admin",
+        "require_settings_owner",
         "require_setup_mode_or_admin",
         "require_setup_mode_or_auth",
     ]

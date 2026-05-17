@@ -148,6 +148,21 @@ async def require_settings_admin(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Admin or owner role required")
 
 
+async def require_settings_owner(request: Request) -> None:
+    """Allow setup-mode bootstrap access, otherwise require a global admin.
+
+    Org owner/admin is insufficient: every user owns a personal
+    organization with the OWNER role, so an org-scoped check gates
+    nothing for instance-wide settings.
+    """
+    if await is_setup_mode():
+        return
+
+    ctx = await build_auth_context(request, None)
+    if ctx.user.is_admin is not True:
+        raise HTTPException(status_code=403, detail="Global admin required")
+
+
 __all__ = [
     "SetupStatus",
     "SurrealOrganizationRepository",
@@ -156,6 +171,7 @@ __all__ = [
     "get_setup_status",
     "is_setup_mode",
     "require_settings_admin",
+    "require_settings_owner",
     "require_setup_mode_or_admin",
     "require_setup_mode_or_auth",
 ]

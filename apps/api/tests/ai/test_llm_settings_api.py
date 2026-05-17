@@ -32,7 +32,7 @@ def _request() -> Request:
 async def test_get_llm_settings_returns_instance_wide_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(routes, "require_settings_admin", AsyncMock())
+    monkeypatch.setattr(routes, "require_settings_owner", AsyncMock())
     monkeypatch.setattr(routes, "get_config_source", lambda: FakeConfigSource(_resolved()))
 
     response = await routes.get_llm_settings(_request())
@@ -52,7 +52,7 @@ async def test_update_llm_surface_writes_db_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = AsyncMock()
-    monkeypatch.setattr(routes, "require_settings_admin", AsyncMock())
+    monkeypatch.setattr(routes, "require_settings_owner", AsyncMock())
     monkeypatch.setattr(routes, "get_config_source", lambda: FakeConfigSource(_resolved()))
     monkeypatch.setattr(routes, "get_settings_service", lambda: service)
     monkeypatch.setattr(routes, "invalidate_llm_runtime", AsyncMock())
@@ -72,7 +72,7 @@ async def test_update_llm_surface_writes_db_settings(
 async def test_update_llm_surface_rejects_env_locked_field(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(routes, "require_settings_admin", AsyncMock())
+    monkeypatch.setattr(routes, "require_settings_owner", AsyncMock())
     resolved = _resolved(
         model=ConfigField(
             value="claude-haiku-4-5",
@@ -98,7 +98,7 @@ async def test_update_llm_surface_rejects_env_locked_field(
 async def test_llm_surface_test_delegates_to_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(routes, "require_settings_admin", AsyncMock())
+    monkeypatch.setattr(routes, "require_settings_owner", AsyncMock())
     result = SurfaceTestResult(
         surface=LLMSurface.CRAWLER,
         provider="anthropic",
@@ -119,11 +119,11 @@ async def test_llm_surface_test_delegates_to_validation(
 
 
 @pytest.mark.asyncio
-async def test_llm_settings_routes_reject_non_admin(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_llm_settings_routes_reject_non_owner(monkeypatch: pytest.MonkeyPatch) -> None:
     async def reject(_: Request) -> None:
         raise HTTPException(status_code=403, detail="forbidden")
 
-    monkeypatch.setattr(routes, "require_settings_admin", reject)
+    monkeypatch.setattr(routes, "require_settings_owner", reject)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.get_llm_settings(_request())
