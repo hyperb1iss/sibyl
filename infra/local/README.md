@@ -62,8 +62,8 @@ Docker and skips an explicit image load. Override with `SIBYL_CONTAINER_BUILDER=
 
 ## Manual Render Checks
 
-The Tiltfile registers these chart repos as `surrealdb-helm` and `valkey-helm`. The
-render checks below use the same aliases.
+The Tiltfile registers these chart repos as `surrealdb-helm` and `valkey-helm`. The render checks
+below use the same aliases.
 
 ```bash
 helm template surrealdb surrealdb-helm/surrealdb \
