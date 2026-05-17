@@ -31,8 +31,8 @@ jobs:
       SIBYL_AUTH_STORE: surreal
       SIBYL_COORDINATION_BACKEND: local
       SIBYL_SURREAL_URL: ws://localhost:8000/rpc
-      SIBYL_SURREAL_USERNAME: root
-      SIBYL_SURREAL_PASSWORD: root
+      SIBYL_SURREAL_USERNAME: sibyl_ci
+      SIBYL_SURREAL_PASSWORD: sibyl_ci_password
       SIBYL_RETRIEVAL_MODE: compare
       SIBYL_OPENAI_API_KEY: sk-test-key
       SIBYL_ANTHROPIC_API_KEY: sk-ant-test-key
@@ -218,8 +218,8 @@ jobs:
       SIBYL_AUTH_STORE: surreal
       SIBYL_COORDINATION_BACKEND: local
       SIBYL_SURREAL_URL: ws://localhost:8000/rpc
-      SIBYL_SURREAL_USERNAME: root
-      SIBYL_SURREAL_PASSWORD: root
+      SIBYL_SURREAL_USERNAME: sibyl_ci
+      SIBYL_SURREAL_PASSWORD: sibyl_ci_password
       SIBYL_OPENAI_API_KEY: sk-test-key
       SIBYL_ANTHROPIC_API_KEY: sk-ant-test-key
       SIBYL_MOCK_LLM: true
