@@ -516,6 +516,30 @@ async def test_compile_context_scopes_agent_diary_to_accessible_projects() -> No
 
 
 @pytest.mark.asyncio
+async def test_compile_context_skips_agent_diary_without_accessible_projects() -> None:
+    raw_calls: list[dict[str, Any]] = []
+
+    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
+        raw_calls.append(kwargs)
+        return []
+
+    await _compile_context_compat(
+        "implementation stance",
+        intent="build",
+        project=None,
+        accessible_projects=set(),
+        principal_id="user-123",
+        agent_id="nova",
+        organization_id="org-123",
+        search_fn=_empty_search_response,
+        raw_memory_recall_fn=fake_raw_recall,
+    )
+
+    diary_calls = [call for call in raw_calls if call.get("agent_id") == "nova"]
+    assert diary_calls == []
+
+
+@pytest.mark.asyncio
 async def test_compile_context_native_ranks_agent_diary_by_relevance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

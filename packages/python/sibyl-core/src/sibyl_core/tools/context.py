@@ -430,7 +430,7 @@ async def _compile_raw_memory_section(
     if agent_id:
         if project:
             recall_specs.append(("private", None, agent_id, project))
-        elif accessible_projects:
+        elif accessible_projects is not None:
             recall_specs.extend(
                 ("private", None, agent_id, scoped_project)
                 for scoped_project in sorted(accessible_projects)
