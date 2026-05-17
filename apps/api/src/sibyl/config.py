@@ -128,6 +128,13 @@ class Settings(BaseSettings):
                     "CRITICAL: In-memory SurrealDB is forbidden in production. "
                     "Set SIBYL_SURREAL_URL or SIBYL_SURREAL_DATA_DIR."
                 )
+            if self.auth_store == "surreal" and self.surreal_username == "root" and (
+                self.surreal_password.get_secret_value() in {"sibyl_dev", "root"}
+            ):
+                raise ValueError(
+                    "CRITICAL: Default SurrealDB credentials are forbidden in production. "
+                    "Set SIBYL_SURREAL_USERNAME and SIBYL_SURREAL_PASSWORD to secure values."
+                )
         return self
 
     jwt_secret: SecretStr = Field(
