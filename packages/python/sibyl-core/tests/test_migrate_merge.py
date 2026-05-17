@@ -305,7 +305,7 @@ def test_merge_archives_can_override_canonical_org_name_and_slug() -> None:
     assert auth["tables"]["organizations"][0]["slug"] == "merged-organization"
 
 
-def test_merge_archives_coalesces_users_by_email_and_rewrites_references() -> None:
+def test_merge_archives_does_not_coalesce_users_by_email() -> None:
     result = merge_archives(
         [
             _archive(
@@ -424,24 +424,16 @@ def test_merge_archives_coalesces_users_by_email_and_rewrites_references() -> No
         options=ArchiveMergeOptions(canonical_org_id=CANONICAL_ORG_ID),
     )
 
-    assert result.user_alias_count == 1
+    assert result.user_alias_count == 0
 
     auth = json.loads(result.archive.files[AUTH_FILENAME].decode("utf-8"))
     assert auth["tables"]["users"] == [
-        {
-            "uuid": "user-a",
-            "email": "stef@hyperbliss.tech",
-            "name": "Stef A",
-            "is_admin": True,
-        }
+        {"uuid": "user-a", "email": "stef@hyperbliss.tech", "name": "Stef A", "is_admin": False},
+        {"uuid": "user-b", "email": "stef@hyperbliss.tech", "name": "Stef B", "is_admin": True},
     ]
     assert auth["tables"]["organization_members"] == [
-        {
-            "uuid": "member-a",
-            "organization_id": CANONICAL_ORG_ID,
-            "user_id": "user-a",
-            "role": "owner",
-        }
+        {"uuid": "member-a", "organization_id": CANONICAL_ORG_ID, "user_id": "user-a", "role": "member"},
+        {"uuid": "member-b", "organization_id": CANONICAL_ORG_ID, "user_id": "user-b", "role": "owner"},
     ]
     assert auth["tables"]["memory_spaces"] == [
         {
@@ -458,5 +450,5 @@ def test_merge_archives_coalesces_users_by_email_and_rewrites_references() -> No
     assert content["tables"]["raw_captures"][0]["principal_id"] == "user-a"
     assert content["tables"]["raw_captures"][0]["scope_key"] == "user-a"
     assert content["tables"]["raw_captures"][0]["created_by_user_id"] == "user-a"
-    assert content["tables"]["source_imports"][0]["principal_id"] == "user-a"
-    assert content["tables"]["source_imports"][0]["target_scope_key"] == "user-a"
+    assert content["tables"]["source_imports"][0]["principal_id"] == "user-b"
+    assert content["tables"]["source_imports"][0]["target_scope_key"] == "user-b"

@@ -272,9 +272,6 @@ def _normalized_email(row: dict[str, Any]) -> str:
 
 
 def _user_identity_key(row: dict[str, Any]) -> tuple[str, str]:
-    email = _normalized_email(row)
-    if email:
-        return ("email", email)
     github_id = str(row.get("github_id") or "").strip()
     if github_id:
         return ("github_id", github_id)
