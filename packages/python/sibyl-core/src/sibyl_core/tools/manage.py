@@ -32,6 +32,8 @@ from sibyl_core.tools.helpers import _project_id_for_policy
 
 log = structlog.get_logger()
 MEMORY_POLICY_CONTEXT_DATA_KEY = "_memory_policy_context"
+DEFAULT_CRAWL_MAX_PAGES = 50
+MAX_CRAWL_MAX_PAGES = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -1031,13 +1033,22 @@ async def _crawl_source(
     organization_id: str,
 ) -> ManageResponse:
     """Trigger crawl of a URL."""
+    sanitized_data = dict(data)
+    # Manage crawl only supports website ingestion.
+    sanitized_data["source_type"] = "website"
+
     source_id, created = await _create_or_get_crawl_source(
         url,
         depth,
-        data,
+        sanitized_data,
         organization_id=organization_id,
     )
-    max_pages = int(data.get("max_pages", 50))
+    raw_max_pages = data.get("max_pages", DEFAULT_CRAWL_MAX_PAGES)
+    try:
+        max_pages = int(raw_max_pages)
+    except (TypeError, ValueError):
+        max_pages = DEFAULT_CRAWL_MAX_PAGES
+    max_pages = max(1, min(max_pages, MAX_CRAWL_MAX_PAGES))
     generate_embeddings = bool(data.get("generate_embeddings", True))
     job_id = await _enqueue_source_crawl(
         source_id,
