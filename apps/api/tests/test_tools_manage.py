@@ -540,6 +540,55 @@ class TestSourceActions:
             create_or_get.assert_awaited_once()
             enqueue.assert_awaited_once()
 
+
+    @pytest.mark.asyncio
+    async def test_crawl_forces_website_source_type(self) -> None:
+        """crawl action should force website source type for manage surface."""
+        with (
+            patch(
+                "sibyl_core.tools.manage._create_or_get_crawl_source",
+                new=AsyncMock(return_value=("source_abc123", True)),
+            ) as create_or_get,
+            patch(
+                "sibyl_core.tools.manage._enqueue_source_crawl",
+                new=AsyncMock(return_value="crawl:source_abc123"),
+            ),
+        ):
+            result = await manage(
+                action="crawl",
+                data={
+                    "url": "https://docs.example.com",
+                    "source_type": "local",
+                },
+                organization_id=TEST_ORG_ID,
+            )
+
+            assert result.success is True
+            payload = create_or_get.await_args.args[2]
+            assert payload["source_type"] == "website"
+
+    @pytest.mark.asyncio
+    async def test_crawl_clamps_max_pages(self) -> None:
+        """crawl action should cap max_pages to API-safe bounds."""
+        with (
+            patch(
+                "sibyl_core.tools.manage._create_or_get_crawl_source",
+                new=AsyncMock(return_value=("source_abc123", True)),
+            ),
+            patch(
+                "sibyl_core.tools.manage._enqueue_source_crawl",
+                new=AsyncMock(return_value="crawl:source_abc123"),
+            ) as enqueue,
+        ):
+            result = await manage(
+                action="crawl",
+                data={"url": "https://docs.example.com", "max_pages": 999999999},
+                organization_id=TEST_ORG_ID,
+            )
+
+            assert result.success is True
+            assert enqueue.await_args.kwargs["max_pages"] == 500
+
     @pytest.mark.asyncio
     async def test_sync_source_not_found(self) -> None:
         """sync action should fail gracefully if source not found."""
