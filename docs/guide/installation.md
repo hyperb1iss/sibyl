@@ -129,18 +129,18 @@ SIBYL_ANTHROPIC_API_KEY=...        # For LLM operations
 
 ### Optional Environment Variables
 
-| Variable                     | Default                  | Description                                 |
-| ---------------------------- | ------------------------ | ------------------------------------------- |
-| `SIBYL_STORE`                | `surreal`                | Active persistence runtime                  |
-| `SIBYL_COORDINATION_BACKEND` | `auto`                   | `local` or `redis` coordination backend     |
-| `SIBYL_SURREAL_URL`          | -                        | SurrealDB server URL                        |
-| `SIBYL_LOG_LEVEL`            | `INFO`                   | Logging level                               |
-| `SIBYL_EMBEDDING_MODEL`      | `text-embedding-3-small` | OpenAI embedding model                      |
-| `SIBYL_PUBLIC_URL`           | `http://localhost:3337`  | Public base URL (OAuth callbacks, redirects)|
-| `SIBYL_SERVER_URL`           | derived                  | Override API base URL (defaults to public)  |
-| `SIBYL_FRONTEND_URL`         | derived                  | Override frontend URL (defaults to public)  |
-| `SIBYL_REDIS_HOST`           | `127.0.0.1`              | Redis/Valkey host when `coordination=redis` |
-| `SIBYL_POSTGRES_HOST`        | `localhost`              | Migration-only PostgreSQL host              |
+| Variable                     | Default                  | Description                                  |
+| ---------------------------- | ------------------------ | -------------------------------------------- |
+| `SIBYL_STORE`                | `surreal`                | Active persistence runtime                   |
+| `SIBYL_COORDINATION_BACKEND` | `auto`                   | `local` or `redis` coordination backend      |
+| `SIBYL_SURREAL_URL`          | -                        | SurrealDB server URL                         |
+| `SIBYL_LOG_LEVEL`            | `INFO`                   | Logging level                                |
+| `SIBYL_EMBEDDING_MODEL`      | `text-embedding-3-small` | OpenAI embedding model                       |
+| `SIBYL_PUBLIC_URL`           | `http://localhost:3337`  | Public base URL (OAuth callbacks, redirects) |
+| `SIBYL_SERVER_URL`           | derived                  | Override API base URL (defaults to public)   |
+| `SIBYL_FRONTEND_URL`         | derived                  | Override frontend URL (defaults to public)   |
+| `SIBYL_REDIS_HOST`           | `127.0.0.1`              | Redis/Valkey host when `coordination=redis`  |
+| `SIBYL_POSTGRES_HOST`        | `localhost`              | Migration-only PostgreSQL host               |
 
 ## Running Sibyl
 

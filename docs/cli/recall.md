@@ -12,43 +12,43 @@ sibyl recall <goal> [options]
 
 ## Arguments
 
-| Argument | Required | Description              |
-| -------- | -------- | ------------------------ |
-| `goal`   | Yes      | Agent goal or user task  |
+| Argument | Required | Description             |
+| -------- | -------- | ----------------------- |
+| `goal`   | Yes      | Agent goal or user task |
 
 ## Options
 
-| Option          | Short | Default   | Description                                          |
-| --------------- | ----- | --------- | ---------------------------------------------------- |
-| `--intent`      | `-i`  | `build`   | Agent intent (see below)                             |
-| `--layer`       |       | `recall`  | Context depth: `wake`, `recall`, `deep_search`       |
-| `--domain`      | `-d`  | (none)    | Domain/category to bias retrieval                    |
-| `--project`     | `-p`  | (auto)    | Project ID                                           |
-| `--agent`       |       | (none)    | Agent diary identity to include                      |
-| `--all`         | `-a`  | false     | Use all accessible projects                          |
-| `--limit`       | `-l`  | 12        | Maximum context items (1-50)                         |
-| `--related`     |       | on        | Include one-hop related graph context (`--no-related`) |
-| `--json`        | `-j`  | false     | Output full JSON                                     |
-| `--raw`         |       | false     | Recall verbatim raw memories                         |
-| `--diary`       |       | false     | Recall a private agent diary                         |
-| `--scope`       |       | `private` | Raw memory scope                                     |
-| `--scope-key`   |       | (none)    | Project/team/shared scope key                        |
+| Option        | Short | Default   | Description                                            |
+| ------------- | ----- | --------- | ------------------------------------------------------ |
+| `--intent`    | `-i`  | `build`   | Agent intent (see below)                               |
+| `--layer`     |       | `recall`  | Context depth: `wake`, `recall`, `deep_search`         |
+| `--domain`    | `-d`  | (none)    | Domain/category to bias retrieval                      |
+| `--project`   | `-p`  | (auto)    | Project ID                                             |
+| `--agent`     |       | (none)    | Agent diary identity to include                        |
+| `--all`       | `-a`  | false     | Use all accessible projects                            |
+| `--limit`     | `-l`  | 12        | Maximum context items (1-50)                           |
+| `--related`   |       | on        | Include one-hop related graph context (`--no-related`) |
+| `--json`      | `-j`  | false     | Output full JSON                                       |
+| `--raw`       |       | false     | Recall verbatim raw memories                           |
+| `--diary`     |       | false     | Recall a private agent diary                           |
+| `--scope`     |       | `private` | Raw memory scope                                       |
+| `--scope-key` |       | (none)    | Project/team/shared scope key                          |
 
 ## Intent
 
 The `--intent` flag biases what kind of memory the pack favors:
 
-| Intent     | Bias                                       |
-| ---------- | ------------------------------------------ |
-| `build`    | Implementation patterns and active tasks   |
-| `plan`     | Decisions, plans, roadmap context          |
-| `ideate`   | Ideas, open questions, prior exploration   |
-| `research` | Claims, sources, documents                 |
-| `review`   | Recent changes, prior review notes         |
-| `debug`    | Error patterns, gotchas, related failures  |
-| `decide`   | Decisions, constraints, tradeoffs          |
-| `learn`    | Guides, procedures, durable knowledge      |
-| `general`  | Balanced mix                               |
+| Intent     | Bias                                      |
+| ---------- | ----------------------------------------- |
+| `build`    | Implementation patterns and active tasks  |
+| `plan`     | Decisions, plans, roadmap context         |
+| `ideate`   | Ideas, open questions, prior exploration  |
+| `research` | Claims, sources, documents                |
+| `review`   | Recent changes, prior review notes        |
+| `debug`    | Error patterns, gotchas, related failures |
+| `decide`   | Decisions, constraints, tradeoffs         |
+| `learn`    | Guides, procedures, durable knowledge     |
+| `general`  | Balanced mix                              |
 
 ## Layers
 

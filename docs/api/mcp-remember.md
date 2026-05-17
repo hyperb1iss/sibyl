@@ -1,7 +1,7 @@
 # MCP Tool: remember
 
-Capture durable context from planning, ideation, building, or any domain. `remember` stores
-verbatim raw memory as provenance and creates a graph entity in one call.
+Capture durable context from planning, ideation, building, or any domain. `remember` stores verbatim
+raw memory as provenance and creates a graph entity in one call.
 
 ## Overview
 
@@ -48,19 +48,19 @@ interface RememberInput {
 episode, decision, plan, idea, claim, artifact, procedure, domain, session, pattern, rule
 ```
 
-| Kind        | Capture For                                       |
-| ----------- | ------------------------------------------------- |
-| `episode`   | Temporal knowledge, learnings (default)           |
-| `decision`  | A chosen direction with rationale                 |
-| `plan`      | Strategy, sequencing, milestones                  |
-| `idea`      | A brainstormed concept or unresolved option       |
-| `claim`     | An atomic fact or assertion                       |
-| `artifact`  | A file, object, document, asset, or work product  |
-| `procedure` | A repeatable workflow or runbook                  |
-| `domain`    | A modeled problem space                           |
-| `session`   | A conversation or work-session checkpoint         |
-| `pattern`   | A reusable pattern or best practice               |
-| `rule`      | A rule or guideline                               |
+| Kind        | Capture For                                      |
+| ----------- | ------------------------------------------------ |
+| `episode`   | Temporal knowledge, learnings (default)          |
+| `decision`  | A chosen direction with rationale                |
+| `plan`      | Strategy, sequencing, milestones                 |
+| `idea`      | A brainstormed concept or unresolved option      |
+| `claim`     | An atomic fact or assertion                      |
+| `artifact`  | A file, object, document, asset, or work product |
+| `procedure` | A repeatable workflow or runbook                 |
+| `domain`    | A modeled problem space                          |
+| `session`   | A conversation or work-session checkpoint        |
+| `pattern`   | A reusable pattern or best practice              |
+| `rule`      | A rule or guideline                              |
 
 ## Memory Scope
 
@@ -69,14 +69,14 @@ The scope is derived from `project`:
 - With a `project`, the memory is scoped to that project (`project` scope).
 - Without a `project`, the memory is private to the calling user (`private` scope).
 
-Project-scoped writes require access to the project. Project-scoped credentials (an API key bound
-to specific projects) must supply a `project`.
+Project-scoped writes require access to the project. Project-scoped credentials (an API key bound to
+specific projects) must supply a `project`.
 
 ## Active Task Linking
 
 When `active_task` is `true` (default) and a `project` is supplied, `remember` looks up the single
-task in `doing` status for that project. If exactly one exists, the new memory is linked to it.
-This keeps captures attached to the work in progress without the caller tracking task IDs.
+task in `doing` status for that project. If exactly one exists, the new memory is linked to it. This
+keeps captures attached to the work in progress without the caller tracking task IDs.
 
 Supply `task_ids` for explicit task linkage regardless of the active-task lookup.
 
@@ -159,20 +159,20 @@ Without a `project`, the memory is private to the calling user.
 
 ## Notes
 
-- The raw memory record is stored verbatim before the graph entity is created. The
-  `raw_source_id` is the stable provenance key for that record.
-- `remember` requires a user context. API keys without a resolvable user cannot capture raw
-  source material.
+- The raw memory record is stored verbatim before the graph entity is created. The `raw_source_id`
+  is the stable provenance key for that record.
+- `remember` requires a user context. API keys without a resolvable user cannot capture raw source
+  material.
 - Every call is authorized against the memory policy and audited.
 
 ## Error Handling
 
-| Error                                                | Cause                                       | Resolution                            |
-| ----------------------------------------------------- | ------------------------------------------- | ------------------------------------- |
-| `Organization context required`                        | No org-scoped token                         | Authenticate with an org-scoped token |
-| `User context required to remember raw source material` | Credential has no resolvable user           | Use a user-bound token or API key     |
-| `Project is required when MCP credentials are project-scoped` | Project-scoped key with no `project`        | Supply a `project`                    |
-| `api_key_memory_space_denied`                           | API key lacks the memory scope being written | Grant the key the required memory scope |
+| Error                                                         | Cause                                        | Resolution                              |
+| ------------------------------------------------------------- | -------------------------------------------- | --------------------------------------- |
+| `Organization context required`                               | No org-scoped token                          | Authenticate with an org-scoped token   |
+| `User context required to remember raw source material`       | Credential has no resolvable user            | Use a user-bound token or API key       |
+| `Project is required when MCP credentials are project-scoped` | Project-scoped key with no `project`         | Supply a `project`                      |
+| `api_key_memory_space_denied`                                 | API key lacks the memory scope being written | Grant the key the required memory scope |
 
 ## Related
 

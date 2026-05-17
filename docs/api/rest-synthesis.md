@@ -20,7 +20,7 @@ All endpoints require authentication via:
 
 ## Role Requirements
 
-| Operation                  | Required Roles               |
+| Operation                   | Required Roles               |
 | --------------------------- | ---------------------------- |
 | Plan and draft              | Owner, Admin, Member, Viewer |
 | Draft with `remember: true` | Owner, Admin, Member         |
@@ -60,23 +60,23 @@ section. No artifact text is generated.
 
 **Request Schema:**
 
-| Field                   | Type     | Required | Default         | Description                                  |
-| ----------------------- | -------- | -------- | --------------- | -------------------------------------------- |
-| `goal`                  | string   | Yes      | -               | Synthesis goal (1-1000 chars)                |
-| `output_type`           | string   | No       | `documentation` | Output type                                  |
-| `audience`              | string   | No       | -               | Intended reader (max 500 chars)              |
-| `depth`                 | string   | No       | `standard`      | `brief`, `standard`, or `deep`               |
-| `seed_query`            | string   | No       | -               | Explicit retrieval query                     |
-| `project`               | string   | No       | -               | Project ID to scope sources                  |
-| `domain`                | string   | No       | -               | Domain to scope sources                      |
-| `entity_ids`            | string[] | No       | `[]`            | Pinned entity sources (max 100)              |
-| `decision_ids`          | string[] | No       | `[]`            | Pinned decision sources (max 100)            |
-| `task_ids`              | string[] | No       | `[]`            | Pinned task sources (max 100)                |
-| `artifact_ids`          | string[] | No       | `[]`            | Pinned artifact sources (max 100)            |
-| `required_sections`     | object[] | No       | `[]`            | Forced outline sections (max 12)             |
-| `constraints`           | string[] | No       | `[]`            | Free-text output constraints (max 50)        |
-| `max_sections`          | integer  | No       | 6               | Outline section cap (1-12)                   |
-| `include_neighborhoods` | boolean  | No       | true            | Include one-hop related sources              |
+| Field                   | Type     | Required | Default         | Description                           |
+| ----------------------- | -------- | -------- | --------------- | ------------------------------------- |
+| `goal`                  | string   | Yes      | -               | Synthesis goal (1-1000 chars)         |
+| `output_type`           | string   | No       | `documentation` | Output type                           |
+| `audience`              | string   | No       | -               | Intended reader (max 500 chars)       |
+| `depth`                 | string   | No       | `standard`      | `brief`, `standard`, or `deep`        |
+| `seed_query`            | string   | No       | -               | Explicit retrieval query              |
+| `project`               | string   | No       | -               | Project ID to scope sources           |
+| `domain`                | string   | No       | -               | Domain to scope sources               |
+| `entity_ids`            | string[] | No       | `[]`            | Pinned entity sources (max 100)       |
+| `decision_ids`          | string[] | No       | `[]`            | Pinned decision sources (max 100)     |
+| `task_ids`              | string[] | No       | `[]`            | Pinned task sources (max 100)         |
+| `artifact_ids`          | string[] | No       | `[]`            | Pinned artifact sources (max 100)     |
+| `required_sections`     | object[] | No       | `[]`            | Forced outline sections (max 12)      |
+| `constraints`           | string[] | No       | `[]`            | Free-text output constraints (max 50) |
+| `max_sections`          | integer  | No       | 6               | Outline section cap (1-12)            |
+| `include_neighborhoods` | boolean  | No       | true            | Include one-hop related sources       |
 
 A `required_sections` entry has the shape:
 
@@ -150,8 +150,8 @@ documentation, report, briefing, roadmap, release_notes, audit_packet, custom
 }
 ```
 
-`hidden_count` on a source pack reports relevant sources withheld because the caller's memory
-policy does not grant access.
+`hidden_count` on a source pack reports relevant sources withheld because the caller's memory policy
+does not grant access.
 
 ### Draft Synthesis
 
@@ -181,13 +181,13 @@ artifact as a memory record.
 
 **Additional Request Schema:**
 
-| Field           | Type     | Required | Default    | Description                                      |
-| --------------- | -------- | -------- | ---------- | ------------------------------------------------ |
-| `output_format` | string   | No       | `markdown` | `markdown` or `json`                             |
-| `remember`      | boolean  | No       | false      | Persist the generated artifact as memory         |
+| Field           | Type     | Required | Default    | Description                                        |
+| --------------- | -------- | -------- | ---------- | -------------------------------------------------- |
+| `output_format` | string   | No       | `markdown` | `markdown` or `json`                               |
+| `remember`      | boolean  | No       | false      | Persist the generated artifact as memory           |
 | `memory_scope`  | string   | No       | `private`  | `private` or `project` for the remembered artifact |
-| `scope_key`     | string   | No       | -          | Project ID when `memory_scope` is `project`      |
-| `tags`          | string[] | No       | `[]`       | Tags for the remembered artifact (max 50)        |
+| `scope_key`     | string   | No       | -          | Project ID when `memory_scope` is `project`        |
+| `tags`          | string[] | No       | `[]`       | Tags for the remembered artifact (max 50)          |
 
 When `remember` is `true` with `memory_scope: "project"`, `scope_key` is required (it defaults to
 `project` when omitted) and the write requires Member-or-higher role plus project access.
@@ -239,24 +239,24 @@ When `remember` is `false`, `remembered_memory_id` and `remembered_source_id` ar
 Both endpoints attach a `verification` summary. The `/draft` endpoint applies verification before
 returning; `/plan` returns `verification.status: "pending"`.
 
-| Status    | Meaning                                                       |
-| --------- | ------------------------------------------------------------- |
-| `pending` | Verification not yet applied (raw `/plan` response)           |
-| `gaps`    | One or more sections lack sufficient grounding                |
-| `pass`    | All sections are adequately source-grounded                   |
+| Status    | Meaning                                             |
+| --------- | --------------------------------------------------- |
+| `pending` | Verification not yet applied (raw `/plan` response) |
+| `gaps`    | One or more sections lack sufficient grounding      |
+| `pass`    | All sections are adequately source-grounded         |
 
 Each `gap` identifies the under-grounded section, the reason, the retrieval query that came up
 short, and any missing source IDs.
 
 ## Error Responses
 
-| Status | Cause                                                          |
-| ------ | -------------------------------------------------------------- |
-| 400    | Invalid request, or `missing_scope_key` on a project-scoped draft |
-| 401    | Missing or invalid authentication                              |
+| Status | Cause                                                                |
+| ------ | -------------------------------------------------------------------- |
+| 400    | Invalid request, or `missing_scope_key` on a project-scoped draft    |
+| 401    | Missing or invalid authentication                                    |
 | 403    | Insufficient role, `insufficient_org_role`, or project access denied |
-| 422    | Request body validation failed                                |
-| 500    | Synthesis planning or drafting failed                          |
+| 422    | Request body validation failed                                       |
+| 500    | Synthesis planning or drafting failed                                |
 
 ## Related
 

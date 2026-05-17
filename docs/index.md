@@ -5,8 +5,8 @@ hero:
   name: Sibyl
   text: Durable Project Memory
   tagline:
-    Stop rediscovering the same solutions every session. Sibyl gives your projects a
-    knowledge graph, an agent memory loop, semantic search, and durable task context.
+    Stop rediscovering the same solutions every session. Sibyl gives your projects a knowledge
+    graph, an agent memory loop, semantic search, and durable task context.
   actions:
     - theme: brand
       text: Get Started
@@ -19,46 +19,44 @@ features:
   - icon: 🔮
     title: Memory That Sticks
     details:
-      Knowledge survives across sessions. Patterns, decisions, gotchas, and hard-won
-      lessons stay searchable in a SurrealDB-native knowledge graph.
+      Knowledge survives across sessions. Patterns, decisions, gotchas, and hard-won lessons stay
+      searchable in a SurrealDB-native knowledge graph.
   - icon: 🪄
     title: The Memory Loop
     details:
-      Recall context before you act, remember what you learn, and reflect raw notes
-      into durable memory. Built into the CLI, MCP, and hooks.
+      Recall context before you act, remember what you learn, and reflect raw notes into durable
+      memory. Built into the CLI, MCP, and hooks.
   - icon: 🎯
     title: Project-Centric Tasks
     details:
-      Track work across sessions. Full lifecycle from backlog to completion, with
-      learnings captured along the way.
+      Track work across sessions. Full lifecycle from backlog to completion, with learnings captured
+      along the way.
   - icon: ⚡
     title: Find by Meaning
     details:
-      Semantic search finds knowledge by intent, not keywords. Ask "how do I handle
-      auth?" and surface the relevant patterns instantly.
+      Semantic search finds knowledge by intent, not keywords. Ask "how do I handle auth?" and
+      surface the relevant patterns instantly.
   - icon: 🧪
     title: Source-Grounded Synthesis
     details:
-      Draft verified documents from your own memory, with citation, freshness, and
-      gap checks built in.
+      Draft verified documents from your own memory, with citation, freshness, and gap checks built
+      in.
   - icon: 🌊
     title: Ingest External Sources
     details:
-      Crawl documentation sites and import sources into the same graph as your own
-      project knowledge.
+      Crawl documentation sites and import sources into the same graph as your own project
+      knowledge.
 ---
 
 ## The Problem
 
-Every time you start a new coding session, critical context slips away. That OAuth
-gotcha you debugged for two hours? Gone. The pattern that finally made your tests
-pass? Vanished. The configuration quirk that took forever to figure out? Lost to the
-void.
+Every time you start a new coding session, critical context slips away. That OAuth gotcha you
+debugged for two hours? Gone. The pattern that finally made your tests pass? Vanished. The
+configuration quirk that took forever to figure out? Lost to the void.
 
 ## The Solution
 
-Sibyl is a **knowledge graph, agent memory loop, and task workflow** that gives your
-team:
+Sibyl is a **knowledge graph, agent memory loop, and task workflow** that gives your team:
 
 - **Memory:** Store patterns, decisions, and solutions that persist across sessions
 - **The Memory Loop:** `recall → act → remember → reflect`, built into every surface
@@ -114,8 +112,8 @@ sibyl task start task_xyz
 sibyl task complete task_xyz --learnings "OAuth tokens need refresh..."
 ```
 
-**Hooks** automatically inject relevant knowledge into every prompt so useful context
-shows up before you have to go looking for it.
+**Hooks** automatically inject relevant knowledge into every prompt so useful context shows up
+before you have to go looking for it.
 
 ### For Humans: Web UI + CLI
 
@@ -175,18 +173,18 @@ Sibyl is built around a durable cycle that both humans and agents follow:
 └─────────────────────────────────────────────────────┘
 ```
 
-Every completed task makes your knowledge graph smarter. Every pattern discovered
-helps future sessions move faster. **The system learns as you work.**
+Every completed task makes your knowledge graph smarter. Every pattern discovered helps future
+sessions move faster. **The system learns as you work.**
 
 ## Why Sibyl?
 
-| Without Sibyl                    | With Sibyl                              |
-| -------------------------------- | --------------------------------------- |
+| Without Sibyl                    | With Sibyl                                |
+| -------------------------------- | ----------------------------------------- |
 | Agent rediscovers same solutions | Agent recalls existing patterns instantly |
-| Context lost between sessions    | Knowledge persists in a graph           |
-| Manual prompting required        | Hooks inject context automatically      |
-| No task tracking                 | Full lifecycle with learnings capture   |
-| Scattered documentation          | Searchable, connected knowledge graph   |
+| Context lost between sessions    | Knowledge persists in a graph             |
+| Manual prompting required        | Hooks inject context automatically        |
+| No task tracking                 | Full lifecycle with learnings capture     |
+| Scattered documentation          | Searchable, connected knowledge graph     |
 
 ## Get Started
 

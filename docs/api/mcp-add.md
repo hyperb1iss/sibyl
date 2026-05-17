@@ -13,8 +13,8 @@ The `add` tool creates entities in the knowledge graph with:
 - Auto-tagging based on content analysis (for tasks)
 - Conflict detection against semantically similar existing knowledge
 
-The MCP `add` tool runs against the SurrealDB-native graph runtime. There is no Graphiti or
-FalkorDB processing stage in the default memory loop.
+The MCP `add` tool runs against the SurrealDB-native graph runtime. There is no Graphiti or FalkorDB
+processing stage in the default memory loop.
 
 ## Input Schema
 
@@ -283,17 +283,17 @@ operations), use the REST endpoint `POST /api/entities?sync=true` documented in
 
 ### From Request Parameters
 
-| Relationship | Target     | Condition                        |
-| ------------ | ---------- | -------------------------------- |
-| `RELATED_TO` | Any entity | For each ID in `related_to`      |
-| `DEPENDS_ON` | Task       | For each ID in `depends_on`      |
+| Relationship | Target     | Condition                   |
+| ------------ | ---------- | --------------------------- |
+| `RELATED_TO` | Any entity | For each ID in `related_to` |
+| `DEPENDS_ON` | Task       | For each ID in `depends_on` |
 
 Tasks and epics are bound to their project through the required `project` parameter.
 
 ### Auto-Discovered
 
-| Relationship | Source     | Target                                     |
-| ------------ | ---------- | ------------------------------------------ |
+| Relationship | Source     | Target                                        |
+| ------------ | ---------- | --------------------------------------------- |
 | `RELATED_TO` | New entity | Semantically similar patterns/rules/templates |
 
 ## Validation

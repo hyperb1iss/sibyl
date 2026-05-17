@@ -26,8 +26,8 @@ sibyl search <query> [options]
 | `--docs-only`  |       | false   | Search crawled docs only             |
 | `--json`       | `-j`  | false   | Output as JSON                       |
 
-Search spans both graph memory and crawled documents by default. Use `--graph-only` or
-`--docs-only` to restrict the surface.
+Search spans both graph memory and crawled documents by default. Use `--graph-only` or `--docs-only`
+to restrict the surface.
 
 ## Entity Types
 

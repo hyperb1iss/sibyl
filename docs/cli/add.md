@@ -12,8 +12,8 @@ For a single-blob quick capture, see [`capture`](./capture.md). For typed memory
 sibyl add [title] [content] [options]
 ```
 
-Title and content can be passed positionally or with the `--title` / `--content` flags. Content
-can also be read from a file with `--content-file`.
+Title and content can be passed positionally or with the `--title` / `--content` flags. Content can
+also be read from a file with `--content-file`.
 
 ## Arguments
 

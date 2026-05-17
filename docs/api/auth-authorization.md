@@ -17,19 +17,19 @@ Organization (org-level roles)
 - **Organization Roles**: `owner`, `admin`, `member`, `viewer` - inherited across all projects
 - **Project Roles**: `project_owner`, `project_maintainer`, `project_contributor`,
   `project_viewer` - scoped to specific projects
-- **Org Isolation**: each organization has its own SurrealDB namespace, so cross-org data access
-  is impossible at the storage layer
+- **Org Isolation**: each organization has its own SurrealDB namespace, so cross-org data access is
+  impossible at the storage layer
 
 ## Role Hierarchy
 
 ### Organization Roles
 
-| Role     | Description                                              |
-| -------- | -------------------------------------------------------- |
+| Role     | Description                                               |
+| -------- | --------------------------------------------------------- |
 | `owner`  | Super admin. Full org access, owner-only boundaries, logs |
-| `admin`  | Full organization access, can manage members             |
-| `member` | Standard member, project access based on assignments     |
-| `viewer` | Read-only member                                         |
+| `admin`  | Full organization access, can manage members              |
+| `member` | Standard member, project access based on assignments      |
+| `viewer` | Read-only member                                          |
 
 Organization owners and admins have full project access across the organization.
 
@@ -97,8 +97,8 @@ The resolved role is then compared against the role the route requires.
 ### Dependency Functions
 
 Organization-level access is gated with `require_org_role`. Project-level access uses
-`require_project_role` and its convenience shortcuts `require_project_read`, `require_project_write`,
-and `require_project_admin`.
+`require_project_role` and its convenience shortcuts `require_project_read`,
+`require_project_write`, and `require_project_admin`.
 
 ```python
 from sibyl.auth.dependencies import require_org_role
@@ -159,18 +159,18 @@ When authorization fails, a structured error is returned:
 
 ## Organization Isolation
 
-Sibyl's default runtime is SurrealDB-native. Organization isolation is enforced by the storage
-layer through a namespace per organization.
+Sibyl's default runtime is SurrealDB-native. Organization isolation is enforced by the storage layer
+through a namespace per organization.
 
 ### Namespace-Per-Org
 
-Each organization gets its own SurrealDB namespace, named `org_<uuid_hex>`. Graph, content, and
-auth records for an organization live entirely within that namespace.
+Each organization gets its own SurrealDB namespace, named `org_<uuid_hex>`. Graph, content, and auth
+records for an organization live entirely within that namespace.
 
 - Every authenticated request resolves an organization first, then operates inside that
   organization's namespace.
-- A query issued in one namespace cannot see another organization's data. Cross-org leakage is
-  not possible at the storage layer.
+- A query issued in one namespace cannot see another organization's data. Cross-org leakage is not
+  possible at the storage layer.
 - The SurrealDB driver is cloned per organization (`driver.clone(group_id)`) so a single client
   instance is never shared across namespaces.
 
@@ -190,9 +190,9 @@ than silently crossing tenants.
 
 ### PostgreSQL and Migration
 
-PostgreSQL is retained only for migration and archive rehearsal, not for the default runtime.
-Where PostgreSQL is used for rehearsal, row-level security policies provide org isolation within
-that database. Migration and archive operations use explicit `sibyld migrate` commands:
+PostgreSQL is retained only for migration and archive rehearsal, not for the default runtime. Where
+PostgreSQL is used for rehearsal, row-level security policies provide org isolation within that
+database. Migration and archive operations use explicit `sibyld migrate` commands:
 
 ```bash
 sibyld migrate import migration-archive.tar.gz \

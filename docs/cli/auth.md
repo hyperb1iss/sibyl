@@ -1,18 +1,18 @@
 # auth
 
-Authentication and credentials. `auth` logs the CLI into a Sibyl server, manages stored tokens,
-and creates API keys for MCP clients and scripts.
+Authentication and credentials. `auth` logs the CLI into a Sibyl server, manages stored tokens, and
+creates API keys for MCP clients and scripts.
 
 ## Commands
 
-| Command                                       | Description                                  |
-| ---------------------------------------------- | -------------------------------------------- |
-| [`sibyl auth login`](#auth-login)             | Log in to a server and save credentials      |
-| [`sibyl auth status`](#auth-status)           | Show auth status for the current context     |
-| [`sibyl auth local-signup`](#auth-local-signup) | Create a local user and save its token     |
-| [`sibyl auth set-token`](#auth-set-token)     | Set an auth token for a server               |
-| [`sibyl auth clear-token`](#auth-clear-token) | Clear auth tokens for a server               |
-| [`sibyl auth api-key`](#auth-api-key)         | API key management                           |
+| Command                                         | Description                              |
+| ----------------------------------------------- | ---------------------------------------- |
+| [`sibyl auth login`](#auth-login)               | Log in to a server and save credentials  |
+| [`sibyl auth status`](#auth-status)             | Show auth status for the current context |
+| [`sibyl auth local-signup`](#auth-local-signup) | Create a local user and save its token   |
+| [`sibyl auth set-token`](#auth-set-token)       | Set an auth token for a server           |
+| [`sibyl auth clear-token`](#auth-clear-token)   | Clear auth tokens for a server           |
+| [`sibyl auth api-key`](#auth-api-key)           | API key management                       |
 
 ---
 
@@ -30,21 +30,21 @@ sibyl auth login [url] [options]
 
 ### Arguments
 
-| Argument | Required | Description                                              |
-| -------- | -------- | -------------------------------------------------------- |
+| Argument | Required | Description                                                |
+| -------- | -------- | ---------------------------------------------------------- |
 | `url`    | No       | Server URL. If omitted, uses the active context or default |
 
 ### Options
 
-| Option         | Short | Default | Description                                       |
-| -------------- | ----- | ------- | ------------------------------------------------- |
-| `--server`     | `-s`  | (none)  | Server base URL (alias for the positional URL)    |
-| `--context`    | `-c`  | (none)  | Create or update a named context for this server  |
-| `--no-browser` |       | false   | Print the URL instead of opening a browser        |
-| `--timeout`    |       | 180     | Seconds to wait for approval/auth                 |
-| `--email`      | `-e`  | (none)  | Email for local login                             |
-| `--password`   | `-p`  | (none)  | Password for local login                          |
-| `--insecure`   | `-k`  | false   | Disable SSL certificate verification              |
+| Option         | Short | Default | Description                                      |
+| -------------- | ----- | ------- | ------------------------------------------------ |
+| `--server`     | `-s`  | (none)  | Server base URL (alias for the positional URL)   |
+| `--context`    | `-c`  | (none)  | Create or update a named context for this server |
+| `--no-browser` |       | false   | Print the URL instead of opening a browser       |
+| `--timeout`    |       | 180     | Seconds to wait for approval/auth                |
+| `--email`      | `-e`  | (none)  | Email for local login                            |
+| `--password`   | `-p`  | (none)  | Password for local login                         |
+| `--insecure`   | `-k`  | false   | Disable SSL certificate verification             |
 
 ### Examples
 
@@ -89,11 +89,11 @@ sibyl auth local-signup --email <email> --password <password> --name <name>
 
 ### Options
 
-| Option       | Short | Required | Description               |
-| ------------ | ----- | -------- | ------------------------- |
-| `--email`    | `-e`  | Yes      | Email address             |
-| `--password` | `-p`  | Yes      | Password (min 8 chars)    |
-| `--name`     | `-n`  | Yes      | Display name              |
+| Option       | Short | Required | Description            |
+| ------------ | ----- | -------- | ---------------------- |
+| `--email`    | `-e`  | Yes      | Email address          |
+| `--password` | `-p`  | Yes      | Password (min 8 chars) |
+| `--name`     | `-n`  | Yes      | Display name           |
 
 ### Example
 
@@ -122,16 +122,16 @@ sibyl auth set-token <token> [options]
 
 ### Options
 
-| Option     | Short | Description                                  |
-| ---------- | ----- | -------------------------------------------- |
+| Option     | Short | Description                                                  |
+| ---------- | ----- | ------------------------------------------------------------ |
 | `--server` | `-s`  | Server URL to set the token for (defaults to active context) |
 
 ---
 
 ## auth clear-token
 
-Clear auth tokens for a server. Defaults to the active context server, or use `--all` to clear
-every stored token.
+Clear auth tokens for a server. Defaults to the active context server, or use `--all` to clear every
+stored token.
 
 ### Synopsis
 
@@ -141,10 +141,10 @@ sibyl auth clear-token [options]
 
 ### Options
 
-| Option     | Short | Description                                  |
-| ---------- | ----- | -------------------------------------------- |
+| Option     | Short | Description                                                 |
+| ---------- | ----- | ----------------------------------------------------------- |
 | `--server` | `-s`  | Server URL to clear tokens for (defaults to active context) |
-| `--all`    | `-a`  | Clear tokens for ALL servers                 |
+| `--all`    | `-a`  | Clear tokens for ALL servers                                |
 
 ### Example
 
@@ -159,11 +159,11 @@ sibyl auth clear-token --all
 API key management. API keys authenticate MCP clients and scripts without a browser session. Keys
 carry scopes and can be limited to specific projects and memory spaces.
 
-| Subcommand                            | Description       |
-| ------------------------------------- | ----------------- |
-| `sibyl auth api-key list`             | List API keys     |
-| `sibyl auth api-key create`           | Create an API key |
-| `sibyl auth api-key revoke`           | Revoke an API key |
+| Subcommand                  | Description       |
+| --------------------------- | ----------------- |
+| `sibyl auth api-key list`   | List API keys     |
+| `sibyl auth api-key create` | Create an API key |
+| `sibyl auth api-key revoke` | Revoke an API key |
 
 ### auth api-key list
 
@@ -177,14 +177,14 @@ sibyl auth api-key list
 sibyl auth api-key create --name <name> [options]
 ```
 
-| Option            | Short | Default | Description                                          |
-| ----------------- | ----- | ------- | ---------------------------------------------------- |
-| `--name`          | `-n`  | (req.)  | Display name for the key (required)                  |
-| `--live` / `--test` |     | `live`  | Use an `sk_live_` (default) or `sk_test_` key prefix |
-| `--scopes`        |       | `mcp`   | Comma-separated scopes                               |
-| `--projects`      |       | (none)  | Comma-separated graph project IDs the key may access |
-| `--memory-spaces` |       | (none)  | Comma-separated memory-space IDs the key may access  |
-| `--expires-days`  |       | (none)  | Optional expiry in days (1-365)                      |
+| Option              | Short | Default | Description                                          |
+| ------------------- | ----- | ------- | ---------------------------------------------------- |
+| `--name`            | `-n`  | (req.)  | Display name for the key (required)                  |
+| `--live` / `--test` |       | `live`  | Use an `sk_live_` (default) or `sk_test_` key prefix |
+| `--scopes`          |       | `mcp`   | Comma-separated scopes                               |
+| `--projects`        |       | (none)  | Comma-separated graph project IDs the key may access |
+| `--memory-spaces`   |       | (none)  | Comma-separated memory-space IDs the key may access  |
+| `--expires-days`    |       | (none)  | Optional expiry in days (1-365)                      |
 
 Available scopes include `mcp`, `api:read`, `api:write`, plus memory scopes. The full key value is
 shown only once at creation.
@@ -210,8 +210,8 @@ sibyl auth api-key create --name "agent-sandbox" --test \
 sibyl auth api-key revoke <api_key_id>
 ```
 
-| Argument     | Required | Description       |
-| ------------ | -------- | ----------------- |
+| Argument     | Required | Description          |
+| ------------ | -------- | -------------------- |
 | `api_key_id` | Yes      | API key ID to revoke |
 
 ## Related Commands

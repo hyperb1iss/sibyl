@@ -170,14 +170,14 @@ sibyl auth api-key create --name "MCP Client" --scopes mcp
 
 ### Database Settings
 
-| Variable             | Default     | Description                                |
-| -------------------- | ----------- | ------------------------------------------ |
+| Variable             | Default     | Description                                    |
+| -------------------- | ----------- | ---------------------------------------------- |
 | `SIBYL_SURREAL_URL`  | -           | SurrealDB connection URL (`ws://` / `http://`) |
-| `SIBYL_REDIS_HOST`   | `127.0.0.1` | Optional Redis/Valkey host                 |
-| `SIBYL_POSTGRES_URL` | -           | Migration/rehearsal-only PostgreSQL        |
+| `SIBYL_REDIS_HOST`   | `127.0.0.1` | Optional Redis/Valkey host                     |
+| `SIBYL_POSTGRES_URL` | -           | Migration/rehearsal-only PostgreSQL            |
 
-`moon run dev` provisions a local SurrealDB automatically. The `memory://` URL is a
-test-only mode and is rejected by the production config validator.
+`moon run dev` provisions a local SurrealDB automatically. The `memory://` URL is a test-only mode
+and is rejected by the production config validator.
 
 ### Embedding Settings
 
@@ -190,10 +190,9 @@ test-only mode and is rejected by the production config validator.
 
 ### Tool Registration
 
-The MCP server is constructed in `server.py` and registers 11 tools: `search`,
-`context`, `synthesis_plan`, `synthesis_draft`, `synthesis_verify`, `explore`, `add`,
-`remember`, `reflect`, `manage`, and `logs`. See
-[Claude Code Integration](./claude-code.md) for what each one does.
+The MCP server is constructed in `server.py` and registers 11 tools: `search`, `context`,
+`synthesis_plan`, `synthesis_draft`, `synthesis_verify`, `explore`, `add`, `remember`, `reflect`,
+`manage`, and `logs`. See [Claude Code Integration](./claude-code.md) for what each one does.
 
 ```python
 mcp = FastMCP(

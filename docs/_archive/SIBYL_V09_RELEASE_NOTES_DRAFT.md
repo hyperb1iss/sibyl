@@ -61,5 +61,6 @@ Status: released as `v0.9.0`.
 `v0.9.0` is published. Treat this document as the release receipt and claim boundary, not an active
 hold notice.
 
-Post-v0.9 planning moved to [`SIBYL_1_0_ROADMAP.md`](../architecture/SIBYL_1_0_ROADMAP.md), which promotes the
-manual review and workspace work into the larger 1.0 automatic memory operating-system plan.
+Post-v0.9 planning moved to [`SIBYL_1_0_ROADMAP.md`](../architecture/SIBYL_1_0_ROADMAP.md), which
+promotes the manual review and workspace work into the larger 1.0 automatic memory operating-system
+plan.

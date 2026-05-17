@@ -26,11 +26,11 @@ All endpoints require authentication via:
 
 ## Role Requirements
 
-| Operation group                       | Required Roles               |
-| --------------------------------------- | ---------------------------- |
-| Read (recall, context pack, import status) | Owner, Admin, Member, Viewer |
+| Operation group                                     | Required Roles               |
+| --------------------------------------------------- | ---------------------------- |
+| Read (recall, context pack, import status)          | Owner, Admin, Member, Viewer |
 | Write (remember, reflect, share preview, promotion) | Owner, Admin, Member         |
-| Admin (memory spaces, audit, inspect, corrections) | Owner, Admin                 |
+| Admin (memory spaces, audit, inspect, corrections)  | Owner, Admin                 |
 
 ## Memory Scopes
 
@@ -74,20 +74,20 @@ Stores verbatim memory before extraction or graph reflection.
 
 **Request Schema:**
 
-| Field             | Type     | Required | Default   | Description                                  |
-| ----------------- | -------- | -------- | --------- | -------------------------------------------- |
-| `raw_content`     | string   | Yes      | -         | Verbatim memory (1-500,000 chars)            |
-| `title`           | string   | No       | ""        | Human title (max 300 chars)                  |
-| `source_id`       | string   | No       | -         | Stable provenance ID                         |
-| `memory_scope`    | string   | No       | `private` | Retrieval scope                              |
-| `scope_key`       | string   | No       | -         | Project/team/shared scope key                |
-| `diary`           | boolean  | No       | false     | Store as a private agent diary entry         |
-| `agent_id`        | string   | No       | -         | Agent identity for diary entries             |
-| `project_id`      | string   | No       | -         | Associated project                          |
-| `tags`            | string[] | No       | `[]`      | Searchable tags                              |
-| `metadata`        | object   | No       | `{}`      | Auxiliary metadata                           |
-| `provenance`      | object   | No       | `{}`      | Source provenance                           |
-| `capture_surface` | string   | No       | `api`     | Capture surface label                        |
+| Field             | Type     | Required | Default   | Description                          |
+| ----------------- | -------- | -------- | --------- | ------------------------------------ |
+| `raw_content`     | string   | Yes      | -         | Verbatim memory (1-500,000 chars)    |
+| `title`           | string   | No       | ""        | Human title (max 300 chars)          |
+| `source_id`       | string   | No       | -         | Stable provenance ID                 |
+| `memory_scope`    | string   | No       | `private` | Retrieval scope                      |
+| `scope_key`       | string   | No       | -         | Project/team/shared scope key        |
+| `diary`           | boolean  | No       | false     | Store as a private agent diary entry |
+| `agent_id`        | string   | No       | -         | Agent identity for diary entries     |
+| `project_id`      | string   | No       | -         | Associated project                   |
+| `tags`            | string[] | No       | `[]`      | Searchable tags                      |
+| `metadata`        | object   | No       | `{}`      | Auxiliary metadata                   |
+| `provenance`      | object   | No       | `{}`      | Source provenance                    |
+| `capture_surface` | string   | No       | `api`     | Capture surface label                |
 
 **Response:**
 
@@ -134,15 +134,15 @@ Recalls verbatim memories through scoped retrieval.
 }
 ```
 
-| Field          | Type    | Required | Default   | Description                  |
-| -------------- | ------- | -------- | --------- | ---------------------------- |
-| `query`        | string  | Yes      | -         | Full-text recall query       |
-| `memory_scope` | string  | No       | `private` | Retrieval scope              |
-| `scope_key`    | string  | No       | -         | Scope key                    |
-| `diary`        | boolean | No       | false     | Recall agent diary entries   |
-| `agent_id`     | string  | No       | -         | Agent identity to recall     |
-| `project_id`   | string  | No       | -         | Project diary filter         |
-| `limit`        | integer | No       | 10        | Maximum memories (1-50)      |
+| Field          | Type    | Required | Default   | Description                |
+| -------------- | ------- | -------- | --------- | -------------------------- |
+| `query`        | string  | Yes      | -         | Full-text recall query     |
+| `memory_scope` | string  | No       | `private` | Retrieval scope            |
+| `scope_key`    | string  | No       | -         | Scope key                  |
+| `diary`        | boolean | No       | false     | Recall agent diary entries |
+| `agent_id`     | string  | No       | -         | Agent identity to recall   |
+| `project_id`   | string  | No       | -         | Project diary filter       |
+| `limit`        | integer | No       | 10        | Maximum memories (1-50)    |
 
 **Response:**
 
@@ -150,9 +150,7 @@ Recalls verbatim memories through scoped retrieval.
 {
   "query": "surreal concurrency",
   "limit": 10,
-  "memories": [
-    { "id": "raw_abc123", "title": "SurrealDB write concurrency", "score": 0.88 }
-  ],
+  "memories": [{ "id": "raw_abc123", "title": "SurrealDB write concurrency", "score": 0.88 }],
   "policy_reason": "allowed"
 }
 ```
@@ -184,17 +182,17 @@ Compiles a structured context pack for an agent goal. This is the REST equivalen
 }
 ```
 
-| Field             | Type    | Required | Default  | Description                              |
-| ----------------- | ------- | -------- | -------- | ---------------------------------------- |
-| `goal`            | string  | Yes      | -        | Agent goal or user task                  |
-| `intent`          | string  | No       | `build`  | How the agent will act                   |
-| `layer`           | string  | No       | `recall` | `wake`, `recall`, or `deep_search`       |
-| `domain`          | string  | No       | -        | Domain to bias retrieval                 |
-| `project`         | string  | No       | -        | Project ID to scope context              |
-| `agent_id`        | string  | No       | -        | Agent diary identity to include          |
-| `limit`           | integer | No       | 24       | Maximum context items (1-50)             |
-| `include_related` | boolean | No       | true     | Include one-hop related graph context    |
-| `related_limit`   | integer | No       | 3        | Related items per context item (0-5)     |
+| Field             | Type    | Required | Default  | Description                           |
+| ----------------- | ------- | -------- | -------- | ------------------------------------- |
+| `goal`            | string  | Yes      | -        | Agent goal or user task               |
+| `intent`          | string  | No       | `build`  | How the agent will act                |
+| `layer`           | string  | No       | `recall` | `wake`, `recall`, or `deep_search`    |
+| `domain`          | string  | No       | -        | Domain to bias retrieval              |
+| `project`         | string  | No       | -        | Project ID to scope context           |
+| `agent_id`        | string  | No       | -        | Agent diary identity to include       |
+| `limit`           | integer | No       | 24       | Maximum context items (1-50)          |
+| `include_related` | boolean | No       | true     | Include one-hop related graph context |
+| `related_limit`   | integer | No       | 3        | Related items per context item (0-5)  |
 
 The response is a context pack with `sections`, `total_items`, `usage_hint`, and a rendered
 `markdown` field. See [mcp-context.md](./mcp-context.md) for the full pack schema.
@@ -227,32 +225,32 @@ Reflects raw notes into durable memory candidates. This is the REST equivalent o
 }
 ```
 
-| Field            | Type     | Required | Default              | Description                                       |
-| ---------------- | -------- | -------- | -------------------- | ------------------------------------------------- |
-| `content`        | string   | Yes      | -                    | Raw session notes                                 |
-| `source_title`   | string   | No       | `Session reflection` | Source/session title                              |
-| `intent`         | string   | No       | `general`            | Reflection intent                                 |
-| `domain`         | string   | No       | -                    | Domain for candidates                             |
-| `project`        | string   | No       | -                    | Project ID to scope candidates                    |
-| `related_to`     | string[] | No       | -                    | Entity IDs to link persisted candidates           |
-| `task_ids`       | string[] | No       | -                    | Task IDs to link persisted output                 |
-| `active_task`    | boolean  | No       | true                 | Link persisted output to the active doing task    |
-| `persist`        | boolean  | No       | false                | Persist candidates into the graph                 |
-| `persist_source` | boolean  | No       | true                 | Store the raw source notes                        |
-| `persist_review` | boolean  | No       | false                | Store output in the raw review queue              |
-| `limit`          | integer  | No       | 12                   | Maximum candidates (1-25)                          |
+| Field            | Type     | Required | Default              | Description                                    |
+| ---------------- | -------- | -------- | -------------------- | ---------------------------------------------- |
+| `content`        | string   | Yes      | -                    | Raw session notes                              |
+| `source_title`   | string   | No       | `Session reflection` | Source/session title                           |
+| `intent`         | string   | No       | `general`            | Reflection intent                              |
+| `domain`         | string   | No       | -                    | Domain for candidates                          |
+| `project`        | string   | No       | -                    | Project ID to scope candidates                 |
+| `related_to`     | string[] | No       | -                    | Entity IDs to link persisted candidates        |
+| `task_ids`       | string[] | No       | -                    | Task IDs to link persisted output              |
+| `active_task`    | boolean  | No       | true                 | Link persisted output to the active doing task |
+| `persist`        | boolean  | No       | false                | Persist candidates into the graph              |
+| `persist_source` | boolean  | No       | true                 | Store the raw source notes                     |
+| `persist_review` | boolean  | No       | false                | Store output in the raw review queue           |
+| `limit`          | integer  | No       | 12                   | Maximum candidates (1-25)                      |
 
 The response is a reflection pack with `candidates`, `total_candidates`, `persisted_count`, and a
 rendered `markdown` field. See [mcp-reflect.md](./mcp-reflect.md) for the candidate schema.
 
 ## Reflection Promotion Endpoints
 
-| Method | Path                                       | Purpose                                                    |
-| ------ | ------------------------------------------ | ---------------------------------------------------------- |
-| POST   | `/api/memory/reflection/promote`           | Promote a reviewed candidate into native Surreal memory    |
-| POST   | `/api/memory/reflection/promote/preview`   | Preview a promotion without writing                        |
-| POST   | `/api/memory/reflection/review/auto`       | Auto-review and promote a single safe candidate            |
-| POST   | `/api/memory/reflection/review/drain`      | Bulk auto-review pending candidates                        |
+| Method | Path                                     | Purpose                                                 |
+| ------ | ---------------------------------------- | ------------------------------------------------------- |
+| POST   | `/api/memory/reflection/promote`         | Promote a reviewed candidate into native Surreal memory |
+| POST   | `/api/memory/reflection/promote/preview` | Preview a promotion without writing                     |
+| POST   | `/api/memory/reflection/review/auto`     | Auto-review and promote a single safe candidate         |
+| POST   | `/api/memory/reflection/review/drain`    | Bulk auto-review pending candidates                     |
 
 These endpoints drive the reflection dream-cycle: candidates flow into the review queue, then are
 promoted automatically (when confident and within policy) or by an operator. Promotion endpoints
@@ -263,40 +261,39 @@ require Member-or-higher role.
 Memory spaces are persisted scope records for owner/admin inspection. All space endpoints require
 Owner or Admin role.
 
-| Method | Path                                            | Purpose                                  |
-| ------ | ----------------------------------------------- | ---------------------------------------- |
-| GET    | `/api/memory/spaces`                            | List persisted memory spaces             |
-| POST   | `/api/memory/spaces`                            | Create a memory-space record             |
-| GET    | `/api/memory/spaces/{space_id}`                 | Inspect a space and its memberships      |
-| PATCH  | `/api/memory/spaces/{space_id}`                 | Update space metadata or state           |
-| POST   | `/api/memory/spaces/{space_id}/members`         | Grant a principal membership             |
-| POST   | `/api/memory/spaces/{space_id}/members/preview` | Preview what a principal could recall    |
+| Method | Path                                            | Purpose                               |
+| ------ | ----------------------------------------------- | ------------------------------------- |
+| GET    | `/api/memory/spaces`                            | List persisted memory spaces          |
+| POST   | `/api/memory/spaces`                            | Create a memory-space record          |
+| GET    | `/api/memory/spaces/{space_id}`                 | Inspect a space and its memberships   |
+| PATCH  | `/api/memory/spaces/{space_id}`                 | Update space metadata or state        |
+| POST   | `/api/memory/spaces/{space_id}/members`         | Grant a principal membership          |
+| POST   | `/api/memory/spaces/{space_id}/members/preview` | Preview what a principal could recall |
 
 ## Inspection, Audit, and Sharing
 
-| Method | Path                                                   | Purpose                                          |
-| ------ | ------------------------------------------------------ | ------------------------------------------------ |
-| GET    | `/api/memory/audit`                                    | List memory audit events (filterable)            |
-| GET    | `/api/memory/inspect/{source_id}`                      | Inspect a raw memory source and derived records  |
-| POST   | `/api/memory/inspect/{source_id}/corrections/preview`  | Preview a correction or lifecycle action         |
-| POST   | `/api/memory/inspect/{source_id}/corrections`          | Apply a correction or lifecycle action           |
-| POST   | `/api/memory/share/preview`                            | Preview memory sharing without enabling a share  |
-| GET    | `/api/memory/source-imports/{import_id}`               | Get source-safe import progress                  |
+| Method | Path                                                  | Purpose                                         |
+| ------ | ----------------------------------------------------- | ----------------------------------------------- |
+| GET    | `/api/memory/audit`                                   | List memory audit events (filterable)           |
+| GET    | `/api/memory/inspect/{source_id}`                     | Inspect a raw memory source and derived records |
+| POST   | `/api/memory/inspect/{source_id}/corrections/preview` | Preview a correction or lifecycle action        |
+| POST   | `/api/memory/inspect/{source_id}/corrections`         | Apply a correction or lifecycle action          |
+| POST   | `/api/memory/share/preview`                           | Preview memory sharing without enabling a share |
+| GET    | `/api/memory/source-imports/{import_id}`              | Get source-safe import progress                 |
 
 Memory corrections support actions such as `delete` and `hide` for lifecycle management. Audit and
-inspection endpoints require Owner or Admin role; `source-imports` status is readable by any
-member.
+inspection endpoints require Owner or Admin role; `source-imports` status is readable by any member.
 
 ## Error Responses
 
-| Status | Cause                                                       |
-| ------ | ----------------------------------------------------------- |
-| 400    | Invalid request, or `invalid_memory_space_id`               |
-| 401    | Missing or invalid authentication (`Not authenticated`)     |
+| Status | Cause                                                             |
+| ------ | ----------------------------------------------------------------- |
+| 400    | Invalid request, or `invalid_memory_space_id`                     |
+| 401    | Missing or invalid authentication (`Not authenticated`)           |
 | 403    | Insufficient role, project access denied, or memory policy denial |
-| 404    | Source, import, or reflection candidate not found           |
-| 422    | Request body validation failed                             |
-| 500    | Memory operation failed                                     |
+| 404    | Source, import, or reflection candidate not found                 |
+| 422    | Request body validation failed                                    |
+| 500    | Memory operation failed                                           |
 
 ## Related
 

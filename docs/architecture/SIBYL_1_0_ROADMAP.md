@@ -29,8 +29,8 @@ real work, and leave the graph smarter without Bliss babysitting a manual inbox.
 These living docs in `docs/architecture/` remain active planning inputs:
 
 - [`SIBYL_NORTHSTAR.md`](SIBYL_NORTHSTAR.md): product and architecture truth.
-- [`SIBYL_V012_REFLECTION_OS_PLAN.md`](SIBYL_V012_REFLECTION_OS_PLAN.md): current v0.12 Reflection OS
-  implementation plan.
+- [`SIBYL_V012_REFLECTION_OS_PLAN.md`](SIBYL_V012_REFLECTION_OS_PLAN.md): current v0.12 Reflection
+  OS implementation plan.
 - [`PERMISSION_SYSTEM_AUDIT.md`](PERMISSION_SYSTEM_AUDIT.md): current auth, policy, project RBAC,
   MCP, and trust-surface audit.
 - [`TASKIQ_MIGRATION_PLAN.md`](TASKIQ_MIGRATION_PLAN.md): coordination backend boundary and

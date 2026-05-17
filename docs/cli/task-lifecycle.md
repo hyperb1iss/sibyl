@@ -28,9 +28,9 @@ sibyl task show <task_id> [options]
 
 ### Arguments
 
-| Argument  | Required | Description                       |
-| --------- | -------- | --------------------------------- |
-| `task_id` | Yes      | Task ID or unambiguous prefix     |
+| Argument  | Required | Description                   |
+| --------- | -------- | ----------------------------- |
+| `task_id` | Yes      | Task ID or unambiguous prefix |
 
 ### Options
 
@@ -38,8 +38,8 @@ sibyl task show <task_id> [options]
 | -------- | ----- | ----------- |
 | `--json` | `-j`  | JSON output |
 
-Task ID arguments accept an unambiguous prefix, so `sibyl task show task_abc1` resolves as long
-as only one task matches.
+Task ID arguments accept an unambiguous prefix, so `sibyl task show task_abc1` resolves as long as
+only one task matches.
 
 ### Example
 
@@ -242,14 +242,14 @@ sibyl task complete <task_id> [options]
 
 ### Options
 
-| Option                  | Short | Default | Description                                     |
-| ----------------------- | ----- | ------- | ----------------------------------------------- |
-| `--hours`               | `-h`  | (none)  | Actual hours spent                              |
-| `--learnings` / `--note` | `-l` | (none)  | Key learnings (creates an episode)              |
-| `--learnings-file`      |       | (none)  | Read learnings from a file                      |
-| `--max-size`            |       | 1048576 | Maximum learnings file size in bytes            |
-| `--follow-symlinks`     |       | false   | Allow `--learnings-file` to read through symlinks |
-| `--json`                | `-j`  | false   | JSON output                                     |
+| Option                   | Short | Default | Description                                       |
+| ------------------------ | ----- | ------- | ------------------------------------------------- |
+| `--hours`                | `-h`  | (none)  | Actual hours spent                                |
+| `--learnings` / `--note` | `-l`  | (none)  | Key learnings (creates an episode)                |
+| `--learnings-file`       |       | (none)  | Read learnings from a file                        |
+| `--max-size`             |       | 1048576 | Maximum learnings file size in bytes              |
+| `--follow-symlinks`      |       | false   | Allow `--learnings-file` to read through symlinks |
+| `--json`                 | `-j`  | false   | JSON output                                       |
 
 ### Basic Completion
 
@@ -362,21 +362,21 @@ sibyl task update <task_id> [options]
 
 ### Options
 
-| Option          | Short | Description                                                   |
-| --------------- | ----- | ------------------------------------------------------------- |
-| `--status`      | `-s`  | Status: todo, doing, blocked, review, done                    |
-| `--priority`    | `-p`  | Priority: critical, high, medium, low, someday                |
-| `--complexity`  |       | Complexity: trivial, simple, medium, complex, epic            |
-| `--title`       |       | Task title                                                    |
-| `--description` | `-d`  | Task description/content                                      |
-| `--assignee`    | `-a`  | Assignee                                                      |
-| `--epic`        | `-e`  | Epic ID to group under                                        |
-| `--feature`     | `-f`  | Feature area                                                  |
-| `--tags`        |       | Comma-separated tags (replaces existing)                      |
-| `--tech`        |       | Comma-separated technologies (replaces existing)              |
-| `--add-dep`     |       | Comma-separated task IDs to add as dependencies               |
-| `--remove-dep`  |       | Comma-separated task IDs to remove as dependencies            |
-| `--json`        | `-j`  | JSON output                                                   |
+| Option          | Short | Description                                        |
+| --------------- | ----- | -------------------------------------------------- |
+| `--status`      | `-s`  | Status: todo, doing, blocked, review, done         |
+| `--priority`    | `-p`  | Priority: critical, high, medium, low, someday     |
+| `--complexity`  |       | Complexity: trivial, simple, medium, complex, epic |
+| `--title`       |       | Task title                                         |
+| `--description` | `-d`  | Task description/content                           |
+| `--assignee`    | `-a`  | Assignee                                           |
+| `--epic`        | `-e`  | Epic ID to group under                             |
+| `--feature`     | `-f`  | Feature area                                       |
+| `--tags`        |       | Comma-separated tags (replaces existing)           |
+| `--tech`        |       | Comma-separated technologies (replaces existing)   |
+| `--add-dep`     |       | Comma-separated task IDs to add as dependencies    |
+| `--remove-dep`  |       | Comma-separated task IDs to remove as dependencies |
+| `--json`        | `-j`  | JSON output                                        |
 
 To archive a task, use [`task archive`](#task-archive) rather than `task update --status`.
 
@@ -416,21 +416,21 @@ sibyl task note <task_id> [content] [options]
 
 ### Arguments
 
-| Argument  | Required | Description                       |
-| --------- | -------- | --------------------------------- |
-| `task_id` | Yes      | Task ID or unambiguous prefix     |
-| `content` | No       | Note content or `-` for stdin     |
+| Argument  | Required | Description                   |
+| --------- | -------- | ----------------------------- |
+| `task_id` | Yes      | Task ID or unambiguous prefix |
+| `content` | No       | Note content or `-` for stdin |
 
 ### Options
 
-| Option                   | Short | Default | Description                                     |
-| ------------------------ | ----- | ------- | ----------------------------------------------- |
-| `--content-file`         |       | (none)  | Read note content from a file                   |
-| `--max-size`             |       | 1048576 | Maximum content file size in bytes              |
-| `--follow-symlinks`      |       | false   | Allow `--content-file` to read through symlinks |
-| `--assistant` / `--agent` |      | false   | Mark as assistant-authored (default: user)      |
-| `--author`               | `-a`  | (none)  | Author name/identifier                          |
-| `--json`                 | `-j`  | false   | JSON output                                     |
+| Option                    | Short | Default | Description                                     |
+| ------------------------- | ----- | ------- | ----------------------------------------------- |
+| `--content-file`          |       | (none)  | Read note content from a file                   |
+| `--max-size`              |       | 1048576 | Maximum content file size in bytes              |
+| `--follow-symlinks`       |       | false   | Allow `--content-file` to read through symlinks |
+| `--assistant` / `--agent` |       | false   | Mark as assistant-authored (default: user)      |
+| `--author`                | `-a`  | (none)  | Author name/identifier                          |
+| `--json`                  | `-j`  | false   | JSON output                                     |
 
 ### Examples
 

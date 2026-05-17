@@ -38,15 +38,15 @@ multi-pod deployments. See [storage-modes.md](../guide/storage-modes.md) for the
 
 SurrealDB is the default and only runtime store. These settings apply to every Sibyl process.
 
-| Variable                         | Default | Description                                                          |
-| -------------------------------- | ------- | -------------------------------------------------------------------- |
-| `SIBYL_SURREAL_URL`              | (empty) | Connection URL (`ws://`, `http://`, `surrealkv://`, `memory://`)     |
-| `SIBYL_SURREAL_DATA_DIR`         | (empty) | Local SurrealKV path used when `SIBYL_SURREAL_URL` is unset          |
-| `SIBYL_SURREAL_USERNAME`         | (empty) | Root username for remote runtimes                                    |
-| `SIBYL_SURREAL_PASSWORD`         | (empty) | Root password for remote runtimes                                    |
-| `SIBYL_SURREAL_TOKEN`            | (empty) | Bearer token for remote runtimes (alternative to username/password)  |
-| `SIBYL_SURREAL_NAMESPACE_PREFIX` | `org_`  | Namespace prefix for per-org isolation (`org_<uuid_hex>`)            |
-| `SIBYL_SURREAL_DATABASE`         | `graph` | Database name inside each org namespace                              |
+| Variable                         | Default | Description                                                           |
+| -------------------------------- | ------- | --------------------------------------------------------------------- |
+| `SIBYL_SURREAL_URL`              | (empty) | Connection URL (`ws://`, `http://`, `surrealkv://`, `memory://`)      |
+| `SIBYL_SURREAL_DATA_DIR`         | (empty) | Local SurrealKV path used when `SIBYL_SURREAL_URL` is unset           |
+| `SIBYL_SURREAL_USERNAME`         | (empty) | Root username for remote runtimes                                     |
+| `SIBYL_SURREAL_PASSWORD`         | (empty) | Root password for remote runtimes                                     |
+| `SIBYL_SURREAL_TOKEN`            | (empty) | Bearer token for remote runtimes (alternative to username/password)   |
+| `SIBYL_SURREAL_NAMESPACE_PREFIX` | `org_`  | Namespace prefix for per-org isolation (`org_<uuid_hex>`)             |
+| `SIBYL_SURREAL_DATABASE`         | `graph` | Database name inside each org namespace                               |
 | `SIBYL_SURREAL_SLOW_QUERY_MS`    | `500`   | Log SurrealDB queries at warning level when elapsed time exceeds this |
 
 `SIBYL_SURREAL_URL` and `SIBYL_SURREAL_DATA_DIR` are mutually exclusive; set only one. When neither
@@ -168,14 +168,14 @@ Redis/Valkey is optional. The default Surreal runtime uses local in-process coor
 Document chunk embeddings and graph node/relationship embeddings are configured separately. The
 graph embedding dimensions also size the native Surreal vector indexes.
 
-| Variable                           | Default                  | Description                                  |
-| ----------------------------------- | ------------------------ | -------------------------------------------- |
-| `SIBYL_EMBEDDING_PROVIDER`          | `openai`                 | Document chunk embedding provider: openai or gemini |
-| `SIBYL_EMBEDDING_MODEL`             | `text-embedding-3-small` | Document chunk embedding model               |
-| `SIBYL_EMBEDDING_DIMENSIONS`        | `1536`                   | Document chunk embedding vector dimensions   |
-| `SIBYL_GRAPH_EMBEDDING_PROVIDER`    | `openai`                 | Graph node/relationship embedding provider   |
-| `SIBYL_GRAPH_EMBEDDING_MODEL`       | `text-embedding-3-small` | Graph node/relationship embedding model      |
-| `SIBYL_GRAPH_EMBEDDING_DIMENSIONS`  | `1024`                   | Graph embedding dimensions (sizes vector indexes) |
+| Variable                           | Default                  | Description                                         |
+| ---------------------------------- | ------------------------ | --------------------------------------------------- |
+| `SIBYL_EMBEDDING_PROVIDER`         | `openai`                 | Document chunk embedding provider: openai or gemini |
+| `SIBYL_EMBEDDING_MODEL`            | `text-embedding-3-small` | Document chunk embedding model                      |
+| `SIBYL_EMBEDDING_DIMENSIONS`       | `1536`                   | Document chunk embedding vector dimensions          |
+| `SIBYL_GRAPH_EMBEDDING_PROVIDER`   | `openai`                 | Graph node/relationship embedding provider          |
+| `SIBYL_GRAPH_EMBEDDING_MODEL`      | `text-embedding-3-small` | Graph node/relationship embedding model             |
+| `SIBYL_GRAPH_EMBEDDING_DIMENSIONS` | `1024`                   | Graph embedding dimensions (sizes vector indexes)   |
 
 ## API Keys
 
@@ -190,8 +190,10 @@ graph embedding dimensions also size the native Surreal vector indexes.
 API keys are resolved in this order:
 
 1. **Database** - Keys stored via web UI (Settings, AI Services)
-2. **Environment variables** - `SIBYL_OPENAI_API_KEY`, `SIBYL_ANTHROPIC_API_KEY`, `SIBYL_GEMINI_API_KEY`
-3. **Unprefixed fallbacks** - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`
+2. **Environment variables** - `SIBYL_OPENAI_API_KEY`, `SIBYL_ANTHROPIC_API_KEY`,
+   `SIBYL_GEMINI_API_KEY`
+3. **Unprefixed fallbacks** - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` /
+   `GOOGLE_API_KEY`
 
 This allows zero-config deployments where API keys are entered through the onboarding wizard and
 stored encrypted in the database (using `SIBYL_SETTINGS_KEY`).
@@ -223,24 +225,24 @@ fallback for migration or investigation.
 
 ## Runtime Telemetry
 
-| Variable                       | Default | Description                                            |
-| ------------------------------ | ------- | ------------------------------------------------------ |
-| `SIBYL_METRICS_SCRAPE_TOKEN`   | (empty) | Bearer/header token for non-local `/metrics` scraping |
+| Variable                     | Default | Description                                           |
+| ---------------------------- | ------- | ----------------------------------------------------- |
+| `SIBYL_METRICS_SCRAPE_TOKEN` | (empty) | Bearer/header token for non-local `/metrics` scraping |
 
 ## Email (Resend)
 
-| Variable                  | Default                     | Description                                            |
-| ------------------------- | --------------------------- | ------------------------------------------------------ |
-| `SIBYL_RESEND_API_KEY`    | (empty)                     | Resend API key for transactional email                 |
-| `SIBYL_EMAIL_FROM`        | `Sibyl <noreply@sibyl.dev>` | Default from address                                   |
-| `SIBYL_EMAIL_OUTBOX_PATH` | (empty)                     | Optional JSONL outbox path for local/staging capture   |
+| Variable                  | Default                     | Description                                          |
+| ------------------------- | --------------------------- | ---------------------------------------------------- |
+| `SIBYL_RESEND_API_KEY`    | (empty)                     | Resend API key for transactional email               |
+| `SIBYL_EMAIL_FROM`        | `Sibyl <noreply@sibyl.dev>` | Default from address                                 |
+| `SIBYL_EMAIL_OUTBOX_PATH` | (empty)                     | Optional JSONL outbox path for local/staging capture |
 
 ## Content Ingestion
 
-| Variable                     | Default            | Description                                              |
-| ---------------------------- | ------------------ | -------------------------------------------------------- |
-| `SIBYL_CHUNK_MAX_TOKENS`     | `1000`             | Maximum tokens per chunk                                 |
-| `SIBYL_CHUNK_OVERLAP_TOKENS` | `100`              | Token overlap between chunks                             |
+| Variable                     | Default            | Description                                             |
+| ---------------------------- | ------------------ | ------------------------------------------------------- |
+| `SIBYL_CHUNK_MAX_TOKENS`     | `1000`             | Maximum tokens per chunk                                |
+| `SIBYL_CHUNK_OVERLAP_TOKENS` | `100`              | Token overlap between chunks                            |
 | `SIBYL_SOURCE_IMPORT_DIR`    | `./source-imports` | Directory of local source archives API imports may read |
 
 ## Backups
@@ -248,12 +250,12 @@ fallback for migration or investigation.
 Scheduled archive backups run from the worker. See [Monitoring](monitoring.md) for operational
 detail.
 
-| Variable                      | Default       | Description                                       |
-| ----------------------------- | ------------- | ------------------------------------------------- |
-| `SIBYL_BACKUP_ENABLED`        | `true`        | Enable scheduled automatic backups                |
-| `SIBYL_BACKUP_DIR`            | `./backups`   | Directory to store backup archives                |
-| `SIBYL_BACKUP_RETENTION_DAYS` | `30`          | Days to retain backups before auto-cleanup        |
-| `SIBYL_BACKUP_SCHEDULE`       | `0 2 * * *`   | Cron schedule for automatic backups (2 AM daily)  |
+| Variable                      | Default     | Description                                      |
+| ----------------------------- | ----------- | ------------------------------------------------ |
+| `SIBYL_BACKUP_ENABLED`        | `true`      | Enable scheduled automatic backups               |
+| `SIBYL_BACKUP_DIR`            | `./backups` | Directory to store backup archives               |
+| `SIBYL_BACKUP_RETENTION_DAYS` | `30`        | Days to retain backups before auto-cleanup       |
+| `SIBYL_BACKUP_SCHEDULE`       | `0 2 * * *` | Cron schedule for automatic backups (2 AM daily) |
 
 ## Worker Configuration
 
@@ -454,5 +456,5 @@ settings.requires_relational_support  # True only for relational store/auth_stor
 settings.resolved_coordination_backend  # resolves "auto" to "local" or "redis"
 ```
 
-With the default `SIBYL_STORE=surreal` and `SIBYL_AUTH_STORE=surreal`, `fully_surreal` is `True`
-and both `uses_relational_auth` and `requires_relational_support` are `False`.
+With the default `SIBYL_STORE=surreal` and `SIBYL_AUTH_STORE=surreal`, `fully_surreal` is `True` and
+both `uses_relational_auth` and `requires_relational_support` are `False`.

@@ -8,9 +8,9 @@ description: Multi-agent patterns with shared knowledge
 Sibyl enables multiple AI agents to share knowledge and coordinate work. This guide covers patterns
 for multi-agent collaboration.
 
-Every agent runs the same [memory loop](./memory-loop.md): recall before acting,
-remember what it learns, reflect on its session. Because the graph is shared, one
-agent's remember is the next agent's recall.
+Every agent runs the same [memory loop](./memory-loop.md): recall before acting, remember what it
+learns, reflect on its session. Because the graph is shared, one agent's remember is the next
+agent's recall.
 
 ## Shared Knowledge Graph
 

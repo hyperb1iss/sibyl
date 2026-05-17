@@ -29,8 +29,8 @@ Short-lived token for API authentication.
 }
 ```
 
-Access tokens may also carry an `org_role` claim and a `scopes` claim when the issuer includes
-them. The MCP server uses `org_role` to gate owner-only tools.
+Access tokens may also carry an `org_role` claim and a `scopes` claim when the issuer includes them.
+The MCP server uses `org_role` to gate owner-only tools.
 
 **Default Expiry:** 60 minutes (configurable via `SIBYL_ACCESS_TOKEN_EXPIRE_MINUTES`)
 

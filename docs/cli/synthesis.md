@@ -6,12 +6,12 @@ plan, draft, verify, and remember.
 
 ## Commands
 
-| Command                              | Description                                          |
-| ------------------------------------- | ---------------------------------------------------- |
+| Command                                           | Description                                           |
+| ------------------------------------------------- | ----------------------------------------------------- |
 | [`sibyl synthesis plan`](#synthesis-plan)         | Plan source-grounded synthesis from authorized memory |
-| [`sibyl synthesis draft`](#synthesis-draft)       | Draft a verified synthesis artifact                  |
-| [`sibyl synthesis verify`](#synthesis-verify)     | Verify citation, freshness, redaction, gap coverage  |
-| [`sibyl synthesis remember`](#synthesis-remember) | Draft, verify, and remember an artifact              |
+| [`sibyl synthesis draft`](#synthesis-draft)       | Draft a verified synthesis artifact                   |
+| [`sibyl synthesis verify`](#synthesis-verify)     | Verify citation, freshness, redaction, gap coverage   |
+| [`sibyl synthesis remember`](#synthesis-remember) | Draft, verify, and remember an artifact               |
 
 ## The Synthesis Pipeline
 
@@ -39,30 +39,30 @@ sibyl synthesis plan <goal> [options]
 
 ### Arguments
 
-| Argument | Required | Description     |
-| -------- | -------- | --------------- |
-| `goal`   | Yes      | Synthesis goal  |
+| Argument | Required | Description    |
+| -------- | -------- | -------------- |
+| `goal`   | Yes      | Synthesis goal |
 
 ### Options
 
-| Option            | Short | Default         | Description                                       |
-| ----------------- | ----- | --------------- | ------------------------------------------------- |
-| `--type`          |       | `documentation` | Output type                                       |
-| `--audience`      |       | (none)          | Intended audience                                 |
-| `--depth`         |       | `standard`      | `brief`, `standard`, or `deep`                    |
-| `--seed`          |       | (none)          | Search seed query                                 |
-| `--project`       | `-p`  | (auto)          | Project ID                                        |
-| `--all-projects`  |       | false           | Skip cwd project scope                            |
-| `--domain`        | `-d`  | (none)          | Domain/category                                   |
-| `--entity`        |       | (none)          | Comma-separated entity IDs                        |
-| `--decision`      |       | (none)          | Comma-separated decision IDs                      |
-| `--task`          |       | (none)          | Comma-separated task IDs                          |
-| `--artifact`      |       | (none)          | Comma-separated artifact IDs                      |
-| `--section`       |       | (none)          | Pipe-separated `Title::Prompt::sources` specs     |
-| `--constraint`    |       | (none)          | Comma-separated constraints                       |
-| `--max-sections`  |       | 6               | Maximum sections (1-12)                           |
+| Option            | Short | Default         | Description                                                |
+| ----------------- | ----- | --------------- | ---------------------------------------------------------- |
+| `--type`          |       | `documentation` | Output type                                                |
+| `--audience`      |       | (none)          | Intended audience                                          |
+| `--depth`         |       | `standard`      | `brief`, `standard`, or `deep`                             |
+| `--seed`          |       | (none)          | Search seed query                                          |
+| `--project`       | `-p`  | (auto)          | Project ID                                                 |
+| `--all-projects`  |       | false           | Skip cwd project scope                                     |
+| `--domain`        | `-d`  | (none)          | Domain/category                                            |
+| `--entity`        |       | (none)          | Comma-separated entity IDs                                 |
+| `--decision`      |       | (none)          | Comma-separated decision IDs                               |
+| `--task`          |       | (none)          | Comma-separated task IDs                                   |
+| `--artifact`      |       | (none)          | Comma-separated artifact IDs                               |
+| `--section`       |       | (none)          | Pipe-separated `Title::Prompt::sources` specs              |
+| `--constraint`    |       | (none)          | Comma-separated constraints                                |
+| `--max-sections`  |       | 6               | Maximum sections (1-12)                                    |
 | `--neighborhoods` |       | on              | Include one-hop graph neighborhoods (`--no-neighborhoods`) |
-| `--json`          | `-j`  | false           | Output full JSON                                  |
+| `--json`          | `-j`  | false           | Output full JSON                                           |
 
 ### Examples
 
@@ -96,8 +96,8 @@ sibyl synthesis draft <goal> [options]
 
 `draft` accepts every [`synthesis plan`](#synthesis-plan) option plus:
 
-| Option     | Default    | Description         |
-| ---------- | ---------- | ------------------- |
+| Option     | Default    | Description          |
+| ---------- | ---------- | -------------------- |
 | `--format` | `markdown` | `markdown` or `json` |
 
 ### Examples
@@ -129,12 +129,12 @@ sibyl synthesis verify <goal> [options]
 
 ### Verification Checks
 
-| Check      | What it confirms                                          |
-| ---------- | --------------------------------------------------------- |
-| Citation   | Every claim is backed by a cited source                   |
-| Freshness  | Cited sources are recent enough for the goal              |
-| Redaction  | No hidden-context or out-of-scope memory leaked in        |
-| Gap        | Planned sections are actually covered by the draft        |
+| Check     | What it confirms                                   |
+| --------- | -------------------------------------------------- |
+| Citation  | Every claim is backed by a cited source            |
+| Freshness | Cited sources are recent enough for the goal       |
+| Redaction | No hidden-context or out-of-scope memory leaked in |
+| Gap       | Planned sections are actually covered by the draft |
 
 ### Example
 
@@ -159,10 +159,10 @@ sibyl synthesis remember <goal> [options]
 
 `remember` accepts every [`synthesis draft`](#synthesis-draft) option plus:
 
-| Option        | Default   | Description                  |
-| ------------- | --------- | ---------------------------- |
-| `--scope`     | `private` | Artifact memory scope        |
-| `--scope-key` | (none)    | Artifact scope key           |
+| Option        | Default   | Description                   |
+| ------------- | --------- | ----------------------------- |
+| `--scope`     | `private` | Artifact memory scope         |
+| `--scope-key` | (none)    | Artifact scope key            |
 | `--tags`      | (none)    | Comma-separated artifact tags |
 
 ### Example

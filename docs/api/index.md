@@ -31,19 +31,19 @@ multi-process or distributed worker deployments.
 The MCP interface exposes eleven tools that cover discovery, context, capture, synthesis, and
 administration. Tools are registered in `apps/api/src/sibyl/server.py`.
 
-| Tool               | Purpose                                                       | Documentation                          |
-| ------------------ | ------------------------------------------------------------- | --------------------------------------- |
-| `search`           | Semantic search across knowledge graph and documents          | [mcp-search.md](./mcp-search.md)        |
-| `context`          | Compile a structured context pack for an agent goal           | [mcp-context.md](./mcp-context.md)      |
-| `synthesis_plan`   | Plan a source-grounded synthesis outline                      | [mcp-synthesis.md](./mcp-synthesis.md)  |
-| `synthesis_draft`  | Draft, verify, and optionally remember a synthesis artifact   | [mcp-synthesis.md](./mcp-synthesis.md)  |
-| `synthesis_verify` | Verify citation, freshness, hidden-context, and gap coverage  | [mcp-synthesis.md](./mcp-synthesis.md)  |
-| `explore`          | Navigate and browse graph structure                          | [mcp-explore.md](./mcp-explore.md)      |
-| `add`              | Create new knowledge entities                                 | [mcp-add.md](./mcp-add.md)              |
-| `remember`         | Capture durable memory with verbatim raw provenance           | [mcp-remember.md](./mcp-remember.md)    |
-| `reflect`          | Reflect raw notes into reviewable memory candidates           | [mcp-reflect.md](./mcp-reflect.md)      |
-| `manage`           | Lifecycle operations and administration                       | [mcp-manage.md](./mcp-manage.md)        |
-| `logs`             | Recent server logs (OWNER role)                               | [mcp-logs.md](./mcp-logs.md)            |
+| Tool               | Purpose                                                      | Documentation                          |
+| ------------------ | ------------------------------------------------------------ | -------------------------------------- |
+| `search`           | Semantic search across knowledge graph and documents         | [mcp-search.md](./mcp-search.md)       |
+| `context`          | Compile a structured context pack for an agent goal          | [mcp-context.md](./mcp-context.md)     |
+| `synthesis_plan`   | Plan a source-grounded synthesis outline                     | [mcp-synthesis.md](./mcp-synthesis.md) |
+| `synthesis_draft`  | Draft, verify, and optionally remember a synthesis artifact  | [mcp-synthesis.md](./mcp-synthesis.md) |
+| `synthesis_verify` | Verify citation, freshness, hidden-context, and gap coverage | [mcp-synthesis.md](./mcp-synthesis.md) |
+| `explore`          | Navigate and browse graph structure                          | [mcp-explore.md](./mcp-explore.md)     |
+| `add`              | Create new knowledge entities                                | [mcp-add.md](./mcp-add.md)             |
+| `remember`         | Capture durable memory with verbatim raw provenance          | [mcp-remember.md](./mcp-remember.md)   |
+| `reflect`          | Reflect raw notes into reviewable memory candidates          | [mcp-reflect.md](./mcp-reflect.md)     |
+| `manage`           | Lifecycle operations and administration                      | [mcp-manage.md](./mcp-manage.md)       |
+| `logs`             | Recent server logs (OWNER role)                              | [mcp-logs.md](./mcp-logs.md)           |
 
 **MCP Endpoint:** `POST /mcp` (streamable-http transport)
 
@@ -55,14 +55,14 @@ The MCP server also exposes two resources: `sibyl://health` (connectivity and en
 The REST API spans 26 routers. The pages below cover the most commonly used surfaces; the full
 contract is in the OpenAPI schema.
 
-| Category  | Endpoints                           | Documentation                            |
-| --------- | ----------------------------------- | ----------------------------------------- |
-| Entities  | `/api/entities/*`                   | [rest-entities.md](./rest-entities.md)    |
-| Tasks     | `/api/tasks/*`                      | [rest-tasks.md](./rest-tasks.md)          |
-| Projects  | `/api/entities?entity_type=project` | [rest-projects.md](./rest-projects.md)    |
-| Search    | `/api/search`, `/api/search/explore`| [rest-search.md](./rest-search.md)        |
-| Memory    | `/api/memory/*`, `/api/context/*`   | [rest-memory.md](./rest-memory.md)        |
-| Synthesis | `/api/synthesis/*`                  | [rest-synthesis.md](./rest-synthesis.md)  |
+| Category  | Endpoints                            | Documentation                            |
+| --------- | ------------------------------------ | ---------------------------------------- |
+| Entities  | `/api/entities/*`                    | [rest-entities.md](./rest-entities.md)   |
+| Tasks     | `/api/tasks/*`                       | [rest-tasks.md](./rest-tasks.md)         |
+| Projects  | `/api/entities?entity_type=project`  | [rest-projects.md](./rest-projects.md)   |
+| Search    | `/api/search`, `/api/search/explore` | [rest-search.md](./rest-search.md)       |
+| Memory    | `/api/memory/*`, `/api/context/*`    | [rest-memory.md](./rest-memory.md)       |
+| Synthesis | `/api/synthesis/*`                   | [rest-synthesis.md](./rest-synthesis.md) |
 
 Additional routers not covered by dedicated pages include `auth`, `users`, `epics`, `graph`,
 `crawler`, `rag`, `resolve`, `jobs`, `backups`, `settings`, `metrics`, `admin`, `logs`, `orgs`,

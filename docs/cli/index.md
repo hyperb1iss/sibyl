@@ -46,73 +46,73 @@ The CLI has roughly three dozen command groups. They fall into five families.
 
 Capture knowledge and recall it back into agent context.
 
-| Command                           | Description                                          |
-| ---------------------------------- | ---------------------------------------------------- |
-| [`sibyl recall`](./recall.md)     | Recall a compact working context pack for an agent   |
-| [`sibyl remember`](./remember.md) | Remember a decision, plan, idea, claim, or learning  |
-| [`sibyl reflect`](./reflect.md)   | Reflect raw notes into reviewable memory candidates  |
-| [`sibyl capture`](./capture.md)   | Quick capture with an auto-derived title             |
-| [`sibyl note`](./remember.md)     | Add a task note or capture a free note memory        |
-| [`sibyl add`](./add.md)           | Add knowledge with explicit title and content        |
-| [`sibyl search`](./search.md)     | Semantic search across graph and crawled docs        |
-| [`sibyl entity`](./entity.md)     | Generic entity CRUD operations                       |
-| [`sibyl explore`](./explore.md)   | Graph traversal and exploration                      |
-| [`sibyl archive`](./archive.md)   | Browse raw quick captures                            |
-| [`sibyl session`](./session.md)   | Package a wake-up context bundle                     |
-| [`sibyl context`](./context.md)   | Compile context packs and manage CLI contexts        |
+| Command                           | Description                                         |
+| --------------------------------- | --------------------------------------------------- |
+| [`sibyl recall`](./recall.md)     | Recall a compact working context pack for an agent  |
+| [`sibyl remember`](./remember.md) | Remember a decision, plan, idea, claim, or learning |
+| [`sibyl reflect`](./reflect.md)   | Reflect raw notes into reviewable memory candidates |
+| [`sibyl capture`](./capture.md)   | Quick capture with an auto-derived title            |
+| [`sibyl note`](./remember.md)     | Add a task note or capture a free note memory       |
+| [`sibyl add`](./add.md)           | Add knowledge with explicit title and content       |
+| [`sibyl search`](./search.md)     | Semantic search across graph and crawled docs       |
+| [`sibyl entity`](./entity.md)     | Generic entity CRUD operations                      |
+| [`sibyl explore`](./explore.md)   | Graph traversal and exploration                     |
+| [`sibyl archive`](./archive.md)   | Browse raw quick captures                           |
+| [`sibyl session`](./session.md)   | Package a wake-up context bundle                    |
+| [`sibyl context`](./context.md)   | Compile context packs and manage CLI contexts       |
 
 ### Work tracking
 
 Plan and run tasks, epics, and projects.
 
-| Command                           | Description                          |
-| ---------------------------------- | ------------------------------------ |
-| [`sibyl task`](./task-list.md)    | Task lifecycle management            |
-| [`sibyl epic`](./epic.md)         | Epic (feature group) management      |
-| [`sibyl project`](./project.md)   | Project management                   |
+| Command                         | Description                     |
+| ------------------------------- | ------------------------------- |
+| [`sibyl task`](./task-list.md)  | Task lifecycle management       |
+| [`sibyl epic`](./epic.md)       | Epic (feature group) management |
+| [`sibyl project`](./project.md) | Project management              |
 
 ### Sources and synthesis
 
 Ingest external docs and produce source-grounded artifacts.
 
-| Command                              | Description                                  |
-| ------------------------------------- | -------------------------------------------- |
-| [`sibyl crawl`](./crawl.md)          | Web crawling and documentation ingestion     |
-| [`sibyl synthesis`](./synthesis.md)  | Source-grounded synthesis (plan/draft/verify) |
+| Command                             | Description                                   |
+| ----------------------------------- | --------------------------------------------- |
+| [`sibyl crawl`](./crawl.md)         | Web crawling and documentation ingestion      |
+| [`sibyl synthesis`](./synthesis.md) | Source-grounded synthesis (plan/draft/verify) |
 
 ### Memory governance
 
 Review, promote, share, and audit memory.
 
-| Command                                       | Description                                  |
-| ---------------------------------------------- | -------------------------------------------- |
-| [`sibyl memory-audit`](./memory.md)           | Inspect memory audit receipts                |
-| [`sibyl memory-inspect`](./memory.md)         | Inspect a memory source and its audit trail  |
-| [`sibyl memory-promote`](./memory.md)         | Preview or auto-review candidate promotion   |
-| [`sibyl memory-share`](./memory.md)           | Preview memory sharing across scopes         |
-| [`sibyl memory-space`](./memory.md)           | Memory-space inspection and preview          |
-| [`sibyl memory-review`](./memory.md)          | Reflection review queue and dream-cycle      |
-| [`sibyl pending-writes`](./pending-writes.md) | Inspect and replay locally buffered writes   |
+| Command                                       | Description                                 |
+| --------------------------------------------- | ------------------------------------------- |
+| [`sibyl memory-audit`](./memory.md)           | Inspect memory audit receipts               |
+| [`sibyl memory-inspect`](./memory.md)         | Inspect a memory source and its audit trail |
+| [`sibyl memory-promote`](./memory.md)         | Preview or auto-review candidate promotion  |
+| [`sibyl memory-share`](./memory.md)           | Preview memory sharing across scopes        |
+| [`sibyl memory-space`](./memory.md)           | Memory-space inspection and preview         |
+| [`sibyl memory-review`](./memory.md)          | Reflection review queue and dream-cycle     |
+| [`sibyl pending-writes`](./pending-writes.md) | Inspect and replay locally buffered writes  |
 
 ### System
 
 Auth, organizations, configuration, and operations.
 
-| Command                       | Description                                       |
-| ------------------------------ | ------------------------------------------------- |
-| [`sibyl auth`](./auth.md)      | Authentication, tokens, and API keys              |
-| [`sibyl org`](./org.md)        | Organizations and member management               |
-| `sibyl context`                | Server/org/project context bundles (see above)    |
-| `sibyl config`                 | Manage CLI configuration                          |
-| `sibyl health`                 | Check Sibyl server health                         |
-| `sibyl stats`                  | Show knowledge graph statistics                   |
-| `sibyl version`                | Show version information                          |
-| `sibyl logs`                   | View server logs (requires OWNER role)            |
-| `sibyl debug`                  | Debug tools for development (requires OWNER role) |
-| `sibyl local`                  | Manage a local Docker-based Sibyl instance        |
-| `sibyl dev`                    | Devcontainer shell and lifecycle commands         |
-| `sibyl update`                 | Update Sibyl components                           |
-| `sibyl skill`                  | Print or install the canonical Sibyl skill        |
+| Command                   | Description                                       |
+| ------------------------- | ------------------------------------------------- |
+| [`sibyl auth`](./auth.md) | Authentication, tokens, and API keys              |
+| [`sibyl org`](./org.md)   | Organizations and member management               |
+| `sibyl context`           | Server/org/project context bundles (see above)    |
+| `sibyl config`            | Manage CLI configuration                          |
+| `sibyl health`            | Check Sibyl server health                         |
+| `sibyl stats`             | Show knowledge graph statistics                   |
+| `sibyl version`           | Show version information                          |
+| `sibyl logs`              | View server logs (requires OWNER role)            |
+| `sibyl debug`             | Debug tools for development (requires OWNER role) |
+| `sibyl local`             | Manage a local Docker-based Sibyl instance        |
+| `sibyl dev`               | Devcontainer shell and lifecycle commands         |
+| `sibyl update`            | Update Sibyl components                           |
+| `sibyl skill`             | Print or install the canonical Sibyl skill        |
 
 ## Global Options
 

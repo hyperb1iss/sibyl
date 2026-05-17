@@ -38,10 +38,10 @@ sibyl context [options]
 
 ### Options
 
-| Option                 | Short | Description                                              |
-| ---------------------- | ----- | -------------------------------------------------------- |
-| `--json`               | `-j`  | JSON output                                              |
-| `--quick` / `--validate` |     | Show local server/org/project/auth status only          |
+| Option                   | Short | Description                                    |
+| ------------------------ | ----- | ---------------------------------------------- |
+| `--json`                 | `-j`  | JSON output                                    |
+| `--quick` / `--validate` |       | Show local server/org/project/auth status only |
 
 ### Example
 
@@ -60,8 +60,8 @@ Output:
   Project:  proj_abc123 (linked)
 ```
 
-If a directory is linked, it shows `(linked)` next to the project. Use `--quick` for a fast
-local status check that skips fetching full project detail.
+If a directory is linked, it shows `(linked)` next to the project. Use `--quick` for a fast local
+status check that skips fetching full project detail.
 
 ---
 
@@ -69,8 +69,8 @@ local status check that skips fetching full project detail.
 
 Compile a precise context pack for an agent. This is the lower-level command behind
 [`sibyl recall`](./recall.md): it builds a goal-scoped bundle of tasks, decisions, and graph
-neighbors. Use `recall` for everyday work and `context pack` when you need fine-grained control
-over the pack.
+neighbors. Use `recall` for everyday work and `context pack` when you need fine-grained control over
+the pack.
 
 ### Synopsis
 
@@ -86,19 +86,19 @@ sibyl context pack <goal> [options]
 
 ### Options
 
-| Option            | Short | Default  | Description                                       |
-| ----------------- | ----- | -------- | ------------------------------------------------- |
+| Option            | Short | Default  | Description                                                                        |
+| ----------------- | ----- | -------- | ---------------------------------------------------------------------------------- |
 | `--intent`        | `-i`  | `build`  | Agent intent: build, plan, ideate, research, review, debug, decide, learn, general |
-| `--layer`         |       | `recall` | Context depth: `wake`, `recall`, `deep_search`    |
-| `--domain`        | `-d`  | (none)   | Domain/category to bias retrieval                 |
-| `--project`       | `-p`  | (auto)   | Project ID to scope context                       |
-| `--agent`         |       | (none)   | Agent diary identity to include                   |
-| `--all`           | `-a`  | false    | Use all accessible projects                       |
-| `--limit`         | `-l`  | 24       | Maximum total context items (1-50)                |
-| `--related`       |       | on       | Include one-hop related graph context (`--no-related`) |
-| `--related-limit` |       | 3        | Related items per context item (0-5)              |
-| `--markdown`      | `-m`  | false    | Output compact Markdown for agent injection       |
-| `--json`          | `-j`  | false    | JSON output                                       |
+| `--layer`         |       | `recall` | Context depth: `wake`, `recall`, `deep_search`                                     |
+| `--domain`        | `-d`  | (none)   | Domain/category to bias retrieval                                                  |
+| `--project`       | `-p`  | (auto)   | Project ID to scope context                                                        |
+| `--agent`         |       | (none)   | Agent diary identity to include                                                    |
+| `--all`           | `-a`  | false    | Use all accessible projects                                                        |
+| `--limit`         | `-l`  | 24       | Maximum total context items (1-50)                                                 |
+| `--related`       |       | on       | Include one-hop related graph context (`--no-related`)                             |
+| `--related-limit` |       | 3        | Related items per context item (0-5)                                               |
+| `--markdown`      | `-m`  | false    | Output compact Markdown for agent injection                                        |
+| `--json`          | `-j`  | false    | JSON output                                                                        |
 
 ### Examples
 

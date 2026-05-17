@@ -1,24 +1,24 @@
 # crawl
 
-Web crawling and documentation ingestion. `crawl` registers documentation sources, ingests them
-into the content store, and links the crawled chunks into the knowledge graph so they surface in
+Web crawling and documentation ingestion. `crawl` registers documentation sources, ingests them into
+the content store, and links the crawled chunks into the knowledge graph so they surface in
 [`sibyl search`](./search.md).
 
 ## Commands
 
-| Command                                          | Description                                |
-| ------------------------------------------------- | ------------------------------------------ |
-| [`sibyl crawl list`](#crawl-list)                 | List crawl sources                         |
-| [`sibyl crawl add`](#crawl-add)                   | Add a new documentation source             |
-| [`sibyl crawl ingest`](#crawl-ingest)             | Start crawling a source                    |
-| [`sibyl crawl status`](#crawl-status)             | Get crawl status for a source              |
-| [`sibyl crawl show`](#crawl-show)                 | Show crawl source details                  |
-| [`sibyl crawl stats`](#crawl-stats)               | Show crawling statistics                   |
-| [`sibyl crawl health`](#crawl-health)             | Check crawl system health                  |
-| [`sibyl crawl delete`](#crawl-delete)             | Delete a source and all its documents      |
-| [`sibyl crawl link-status`](#crawl-link-status)   | Show pending graph linking work per source |
-| [`sibyl crawl link-graph`](#crawl-link-graph)     | Link crawled chunks into the graph         |
-| [`sibyl crawl documents`](#crawl-documents)       | Browse crawled documents                   |
+| Command                                         | Description                                |
+| ----------------------------------------------- | ------------------------------------------ |
+| [`sibyl crawl list`](#crawl-list)               | List crawl sources                         |
+| [`sibyl crawl add`](#crawl-add)                 | Add a new documentation source             |
+| [`sibyl crawl ingest`](#crawl-ingest)           | Start crawling a source                    |
+| [`sibyl crawl status`](#crawl-status)           | Get crawl status for a source              |
+| [`sibyl crawl show`](#crawl-show)               | Show crawl source details                  |
+| [`sibyl crawl stats`](#crawl-stats)             | Show crawling statistics                   |
+| [`sibyl crawl health`](#crawl-health)           | Check crawl system health                  |
+| [`sibyl crawl delete`](#crawl-delete)           | Delete a source and all its documents      |
+| [`sibyl crawl link-status`](#crawl-link-status) | Show pending graph linking work per source |
+| [`sibyl crawl link-graph`](#crawl-link-graph)   | Link crawled chunks into the graph         |
+| [`sibyl crawl documents`](#crawl-documents)     | Browse crawled documents                   |
 
 ## Workflow
 
@@ -41,11 +41,11 @@ List crawl sources.
 sibyl crawl list [options]
 ```
 
-| Option     | Short | Default | Description                  |
-| ---------- | ----- | ------- | ---------------------------- |
-| `--status` | `-s`  | (all)   | Filter by status             |
-| `--limit`  | `-n`  | 20      | Max results                  |
-| `--json`   | `-j`  | false   | JSON output                  |
+| Option     | Short | Default | Description      |
+| ---------- | ----- | ------- | ---------------- |
+| `--status` | `-s`  | (all)   | Filter by status |
+| `--limit`  | `-n`  | 20      | Max results      |
+| `--json`   | `-j`  | false   | JSON output      |
 
 ---
 
@@ -57,17 +57,17 @@ Add a new documentation source.
 sibyl crawl add <url> [options]
 ```
 
-| Argument | Required | Description                  |
-| -------- | -------- | ---------------------------- |
-| `url`    | Yes      | Documentation URL to add     |
+| Argument | Required | Description              |
+| -------- | -------- | ------------------------ |
+| `url`    | Yes      | Documentation URL to add |
 
-| Option                  | Short | Default   | Description                            |
-| ----------------------- | ----- | --------- | -------------------------------------- |
-| `--name`                | `-n`  | (derived) | Source name                            |
-| `--type`                | `-T`  | `website` | Source type: `website`, `github`, `api_docs` |
-| `--depth`               | `-d`  | 2         | Crawl depth                            |
-| `--pattern` / `--include` | `-p` | (none)   | URL patterns to include                |
-| `--json`                | `-j`  | false     | JSON output                            |
+| Option                    | Short | Default   | Description                                  |
+| ------------------------- | ----- | --------- | -------------------------------------------- |
+| `--name`                  | `-n`  | (derived) | Source name                                  |
+| `--type`                  | `-T`  | `website` | Source type: `website`, `github`, `api_docs` |
+| `--depth`                 | `-d`  | 2         | Crawl depth                                  |
+| `--pattern` / `--include` | `-p`  | (none)    | URL patterns to include                      |
+| `--json`                  | `-j`  | false     | JSON output                                  |
 
 ### Example
 
@@ -87,16 +87,16 @@ Start crawling a documentation source.
 sibyl crawl ingest <source_id> [options]
 ```
 
-| Argument    | Required | Description           |
-| ----------- | -------- | --------------------- |
-| `source_id` | Yes      | Source ID to crawl    |
+| Argument    | Required | Description        |
+| ----------- | -------- | ------------------ |
+| `source_id` | Yes      | Source ID to crawl |
 
-| Option        | Short | Default | Description                  |
-| ------------- | ----- | ------- | ---------------------------- |
-| `--max-pages` | `-p`  | 50      | Maximum pages to crawl       |
-| `--depth`     | `-d`  | 3       | Maximum link depth           |
-| `--no-embed`  |       | false   | Skip embedding generation    |
-| `--json`      | `-j`  | false   | JSON output                  |
+| Option        | Short | Default | Description               |
+| ------------- | ----- | ------- | ------------------------- |
+| `--max-pages` | `-p`  | 50      | Maximum pages to crawl    |
+| `--depth`     | `-d`  | 3       | Maximum link depth        |
+| `--no-embed`  |       | false   | Skip embedding generation |
+| `--json`      | `-j`  | false   | JSON output               |
 
 ### Examples
 
@@ -171,8 +171,8 @@ sibyl crawl delete <source_id> [options]
 
 ## crawl link-status
 
-Show pending graph linking work per source. Use this to see how many crawled chunks still need to
-be linked into the graph.
+Show pending graph linking work per source. Use this to see how many crawled chunks still need to be
+linked into the graph.
 
 ```bash
 sibyl crawl link-status [--json]
@@ -188,16 +188,16 @@ Link crawled chunks into the graph. Pass a source ID, or `all` to process every 
 sibyl crawl link-graph [source_id] [options]
 ```
 
-| Argument    | Required | Description                          |
-| ----------- | -------- | ------------------------------------ |
-| `source_id` | No       | Source ID, or `all` for all sources  |
+| Argument    | Required | Description                         |
+| ----------- | -------- | ----------------------------------- |
+| `source_id` | No       | Source ID, or `all` for all sources |
 
-| Option         | Short | Default | Description                                  |
-| -------------- | ----- | ------- | -------------------------------------------- |
-| `--batch`      | `-b`  | 50      | Batch size                                   |
-| `--dry-run`    | `-n`  | false   | Show what would be processed                 |
+| Option         | Short | Default | Description                                    |
+| -------------- | ----- | ------- | ---------------------------------------------- |
+| `--batch`      | `-b`  | 50      | Batch size                                     |
+| `--dry-run`    | `-n`  | false   | Show what would be processed                   |
 | `--create-new` |       | false   | Create graph entities for unlinked extractions |
-| `--json`       | `-j`  | false   | JSON output                                  |
+| `--json`       | `-j`  | false   | JSON output                                    |
 
 ### Examples
 
@@ -223,11 +223,11 @@ List crawled documents.
 sibyl crawl documents list [options]
 ```
 
-| Option     | Short | Default | Description           |
-| ---------- | ----- | ------- | --------------------- |
-| `--source` | `-s`  | (all)   | Filter by source ID   |
-| `--limit`  | `-n`  | 20      | Max results           |
-| `--json`   | `-j`  | false   | JSON output           |
+| Option     | Short | Default | Description         |
+| ---------- | ----- | ------- | ------------------- |
+| `--source` | `-s`  | (all)   | Filter by source ID |
+| `--limit`  | `-n`  | 20      | Max results         |
+| `--json`   | `-j`  | false   | JSON output         |
 
 ### crawl documents show
 
@@ -237,14 +237,14 @@ Show full document content. Use the `document_id` from search result metadata.
 sibyl crawl documents show <document_id> [options]
 ```
 
-| Argument      | Required | Description                            |
-| ------------- | -------- | -------------------------------------- |
+| Argument      | Required | Description                             |
+| ------------- | -------- | --------------------------------------- |
 | `document_id` | Yes      | Document ID from search result metadata |
 
-| Option   | Short | Description                |
-| -------- | ----- | -------------------------- |
-| `--raw`  | `-r`  | Show raw markdown content  |
-| `--json` | `-j`  | JSON output                |
+| Option   | Short | Description               |
+| -------- | ----- | ------------------------- |
+| `--raw`  | `-r`  | Show raw markdown content |
+| `--json` | `-j`  | JSON output               |
 
 ### Example
 

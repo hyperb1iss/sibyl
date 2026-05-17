@@ -1,8 +1,8 @@
 # reflect
 
 Reflect raw notes into memory candidates, optionally persisting them. `reflect` takes unstructured
-session notes and runs them through Sibyl's extractor to produce typed memory candidates
-(decisions, plans, ideas, claims, and learnings) you can review or commit.
+session notes and runs them through Sibyl's extractor to produce typed memory candidates (decisions,
+plans, ideas, claims, and learnings) you can review or commit.
 
 ## Synopsis
 
@@ -14,27 +14,27 @@ Content is read from stdin when the positional argument is omitted.
 
 ## Arguments
 
-| Argument  | Required | Description                              |
-| --------- | -------- | ---------------------------------------- |
+| Argument  | Required | Description                                  |
+| --------- | -------- | -------------------------------------------- |
 | `content` | No       | Raw notes to reflect. Reads stdin if omitted |
 
 ## Options
 
-| Option           | Short | Default              | Description                                            |
-| ---------------- | ----- | -------------------- | ------------------------------------------------------ |
-| `--title`        | `-t`  | `Session reflection` | Source/session title                                   |
-| `--intent`       | `-i`  | `general`            | Intent: build, plan, ideate, research, review, debug, decide, learn, general |
-| `--domain`       | `-d`  | (none)               | Domain/category                                        |
-| `--project`      | `-p`  | (auto)               | Project ID                                             |
-| `--all-projects` |       | false                | Do not auto-scope to the linked project                |
-| `--related-to`   |       | (none)               | Comma-separated entity IDs to link persisted candidates to |
-| `--task`         |       | (none)               | Comma-separated task IDs to link persisted output to   |
-| `--active-task`  |       | on                   | When persisting, auto-link to the active task (`--no-active-task`) |
-| `--persist`      |       | false                | Persist candidates into the graph                      |
+| Option           | Short | Default              | Description                                                                   |
+| ---------------- | ----- | -------------------- | ----------------------------------------------------------------------------- |
+| `--title`        | `-t`  | `Session reflection` | Source/session title                                                          |
+| `--intent`       | `-i`  | `general`            | Intent: build, plan, ideate, research, review, debug, decide, learn, general  |
+| `--domain`       | `-d`  | (none)               | Domain/category                                                               |
+| `--project`      | `-p`  | (auto)               | Project ID                                                                    |
+| `--all-projects` |       | false                | Do not auto-scope to the linked project                                       |
+| `--related-to`   |       | (none)               | Comma-separated entity IDs to link persisted candidates to                    |
+| `--task`         |       | (none)               | Comma-separated task IDs to link persisted output to                          |
+| `--active-task`  |       | on                   | When persisting, auto-link to the active task (`--no-active-task`)            |
+| `--persist`      |       | false                | Persist candidates into the graph                                             |
 | `--source`       |       | on                   | When persisting, also store the raw notes as a session memory (`--no-source`) |
-| `--review`       |       | false                | Store persisted output in the raw review queue instead of graph promotion |
-| `--limit`        | `-l`  | 12                   | Maximum candidates (1-25)                              |
-| `--json`         | `-j`  | false                | Output as JSON                                         |
+| `--review`       |       | false                | Store persisted output in the raw review queue instead of graph promotion     |
+| `--limit`        | `-l`  | 12                   | Maximum candidates (1-25)                                                     |
+| `--json`         | `-j`  | false                | Output as JSON                                                                |
 
 ## How It Works
 
@@ -70,8 +70,8 @@ sibyl reflect --persist --project proj_abc123 < notes.txt
 
 ### Route Candidates to the Review Queue
 
-Use `--review` when candidates should be governed before they land in the graph. They become
-pending reflection candidates that `memory-promote` or `memory-review` can act on.
+Use `--review` when candidates should be governed before they land in the graph. They become pending
+reflection candidates that `memory-promote` or `memory-review` can act on.
 
 ```bash
 sibyl reflect --persist --review --domain synthesis < notes.txt

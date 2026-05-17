@@ -210,8 +210,10 @@ sibyl task list --csv
 
 Now that you have Sibyl running:
 
-1. **Learn the Memory Loop** - [The Memory Loop](./memory-loop.md) explains recall, act, remember, reflect
-2. **Read the Philosophy** - [Introduction](./index.md) explains why context should survive the session
+1. **Learn the Memory Loop** - [The Memory Loop](./memory-loop.md) explains recall, act, remember,
+   reflect
+2. **Read the Philosophy** - [Introduction](./index.md) explains why context should survive the
+   session
 3. **Understand the Graph** - [Knowledge Graph](./knowledge-graph.md) explains how entities connect
 4. **Set Up Claude** - [Claude Code Integration](./claude-code.md) for full AI agent support
 

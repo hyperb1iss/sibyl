@@ -1,7 +1,7 @@
 # capture
 
-Capture a quick memory without separate title and content fields. `capture` is the fastest way
-into the memory loop: pass a single blob of text (or pipe it in) and Sibyl derives a title for you.
+Capture a quick memory without separate title and content fields. `capture` is the fastest way into
+the memory loop: pass a single blob of text (or pipe it in) and Sibyl derives a title for you.
 
 ## Synopsis
 
@@ -13,9 +13,9 @@ Content is read from stdin when the positional argument is omitted.
 
 ## Arguments
 
-| Argument  | Required | Description                                |
-| --------- | -------- | ------------------------------------------ |
-| `content` | No       | What to capture. Reads stdin if omitted    |
+| Argument  | Required | Description                             |
+| --------- | -------- | --------------------------------------- |
+| `content` | No       | What to capture. Reads stdin if omitted |
 
 ## Options
 
@@ -37,9 +37,9 @@ Content is read from stdin when the positional argument is omitted.
 
 ## When to Use
 
-Reach for `capture` when you have a thought to record and do not want to stop to phrase a title.
-Use [`remember`](./remember.md) when the memory has a clear name or a specific kind (decision,
-plan, claim). Use [`add`](./add.md) when you want explicit title and content fields.
+Reach for `capture` when you have a thought to record and do not want to stop to phrase a title. Use
+[`remember`](./remember.md) when the memory has a clear name or a specific kind (decision, plan,
+claim). Use [`add`](./add.md) when you want explicit title and content fields.
 
 ## Examples
 

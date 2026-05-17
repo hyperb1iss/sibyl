@@ -1,8 +1,8 @@
 # remember
 
-Remember a decision, plan, idea, claim, artifact, session, or learning. `remember` is the write
-side of the Sibyl memory loop. It captures a titled memory and routes it into the graph, or stores
-it verbatim as a raw memory or private agent diary entry.
+Remember a decision, plan, idea, claim, artifact, session, or learning. `remember` is the write side
+of the Sibyl memory loop. It captures a titled memory and routes it into the graph, or stores it
+verbatim as a raw memory or private agent diary entry.
 
 ## Synopsis
 
@@ -14,10 +14,10 @@ Content is read from stdin when the positional argument is omitted.
 
 ## Arguments
 
-| Argument  | Required | Description                                  |
-| --------- | -------- | -------------------------------------------- |
-| `title`   | Yes      | Title/name of the memory                     |
-| `content` | No       | Memory body. Reads stdin if omitted          |
+| Argument  | Required | Description                         |
+| --------- | -------- | ----------------------------------- |
+| `title`   | Yes      | Title/name of the memory            |
+| `content` | No       | Memory body. Reads stdin if omitted |
 
 ## Options
 
@@ -47,18 +47,18 @@ Content is read from stdin when the positional argument is omitted.
 
 ## Memory Kinds
 
-`remember` defaults to `episode`, but the memory loop adds first-class kinds for durable
-reasoning artifacts:
+`remember` defaults to `episode`, but the memory loop adds first-class kinds for durable reasoning
+artifacts:
 
-| Kind       | Use Case                                          |
-| ---------- | ------------------------------------------------- |
-| `decision` | A choice that was made, with rationale            |
-| `plan`     | An intended sequence of work                      |
-| `idea`     | An exploration or proposal not yet acted on       |
-| `claim`    | An assertion to be verified or cited later        |
-| `artifact` | A produced output (synthesis, doc, summary)       |
-| `session`  | A session-level memory or summary                 |
-| `episode`  | General learning or knowledge (default)           |
+| Kind       | Use Case                                    |
+| ---------- | ------------------------------------------- |
+| `decision` | A choice that was made, with rationale      |
+| `plan`     | An intended sequence of work                |
+| `idea`     | An exploration or proposal not yet acted on |
+| `claim`    | An assertion to be verified or cited later  |
+| `artifact` | A produced output (synthesis, doc, summary) |
+| `session`  | A session-level memory or summary           |
+| `episode`  | General learning or knowledge (default)     |
 
 See [`sibyl entity`](./entity.md) for the full entity type list.
 
@@ -88,8 +88,8 @@ sibyl remember "Incident 2026-05 postmortem" --content-file ./postmortem.md --ki
 
 ### Store a Raw Memory
 
-`--raw` skips graph extraction and stores the payload verbatim in the raw memory store. Raw
-memories are read back with `recall --raw` and reviewed before promotion.
+`--raw` skips graph extraction and stores the payload verbatim in the raw memory store. Raw memories
+are read back with `recall --raw` and reviewed before promotion.
 
 ```bash
 sibyl remember "Deploy runbook" --raw --scope project --scope-key proj_abc123

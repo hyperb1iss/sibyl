@@ -7,8 +7,8 @@ generic search browsing.
 
 The `context` tool retrieves the memory that matters for a specific goal and groups it into facets
 such as active work, decisions, plans, ideas, constraints, artifacts, procedures, gotchas, and
-recent sessions. Use it before dispatching or resuming an agent so the agent starts with the
-working set it needs.
+recent sessions. Use it before dispatching or resuming an agent so the agent starts with the working
+set it needs.
 
 The `context` tool is the retrieval companion to [`remember`](./mcp-remember.md): `remember` stores
 what future agents should not have to relearn, and `context` pulls that material back into a goal.
@@ -36,26 +36,26 @@ interface ContextInput {
 
 ### Intent Values
 
-| Intent     | Use For                                            |
-| ---------- | -------------------------------------------------- |
-| `build`    | Implementation work (default)                      |
-| `plan`     | Sequencing, milestones, roadmap work               |
-| `ideate`   | Brainstorming and option generation                |
-| `research` | Investigation and landscape analysis               |
-| `debug`    | Diagnosing failures                                |
-| `decide`   | Resolving a choice                                 |
-| `learn`    | Building understanding of a topic                  |
-| `general`  | Unscoped retrieval                                 |
+| Intent     | Use For                              |
+| ---------- | ------------------------------------ |
+| `build`    | Implementation work (default)        |
+| `plan`     | Sequencing, milestones, roadmap work |
+| `ideate`   | Brainstorming and option generation  |
+| `research` | Investigation and landscape analysis |
+| `debug`    | Diagnosing failures                  |
+| `decide`   | Resolving a choice                   |
+| `learn`    | Building understanding of a topic    |
+| `general`  | Unscoped retrieval                   |
 
 Intent shapes which facets are emphasized in the resulting pack.
 
 ### Retrieval Layers
 
-| Layer         | Behavior                                                  |
-| ------------- | --------------------------------------------------------- |
-| `wake`        | Compact retrieval for session start                       |
-| `recall`      | Working context for an active goal (default)              |
-| `deep_search` | Broad retrieval for research-grade context                |
+| Layer         | Behavior                                     |
+| ------------- | -------------------------------------------- |
+| `wake`        | Compact retrieval for session start          |
+| `recall`      | Working context for an active goal (default) |
+| `deep_search` | Broad retrieval for research-grade context   |
 
 ## Response Schema
 
@@ -208,10 +208,10 @@ project raw memory.
 
 ## Error Handling
 
-| Error                              | Cause                                  | Resolution                          |
-| ----------------------------------- | -------------------------------------- | ----------------------------------- |
-| `Organization context required`     | No org-scoped token                    | Authenticate with an org-scoped token |
-| `Project access denied: <id>`        | Caller cannot access the project       | Use an accessible project ID        |
+| Error                           | Cause                            | Resolution                            |
+| ------------------------------- | -------------------------------- | ------------------------------------- |
+| `Organization context required` | No org-scoped token              | Authenticate with an org-scoped token |
+| `Project access denied: <id>`   | Caller cannot access the project | Use an accessible project ID          |
 
 ## Related
 

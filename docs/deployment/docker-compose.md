@@ -55,8 +55,8 @@ SIBYL_COORDINATION_BACKEND=redis moon run dev
 
 ## Service Definitions
 
-The root `docker-compose.yml` defines a Surreal-first local stack plus an opt-in `redis` profile.
-It runs only the data services; the API and web apps run natively for hot reload.
+The root `docker-compose.yml` defines a Surreal-first local stack plus an opt-in `redis` profile. It
+runs only the data services; the API and web apps run natively for hot reload.
 
 ```yaml
 services:
@@ -65,9 +65,13 @@ services:
     container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-surrealdb
     command:
       [
-        "start", "--log", "info",
-        "--user", "${SIBYL_SURREAL_USERNAME:-root}",
-        "--pass", "${SIBYL_SURREAL_PASSWORD:-root}",
+        "start",
+        "--log",
+        "info",
+        "--user",
+        "${SIBYL_SURREAL_USERNAME:-root}",
+        "--pass",
+        "${SIBYL_SURREAL_PASSWORD:-root}",
         "${SIBYL_SURREAL_PATH:-rocksdb:///data/sibyl.db}",
       ]
     ports:

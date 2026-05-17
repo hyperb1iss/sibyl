@@ -36,10 +36,10 @@ sibyl task list [options]
 
 ### Output
 
-| Option   | Short | Description                                  |
-| -------- | ----- | -------------------------------------------- |
-| `--json` | `-j`  | JSON output                                  |
-| `--csv`  |       | CSV output                                   |
+| Option   | Short | Description                                     |
+| -------- | ----- | ----------------------------------------------- |
+| `--json` | `-j`  | JSON output                                     |
+| `--csv`  |       | CSV output                                      |
 | `--wide` |       | Render a wide task table without title wrapping |
 
 ## Status Values

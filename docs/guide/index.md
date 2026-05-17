@@ -85,8 +85,8 @@ filter to find what you need.
 
 ## The Memory Loop
 
-Every effective Sibyl workflow follows the same cycle: **recall, act, remember,
-reflect.** Learn it once and the rest of Sibyl falls into place.
+Every effective Sibyl workflow follows the same cycle: **recall, act, remember, reflect.** Learn it
+once and the rest of Sibyl falls into place.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -116,8 +116,8 @@ reflect.** Learn it once and the rest of Sibyl falls into place.
 └─────────────────────────────────────────────────────────┘
 ```
 
-The loop runs on the CLI, through MCP tools, and from hooks. See
-[The Memory Loop](./memory-loop) for the full cycle.
+The loop runs on the CLI, through MCP tools, and from hooks. See [The Memory Loop](./memory-loop)
+for the full cycle.
 
 ## What to Capture
 

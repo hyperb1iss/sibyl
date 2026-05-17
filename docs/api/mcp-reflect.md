@@ -1,13 +1,13 @@
 # MCP Tool: reflect
 
-Reflect raw notes into reviewable durable memory candidates. Use `reflect` after planning,
-ideation, debugging, or building sessions to extract structured memory from unstructured notes.
+Reflect raw notes into reviewable durable memory candidates. Use `reflect` after planning, ideation,
+debugging, or building sessions to extract structured memory from unstructured notes.
 
 ## Overview
 
-Where [`remember`](./mcp-remember.md) captures a single piece of memory you already know you want
-to keep, `reflect` takes a block of raw session notes and extracts multiple memory candidates from
-it: decisions, plans, ideas, claims, artifacts, procedures, and session checkpoints. Each candidate
+Where [`remember`](./mcp-remember.md) captures a single piece of memory you already know you want to
+keep, `reflect` takes a block of raw session notes and extracts multiple memory candidates from it:
+decisions, plans, ideas, claims, artifacts, procedures, and session checkpoints. Each candidate
 carries a confidence score and a reason.
 
 By default `reflect` only extracts and returns candidates. Use the persistence flags to write them
@@ -53,11 +53,11 @@ Intent guides which kinds of candidates the extractor emphasizes.
 
 The persistence flags control what happens to the extracted candidates:
 
-| `persist` | `persist_review` | Outcome                                                          |
-| --------- | ---------------- | ---------------------------------------------------------------- |
-| `false`   | any              | Extract and return candidates only, no writes                    |
-| `true`    | `false`          | Promote candidates into the knowledge graph                      |
-| `true`    | `true`           | Store candidates in the raw review queue for later review        |
+| `persist` | `persist_review` | Outcome                                                   |
+| --------- | ---------------- | --------------------------------------------------------- |
+| `false`   | any              | Extract and return candidates only, no writes             |
+| `true`    | `false`          | Promote candidates into the knowledge graph               |
+| `true`    | `true`           | Store candidates in the raw review queue for later review |
 
 `persist_source` (default `true`) controls whether the raw reflection source itself is stored as a
 provenance record. The review queue feeds the reflection dream-cycle, where candidates are reviewed
@@ -169,11 +169,11 @@ through the reflection dream-cycle.
 
 ## Error Handling
 
-| Error                                                | Cause                                | Resolution                            |
-| ----------------------------------------------------- | ------------------------------------ | ------------------------------------- |
-| `Organization context required`                        | No org-scoped token                  | Authenticate with an org-scoped token |
-| `Project is required when MCP credentials are project-scoped` | Project-scoped key, `persist=true`, no `project` | Supply a `project`        |
-| `api_key_memory_space_denied`                           | API key lacks the target memory scope | Grant the key the required memory scope |
+| Error                                                         | Cause                                            | Resolution                              |
+| ------------------------------------------------------------- | ------------------------------------------------ | --------------------------------------- |
+| `Organization context required`                               | No org-scoped token                              | Authenticate with an org-scoped token   |
+| `Project is required when MCP credentials are project-scoped` | Project-scoped key, `persist=true`, no `project` | Supply a `project`                      |
+| `api_key_memory_space_denied`                                 | API key lacks the target memory scope            | Grant the key the required memory scope |
 
 ## Related
 

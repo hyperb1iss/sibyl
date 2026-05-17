@@ -6,18 +6,18 @@ members.
 
 ## Commands
 
-| Command                                   | Description                          |
-| ------------------------------------------ | ------------------------------------ |
-| [`sibyl org list`](#org-list)             | List organizations                   |
-| [`sibyl org create`](#org-create)         | Create an organization               |
-| [`sibyl org switch`](#org-switch)         | Switch the active organization       |
-| [`sibyl org members`](#org-members)       | Manage organization members          |
+| Command                             | Description                    |
+| ----------------------------------- | ------------------------------ |
+| [`sibyl org list`](#org-list)       | List organizations             |
+| [`sibyl org create`](#org-create)   | Create an organization         |
+| [`sibyl org switch`](#org-switch)   | Switch the active organization |
+| [`sibyl org members`](#org-members) | Manage organization members    |
 
 ## Org Isolation
 
-Every graph and memory operation is scoped to an organization. Switching orgs changes the
-namespace the CLI reads and writes. Membership roles (`owner`, `admin`, `member`, `viewer`) govern
-what a user can do inside an org.
+Every graph and memory operation is scoped to an organization. Switching orgs changes the namespace
+the CLI reads and writes. Membership roles (`owner`, `admin`, `member`, `viewer`) govern what a user
+can do inside an org.
 
 ---
 
@@ -43,11 +43,11 @@ sibyl org create --name <name> [options]
 
 ### Options
 
-| Option     | Short | Default | Description                                          |
-| ---------- | ----- | ------- | ---------------------------------------------------- |
-| `--name`   | `-n`  | (req.)  | Organization name (required)                         |
-| `--slug`   |       | (derived) | Optional URL slug                                  |
-| `--switch` |       | on      | Switch into the org after creating it (`--no-switch`) |
+| Option     | Short | Default   | Description                                           |
+| ---------- | ----- | --------- | ----------------------------------------------------- |
+| `--name`   | `-n`  | (req.)    | Organization name (required)                          |
+| `--slug`   |       | (derived) | Optional URL slug                                     |
+| `--switch` |       | on        | Switch into the org after creating it (`--no-switch`) |
 
 ### Example
 
@@ -85,12 +85,12 @@ sibyl org switch acme-eng
 
 Manage organization members.
 
-| Subcommand                            | Description                  |
-| ------------------------------------- | ---------------------------- |
-| `sibyl org members list`              | List all members of an org   |
-| `sibyl org members add`               | Add a member to an org       |
-| `sibyl org members remove`            | Remove a member from an org  |
-| `sibyl org members role`              | Update a member's role       |
+| Subcommand                 | Description                 |
+| -------------------------- | --------------------------- |
+| `sibyl org members list`   | List all members of an org  |
+| `sibyl org members add`    | Add a member to an org      |
+| `sibyl org members remove` | Remove a member from an org |
+| `sibyl org members role`   | Update a member's role      |
 
 Roles: `owner`, `admin`, `member`, `viewer`.
 
@@ -115,9 +115,9 @@ sibyl org members add <slug> <user_id> [options]
 | `slug`    | Yes      | Organization slug |
 | `user_id` | Yes      | User ID to add    |
 
-| Option   | Short | Default  | Description     |
-| -------- | ----- | -------- | --------------- |
-| `--role` | `-r`  | `member` | Role to assign  |
+| Option   | Short | Default  | Description    |
+| -------- | ----- | -------- | -------------- |
+| `--role` | `-r`  | `member` | Role to assign |
 
 ### org members remove
 
@@ -125,10 +125,10 @@ sibyl org members add <slug> <user_id> [options]
 sibyl org members remove <slug> <user_id> [options]
 ```
 
-| Argument  | Required | Description        |
-| --------- | -------- | ------------------ |
-| `slug`    | Yes      | Organization slug  |
-| `user_id` | Yes      | User ID to remove  |
+| Argument  | Required | Description       |
+| --------- | -------- | ----------------- |
+| `slug`    | Yes      | Organization slug |
+| `user_id` | Yes      | User ID to remove |
 
 | Option    | Short | Description       |
 | --------- | ----- | ----------------- |
@@ -140,10 +140,10 @@ sibyl org members remove <slug> <user_id> [options]
 sibyl org members role <slug> <user_id> <role>
 ```
 
-| Argument  | Required | Description                                |
-| --------- | -------- | ------------------------------------------ |
-| `slug`    | Yes      | Organization slug                          |
-| `user_id` | Yes      | User ID                                    |
+| Argument  | Required | Description                                    |
+| --------- | -------- | ---------------------------------------------- |
+| `slug`    | Yes      | Organization slug                              |
+| `user_id` | Yes      | User ID                                        |
 | `role`    | Yes      | New role: `owner`, `admin`, `member`, `viewer` |
 
 ### Examples

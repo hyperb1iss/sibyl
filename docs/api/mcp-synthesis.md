@@ -9,11 +9,11 @@ Synthesis turns the knowledge graph into a structured artifact (documentation, r
 roadmap, release notes, audit packet) where every section is grounded in cited sources. The three
 tools share the same request shape and differ only in what they produce:
 
-| Tool               | Produces                                                          |
-| ------------------ | ----------------------------------------------------------------- |
-| `synthesis_plan`   | A deterministic outline with materialized source packs            |
-| `synthesis_draft`  | A drafted artifact plus verification, optionally remembered        |
-| `synthesis_verify` | The same run as `plan`, with verification applied, no artifact     |
+| Tool               | Produces                                                       |
+| ------------------ | -------------------------------------------------------------- |
+| `synthesis_plan`   | A deterministic outline with materialized source packs         |
+| `synthesis_draft`  | A drafted artifact plus verification, optionally remembered    |
+| `synthesis_verify` | The same run as `plan`, with verification applied, no artifact |
 
 A typical flow is `synthesis_plan` to inspect coverage, then `synthesis_draft` to produce the
 artifact. `synthesis_verify` is useful as a standalone coverage check.
@@ -66,11 +66,11 @@ documentation, report, briefing, roadmap, release_notes, audit_packet, custom
 
 ### Depth Values
 
-| Depth      | Behavior                                              |
-| ---------- | ----------------------------------------------------- |
-| `brief`    | Tight outline, fewer sources per section              |
-| `standard` | Balanced coverage (default)                           |
-| `deep`     | Broad retrieval, more sources per section             |
+| Depth      | Behavior                                  |
+| ---------- | ----------------------------------------- |
+| `brief`    | Tight outline, fewer sources per section  |
+| `standard` | Balanced coverage (default)               |
+| `deep`     | Broad retrieval, more sources per section |
 
 ## Tool: synthesis_plan
 
@@ -123,9 +123,9 @@ interface SynthesisDraftExtra {
 }
 ```
 
-When `remember` is `true` and `memory_scope` is `project`, `scope_key` defaults to `project` and
-the write is authorized against the memory policy. The remembered artifact's IDs appear on the
-returned artifact (`remembered_memory_id`, `remembered_source_id`).
+When `remember` is `true` and `memory_scope` is `project`, `scope_key` defaults to `project` and the
+write is authorized against the memory policy. The remembered artifact's IDs appear on the returned
+artifact (`remembered_memory_id`, `remembered_source_id`).
 
 ## Tool: synthesis_verify
 
@@ -233,11 +233,11 @@ interface SynthesisArtifact {
 
 ### Verification Status
 
-| Status    | Meaning                                                       |
-| --------- | ------------------------------------------------------------- |
-| `pending` | Verification has not been applied (raw `synthesis_plan` run)  |
-| `gaps`    | One or more sections lack sufficient grounding                |
-| `pass`    | All sections are adequately source-grounded                   |
+| Status    | Meaning                                                      |
+| --------- | ------------------------------------------------------------ |
+| `pending` | Verification has not been applied (raw `synthesis_plan` run) |
+| `gaps`    | One or more sections lack sufficient grounding               |
+| `pass`    | All sections are adequately source-grounded                  |
 
 `hidden_count` on a source pack reports sources that are relevant but withheld because the caller's
 memory policy does not grant access. A high `hidden_count` means the caller is synthesizing without
@@ -253,12 +253,12 @@ full visibility.
 
 ## Error Handling
 
-| Error                              | Cause                                  | Resolution                          |
-| ----------------------------------- | -------------------------------------- | ----------------------------------- |
-| `Organization context required`     | No org-scoped token                    | Authenticate with an org-scoped token |
-| `Project access denied: <id>`        | Caller cannot access the project       | Use an accessible project ID        |
-| `missing_scope_key`                  | `remember` with project scope, no key  | Supply `scope_key` or `project`     |
-| `principal_id is required`           | `remember=true` with no resolvable user | Use a user-bound credential         |
+| Error                           | Cause                                   | Resolution                            |
+| ------------------------------- | --------------------------------------- | ------------------------------------- |
+| `Organization context required` | No org-scoped token                     | Authenticate with an org-scoped token |
+| `Project access denied: <id>`   | Caller cannot access the project        | Use an accessible project ID          |
+| `missing_scope_key`             | `remember` with project scope, no key   | Supply `scope_key` or `project`       |
+| `principal_id is required`      | `remember=true` with no resolvable user | Use a user-bound credential           |
 
 ## Related
 

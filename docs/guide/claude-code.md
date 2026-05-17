@@ -27,9 +27,9 @@ and data sources. Sibyl exposes 11 MCP tools:
 | `manage`           | State changes: task workflow, crawl, sync, analysis, admin     |
 | `logs`             | Recent server logs (OWNER role)                                |
 
-The four memory-loop tools (`context`, `remember`, `reflect`, and the `synthesis_*`
-family) implement the [memory loop](./memory-loop.md) for agents. `search`, `explore`,
-`add`, and `manage` cover retrieval and workflow.
+The four memory-loop tools (`context`, `remember`, `reflect`, and the `synthesis_*` family)
+implement the [memory loop](./memory-loop.md) for agents. `search`, `explore`, `add`, and `manage`
+cover retrieval and workflow.
 
 ## Configuration
 

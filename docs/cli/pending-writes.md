@@ -6,11 +6,11 @@ lists, replays, and discards that buffer.
 
 ## Commands
 
-| Command                                          | Description                                          |
-| ------------------------------------------------- | ---------------------------------------------------- |
-| [`sibyl pending-writes list`](#pending-writes-list)       | List buffered writes (no sensitive payload bodies)   |
-| [`sibyl pending-writes flush`](#pending-writes-flush)     | Replay buffered writes                               |
-| [`sibyl pending-writes discard`](#pending-writes-discard) | Discard buffered writes without replaying            |
+| Command                                                   | Description                                        |
+| --------------------------------------------------------- | -------------------------------------------------- |
+| [`sibyl pending-writes list`](#pending-writes-list)       | List buffered writes (no sensitive payload bodies) |
+| [`sibyl pending-writes flush`](#pending-writes-flush)     | Replay buffered writes                             |
+| [`sibyl pending-writes discard`](#pending-writes-discard) | Discard buffered writes without replaying          |
 
 ## How Buffering Works
 
@@ -49,8 +49,8 @@ sibyl pending-writes list
 
 ## pending-writes flush
 
-Replay buffered writes. With no arguments, flushes the entire buffer. Pass IDs or prefixes to
-replay a subset.
+Replay buffered writes. With no arguments, flushes the entire buffer. Pass IDs or prefixes to replay
+a subset.
 
 ### Synopsis
 
@@ -60,9 +60,9 @@ sibyl pending-writes flush [write_ids]...
 
 ### Arguments
 
-| Argument    | Required | Description                                          |
-| ----------- | -------- | ---------------------------------------------------- |
-| `write_ids` | No       | Pending write IDs or prefixes. Omit to flush all     |
+| Argument    | Required | Description                                      |
+| ----------- | -------- | ------------------------------------------------ |
+| `write_ids` | No       | Pending write IDs or prefixes. Omit to flush all |
 
 ### Examples
 
@@ -89,9 +89,9 @@ sibyl pending-writes discard <write_ids>...
 
 ### Arguments
 
-| Argument    | Required | Description                          |
-| ----------- | -------- | ------------------------------------ |
-| `write_ids` | Yes      | Pending write IDs or prefixes        |
+| Argument    | Required | Description                   |
+| ----------- | -------- | ----------------------------- |
+| `write_ids` | Yes      | Pending write IDs or prefixes |
 
 ### Example
 

@@ -8,8 +8,8 @@ in-memory log ring buffer to authorized callers.
 `logs` returns recent entries from the server's ring buffer, letting an agent debug Sibyl behavior
 without direct access to the host. It is a developer-introspection tool.
 
-This tool requires the **OWNER** role (the super-admin equivalent). Callers without OWNER
-membership receive an authorization error.
+This tool requires the **OWNER** role (the super-admin equivalent). Callers without OWNER membership
+receive an authorization error.
 
 ## Input Schema
 
@@ -21,8 +21,8 @@ interface LogsInput {
 }
 ```
 
-The `limit` argument is clamped to the range 1-500 regardless of the value supplied. The ring
-buffer retains the most recent entries only; older entries are dropped as new ones arrive.
+The `limit` argument is clamped to the range 1-500 regardless of the value supplied. The ring buffer
+retains the most recent entries only; older entries are dropped as new ones arrive.
 
 ## Response Schema
 
@@ -100,10 +100,10 @@ Returns the last 50 entries.
 
 ## Error Handling
 
-| Error                              | Cause                          | Resolution                          |
-| ----------------------------------- | ------------------------------ | ----------------------------------- |
-| `Organization context required`     | No org-scoped token            | Authenticate with an org-scoped token |
-| `OWNER role required for log access` | Caller is not an org OWNER     | Use an OWNER credential             |
+| Error                                | Cause                      | Resolution                            |
+| ------------------------------------ | -------------------------- | ------------------------------------- |
+| `Organization context required`      | No org-scoped token        | Authenticate with an org-scoped token |
+| `OWNER role required for log access` | Caller is not an org OWNER | Use an OWNER credential               |
 
 ## Related
 

@@ -10,10 +10,10 @@ each type helps keep your knowledge graph organized and searchable.
 
 The full set, as accepted by `--type` on `sibyl add` and `--kind` on `sibyl remember`:
 
-`pattern`, `rule`, `template`, `guide`, `tool`, `language`, `topic`, `episode`,
-`knowledge_source`, `config_file`, `slash_command`, `project`, `epic`, `task`, `team`,
-`error_pattern`, `milestone`, `source`, `document`, `procedure`, `community`, `note`, `domain`,
-`artifact`, `decision`, `plan`, `idea`, `claim`, `session`.
+`pattern`, `rule`, `template`, `guide`, `tool`, `language`, `topic`, `episode`, `knowledge_source`,
+`config_file`, `slash_command`, `project`, `epic`, `task`, `team`, `error_pattern`, `milestone`,
+`source`, `document`, `procedure`, `community`, `note`, `domain`, `artifact`, `decision`, `plan`,
+`idea`, `claim`, `session`.
 
 You rarely touch most of them directly. The sections below cover the types you choose by hand;
 crawler, analysis, and reflection paths create the rest.
@@ -151,8 +151,8 @@ High-level concepts and knowledge areas.
 
 ## Memory Loop Types
 
-These types are the vocabulary of the [memory loop](./memory-loop.md). They are the natural
-`--kind` values for `sibyl remember` and capture the durable thinking behind your work.
+These types are the vocabulary of the [memory loop](./memory-loop.md). They are the natural `--kind`
+values for `sibyl remember` and capture the durable thinking behind your work.
 
 ### Decision
 
@@ -498,33 +498,33 @@ Entity clusters from graph analysis.
 A handful of types exist for completeness and are created by specific paths rather than chosen by
 hand:
 
-| Type               | Created by                                                        |
-| ------------------ | ----------------------------------------------------------------- |
-| `knowledge_source` | Knowledge ingestion paths that register an origin for memory      |
-| `config_file`      | Capturing a configuration file as referenceable knowledge         |
-| `slash_command`    | Capturing a slash command definition                              |
-| `language`         | Programming-language nodes used for tagging and traversal         |
+| Type               | Created by                                                   |
+| ------------------ | ------------------------------------------------------------ |
+| `knowledge_source` | Knowledge ingestion paths that register an origin for memory |
+| `config_file`      | Capturing a configuration file as referenceable knowledge    |
+| `slash_command`    | Capturing a slash command definition                         |
+| `language`         | Programming-language nodes used for tagging and traversal    |
 
 They accept the same `--type` flag if you ever need them, but most workflows never do.
 
 ## Type Selection Guide
 
-| Scenario                       | Recommended Type |
-| ------------------------------ | ---------------- |
-| "I just figured something out" | `episode`        |
-| "This is how we always do X"   | `pattern`        |
-| "This must never happen"       | `rule`           |
-| "We chose A over B, here's why"| `decision`       |
-| "Here's the approach I'll take"| `plan`           |
-| "Worth trying later"           | `idea`           |
-| "X behaves like this"          | `claim`          |
-| "I need to implement X"        | `task`           |
-| "X is a major feature area"    | `epic`           |
-| "X is a big initiative"        | `project`        |
-| "Here's useful external docs"  | `source`         |
-| "This error keeps happening"   | `error_pattern`  |
-| "A repeatable runbook"         | `procedure`      |
-| "Template for new services"    | `template`       |
+| Scenario                        | Recommended Type |
+| ------------------------------- | ---------------- |
+| "I just figured something out"  | `episode`        |
+| "This is how we always do X"    | `pattern`        |
+| "This must never happen"        | `rule`           |
+| "We chose A over B, here's why" | `decision`       |
+| "Here's the approach I'll take" | `plan`           |
+| "Worth trying later"            | `idea`           |
+| "X behaves like this"           | `claim`          |
+| "I need to implement X"         | `task`           |
+| "X is a major feature area"     | `epic`           |
+| "X is a big initiative"         | `project`        |
+| "Here's useful external docs"   | `source`         |
+| "This error keeps happening"    | `error_pattern`  |
+| "A repeatable runbook"          | `procedure`      |
+| "Template for new services"     | `template`       |
 
 ## Creating Entities
 

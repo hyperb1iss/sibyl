@@ -4,8 +4,8 @@ Testing strategy for Sibyl's multi-tier permission system.
 
 ## Permission Tiers Overview
 
-Sibyl scopes access at three levels: organization, project, and memory. Org and project each have
-an ordered role enum; project visibility controls who can see a project at all.
+Sibyl scopes access at three levels: organization, project, and memory. Org and project each have an
+ordered role enum; project visibility controls who can see a project at all.
 
 ```
 Organization role (sibyl_core.auth.OrganizationRole)
@@ -40,23 +40,23 @@ filter:
 moon run api:test -- -k auth
 ```
 
-| File                                  | Focus                                              |
-| ------------------------------------- | -------------------------------------------------- |
-| `test_auth_authorization.py`          | Project-role hierarchy and `require_project_*`      |
-| `test_auth_context.py`                | `AuthContext` construction and role resolution      |
-| `test_auth_dependencies.py`           | FastAPI auth dependencies and guards                |
-| `test_auth_tenancy.py`                | Org isolation and namespace-per-org scoping         |
-| `test_auth_rls.py`                    | Row-level access enforcement                        |
-| `test_auth_api_keys.py`               | API key issue/verify lifecycle                      |
-| `test_auth_api_key_scopes_rest.py`    | API-key scope enforcement on REST endpoints         |
-| `test_auth_jwt.py`                    | JWT issue, verify, and expiry                       |
-| `test_auth_mcp_token_verifier.py`     | MCP bearer-token verification                       |
-| `test_auth_invitation_token.py`       | Org invitation token boundaries                     |
-| `test_auth_signup_locks.py`           | Signup race and lock handling                       |
-| `test_auth_session_cache.py`          | Session cache behavior and invalidation             |
-| `test_auth_errors.py`                 | Auth error mapping and safe responses               |
-| `test_auth_http.py`                   | End-to-end auth over the HTTP app                   |
-| `test_auth_flow_replay.py`            | Recorded auth-flow replay checks                    |
+| File                               | Focus                                          |
+| ---------------------------------- | ---------------------------------------------- |
+| `test_auth_authorization.py`       | Project-role hierarchy and `require_project_*` |
+| `test_auth_context.py`             | `AuthContext` construction and role resolution |
+| `test_auth_dependencies.py`        | FastAPI auth dependencies and guards           |
+| `test_auth_tenancy.py`             | Org isolation and namespace-per-org scoping    |
+| `test_auth_rls.py`                 | Row-level access enforcement                   |
+| `test_auth_api_keys.py`            | API key issue/verify lifecycle                 |
+| `test_auth_api_key_scopes_rest.py` | API-key scope enforcement on REST endpoints    |
+| `test_auth_jwt.py`                 | JWT issue, verify, and expiry                  |
+| `test_auth_mcp_token_verifier.py`  | MCP bearer-token verification                  |
+| `test_auth_invitation_token.py`    | Org invitation token boundaries                |
+| `test_auth_signup_locks.py`        | Signup race and lock handling                  |
+| `test_auth_session_cache.py`       | Session cache behavior and invalidation        |
+| `test_auth_errors.py`              | Auth error mapping and safe responses          |
+| `test_auth_http.py`                | End-to-end auth over the HTTP app              |
+| `test_auth_flow_replay.py`         | Recorded auth-flow replay checks               |
 
 ## Test Categories
 
@@ -66,8 +66,7 @@ moon run api:test -- -k auth
 
 - `PROJECT_ROLE_LEVELS` ordering (`viewer < contributor < maintainer < owner`)
 - `_max_role` resolution across multiple grants
-- `require_project_read`, `require_project_write`, `require_project_admin`,
-  `require_project_role`
+- `require_project_read`, `require_project_write`, `require_project_admin`, `require_project_role`
 - `list_accessible_project_graph_ids` for visibility-filtered listing
 
 Example:
@@ -86,19 +85,19 @@ moon run api:test -- tests/test_auth_authorization.py
 
 ### 2. Organization Role Enforcement
 
-Org-role checks run through `AuthContext`. `test_auth_context.py` exercises context construction
-and role resolution; `test_auth_dependencies.py` covers the FastAPI guards that gate endpoints.
+Org-role checks run through `AuthContext`. `test_auth_context.py` exercises context construction and
+role resolution; `test_auth_dependencies.py` covers the FastAPI guards that gate endpoints.
 
 Owner-only operations include deleting the org, transferring ownership, and managing invitations.
 Admins manage members and roles but cannot delete the org.
 
-| Operation               | Owner | Admin | Member | Viewer |
-| ----------------------- | ----- | ----- | ------ | ------ |
-| Delete organization     | yes   | no    | no     | no     |
-| Transfer ownership      | yes   | no    | no     | no     |
-| Add/remove members      | yes   | yes   | no     | no     |
-| Create tasks/knowledge  | yes   | yes   | yes    | no     |
-| Read tasks/knowledge    | yes   | yes   | yes    | yes    |
+| Operation              | Owner | Admin | Member | Viewer |
+| ---------------------- | ----- | ----- | ------ | ------ |
+| Delete organization    | yes   | no    | no     | no     |
+| Transfer ownership     | yes   | no    | no     | no     |
+| Add/remove members     | yes   | yes   | no     | no     |
+| Create tasks/knowledge | yes   | yes   | yes    | no     |
+| Read tasks/knowledge   | yes   | yes   | yes    | yes    |
 
 Run:
 
@@ -127,8 +126,8 @@ moon run api:test -- tests/test_auth_tenancy.py tests/test_auth_rls.py
 ### 4. API Key Scopes
 
 `test_auth_api_keys.py` covers the key lifecycle; `test_auth_api_key_scopes_rest.py` asserts scope
-enforcement on REST endpoints. Scopes include `mcp`, `api:read`, `api:write`, and the memory
-scopes. A read-scoped key must be rejected on write endpoints.
+enforcement on REST endpoints. Scopes include `mcp`, `api:read`, `api:write`, and the memory scopes.
+A read-scoped key must be rejected on write endpoints.
 
 Run:
 

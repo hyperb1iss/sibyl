@@ -7,13 +7,13 @@ operations, analysis, and admin actions through a single action-dispatched tool.
 
 The `manage` tool handles state-changing operations organized by category:
 
-| Category          | Actions                                                                                   |
-| ----------------- | ----------------------------------------------------------------------------------------- |
+| Category          | Actions                                                                                                                 |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | Task Workflow     | `start_task`, `block_task`, `unblock_task`, `submit_review`, `complete_task`, `archive_task`, `update_task`, `add_note` |
-| Epic Workflow     | `start_epic`, `complete_epic`, `archive_epic`, `update_epic`                              |
-| Source Operations | `crawl`, `sync`, `refresh`, `link_graph`, `link_graph_status`                             |
-| Analysis          | `estimate`, `prioritize`, `detect_cycles`, `suggest`                                      |
-| Admin             | `health`, `stats`, `rebuild_index`                                                        |
+| Epic Workflow     | `start_epic`, `complete_epic`, `archive_epic`, `update_epic`                                                            |
+| Source Operations | `crawl`, `sync`, `refresh`, `link_graph`, `link_graph_status`                                                           |
+| Analysis          | `estimate`, `prioritize`, `detect_cycles`, `suggest`                                                                    |
+| Admin             | `health`, `stats`, `rebuild_index`                                                                                      |
 
 For web applications, the REST task endpoints (`/api/tasks/{id}/*`) offer the same task workflow
 with finer-grained routes and authorization. The `manage` tool is the agent-facing equivalent and

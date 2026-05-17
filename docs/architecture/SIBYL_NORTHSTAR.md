@@ -28,7 +28,8 @@ Shipped execution plans, kept in `docs/_archive/` as release receipts and design
   [`SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md`](../_archive/SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md)
 - v0.9 synthesis and memory workspace:
   [`SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md`](../_archive/SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md)
-- Native LLM provider substrate: [`SIBYL_LLM_SUBSTRATE_PLAN.md`](../_archive/SIBYL_LLM_SUBSTRATE_PLAN.md)
+- Native LLM provider substrate:
+  [`SIBYL_LLM_SUBSTRATE_PLAN.md`](../_archive/SIBYL_LLM_SUBSTRATE_PLAN.md)
 
 ## Northstar
 

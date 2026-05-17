@@ -165,8 +165,7 @@ Use consistent response format from `src/lib/responses.ts`.
 
 ### A Real Project CLAUDE.md
 
-Here's how a project that uses Sibyl as its own knowledge repository sets up its
-`CLAUDE.md`:
+Here's how a project that uses Sibyl as its own knowledge repository sets up its `CLAUDE.md`:
 
 ```markdown
 # Sibyl Development Guide

@@ -79,14 +79,14 @@ sibyl search "database" --type pattern,episode
 
 The `search` command keeps a small, focused flag set:
 
-| Flag           | Purpose                                  |
-| -------------- | ---------------------------------------- |
-| `--type`       | Filter by entity type (comma-separated)  |
-| `--limit`      | Maximum results (default 10)             |
+| Flag           | Purpose                                             |
+| -------------- | --------------------------------------------------- |
+| `--type`       | Filter by entity type (comma-separated)             |
+| `--limit`      | Maximum results (default 10)                        |
 | `--all`        | Search across all projects, not just the linked one |
-| `--graph-only` | Search graph memory only                 |
-| `--docs-only`  | Search crawled docs only                 |
-| `--json`       | Structured output                        |
+| `--graph-only` | Search graph memory only                            |
+| `--docs-only`  | Search crawled docs only                            |
+| `--json`       | Structured output                                   |
 
 ```bash
 # Search every project, not just the linked one
@@ -96,8 +96,8 @@ sibyl search "rate limiting" --all
 sibyl search "OAuth callback" --graph-only
 ```
 
-`search` takes a required query. To list entities by structured filters such as
-status, project, or assignee, use `sibyl task list` or `sibyl entity list` instead.
+`search` takes a required query. To list entities by structured filters such as status, project, or
+assignee, use `sibyl task list` or `sibyl entity list` instead.
 
 ```bash
 # Listing, not searching: structured filters live on task/entity list
@@ -260,8 +260,8 @@ sibyl search "authentication" --type pattern
 
 ### 4. Use the Right Tool for Listing
 
-`search` always takes a query. To enumerate entities by structured filters, use
-`task list` or `entity list`:
+`search` always takes a query. To enumerate entities by structured filters, use `task list` or
+`entity list`:
 
 ```bash
 # List all patterns
@@ -273,8 +273,8 @@ sibyl task list --status todo --project proj_abc
 
 ## Document Search
 
-Sibyl can also search crawled documentation. By default a search covers both graph
-memory and crawled docs; narrow it with `--docs-only` or `--graph-only`:
+Sibyl can also search crawled documentation. By default a search covers both graph memory and
+crawled docs; narrow it with `--docs-only` or `--graph-only`:
 
 ```bash
 # Docs only
@@ -284,9 +284,8 @@ sibyl search "Next.js middleware" --docs-only
 sibyl search "OAuth callback" --graph-only
 ```
 
-Document search uses the same hybrid approach over Surreal-backed document chunks. The
-MCP `search` tool exposes finer filters such as `source_name` for narrowing to a
-single crawled source.
+Document search uses the same hybrid approach over Surreal-backed document chunks. The MCP `search`
+tool exposes finer filters such as `source_name` for narrowing to a single crawled source.
 
 ## Understanding Results
 

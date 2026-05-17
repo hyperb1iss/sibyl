@@ -35,8 +35,8 @@ sibyl remember "Chose SurrealDB" "One engine replaces three backends" --kind dec
 sibyl add "Descriptive title" "What, why, how, caveats" --type pattern
 ```
 
-`capture` and `remember` are the memory-loop verbs. `add` is the lower-level command
-with the widest set of flags.
+`capture` and `remember` are the memory-loop verbs. `add` is the lower-level command with the widest
+set of flags.
 
 ### Complete With Learnings
 

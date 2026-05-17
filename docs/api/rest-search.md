@@ -281,21 +281,21 @@ conflict detection.
 
 **Request Schema:**
 
-| Field             | Type    | Required | Default   | Description                                  |
-| ----------------- | ------- | -------- | --------- | -------------------------------------------- |
-| `mode`            | string  | No       | `history` | `history`, `timeline`, or `conflicts`        |
-| `entity_id`       | string  | No       | -         | Entity to scope the temporal query           |
-| `as_of`           | string  | No       | -         | Point-in-time date for `history` mode        |
-| `include_expired` | boolean | No       | false     | Include expired edges                        |
-| `limit`           | integer | No       | 50        | Maximum edges to return                      |
+| Field             | Type    | Required | Default   | Description                           |
+| ----------------- | ------- | -------- | --------- | ------------------------------------- |
+| `mode`            | string  | No       | `history` | `history`, `timeline`, or `conflicts` |
+| `entity_id`       | string  | No       | -         | Entity to scope the temporal query    |
+| `as_of`           | string  | No       | -         | Point-in-time date for `history` mode |
+| `include_expired` | boolean | No       | false     | Include expired edges                 |
+| `limit`           | integer | No       | 50        | Maximum edges to return               |
 
 **Modes:**
 
-| Mode        | Answers                                                |
-| ----------- | ------------------------------------------------------ |
-| `history`   | Edges as they existed at `as_of`                       |
-| `timeline`  | All versions of edges over time (knowledge evolution)  |
-| `conflicts` | Invalidated or superseded facts                        |
+| Mode        | Answers                                               |
+| ----------- | ----------------------------------------------------- |
+| `history`   | Edges as they existed at `as_of`                      |
+| `timeline`  | All versions of edges over time (knowledge evolution) |
+| `conflicts` | Invalidated or superseded facts                       |
 
 **Response:**
 

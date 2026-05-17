@@ -294,8 +294,8 @@ The link is stored in `~/.sibyl/config.toml`:
 
 ## project relink
 
-Repair the project link for the current directory. Use this when a link points at a stale or
-renamed project and you want to retarget it without unlinking first.
+Repair the project link for the current directory. Use this when a link points at a stale or renamed
+project and you want to retarget it without unlinking first.
 
 ### Synopsis
 
@@ -305,10 +305,10 @@ sibyl project relink [options]
 
 ### Options
 
-| Option   | Short | Default | Description                                       |
-| -------- | ----- | ------- | ------------------------------------------------- |
-| `--id`   |       | (none)  | Project ID, UUID, name, or slug to relink to      |
-| `--path` | `-p`  | cwd     | Directory path                                    |
+| Option   | Short | Default | Description                                  |
+| -------- | ----- | ------- | -------------------------------------------- |
+| `--id`   |       | (none)  | Project ID, UUID, name, or slug to relink to |
+| `--path` | `-p`  | cwd     | Directory path                               |
 
 ### Example
 
