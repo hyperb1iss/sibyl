@@ -69,6 +69,20 @@ _PROJECT_ROLE_LEVELS: dict[ProjectRole, int] = {
 }
 _USER_UUID_FIELDS = {"id", "github_id", "created_by_user_id", "accepted_by_user_id"}
 _USER_DATETIME_FIELDS = {"created_at", "updated_at", "email_verified_at", "last_login_at"}
+_SAFE_HTTP_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+_REST_READ_SCOPES = frozenset({"api:read", "api:write"})
+_REST_WRITE_SCOPE = "api:write"
+
+
+def _is_rest_request(request: Request) -> bool:
+    return request.url.path.startswith("/api/")
+
+
+def _api_key_allows_rest(*, scopes: list[str], method: str) -> bool:
+    normalized = {s.strip() for s in scopes if str(s).strip()}
+    if method.upper() in _SAFE_HTTP_METHODS:
+        return bool(normalized & _REST_READ_SCOPES)
+    return _REST_WRITE_SCOPE in normalized
 
 
 def _project_not_found_detail(project_id: object) -> str:
@@ -1794,6 +1808,11 @@ async def resolve_request_claims(request) -> SurrealRecord | None:
         auth = await authenticate_api_key(token)
         if auth is None:
             return None
+        scopes = list(auth.scopes or [])
+        if _is_rest_request(request) and not _api_key_allows_rest(
+            scopes=scopes, method=request.method
+        ):
+            raise HTTPException(status_code=403, detail="Insufficient API key scope")
         return _api_key_claim_payload(auth)
     return None
 

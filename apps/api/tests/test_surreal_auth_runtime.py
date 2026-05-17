@@ -2618,3 +2618,59 @@ async def test_exchange_device_code_handles_missing_last_polled_at(
     assert "UPSERT device_authorization_requests" not in query
     assert params["uuid"] == str(device_request_id)
     assert params["last_polled_at"] == params["updated_at"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_request_claims_rejects_rest_write_with_mcp_only_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    auth = SimpleNamespace(
+        user_id=uuid4(),
+        organization_id=uuid4(),
+        api_key_id=uuid4(),
+        scopes=["mcp"],
+        project_ids=[],
+        memory_space_ids=[],
+        memory_spaces=[],
+    )
+    request = SimpleNamespace(
+        state=SimpleNamespace(jwt_claims=None),
+        headers={"authorization": "Bearer sk_live_test"},
+        cookies={},
+        method="POST",
+        url=SimpleNamespace(path="/api/auth/device/verify"),
+    )
+    monkeypatch.setattr(surreal_auth_runtime, "authenticate_api_key", AsyncMock(return_value=auth))
+
+    with pytest.raises(HTTPException, match="Insufficient API key scope") as exc_info:
+        await surreal_auth_runtime.resolve_request_claims(request)
+
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_resolve_request_claims_allows_rest_write_with_api_write_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    auth = SimpleNamespace(
+        user_id=uuid4(),
+        organization_id=uuid4(),
+        api_key_id=uuid4(),
+        scopes=["api:write"],
+        project_ids=[],
+        memory_space_ids=[],
+        memory_spaces=[],
+    )
+    request = SimpleNamespace(
+        state=SimpleNamespace(jwt_claims=None),
+        headers={"authorization": "Bearer sk_live_test"},
+        cookies={},
+        method="POST",
+        url=SimpleNamespace(path="/api/auth/device/verify"),
+    )
+    monkeypatch.setattr(surreal_auth_runtime, "authenticate_api_key", AsyncMock(return_value=auth))
+
+    claims = await surreal_auth_runtime.resolve_request_claims(request)
+
+    assert claims is not None
+    assert claims["typ"] == "api_key"
