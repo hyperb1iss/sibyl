@@ -808,6 +808,8 @@ async def _add_mcp_entity(
         project,
         require_project_when_restricted=True,
     )
+    memory_scope = "project" if project else "private"
+    scope_key = project
     write_decision = _authorize_mcp_memory_write(
         ctx=ctx,
         memory_scope=memory_scope,
@@ -927,9 +929,6 @@ async def _manage_mcp_action(
         entity_id=entity_id,
         data=full_data,
         organization_id=ctx.org_id,
-        allowed_memory_scope_keys=set(ctx.api_key_memory_scope_keys)
-        if ctx.api_key_memory_scope_keys is not None
-        else None,
     )
     payload = _to_dict(result)
     if policy_decision is not None:
