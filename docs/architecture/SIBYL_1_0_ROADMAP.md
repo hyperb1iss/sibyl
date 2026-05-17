@@ -2,9 +2,11 @@
 
 - Status: active planning baseline
 - Created: 2026-05-15
-- Current release floor: v0.9.0
-- Current implementation focus: v0.12 Reflection OS
-- Tracking task: `b4061098-bf23-44e3-a164-006501345863`
+- Current release floor: v0.10.0
+- Current implementation focus: v0.11 Corpus Runtime
+- Active remap spec:
+  [`SIBYL_POST_V010_RELEASE_REMAP_SPEC.md`](SIBYL_POST_V010_RELEASE_REMAP_SPEC.md)
+- Tracking task: `12b1fee4-7bdd-45c8-8a6a-b13fd6eab308`
 
 ## 1. Thesis
 
@@ -29,12 +31,15 @@ real work, and leave the graph smarter without Bliss babysitting a manual inbox.
 These living docs in `docs/architecture/` remain active planning inputs:
 
 - [`SIBYL_NORTHSTAR.md`](SIBYL_NORTHSTAR.md): product and architecture truth.
-- [`SIBYL_V012_REFLECTION_OS_PLAN.md`](SIBYL_V012_REFLECTION_OS_PLAN.md): current v0.12 Reflection
-  OS implementation plan.
+- [`SIBYL_POST_V010_RELEASE_REMAP_SPEC.md`](SIBYL_POST_V010_RELEASE_REMAP_SPEC.md): current
+  post-v0.10 release schedule and v0.11 execution spec.
 - [`PERMISSION_SYSTEM_AUDIT.md`](PERMISSION_SYSTEM_AUDIT.md): current auth, policy, project RBAC,
   MCP, and trust-surface audit.
 - [`TASKIQ_MIGRATION_PLAN.md`](TASKIQ_MIGRATION_PLAN.md): coordination backend boundary and
   Redis-optional local runtime direction.
+- [`SIBYL_REFLECTION_OS_PLAN.md`](SIBYL_REFLECTION_OS_PLAN.md): Reflection OS design packet whose
+  first slice landed in v0.10; keep it as design provenance for reflection-quality work, not as the
+  active release label.
 
 These docs are release receipts or historical execution plans. They moved to `docs/_archive/` once
 their work shipped. They can still hold useful receipts and design contracts, but they do not
@@ -263,103 +268,99 @@ Exit criteria:
 
 ## 5. Milestone Stack
 
-### v0.10: Autonomy And Runtime Pain
+### v0.10: Shipped Baseline
 
-Goal: make the system less needy immediately.
+Goal: establish the new floor.
 
-- fix overview and metrics slow-query behavior
-- fix CLI auth/session churn and add regression coverage
-- land the automatic memory decision engine
-- add exception-only review queue semantics
-- start the native LLM substrate foundation
+v0.10 shipped more of the original roadmap than expected: native LLM substrate foundations,
+Reflection OS foundations, trust-control and auth-session gates, runtime telemetry, CLI pending
+writes, single-host deployment scaffolding, and broad RBAC/scope hardening. Treat v0.10 as the
+current baseline, not as the start of new implementation.
 
-Required gates:
+### v0.11: Corpus Runtime
 
-- existing `memory-trust-gate`
-- new autonomy decision fixtures
-- targeted auth/session tests
-- targeted overview/perf receipts
+Goal: make source-grounded memory work on real corpora.
 
-### v0.11: Trust And Control Plane
-
-Goal: make shared memory spaces and delegated agents safe enough for default use.
-
-- persisted MemorySpace CRUD and membership
-- agent identity and delegated authority
-- API-key project and memory-space restrictions
-- MCP `add/manage` policy closure
-- job payload policy receipts
-- complete inspect/audit parity
-
-Required gates:
-
-- project/private leak fixtures across REST, CLI, MCP, web, jobs, and prompt hooks
-- API-key and delegated-agent deny cases
-- inspect/audit consistency fixtures
-
-### v0.12: Reflection OS
-
-Goal: make memory consolidate itself.
-
-- active plan: [`SIBYL_V012_REFLECTION_OS_PLAN.md`](SIBYL_V012_REFLECTION_OS_PLAN.md)
-- first-class claim and reflection-finding lifecycle records
-- contradiction, staleness, and duplicate detection
-- supersession and rollback propagation
-- automatic diary/session learning promotion
-- dream-cycle style consolidation jobs
-- recall quality evaluation against dogfood fixtures
-- minimum CLI/web visibility for automatic decisions and exception routing
-
-Required gates:
-
-- new `reflection-quality-gate`
-- correction and rollback fixtures
-- source-grounding and permission-safety checks
-
-First implementation slice landed:
-
-- claim/finding/lifecycle records, structured extractor fixtures, and lifecycle decisions
-- org-scoped reflection dream-cycle job with scheduled all-org maintenance
-- queue, API, CLI, and web receipts for automatic promotion and exception routing
-- `reflection-quality-gate` now runs core, API, CLI, and web reflection-quality slices
-- dogfood recall-improvement fixture covers decision, procedure, task learning, stale claim,
-  duplicate suppression, supersession exclusion, and private sensitive-note exclusion
-- v0.12 release-matrix pass is green across reflection quality, autonomy, memory trust, trust
-  control, auth/session, synthesis, adapter ingest, and overview performance
-
-### v0.13: Source And Synthesis Scale
-
-Goal: make source-grounded outputs reliable on real corpora.
-
-- broader source adapters
-- import observability and resumability hardening
-- section-pack quality improvements
-- synthesis verification expansion
-- artifact remember and correction propagation
+- source adapter contract hardening
+- broader or deeper import target support beyond the curated mailbox path
+- large-corpus import rehearsal with resumability, dedupe, skipped/error state, attachments, and
+  private-by-default policy
+- source search before expensive extraction finishes
+- synthesis verification expansion for hidden sources, unsupported claims, freshness, redaction, and
+  artifact provenance
+- correction and redaction propagation into future recall and synthesis
 
 Required gates:
 
 - `adapter-ingest-gate`
+- `large-corpus-rehearsal`
 - `synthesis-gate`
-- large-corpus import rehearsal
+- `autonomy-gate`
+- `reflection-quality-gate`
+- `trust-control-gate`
+- `auth-session-gate`
+- `memory-trust-gate`
+- `overview-perf-gate`
 - hidden-source and unsupported-claim fixtures
+- `moon run docs:lint`
+- `moon run docs:build`
+- `moon run :check`
 
-### v0.14: Product And Distribution
+### v0.12: Memory Workspace OS
 
-Goal: make Sibyl feel like a polished local-first product.
+Goal: make Sibyl's automatic memory behavior understandable and correctable from one product
+surface.
 
-- Memory Workspace polish and exception console
-- CLI simplification
-- first-run setup and settings polish
-- backup/restore and migration docs
-- Docker, Helm, Homebrew, and install path hardening
-- full docs consolidation
+- exception console for automatic memory decisions
+- context-pack explanation for inclusion, exclusion, redaction, freshness, confidence, and source
+  IDs
+- product-grade inspect, correction, restore, and promotion preview flows
+- CLI vocabulary aligned with the web Memory Workspace
+- realtime activity and overview behavior that stays within query budgets
 
 Required gates:
 
-- browser/workspace trust-flow checks
-- docs lint and install rehearsal
+- new `context-quality-gate`
+- new `workspace-trust-gate`
+- `memory-trust-gate`
+- `autonomy-gate`
+- `reflection-quality-gate`
+- `trust-control-gate`
+- `auth-session-gate`
+- `synthesis-gate`
+- `overview-perf-gate`
+- `moon run :check`
+
+### v0.13: Surreal-Only Runtime Closure
+
+Goal: remove remaining Graphiti and Redis-required default-runtime assumptions.
+
+- Graphiti removed from supported runtime, package metadata, optional extras, dev dependencies, CI,
+  and live compatibility tests
+- legacy Graphiti-shaped archives imported through Sibyl-owned readers that do not import
+  `graphiti_core`
+- no-Graphiti smoke strengthened from default-loop proof to supported-runtime proof
+- Redis remains opt-in for distributed deployments while local single-machine installs work with
+  SurrealDB as the only required data service
+- backup/restore round-trip for auth, graph, content, raw memory, tasks, settings, and source
+  imports
+- Docker, Helm, Homebrew, quickstart, and docs alignment to remove Graphiti from default install
+  paths and prove the Surreal-only runtime
+
+Required gates:
+
+- `moon run inventory-check inventory-typecheck inventory-test`
+- strengthened no-Graphiti supported-runtime proof
 - backup/restore round-trip
+- `memory-trust-gate`
+- `trust-control-gate`
+- `reflection-quality-gate`
+- `auth-session-gate`
+- `autonomy-gate`
+- `overview-perf-gate`
+- `adapter-ingest-gate`
+- `synthesis-gate`
+- `backup-restore-gate`
 - `moon run :check`
 
 ### v1.0 RC
@@ -401,8 +402,11 @@ Current gates remain useful, but 1.0 needs named gates that map to product claim
 - `overview-perf-gate`: overview page and metrics API query count and latency budgets
 - `workspace-trust-gate`: browser-visible inspect, correction, promotion preview, import progress,
   synthesis verification, and exception-console flows
+- backup/restore round-trip gate: auth, graph, content, raw memory, tasks, settings, and source
+  imports survive export and restore
 
-These should become Moon tasks once the first implementation slice lands.
+`context-quality-gate`, `workspace-trust-gate`, and the backup/restore round-trip gate are the
+remaining missing release gates in the post-v0.10 schedule.
 
 ## 7. Strategic Boundary
 
@@ -426,12 +430,10 @@ Separate:
 
 ## 8. Recommendation
 
-Start v0.10 with two parallel cuts:
+Start v0.11 as the Corpus Runtime release described in
+[`SIBYL_POST_V010_RELEASE_REMAP_SPEC.md`](SIBYL_POST_V010_RELEASE_REMAP_SPEC.md).
 
-1. Autonomy plus runtime pain: automatic memory decisions, exception-only review, CLI auth
-   stability, and overview query budgets.
-2. LLM substrate foundation: one provider layer, registry, validation, observability, and model
-   settings shape.
-
-This turns the post-v0.9 momentum into a real 1.0 path: less human review, fewer surprise logins,
-faster pages, and a model/runtime substrate strong enough for automatic reflection and synthesis.
+v0.10 already made Sibyl less needy, safer, and more model/runtime-aware. The next high-leverage
+step is proving the system can ingest a real private corpus, keep it policy-safe, synthesize
+source-grounded artifacts from it, and carry corrections forward. That produces the evidence needed
+for workspace polish, Graphiti deletion, and a boring v1.0 release candidate.

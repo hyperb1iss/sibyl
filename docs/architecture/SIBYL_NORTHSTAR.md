@@ -2,7 +2,7 @@
 
 - Status: living product and architecture spec
 - Last validated: 2026-05-15
-- Current release floor: v0.9.0
+- Current release floor: v0.10.0
 - Active 1.0 roadmap: [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
 
 This document defines Sibyl's northstar: the product shape, architecture principles, and deletion
@@ -18,7 +18,8 @@ implementation threads inside this larger product direction.
 Active executable plan:
 
 - v1.0 automatic memory operating system: [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
-- v0.12 Reflection OS: [`SIBYL_V012_REFLECTION_OS_PLAN.md`](SIBYL_V012_REFLECTION_OS_PLAN.md)
+- post-v0.10 release remap and v0.11 Corpus Runtime:
+  [`SIBYL_POST_V010_RELEASE_REMAP_SPEC.md`](SIBYL_POST_V010_RELEASE_REMAP_SPEC.md)
 
 Shipped execution plans, kept in `docs/_archive/` as release receipts and design contracts:
 
@@ -30,6 +31,12 @@ Shipped execution plans, kept in `docs/_archive/` as release receipts and design
   [`SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md`](../_archive/SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md)
 - Native LLM provider substrate:
   [`SIBYL_LLM_SUBSTRATE_PLAN.md`](../_archive/SIBYL_LLM_SUBSTRATE_PLAN.md)
+
+Design provenance kept alongside active architecture docs:
+
+- Reflection OS packet: [`SIBYL_REFLECTION_OS_PLAN.md`](SIBYL_REFLECTION_OS_PLAN.md). Its first
+  implementation slice landed in v0.10; keep this as design provenance, not the active release
+  label.
 
 ## Northstar
 
@@ -240,8 +247,9 @@ These pieces are part of the foundation and must not get lost while we push towa
 - Raw memory capture and scoped raw recall exist through the API and CLI, including private/project
   scope checks and agent diary metadata.
 - `reflect` exists across CLI, API, and MCP as the consolidation review/persist surface.
-- The v0.12 Reflection OS slice adds structured claim/finding lifecycle records, automatic
-  dream-cycle maintenance, and CLI/web receipts for automatic promotion and exception routing.
+- The first Reflection OS slice shipped in v0.10 adds structured claim/finding lifecycle records,
+  automatic dream-cycle maintenance, and CLI/web receipts for automatic promotion and exception
+  routing.
 - Context packs already include direct matches and one-hop related graph context.
 - Wake, recall, and deep-search layers exist on context packs and session wake bundles.
 - The Sibyl skill defines the agent memory contract: recall, act, remember, reflect.
@@ -679,10 +687,11 @@ Worse if we delete too early:
 
 ## Workstreams
 
-Workstreams are not strictly sequential. The `v0.6.0` through `v0.9.0` releases landed the
-Surreal-first foundation, native memory trust, synthesis, source inspect, import, and Memory
-Workspace slices. The next execution map is the 1.0 roadmap: make those surfaces automatic,
-policy-backed, fast, explainable, and polished enough to trust without routine human review.
+Workstreams are not strictly sequential. The `v0.6.0` through `v0.10.0` releases landed the
+Surreal-first foundation, native memory trust, synthesis, source inspect, import, Memory Workspace,
+native LLM substrate, Reflection OS foundation, trust-control gates, and runtime telemetry slices.
+The next execution map is the 1.0 roadmap: make those surfaces automatic, policy-backed, fast,
+explainable, and polished enough to trust without routine human review.
 
 ### W0. Northstar Tracking
 

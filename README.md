@@ -465,23 +465,22 @@ typical solo developer uses around $5/month in API costs.
 
 ### Is it production-ready?
 
-Sibyl is in active development (v0.9.x, heading toward 1.0). SurrealDB is the default
+Sibyl is in active development (v0.10.x, heading toward 1.0). SurrealDB is the default
 runtime for graph, content, and auth; legacy PostgreSQL paths are retained only for
 migration and archive rehearsal. **We use Sibyl to build Sibyl.** Every feature, task,
 and learning you see here was tracked inside the system itself.
 
 ## 🎯 Roadmap
 
-**Where we're headed after v0.9.0, toward 1.0:**
+**Where we're headed after v0.10.0, toward 1.0:**
 
-- **Reflection OS:** automatic reflection review, nightly dream-cycle maintenance, and
-  lifecycle findings that keep the graph consolidated without manual curation.
-- **Memory trust:** audit receipts, scoped memory spaces, promotion review, and sharing
-  controls so memory is legible instead of spooky.
-- **Synthesis:** richer source-grounded artifacts with citation, freshness, and gap
-  verification across more output types.
-- **Source ingestion:** more import adapters beyond mailboxes, with resumable jobs.
-- **Self-hosting:** one-command deploy on a tailnet with Ansible.
+- **Corpus Runtime:** real private source corpora can be imported, searched, inspected,
+  corrected, and synthesized without leaking scope.
+- **Memory Workspace OS:** automatic memory decisions become visible, explainable,
+  correctable, and undoable from one product surface.
+- **Surreal-only closure:** Graphiti and Redis-required local assumptions leave the supported
+  runtime once native behavior has receipts.
+- **1.0 evidence freeze:** release claims cite gates, artifacts, and install rehearsals.
 
 The graph gets smarter. The workflow gets sharper. See
 [`docs/architecture/SIBYL_1_0_ROADMAP.md`](docs/architecture/SIBYL_1_0_ROADMAP.md).

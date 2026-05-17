@@ -1,14 +1,21 @@
-# Sibyl v0.12 Reflection OS Plan
+# Sibyl Reflection OS Plan
 
-- Status: active implementation plan
+- Status: design provenance; first implementation slice shipped in v0.10.0
 - Created: 2026-05-15
-- Last implementation checkpoint: 2026-05-15
+- Last implementation checkpoint: 2026-05-17
 - Tracking task: `9c8b0033-fc26-4342-bce5-9f104fc69e06`
 - Parent roadmap: [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
+- Active remap spec:
+  [`SIBYL_POST_V010_RELEASE_REMAP_SPEC.md`](SIBYL_POST_V010_RELEASE_REMAP_SPEC.md)
 
-## 1. Release Promise
+This document is no longer the active release label. v0.10.0 absorbed the first Reflection OS slice:
+reflection lifecycle records, dream-cycle maintenance, automatic promotion receipts, and the
+`reflection-quality-gate`. Keep this plan as design provenance for reflection-quality work and for
+the v0.11-v0.13 gates that depend on reflection behavior.
 
-v0.12 makes memory consolidate itself.
+## 1. Original Release Promise
+
+The original v0.12 packet promised to make memory consolidate itself.
 
 A normal coding session should leave behind raw captures, source-grounded claims, decisions,
 procedures, tasks, artifacts, duplicate/stale/contradiction decisions, policy receipts, and better
@@ -17,11 +24,12 @@ recall without a human approving routine cases.
 Humans stay in the loop only for sensitive material, ambiguous contradictions, destructive actions,
 policy failures, and high-impact sharing.
 
-## 2. Why This Is The Next Large Block
+## 2. Why This Was A Large Block
 
-v0.10 made memory review less manual. v0.11 made trust and control-plane decisions enforceable.
-v0.12 should make the memory process self-maintaining enough that Graphiti deletion becomes a
-measured removal instead of a leap of faith.
+The original v0.12 packet made sense before v0.10 expanded. v0.10 made memory review less manual,
+installed trust-control and auth-session gates, and shipped the first Reflection OS slice. The
+remaining reflection work now feeds the post-v0.10 schedule rather than owning a separate immediate
+release label.
 
 This packet pulls three roadmap threads together:
 
@@ -176,7 +184,7 @@ Acceptance:
 
 ### Packet F: Reflection Quality Gate
 
-Make v0.12 shippable through proof, not vibes.
+Make the reflection packet shippable through proof, not vibes.
 
 Expected outputs:
 
@@ -290,9 +298,9 @@ The release fixture should replay a realistic coding session:
 7. recall excludes duplicate, stale, sensitive, and superseded material
 8. inspect shows the source chain and lifecycle reason for each automatic decision
 
-## 8. Verification Matrix
+## 8. Original Verification Matrix
 
-Minimum commands before v0.12 is release-candidate ready:
+Minimum commands from the original Reflection OS release-candidate plan:
 
 ```bash
 moon run reflection-quality-gate
@@ -314,9 +322,9 @@ moon run cli:lint cli:typecheck cli:test
 moon run web:lint web:typecheck web:test
 ```
 
-## 9. Release Exit Criteria
+## 9. Original Release Exit Criteria
 
-v0.12 can ship when:
+The original Reflection OS packet is complete when:
 
 - `reflection-quality-gate` passes with all required surfaces covered
 - automatic reflection has source IDs and audit receipts for every write
@@ -325,10 +333,10 @@ v0.12 can ship when:
 - existing trust, auth, overview, synthesis, and adapter gates still pass
 - docs explain the automatic path and the exception-only review path
 
-## 10. Recommendation
+## 10. Original Recommendation
 
-Make v0.12 the Reflection OS milestone.
+Make the original v0.12 packet the Reflection OS milestone.
 
-This is the right next ambitious block because it reduces the largest remaining human bottleneck
-while creating the evidence needed for v0.13 source/synthesis scale and eventual Graphiti deletion.
-It turns "memory review" from a queue into a maintenance loop with receipts.
+This was the right ambitious block before v0.10 expanded because it reduced the largest remaining
+human bottleneck while creating the evidence needed for source/synthesis scale and eventual Graphiti
+deletion. It turns "memory review" from a queue into a maintenance loop with receipts.
