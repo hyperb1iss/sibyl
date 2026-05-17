@@ -262,6 +262,7 @@ async def test_create_entity_sanitizes_raw_capture_scope_metadata() -> None:
     add_result = SimpleNamespace(success=True, id="decision_1", message="ok")
 
     with (
+        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
         patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)),
         patch("sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock()),
         patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
