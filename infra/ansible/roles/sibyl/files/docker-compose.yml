@@ -88,8 +88,11 @@ services:
       SIBYL_API_URL: http://backend:3334/api
       SIBYL_BACKEND_URL: http://backend:3334
       NODE_ENV: production
+      # Next.js standalone binds 0.0.0.0 (IPv4 only) by default; :: makes
+      # the server dual-stack so it answers on both ::1 and 127.0.0.1.
+      HOSTNAME: "::"
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3337/"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3337/"]
       interval: 10s
       timeout: 5s
       retries: 3
