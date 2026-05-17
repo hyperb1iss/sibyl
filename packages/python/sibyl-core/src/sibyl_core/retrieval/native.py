@@ -1513,7 +1513,9 @@ def _candidate_allowed(
     )
 
 
-def _candidate_scope_allowed(candidate: NativeRetrievalCandidate, plan: NativeRetrievalPlan) -> bool:
+def _candidate_scope_allowed(
+    candidate: NativeRetrievalCandidate, plan: NativeRetrievalPlan
+) -> bool:
     metadata = candidate.metadata if isinstance(candidate.metadata, Mapping) else {}
     raw_scope = metadata.get("memory_scope")
     if raw_scope is None:
@@ -1522,16 +1524,17 @@ def _candidate_scope_allowed(candidate: NativeRetrievalCandidate, plan: NativeRe
     if memory_scope is None:
         return False
     scope_key = _string_value(metadata.get("scope_key"))
-    if memory_scope is MemoryScope.PRIVATE and scope_key:
-        allowed_private_scope_keys = {scope.scope_key for scope in plan.scopes if scope.scope_key}
-        if scope_key not in allowed_private_scope_keys:
-            return False
+    plan_principal = plan.scopes[0].principal_id if plan.scopes else None
+    if memory_scope is MemoryScope.PRIVATE:
+        owner = _string_value(metadata.get("principal_id")) or scope_key
+        return bool(plan_principal) and owner == plan_principal
+    agent_id = next((scope.agent_id for scope in plan.scopes if scope.agent_id), None)
     decision = authorize_memory_read(
-        principal_id=plan.principal_id,
+        principal_id=plan_principal,
         memory_scope=memory_scope,
         scope_key=scope_key,
         project_id=plan.project,
-        agent_id=plan.agent_id,
+        agent_id=agent_id,
         accessible_projects=plan.accessible_projects,
     )
     return decision.allowed
