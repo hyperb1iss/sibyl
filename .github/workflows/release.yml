@@ -96,7 +96,7 @@ jobs:
           to: HEAD
           version-name: ${{ steps.version.outputs.version }}
           provider: anthropic
-          model: claude-sonnet-4-5-20250929
+          model: claude-opus-4-7
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: "◆ Commit version bump"

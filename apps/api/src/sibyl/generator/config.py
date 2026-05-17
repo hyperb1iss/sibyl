@@ -8,15 +8,15 @@ from typing import Any
 class ModelType(StrEnum):
     """Supported LLM models for content generation."""
 
-    SONNET = "sonnet"  # Claude Sonnet 4.5 - balanced quality/cost
-    OPUS = "opus"  # Claude Opus 4.5 - highest quality
+    SONNET = "sonnet"  # Claude Sonnet 4.6 - balanced quality/cost
+    OPUS = "opus"  # Claude Opus 4.7 - highest quality
 
     @property
     def model_id(self) -> str:
         """Get the full Anthropic model ID."""
         return {
-            ModelType.SONNET: "claude-sonnet-4-5-20250929",
-            ModelType.OPUS: "claude-opus-4-5-20251101",
+            ModelType.SONNET: "claude-sonnet-4-6",
+            ModelType.OPUS: "claude-opus-4-7",
         }[self]
 
 
