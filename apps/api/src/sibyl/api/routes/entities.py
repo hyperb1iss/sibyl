@@ -763,10 +763,24 @@ async def update_raw_capture_review_state(
     capture_id: UUID,
     update: RawCaptureReviewUpdate,
     org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
     session: Any = Depends(get_content_read_session_dependency),
 ) -> RawCaptureResponse:
     """Update review-state metadata for a raw capture."""
     try:
+        accessible_projects = await _accessible_project_ids_for_read(ctx)
+        existing = await content_runtime.get_raw_capture(
+            session,
+            organization_id=org.id,
+            capture_id=capture_id,
+        )
+        if not existing or not _raw_capture_visible_to_reader(
+            existing,
+            reader_user_id=getattr(ctx, "user_id", None),
+            accessible_projects=accessible_projects,
+        ):
+            raise HTTPException(status_code=404, detail=f"Raw capture not found: {capture_id}")
+
         capture = await content_runtime.update_raw_capture_review_state(
             session,
             organization_id=org.id,
