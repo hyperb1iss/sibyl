@@ -1430,6 +1430,7 @@ def _promotion_denied(
     scope_key: str | None,
     raw_source_ids: list[str],
     metadata: dict[str, Any] | None = None,
+    policy_decisions: Sequence[MemoryPolicyDecision] = (),
 ) -> NativeReflectionPromotionResult:
     payload = {"policy_reasons": [reason], "policy_allowed": False}
     if metadata:
@@ -1444,6 +1445,7 @@ def _promotion_denied(
         scope_key=scope_key,
         raw_source_ids=raw_source_ids,
         metadata=payload,
+        policy_decisions=tuple(policy_decisions),
     )
 
 

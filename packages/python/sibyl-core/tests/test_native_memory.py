@@ -462,9 +462,7 @@ async def test_apply_memory_correction_marks_hidden_and_preserves_history(
     assert lifecycle.action == "hide"
     assert findings[-1].kind == "correction"
     assert findings[-1].target_source_id == "source-1"
-    assert result.updated_memory.metadata["correction_history"][0] == {
-        "action": "mark_stale"
-    }
+    assert result.updated_memory.metadata["correction_history"][0] == {"action": "mark_stale"}
     assert result.updated_memory.metadata["correction_history"][1]["action"] == "hide"
     save_raw_memory.assert_awaited_once()
 
@@ -723,6 +721,7 @@ async def test_promote_review_candidate_denies_mixed_scope_without_target(
         organization_id="org-1",
         principal_id="user-1",
         promote_to_scope=None,
+        accessible_projects={"project_123"},
     )
 
     assert not result.success
@@ -753,6 +752,7 @@ async def test_promote_review_candidate_requires_broadest_mixed_scope_target(
         organization_id="org-1",
         principal_id="user-1",
         promote_to_scope="private",
+        accessible_projects={"project_123"},
     )
 
     assert not result.success
@@ -769,7 +769,7 @@ async def test_promote_review_candidate_denies_inaccessible_source_scope(
         scope_key="project_secret",
         principal_id="victim-user",
     )
-    source = _raw_review_candidate(id="source-1")
+    source = _raw_review_candidate(id="source-1", principal_id="attacker-user")
     monkeypatch.setattr(
         native_memory,
         "get_raw_memory",
