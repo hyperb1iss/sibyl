@@ -80,8 +80,8 @@ services:
       - backend
       - frontend
     ports:
-      - "80:80"
-      - "443:443"
+      - "127.0.0.1:80:80"
+      - "127.0.0.1:443:443"
     environment:
       SIBYL_DOMAIN: ${SIBYL_DOMAIN:?set SIBYL_DOMAIN in .env}
       CF_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
