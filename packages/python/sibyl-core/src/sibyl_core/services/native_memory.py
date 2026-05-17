@@ -279,6 +279,12 @@ async def persist_reflection_candidate_native(
 
     runtime = await get_native_graph_runtime(organization_id)
     source_ids = _candidate_source_ids(candidate, source_id)
+    superseded_ids = await _authorized_superseded_entity_ids(
+        runtime=runtime,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        candidate=candidate,
+    )
     entity = _entity_from_candidate(
         candidate,
         organization_id=organization_id,
@@ -292,23 +298,20 @@ async def persist_reflection_candidate_native(
     )
     entity = entity.model_copy(
         update={
-            "metadata": _promotion_lifecycle_metadata(
-                metadata=entity.metadata,
-                promoted_entity_id=entity.id,
-                source_ids=source_ids,
-                source_id=source_ids[0] if source_ids else None,
-                reason=candidate.reason,
-                policy_metadata=policy_metadata,
+            "metadata": _with_authorized_supersedes(
+                _promotion_lifecycle_metadata(
+                    metadata=entity.metadata,
+                    promoted_entity_id=entity.id,
+                    source_ids=source_ids,
+                    source_id=source_ids[0] if source_ids else None,
+                    reason=candidate.reason,
+                    policy_metadata=policy_metadata,
+                ),
+                superseded_ids,
             )
         }
     )
     created_id = await runtime.entity_manager.create_direct(entity)
-    superseded_ids = await _authorized_superseded_entity_ids(
-        runtime=runtime,
-        principal_id=principal_id,
-        accessible_projects=accessible_projects,
-        candidate=candidate,
-    )
     relationships = _relationships_for_promotion(
         created_id,
         project=project,
@@ -736,13 +739,7 @@ async def preview_memory_access(
     policy_reasons = [decision.reason for decision in decisions]
     denied_reasons = [decision.reason for decision in decisions if not decision.allowed]
     allowed = not denied_reasons and not lifecycle_hidden_source_ids
-    access_state = (
-        "allowed"
-        if allowed
-        else "partial"
-        if visible_source_ids
-        else "denied"
-    )
+    access_state = "allowed" if allowed else "partial" if visible_source_ids else "denied"
     metadata: dict[str, Any] = {
         "access_state": access_state,
         "denied_memory_space_ids": [space_id for space_id in denied_space_ids if space_id],
@@ -764,9 +761,7 @@ async def preview_memory_access(
         target_principal_type=normalized_target_type,
         target_principal_id=target_principal_id,
         memory_space_ids=[
-            str(_space_field(space, "id"))
-            for space in memory_spaces
-            if _space_field(space, "id")
+            str(_space_field(space, "id")) for space in memory_spaces if _space_field(space, "id")
         ],
         visible_source_ids=visible_source_ids,
         denied_source_ids=denied_source_ids,
@@ -1114,9 +1109,7 @@ def _correction_metadata(
             lifecycle_state=lifecycle.state,
             source_ids=[memory.id],
             related_source_ids=[
-                item
-                for item in (replacement_source_id, duplicate_of_source_id)
-                if item is not None
+                item for item in (replacement_source_id, duplicate_of_source_id) if item is not None
             ],
             policy_reasons=_metadata_str_values(preview.metadata or {}, "policy_reasons"),
             reversible=preview.reversible,
@@ -1596,14 +1589,27 @@ def _candidate_source_ids(
     )
 
 
+_SUPERSEDES_METADATA_KEYS = (
+    "supersedes",
+    "supersedes_ids",
+    "superseded_ids",
+    "supersedes_entity_ids",
+)
+
+
 def _superseded_entity_ids(metadata: Mapping[str, object]) -> list[str]:
-    return _metadata_str_values(
-        metadata,
-        "supersedes",
-        "supersedes_ids",
-        "superseded_ids",
-        "supersedes_entity_ids",
-    )
+    return _metadata_str_values(metadata, *_SUPERSEDES_METADATA_KEYS)
+
+
+def _with_authorized_supersedes(
+    metadata: Mapping[str, object], authorized_ids: Sequence[str]
+) -> dict[str, object]:
+    """Replace any supersedes id list in metadata with the authorized targets."""
+    sanitized = dict(metadata)
+    for key in _SUPERSEDES_METADATA_KEYS:
+        if key in sanitized:
+            sanitized[key] = list(authorized_ids)
+    return sanitized
 
 
 async def _authorized_superseded_entity_ids(
@@ -1618,6 +1624,8 @@ async def _authorized_superseded_entity_ids(
         try:
             target_entity = await runtime.entity_manager.get(entity_id)
         except Exception:
+            continue
+        if target_entity is None:
             continue
         metadata = target_entity.metadata if isinstance(target_entity.metadata, Mapping) else {}
         target_scope = _resolve_memory_scope(
