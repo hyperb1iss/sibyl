@@ -868,21 +868,6 @@ class EntityManager:
             ]
         )
 
-        if entity_type == EntityType.EPISODE:
-            return await self._surreal_list_episode_entities_direct(
-                limit=limit,
-                offset=offset,
-                project_id=project_id,
-                epic_id=epic_id,
-                no_epic=no_epic,
-                status_values=status_values,
-                priority_values=priority_values,
-                complexity_values=complexity_values,
-                feature=feature,
-                tags=tags,
-                include_archived=include_archived,
-            )
-
         while len(entities) < target_count:
             records = await self._surreal_select_entity_records(
                 entity_type=entity_type,
