@@ -1019,7 +1019,8 @@ def _correction_history(
     for event in audit_events:
         if not (
             event.action.startswith("memory.correction")
-            or event.action in {
+            or event.action
+            in {
                 "memory.hide",
                 "memory.redact",
                 "memory.restore",
@@ -2190,13 +2191,10 @@ async def drain_reflection_review(
             http_request=http_request,
         )
         source_accessible_projects = await list_accessible_project_graph_ids(ctx)
-        readable_projects = {
-            str(project_id) for project_id in source_accessible_projects or set()
-        }
+        readable_projects = {str(project_id) for project_id in source_accessible_projects or set()}
         results: list[ReflectionReviewDrainItem] = []
         for candidate in candidates:
             policy_context = MemoryPolicyContext(
-                action=MemoryPolicyAction.READ,
                 actor_user_id=ctx.user_id,
                 organization_id=ctx.organization_id,
                 organization_role=ctx.org_role,

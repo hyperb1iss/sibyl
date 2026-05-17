@@ -459,9 +459,7 @@ async def test_remember_raw_uses_shared_policy_for_project_scope_write() -> None
 @pytest.mark.asyncio
 async def test_remember_raw_denies_disallowed_api_key_memory_space() -> None:
     ctx = _ctx()
-    ctx.api_key_memory_scope_keys = [
-        api_key_memory_scope_key("project", "project_allowed")
-    ]
+    ctx.api_key_memory_scope_keys = [api_key_memory_scope_key("project", "project_allowed")]
     with (
         patch(
             "sibyl.api.routes.memory.list_accessible_project_graph_ids",
@@ -2028,7 +2026,7 @@ async def test_drain_reflection_review_dry_run_summarizes_pending_candidates() -
         review_state="pending",
         limit=2,
     )
-    access.assert_awaited_once()
+    access.assert_awaited()
     promote.assert_not_awaited()
     assert response.scanned_count == 2
     assert response.auto_promote_count == 1
@@ -2038,8 +2036,6 @@ async def test_drain_reflection_review_dry_run_summarizes_pending_candidates() -
     assert response.results[0].outcome == "auto_promote"
     assert response.results[1].candidate_id == "candidate-exception"
     assert response.results[1].reason == "policy_denied"
-
-
 
 
 @pytest.mark.asyncio
@@ -2061,6 +2057,10 @@ async def test_drain_reflection_review_skips_inaccessible_candidate_scope() -> N
         ),
         patch(
             "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"open-project"}),
+        ),
+        patch(
+            "sibyl.api.routes.memory._accessible_projects_for_promotion",
             AsyncMock(return_value={"open-project"}),
         ),
         patch(
@@ -2086,6 +2086,7 @@ async def test_drain_reflection_review_skips_inaccessible_candidate_scope() -> N
     assert response.results[0].candidate_id == "candidate-secret"
     assert response.results[0].reason == "policy_denied"
     assert response.results[0].policy_reasons == ["unverified_membership"]
+
 
 @pytest.mark.asyncio
 async def test_drain_reflection_review_archives_terminal_exceptions() -> None:
