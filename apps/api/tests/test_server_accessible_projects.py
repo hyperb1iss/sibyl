@@ -613,6 +613,38 @@ async def test_add_mcp_entity_requires_project_for_restricted_credentials() -> N
 
 
 @pytest.mark.asyncio
+async def test_add_mcp_entity_clamps_conflict_threshold_floor_for_mcp_callers() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    add = AsyncMock(return_value=AddResponse(success=True, id="task_123", message="ok"))
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl_core.tools.core.add", add),
+    ):
+        await _add_mcp_entity(
+            title="Probe threshold floor",
+            content="Threshold should not be weakenable by remote callers.",
+            entity_type="task",
+            category=None,
+            languages=None,
+            tags=None,
+            related_to=None,
+            metadata=None,
+            project="project-a",
+            priority=None,
+            assignees=None,
+            due_date=None,
+            technologies=None,
+            depends_on=None,
+            repository_url=None,
+            conflict_threshold=-1.0,
+        )
+
+    assert add.await_args.kwargs["conflict_threshold"] == 0.85
+
+
+@pytest.mark.asyncio
 async def test_add_mcp_entity_denies_missing_actor_with_policy_reason() -> None:
     ctx = McpContext(
         org_id=str(uuid4()),
