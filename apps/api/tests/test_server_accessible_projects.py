@@ -615,7 +615,7 @@ async def test_add_mcp_entity_requires_project_for_restricted_credentials() -> N
 @pytest.mark.asyncio
 async def test_add_mcp_entity_clamps_conflict_threshold_floor_for_mcp_callers() -> None:
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
-    add = AsyncMock(return_value=AddResponse(success=True, id="task_123", message="ok"))
+    add = AsyncMock(return_value={"success": True, "id": "task_123"})
 
     with (
         patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),

@@ -801,7 +801,6 @@ async def _add_mcp_entity(
     conflict_threshold: float = 0.85,
 ) -> dict[str, Any]:
     from sibyl_core.tools.core import add
-    from sibyl_core.tools.conflicts import CONFLICT_THRESHOLD
 
     ctx = await _require_mcp_context()
     accessible_projects = await _resolve_mcp_project_scope(
@@ -842,9 +841,10 @@ async def _add_mcp_entity(
         repository_url=repository_url,
         check_conflicts=check_conflicts,
         skip_conflicts=skip_conflicts,
-        # Remote callers can request stricter detection, but cannot weaken
-        # the baseline threshold for organization-wide conflict probes.
-        conflict_threshold=max(conflict_threshold, CONFLICT_THRESHOLD),
+        # Remote MCP callers may relax conflict detection but must not drop
+        # below the baseline: a near-zero threshold turns every add into a
+        # low-similarity probe of organization entities.
+        conflict_threshold=max(conflict_threshold, 0.85),
     )
     payload = _to_dict(result)
     payload["policy_reason"] = write_decision.reason
