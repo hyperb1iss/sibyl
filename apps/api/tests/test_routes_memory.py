@@ -422,6 +422,10 @@ async def test_remember_raw_uses_shared_policy_for_project_scope_write() -> None
     ctx = _ctx()
     with (
         patch(
+            "sibyl.api.routes.memory.verify_entity_project_access",
+            AsyncMock(),
+        ) as verify_access,
+        patch(
             "sibyl.api.routes.memory.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_123"}),
         ) as accessible_projects,
@@ -441,6 +445,13 @@ async def test_remember_raw_uses_shared_policy_for_project_scope_write() -> None
             ctx=ctx,
         )
 
+    verify_access.assert_awaited_once_with(
+        None,
+        ctx,
+        "project_123",
+        required_role=ProjectRole.CONTRIBUTOR,
+        require_existing_project=True,
+    )
     accessible_projects.assert_awaited_once_with(ctx)
     route_log.info.assert_any_call(
         "memory_policy_decision",
@@ -539,6 +550,31 @@ async def test_remember_raw_denies_project_scope_without_policy_membership() -> 
         scope_key="project_123",
         surface="raw_remember",
     )
+    remember.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_remember_raw_denies_project_scope_without_contributor_role() -> None:
+    with (
+        patch(
+            "sibyl.api.routes.memory.verify_entity_project_access",
+            AsyncMock(side_effect=HTTPException(status_code=403, detail="project_access_denied")),
+        ),
+        patch("sibyl.api.routes.memory.remember_raw_memory", AsyncMock()) as remember,
+        pytest.raises(HTTPException) as exc,
+    ):
+        await remember_raw(
+            RawMemoryRememberRequest(
+                raw_content="project note",
+                memory_scope="project",
+                scope_key="project_123",
+            ),
+            org=_org(),
+            ctx=_ctx(),
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "project_access_denied"
     remember.assert_not_awaited()
 
 

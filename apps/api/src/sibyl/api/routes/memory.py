@@ -205,6 +205,23 @@ async def _project_accessible_for_policy(
     return {str(project_id) for project_id in accessible_projects or set()}
 
 
+
+async def _authorize_project_scope_write(
+    *,
+    ctx: AuthContext,
+    memory_scope: str,
+    scope_key: str | None,
+) -> None:
+    if memory_scope != "project" or not scope_key:
+        return
+    await verify_entity_project_access(
+        None,
+        ctx,
+        scope_key,
+        required_role=ProjectRole.CONTRIBUTOR,
+        require_existing_project=True,
+    )
+
 def _api_key_memory_scope_allowed(
     ctx: AuthContext,
     *,
@@ -1493,6 +1510,11 @@ async def remember_raw(
             scope_key=request.scope_key,
             policy_action="write",
             request=http_request,
+        )
+        await _authorize_project_scope_write(
+            ctx=ctx,
+            memory_scope=request.memory_scope,
+            scope_key=request.scope_key,
         )
         write_decision = await _authorize_memory_policy(
             ctx=ctx,
