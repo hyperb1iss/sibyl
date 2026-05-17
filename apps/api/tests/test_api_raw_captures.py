@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -36,8 +36,9 @@ def _capture(
     surface: str,
     entity_type: str = "episode",
     review_state: str | None = None,
+    owner_id: UUID | None = None,
 ) -> RawCaptureRecord:
-    owner_id = uuid4()
+    owner_id = owner_id or uuid4()
     metadata = {
         "capture_mode": "quick",
         "capture_surface": surface,
@@ -66,9 +67,10 @@ def _capture(
 async def test_list_raw_captures_returns_paginated_summaries() -> None:
     org = _org()
     session = MagicMock()
+    reader_id = uuid4()
     captures = [
-        _capture(org_id=org.id, title="Newest", surface="dashboard"),
-        _capture(org_id=org.id, title="Older", surface="cli"),
+        _capture(org_id=org.id, title="Newest", surface="dashboard", owner_id=reader_id),
+        _capture(org_id=org.id, title="Older", surface="cli", owner_id=reader_id),
     ]
 
     with patch(
@@ -77,7 +79,7 @@ async def test_list_raw_captures_returns_paginated_summaries() -> None:
     ) as list_captures:
         response = await list_raw_captures(
             org=org,
-            ctx=_ctx(user_id=str(captures[0].created_by_user_id)),
+            ctx=_ctx(user_id=str(reader_id)),
             session=session,
             entity_type=None,
             capture_surface=None,
@@ -170,6 +172,29 @@ async def test_get_raw_capture_raises_not_found_for_other_org() -> None:
         await get_raw_capture(
             uuid4(),
             org=_org(),
+            ctx=_ctx(user_id=str(uuid4())),
+            session=session,
+        )
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_raw_capture_hides_other_users_private_capture() -> None:
+    org = _org()
+    capture = _capture(org_id=org.id, title="Someone else's note", surface="dashboard")
+    session = MagicMock()
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.content_runtime.get_raw_capture",
+            AsyncMock(return_value=capture),
+        ),
+        pytest.raises(HTTPException) as exc,
+    ):
+        await get_raw_capture(
+            capture.id,
+            org=org,
             ctx=_ctx(user_id=str(uuid4())),
             session=session,
         )
