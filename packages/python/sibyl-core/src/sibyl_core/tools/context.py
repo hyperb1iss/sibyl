@@ -428,7 +428,15 @@ async def _compile_raw_memory_section(
         ("project", project, None, None),
     ]
     if agent_id:
-        recall_specs.append(("private", None, agent_id, project))
+        if project:
+            recall_specs.append(("private", None, agent_id, project))
+        elif accessible_projects:
+            recall_specs.extend(
+                ("private", None, agent_id, scoped_project)
+                for scoped_project in sorted(accessible_projects)
+            )
+        else:
+            recall_specs.append(("private", None, agent_id, None))
     for memory_scope, scope_key, spec_agent_id, spec_project_id in recall_specs:
         if allowed_memory_scope_keys is not None:
             effective_scope_key = principal_id if memory_scope == "private" else scope_key
