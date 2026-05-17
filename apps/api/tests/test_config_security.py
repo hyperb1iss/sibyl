@@ -93,15 +93,14 @@ class TestEnvironmentValidation:
 class TestProductionPasswordSecurity:
     """Tests for production password validation."""
 
-    def test_default_postgres_password_allowed_after_sidecar_removal(self) -> None:
-        settings = Settings(
-            environment="production",
-            store="legacy",
-            auth_store="surreal",
-            postgres_password="sibyl_dev",
-        )
-
-        assert settings.requires_relational_support is False
+    def test_legacy_runtime_rejects_memory_surreal_in_production(self) -> None:
+        with pytest.raises(ValueError, match="In-memory SurrealDB is forbidden in production"):
+            Settings(
+                environment="production",
+                store="legacy",
+                auth_store="surreal",
+                postgres_password="sibyl_dev",
+            )
 
     def test_legacy_password_defaults_do_not_block_fully_surreal_production(self) -> None:
         settings = Settings(
