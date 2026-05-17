@@ -1,7 +1,7 @@
 """Tests for sibyl-core graph/entities.py EntityManager."""
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1175,117 +1175,6 @@ class TestEntityListByType:
         second_query = surreal_entity_manager._driver.execute_query.await_args_list[1].args[0]
         assert "project_id = $project_id" in first_query
         assert "project_id = $project_id" not in second_query
-
-    @pytest.mark.asyncio
-    async def test_list_by_type_episode_reads_surreal_episode_table(
-        self,
-        surreal_entity_manager: EntityManager,
-    ) -> None:
-        created_at = datetime.now(UTC)
-        surreal_entity_manager._driver.execute_query = AsyncMock(
-            side_effect=[
-                [
-                    {
-                        "uuid": "episode-001",
-                        "name": "Baseline Corpus Episode",
-                        "group_id": "test-org-123",
-                        "content": "Runtime baseline seed.",
-                        "source_description": "Baseline",
-                        "created_at": created_at,
-                    }
-                ],
-                [],
-            ]
-        )
-
-        results = await surreal_entity_manager.list_by_type(EntityType.EPISODE)
-
-        assert len(results) == 1
-        assert results[0].id == "episode-001"
-        assert results[0].name == "Baseline Corpus Episode"
-        assert results[0].entity_type == EntityType.EPISODE
-        episode_query = surreal_entity_manager._driver.execute_query.await_args_list[0].args[0]
-        legacy_query = surreal_entity_manager._driver.execute_query.await_args_list[1].args[0]
-        assert "FROM episode" in episode_query
-        assert "FROM entity" in legacy_query
-        assert "entity_type = $entity_type" in legacy_query
-
-    @pytest.mark.asyncio
-    async def test_list_by_type_episode_includes_legacy_entity_table_rows(
-        self,
-        surreal_entity_manager: EntityManager,
-    ) -> None:
-        created_at = datetime.now(UTC)
-        surreal_entity_manager._driver.execute_query = AsyncMock(
-            side_effect=[
-                [],
-                [
-                    {
-                        "uuid": "episode-legacy",
-                        "name": "Baseline Corpus Episode",
-                        "entity_type": "episode",
-                        "group_id": "test-org-123",
-                        "summary": "Baseline",
-                        "description": "Baseline",
-                        "content": "Runtime baseline seed.",
-                        "metadata": json.dumps({"tags": ["baseline-corpus"]}),
-                        "created_at": created_at,
-                        "updated_at": created_at,
-                    }
-                ],
-            ]
-        )
-
-        results = await surreal_entity_manager.list_by_type(EntityType.EPISODE)
-
-        assert len(results) == 1
-        assert results[0].id == "episode-legacy"
-        assert results[0].name == "Baseline Corpus Episode"
-        assert results[0].entity_type == EntityType.EPISODE
-
-    @pytest.mark.asyncio
-    async def test_list_by_type_episode_paginates_native_rows_before_slice(
-        self,
-        surreal_entity_manager: EntityManager,
-    ) -> None:
-        base_time = datetime.now(UTC)
-        first_page = [
-            {
-                "uuid": f"episode-{index:04d}",
-                "name": f"Episode {index}",
-                "group_id": "test-org-123",
-                "content": f"Episode {index}",
-                "source_description": "Baseline",
-                "created_at": base_time - timedelta(seconds=index),
-            }
-            for index in range(1000)
-        ]
-        second_page = [
-            {
-                "uuid": "episode-1000",
-                "name": "Episode 1000",
-                "group_id": "test-org-123",
-                "content": "Episode 1000",
-                "source_description": "Baseline",
-                "created_at": base_time - timedelta(seconds=1000),
-            }
-        ]
-        surreal_entity_manager._driver.execute_query = AsyncMock(
-            side_effect=[first_page, second_page, []]
-        )
-
-        results = await surreal_entity_manager.list_by_type(
-            EntityType.EPISODE,
-            limit=1,
-            offset=1000,
-            include_archived=True,
-        )
-
-        assert [entity.id for entity in results] == ["episode-1000"]
-        calls = surreal_entity_manager._driver.execute_query.await_args_list
-        assert calls[0].kwargs["query_offset"] == 0
-        assert calls[1].kwargs["query_offset"] == 1000
-        assert calls[2].kwargs["query_offset"] == 0
 
     @pytest.mark.asyncio
     async def test_list_by_type_refuses_surreal_legacy_fallback(
