@@ -576,6 +576,7 @@ class EntityManager:
                        name,
                        group_id,
                        project_id,
+                       metadata,
                        content,
                        source_description,
                        created_at,
@@ -605,6 +606,7 @@ class EntityManager:
                    name,
                    group_id,
                    project_id,
+                   metadata,
                    content,
                    source_description,
                    created_at,
@@ -669,6 +671,7 @@ class EntityManager:
                    name,
                    group_id,
                    project_id,
+                   metadata,
                    content,
                    source_description,
                    created_at,
@@ -1097,6 +1100,16 @@ class EntityManager:
                         created_uuid=created_uuid,
                         desired_id=desired_id,
                     )
+                metadata = self._entity_to_metadata(entity)
+                await self._driver.execute_query(
+                    """
+                    UPDATE episode
+                    SET metadata = $metadata
+                    WHERE uuid = $desired_id;
+                    """,
+                    desired_id=desired_id,
+                    metadata=metadata,
+                )
             else:
                 # Force deterministic UUID when caller provides one
                 await self._driver.execute_query(
@@ -3112,6 +3125,13 @@ class EntityManager:
                 entity_type = EntityType(prefix.strip().lower())
                 name = suffix.strip()
 
+        metadata = node_data.get("metadata", {})
+        if isinstance(metadata, str):
+            with contextlib.suppress(json.JSONDecodeError):
+                metadata = json.loads(metadata)
+        if not isinstance(metadata, dict):
+            metadata = {}
+
         entity_kwargs: dict[str, Any] = {
             "id": node_data.get("uuid") or "",
             "name": name,
@@ -3120,9 +3140,9 @@ class EntityManager:
             "content": node_data.get("content") or "",
             "organization_id": node_data.get("group_id"),
             "metadata": (
-                {"project_id": node_data.get("project_id")}
+                {**metadata, "project_id": node_data["project_id"]}
                 if node_data.get("project_id") is not None
-                else {}
+                else metadata
             ),
         }
         if created_at := self._parse_datetime(node_data.get("created_at")):

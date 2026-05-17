@@ -776,6 +776,24 @@ class TestTypedHydration:
         assert result.priority == TaskPriority.HIGH
         assert result.project_id == "project-typed-001"
 
+    def test_record_to_episode_entity_preserves_metadata_dict(
+        self,
+        entity_manager: EntityManager,
+    ) -> None:
+        entity = entity_manager._record_to_episode_entity(
+            {
+                "uuid": "episode-typed-001",
+                "name": "episode:Scoped episode",
+                "group_id": "test-org-123",
+                "metadata": {"project_id": "project-secret", "category": "notes"},
+                "content": "secret content",
+                "source_description": "MCP Entity: episode",
+            }
+        )
+
+        assert entity.metadata.get("project_id") == "project-secret"
+        assert entity.metadata.get("category") == "notes"
+
 
 # =============================================================================
 # Entity Update Tests
