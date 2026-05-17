@@ -189,8 +189,11 @@ async def run_backup(  # noqa: PLR0915
     backup_id = backup_id or generate_backup_id(organization_id)
     job_id = _backup_job_id(backup_id)
     include_database_dump = _effective_include_database_dump(include_database_dump)
-    include_auth_snapshot = _include_surreal_auth_snapshot()
-    include_content_snapshot = _include_surreal_content_snapshot()
+    include_auth_snapshot = False
+    include_content_snapshot = False
+    if not organization_id:
+        include_auth_snapshot = _include_surreal_auth_snapshot()
+        include_content_snapshot = _include_surreal_content_snapshot()
 
     # Update DB to mark as in progress
     await _update_backup_db(backup_id, status="in_progress", started_at=started_at)

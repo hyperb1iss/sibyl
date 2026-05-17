@@ -179,7 +179,7 @@ async def test_run_scheduled_backups_removes_orphan_record_when_queue_fails() ->
 
 
 @pytest.mark.asyncio
-async def test_run_backup_in_fully_surreal_mode_includes_runtime_snapshots(
+async def test_run_backup_in_fully_surreal_mode_skips_runtime_snapshots_for_org_backups(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
@@ -234,8 +234,8 @@ async def test_run_backup_in_fully_surreal_mode_includes_runtime_snapshots(
     assert result["database_dump_size_bytes"] == 0
     assert "pg_size_bytes" not in result
     assert result["job_id"] == "backup:backup_fixed"
-    export_auth.assert_awaited_once_with()
-    export_content.assert_awaited_once_with()
+    export_auth.assert_not_awaited()
+    export_content.assert_not_awaited()
     create_graph_backup.assert_awaited_once_with(organization_id=org_id)
     assert update_backup_db.await_count == 2
     broadcast.assert_any_await(
@@ -257,7 +257,9 @@ async def test_run_backup_in_fully_surreal_mode_includes_runtime_snapshots(
         names = set(archive.getnames())
         metadata = json.load(archive.extractfile("metadata.json"))
 
-    assert {"metadata.json", "auth.json", "content.json", "graph.json"} <= names
+    assert {"metadata.json", "graph.json"} <= names
+    assert "auth.json" not in names
+    assert "content.json" not in names
     assert "postgres.sql" not in names
     assert metadata["database_dump_tables"] == 0
     assert "pg_entities" not in metadata
