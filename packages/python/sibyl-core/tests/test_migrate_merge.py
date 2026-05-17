@@ -432,8 +432,18 @@ def test_merge_archives_does_not_coalesce_users_by_email() -> None:
         {"uuid": "user-b", "email": "stef@hyperbliss.tech", "name": "Stef B", "is_admin": True},
     ]
     assert auth["tables"]["organization_members"] == [
-        {"uuid": "member-a", "organization_id": CANONICAL_ORG_ID, "user_id": "user-a", "role": "member"},
-        {"uuid": "member-b", "organization_id": CANONICAL_ORG_ID, "user_id": "user-b", "role": "owner"},
+        {
+            "uuid": "member-a",
+            "organization_id": CANONICAL_ORG_ID,
+            "user_id": "user-a",
+            "role": "member",
+        },
+        {
+            "uuid": "member-b",
+            "organization_id": CANONICAL_ORG_ID,
+            "user_id": "user-b",
+            "role": "owner",
+        },
     ]
     assert auth["tables"]["memory_spaces"] == [
         {
@@ -442,7 +452,14 @@ def test_merge_archives_does_not_coalesce_users_by_email() -> None:
             "memory_scope": "private",
             "scope_key": "user-a",
             "created_by_user_id": "user-a",
-        }
+        },
+        {
+            "uuid": "space-b",
+            "organization_id": CANONICAL_ORG_ID,
+            "memory_scope": "private",
+            "scope_key": "user-b",
+            "created_by_user_id": "user-b",
+        },
     ]
     assert "user_sessions" not in auth["tables"]
 
