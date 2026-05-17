@@ -575,6 +575,7 @@ class EntityManager:
                 SELECT uuid,
                        name,
                        group_id,
+                       project_id,
                        content,
                        source_description,
                        created_at,
@@ -603,6 +604,7 @@ class EntityManager:
             SELECT uuid,
                    name,
                    group_id,
+                   project_id,
                    content,
                    source_description,
                    created_at,
@@ -666,6 +668,7 @@ class EntityManager:
             SELECT uuid,
                    name,
                    group_id,
+                   project_id,
                    content,
                    source_description,
                    created_at,
@@ -1148,6 +1151,8 @@ class EntityManager:
             raise RuntimeError(msg)
 
         episode_id = entity.id or str(uuid4())
+        metadata = entity.metadata or {}
+        project_id = metadata.get("project_id")
         node = EpisodicNode(
             uuid=episode_id,
             name=f"{entity.entity_type.value}:{entity.name}",
@@ -1160,6 +1165,17 @@ class EntityManager:
             entity_edges=[],
         )
         await episode_ops.save(self._driver, node)
+        if project_id is not None:
+            await self._driver.execute_query(
+                """
+                UPDATE episode
+                SET project_id = $project_id
+                WHERE uuid = $episode_id AND group_id = $group_id;
+                """,
+                project_id=str(project_id),
+                episode_id=episode_id,
+                group_id=self._group_id,
+            )
         return episode_id
 
     async def create(self, entity: Entity) -> str:
@@ -3245,7 +3261,11 @@ class EntityManager:
             "description": node_data.get("source_description") or "",
             "content": node_data.get("content") or "",
             "organization_id": node_data.get("group_id"),
-            "metadata": {},
+            "metadata": (
+                {"project_id": node_data.get("project_id")}
+                if node_data.get("project_id") is not None
+                else {}
+            ),
         }
         if created_at := self._parse_datetime(node_data.get("created_at")):
             entity_kwargs["created_at"] = created_at
