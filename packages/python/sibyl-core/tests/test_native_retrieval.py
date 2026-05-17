@@ -112,6 +112,64 @@ def test_build_native_context_retrieval_plan_denies_unverified_project_scope() -
     )
 
 
+def test_candidate_allowed_denies_private_scope_key_mismatch() -> None:
+    plan = build_native_context_retrieval_plan(
+        query="private memory",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["episode", "note"]},
+        principal_id="bob",
+        project=None,
+        accessible_projects=None,
+        agent_id=None,
+    )
+
+    assert not native_module._candidate_allowed(
+        NativeRetrievalCandidate(
+            id="entity-1",
+            type="note",
+            name="Alice private reflection",
+            content="secret",
+            score=1.0,
+            source=None,
+            metadata={"memory_scope": "private", "scope_key": "alice"},
+            project_id=None,
+        ),
+        plan=plan,
+        requested_types=set(),
+        facet=None,
+    )
+
+
+def test_candidate_allowed_allows_private_scope_key_match() -> None:
+    plan = build_native_context_retrieval_plan(
+        query="private memory",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["episode", "note"]},
+        principal_id="bob",
+        project=None,
+        accessible_projects=None,
+        agent_id=None,
+    )
+
+    assert native_module._candidate_allowed(
+        NativeRetrievalCandidate(
+            id="entity-2",
+            type="note",
+            name="Bob private reflection",
+            content="mine",
+            score=1.0,
+            source=None,
+            metadata={"memory_scope": "private", "scope_key": "bob"},
+            project_id=None,
+        ),
+        plan=plan,
+        requested_types=set(),
+        facet=None,
+    )
+
+
 def test_build_native_context_retrieval_plan_requires_principal() -> None:
     plan = build_native_context_retrieval_plan(
         query="no principal",
