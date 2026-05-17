@@ -248,9 +248,11 @@ class TestEntityCreate:
             name="Surreal lesson",
             description="Captured from a session",
             content="Graphiti should write the raw episode.",
+            metadata={"project_id": "project-123"},
         )
         episode_ops = surreal_entity_manager._driver.episode_node_ops
         episode_ops.save = AsyncMock()
+        surreal_entity_manager._driver.execute_query = AsyncMock()
 
         with patch.object(
             surreal_entity_manager,
@@ -268,6 +270,7 @@ class TestEntityCreate:
         assert saved_episode.name == "episode:Surreal lesson"
         assert saved_episode.content == "Graphiti should write the raw episode."
         assert saved_episode.source.value == "text"
+        surreal_entity_manager._driver.execute_query.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_create_refuses_surreal_legacy_fallback(

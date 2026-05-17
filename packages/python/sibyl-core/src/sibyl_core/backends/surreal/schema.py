@@ -109,6 +109,7 @@ DEFINE FIELD IF NOT EXISTS group_id ON episode TYPE string;
 DEFINE FIELD IF NOT EXISTS created_at ON episode TYPE datetime DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS valid_at ON episode TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS entity_edges ON episode TYPE array<string> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS project_id ON episode TYPE option<string>;
 
 DEFINE INDEX IF NOT EXISTS idx_episode_uuid ON episode FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_episode_group ON episode FIELDS group_id;
