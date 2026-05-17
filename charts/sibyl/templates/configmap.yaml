@@ -1,5 +1,11 @@
 apiVersion: v1
 kind: ConfigMap
+{{- if hasKey .Values "store" }}
+{{- fail "Deprecated value 'store' is no longer supported. Remove it and complete legacy-to-Surreal migration before upgrading." }}
+{{- end }}
+{{- if hasKey .Values "authStore" }}
+{{- fail "Deprecated value 'authStore' is no longer supported. Remove it and complete legacy auth migration before upgrading." }}
+{{- end }}
 metadata:
   name: {{ include "sibyl.fullname" . }}-config
   labels:
