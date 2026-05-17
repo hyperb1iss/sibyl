@@ -176,17 +176,20 @@ async def reflect_memory(
                 source_metadata["domain"] = domain
             if project:
                 source_metadata["project_id"] = project
-            source = await add_fn(
-                title=source_title,
-                content=content,
-                entity_type="session",
-                category=domain,
-                tags=_tags_for("session", domain),
-                related_to=related_to,
-                metadata=source_metadata,
-                sync=True,
-                check_conflicts=False,
-            )
+        source = await add_fn(
+            title=source_title,
+            content=content,
+            entity_type="session",
+            category=domain,
+            tags=_tags_for("session", domain),
+            related_to=related_to,
+            metadata=source_metadata,
+            # Keep reflection source checkpoints as episodic memories so they are
+            # tenant-scoped writes and avoid deterministic direct-entity UUID
+            # collisions across organizations/projects.
+            sync=False,
+            check_conflicts=False,
+        )
         if source.success:
             source_id = source.id
 
