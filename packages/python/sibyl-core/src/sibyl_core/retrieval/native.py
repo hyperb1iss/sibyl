@@ -945,7 +945,9 @@ def _edge_select(extra: str | None = None) -> str:
         SELECT uuid, name, fact, fact_embedding, group_id, episodes, attributes,
                created_at, expired_at, valid_at, invalid_at,
                in.uuid AS source_node_uuid,
-               out.uuid AS target_node_uuid{extra_select}
+               out.uuid AS target_node_uuid,
+               in.project_id AS source_node_project_id,
+               out.project_id AS target_node_project_id{extra_select}
         FROM relates_to
     """
 
@@ -1406,6 +1408,12 @@ def _candidate_from_edge(
 ) -> NativeRetrievalCandidate:
     attributes = _attributes(edge)
     source = _string_value(attributes.get("source_id") or getattr(edge, "uuid", None))
+    source_project_id = _string_value(
+        getattr(edge, "source_node_project_id", None) or attributes.get("source_node_project_id")
+    )
+    target_project_id = _string_value(
+        getattr(edge, "target_node_project_id", None) or attributes.get("target_node_project_id")
+    )
     return NativeRetrievalCandidate(
         id=str(getattr(edge, "uuid", "")),
         type="claim",
@@ -1420,6 +1428,8 @@ def _candidate_from_edge(
             "source_id": source,
             "source_node_uuid": _string_value(getattr(edge, "source_node_uuid", None)),
             "target_node_uuid": _string_value(getattr(edge, "target_node_uuid", None)),
+            "source_node_project_id": source_project_id,
+            "target_node_project_id": target_project_id,
             "retrieval_signals": [signal.value],
         },
         project_id=_string_value(attributes.get("project_id")),
@@ -1506,6 +1516,14 @@ def _candidate_allowed(
         return False
     if plan.project and candidate.project_id and candidate.project_id != plan.project:
         return False
+    if candidate.type == "claim" and plan.accessible_projects is not None:
+        endpoint_project_ids = {
+            _string_value(candidate.metadata.get("source_node_project_id")),
+            _string_value(candidate.metadata.get("target_node_project_id")),
+        }
+        endpoint_project_ids.discard(None)
+        if endpoint_project_ids and not endpoint_project_ids.issubset(plan.accessible_projects):
+            return False
     return not (
         plan.accessible_projects is not None
         and candidate.project_id is not None

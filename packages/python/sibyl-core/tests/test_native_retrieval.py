@@ -190,6 +190,70 @@ def test_build_native_context_retrieval_plan_requires_principal() -> None:
     ]
 
 
+def test_candidate_allowed_rejects_cross_project_claim_edge() -> None:
+    plan = build_native_context_retrieval_plan(
+        query="edge permissions",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["claim"]},
+        principal_id="user-123",
+        project="project_A",
+        accessible_projects={"project_A"},
+    )
+    candidate = NativeRetrievalCandidate(
+        id="edge-1",
+        type="claim",
+        name="Cross-project relationship",
+        content="Sensitive relationship",
+        score=1.0,
+        source=None,
+        metadata={
+            "source_node_project_id": "project_A",
+            "target_node_project_id": "project_B",
+        },
+        project_id=None,
+    )
+
+    assert not native_module._candidate_allowed(
+        candidate,
+        plan=plan,
+        requested_types=set(),
+        facet=None,
+    )
+
+
+def test_candidate_allowed_accepts_claim_edge_when_both_endpoints_accessible() -> None:
+    plan = build_native_context_retrieval_plan(
+        query="edge permissions",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["claim"]},
+        principal_id="user-123",
+        project="project_A",
+        accessible_projects={"project_A"},
+    )
+    candidate = NativeRetrievalCandidate(
+        id="edge-1",
+        type="claim",
+        name="In-project relationship",
+        content="Safe relationship",
+        score=1.0,
+        source=None,
+        metadata={
+            "source_node_project_id": "project_A",
+            "target_node_project_id": "project_A",
+        },
+        project_id=None,
+    )
+
+    assert native_module._candidate_allowed(
+        candidate,
+        plan=plan,
+        requested_types=set(),
+        facet=None,
+    )
+
+
 def test_native_plan_estimates_project_filter_selectivity() -> None:
     accessible_projects = {f"project_{index}" for index in range(20)}
     plan = build_native_context_retrieval_plan(
