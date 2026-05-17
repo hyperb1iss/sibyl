@@ -126,6 +126,18 @@ class TestProductionPasswordSecurity:
                 surreal_password="sibyl_dev",
             )
 
+
+    def test_placeholder_surreal_credentials_forbidden_in_production(self) -> None:
+        with pytest.raises(ValueError, match="Default SurrealDB credentials are forbidden"):
+            Settings(
+                environment="production",
+                store="surreal",
+                auth_store="surreal",
+                surreal_url="ws://surrealdb:8000/rpc",
+                surreal_username="change-me",
+                surreal_password="change-me-strong-password",
+            )
+
     def test_non_default_surreal_credentials_allowed_in_production(self) -> None:
         settings = Settings(
             environment="production",
