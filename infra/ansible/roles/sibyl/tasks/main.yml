@@ -9,9 +9,8 @@
       - sibyl_cf_api_token | default('') | length > 0
     quiet: true
     fail_msg: >-
-      The sibyl role needs sibyl_surreal_password, sibyl_jwt_secret,
-      sibyl_openai_api_key, sibyl_anthropic_api_key and sibyl_cf_api_token.
-      Supply them through vault-backed variables.
+      The sibyl role needs sibyl_surreal_password, sibyl_jwt_secret, sibyl_openai_api_key,
+      sibyl_anthropic_api_key and sibyl_cf_api_token. Supply them through vault-backed variables.
 
 # ─── Docker engine ─────────────────────────────────────────────────────────────
 - name: Create the apt keyring directory

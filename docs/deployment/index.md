@@ -100,16 +100,16 @@ by the default runtime. See [storage-modes.md](../guide/storage-modes.md) and
 
 ## Quick Comparison
 
-| Feature               | Docker Compose | Tilt/Minikube | Production K8s | Single Host  |
-| --------------------- | -------------- | ------------- | -------------- | ------------ |
-| Setup time            | 1 minute       | 5-10 minutes  | Varies         | ~10 minutes  |
-| Hot reload            | Yes            | Yes           | No             | No           |
-| Kong Gateway          | No             | Yes           | Yes            | No           |
-| TLS                   | No             | Yes (Caddy)   | Yes            | Yes (Caddy)  |
-| Autoscaling           | No             | No            | Yes (HPA)      | No           |
-| Multi-replica         | No             | Yes           | Yes            | No           |
-| Resource requirements | Low            | Medium        | High           | Low          |
-| Production-like       | No             | Mostly        | Yes            | Mostly       |
+| Feature               | Docker Compose | Tilt/Minikube | Production K8s | Single Host |
+| --------------------- | -------------- | ------------- | -------------- | ----------- |
+| Setup time            | 1 minute       | 5-10 minutes  | Varies         | ~10 minutes |
+| Hot reload            | Yes            | Yes           | No             | No          |
+| Kong Gateway          | No             | Yes           | Yes            | No          |
+| TLS                   | No             | Yes (Caddy)   | Yes            | Yes (Caddy) |
+| Autoscaling           | No             | No            | Yes (HPA)      | No          |
+| Multi-replica         | No             | Yes           | Yes            | No          |
+| Resource requirements | Low            | Medium        | High           | Low         |
+| Production-like       | No             | Mostly        | Yes            | Mostly      |
 
 ## Port Mappings by Environment
 
