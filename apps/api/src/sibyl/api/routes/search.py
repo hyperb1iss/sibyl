@@ -164,7 +164,9 @@ async def explore(
                     project_id,
                     required_role=ProjectRole.VIEWER,
                 )
-            accessible_filter = None
+            accessible_filter = (
+                set(request.project_ids) if request.mode in {"related", "traverse"} else None
+            )
         elif request.project:
             await verify_entity_project_access(
                 None,
@@ -172,7 +174,9 @@ async def explore(
                 request.project,
                 required_role=ProjectRole.VIEWER,
             )
-            accessible_filter = None
+            accessible_filter = (
+                {request.project} if request.mode in {"related", "traverse"} else None
+            )
         else:
             accessible_filter = await list_accessible_project_graph_ids(ctx)
 

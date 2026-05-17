@@ -186,6 +186,38 @@ class TestExploreRoute:
         assert core_explore.await_args.kwargs["project_ids"] == ["proj_1"]
         assert core_explore.await_args.kwargs["accessible_projects"] is None
 
+
+    @pytest.mark.asyncio
+    async def test_explore_related_with_project_ids_preserves_accessible_filter(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        ctx = SimpleNamespace()
+        result = SimpleNamespace(
+            mode="related",
+            entities=[{"id": "task_1", "name": "Ship it"}],
+            total=1,
+            filters={"project_ids": ["proj_1"]},
+            limit=10,
+            offset=0,
+            has_more=False,
+            actual_total=1,
+        )
+
+        with (
+            patch(
+                "sibyl.api.routes.search.verify_entity_project_access",
+                AsyncMock(return_value=ProjectRole.VIEWER),
+            ),
+            patch("sibyl_core.tools.core.explore", AsyncMock(return_value=result)) as core_explore,
+        ):
+            await explore(
+                request=ExploreRequest(mode="related", entity_id="entity_1", project_ids=["proj_1"]),
+                org=org,
+                ctx=ctx,
+            )
+
+        assert core_explore.await_args.kwargs["project_ids"] == ["proj_1"]
+        assert core_explore.await_args.kwargs["accessible_projects"] == {"proj_1"}
+
     @pytest.mark.asyncio
     async def test_explore_without_project_passes_default_accessible_scope(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
