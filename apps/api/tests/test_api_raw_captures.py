@@ -222,6 +222,10 @@ async def test_update_raw_capture_review_state_updates_metadata() -> None:
 
     with (
         patch(
+            "sibyl.api.routes.entities.content_runtime.get_raw_capture",
+            AsyncMock(return_value=capture),
+        ),
+        patch(
             "sibyl.api.routes.entities.content_runtime.update_raw_capture_review_state",
             AsyncMock(
                 side_effect=lambda _session, **_kwargs: replace(
@@ -240,6 +244,7 @@ async def test_update_raw_capture_review_state_updates_metadata() -> None:
             capture.id,
             RawCaptureReviewUpdate(review_state="deferred"),
             org=org,
+            ctx=_ctx(user_id=str(capture.created_by_user_id)),
             session=session,
         )
 
@@ -250,3 +255,32 @@ async def test_update_raw_capture_review_state_updates_metadata() -> None:
         capture_id=capture.id,
         review_state="deferred",
     )
+
+
+@pytest.mark.asyncio
+async def test_update_raw_capture_review_state_hidden_for_other_user() -> None:
+    org = _org()
+    capture = _capture(org_id=org.id, title="Someone else's note", surface="dashboard")
+    session = MagicMock()
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.content_runtime.get_raw_capture",
+            AsyncMock(return_value=capture),
+        ),
+        patch(
+            "sibyl.api.routes.entities.content_runtime.update_raw_capture_review_state",
+            AsyncMock(),
+        ) as update_capture,
+        pytest.raises(HTTPException) as exc,
+    ):
+        await update_raw_capture_review_state(
+            capture.id,
+            RawCaptureReviewUpdate(review_state="deferred"),
+            org=org,
+            ctx=_ctx(user_id=str(uuid4())),
+            session=session,
+        )
+
+    assert exc.value.status_code == 404
+    update_capture.assert_not_awaited()
