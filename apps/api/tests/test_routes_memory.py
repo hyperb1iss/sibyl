@@ -472,6 +472,7 @@ async def test_remember_raw_denies_disallowed_api_key_memory_space() -> None:
     ctx = _ctx()
     ctx.api_key_memory_scope_keys = [api_key_memory_scope_key("project", "project_allowed")]
     with (
+        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
         patch(
             "sibyl.api.routes.memory.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_123"}),
