@@ -331,6 +331,18 @@ async def test_post_reflection_recall_promotes_review_candidate_into_native_cont
             ),
             generate_embedding=False,
         )
+        await runtime.entity_manager.create_direct(
+            Entity(
+                id="decision_other_project",
+                entity_type=EntityType.DECISION,
+                name="Decision: Other project should stay isolated",
+                description="Cross-project metadata must not create supersedes edges.",
+                content="Cross-project metadata must not create supersedes edges.",
+                organization_id=group_id,
+                metadata={"project_id": "project_other"},
+            ),
+            generate_embedding=False,
+        )
 
         compatibility_add = AsyncMock(
             side_effect=AssertionError("compatibility add path should not run")
@@ -370,7 +382,7 @@ async def test_post_reflection_recall_promotes_review_candidate_into_native_cont
                 candidate_memory,
                 metadata={
                     **candidate_memory.metadata,
-                    "supersedes_ids": ["decision_legacy_recall"],
+                    "supersedes_ids": ["decision_legacy_recall", "decision_other_project"],
                 },
             )
         )
@@ -424,6 +436,7 @@ async def test_post_reflection_recall_promotes_review_candidate_into_native_cont
         assert (promotion.promoted_id, "BELONGS_TO", "project_native") in relationship_keys
         assert (promotion.promoted_id, "RELATED_TO", "task_native") in relationship_keys
         assert (promotion.promoted_id, "SUPERSEDES", "decision_legacy_recall") in relationship_keys
+        assert (promotion.promoted_id, "SUPERSEDES", "decision_other_project") not in relationship_keys
         supersedes_row = next(row for row in relationship_rows if row["name"] == "SUPERSEDES")
         assert supersedes_row["attributes"]["source_id"] == reflection.source_id
         assert supersedes_row["attributes"]["raw_source_ids"] == [reflection.source_id]

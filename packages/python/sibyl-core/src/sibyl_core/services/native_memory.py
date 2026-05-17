@@ -303,12 +303,18 @@ async def persist_reflection_candidate_native(
         }
     )
     created_id = await runtime.entity_manager.create_direct(entity)
+    superseded_ids = await _authorized_superseded_entity_ids(
+        runtime=runtime,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        candidate=candidate,
+    )
     relationships = _relationships_for_promotion(
         created_id,
         project=project,
         source_id=source_id if link_source_entity else None,
         related_to=related_to,
-        supersedes=_superseded_entity_ids(candidate.metadata),
+        supersedes=superseded_ids,
         raw_source_ids=source_ids,
     )
     if relationships:
@@ -1598,6 +1604,40 @@ def _superseded_entity_ids(metadata: Mapping[str, object]) -> list[str]:
         "superseded_ids",
         "supersedes_entity_ids",
     )
+
+
+async def _authorized_superseded_entity_ids(
+    *,
+    runtime: Any,
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+    candidate: ReflectionCandidate,
+) -> list[str]:
+    authorized_ids: list[str] = []
+    for entity_id in _superseded_entity_ids(candidate.metadata):
+        try:
+            target_entity = await runtime.entity_manager.get(entity_id)
+        except Exception:
+            continue
+        metadata = target_entity.metadata if isinstance(target_entity.metadata, Mapping) else {}
+        target_scope = _resolve_memory_scope(
+            _metadata_str(metadata, "memory_scope"),
+            _metadata_str(metadata, "project_id"),
+        )
+        target_scope_key = _resolve_scope_key(
+            target_scope,
+            _metadata_str(metadata, "scope_key"),
+            _metadata_str(metadata, "project_id"),
+        )
+        decision = authorize_memory_write(
+            principal_id=principal_id,
+            memory_scope=target_scope,
+            scope_key=target_scope_key,
+            accessible_projects=accessible_projects,
+        )
+        if decision.allowed:
+            authorized_ids.append(entity_id)
+    return authorized_ids
 
 
 def _is_reflection_candidate(memory: RawMemory) -> bool:
