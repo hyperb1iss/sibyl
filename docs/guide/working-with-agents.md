@@ -87,37 +87,13 @@ The CLI is preferred for most operations. It uses fewer tokens and is more expre
 
 Every effective session follows the same cycle: **recall, act, remember, reflect.**
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  1. RECALL                                                  │
-│                                                             │
-│  Before implementing anything, pull working context.        │
-│  Your past self (or other agents) may have already          │
-│  solved this problem.                                       │
-│                                                             │
-│  "Recall context for the OAuth work"                        │
-│  "Check if we've solved this before"                        │
-└─────────────────────────┬───────────────────────────────────┘
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│  2. ACT                                                     │
-│                                                             │
-│  Work on your task with the context you found.              │
-│  Track progress with task lifecycle commands.               │
-│                                                             │
-│  "Start the task for OAuth implementation"                  │
-│  "Update task notes with our progress"                      │
-└─────────────────────────┬───────────────────────────────────┘
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│  3. REMEMBER + REFLECT                                      │
-│                                                             │
-│  When you finish, capture what you learned, then            │
-│  reflect session notes into durable memory.                 │
-│                                                             │
-│  "Complete the task with learnings about redirect URIs"     │
-│  "Remember a pattern for the retry logic we figured out"    │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    R(["RECALL<br/>Pull working context before you act"])
+    A(["ACT<br/>Do the work with context in hand"])
+    M(["REMEMBER + REFLECT<br/>Capture learnings, distill session notes"])
+    R --> A --> M
+    M -.->|the graph gets smarter| R
 ```
 
 See [The Memory Loop](./memory-loop.md) for the cycle in depth.

@@ -11,12 +11,17 @@ This guide covers advanced configuration of Sibyl's MCP (Model Context Protocol)
 
 Sibyl's MCP server is built on FastMCP and integrates with the main Starlette application:
 
-```
-Sibyl Combined App (Starlette, port 3334)
-├── /api/*    -> FastAPI REST endpoints
-├── /mcp      -> MCP streamable-http endpoint
-├── /ws       -> WebSocket for real-time updates
-└── Lifespan  -> Background queue + session management
+```mermaid
+flowchart LR
+    APP{{"Sibyl Combined App<br/>Starlette · port 3334"}}
+    API["FastAPI REST endpoints"]
+    MCP["MCP streamable-http endpoint"]
+    WS["WebSocket · real-time updates"]
+    BG["Background queue + session management"]
+    APP -->|"/api/*"| API
+    APP -->|"/mcp"| MCP
+    APP -->|"/ws"| WS
+    APP -->|"Lifespan"| BG
 ```
 
 ## Transport Modes

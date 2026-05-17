@@ -222,15 +222,23 @@ DEFINE TABLE organization_members SCHEMAFULL;
 
 ### Graph Storage
 
-```
-SurrealDB Instance
-├── Namespace: "org_550e8400e29b41d4a716446655440000" (Org A)
-│   ├── Entity nodes
-│   ├── Episodic nodes
-│   └── Relationships
-├── Namespace: "org_6fa459eaee8a3ca4894edb77e160355e" (Org B)
-│   └── (completely isolated)
-└── Namespace: "sibyl_auth" (auth/control plane)
+```mermaid
+flowchart TD
+    DB[("SurrealDB Instance")]
+    subgraph OrgA["Namespace · org_550e8400… (Org A)"]
+        A1["Entity nodes"]
+        A2["Episodic nodes"]
+        A3["Relationships"]
+    end
+    subgraph OrgB["Namespace · org_6fa459ea… (Org B)"]
+        B1["Fully isolated graph"]
+    end
+    subgraph Auth["Namespace · sibyl_auth"]
+        AU["Auth and control plane"]
+    end
+    DB --> OrgA
+    DB --> OrgB
+    DB --> Auth
 ```
 
 ## Security Considerations

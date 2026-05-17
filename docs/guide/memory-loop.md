@@ -9,30 +9,14 @@ Sibyl is built around a durable cycle that both humans and AI agents follow: **r
 remember, reflect.** Every interface (CLI, MCP tools, hooks, and the web workspace) exists to
 support this loop. Learn it once and the rest of Sibyl falls into place.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  1. RECALL                                                  │
-│     Pull working context before you act.                    │
-│     sibyl recall "what you're working on"                   │
-└─────────────────────────┬───────────────────────────────────┘
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│  2. ACT                                                     │
-│     Do the work with context in hand.                       │
-│     sibyl task start <task_id>                              │
-└─────────────────────────┬───────────────────────────────────┘
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│  3. REMEMBER                                                │
-│     Capture decisions, learnings, and durable knowledge.     │
-│     sibyl remember "Title" "What, why, how, caveats"         │
-└─────────────────────────┬───────────────────────────────────┘
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│  4. REFLECT                                                 │
-│     Distill raw notes into reviewable memory candidates.     │
-│     sibyl reflect --persist --review                         │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    R(["RECALL<br/>Pull working context"])
+    A(["ACT<br/>Do the work with context in hand"])
+    M(["REMEMBER<br/>Capture decisions and durable knowledge"])
+    RF(["REFLECT<br/>Distill raw notes into candidates"])
+    R --> A --> M --> RF
+    RF -.->|the next recall is sharper| R
 ```
 
 Every completed loop makes the graph smarter. The next recall is sharper because the last remember

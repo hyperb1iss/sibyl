@@ -88,32 +88,13 @@ filter to find what you need.
 Every effective Sibyl workflow follows the same cycle: **recall, act, remember, reflect.** Learn it
 once and the rest of Sibyl falls into place.
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  RECALL                                                 │
-│  Before implementing anything, pull working context.    │
-│  Your past self (or teammates) may have already         │
-│  solved this problem.                                   │
-│                                                         │
-│  sibyl recall "what you're about to implement"          │
-└─────────────────────────┬───────────────────────────────┘
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│  ACT                                                    │
-│  Work on your task with the context you found.          │
-│  Track progress with task lifecycle commands.           │
-│                                                         │
-│  sibyl task start task_xyz                              │
-└─────────────────────────┬───────────────────────────────┘
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│  REMEMBER + REFLECT                                     │
-│  Capture what you learned, then distill session notes   │
-│  into durable memory. Future sessions will thank you.   │
-│                                                         │
-│  sibyl task complete task_xyz --learnings "..."         │
-│  sibyl remember "Pattern Title" "What you discovered"   │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    R(["RECALL<br/>Pull working context before you act"])
+    A(["ACT<br/>Do the work with context in hand"])
+    M(["REMEMBER + REFLECT<br/>Capture learnings, distill session notes"])
+    R --> A --> M
+    M -.->|the graph gets smarter| R
 ```
 
 The loop runs on the CLI, through MCP tools, and from hooks. See [The Memory Loop](./memory-loop)

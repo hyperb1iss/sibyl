@@ -67,34 +67,17 @@ Sibyl is a **knowledge graph, agent memory loop, and task workflow** that gives 
 
 ## How It Works
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                     Your Actual Workflow                          │
-│        Claude Code • Editors • Scripts • Teammates                │
-└────────────────────────────┬─────────────────────────────────────┘
-                             │
-        ┌────────────────────┼────────────────────┐
-        │                    │                    │
-        ▼                    ▼                    ▼
-   ┌─────────┐        ┌───────────┐        ┌──────────┐
-   │ Skills  │        │   Hooks   │        │   CLI    │
-   │ Teach   │        │  Inject   │        │ Express  │
-   │ workflow│        │  context  │        │  power   │
-   └─────────┘        └───────────┘        └──────────┘
-        │                    │                    │
-        └────────────────────┼────────────────────┘
-                             │
-                             ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                        Sibyl Server                               │
-│   SurrealDB Graph • Semantic Search • Memory Loop • Tasks         │
-└──────────────────────────────────────────────────────────────────┘
-                             │
-                             ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                         Web UI                                    │
-│   Human collaboration • Memory workspace • Graph explorer         │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W["Your Actual Workflow<br/>Claude Code · Editors · Scripts · Teammates"]
+    S["Skills<br/>Teach the workflow"]
+    H["Hooks<br/>Inject context"]
+    C["CLI<br/>Express power"]
+    SRV{{"Sibyl Server<br/>SurrealDB graph · Semantic search · Memory loop · Tasks"}}
+    UI["Web UI<br/>Human collaboration · Memory workspace · Graph explorer"]
+    W --> S & H & C
+    S & H & C --> SRV
+    SRV --> UI
 ```
 
 ### Skills + Hooks
@@ -153,24 +136,13 @@ sibyl task complete <task_id> --learnings "OAuth tokens expire after 1 hour"
 
 Sibyl is built around a durable cycle that both humans and agents follow:
 
-```
-┌─────────────────────────────────────────────────────┐
-│  1. RECALL                                          │
-│     Pull working context before you act             │
-│     sibyl recall "what you're working on"           │
-└─────────────────────────┬───────────────────────────┘
-                          ▼
-┌─────────────────────────────────────────────────────┐
-│  2. ACT                                             │
-│     Do the work with context in hand                │
-│     sibyl task start <task_id>                      │
-└─────────────────────────┬───────────────────────────┘
-                          ▼
-┌─────────────────────────────────────────────────────┐
-│  3. REMEMBER + REFLECT                              │
-│     Capture learnings and distill session notes     │
-│     sibyl task complete <task_id> --learnings "..." │
-└─────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    R(["RECALL<br/>Pull working context before you act"])
+    A(["ACT<br/>Do the work with context in hand"])
+    M(["REMEMBER + REFLECT<br/>Capture learnings, distill session notes"])
+    R --> A --> M
+    M -.->|the graph gets smarter| R
 ```
 
 Every completed task makes your knowledge graph smarter. Every pattern discovered helps future

@@ -11,29 +11,13 @@ documentation, or any web content as easily as they search your own patterns.
 
 ## The Big Picture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     External Documentation                       │
-│   React Docs • AWS API Reference • Your Internal Wiki           │
-└────────────────────────────────┬────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         Source Crawler                           │
-│           Depth-limited crawling • Intelligent chunking          │
-└────────────────────────────────┬────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Embedding & Storage                         │
-│       Vector embeddings • SurrealDB content storage            │
-└────────────────────────────────┬────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Unified Search                              │
-│   Knowledge graph + Documents merged and ranked by relevance    │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    D["External Documentation<br/>React docs · AWS API reference · internal wikis"]
+    C["Source Crawler<br/>Depth-limited crawling · intelligent chunking"]
+    E["Embedding + Storage<br/>Vector embeddings · SurrealDB content store"]
+    U["Unified Search<br/>Knowledge graph and documents, ranked by relevance"]
+    D --> C --> E --> U
 ```
 
 ## Adding Sources
@@ -119,16 +103,17 @@ sibyl crawl ingest source_abc123
 
 Crawled content is stored as `document` entities:
 
-```
-Source (e.g., "React Docs")
-├── Document (e.g., "useState Hook")
-│   ├── Chunk 1: "useState is a React Hook..."
-│   ├── Chunk 2: "Updating state based on..."
-│   └── Chunk 3: "Pitfalls: Calling useState..."
-├── Document (e.g., "useEffect Hook")
-│   ├── Chunk 1: ...
-│   └── Chunk 2: ...
-└── ...
+```mermaid
+flowchart TD
+    S["Source<br/>React Docs"]
+    D1["Document<br/>useState Hook"]
+    D2["Document<br/>useEffect Hook"]
+    S --> D1 & D2
+    D1 --> C1["Chunk · what useState is"]
+    D1 --> C2["Chunk · updating state"]
+    D1 --> C3["Chunk · pitfalls"]
+    D2 --> C4["Chunk · running effects"]
+    D2 --> C5["Chunk · cleanup"]
 ```
 
 Each document chunk includes:

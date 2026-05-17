@@ -10,16 +10,21 @@ guide explains how to structure and navigate your work.
 
 ## Hierarchy Overview
 
-```
-Organization
-└── Project
-    ├── Epic
-    │   ├── Task
-    │   ├── Task
-    │   └── Task
-    ├── Epic
-    │   └── Task
-    └── Task (no epic - orphaned)
+```mermaid
+flowchart TD
+    O["Organization"]
+    P["Project"]
+    E1["Epic"]
+    E2["Epic"]
+    T1["Task"]
+    T2["Task"]
+    T3["Task"]
+    T4["Task"]
+    T0["Task · no epic"]
+    O --> P
+    P --> E1 & E2 & T0
+    E1 --> T1 & T2 & T3
+    E2 --> T4
 ```
 
 ## Projects
@@ -330,8 +335,10 @@ sibyl epic show epic_oauth
 
 The hierarchy is stored as graph relationships:
 
-```
-Task --[BELONGS_TO]--> Epic --[BELONGS_TO]--> Project
+```mermaid
+flowchart LR
+    T["Task"] -->|BELONGS_TO| E["Epic"]
+    E -->|BELONGS_TO| P["Project"]
 ```
 
 Query related entities:

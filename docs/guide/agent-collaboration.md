@@ -18,12 +18,12 @@ agent's recall.
 
 All agents in an organization share the same knowledge graph:
 
-```
-Organization Graph
-├── Agent A's discoveries
-├── Agent B's discoveries
-├── Agent C's discoveries
-└── Shared patterns, rules, tasks
+```mermaid
+flowchart TD
+    A["Agent A"] --> G
+    B["Agent B"] --> G
+    C["Agent C"] --> G
+    G{{"Shared Organization Graph<br/>Patterns · rules · tasks · learnings"}}
 ```
 
 When Agent A captures knowledge:
@@ -323,14 +323,16 @@ manage("archive_task", entity_id="outdated_pattern",
 
 Each organization has isolated graphs:
 
-```
-Organization A (Isolated)
-├── Team A knowledge
-└── Team A tasks
-
-Organization B (Isolated)
-├── Team B knowledge
-└── Team B tasks
+```mermaid
+flowchart LR
+    subgraph OrgA["Organization A · isolated"]
+        A1["Team A knowledge"]
+        A2["Team A tasks"]
+    end
+    subgraph OrgB["Organization B · isolated"]
+        B1["Team B knowledge"]
+        B2["Team B tasks"]
+    end
 ```
 
 ### Cross-Org Patterns
