@@ -123,7 +123,7 @@ class Settings(BaseSettings):
                     "CRITICAL: Default PostgreSQL password 'sibyl_dev' is forbidden in production. "
                     "Set SIBYL_POSTGRES_PASSWORD to a secure value."
                 )
-            if self.store == "surreal" and self.resolved_surreal_url.startswith("memory://"):
+            if self.auth_store == "surreal" and self.resolved_surreal_url.startswith("memory://"):
                 raise ValueError(
                     "CRITICAL: In-memory SurrealDB is forbidden in production. "
                     "Set SIBYL_SURREAL_URL or SIBYL_SURREAL_DATA_DIR."

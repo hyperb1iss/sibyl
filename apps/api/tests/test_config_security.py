@@ -44,6 +44,7 @@ class TestDisableAuthSecurity:
             }
             if env == "production":
                 kwargs["postgres_password"] = "secure_postgres_pw"
+                kwargs["surreal_url"] = "ws://surrealdb:8000/rpc"
             settings = Settings(**kwargs)  # type: ignore[arg-type]
             assert settings.disable_auth is False
 
@@ -75,6 +76,7 @@ class TestEnvironmentValidation:
             }
             if env == "production":
                 kwargs["postgres_password"] = "secure_postgres_pw"
+                kwargs["surreal_url"] = "ws://surrealdb:8000/rpc"
             settings = Settings(**kwargs)  # type: ignore[arg-type]
             assert settings.environment == env
 
@@ -93,15 +95,14 @@ class TestEnvironmentValidation:
 class TestProductionPasswordSecurity:
     """Tests for production password validation."""
 
-    def test_default_postgres_password_allowed_after_sidecar_removal(self) -> None:
-        settings = Settings(
-            environment="production",
-            store="legacy",
-            auth_store="surreal",
-            postgres_password="sibyl_dev",
-        )
-
-        assert settings.requires_relational_support is False
+    def test_in_memory_surreal_forbidden_when_auth_uses_surreal_in_production(self) -> None:
+        with pytest.raises(ValueError, match="In-memory SurrealDB is forbidden in production"):
+            Settings(
+                environment="production",
+                store="legacy",
+                auth_store="surreal",
+                postgres_password="sibyl_dev",
+            )
 
     def test_legacy_password_defaults_do_not_block_fully_surreal_production(self) -> None:
         settings = Settings(
@@ -129,5 +130,6 @@ class TestProductionPasswordSecurity:
             store="legacy",
             auth_store="surreal",
             postgres_password="my_secure_postgres",
+            surreal_url="ws://surrealdb:8000/rpc",
         )
         assert settings.environment == "production"
