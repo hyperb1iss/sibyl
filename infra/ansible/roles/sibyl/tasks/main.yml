@@ -56,10 +56,22 @@
     name: ufw
     state: present
 
-- name: Allow SSH through ufw
+- name: Allow SSH on the proxy interface only
+  community.general.ufw:
+    rule: allow
+    direction: in
+    interface: "{{ sibyl_proxy_interface }}"
+    proto: tcp
+    port: "22"
+  tags: [firewall]
+
+# Earlier runs of this role allowed OpenSSH on every interface. Drop
+# that rule so SSH, like HTTP/HTTPS, is reachable on the tailnet only.
+- name: Revoke the public SSH allow rule
   community.general.ufw:
     rule: allow
     name: OpenSSH
+    delete: true
   tags: [firewall]
 
 - name: Allow HTTP and HTTPS on the proxy interface only
