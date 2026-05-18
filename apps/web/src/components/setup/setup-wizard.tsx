@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { SetupStatus } from '@/lib/api';
 import { AdminAccountStep } from './steps/admin-account-step';
 import { ApiKeysStep } from './steps/api-keys-step';
-import { ConnectClaudeStep } from './steps/connect-claude-step';
+import { ConnectStep } from './steps/connect-step';
 import { WelcomeStep } from './steps/welcome-step';
 
 type SetupStep = 'welcome' | 'api-keys' | 'admin' | 'connect';
@@ -161,7 +161,7 @@ export function SetupWizard({ initialStatus, onComplete }: SetupWizardProps) {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.3 }}
             >
-              <ConnectClaudeStep onFinish={handleComplete} />
+              <ConnectStep onFinish={handleComplete} />
             </motion.div>
           )}
         </AnimatePresence>
