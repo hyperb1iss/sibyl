@@ -167,3 +167,40 @@ def test_compose_command_prefers_quiet_docker_compose_provider(tmp_path: Path) -
         "podman",
         "compose",
     ]
+
+
+def test_dev_main_allows_empty_extra_commands_with_nounset() -> None:
+    env = {
+        **os.environ,
+        "SIBYL_STORE": "surreal",
+        "SIBYL_AUTH_STORE": "surreal",
+        "SIBYL_COORDINATION_BACKEND": "local",
+        "SIBYL_SURREAL_URL": "ws://127.0.0.1:8000/rpc",
+        "SIBYL_DEV_API_COMMAND": "true",
+        "SIBYL_DEV_WEB_COMMAND": "true",
+        "SIBYL_DEV_SKIP_LEGACY_CHECK": "1",
+    }
+    bash = which("bash")
+    assert bash is not None
+
+    script = """
+source tools/dev/run-surreal-dev.sh
+sleep() { :; }
+launch_command() { child_pids+=("99999"); }
+wait_for_api_ready() { return 0; }
+wait_for_commands() { child_pids=(); return 0; }
+cleanup() { exit "${1:-0}"; }
+main
+"""
+
+    result = subprocess.run(  # noqa: S603
+        [bash, "-c", script],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "extra_commands[@]: unbound variable" not in result.stderr

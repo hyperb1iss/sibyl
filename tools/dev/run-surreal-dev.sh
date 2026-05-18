@@ -509,9 +509,11 @@ main() {
   fi
 
   launch_command "$web_command"
-  for command in "${extra_commands[@]}"; do
-    launch_command "$command"
-  done
+  if ((${#extra_commands[@]} > 0)); then
+    for command in "${extra_commands[@]}"; do
+      launch_command "$command"
+    done
+  fi
 
   if ! wait_for_commands; then
     return $?
