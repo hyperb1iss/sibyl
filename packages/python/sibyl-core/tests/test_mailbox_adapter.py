@@ -10,7 +10,9 @@ import pytest
 
 from sibyl_core.models.sources import SourcePrivacyClass
 from sibyl_core.services.mailbox_adapter import (
+    MAILDIR_ADAPTER_NAME,
     MBOX_ADAPTER_NAME,
+    MaildirSourceAdapter,
     MboxSourceAdapter,
     ensure_mailbox_adapter_registered,
 )
@@ -31,6 +33,17 @@ def _clear_registry() -> Iterator[None]:
 
 def _write_mbox(path: Path, messages: list[EmailMessage]) -> Path:
     box = mailbox.mbox(path)
+    try:
+        for message in messages:
+            box.add(message)
+        box.flush()
+    finally:
+        box.close()
+    return path
+
+
+def _write_maildir(path: Path, messages: list[EmailMessage]) -> Path:
+    box = mailbox.Maildir(path, create=True)
     try:
         for message in messages:
             box.add(message)
@@ -218,10 +231,79 @@ async def test_mbox_import_writes_private_source_records(tmp_path: Path) -> None
     assert writes[0]["metadata"]["attachment_count"] == 1
 
 
+@pytest.mark.asyncio
+async def test_maildir_manifest_defaults_to_private_memory(tmp_path: Path) -> None:
+    maildir_path = _write_maildir(tmp_path / "maildir", [_message()])
+    adapter = MaildirSourceAdapter()
+
+    manifest = await adapter.prepare_manifest(source_uri=str(maildir_path))
+
+    assert manifest.adapter_name == "maildir"
+    assert manifest.adapter_version == "1.0"
+    assert manifest.source_identity == str(maildir_path.resolve())
+    assert manifest.source_uri == str(maildir_path.resolve())
+    assert manifest.source_version.startswith("entries:1:mtime:")
+    assert manifest.target_memory_scope == "private"
+    assert manifest.privacy_class is SourcePrivacyClass.PERSONAL
+    assert manifest.metadata["mailbox_format"] == "maildir"
+    assert manifest.metadata["message_count"] == 1
+    assert manifest.metadata_schema["mailbox_key"] == "string"
+
+
+@pytest.mark.asyncio
+async def test_maildir_adapter_preserves_metadata_and_resumes(tmp_path: Path) -> None:
+    maildir_path = _write_maildir(
+        tmp_path / "maildir",
+        [
+            _message(message_id="maildir-1@example.com", attachment=None),
+            _message(message_id="maildir-2@example.com", attachment=None),
+        ],
+    )
+    adapter = MaildirSourceAdapter()
+    manifest = await adapter.prepare_manifest(source_uri=str(maildir_path))
+    first_batch = await anext(
+        adapter.iter_records(
+            manifest,
+            batch_size=1,
+        )
+    )
+
+    assert len(first_batch.records) == 1
+    assert first_batch.checkpoint.cursor == "1"
+    assert first_batch.checkpoint.done is False
+    first_record = first_batch.records[0]
+    assert first_record.adapter_record_id in {
+        "maildir-1@example.com",
+        "maildir-2@example.com",
+    }
+    assert first_record.source_uri is not None
+    assert first_record.source_uri.startswith(f"{manifest.source_uri}#message=0&key=")
+    assert first_record.metadata["mailbox_format"] == "maildir"
+    assert first_record.metadata["mailbox_key"]
+
+    second_batch = await anext(
+        adapter.iter_records(
+            manifest,
+            checkpoint=first_batch.checkpoint,
+            batch_size=2,
+        )
+    )
+
+    assert len(second_batch.records) == 1
+    assert second_batch.checkpoint.cursor is None
+    assert second_batch.checkpoint.done is True
+    assert {
+        first_batch.records[0].adapter_record_id,
+        second_batch.records[0].adapter_record_id,
+    } == {"maildir-1@example.com", "maildir-2@example.com"}
+
+
 def test_ensure_mailbox_adapter_registers_once() -> None:
     ensure_mailbox_adapter_registered()
     ensure_mailbox_adapter_registered()
 
-    adapter = get_source_adapter(MBOX_ADAPTER_NAME)
+    mbox_adapter = get_source_adapter(MBOX_ADAPTER_NAME)
+    maildir_adapter = get_source_adapter(MAILDIR_ADAPTER_NAME)
 
-    assert isinstance(adapter, MboxSourceAdapter)
+    assert isinstance(mbox_adapter, MboxSourceAdapter)
+    assert isinstance(maildir_adapter, MaildirSourceAdapter)

@@ -11,6 +11,7 @@ from email.utils import getaddresses, parsedate_to_datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from sibyl_core.models.sources import (
     SourceAdapterCapability,
@@ -34,6 +35,8 @@ from sibyl_core.services.source_adapters import (
 
 MBOX_ADAPTER_NAME = "mbox"
 MBOX_ADAPTER_VERSION = "1.0"
+MAILDIR_ADAPTER_NAME = "maildir"
+MAILDIR_ADAPTER_VERSION = "1.0"
 
 
 class MboxSourceAdapter:
@@ -163,10 +166,152 @@ class MboxSourceAdapter:
             mbox.close()
 
 
+class MaildirSourceAdapter:
+    """Source adapter for local Maildir archives."""
+
+    descriptor = SourceAdapterDescriptor(
+        name=MAILDIR_ADAPTER_NAME,
+        version=MAILDIR_ADAPTER_VERSION,
+        source_type="mailbox",
+        display_name="Maildir mailbox archive",
+        capabilities=[
+            SourceAdapterCapability.ATTACHMENTS,
+            SourceAdapterCapability.CHECKPOINTS,
+            SourceAdapterCapability.INCREMENTAL,
+            SourceAdapterCapability.SKIPPED_RECORDS,
+        ],
+        default_privacy_class=SourcePrivacyClass.PERSONAL,
+        transform_behavior=SourceTransformBehavior.RAW,
+        metadata_schema={
+            "message_id": "string",
+            "thread_id": "string",
+            "in_reply_to": "string",
+            "references": "string[]",
+            "from": "string[]",
+            "to": "string[]",
+            "cc": "string[]",
+            "bcc": "string[]",
+            "subject": "string",
+            "source_path": "string",
+            "mailbox_key": "string",
+        },
+        supports_incremental=True,
+    )
+
+    async def prepare_manifest(
+        self,
+        *,
+        source_uri: str,
+        options: Mapping[str, object] | None = None,
+    ) -> SourceImportManifest:
+        path = _resolve_maildir_path(source_uri)
+        option_values = dict(options or {})
+        target_memory_scope = str(option_values.get("target_memory_scope") or "private")
+        target_scope_key = _optional_str(option_values.get("target_scope_key"))
+        privacy_class = SourcePrivacyClass(
+            str(option_values.get("privacy_class") or self.descriptor.default_privacy_class)
+        )
+        source_identity = str(option_values.get("source_identity") or path)
+        entries = _maildir_entries(path)
+
+        return SourceImportManifest(
+            adapter_name=self.descriptor.name,
+            adapter_version=self.descriptor.version,
+            source_identity=source_identity,
+            source_uri=str(path),
+            source_version=_maildir_source_version(entries),
+            target_memory_scope=target_memory_scope,
+            target_scope_key=target_scope_key,
+            privacy_class=privacy_class,
+            transform_behavior=self.descriptor.transform_behavior,
+            metadata_schema=dict(self.descriptor.metadata_schema),
+            metadata={
+                "mailbox_format": "maildir",
+                "source_path": str(path),
+                "message_count": len(entries),
+            },
+            options=option_values,
+        )
+
+    async def iter_records(
+        self,
+        manifest: SourceImportManifest,
+        *,
+        checkpoint: SourceImportCheckpoint | None = None,
+        batch_size: int = 100,
+    ) -> AsyncIterator[SourceRecordBatch]:
+        if not manifest.source_uri:
+            msg = "Maildir imports require manifest.source_uri"
+            raise ValueError(msg)
+
+        path = _resolve_maildir_path(manifest.source_uri)
+        start = int(checkpoint.cursor) if checkpoint and checkpoint.cursor else 0
+        batch_records: list[SourceRecord] = []
+        skipped: list[SourceSkippedRecord] = []
+        cursor = start
+        total_seen = start
+
+        maildir = mailbox.Maildir(path, create=False)
+        try:
+            keys = sorted(maildir.keys())
+            message_count = len(keys)
+            for index, key in enumerate(keys):
+                if index < start:
+                    continue
+                if len(batch_records) >= batch_size:
+                    break
+                cursor = index + 1
+                total_seen = cursor
+                source_uri = _message_source_uri(manifest, index, mailbox_key=key)
+                try:
+                    message = maildir.get_message(key)
+                    batch_records.append(
+                        _record_from_message(
+                            manifest,
+                            message,
+                            index=index,
+                            source_uri=source_uri,
+                            extra_metadata={
+                                "mailbox_format": "maildir",
+                                "mailbox_key": key,
+                            },
+                        )
+                    )
+                except Exception as exc:
+                    skipped.append(
+                        SourceSkippedRecord(
+                            adapter_record_id=f"maildir:{key}",
+                            source_uri=source_uri,
+                            reason="message_parse_failed",
+                            metadata={"error": str(exc), "mailbox_key": key},
+                        )
+                    )
+
+            done = cursor >= message_count
+            if batch_records or skipped or start < message_count:
+                yield SourceRecordBatch(
+                    records=batch_records,
+                    skipped=skipped,
+                    checkpoint=SourceImportCheckpoint(
+                        cursor=str(cursor) if not done else None,
+                        source_version=manifest.source_version,
+                        records_seen=total_seen,
+                        records_imported=len(batch_records),
+                        records_skipped=len(skipped),
+                        done=done,
+                        metadata={"source_uri": manifest.source_uri},
+                    ),
+                )
+        finally:
+            maildir.close()
+
+
 def ensure_mailbox_adapter_registered() -> None:
     """Register built-in mailbox adapters once."""
     if not source_adapter_registry.has(MBOX_ADAPTER_NAME):
         register_source_adapter(MboxSourceAdapter())
+    if not source_adapter_registry.has(MAILDIR_ADAPTER_NAME):
+        register_source_adapter(MaildirSourceAdapter())
 
 
 def _resolve_mbox_path(source_uri: str) -> Path:
@@ -177,6 +322,22 @@ def _resolve_mbox_path(source_uri: str) -> Path:
         raise FileNotFoundError(msg)
     if not path.is_file():
         msg = f"MBOX source is not a file: {path}"
+        raise ValueError(msg)
+    return path
+
+
+def _resolve_maildir_path(source_uri: str) -> Path:
+    raw_path = source_uri[7:] if source_uri.startswith("file://") else source_uri
+    path = Path(raw_path).expanduser().resolve()
+    if not path.exists():
+        msg = f"Maildir source does not exist: {path}"
+        raise FileNotFoundError(msg)
+    if not path.is_dir():
+        msg = f"Maildir source is not a directory: {path}"
+        raise ValueError(msg)
+    missing = [name for name in ("cur", "new", "tmp") if not (path / name).is_dir()]
+    if missing:
+        msg = f"Maildir source is missing required directories: {', '.join(missing)}"
         raise ValueError(msg)
     return path
 
@@ -193,19 +354,23 @@ def _record_from_message(
     message: Message,
     *,
     index: int,
+    source_uri: str | None = None,
+    extra_metadata: Mapping[str, Any] | None = None,
 ) -> SourceRecord:
     subject = _decode_header_value(message.get("Subject")) or "(no subject)"
     body = _extract_body(message)
     message_id = _normalized_message_id(message.get("Message-ID"))
     fallback_seed = build_source_content_hash(subject, body, str(index))
-    adapter_record_id = message_id or f"mbox:{index}:{fallback_seed[:16]}"
+    adapter_record_id = message_id or f"{manifest.adapter_name}:{index}:{fallback_seed[:16]}"
     content_hash = build_source_content_hash(subject, body, message_id)
     dedupe_key = build_source_dedupe_key(
         manifest=manifest,
         adapter_record_id=adapter_record_id,
         content_hash=content_hash,
     )
-    source_uri = _message_source_uri(manifest, index)
+    record_source_uri = (
+        source_uri if source_uri is not None else _message_source_uri(manifest, index)
+    )
     source_id = build_source_record_id(
         manifest=manifest,
         adapter_record_id=adapter_record_id,
@@ -236,12 +401,14 @@ def _record_from_message(
         "source_path": manifest.source_uri,
         "mailbox_index": index,
     }
+    if extra_metadata is not None:
+        metadata.update(dict(extra_metadata))
 
     return SourceRecord(
         adapter_record_id=adapter_record_id,
         source_id=source_id,
         source_type="mailbox_message",
-        source_uri=source_uri,
+        source_uri=record_source_uri,
         source_version=manifest.source_version,
         title=subject,
         body=body,
@@ -254,7 +421,7 @@ def _record_from_message(
         participants=participants,
         labels=["mailbox", "email"],
         metadata=metadata,
-        attachments=_extract_attachments(message, adapter_record_id, source_uri),
+        attachments=_extract_attachments(message, adapter_record_id, record_source_uri),
     )
 
 
@@ -303,8 +470,7 @@ def _message_id_list(value: str | None) -> list[str]:
 
 def _header_addresses(message: Message) -> dict[str, list[str]]:
     return {
-        name.lower(): _addresses(message.get_all(name, []))
-        for name in ("From", "To", "Cc", "Bcc")
+        name.lower(): _addresses(message.get_all(name, [])) for name in ("From", "To", "Cc", "Bcc")
     }
 
 
@@ -431,15 +597,38 @@ def _part_payload_bytes(part: Message) -> bytes:
     return str(raw_payload or "").encode("utf-8")
 
 
-def _message_source_uri(manifest: SourceImportManifest, index: int) -> str | None:
+def _maildir_entries(path: Path) -> list[Path]:
+    entries: list[Path] = []
+    for folder in ("cur", "new"):
+        entries.extend(child for child in (path / folder).iterdir() if child.is_file())
+    return entries
+
+
+def _maildir_source_version(entries: list[Path]) -> str:
+    latest_mtime = max((entry.stat().st_mtime_ns for entry in entries), default=0)
+    return f"entries:{len(entries)}:mtime:{latest_mtime}"
+
+
+def _message_source_uri(
+    manifest: SourceImportManifest,
+    index: int,
+    *,
+    mailbox_key: str | None = None,
+) -> str | None:
     if not manifest.source_uri:
         return None
-    return f"{manifest.source_uri}#message={index}"
+    source_uri = f"{manifest.source_uri}#message={index}"
+    if mailbox_key is not None:
+        source_uri = f"{source_uri}&key={quote(mailbox_key, safe='')}"
+    return source_uri
 
 
 __all__ = [
+    "MAILDIR_ADAPTER_NAME",
+    "MAILDIR_ADAPTER_VERSION",
     "MBOX_ADAPTER_NAME",
     "MBOX_ADAPTER_VERSION",
+    "MaildirSourceAdapter",
     "MboxSourceAdapter",
     "ensure_mailbox_adapter_registered",
 ]
