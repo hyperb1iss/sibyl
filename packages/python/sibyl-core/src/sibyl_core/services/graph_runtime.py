@@ -50,6 +50,19 @@ def _assert_surreal_query_dialect(query: str) -> None:
         raise ValueError("Surreal runtime graph queries must use SurrealQL")
 
 
+def _count_value(value: object) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
+
+
 async def get_graph_client(group_id: str = "default") -> NativeSurrealGraphClient:
     """Return the native graph client for the requested organization."""
 
@@ -82,6 +95,34 @@ async def count_entities_by_type(
         return await native_counter(include_archived=include_archived)
 
     counts = {entity_type.value: 0 for entity_type in EntityType}
+
+    driver = getattr(entity_manager, "_driver", None)
+    execute_query = getattr(driver, "execute_query", None)
+    group_id = getattr(entity_manager, "_group_id", None)
+    if callable(execute_query) and group_id:
+        where_clauses = ["group_id = $group_id"]
+        if not include_archived:
+            where_clauses.append("(status IS NONE OR status = '' OR status != 'archived')")
+        rows = normalize_records(
+            await execute_query(
+                """
+                SELECT entity_type, count() AS cnt
+                FROM entity
+                WHERE """
+                + " AND ".join(where_clauses)
+                + """
+                GROUP BY entity_type;
+                """,
+                group_id=str(group_id),
+            )
+        )
+        for row in rows:
+            entity_type = row.get("entity_type")
+            if isinstance(entity_type, str) and entity_type:
+                count = row.get("cnt", row.get("entity_count", 0))
+                counts[entity_type] = _count_value(count)
+        return counts
+
     offset = 0
 
     while True:
@@ -93,10 +134,14 @@ async def count_entities_by_type(
         if not entities:
             break
 
+        page_count = len(entities)
+        if page_count == 0:
+            break
+
         for entity in entities:
             counts[entity.entity_type.value] = counts.get(entity.entity_type.value, 0) + 1
 
-        offset += len(entities)
+        offset += page_count
 
     return counts
 

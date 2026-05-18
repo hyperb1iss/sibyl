@@ -193,8 +193,12 @@ class TestCreate:
         sample_relationship: Relationship,
     ) -> None:
         """Should create relationship and return ID."""
-        with patch.object(EntityEdge, "get_between_nodes", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = []
+        with patch.object(
+            relationship_manager,
+            "_get_existing_edges_between_nodes",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
             relationship_manager._driver.execute_query = AsyncMock()
 
             result = await relationship_manager.create(sample_relationship)
@@ -213,9 +217,12 @@ class TestCreate:
         existing_edge.name = "DEPENDS_ON"
         existing_edge.uuid = "existing_123"
 
-        with patch.object(EntityEdge, "get_between_nodes", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = [existing_edge]
-
+        with patch.object(
+            relationship_manager,
+            "_get_existing_edges_between_nodes",
+            new_callable=AsyncMock,
+            return_value=[existing_edge],
+        ):
             result = await relationship_manager.create(sample_relationship)
 
             assert result == "existing_123"
@@ -233,8 +240,12 @@ class TestCreate:
         existing_edge.name = "RELATED_TO"  # Different from DEPENDS_ON
         existing_edge.uuid = "existing_123"
 
-        with patch.object(EntityEdge, "get_between_nodes", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = [existing_edge]
+        with patch.object(
+            relationship_manager,
+            "_get_existing_edges_between_nodes",
+            new_callable=AsyncMock,
+            return_value=[existing_edge],
+        ):
             relationship_manager._driver.execute_query = AsyncMock()
 
             await relationship_manager.create(sample_relationship)
@@ -251,11 +262,16 @@ class TestCreate:
         """Should raise GraphError on failure."""
         from sibyl_core.errors import GraphError
 
-        with patch.object(EntityEdge, "get_between_nodes", new_callable=AsyncMock) as mock_get:
-            mock_get.side_effect = RuntimeError("Connection failed")
-
-            with pytest.raises(GraphError):
-                await relationship_manager.create(sample_relationship)
+        with (
+            patch.object(
+                relationship_manager,
+                "_get_existing_edges_between_nodes",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("Connection failed"),
+            ),
+            pytest.raises(GraphError),
+        ):
+            await relationship_manager.create(sample_relationship)
 
 
 class TestCreateBulk:
