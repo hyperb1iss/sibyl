@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import logging
 
-from graphiti_core.driver.operations.graph_ops import GraphMaintenanceOperations
 from graphiti_core.driver.operations.graph_utils import Neighbor, label_propagation
 from graphiti_core.driver.record_parsers import (
     community_node_from_record,
@@ -45,7 +44,7 @@ def _count_value(value: object) -> int:
     return 0
 
 
-class SurrealGraphMaintenanceOperations(GraphMaintenanceOperations):
+class SurrealGraphMaintenanceOperations:
     """SurrealDB implementation of GraphMaintenanceOperations."""
 
     async def clear_data(

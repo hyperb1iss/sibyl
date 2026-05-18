@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 
-from graphiti_core.driver.operations.community_edge_ops import CommunityEdgeOperations
 from graphiti_core.edges import CommunityEdge
 from graphiti_core.errors import EdgeNotFoundError
 from graphiti_core.helpers import parse_db_date
@@ -64,7 +63,7 @@ def _community_edge_from_record(record: SurrealRecord) -> CommunityEdge:
     )
 
 
-class SurrealCommunityEdgeOperations(CommunityEdgeOperations):
+class SurrealCommunityEdgeOperations:
     """SurrealDB implementation of Graphiti's CommunityEdgeOperations."""
 
     async def save(

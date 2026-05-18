@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 
-from graphiti_core.driver.operations.entity_node_ops import EntityNodeOperations
 from graphiti_core.driver.record_parsers import entity_node_from_record
 from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.nodes import EntityNode
@@ -118,7 +117,7 @@ def _entity_save_payload(node: EntityNode) -> SurrealRecord:
     }
 
 
-class SurrealEntityNodeOperations(EntityNodeOperations):
+class SurrealEntityNodeOperations:
     """SurrealDB implementation of Graphiti's EntityNodeOperations."""
 
     async def save(

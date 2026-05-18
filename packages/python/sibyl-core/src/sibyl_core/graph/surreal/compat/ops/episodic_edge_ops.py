@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 
-from graphiti_core.driver.operations.episodic_edge_ops import EpisodicEdgeOperations
 from graphiti_core.edges import EpisodicEdge
 from graphiti_core.errors import EdgeNotFoundError
 from graphiti_core.helpers import parse_db_date
@@ -44,7 +43,7 @@ def _episodic_edge_from_record(record: SurrealRecord) -> EpisodicEdge:
     )
 
 
-class SurrealEpisodicEdgeOperations(EpisodicEdgeOperations):
+class SurrealEpisodicEdgeOperations:
     """SurrealDB implementation of Graphiti's EpisodicEdgeOperations.
 
     Persists episode -> entity edges into the ``mentions`` RELATION table.

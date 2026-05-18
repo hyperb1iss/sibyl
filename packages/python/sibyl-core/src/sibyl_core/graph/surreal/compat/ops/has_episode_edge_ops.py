@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 
-from graphiti_core.driver.operations.has_episode_edge_ops import HasEpisodeEdgeOperations
 from graphiti_core.edges import HasEpisodeEdge
 from graphiti_core.errors import EdgeNotFoundError
 from graphiti_core.helpers import parse_db_date
@@ -42,7 +41,7 @@ def _has_episode_edge_from_record(record: SurrealRecord) -> HasEpisodeEdge:
     )
 
 
-class SurrealHasEpisodeEdgeOperations(HasEpisodeEdgeOperations):
+class SurrealHasEpisodeEdgeOperations:
     """SurrealDB implementation of Graphiti's HasEpisodeEdgeOperations."""
 
     async def save(

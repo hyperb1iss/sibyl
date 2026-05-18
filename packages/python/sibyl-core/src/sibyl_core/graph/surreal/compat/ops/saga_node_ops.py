@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 
-from graphiti_core.driver.operations.saga_node_ops import SagaNodeOperations
 from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.helpers import parse_db_date
 from graphiti_core.nodes import SagaNode
@@ -57,7 +56,7 @@ def _saga_from_record(record: SurrealRecord) -> SagaNode:
     )
 
 
-class SurrealSagaNodeOperations(SagaNodeOperations):
+class SurrealSagaNodeOperations:
     """SurrealDB implementation of Graphiti's SagaNodeOperations."""
 
     async def save(

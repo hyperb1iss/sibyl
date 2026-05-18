@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from graphiti_core import Graphiti
 from graphiti_core.cross_encoder.client import CrossEncoderClient
-from graphiti_core.edges import EntityEdge, EpisodicEdge
+from graphiti_core.edges import EntityEdge, EpisodicEdge, HasEpisodeEdge
 from graphiti_core.embedder.client import EmbedderClient
 from graphiti_core.llm_client.client import LLMClient
 from graphiti_core.llm_client.config import LLMConfig, ModelSize
@@ -410,6 +410,66 @@ class TestSurrealSearchInterfaceIntegration:
 
         assert source.attributes["project_id"] == "project-bulk"
         assert edge.attributes["confidence"] == 0.9
+
+    @pytest.mark.asyncio
+    async def test_saga_helpers_use_surreal_graph_operations_interface(
+        self, surreal_schema: SurrealDriver
+    ) -> None:
+        gid = surreal_schema.group_id
+        interface = surreal_schema.graph_operations_interface
+        old_at = datetime(2026, 1, 1, tzinfo=UTC)
+        current_at = datetime(2026, 1, 2, tzinfo=UTC)
+
+        await surreal_schema.execute_query(
+            "CREATE saga SET uuid = 'saga-interface', name = 'daily', "
+            "group_id = $gid, created_at = $created_at;",
+            gid=gid,
+            created_at=old_at,
+        )
+        for uuid, content, created_at in (
+            ("saga-old-episode", "old content", old_at),
+            ("saga-current-episode", "current content", current_at),
+        ):
+            await surreal_schema.episode_node_ops.save(
+                surreal_schema,
+                _episode(uuid, gid, content=content),
+            )
+            await surreal_schema.execute_query(
+                "UPDATE episode SET created_at = $created_at, valid_at = $created_at "
+                "WHERE uuid = $uuid;",
+                uuid=uuid,
+                created_at=created_at,
+            )
+            await surreal_schema.has_episode_edge_ops.save(
+                surreal_schema,
+                HasEpisodeEdge(
+                    uuid=f"has-{uuid}",
+                    group_id=gid,
+                    source_node_uuid="saga-interface",
+                    target_node_uuid=uuid,
+                    created_at=created_at,
+                ),
+            )
+
+        previous_uuid = await interface.saga_get_previous_episode_uuid(
+            surreal_schema,
+            "saga-interface",
+            "saga-current-episode",
+        )
+        latest_contents = await interface.saga_get_episode_contents(
+            surreal_schema,
+            "saga-interface",
+            limit=2,
+        )
+        new_contents = await interface.saga_get_episode_contents(
+            surreal_schema,
+            "saga-interface",
+            since=datetime(2026, 1, 1, 12, tzinfo=UTC),
+        )
+
+        assert previous_uuid == "saga-old-episode"
+        assert latest_contents == ["old content", "current content"]
+        assert new_contents == ["current content"]
 
     @pytest.mark.asyncio
     async def test_graphiti_add_episode_with_saga_uses_surreal_bulk_adapter(

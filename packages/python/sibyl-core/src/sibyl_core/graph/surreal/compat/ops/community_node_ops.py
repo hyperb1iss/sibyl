@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 
-from graphiti_core.driver.operations.community_node_ops import CommunityNodeOperations
 from graphiti_core.driver.record_parsers import community_node_from_record
 from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.nodes import CommunityNode
@@ -75,7 +74,7 @@ def _community_save_payload(node: CommunityNode) -> SurrealRecord:
     }
 
 
-class SurrealCommunityNodeOperations(CommunityNodeOperations):
+class SurrealCommunityNodeOperations:
     """SurrealDB implementation of Graphiti's CommunityNodeOperations."""
 
     async def save(

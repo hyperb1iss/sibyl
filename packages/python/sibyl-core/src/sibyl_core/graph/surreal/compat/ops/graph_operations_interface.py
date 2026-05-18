@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from graphiti_core.driver.graph_operations.graph_operations import GraphOperationsInterface
 from graphiti_core.driver.record_parsers import episodic_node_from_record
 from graphiti_core.edges import (
     CommunityEdge,
@@ -104,7 +103,23 @@ def _entity_edge_from_bulk_payload(item: EntityEdge | SurrealRecord) -> EntityEd
     )
 
 
-class SurrealGraphOperationsInterface(GraphOperationsInterface):
+def _timestamp(value: object) -> float:
+    if isinstance(value, datetime):
+        normalized = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return normalized.timestamp()
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return float("-inf")
+    return float("-inf")
+
+
+def _episode_order(record: SurrealRecord) -> tuple[float, float]:
+    return (_timestamp(record.get("valid_at")), _timestamp(record.get("created_at")))
+
+
+class SurrealGraphOperationsInterface:
     async def node_save(self, node: EntityNode, driver: SurrealDriver) -> None:
         await driver.entity_node_ops.save(driver, node)
 
@@ -415,6 +430,59 @@ class SurrealGraphOperationsInterface(GraphOperationsInterface):
         uuid_cursor: str | None = None,
     ) -> list[SagaNode]:
         return await driver.saga_node_ops.get_by_group_ids(driver, group_ids, limit, uuid_cursor)
+
+    async def saga_get_previous_episode_uuid(
+        self,
+        driver: SurrealDriver,
+        saga_uuid: str,
+        current_episode_uuid: str,
+    ) -> str | None:
+        records = normalize_records(
+            await driver.execute_query(
+                """
+                SELECT out.uuid AS uuid, out.valid_at AS valid_at, out.created_at AS created_at
+                FROM has_episode
+                WHERE in IN (SELECT VALUE id FROM saga WHERE uuid = $saga_uuid LIMIT 1)
+                AND out.uuid != $current_episode_uuid;
+                """,
+                saga_uuid=saga_uuid,
+                current_episode_uuid=current_episode_uuid,
+            )
+        )
+        if not records:
+            return None
+        records.sort(key=_episode_order, reverse=True)
+        return str(records[0]["uuid"])
+
+    async def saga_get_episode_contents(
+        self,
+        driver: SurrealDriver,
+        saga_uuid: str,
+        since: datetime | None = None,
+        limit: int = 200,
+    ) -> list[str]:
+        records = normalize_records(
+            await driver.execute_query(
+                """
+                SELECT out.content AS content, out.valid_at AS valid_at, out.created_at AS created_at
+                FROM has_episode
+                WHERE in IN (SELECT VALUE id FROM saga WHERE uuid = $saga_uuid LIMIT 1);
+                """,
+                saga_uuid=saga_uuid,
+            )
+        )
+        if since is not None:
+            since_timestamp = _timestamp(since)
+            records = [
+                record
+                for record in records
+                if _timestamp(record.get("created_at")) > since_timestamp
+            ]
+        records.sort(key=_episode_order, reverse=since is None)
+        records = records[: max(int(limit), 0)]
+        if since is None:
+            records = list(reversed(records))
+        return [str(content) for record in records if (content := record.get("content"))]
 
     async def edge_save(self, edge: EntityEdge, driver: SurrealDriver) -> None:
         await driver.entity_edge_ops.save(driver, edge)

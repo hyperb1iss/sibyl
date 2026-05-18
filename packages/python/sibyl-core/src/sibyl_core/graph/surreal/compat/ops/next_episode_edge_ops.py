@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 
-from graphiti_core.driver.operations.next_episode_edge_ops import NextEpisodeEdgeOperations
 from graphiti_core.edges import NextEpisodeEdge
 from graphiti_core.errors import EdgeNotFoundError
 from graphiti_core.helpers import parse_db_date
@@ -42,7 +41,7 @@ def _next_episode_edge_from_record(record: SurrealRecord) -> NextEpisodeEdge:
     )
 
 
-class SurrealNextEpisodeEdgeOperations(NextEpisodeEdgeOperations):
+class SurrealNextEpisodeEdgeOperations:
     """SurrealDB implementation of Graphiti's NextEpisodeEdgeOperations."""
 
     async def save(

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 
-from graphiti_core.driver.operations.entity_edge_ops import EntityEdgeOperations
 from graphiti_core.driver.record_parsers import entity_edge_from_record
 from graphiti_core.edges import EntityEdge
 from graphiti_core.errors import EdgeNotFoundError
@@ -79,7 +78,7 @@ def _entity_edge_save_payload(edge: EntityEdge) -> SurrealRecord:
     }
 
 
-class SurrealEntityEdgeOperations(EntityEdgeOperations):
+class SurrealEntityEdgeOperations:
     """SurrealDB implementation of Graphiti's EntityEdgeOperations."""
 
     async def save(

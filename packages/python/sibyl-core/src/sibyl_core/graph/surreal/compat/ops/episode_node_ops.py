@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from graphiti_core.driver.operations.episode_node_ops import EpisodeNodeOperations
 from graphiti_core.driver.record_parsers import episodic_node_from_record
 from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.nodes import EpisodicNode
@@ -86,7 +85,7 @@ def _episode_save_payload(node: EpisodicNode) -> SurrealRecord:
     }
 
 
-class SurrealEpisodeNodeOperations(EpisodeNodeOperations):
+class SurrealEpisodeNodeOperations:
     """SurrealDB implementation of Graphiti's EpisodeNodeOperations."""
 
     async def save(
