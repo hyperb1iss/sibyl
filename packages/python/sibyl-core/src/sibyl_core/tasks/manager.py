@@ -2,7 +2,7 @@
 
 import asyncio
 import uuid
-from typing import TYPE_CHECKING
+from typing import Any
 
 import structlog
 
@@ -15,19 +15,13 @@ from sibyl_core.models.tasks import (
     TaskStatus,
 )
 
-if TYPE_CHECKING:
-    from sibyl_core.graph.entities import EntityManager
-    from sibyl_core.graph.relationships import RelationshipManager
-
 log = structlog.get_logger()
 
 
 class TaskManager:
     """Manages task creation and knowledge integration."""
 
-    def __init__(
-        self, entity_manager: "EntityManager", relationship_manager: "RelationshipManager"
-    ) -> None:
+    def __init__(self, entity_manager: Any, relationship_manager: Any) -> None:
         """Initialize task manager with graph managers."""
         self._entity_manager = entity_manager
         self._relationship_manager = relationship_manager

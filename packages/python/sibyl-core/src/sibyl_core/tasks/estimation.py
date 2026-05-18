@@ -1,14 +1,11 @@
 """Task effort estimation from historical data."""
 
-from typing import TYPE_CHECKING
+from typing import Any
 
 import structlog
 
 from sibyl_core.models.entities import EntityType
 from sibyl_core.models.tasks import SimilarTaskInfo, TaskEstimate, TaskStatus
-
-if TYPE_CHECKING:
-    from sibyl_core.graph.entities import EntityManager
 
 log = structlog.get_logger()
 
@@ -17,7 +14,7 @@ SimilarTask = SimilarTaskInfo
 
 
 async def estimate_task_effort(
-    entity_manager: "EntityManager",
+    entity_manager: Any,
     task_id: str | None = None,
     title: str | None = None,
     description: str | None = None,
@@ -30,7 +27,7 @@ async def estimate_task_effort(
     a weighted average of their actual hours based on similarity scores.
 
     Args:
-        entity_manager: EntityManager for searching tasks.
+        entity_manager: Entity manager for searching tasks.
         task_id: Existing task ID to estimate (will fetch title/description).
         title: Task title for new task estimation.
         description: Task description for new task estimation.
@@ -163,14 +160,14 @@ async def estimate_task_effort(
 
 
 async def batch_estimate(
-    entity_manager: "EntityManager",
+    entity_manager: Any,
     task_ids: list[str],
     min_similarity: float = 0.5,
 ) -> dict[str, TaskEstimate]:
     """Estimate effort for multiple tasks.
 
     Args:
-        entity_manager: EntityManager for searching tasks.
+        entity_manager: Entity manager for searching tasks.
         task_ids: List of task IDs to estimate.
         min_similarity: Minimum similarity threshold.
 

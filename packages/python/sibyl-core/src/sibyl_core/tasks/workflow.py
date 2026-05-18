@@ -3,7 +3,7 @@
 import json
 import re
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import structlog
 
@@ -11,11 +11,6 @@ from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError
 from sibyl_core.models.entities import EntityType, Relationship, RelationshipType
 from sibyl_core.models.tasks import EpicStatus, Task, TaskStatus
 from sibyl_core.tasks.distillation import build_learning_episode, build_learning_procedure
-
-if TYPE_CHECKING:
-    from sibyl_core.graph.client import GraphClient
-    from sibyl_core.graph.entities import EntityManager
-    from sibyl_core.graph.relationships import RelationshipManager
 
 log = structlog.get_logger()
 _MISSING = object()
@@ -113,9 +108,9 @@ class TaskWorkflowEngine:
 
     def __init__(
         self,
-        entity_manager: "EntityManager",
-        relationship_manager: "RelationshipManager",
-        graph_client: "GraphClient",
+        entity_manager: Any,
+        relationship_manager: Any,
+        graph_client: Any,
         organization_id: str,
     ) -> None:
         """Initialize workflow engine with graph managers."""
