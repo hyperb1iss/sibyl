@@ -63,10 +63,12 @@ docker_legacy_setup_detected() {
 
 docker_is_podman_emulation() {
   local version=""
+  local normalized_version=""
 
   command -v docker >/dev/null 2>&1 || return 1
   version="$(docker --version 2>&1 || true)"
-  [[ "${version,,}" == *podman* ]]
+  normalized_version="$(printf '%s' "$version" | tr '[:upper:]' '[:lower:]')"
+  [[ "$normalized_version" == *podman* ]]
 }
 
 docker_compose_provider() {
@@ -123,8 +125,13 @@ compose_command() {
 
 run_compose() {
   local -a command=()
+  local command_part=""
 
-  if ! mapfile -t command < <(compose_command); then
+  while IFS= read -r command_part; do
+    command+=("$command_part")
+  done < <(compose_command)
+
+  if ((${#command[@]} == 0)); then
     echo "Docker or Podman compose is required for local services" >&2
     return 1
   fi
