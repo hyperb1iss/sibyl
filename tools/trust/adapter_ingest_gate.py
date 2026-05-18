@@ -63,6 +63,19 @@ GATE_CHECKS: tuple[GateCheck, ...] = (
         ),
         command=("moon", "run", "core:adapter-ingest-mailbox-test"),
     ),
+    GateCheck(
+        name="large-corpus-rehearsal",
+        description="dogfood corpus volume, resumability, search, dedupe, and policy receipt",
+        surfaces=(
+            "large-corpus rehearsal",
+            "source search before extraction",
+            "import resumability",
+            "dedupe correctness",
+            "private scope enforcement",
+            "source import receipts",
+        ),
+        command=("moon", "run", "large-corpus-rehearsal"),
+    ),
 )
 
 REQUIRED_SURFACES: tuple[str, ...] = (
@@ -71,6 +84,9 @@ REQUIRED_SURFACES: tuple[str, ...] = (
     "import resumability",
     "dedupe correctness",
     "private scope enforcement",
+    "large-corpus rehearsal",
+    "source search before extraction",
+    "source import receipts",
 )
 
 

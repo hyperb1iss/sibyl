@@ -52,6 +52,7 @@ def test_gate_checks_use_moon_package_slices() -> None:
     assert all(command[:2] == ("moon", "run") for command in commands)
     assert ("moon", "run", "core:adapter-ingest-contract-test") in commands
     assert ("moon", "run", "core:adapter-ingest-mailbox-test") in commands
+    assert ("moon", "run", "large-corpus-rehearsal") in commands
 
 
 def test_run_gate_prints_release_receipt(capsys: pytest.CaptureFixture[str]) -> None:
@@ -73,6 +74,9 @@ def test_run_gate_prints_release_receipt(capsys: pytest.CaptureFixture[str]) -> 
     assert "import resumability" in captured.out
     assert "dedupe correctness" in captured.out
     assert "private scope enforcement" in captured.out
+    assert "large-corpus rehearsal" in captured.out
+    assert "source search before extraction" in captured.out
+    assert "source import receipts" in captured.out
 
 
 def test_run_gate_executes_all_checks_before_failure(
@@ -135,6 +139,7 @@ def test_main_lists_gate_checks(capsys: pytest.CaptureFixture[str]) -> None:
         "core-source-adapter-contract: moon run core:adapter-ingest-contract-test" in captured.out
     )
     assert "core-mailbox-ingest: moon run core:adapter-ingest-mailbox-test" in captured.out
+    assert "large-corpus-rehearsal: moon run large-corpus-rehearsal" in captured.out
 
 
 def test_root_moon_tasks_expose_adapter_ingest_gate() -> None:

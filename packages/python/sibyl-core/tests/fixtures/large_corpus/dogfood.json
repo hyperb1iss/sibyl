@@ -1,0 +1,44 @@
+{
+  "fixture_id": "sibyl-large-corpus-dogfood",
+  "version": "2026-05-17.1",
+  "source_uri": "fixture://sibyl-large-corpus-dogfood",
+  "project_scope_key": "project-sibyl-corpus-runtime",
+  "private": {
+    "generated_records": 48,
+    "batch_size": 11,
+    "expected": {
+      "batches": 5,
+      "imported_count": 51,
+      "skipped_count": 3,
+      "dedupe_count": 1,
+      "attachment_count": 1,
+      "extraction_pending_count": 2,
+      "error_count": 1,
+      "raw_memory_count": 51
+    }
+  },
+  "project": {
+    "generated_records": 6,
+    "batch_size": 3,
+    "expected": {
+      "batches": 2,
+      "imported_count": 6,
+      "skipped_count": 0,
+      "dedupe_count": 0,
+      "attachment_count": 0,
+      "extraction_pending_count": 0,
+      "error_count": 0,
+      "raw_memory_count": 6
+    }
+  },
+  "expected": {
+    "total_batches": 7,
+    "imported_count": 57,
+    "skipped_count": 3,
+    "dedupe_count": 1,
+    "attachment_count": 1,
+    "extraction_pending_count": 2,
+    "error_count": 1,
+    "raw_memory_count": 57
+  }
+}

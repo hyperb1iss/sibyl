@@ -225,6 +225,7 @@ tasks:
       - ~:trust-control-gate-test
       - ~:synthesis-gate-test
       - ~:adapter-ingest-gate-test
+      - ~:large-corpus-rehearsal-test
       - core:check
       - api:check
       - cli:check
@@ -246,6 +247,7 @@ tasks:
       - ~:trust-control-gate-test
       - ~:synthesis-gate-test
       - ~:adapter-ingest-gate-test
+      - ~:large-corpus-rehearsal-test
       - core:test
       - api:test
       - cli:test
@@ -727,6 +729,32 @@ tasks:
       - pyproject.toml
       - moon.yml
       - packages/python/sibyl-core/moon.yml
+
+  large-corpus-rehearsal:
+    command: uv run python -m tools.trust.large_corpus_rehearsal
+    inputs:
+      - tools/trust/**/*.py
+      - packages/python/sibyl-core/src/**/*.py
+      - packages/python/sibyl-core/tests/fixtures/large_corpus/**/*.json
+      - pyproject.toml
+      - moon.yml
+      - packages/python/sibyl-core/pyproject.toml
+    outputs:
+      - .moon/cache/large-corpus-rehearsal/receipt.json
+    options:
+      cache: false
+
+  large-corpus-rehearsal-test:
+    command: uv run pytest tools/tests/test_large_corpus_rehearsal.py -v
+    inputs:
+      - tools/trust/**/*.py
+      - tools/tests/conftest.py
+      - tools/tests/test_large_corpus_rehearsal.py
+      - packages/python/sibyl-core/src/**/*.py
+      - packages/python/sibyl-core/tests/fixtures/large_corpus/**/*.json
+      - pyproject.toml
+      - moon.yml
+      - packages/python/sibyl-core/pyproject.toml
 
   migrate-rehearse:
     command: uv run sibyld migrate rehearse

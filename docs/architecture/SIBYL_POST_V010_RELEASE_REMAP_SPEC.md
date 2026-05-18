@@ -210,6 +210,12 @@ Actions:
 - register `moon run large-corpus-rehearsal` or make `adapter-ingest-gate` invoke the same focused
   rehearsal, with fixtures under `packages/python/sibyl-core/tests/fixtures/large_corpus/`
 
+Current command and artifact contract:
+
+- command: `moon run large-corpus-rehearsal`
+- fixture: `packages/python/sibyl-core/tests/fixtures/large_corpus/dogfood.json`
+- artifact: `.moon/cache/large-corpus-rehearsal/receipt.json`
+
 Verify:
 
 - new large-corpus rehearsal task or script exits nonzero on count drift, duplicate drift, policy
@@ -509,7 +515,7 @@ The output should show current work, not stale release ghosts.
 | `overview-perf-gate`               | exists              | Required for product releases touching overview, activity, or realtime     |
 | `adapter-ingest-gate`              | exists              | Primary v0.11 gate                                                         |
 | `synthesis-gate`                   | exists              | Primary v0.11 gate                                                         |
-| `large-corpus-rehearsal`           | missing             | Add in v0.11 or invoke from `adapter-ingest-gate`                          |
+| `large-corpus-rehearsal`           | exists              | v0.11 dogfood volume, resume, search, dedupe, and policy receipt           |
 | `context-quality-gate`             | missing             | Add in v0.12                                                               |
 | `workspace-trust-gate`             | missing             | Add in v0.12                                                               |
 | no-Graphiti supported-runtime gate | partial             | Strengthen in v0.13                                                        |
