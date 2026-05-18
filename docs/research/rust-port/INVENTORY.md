@@ -12,8 +12,8 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - Raw SQL query usage files: 0
 - Session-backed storage access files: 0
 - Graphiti import files: 0
-- Retained legacy term files: 89
-- Dependency records: 3
+- Retained legacy term files: 88
+- Dependency records: 2
 
 ## API Surface
 
@@ -94,9 +94,9 @@ must carry an owner and reason here.
 | `.env.quickstart.example` | `falkor`, `postgres` | 2 | dev env templates | Environment templates keep legacy ports, migration knobs, and optional Redis/Valkey secrets. |
 | `.env.quickstart.test` | `falkor`, `postgres` | 2 | dev env templates | Environment templates keep legacy ports, migration knobs, and optional Redis/Valkey secrets. |
 | `.env.test.example` | `falkor`, `postgres` | 10 | dev env templates | Environment templates keep legacy ports, migration knobs, and optional Redis/Valkey secrets. |
-| `AGENTS.md` | `graphiti`, `redis`, `valkey` | 4 | project instructions | Project agent guides preserve ports, archive shapes, and compatibility boundaries. |
-| `CLAUDE.md` | `graphiti`, `redis`, `valkey` | 4 | project instructions | Project agent guides preserve ports, archive shapes, and compatibility boundaries. |
-| `README.md` | `graphiti`, `postgres`, `redis`, `valkey` | 13 | v0.8 pure Surreal closure | Default quickstart plus explicit legacy migration and optional Redis coordination notes. |
+| `AGENTS.md` | `graphiti`, `redis`, `valkey` | 5 | project instructions | Project agent guides preserve ports, archive shapes, and compatibility boundaries. |
+| `CLAUDE.md` | `graphiti`, `redis`, `valkey` | 5 | project instructions | Project agent guides preserve ports, archive shapes, and compatibility boundaries. |
+| `README.md` | `graphiti`, `postgres`, `redis`, `valkey` | 14 | v0.8 pure Surreal closure | Default quickstart plus explicit legacy migration and optional Redis coordination notes. |
 | `Tiltfile` | `redis`, `valkey` | 14 | local Kubernetes/Tilt dev | Local Tilt and Helm dev keep Redis/Valkey as explicit coordination while Surreal owns data. |
 | `apps/api/README.md` | `postgres`, `redis` | 12 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
 | `apps/api/examples/README.md` | `valkey` | 1 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
@@ -170,10 +170,9 @@ must carry an owner and reason here.
 | `infra/local/valkey-values.yaml` | `redis`, `valkey` | 4 | local Kubernetes/Tilt dev | Local Tilt and Helm dev keep Redis/Valkey as explicit coordination while Surreal owns data. |
 | `moon.yml` | `graphiti` | 6 | v0.7 Graphiti exit | Root moon tasks retain the explicit Graphiti compatibility test island. |
 | `packages/python/sibyl-core/COVERAGE_PLAN.md` | `falkor` | 3 | v0.7 Graphiti exit | Core package docs and tasks preserve compatibility coverage and historical Graphiti context. |
-| `packages/python/sibyl-core/README.md` | `graphiti` | 3 | v0.7 Graphiti exit | Core package docs and tasks preserve compatibility coverage and historical Graphiti context. |
+| `packages/python/sibyl-core/README.md` | `graphiti` | 4 | v0.7 Graphiti exit | Core package docs and tasks preserve compatibility coverage and historical Graphiti context. |
 | `packages/python/sibyl-core/moon.yml` | `graphiti` | 9 | v0.7 Graphiti exit | Core package docs and tasks preserve compatibility coverage and historical Graphiti context. |
-| `packages/python/sibyl-core/pyproject.toml` | `graphiti` | 1 | v0.7 Graphiti exit | Core package docs and tasks preserve compatibility coverage and historical Graphiti context. |
-| `pyproject.toml` | `graphiti` | 4 | repo package config | Root package configs retain compatibility extras and dev dependency boundaries. |
+| `pyproject.toml` | `graphiti` | 2 | repo package config | Root package configs retain compatibility test markers and dev dependency boundaries. |
 | `setup-dev.sh` | `falkor`, `postgres` | 3 | dev bootstrap | Dev scripts mention legacy migration checks and optional Redis coordination. |
 | `skills/agent-activity-audit/EXAMPLES.md` | `falkor` | 1 | v0.8 skill docs | Source skill docs retain examples that mention Redis as historical troubleshooting context. |
 | `skills/sibyl/EXAMPLES.md` | `redis` | 3 | v0.8 skill docs | Source skill docs retain examples that mention Redis as historical troubleshooting context. |
@@ -186,9 +185,7 @@ must carry an owner and reason here.
 - none
 
 ### Graph runtime dependencies
-| Project | Scope | Dependency |
-| ------- | ----- | ---------- |
-| `packages/python/sibyl-core/pyproject.toml` | `optional:compatibility` | `graphiti-core[anthropic,google-genai]>=0.28.2` |
+- none
 
 ### Target SurrealDB dependencies
 | Project | Scope | Dependency |

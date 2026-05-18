@@ -92,9 +92,9 @@ known-first-party = ["sibyl", "sibyl_core", "sibyl_cli"]
 python-version = "3.13"
 
 [tool.ty.rules]
-# External packages without stubs (Graphiti, optional coordination libs, etc.)
+# External packages without stubs and optional coordination libraries
 unresolved-import = "ignore"
-# Graphiti uses dynamic attributes
+# Dynamic third-party attributes
 unresolved-attribute = "warn"
 possibly-missing-attribute = "warn"
 # Gradual adoption - start with warnings
@@ -170,7 +170,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = ["-ra", "--strict-markers", "-v"]
 markers = [
-    "graphiti_compatibility: compatibility tests that require the Graphiti extra",
+    "graphiti_compatibility: compatibility tests for legacy Graphiti-shaped contracts",
 ]
 filterwarnings = [
     "error",

@@ -230,15 +230,6 @@ wheels = [
 ]
 
 [[package]]
-name = "backoff"
-version = "2.2.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/47/d7/5bbeb12c44d7c4f2fb5b56abce497eb5ed9f34d85701de869acedd602619/backoff-2.2.1.tar.gz", hash = "sha256:03f829f5bb1923180821643f8753b0502c3b682293992485b0eef2807afa5cba", size = 17001, upload-time = "2022-10-05T19:19:32.061Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/df/73/b6e24bd22e6720ca8ee9a85a0c4a2971af8497d8f3193fa05390cbd46e09/backoff-2.2.1-py3-none-any.whl", hash = "sha256:63579f9a0628e06278f7e47b7d7d5b6ce20dc65c5e96a6f3ca99a6adca0396e8", size = 15148, upload-time = "2022-10-05T19:19:30.546Z" },
-]
-
-[[package]]
 name = "backrefs"
 version = "7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -926,32 +917,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/02/8e/dfa4b34dd4c0baffccf6466fc68d6d35011662d43e7d79accb902320db74/google_genai-2.3.0.tar.gz", hash = "sha256:e877c750a4ccacdd9928fc3aa8ca8820ce85cade0ca51bd83feceacf5959b579", size = 546930, upload-time = "2026-05-15T06:22:36.264Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b4/6e/aa6b30b09f58b946750fc4089c5248fbd3576f746e0e818d88633559dc84/google_genai-2.3.0-py3-none-any.whl", hash = "sha256:89d3c71c9f5f5b931b405b88a5837aea2bd4d27ed90323b9599f5760bbb91d92", size = 805484, upload-time = "2026-05-15T06:22:34.247Z" },
-]
-
-[[package]]
-name = "graphiti-core"
-version = "0.29.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "neo4j" },
-    { name = "numpy" },
-    { name = "openai" },
-    { name = "posthog" },
-    { name = "pydantic" },
-    { name = "python-dotenv" },
-    { name = "tenacity" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a5/95/c6e05d3cae650f6e236ed4b6cf2201f480e7dea38d9c947553e16424cef3/graphiti_core-0.29.0.tar.gz", hash = "sha256:00bdc148901a0f1c3952e0ed12f704f179221065a31b3d1edad0777a46b03c09", size = 6896765, upload-time = "2026-04-27T15:55:07.575Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d1/0c/54cebaa2e668d1a89d934a924ccefa752a9f7c6e8d93eddcd93372832bd7/graphiti_core-0.29.0-py3-none-any.whl", hash = "sha256:6b94e1c3e66b35216f1ad51e9a2274e52f92ef5ec872e647d6c1e4af51390996", size = 342037, upload-time = "2026-04-27T15:55:05.589Z" },
-]
-
-[package.optional-dependencies]
-anthropic = [
-    { name = "anthropic" },
-]
-google-genai = [
-    { name = "google-genai" },
 ]
 
 [[package]]
@@ -1776,18 +1741,6 @@ wheels = [
 ]
 
 [[package]]
-name = "neo4j"
-version = "6.2.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pytz" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ce/f4/aaa4ac19adae4b01bc742b63afd2672a77e7351566f02721e713e4b863ee/neo4j-6.2.0.tar.gz", hash = "sha256:e1e246b65b572bd8ea97f9e0e721b7d40a5ce53e53d0007c29aef63e4f9124d9", size = 241459, upload-time = "2026-05-04T07:35:41.428Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e6/cf/1c3795866cefaac6e648d4e98c373cafd97810f6e317c307371007ab4abb/neo4j-6.2.0-py3-none-any.whl", hash = "sha256:b87abdd13a5cc2e3bd51026926c2f20ac38fa3febe98c340520dce19e97388d0", size = 327824, upload-time = "2026-05-04T07:35:39.604Z" },
-]
-
-[[package]]
 name = "networkx"
 version = "3.6.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2062,21 +2015,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe6ef3fa267035b518369d9511ffab804f839851d2779/pluggy-1.6.0.tar.gz", hash = "sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3", size = 69412, upload-time = "2025-05-15T12:30:07.975Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
-]
-
-[[package]]
-name = "posthog"
-version = "7.14.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "backoff" },
-    { name = "distro" },
-    { name = "requests" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ca/e6/fe25f9eaeb5b4b66aa738554ba1ef9feece8b1d5b6a9ea431782b6c6c58f/posthog-7.14.2.tar.gz", hash = "sha256:b913dc23acc301a95ca9b851c193b261932d01a66a9af91eb6e9883cd05d5b6b", size = 205633, upload-time = "2026-05-13T16:36:27.153Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c5/b8/75f9eed446c1d48405871542b36fdf1dba3333756a477bcb0d9ef70d17a4/posthog-7.14.2-py3-none-any.whl", hash = "sha256:f78b45a5ad5c72e55bf1cadebe8cf46bae2a6094e7fe01cbc7b5ec0531aab4d8", size = 240750, upload-time = "2026-05-13T16:36:25.544Z" },
 ]
 
 [[package]]
@@ -2516,15 +2454,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pytz"
-version = "2026.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ff/46/dd499ec9038423421951e4fad73051febaa13d2df82b4064f87af8b8c0c3/pytz-2026.2.tar.gz", hash = "sha256:0e60b47b29f21574376f218fe21abc009894a2321ea16c6754f3cad6eb7cdd6a", size = 320861, upload-time = "2026-05-04T01:35:29.667Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ec/dd/96da98f892250475bdf2328112d7468abdd4acc7b902b6af23f4ed958ea0/pytz-2026.2-py2.py3-none-any.whl", hash = "sha256:04156e608bee23d3792fd45c94ae47fae1036688e75032eea2e3bf0323d1f126", size = 510141, upload-time = "2026-05-04T01:35:27.408Z" },
-]
-
-[[package]]
 name = "pywin32"
 version = "311"
 source = { registry = "https://pypi.org/simple" }
@@ -2957,11 +2886,6 @@ dependencies = [
     { name = "surrealdb" },
 ]
 
-[package.optional-dependencies]
-compatibility = [
-    { name = "graphiti-core", extra = ["anthropic", "google-genai"] },
-]
-
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
@@ -2975,7 +2899,6 @@ requires-dist = [
     { name = "anyio", specifier = ">=4.0" },
     { name = "crawl4ai", specifier = ">=0.7.8" },
     { name = "google-genai", specifier = ">=2.0.1" },
-    { name = "graphiti-core", extras = ["anthropic", "google-genai"], marker = "extra == 'compatibility'", specifier = ">=0.28.2" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "mistune", specifier = ">=3.0" },
     { name = "passlib", specifier = ">=1.7" },
@@ -2988,7 +2911,6 @@ requires-dist = [
     { name = "structlog", specifier = ">=24.0" },
     { name = "surrealdb", specifier = ">=1.0.8,<3.0" },
 ]
-provides-extras = ["compatibility"]
 
 [package.metadata.requires-dev]
 dev = [

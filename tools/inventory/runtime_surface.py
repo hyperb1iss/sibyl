@@ -368,7 +368,6 @@ PACKAGE_LEGACY_TERM_FILES = (
     "packages/python/sibyl-core/COVERAGE_PLAN.md",
     "packages/python/sibyl-core/README.md",
     "packages/python/sibyl-core/moon.yml",
-    "packages/python/sibyl-core/pyproject.toml",
 )
 DEV_SCRIPT_LEGACY_TERM_FILES = (
     "setup-dev.sh",
@@ -421,7 +420,7 @@ LEGACY_TERM_ALLOWLIST = (
     *legacy_term_allowlist_records(
         ROOT_CONFIG_LEGACY_TERM_FILES,
         owner="repo package config",
-        reason="Root package configs retain compatibility extras and dev dependency boundaries.",
+        reason="Root package configs retain compatibility test markers and dev dependency boundaries.",
     ),
     *legacy_term_allowlist_records(
         ENV_TEMPLATE_LEGACY_TERM_FILES,

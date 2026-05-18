@@ -23,8 +23,8 @@ Recorded on 2026-05-13 at local commit `1de0b408`.
 - `moon run :check`: 33 tasks completed, including 5 executed tasks and 28 cache hits. Core reported
   1327 passed and 15 skipped; API reported 1639 passed and 1 skipped; CLI reported 156 passed; web
   reported 88 passed.
-- `graphiti-core` remains isolated to `sibyl-core[compatibility]` and the `sibyl-core` dev
-  dependency group. It is absent from default `sibyl-core` runtime dependencies.
+- `graphiti-core` was isolated to `sibyl-core[compatibility]` and the `sibyl-core` dev dependency
+  group at this checkpoint. It was absent from default `sibyl-core` runtime dependencies.
 - Green remote receipts exist for `origin/main` at `d2d3d926`: CI run `25801942331`, docs deploy run
   `25801942466`, and scheduled nightly run `25791871706`. Local `main` is ahead of `origin/main`, so
   local gates are the receipt for the unpushed checkpoint.
@@ -117,11 +117,9 @@ default runtime continues moving to native Surreal surfaces.
 - `reflect`: persisted reflection sources and candidates write native graph records by default. Set
   `SIBYL_NATIVE_WRITE=disabled` to use the compatibility path. Review-mode raw candidate storage
   remains the explicit review path.
-- Graphiti imports are removed from supported source; remaining work is dependency cleanup,
-  compatibility-test replacement, and deletion of legacy manager surfaces that still preserve
-  Graphiti-shaped behavior.
-- `graphiti-core` is owned by the `sibyl-core[compatibility]` extra and the core dev dependency
-  group. It is not a default `sibyl-core` runtime dependency.
+- Graphiti imports are removed from supported source; remaining work is compatibility-test
+  replacement and deletion of legacy manager surfaces that still preserve Graphiti-shaped behavior.
+- `graphiti-core` is no longer owned by any supported dependency set.
 
 ## Legacy Projection Rule
 
@@ -341,7 +339,8 @@ The v0.7/v0.8 exit gate proved Graphiti was out of the default loop. The v1.0 ga
 remaining supported Graphiti surface:
 
 - every allowlisted `graphiti_core` import is deleted or replaced with Sibyl-native code
-- `sibyl-core[compatibility]` no longer installs `graphiti-core`
+- the `sibyl-core[compatibility]` extra is deleted and no supported dependency installs
+  `graphiti-core`
 - dev dependency groups, CI, Docker, Helm, and docs no longer install Graphiti
 - compatibility tests are replaced with native archive/import regression tests
 - inventory checks fail if Graphiti appears outside historical docs or explicit migration-format
@@ -349,14 +348,12 @@ remaining supported Graphiti surface:
 - the no-Graphiti smoke test becomes a deletion proof for the whole supported runtime, not only the
   default loop
 
-## Dependency Boundary
+## Current Dependency Boundary
 
-Default `sibyl-core` installs do not depend on `graphiti-core`. Before 1.0, retained Graphiti code
-may still live behind the `compatibility` optional extra plus the `sibyl-core` dev dependency group.
-For 1.0, those retained surfaces must be deleted or replaced by native import/projection code. The
-generated runtime inventory records dependency scope (`default`, `optional:compatibility`, or
-`dependency-group:dev`) and the 1.0 inventory tests should fail if `graphiti-core` appears in any
-supported dependency set.
+Supported `sibyl-core` installs do not depend on `graphiti-core`. Retained legacy graph surfaces
+must be Sibyl-owned native import/projection code. The generated runtime inventory records
+dependency scope (`default`, `optional:*`, or `dependency-group:*`) and the 1.0 inventory tests fail
+if `graphiti-core` appears in any supported dependency set.
 
 Dependency files:
 

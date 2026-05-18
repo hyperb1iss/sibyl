@@ -365,8 +365,8 @@ sibyl/
 - **Coordination:** In-process by default; Redis/Valkey is optional for multi-process
   or distributed deployments.
 - **Build:** moonrepo + uv (Python) + pnpm (TypeScript)
-- **Compatibility:** Graphiti is an optional extra (`sibyl-core[compatibility]`) used
-  only for named migration and compatibility surfaces, not the default memory loop.
+- **Compatibility:** Legacy Graphiti-shaped records are handled by Sibyl-owned
+  Surreal projection and archive code. No supported install pulls Graphiti.
 
 See [`docs/guide/why-surreal.md`](docs/guide/why-surreal.md) for the rationale and
 [`docs/guide/storage-modes.md`](docs/guide/storage-modes.md) for the mode matrix.

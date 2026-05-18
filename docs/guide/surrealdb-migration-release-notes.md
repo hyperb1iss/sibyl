@@ -21,9 +21,8 @@ sidecars.
 - The local `moon run dev-legacy` fallback has been retired after the v0.6.0 compatibility release.
 - `moon run dev` detects local legacy data before creating a fresh Surreal dev runtime.
 - The live local FalkorDB migration wrapper has been retired; use archive import instead.
-- `graphiti-core` is no longer a default `sibyl-core` runtime dependency. Install the
-  `sibyl-core[compatibility]` extra only when running named Graphiti compatibility, migration, or
-  admin surfaces that still require the old contracts.
+- `graphiti-core` is no longer a supported `sibyl-core` dependency. Legacy Graphiti-shaped archives
+  and records are handled by Sibyl-owned Surreal projection and import code.
 
 ## Existing local installs
 

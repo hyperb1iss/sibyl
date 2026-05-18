@@ -488,12 +488,6 @@ def test_dependency_inventory_covers_legacy_and_target_stack() -> None:
     }
 
     assert (
-        "packages/python/sibyl-core/pyproject.toml",
-        "optional:compatibility",
-        "graphiti-core[anthropic,google-genai]>=0.28.2",
-        "graph",
-    ) in dependencies
-    assert (
         "apps/api/pyproject.toml",
         "default",
         "surrealdb>=1.0.8,<3.0",
@@ -514,7 +508,7 @@ def test_dependency_inventory_scans_all_repo_pyprojects() -> None:
     } <= scanned
 
 
-def test_graphiti_dependency_is_compatibility_only() -> None:
+def test_graphiti_dependency_is_absent() -> None:
     surface = collect_runtime_surface()
     graphiti_dependencies = tuple(
         record
@@ -522,20 +516,7 @@ def test_graphiti_dependency_is_compatibility_only() -> None:
         if parse_dependency_name(record.dependency) == "graphiti-core"
     )
 
-    assert graphiti_dependencies
-    assert {record.project for record in graphiti_dependencies} == {
-        "packages/python/sibyl-core/pyproject.toml"
-    }
-    assert all(record.scope != "default" for record in graphiti_dependencies)
-    assert all(record.scope != "dependency-group:dev" for record in graphiti_dependencies)
-    assert any(record.scope == "optional:compatibility" for record in graphiti_dependencies)
-    assert all(
-        record.scope == "optional:compatibility" or record.scope.startswith("dependency-group:")
-        for record in graphiti_dependencies
-    )
-    assert all("anthropic" in record.dependency for record in graphiti_dependencies)
-    assert all("google-genai" in record.dependency for record in graphiti_dependencies)
-    assert all("falkordb" not in record.dependency for record in graphiti_dependencies)
+    assert graphiti_dependencies == ()
 
 
 def test_no_graphiti_smoke_covers_default_entrypoints() -> None:

@@ -222,13 +222,11 @@ await manager.create_direct(entity)  # Native write path, no LLM
 await manager.create(entity)         # Compatibility extraction path
 ```
 
-## Compatibility Extra
+## Legacy Compatibility
 
-Graphiti support is an optional extra, not part of the default memory loop:
-
-```bash
-uv sync --extra compatibility    # installs graphiti-core for migration/compat surfaces
-```
+Legacy Graphiti-shaped records remain readable through Sibyl-owned Surreal
+projection and archive code. The package no longer exposes a Graphiti
+compatibility extra or installs `graphiti-core`.
 
 ## Testing
 
