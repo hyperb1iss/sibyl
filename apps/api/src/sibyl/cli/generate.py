@@ -4,12 +4,7 @@ Commands for generating test data to stress-test the system.
 Supports both template-based (fast) and LLM-enhanced (Claude) generation.
 """
 
-import os
-
-# Disable graphiti telemetry before any imports
-os.environ["GRAPHITI_TELEMETRY_ENABLED"] = "false"
-
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -47,8 +42,15 @@ def _count_result_rows(rows: object) -> int:
     return total or len(rows)
 
 
+async def _native_graph_managers(org_id: str) -> tuple[Any, Any]:
+    from sibyl_core.services.native_graph import get_native_graph_runtime
+
+    runtime = await get_native_graph_runtime(org_id)
+    return runtime.entity_manager, runtime.relationship_manager
+
+
 @app.command("realistic")
-def generate_realistic(  # noqa: PLR0915 - complex CLI command
+def generate_realistic(
     projects: Annotated[int, typer.Option("--projects", "-p", help="Number of projects")] = 5,
     tasks_per_project: Annotated[int, typer.Option("--tasks", "-t", help="Tasks per project")] = 20,
     patterns: Annotated[int, typer.Option("--patterns", help="Number of patterns")] = 50,
@@ -105,8 +107,6 @@ def generate_realistic(  # noqa: PLR0915 - complex CLI command
         from sibyl.generator.llm import LLMContentGenerator
         from sibyl.generator.relationships import RelationshipWeaver
         from sibyl.generator.templates import TemplateGenerator
-        from sibyl_core.graph.entities import EntityManager
-        from sibyl_core.graph.relationships import RelationshipManager
 
         # Build config
         model_type = ModelType.OPUS if model.lower() == "opus" else ModelType.SONNET
@@ -154,13 +154,9 @@ def generate_realistic(  # noqa: PLR0915 - complex CLI command
             # Store in graph
             confirm = typer.confirm("\nStore generated data in the graph?")
             if confirm:
-                from sibyl_core.graph.client import get_graph_client
+                entity_mgr, rel_mgr = await _native_graph_managers(org_id)
 
-                client = await get_graph_client()
-                entity_mgr = EntityManager(client, group_id=org_id)
-                rel_mgr = RelationshipManager(client, group_id=org_id)
-
-                # Use bulk_create_direct for speed (bypasses Graphiti LLM)
+                # Use direct bulk writes for speed.
                 stored_entities, _ = await entity_mgr.bulk_create_direct(
                     result.entities, batch_size=100
                 )
@@ -229,8 +225,6 @@ def generate_stress(
     async def _stress() -> None:
         from sibyl.generator.config import StressConfig
         from sibyl.generator.stress import StressTestGenerator
-        from sibyl_core.graph.entities import EntityManager
-        from sibyl_core.graph.relationships import RelationshipManager
 
         stress_config = StressConfig(
             entities=entities,
@@ -264,13 +258,9 @@ def generate_stress(
             # Store in graph
             confirm = typer.confirm("\nStore stress test data in the graph?")
             if confirm:
-                from sibyl_core.graph.client import get_graph_client
+                entity_mgr, rel_mgr = await _native_graph_managers(org_id)
 
-                client = await get_graph_client()
-                entity_mgr = EntityManager(client, group_id=org_id)
-                rel_mgr = RelationshipManager(client, group_id=org_id)
-
-                # Use bulk_create_direct for speed (bypasses Graphiti LLM)
+                # Use direct bulk writes for speed.
                 stored, _failed_ents = await entity_mgr.bulk_create_direct(
                     result.entities, batch_size=500
                 )
@@ -366,8 +356,6 @@ def generate_scenario(  # noqa: PLR0915 - complex CLI command
     async def _scenario() -> None:
         from sibyl.generator.config import ModelType
         from sibyl.generator.scenarios import ScenarioRunner
-        from sibyl_core.graph.entities import EntityManager
-        from sibyl_core.graph.relationships import RelationshipManager
 
         model_type = ModelType.OPUS if model.lower() == "opus" else ModelType.SONNET
 
@@ -396,13 +384,9 @@ def generate_scenario(  # noqa: PLR0915 - complex CLI command
             # Store in graph
             confirm = typer.confirm("\nStore scenario data in the graph?")
             if confirm:
-                from sibyl_core.graph.client import get_graph_client
+                entity_mgr, rel_mgr = await _native_graph_managers(org_id)
 
-                client = await get_graph_client()
-                entity_mgr = EntityManager(client, group_id=org_id)
-                rel_mgr = RelationshipManager(client, group_id=org_id)
-
-                # Use bulk_create_direct for speed (bypasses Graphiti LLM)
+                # Use direct bulk writes for speed.
                 stored_entities, _ = await entity_mgr.bulk_create_direct(
                     result.entities, batch_size=100
                 )
@@ -468,53 +452,47 @@ def clean_generated(
 
     @run_async
     async def _clean() -> None:
-        from sibyl.config import settings
-        from sibyl_core.graph.client import get_graph_client
+        from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
+        from sibyl_core.services.native_graph import (
+            get_native_graph_client,
+            prepare_native_graph_schema,
+        )
 
         try:
-            client = await get_graph_client()
+            client = await get_native_graph_client(org_id)
+            await prepare_native_graph_schema(client)
 
-            if settings.store == "surreal":
-                driver = client.get_org_driver(org_id)
-                if preserve_real:
-                    rel_rows = await driver.execute_query(
-                        """
-                        DELETE FROM relates_to
-                        WHERE group_id = $group_id
-                          AND attributes._generated = true
-                        RETURN BEFORE;
-                        """,
-                        group_id=org_id,
-                    )
-                    entity_rows = await driver.execute_query(
-                        """
-                        DELETE FROM entity
-                        WHERE group_id = $group_id
-                          AND attributes._generated = true
-                        RETURN BEFORE;
-                        """,
-                        group_id=org_id,
-                    )
-                    deleted = _count_result_rows(entity_rows) + _count_result_rows(rel_rows)
-                else:
-                    rows = await driver.execute_query(
-                        "SELECT count() AS count FROM entity WHERE group_id = $group_id GROUP ALL;",
-                        group_id=org_id,
-                    )
-                    deleted = _count_result_rows(rows)
-                    await driver.graph_ops.clear_data(driver, group_ids=[org_id])
-            elif preserve_real:
-                rows = await client.execute_write_org(
-                    "MATCH (n) WHERE n._generated = true DETACH DELETE n RETURN count(n) as deleted",
-                    org_id,
+            if preserve_real:
+                rel_rows = await client.execute_query(
+                    """
+                    DELETE FROM relates_to
+                    WHERE group_id = $group_id
+                      AND attributes._generated = true
+                    RETURN BEFORE;
+                    """,
+                    group_id=org_id,
                 )
-                deleted = rows[0][0] if rows else 0
+                entity_rows = await client.execute_query(
+                    """
+                    DELETE FROM entity
+                    WHERE group_id = $group_id
+                      AND attributes._generated = true
+                    RETURN BEFORE;
+                    """,
+                    group_id=org_id,
+                )
+                deleted = _count_result_rows(entity_rows) + _count_result_rows(rel_rows)
             else:
-                rows = await client.execute_write_org(
-                    "MATCH (n) DETACH DELETE n RETURN count(n) as deleted",
-                    org_id,
+                rows = await client.execute_query(
+                    "SELECT count() AS count FROM entity WHERE group_id = $group_id GROUP ALL;",
+                    group_id=org_id,
                 )
-                deleted = rows[0][0] if rows else 0
+                deleted = _count_result_rows(rows)
+                for table in (*GRAPH_EDGES, *GRAPH_TABLES):
+                    await client.execute_query(
+                        f"DELETE FROM {table} WHERE group_id = $group_id;",  # noqa: S608
+                        group_id=org_id,
+                    )
 
             success(f"Removed {deleted:,} generated records")
 
