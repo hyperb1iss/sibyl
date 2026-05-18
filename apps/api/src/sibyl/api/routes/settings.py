@@ -30,6 +30,12 @@ async def reset_graph_runtime() -> None:
     await service()
 
 
+def reset_document_embedding_runtime() -> None:
+    from sibyl_core.services.document_search import reset_document_embedding_provider_cache
+
+    reset_document_embedding_provider_cache()
+
+
 async def _try_reset_graph_client(context: str) -> None:
     """Reset the active graph runtime, logging on failure.
 
@@ -38,9 +44,10 @@ async def _try_reset_graph_client(context: str) -> None:
     """
     try:
         await reset_graph_runtime()
-        log.info(f"Reset graph runtime after {context}")
+        reset_document_embedding_runtime()
+        log.info(f"Reset graph and embedding runtimes after {context}")
     except Exception as e:
-        log.warning("Failed to reset graph runtime", error=str(e))
+        log.warning("Failed to reset graph and embedding runtimes", error=str(e))
 
 
 class SettingInfo(BaseModel):

@@ -1,5 +1,7 @@
 """Document search helpers for unified search."""
 
+import hashlib
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Protocol, cast
@@ -8,6 +10,11 @@ from uuid import UUID
 import structlog
 
 from sibyl_core.config import settings
+from sibyl_core.embeddings.native import (
+    NativeEmbeddingProvider,
+    NativeEmbeddingProviderName,
+    create_native_embedding_provider,
+)
 from sibyl_core.retrieval.dedup import cosine_similarity
 from sibyl_core.services.surreal_content import (
     lexical_score_from_tokens,
@@ -24,12 +31,93 @@ log = structlog.get_logger()
 DOCUMENT_VECTOR_WEIGHT = 0.7
 DOCUMENT_LEXICAL_WEIGHT = 0.3
 DOCUMENT_EMBEDDING_TIMEOUT_SECONDS = 2.0
+DOCUMENT_EMBEDDING_CACHE_SIZE = 1000
+
+_document_embedding_provider: NativeEmbeddingProvider | None = None
+_document_embedding_fingerprint: tuple[NativeEmbeddingProviderName, str, int, str] | None = None
+
+
+def reset_document_embedding_provider_cache() -> None:
+    global _document_embedding_fingerprint, _document_embedding_provider
+    _document_embedding_provider = None
+    _document_embedding_fingerprint = None
 
 
 async def _embed_text(text: str) -> list[float]:
-    from sibyl.crawler.embedder import embed_text
+    provider = _get_document_embedding_provider()
+    embeddings = await provider.embed_texts([text], input_kind="query")
+    if not embeddings:
+        raise ValueError("embedding provider returned no vectors")
+    return [float(value) for value in embeddings[0]]
 
-    return await embed_text(text)
+
+def _get_document_embedding_provider() -> NativeEmbeddingProvider:
+    global _document_embedding_fingerprint, _document_embedding_provider
+    provider_name = _document_embedding_provider_name()
+    model = _document_embedding_model(provider_name)
+    dimensions = _document_embedding_dimensions()
+    api_key = _document_embedding_api_key(provider_name)
+    fingerprint = (provider_name, model, dimensions, _secret_fingerprint(api_key))
+    if _document_embedding_provider is None or fingerprint != _document_embedding_fingerprint:
+        _document_embedding_provider = create_native_embedding_provider(
+            provider=provider_name,
+            model=model,
+            dimensions=dimensions,
+            cache_namespace="document",
+            api_key=api_key,
+            max_cache_size=DOCUMENT_EMBEDDING_CACHE_SIZE,
+        )
+        _document_embedding_fingerprint = fingerprint
+    assert _document_embedding_provider is not None
+    return _document_embedding_provider
+
+
+def _document_embedding_provider_name() -> NativeEmbeddingProviderName:
+    raw_provider = os.getenv("SIBYL_EMBEDDING_PROVIDER") or settings.embedding_provider
+    if raw_provider == "openai":
+        return "openai"
+    if raw_provider == "gemini":
+        return "gemini"
+    raise ValueError(f"Unsupported embedding provider: {raw_provider}")
+
+
+def _document_embedding_model(provider: NativeEmbeddingProviderName) -> str:
+    env_model = os.getenv("SIBYL_EMBEDDING_MODEL")
+    if env_model:
+        return env_model
+    if provider == "gemini" and settings.embedding_model == "text-embedding-3-small":
+        return "gemini-embedding-2"
+    return settings.embedding_model
+
+
+def _document_embedding_dimensions() -> int:
+    raw_dimensions = os.getenv("SIBYL_EMBEDDING_DIMENSIONS")
+    if raw_dimensions:
+        return int(raw_dimensions)
+    return settings.embedding_dimensions
+
+
+def _document_embedding_api_key(provider: NativeEmbeddingProviderName) -> str | None:
+    if provider == "gemini":
+        return (
+            os.getenv("SIBYL_GEMINI_API_KEY", "")
+            or os.getenv("GEMINI_API_KEY", "")
+            or os.getenv("GOOGLE_API_KEY", "")
+            or settings.gemini_api_key.get_secret_value()
+            or None
+        )
+    return (
+        os.getenv("SIBYL_OPENAI_API_KEY", "")
+        or os.getenv("OPENAI_API_KEY", "")
+        or settings.openai_api_key.get_secret_value()
+        or None
+    )
+
+
+def _secret_fingerprint(secret: str | None) -> str:
+    if not secret:
+        return ""
+    return hashlib.sha256(secret.encode()).hexdigest()
 
 
 class DocumentSearchChunk(Protocol):

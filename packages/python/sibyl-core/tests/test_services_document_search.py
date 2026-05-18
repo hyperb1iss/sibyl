@@ -12,6 +12,47 @@ from sibyl_core.services.document_search import search_documents
 from sibyl_core.services.surreal_content import ContentChunk, ContentDocument, ContentSource
 
 
+@pytest.mark.asyncio
+async def test_document_embedding_uses_core_native_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeProvider:
+        async def embed_texts(self, texts: list[str], *, input_kind: str) -> list[list[float]]:
+            calls.append({"texts": texts, "input_kind": input_kind})
+            return [[0.1, 0.2]]
+
+    def fake_provider_factory(**kwargs: object) -> FakeProvider:
+        calls.append(kwargs)
+        return FakeProvider()
+
+    document_search_service.reset_document_embedding_provider_cache()
+    monkeypatch.setenv("SIBYL_EMBEDDING_PROVIDER", "gemini")
+    monkeypatch.setenv("SIBYL_EMBEDDING_MODEL", "gemini-embedding-2")
+    monkeypatch.setenv("SIBYL_EMBEDDING_DIMENSIONS", "768")
+    monkeypatch.setenv("SIBYL_GEMINI_API_KEY", "gemini-key")
+    monkeypatch.setattr(
+        document_search_service,
+        "create_native_embedding_provider",
+        fake_provider_factory,
+    )
+
+    embedding = await document_search_service._embed_text("find docs")
+
+    assert embedding == [0.1, 0.2]
+    assert calls[0] == {
+        "provider": "gemini",
+        "model": "gemini-embedding-2",
+        "dimensions": 768,
+        "cache_namespace": "document",
+        "api_key": "gemini-key",
+        "max_cache_size": document_search_service.DOCUMENT_EMBEDDING_CACHE_SIZE,
+    }
+    assert calls[1] == {"texts": ["find docs"], "input_kind": "query"}
+    document_search_service.reset_document_embedding_provider_cache()
+
+
 class TestDocumentSearch:
     @pytest.mark.asyncio
     async def test_search_documents_uses_direct_surreal_chunk_search(

@@ -1,7 +1,7 @@
 """Tests for settings route auth gating."""
 
 import os
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -102,8 +102,11 @@ async def test_try_reset_graph_client_uses_runtime_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     reset_runtime = AsyncMock()
+    reset_embeddings = MagicMock()
     monkeypatch.setattr(settings_routes, "reset_graph_runtime", reset_runtime)
+    monkeypatch.setattr(settings_routes, "reset_document_embedding_runtime", reset_embeddings)
 
     await settings_routes._try_reset_graph_client("test context")
 
     reset_runtime.assert_awaited_once_with()
+    reset_embeddings.assert_called_once_with()

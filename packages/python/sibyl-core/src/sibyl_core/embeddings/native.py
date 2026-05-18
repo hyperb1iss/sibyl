@@ -18,6 +18,7 @@ from sibyl_core.embeddings.gemini import (
 from sibyl_core.models.entities import Entity, Relationship
 
 type NativeEmbeddingInputKind = Literal["query", "document"]
+type NativeEmbeddingProviderName = Literal["openai", "gemini"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +274,43 @@ class CachedNativeEmbeddingProvider:
         self._cache.clear()
 
 
+def create_native_embedding_provider(
+    *,
+    provider: NativeEmbeddingProviderName,
+    model: str,
+    dimensions: int,
+    cache_namespace: str,
+    api_key: str | None = None,
+    client: Any | None = None,
+    max_cache_size: int = 1000,
+    tokenizer_estimate_method: str = "provider-default",
+) -> NativeEmbeddingProvider:
+    metadata = NativeEmbeddingMetadata(
+        provider=provider,
+        model=model,
+        dimensions=dimensions,
+        cache_namespace=cache_namespace,
+        tokenizer_estimate_method=tokenizer_estimate_method,
+    )
+    if provider == "gemini":
+        return CachedNativeEmbeddingProvider(
+            GeminiNativeEmbeddingProvider(
+                metadata=metadata,
+                api_key=api_key,
+                client=client,
+            ),
+            max_size=max_cache_size,
+        )
+    return CachedNativeEmbeddingProvider(
+        OpenAINativeEmbeddingProvider(
+            metadata=metadata,
+            api_key=api_key,
+            client=client,
+        ),
+        max_size=max_cache_size,
+    )
+
+
 def native_embedding_cache_key(
     metadata: NativeEmbeddingMetadata,
     text: str,
@@ -369,7 +407,9 @@ __all__ = [
     "NativeEmbeddingInputKind",
     "NativeEmbeddingMetadata",
     "NativeEmbeddingProvider",
+    "NativeEmbeddingProviderName",
     "OpenAINativeEmbeddingProvider",
+    "create_native_embedding_provider",
     "native_embedding_cache_key",
     "native_entity_embedding_text",
     "native_relationship_embedding_text",
