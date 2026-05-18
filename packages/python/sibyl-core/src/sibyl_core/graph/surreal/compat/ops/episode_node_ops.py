@@ -10,9 +10,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from graphiti_core.errors import NodeNotFoundError
-from graphiti_core.nodes import EpisodeType, EpisodicNode
-
+from sibyl_core.graph.surreal.compat.models import EpisodeType, EpisodicNode, NodeNotFoundError
 from sibyl_core.graph.surreal.compat.ops._common import (
     QueryExecutor,
     SurrealRecord,

@@ -5,15 +5,18 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from graphiti_core.edges import (
+from sibyl_core.graph.surreal.compat.models import (
     CommunityEdge,
+    CommunityNode,
     EntityEdge,
+    EntityNode,
+    EpisodeType,
     EpisodicEdge,
+    EpisodicNode,
     HasEpisodeEdge,
     NextEpisodeEdge,
+    SagaNode,
 )
-from graphiti_core.nodes import CommunityNode, EntityNode, EpisodeType, EpisodicNode, SagaNode
-
 from sibyl_core.graph.surreal.compat.ops._common import SurrealRecord, normalize_records
 from sibyl_core.graph.surreal.compat.ops.episode_node_ops import episodic_node_from_record
 

@@ -8,11 +8,9 @@ from typing import Any
 import pytest
 from graphiti_core import Graphiti
 from graphiti_core.cross_encoder.client import CrossEncoderClient
-from graphiti_core.edges import EntityEdge, EpisodicEdge, HasEpisodeEdge
 from graphiti_core.embedder.client import EmbedderClient
 from graphiti_core.llm_client.client import LLMClient
 from graphiti_core.llm_client.config import LLMConfig, ModelSize
-from graphiti_core.nodes import CommunityNode, EntityNode, EpisodeType, EpisodicNode
 from graphiti_core.prompts.models import Message
 from graphiti_core.search.search_filters import ComparisonOperator, DateFilter, SearchFilters
 from graphiti_core.search.search_utils import get_embeddings_for_edges, get_embeddings_for_nodes
@@ -22,6 +20,15 @@ from sibyl_core.backends.surreal import SurrealDriver
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.graph.mock_llm import MockLLMClient as NativeMockLLMClient
 from sibyl_core.graph.search_interface import SurrealSearchInterface
+from sibyl_core.graph.surreal.compat.models import (
+    CommunityNode,
+    EntityEdge,
+    EntityNode,
+    EpisodeType,
+    EpisodicEdge,
+    EpisodicNode,
+    HasEpisodeEdge,
+)
 
 
 class _FakeEmbedder(EmbedderClient):

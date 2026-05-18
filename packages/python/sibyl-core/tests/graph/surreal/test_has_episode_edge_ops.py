@@ -5,10 +5,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from graphiti_core.edges import HasEpisodeEdge
-from graphiti_core.errors import EdgeNotFoundError
 
 from sibyl_core.backends.surreal import SurrealDriver
+from sibyl_core.graph.surreal.compat.models import EdgeNotFoundError, HasEpisodeEdge
 from sibyl_core.graph.surreal.compat.ops.has_episode_edge_ops import SurrealHasEpisodeEdgeOperations
 
 

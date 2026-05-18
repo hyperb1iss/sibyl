@@ -22,10 +22,9 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 
-from graphiti_core.nodes import CommunityNode, EntityNode, EpisodicNode
-
 from sibyl_core.backends.surreal.driver import SurrealDriver
 from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
+from sibyl_core.graph.surreal.compat.models import CommunityNode, EntityNode, EpisodicNode
 from sibyl_core.graph.surreal.compat.ops._common import QueryExecutor, normalize_records
 from sibyl_core.graph.surreal.compat.ops.community_node_ops import community_node_from_record
 from sibyl_core.graph.surreal.compat.ops.entity_node_ops import entity_node_from_record

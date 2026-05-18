@@ -11,7 +11,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - SQLModel tables: 0
 - Raw SQL query usage files: 0
 - Session-backed storage access files: 0
-- Graphiti import files: 12
+- Graphiti import files: 1
 - Retained legacy term files: 89
 - Dependency records: 3
 
@@ -83,17 +83,6 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 
 ### Graphiti import files
 - `packages/python/sibyl-core/src/sibyl_core/graph/client.py` — class: `compatibility`; imports: `graphiti_core`, `graphiti_core.driver.driver`, `graphiti_core.helpers`, `graphiti_core.llm_client.anthropic_client`, `graphiti_core.llm_client.config`, `graphiti_core.llm_client.openai_client`, `graphiti_core.search.search_config_recipes`
-- `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/community_edge_ops.py` — class: `compatibility`; imports: `graphiti_core.edges`, `graphiti_core.errors`
-- `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/community_node_ops.py` — class: `compatibility`; imports: `graphiti_core.errors`, `graphiti_core.nodes`
-- `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/entity_edge_ops.py` — class: `compatibility`; imports: `graphiti_core.edges`, `graphiti_core.errors`
-- `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/entity_node_ops.py` — class: `compatibility`; imports: `graphiti_core.errors`, `graphiti_core.nodes`
-- `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/episode_node_ops.py` — class: `compatibility`; imports: `graphiti_core.errors`, `graphiti_core.nodes`
-- `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/episodic_edge_ops.py` — class: `compatibility`; imports: `graphiti_core.edges`, `graphiti_core.errors`
-- `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/graph_operations_interface.py` — class: `compatibility`; imports: `graphiti_core.edges`, `graphiti_core.nodes`
-- `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/graph_ops.py` — class: `compatibility`; imports: `graphiti_core.nodes`
-- `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/has_episode_edge_ops.py` — class: `compatibility`; imports: `graphiti_core.edges`, `graphiti_core.errors`
-- `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/next_episode_edge_ops.py` — class: `compatibility`; imports: `graphiti_core.edges`, `graphiti_core.errors`
-- `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/saga_node_ops.py` — class: `compatibility`; imports: `graphiti_core.errors`, `graphiti_core.nodes`
 
 ## Retained Legacy Term Inventory
 

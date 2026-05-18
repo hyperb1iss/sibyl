@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from graphiti_core.edges import NextEpisodeEdge
-from graphiti_core.errors import EdgeNotFoundError
-
+from sibyl_core.graph.surreal.compat.models import EdgeNotFoundError, NextEpisodeEdge
 from sibyl_core.graph.surreal.compat.ops._common import (
     QueryExecutor,
     SurrealRecord,

@@ -7,8 +7,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from graphiti_core.edges import EntityEdge, EpisodicEdge
-from graphiti_core.nodes import EntityNode
 
 from sibyl_core.backends.surreal import SurrealDriver
 from sibyl_core.errors import GraphError
@@ -18,6 +16,7 @@ from sibyl_core.graph.relationships import (
     _sanitize_pagination,
     _validate_relationship_type,
 )
+from sibyl_core.graph.surreal.compat.models import EntityEdge, EntityNode, EpisodicEdge
 from sibyl_core.models.entities import Relationship, RelationshipType
 from tests.conftest import (
     MockRelationshipManager,

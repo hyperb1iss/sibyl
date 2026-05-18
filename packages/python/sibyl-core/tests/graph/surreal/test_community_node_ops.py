@@ -6,11 +6,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from graphiti_core.errors import NodeNotFoundError
-from graphiti_core.nodes import CommunityNode
 
 from sibyl_core.backends.surreal import SurrealDriver
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
+from sibyl_core.graph.surreal.compat.models import CommunityNode, NodeNotFoundError
 from sibyl_core.graph.surreal.compat.ops.community_node_ops import SurrealCommunityNodeOperations
 
 

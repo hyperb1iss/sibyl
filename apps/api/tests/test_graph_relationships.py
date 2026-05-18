@@ -4,9 +4,9 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from graphiti_core.edges import EntityEdge
 
 from sibyl_core.graph.relationships import RelationshipManager
+from sibyl_core.graph.surreal.compat.models import EntityEdge
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 
 

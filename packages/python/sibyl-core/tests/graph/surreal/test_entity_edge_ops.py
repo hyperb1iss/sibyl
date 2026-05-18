@@ -6,13 +6,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from graphiti_core.edges import EntityEdge
-from graphiti_core.errors import EdgeNotFoundError
-from graphiti_core.nodes import EntityNode
 from surrealdb import RecordID
 
 from sibyl_core.backends.surreal import SurrealDriver
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
+from sibyl_core.graph.surreal.compat.models import EdgeNotFoundError, EntityEdge, EntityNode
 from sibyl_core.graph.surreal.compat.ops.entity_edge_ops import SurrealEntityEdgeOperations
 from sibyl_core.graph.surreal.compat.ops.entity_node_ops import SurrealEntityNodeOperations
 

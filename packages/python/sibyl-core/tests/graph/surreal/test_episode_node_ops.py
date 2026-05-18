@@ -6,10 +6,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from graphiti_core.errors import NodeNotFoundError
-from graphiti_core.nodes import EpisodeType, EpisodicNode
 
 from sibyl_core.backends.surreal import SurrealDriver
+from sibyl_core.graph.surreal.compat.models import EpisodeType, EpisodicNode, NodeNotFoundError
 from sibyl_core.graph.surreal.compat.ops.episode_node_ops import SurrealEpisodeNodeOperations
 
 

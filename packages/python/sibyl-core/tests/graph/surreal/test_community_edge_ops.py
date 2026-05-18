@@ -5,11 +5,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from graphiti_core.edges import CommunityEdge
-from graphiti_core.errors import EdgeNotFoundError
-from graphiti_core.nodes import CommunityNode, EntityNode
 
 from sibyl_core.backends.surreal import SurrealDriver
+from sibyl_core.graph.surreal.compat.models import (
+    CommunityEdge,
+    CommunityNode,
+    EdgeNotFoundError,
+    EntityNode,
+)
 from sibyl_core.graph.surreal.compat.ops.community_edge_ops import SurrealCommunityEdgeOperations
 from sibyl_core.graph.surreal.compat.ops.entity_node_ops import SurrealEntityNodeOperations
 
