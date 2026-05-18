@@ -217,6 +217,7 @@ tasks:
       - ~:inventory-test
       - ~:dev-script-test
       - ~:bench-gate-test
+      - ~:multi-user-perf-test
       - ~:chaos-test
       - ~:storage-access-check
       - ~:storage-access-test
@@ -243,6 +244,7 @@ tasks:
       - ~:inventory-test
       - ~:dev-script-test
       - ~:bench-gate-test
+      - ~:multi-user-perf-test
       - ~:chaos-test
       - ~:storage-access-test
       - ~:baseline-test
@@ -516,6 +518,13 @@ tasks:
       - tools/**/*.py
       - benchmarks/longmemeval_bench.py
       - benchmarks/results/ai-memory/*.json
+      - pyproject.toml
+
+  multi-user-perf-test:
+    command: uv run pytest tools/tests/test_multi_user_perf.py -v
+    inputs:
+      - tools/perf/**/*.py
+      - tools/tests/test_multi_user_perf.py
       - pyproject.toml
 
   chaos-archive:

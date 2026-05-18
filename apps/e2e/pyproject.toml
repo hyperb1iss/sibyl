@@ -57,7 +57,9 @@ markers = [
     "api: API endpoint tests",
     "cli: CLI command tests",
     "browser: Browser automation tests (requires playwright)",
+    "perf: live performance tests",
     "slow: marks tests as slow",
+    "stress: marks tests as stress/load tests",
 ]
 
 # =============================================================================

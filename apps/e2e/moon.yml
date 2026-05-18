@@ -17,6 +17,15 @@ tasks:
     inputs:
     - '@group(tests)'
     preset: server
+  test-perf:
+    command: uv run pytest tests/perf -m perf -v -s
+    env:
+      SIBYL_E2E_CLI_COMMAND: uv run --project ../cli sibyl
+      SIBYL_E2E_PERF: '1'
+    inputs:
+    - '@group(tests)'
+    - /tools/perf/**/*.py
+    preset: server
   test-browser:
     command: uv run pytest -m browser
     env:
