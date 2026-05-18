@@ -76,10 +76,6 @@ owner, and deletion or retention criterion.
   - Class: `test`
   - Owner: v0.7 reflection
   - Criteria: Native reflection tests no longer instantiate Graphiti extraction clients.
-- `packages/python/sibyl-core/src/sibyl_core/tools/admin.py`
-  - Class: `admin`
-  - Owner: v0.7 archive compatibility
-  - Criteria: Backup restore helpers stop dynamically loading Graphiti node and edge classes.
 - `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/*`
   - Class: `compatibility`
   - Owner: v0.7 Graphiti exit
@@ -265,17 +261,6 @@ source metadata.
 - Removal condition: native reflection tests no longer instantiate Graphiti extraction clients.
 - Owner: v0.7 reflection.
 - Verify: `moon run core:test -- tests/test_graph_client.py tests/test_reflect.py`.
-
-### `packages/python/sibyl-core/src/sibyl_core/tools/admin.py`
-
-- Behavior: backup restore helpers dynamically load legacy Graphiti episode node and edge classes
-  when restoring historical backup payloads.
-- Default-loop usage: none; default API, MCP, CLI, and worker import smoke does not call these
-  helpers.
-- Status: retained admin compatibility helper.
-- Removal condition: backup restore helpers stop dynamically loading Graphiti node and edge classes.
-- Owner: v0.7 archive compatibility.
-- Verify: `moon run graphiti-compatibility-test`.
 
 ### `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/*`
 

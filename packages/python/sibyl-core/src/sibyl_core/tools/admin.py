@@ -7,14 +7,15 @@ import contextlib
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from importlib import import_module
 from typing import Any
 from uuid import uuid4
 
 import structlog
+from surrealdb import RecordID
 
 from sibyl_core.config import settings
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.services.native_graph import normalize_records
 
 log = structlog.get_logger()
 
@@ -232,7 +233,7 @@ async def get_stats(*, organization_id: str | None = None) -> dict[str, object]:
         stats["total_entities"] = sum(entity_stats.values())
 
         # TODO: Add relationship stats from the native relationship manager
-        # TODO: Add storage stats from Graphiti
+        # TODO: Add native graph storage stats
 
         return stats
 
@@ -494,16 +495,32 @@ class RestoreResult:
 BACKUP_ENTITY_TYPES = list(EntityType)
 
 
-def _episode_type_cls() -> Any:
-    return import_module("graphiti_core.nodes").EpisodeType
+@dataclass
+class BackupEpisodeSource:
+    value: str
 
 
-def _episodic_node_cls() -> Any:
-    return import_module("graphiti_core.nodes").EpisodicNode
+@dataclass
+class BackupEpisodeNode:
+    uuid: str
+    name: str
+    group_id: str
+    source: BackupEpisodeSource
+    source_description: str
+    content: str
+    entity_edges: list[str]
+    created_at: datetime
+    valid_at: datetime
+    labels: list[str] = field(default_factory=lambda: ["Episodic"])
 
 
-def _episodic_edge_cls() -> Any:
-    return import_module("graphiti_core.edges").EpisodicEdge
+@dataclass
+class BackupMentionEdge:
+    uuid: str
+    group_id: str
+    source_node_uuid: str
+    target_node_uuid: str
+    created_at: datetime
 
 
 def _serialize_backup_datetime(value: Any) -> str:
@@ -521,20 +538,38 @@ def _parse_backup_datetime(value: Any) -> datetime:
     return datetime.now(UTC)
 
 
-def _coerce_episode_type(value: Any) -> Any:
-    EpisodeType = _episode_type_cls()
+def _coerce_episode_source(value: Any) -> BackupEpisodeSource:
     raw_value = str(value or "").strip().lower()
-    for episode_type in EpisodeType:
-        if episode_type.value == raw_value:
-            return episode_type
-    return EpisodeType.message
+    return BackupEpisodeSource(raw_value or "message")
+
+
+def _runtime_driver_for(client: Any, organization_id: str) -> Any:
+    get_org_driver = getattr(client, "get_org_driver", None)
+    if callable(get_org_driver):
+        return get_org_driver(organization_id)
+    return client
+
+
+def _normalize_runtime_rows(client: Any, result: Any) -> list[dict[str, Any]]:
+    normalize_result = getattr(client, "normalize_result", None)
+    if callable(normalize_result):
+        return normalize_result(result)
+    return normalize_records(result)
+
+
+def _string_list(value: Any, *, default: list[str] | None = None) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return list(default or [])
 
 
 def _episode_payload_from_node(node: Any, *, organization_id: str) -> dict[str, Any]:
+    source = getattr(node, "source", None)
+    source_value = getattr(source, "value", source)
     return {
         "uuid": node.uuid,
         "name": node.name,
-        "source": node.source.value,
+        "source": str(source_value or "message"),
         "source_description": node.source_description,
         "content": node.content,
         "labels": list(node.labels),
@@ -558,11 +593,11 @@ def _mention_payload_from_edge(edge: Any, *, organization_id: str) -> dict[str, 
 def _episode_from_payload(payload: dict[str, Any], *, organization_id: str) -> Any:
     created_at = _parse_backup_datetime(payload.get("created_at"))
     valid_at = _parse_backup_datetime(payload.get("valid_at") or created_at)
-    return _episodic_node_cls()(
+    return BackupEpisodeNode(
         uuid=str(payload.get("uuid") or ""),
         name=str(payload.get("name") or ""),
         group_id=organization_id,
-        source=_coerce_episode_type(payload.get("source")),
+        source=_coerce_episode_source(payload.get("source")),
         source_description=str(payload.get("source_description") or ""),
         content=str(payload.get("content") or ""),
         entity_edges=list(payload.get("entity_edges") or []),
@@ -572,7 +607,7 @@ def _episode_from_payload(payload: dict[str, Any], *, organization_id: str) -> A
 
 
 def _mention_from_payload(payload: dict[str, Any], *, organization_id: str) -> Any:
-    return _episodic_edge_cls()(
+    return BackupMentionEdge(
         uuid=str(payload.get("uuid") or ""),
         group_id=organization_id,
         source_node_uuid=str(payload.get("source_id") or payload.get("source_node_uuid") or ""),
@@ -581,17 +616,208 @@ def _mention_from_payload(payload: dict[str, Any], *, organization_id: str) -> A
     )
 
 
+async def _native_record_id(client: Any, table: str, uuid: str) -> Any | None:
+    rows = normalize_records(
+        await client.execute_query(
+            f"SELECT id AS record_id FROM {table} WHERE uuid = $uuid LIMIT 1;",
+            uuid=uuid,
+        )
+    )
+    if not rows:
+        return None
+    return rows[0].get("record_id")
+
+
+async def _native_mention_exists(client: Any, uuid: str) -> bool:
+    rows = normalize_records(
+        await client.execute_query(
+            "SELECT uuid FROM mentions WHERE uuid = $uuid LIMIT 1;",
+            uuid=uuid,
+        )
+    )
+    return bool(rows)
+
+
+async def _save_native_episode(client: Any, episode: BackupEpisodeNode) -> None:
+    await client.execute_query(
+        """
+        UPSERT episode SET
+            uuid = $uuid,
+            name = $name,
+            source = $source,
+            source_description = $source_description,
+            content = $content,
+            labels = $labels,
+            group_id = $group_id,
+            created_at = $created_at,
+            valid_at = $valid_at,
+            entity_edges = $entity_edges
+        WHERE uuid = $uuid;
+        """,
+        uuid=episode.uuid,
+        name=episode.name,
+        source=episode.source.value,
+        source_description=episode.source_description,
+        content=episode.content,
+        labels=list(episode.labels),
+        group_id=episode.group_id,
+        created_at=episode.created_at,
+        valid_at=episode.valid_at,
+        entity_edges=list(episode.entity_edges),
+    )
+
+
+async def _save_native_mention(client: Any, mention: BackupMentionEdge) -> None:
+    source_record_id = await _native_record_id(client, "episode", mention.source_node_uuid)
+    target_record_id = await _native_record_id(client, "entity", mention.target_node_uuid)
+    if source_record_id is None or target_record_id is None:
+        msg = (
+            f"Cannot save mention {mention.uuid!r}: source episode "
+            f"{mention.source_node_uuid!r} or target entity "
+            f"{mention.target_node_uuid!r} not found"
+        )
+        raise ValueError(msg)
+
+    await client.execute_query(
+        """
+        DELETE FROM mentions WHERE uuid = $uuid AND (in != $src OR out != $tgt);
+        LET $updated = (UPDATE mentions SET
+            in = $src,
+            out = $tgt,
+            uuid = $uuid,
+            group_id = $group_id,
+            created_at = $created_at
+        WHERE uuid = $uuid RETURN id);
+        IF array::len($updated) = 0 THEN
+            RELATE $src->$rel->$tgt SET
+                uuid = $uuid,
+                group_id = $group_id,
+                created_at = $created_at;
+        END;
+        """,
+        rel=RecordID("mentions", mention.uuid),
+        src=source_record_id,
+        tgt=target_record_id,
+        uuid=mention.uuid,
+        group_id=mention.group_id,
+        created_at=mention.created_at,
+    )
+
+
+async def _list_native_backup_episodes(
+    *,
+    organization_id: str,
+    client: Any,
+) -> list[dict[str, Any]]:
+    episodes: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT uuid,
+                       name,
+                       source,
+                       source_description,
+                       content,
+                       labels,
+                       group_id,
+                       created_at,
+                       valid_at,
+                       entity_edges
+                FROM episode
+                WHERE group_id = $group_id
+                ORDER BY uuid DESC
+                LIMIT $limit START $offset;
+                """,
+                group_id=organization_id,
+                limit=BACKFILL_PAGE_SIZE,
+                offset=offset,
+            )
+        )
+        if not rows:
+            break
+        for row in rows:
+            episodes.append(
+                {
+                    "uuid": str(row.get("uuid") or ""),
+                    "name": str(row.get("name") or ""),
+                    "source": str(row.get("source") or "message"),
+                    "source_description": row.get("source_description"),
+                    "content": str(row.get("content") or ""),
+                    "labels": _string_list(row.get("labels"), default=["Episodic"]),
+                    "group_id": str(row.get("group_id") or organization_id),
+                    "created_at": _serialize_backup_datetime(row.get("created_at")),
+                    "valid_at": _serialize_backup_datetime(
+                        row.get("valid_at") or row.get("created_at")
+                    ),
+                    "entity_edges": _string_list(row.get("entity_edges")),
+                }
+            )
+        if len(rows) < BACKFILL_PAGE_SIZE:
+            break
+        offset += len(rows)
+    return episodes
+
+
+async def _list_native_backup_mentions(
+    *,
+    organization_id: str,
+    client: Any,
+) -> list[dict[str, Any]]:
+    mentions: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT uuid,
+                       in.uuid AS source_id,
+                       out.uuid AS target_id,
+                       group_id,
+                       created_at
+                FROM mentions
+                WHERE group_id = $group_id
+                ORDER BY uuid DESC
+                LIMIT $limit START $offset;
+                """,
+                group_id=organization_id,
+                limit=BACKFILL_PAGE_SIZE,
+                offset=offset,
+            )
+        )
+        if not rows:
+            break
+        for row in rows:
+            mentions.append(
+                {
+                    "uuid": str(row.get("uuid") or ""),
+                    "source_id": str(row.get("source_id") or ""),
+                    "target_id": str(row.get("target_id") or ""),
+                    "group_id": str(row.get("group_id") or organization_id),
+                    "created_at": _serialize_backup_datetime(row.get("created_at")),
+                }
+            )
+        if len(rows) < BACKFILL_PAGE_SIZE:
+            break
+        offset += len(rows)
+    return mentions
+
+
 async def _list_backup_episodes(
     *,
     organization_id: str,
     client: Any,
 ) -> list[dict[str, Any]]:
-    driver = client.get_org_driver(organization_id)
+    driver = _runtime_driver_for(client, organization_id)
 
     if settings.store == "surreal":
         episode_ops = getattr(driver, "episode_node_ops", None)
         if episode_ops is None:
-            return []
+            return await _list_native_backup_episodes(
+                organization_id=organization_id,
+                client=driver,
+            )
 
         episodes: list[dict[str, Any]] = []
         cursor: str | None = None
@@ -635,7 +861,7 @@ async def _list_backup_episodes(
             """,
             group_id=organization_id,
         )
-        rows = client.normalize_result(result)
+        rows = _normalize_runtime_rows(client, result)
         if not rows:
             break
         for row in rows:
@@ -643,16 +869,16 @@ async def _list_backup_episodes(
                 {
                     "uuid": str(row.get("uuid") or ""),
                     "name": str(row.get("name") or ""),
-                    "source": str(row.get("source") or _episode_type_cls().message.value),
+                    "source": str(row.get("source") or "message"),
                     "source_description": row.get("source_description"),
                     "content": str(row.get("content") or ""),
-                    "labels": list(row.get("labels") or ["Episodic"]),
+                    "labels": _string_list(row.get("labels"), default=["Episodic"]),
                     "group_id": str(row.get("group_id") or organization_id),
                     "created_at": _serialize_backup_datetime(row.get("created_at")),
                     "valid_at": _serialize_backup_datetime(
                         row.get("valid_at") or row.get("created_at")
                     ),
-                    "entity_edges": list(row.get("entity_edges") or []),
+                    "entity_edges": _string_list(row.get("entity_edges")),
                 }
             )
         if len(rows) < BACKFILL_PAGE_SIZE:
@@ -666,12 +892,15 @@ async def _list_backup_mentions(
     organization_id: str,
     client: Any,
 ) -> list[dict[str, Any]]:
-    driver = client.get_org_driver(organization_id)
+    driver = _runtime_driver_for(client, organization_id)
 
     if settings.store == "surreal":
         episodic_edge_ops = getattr(driver, "episodic_edge_ops", None)
         if episodic_edge_ops is None:
-            return []
+            return await _list_native_backup_mentions(
+                organization_id=organization_id,
+                client=driver,
+            )
 
         mentions: list[dict[str, Any]] = []
         cursor: str | None = None
@@ -710,7 +939,7 @@ async def _list_backup_mentions(
             """,
             group_id=organization_id,
         )
-        rows = client.normalize_result(result)
+        rows = _normalize_runtime_rows(client, result)
         if not rows:
             break
         for row in rows:
@@ -751,7 +980,7 @@ async def _list_backup_relationships(
             offset += len(batch)
         return relationships
 
-    driver = client.get_org_driver(organization_id)
+    driver = _runtime_driver_for(client, organization_id)
     quoted_types = ", ".join(
         f"'{relationship_type.value}'" for relationship_type in RelationshipType
     )
@@ -776,7 +1005,7 @@ async def _list_backup_relationships(
             """,
             group_id=organization_id,
         )
-        rows = client.normalize_result(result)
+        rows = _normalize_runtime_rows(client, result)
         if not rows:
             break
         for row in rows:
@@ -856,7 +1085,7 @@ async def _list_backup_entities(
             offset += len(batch)
         return entities
 
-    driver = client.get_org_driver(organization_id)
+    driver = _runtime_driver_for(client, organization_id)
     entities: list[Entity] = []
     offset = 0
     while True:
@@ -883,7 +1112,7 @@ async def _list_backup_entities(
             """,
             group_id=organization_id,
         )
-        rows = client.normalize_result(result)
+        rows = _normalize_runtime_rows(client, result)
         if not rows:
             break
         entities.extend(
@@ -1034,7 +1263,7 @@ async def restore_backup(
         runtime = await get_graph_runtime(organization_id)
         entity_manager = runtime.entity_manager
         relationship_manager = runtime.relationship_manager
-        driver = runtime.client.get_org_driver(organization_id)
+        driver = _runtime_driver_for(runtime.client, organization_id)
 
         entities_to_restore: list[Entity] = []
         for entity_data in backup_data.entities:
@@ -1130,9 +1359,15 @@ async def restore_backup(
                         if len(errors) <= 10:
                             log.warning("Episode restore failed", error=error_msg)
         elif episodes_to_restore:
-            error_msg = "Episode restore is not supported by the active runtime driver"
-            errors.append(error_msg)
-            log.warning("Episode restore failed", error=error_msg)
+            for episode in episodes_to_restore:
+                try:
+                    await _save_native_episode(driver, episode)
+                    episodes_restored += 1
+                except Exception as e:
+                    error_msg = f"Episode {episode.uuid}: {e}"
+                    errors.append(error_msg)
+                    if len(errors) <= 10:
+                        log.warning("Episode restore failed", error=error_msg)
 
         relationships_to_restore: list[Relationship] = []
         for rel_data in normalize_relationship_payloads(backup_data.relationships):
@@ -1178,6 +1413,9 @@ async def restore_backup(
                                 continue
                         except Exception:
                             pass
+                    elif await _native_mention_exists(driver, mention.uuid):
+                        mentions_skipped += 1
+                        continue
                 mentions_to_restore.append(mention)
             except Exception as e:
                 error_msg = f"Mention {mention_data.get('uuid', 'unknown')}: {e}"
@@ -1214,9 +1452,15 @@ async def restore_backup(
                         if len(errors) <= 10:
                             log.warning("Mention restore failed", error=error_msg)
         elif mentions_to_restore:
-            error_msg = "Mention restore is not supported by the active runtime driver"
-            errors.append(error_msg)
-            log.warning("Mention restore failed", error=error_msg)
+            for mention in mentions_to_restore:
+                try:
+                    await _save_native_mention(driver, mention)
+                    mentions_restored += 1
+                except Exception as e:
+                    error_msg = f"Mention {mention.uuid}: {e}"
+                    errors.append(error_msg)
+                    if len(errors) <= 10:
+                        log.warning("Mention restore failed", error=error_msg)
 
         duration = time.time() - start_time
         log.info(

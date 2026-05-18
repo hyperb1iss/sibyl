@@ -19,6 +19,7 @@ from tools.inventory.runtime_surface import (
     collect_runtime_surface,
     default_runtime_graphiti_imports,
     graphiti_allowlist_record,
+    graphiti_dynamic_import_name,
     iter_legacy_term_files,
     legacy_term_allowlist_record,
     parse_dependency_name,
@@ -259,15 +260,24 @@ def test_graphiti_exit_inventory_allows_named_compatibility_imports() -> None:
 
 
 def test_graphiti_exit_inventory_detects_dynamic_imports() -> None:
-    surface = collect_runtime_surface()
-    record = next(
-        record
-        for record in surface.graphiti_imports
-        if record.path == "packages/python/sibyl-core/src/sibyl_core/tools/admin.py"
+    tree = ast.parse(
+        """
+from importlib import import_module
+
+import_module("graphiti_core.edges")
+__import__("graphiti.nodes")
+import_module("sibyl_core.graph")
+"""
+    )
+    imports = tuple(
+        dynamic_import
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for dynamic_import in [graphiti_dynamic_import_name(node)]
+        if dynamic_import is not None
     )
 
-    assert record.imports == ("graphiti_core.edges", "graphiti_core.nodes")
-    assert graphiti_allowlist_record(record.path) is not None
+    assert imports == ("graphiti_core.edges", "graphiti.nodes")
 
 
 def test_graphiti_exit_inventory_documents_allowlist_ownership() -> None:

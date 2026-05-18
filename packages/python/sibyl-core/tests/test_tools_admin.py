@@ -8,6 +8,13 @@ from unittest.mock import ANY, AsyncMock, call, patch
 import pytest
 
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.services.native_graph import (
+    NativeEntityManager,
+    NativeRelationshipManager,
+    NativeSurrealGraphClient,
+    normalize_records,
+    prepare_native_graph_schema,
+)
 from sibyl_core.tools import admin as admin_module
 from sibyl_core.tools.admin import (
     BackupData,
@@ -440,28 +447,26 @@ class TestRestoreBackup:
         assert create_args.kwargs == {"generate_embedding": False}
 
     @pytest.mark.asyncio
-    @pytest.mark.graphiti_compatibility
     async def test_restore_rehydrates_episodes_and_mentions(self) -> None:
         org_id = "00000000-0000-0000-0000-000000000111"
-        entity_manager = AsyncMock()
-        relationship_manager = AsyncMock()
-        episode_ops = SimpleNamespace(save_bulk=AsyncMock(), save=AsyncMock())
-        mention_ops = SimpleNamespace(
-            save_bulk=AsyncMock(), save=AsyncMock(), get_by_uuid=AsyncMock()
-        )
-        driver = SimpleNamespace(
-            episode_node_ops=episode_ops,
-            episodic_edge_ops=mention_ops,
-        )
-        entity_manager.bulk_create_direct = AsyncMock(return_value=(0, 0))
-        relationship_manager.create_bulk = AsyncMock(return_value=(0, 0))
+        client = NativeSurrealGraphClient(group_id=org_id, url="memory://")
+        await prepare_native_graph_schema(client)
+        entity_manager = NativeEntityManager(client, group_id=org_id)
+        relationship_manager = NativeRelationshipManager(client, group_id=org_id)
         backup_data = BackupData(
             version="2.0",
             created_at="2026-04-19T00:00:00Z",
             organization_id=org_id,
-            entity_count=0,
+            entity_count=1,
             relationship_count=0,
-            entities=[],
+            entities=[
+                Entity(
+                    id="entity-1",
+                    entity_type=EntityType.NOTE,
+                    name="Mentioned entity",
+                    organization_id=org_id,
+                ).model_dump(mode="json")
+            ],
             relationships=[],
             episode_count=1,
             mention_count=1,
@@ -487,27 +492,59 @@ class TestRestoreBackup:
             ],
         )
 
-        with patch(
-            "sibyl_core.tools.admin.get_graph_runtime",
-            AsyncMock(
-                return_value=SimpleNamespace(
-                    client=SimpleNamespace(get_org_driver=lambda group_id: driver),
-                    entity_manager=entity_manager,
-                    relationship_manager=relationship_manager,
+        try:
+            with patch(
+                "sibyl_core.tools.admin.get_graph_runtime",
+                AsyncMock(
+                    return_value=SimpleNamespace(
+                        client=client,
+                        entity_manager=entity_manager,
+                        relationship_manager=relationship_manager,
+                    )
+                ),
+            ):
+                result = await restore_backup(
+                    backup_data,
+                    organization_id=org_id,
+                    skip_existing=False,
                 )
-            ),
-        ):
-            result = await restore_backup(
-                backup_data,
-                organization_id=org_id,
-                skip_existing=False,
+
+            episode_rows = normalize_records(
+                await client.execute_query(
+                    """
+                    SELECT uuid, source, source_description, content, entity_edges
+                    FROM episode
+                    WHERE uuid = "episode-1";
+                    """
+                )
             )
+            mention_rows = normalize_records(
+                await client.execute_query(
+                    """
+                    SELECT uuid, in.uuid AS source_id, out.uuid AS target_id
+                    FROM mentions
+                    WHERE uuid = "mention-1";
+                    """
+                )
+            )
+        finally:
+            await client.close()
 
         assert result.success is True
         assert result.episodes_restored == 1
         assert result.mentions_restored == 1
-        episode_ops.save_bulk.assert_awaited_once()
-        mention_ops.save_bulk.assert_awaited_once()
+        assert episode_rows == [
+            {
+                "uuid": "episode-1",
+                "source": "message",
+                "source_description": "chat",
+                "content": "hi",
+                "entity_edges": [],
+            }
+        ]
+        assert mention_rows == [
+            {"uuid": "mention-1", "source_id": "episode-1", "target_id": "entity-1"}
+        ]
 
     @pytest.mark.asyncio
     async def test_restore_preserves_task_link_source_metadata(self) -> None:

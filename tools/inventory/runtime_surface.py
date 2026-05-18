@@ -312,12 +312,6 @@ GRAPHITI_COMPATIBILITY_ALLOWLIST = (
         criteria="Native reflection tests no longer instantiate Graphiti extraction clients.",
     ),
     GraphitiCompatibilityRecord(
-        path="packages/python/sibyl-core/src/sibyl_core/tools/admin.py",
-        classification="admin",
-        owner="v0.7 archive compatibility",
-        criteria="Backup restore helpers stop dynamically loading Graphiti node and edge classes.",
-    ),
-    GraphitiCompatibilityRecord(
         path="packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/*",
         classification="compatibility",
         owner="v0.7 Graphiti exit",
