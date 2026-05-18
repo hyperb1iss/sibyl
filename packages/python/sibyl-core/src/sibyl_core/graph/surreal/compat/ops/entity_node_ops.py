@@ -11,13 +11,14 @@ from __future__ import annotations
 import logging
 
 from graphiti_core.driver.operations.entity_node_ops import EntityNodeOperations
-from graphiti_core.driver.query_executor import QueryExecutor, Transaction
 from graphiti_core.driver.record_parsers import entity_node_from_record
 from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.nodes import EntityNode
 
 from sibyl_core.graph.surreal.compat.ops._common import (
+    QueryExecutor,
     SurrealRecord,
+    Transaction,
     build_node_bulk_upsert_query,
     build_node_upsert_query,
     normalize_embedding,

@@ -10,13 +10,14 @@ from __future__ import annotations
 import logging
 
 from graphiti_core.driver.operations.community_node_ops import CommunityNodeOperations
-from graphiti_core.driver.query_executor import QueryExecutor, Transaction
 from graphiti_core.driver.record_parsers import community_node_from_record
 from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.nodes import CommunityNode
 
 from sibyl_core.graph.surreal.compat.ops._common import (
+    QueryExecutor,
     SurrealRecord,
+    Transaction,
     build_node_bulk_upsert_query,
     build_node_upsert_query,
     normalize_records,

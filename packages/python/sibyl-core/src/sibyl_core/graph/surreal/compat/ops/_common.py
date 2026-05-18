@@ -9,11 +9,19 @@ so the call sites in individual ops modules stay short.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any, Protocol
 
-from graphiti_core.driver.query_executor import QueryExecutor, Transaction
 from surrealdb import RecordID
 
 type SurrealRecord = dict[str, object]
+
+
+class QueryExecutor(Protocol):
+    async def execute_query(self, cypher_query_: str, **kwargs: Any) -> Any: ...
+
+
+class Transaction(Protocol):
+    async def run(self, query: str, **kwargs: Any) -> Any: ...
 
 
 def _check_identifier(value: str) -> str:
@@ -169,7 +177,9 @@ def normalize_embedding(value: object) -> list[float] | None:
 
 
 __all__ = [
+    "QueryExecutor",
     "SurrealRecord",
+    "Transaction",
     "build_node_bulk_upsert_query",
     "build_node_upsert_query",
     "build_relation_save_query",

@@ -12,13 +12,14 @@ from __future__ import annotations
 import logging
 
 from graphiti_core.driver.operations.saga_node_ops import SagaNodeOperations
-from graphiti_core.driver.query_executor import QueryExecutor, Transaction
 from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.helpers import parse_db_date
 from graphiti_core.nodes import SagaNode
 
 from sibyl_core.graph.surreal.compat.ops._common import (
+    QueryExecutor,
     SurrealRecord,
+    Transaction,
     build_node_bulk_upsert_query,
     build_node_upsert_query,
     normalize_records,

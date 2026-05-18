@@ -12,13 +12,14 @@ from __future__ import annotations
 import logging
 
 from graphiti_core.driver.operations.entity_edge_ops import EntityEdgeOperations
-from graphiti_core.driver.query_executor import QueryExecutor, Transaction
 from graphiti_core.driver.record_parsers import entity_edge_from_record
 from graphiti_core.edges import EntityEdge
 from graphiti_core.errors import EdgeNotFoundError
 
 from sibyl_core.graph.surreal.compat.ops._common import (
+    QueryExecutor,
     SurrealRecord,
+    Transaction,
     build_relation_save_query,
     normalize_embedding,
     normalize_records,

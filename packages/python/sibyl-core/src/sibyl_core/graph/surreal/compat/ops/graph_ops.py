@@ -22,7 +22,6 @@ import logging
 
 from graphiti_core.driver.operations.graph_ops import GraphMaintenanceOperations
 from graphiti_core.driver.operations.graph_utils import Neighbor, label_propagation
-from graphiti_core.driver.query_executor import QueryExecutor
 from graphiti_core.driver.record_parsers import (
     community_node_from_record,
     entity_node_from_record,
@@ -31,7 +30,7 @@ from graphiti_core.nodes import CommunityNode, EntityNode, EpisodicNode
 
 from sibyl_core.backends.surreal.driver import SurrealDriver
 from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
-from sibyl_core.graph.surreal.compat.ops._common import normalize_records
+from sibyl_core.graph.surreal.compat.ops._common import QueryExecutor, normalize_records
 
 logger = logging.getLogger(__name__)
 
