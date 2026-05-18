@@ -327,6 +327,14 @@ async def test_active_graph_store_uses_native_managers_for_surreal_driver() -> N
     assert isinstance(store.relationships._manager, NativeRelationshipManager)
 
 
+def test_active_graph_store_rejects_non_native_graph_clients() -> None:
+    client = MagicMock()
+    client.get_org_driver.return_value = MagicMock()
+
+    with pytest.raises(RuntimeError, match="native Surreal graph operations"):
+        ActiveGraphStore.from_client(client, "org-1")
+
+
 @pytest.mark.asyncio
 async def test_graph_relationship_get_uses_native_manager_for_surreal_driver() -> None:
     relationship = Relationship(

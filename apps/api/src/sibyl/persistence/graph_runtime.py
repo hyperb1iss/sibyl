@@ -73,22 +73,20 @@ def _driver_for_client(client: Any, group_id: str) -> Any:
     return client
 
 
-def _entity_manager_for(client: Any, group_id: str) -> Any:
+def _native_driver_for_client(client: Any, group_id: str) -> Any:
     driver = _driver_for_client(client, group_id)
-    if _surreal_driver_for(driver) is not None:
-        return NativeEntityManager(driver, group_id=group_id)
-    from sibyl_core.graph.entities import EntityManager
+    native_driver = _surreal_driver_for(driver)
+    if native_driver is None:
+        raise RuntimeError("Supported graph runtime requires native Surreal graph operations")
+    return native_driver
 
-    return EntityManager(client, group_id=group_id)
+
+def _entity_manager_for(client: Any, group_id: str) -> Any:
+    return NativeEntityManager(_native_driver_for_client(client, group_id), group_id=group_id)
 
 
 def _relationship_manager_for(client: Any, group_id: str) -> Any:
-    driver = _driver_for_client(client, group_id)
-    if _surreal_driver_for(driver) is not None:
-        return NativeRelationshipManager(driver, group_id=group_id)
-    from sibyl_core.graph.relationships import RelationshipManager
-
-    return RelationshipManager(client, group_id=group_id)
+    return NativeRelationshipManager(_native_driver_for_client(client, group_id), group_id=group_id)
 
 
 async def get_graph_client() -> Any:
@@ -175,9 +173,7 @@ def _surreal_nested_rows(value: object) -> list[dict[str, object]]:
         return [{str(key): item for key, item in value.items()}]
     if isinstance(value, list):
         return [
-            {str(key): item for key, item in row.items()}
-            for row in value
-            if isinstance(row, dict)
+            {str(key): item for key, item in row.items()} for row in value if isinstance(row, dict)
         ]
     return []
 
