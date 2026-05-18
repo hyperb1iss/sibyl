@@ -16,6 +16,7 @@ from sibyl_core.models.sources import (
     SourceRecord,
     SourceRecordBatch,
     SourceSkippedRecord,
+    SourceTransformBehavior,
 )
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory, remember_raw_memory
 
@@ -310,6 +311,8 @@ def raw_memory_write_from_source_record(
     policy = source_import_policy(manifest, privacy_class=record.privacy_class)
     attachment_payload = [attachment.model_dump(mode="json") for attachment in record.attachments]
     occurred_at = record.occurred_at.isoformat() if record.occurred_at else None
+    metadata_only = record.transform_behavior == SourceTransformBehavior.METADATA_ONLY
+    extraction_pending = metadata_only or bool(record.attachments)
     metadata: dict[str, object] = {
         "adapter_record_id": record.adapter_record_id,
         "adapter_name": manifest.adapter_name,
@@ -329,6 +332,7 @@ def raw_memory_write_from_source_record(
         "source_type": record.source_type,
         "source_uri": record.source_uri,
         "source_version": record.source_version,
+        "source_extraction_state": "pending" if extraction_pending else "complete",
         "transform_behavior": record.transform_behavior.value,
         "transform_version": record.transform_version or manifest.adapter_version,
     }
@@ -437,6 +441,8 @@ async def import_source_batch(
 
             attachment_count += len(record.attachments)
             extraction_pending_count += len(record.attachments)
+            if record.transform_behavior == SourceTransformBehavior.METADATA_ONLY:
+                extraction_pending_count += 1
             memory = await remember(
                 organization_id=payload.organization_id,
                 principal_id=payload.principal_id,

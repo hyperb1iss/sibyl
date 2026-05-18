@@ -286,6 +286,7 @@ def test_raw_memory_write_preserves_source_metadata() -> None:
     assert payload.metadata["attachment_count"] == 1
     assert payload.metadata["adapter_record_id"] == "message-1"
     assert payload.metadata["source_record_id"] == record.source_id
+    assert payload.metadata["source_extraction_state"] == "pending"
     assert payload.provenance["adapter_record_id"] == "message-1"
     assert payload.provenance["source_record_id"] == record.source_id
 
@@ -356,6 +357,65 @@ async def test_import_source_batch_uses_registered_adapter_contract() -> None:
     assert result.checkpoint.done is True
     assert writes[0]["source_id"] == record.source_id
     assert writes[0]["capture_surface"] == "source_import"
+
+
+@pytest.mark.asyncio
+async def test_import_source_batch_tracks_metadata_only_records_as_pending() -> None:
+    manifest = _manifest(transform_behavior=SourceTransformBehavior.METADATA_ONLY)
+    metadata_hash = build_source_content_hash("Subject", "headers-only")
+    dedupe_key = build_source_dedupe_key(
+        manifest=manifest,
+        adapter_record_id="message-1",
+        content_hash=metadata_hash,
+    )
+    record = _record(manifest).model_copy(
+        update={
+            "body": "",
+            "content_hash": metadata_hash,
+            "dedupe_key": dedupe_key.value,
+            "transform_behavior": SourceTransformBehavior.METADATA_ONLY,
+            "transform_version": "headers-v1",
+            "attachments": [],
+        }
+    )
+    adapter = FakeSourceAdapter([record])
+    writes: list[dict[str, object]] = []
+
+    async def fake_remember(**kwargs: object) -> RawMemory:
+        writes.append(dict(kwargs))
+        return RawMemory(
+            id=f"raw-{len(writes)}",
+            organization_id=str(kwargs["organization_id"]),
+            source_id=str(kwargs["source_id"]),
+            principal_id=str(kwargs["principal_id"]),
+            memory_scope=kwargs["memory_scope"],
+            scope_key=kwargs["scope_key"],
+            title=str(kwargs["title"]),
+            raw_content=str(kwargs["raw_content"]),
+            tags=list(kwargs["tags"]),
+            metadata=dict(kwargs["metadata"]),
+            provenance=dict(kwargs["provenance"]),
+            capture_surface=str(kwargs["capture_surface"]),
+            entity_type=str(kwargs["entity_type"]),
+            captured_at=datetime(2026, 5, 14, 12, 0, tzinfo=UTC),
+            created_at=datetime(2026, 5, 14, 12, 0, tzinfo=UTC),
+        )
+
+    result = await import_source_batch(
+        adapter,
+        manifest,
+        organization_id="org-1",
+        principal_id="user-1",
+        remember=fake_remember,
+    )
+
+    assert result.imported_count == 1
+    assert result.attachment_count == 0
+    assert result.extraction_pending_count == 1
+    assert writes[0]["raw_content"] == ""
+    assert writes[0]["metadata"]["source_extraction_state"] == "pending"
+    assert writes[0]["metadata"]["transform_behavior"] == "metadata_only"
+    assert writes[0]["metadata"]["transform_version"] == "headers-v1"
 
 
 @pytest.mark.asyncio
