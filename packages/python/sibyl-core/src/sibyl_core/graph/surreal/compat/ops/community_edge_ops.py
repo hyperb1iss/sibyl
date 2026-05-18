@@ -16,7 +16,6 @@ import logging
 
 from graphiti_core.edges import CommunityEdge
 from graphiti_core.errors import EdgeNotFoundError
-from graphiti_core.helpers import parse_db_date
 
 from sibyl_core.graph.surreal.compat.ops._common import (
     QueryExecutor,
@@ -24,6 +23,7 @@ from sibyl_core.graph.surreal.compat.ops._common import (
     Transaction,
     build_relation_save_query,
     normalize_records,
+    parse_db_date,
     relation_record_id,
     run_query,
 )
@@ -59,7 +59,7 @@ def _community_edge_from_record(record: SurrealRecord) -> CommunityEdge:
         group_id=str(record["group_id"]),
         source_node_uuid=str(record["source_node_uuid"]),
         target_node_uuid=str(record["target_node_uuid"]),
-        created_at=parse_db_date(record["created_at"]),  # type: ignore[arg-type]
+        created_at=parse_db_date(record["created_at"]),
     )
 
 

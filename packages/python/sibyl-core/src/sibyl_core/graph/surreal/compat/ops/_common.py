@@ -9,6 +9,7 @@ so the call sites in individual ops modules stay short.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any, Protocol
 
 from surrealdb import RecordID
@@ -165,6 +166,21 @@ def normalize_records(result: object) -> list[SurrealRecord]:
     return []
 
 
+def parse_db_date(input_date: object) -> datetime | None:
+    if input_date is None:
+        return None
+    to_native = getattr(input_date, "to_native", None)
+    if callable(to_native):
+        native = to_native()
+        if isinstance(native, datetime):
+            return native
+    if isinstance(input_date, datetime):
+        return input_date
+    if isinstance(input_date, str):
+        return datetime.fromisoformat(input_date)
+    return None
+
+
 def normalize_embedding(value: object) -> list[float] | None:
     if not isinstance(value, list):
         return None
@@ -186,6 +202,7 @@ __all__ = [
     "normalize_embedding",
     "normalize_record",
     "normalize_records",
+    "parse_db_date",
     "relation_record_id",
     "resolve_record_id",
     "run_query",
