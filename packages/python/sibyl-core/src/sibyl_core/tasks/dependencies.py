@@ -1,17 +1,12 @@
 """Task dependency detection and cycle checking."""
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
 
 from sibyl_core.models.entities import EntityType, RelationshipType
 from sibyl_core.models.tasks import TaskStatus
-
-if TYPE_CHECKING:
-    from sibyl_core.graph.client import GraphClient
-    from sibyl_core.graph.entities import EntityManager
-    from sibyl_core.graph.relationships import RelationshipManager
 
 log = structlog.get_logger()
 
@@ -47,7 +42,7 @@ class TaskOrderResult:
 
 
 def _get_graph_managers(
-    client: "GraphClient",
+    client: Any,
     organization_id: str,
 ) -> tuple[Any, Any]:
     from sibyl_core.services.native_graph import (
@@ -62,13 +57,7 @@ def _get_graph_managers(
             NativeRelationshipManager(client, group_id=organization_id),
         )
 
-    from sibyl_core.graph.entities import EntityManager
-    from sibyl_core.graph.relationships import RelationshipManager
-
-    return (
-        EntityManager(client, group_id=organization_id),
-        RelationshipManager(client, group_id=organization_id),
-    )
+    raise RuntimeError("Task dependency traversal requires a native graph client")
 
 
 def _task_status_value(task: Any) -> str | None:
@@ -99,7 +88,7 @@ def _task_order_value(task: Any) -> int:
 
 
 async def _list_task_entities(
-    entity_manager: "EntityManager",
+    entity_manager: Any,
     *,
     project_id: str | None = None,
 ) -> list[Any]:
@@ -126,7 +115,7 @@ async def _list_task_entities(
 
 
 async def _list_dependency_relationships(
-    relationship_manager: "RelationshipManager",
+    relationship_manager: Any,
     *,
     task_ids: set[str] | None = None,
 ) -> list[dict[str, str]]:
@@ -159,7 +148,7 @@ async def _list_dependency_relationships(
 
 
 async def get_task_dependencies(
-    client: "GraphClient",
+    client: Any,
     task_id: str,
     organization_id: str,
     depth: int = 1,
@@ -170,7 +159,7 @@ async def get_task_dependencies(
     Traverses DEPENDS_ON relationships outward from the task.
 
     Args:
-        client: Graph client for queries.
+        client: Native graph client for queries.
         task_id: The task to find dependencies for.
         depth: Maximum traversal depth (1-5, default 1).
         include_transitive: Include transitive dependencies.
@@ -253,7 +242,7 @@ async def get_task_dependencies(
 
 
 async def get_blocking_tasks(
-    client: "GraphClient",
+    client: Any,
     task_id: str,
     organization_id: str,
     depth: int = 1,
@@ -263,7 +252,7 @@ async def get_blocking_tasks(
     Traverses BLOCKS relationships outward (or inverse DEPENDS_ON).
 
     Args:
-        client: Graph client for queries.
+        client: Native graph client for queries.
         task_id: The task to find dependents for.
         depth: Maximum traversal depth (1-5, default 1).
 
@@ -331,20 +320,20 @@ async def get_blocking_tasks(
 
 
 async def detect_dependency_cycles(
-    client: "GraphClient | None",
+    client: Any | None,
     organization_id: str,
     project_id: str | None = None,
     max_depth: int = 10,
     *,
-    entity_manager: "EntityManager | None" = None,
-    relationship_manager: "RelationshipManager | None" = None,
+    entity_manager: Any | None = None,
+    relationship_manager: Any | None = None,
 ) -> CycleResult:
     """Detect circular dependencies in the task graph.
 
     Uses DFS-based cycle detection on DEPENDS_ON relationships.
 
     Args:
-        client: Graph client for queries.
+        client: Native graph client for queries.
         project_id: Optional project to scope the search.
         max_depth: Maximum cycle length to detect (default 10).
 
@@ -434,7 +423,7 @@ async def detect_dependency_cycles(
 
 
 async def suggest_task_order(
-    client: "GraphClient",
+    client: Any,
     organization_id: str,
     project_id: str | None = None,
     status_filter: list[TaskStatus] | None = None,
