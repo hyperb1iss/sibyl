@@ -1344,37 +1344,39 @@ class TestHybridWithRRFFusion:
     """Test hybrid search RRF fusion behavior."""
 
     @pytest.mark.asyncio
-    async def test_rrf_boosts_entities_in_multiple_sources(self) -> None:
+    async def test_rrf_boosts_entities_in_multiple_sources(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Entities appearing in multiple sources get higher RRF scores."""
-        client = MockGraphClientForHybrid()
+        import sibyl_core.services.native_graph as native_graph_module
+
+        client = make_native_graph_client()
         manager = MockEntityManagerForHybrid()
 
-        # Entity appears in vector results
+        seed_entities = [
+            make_entity_for_test(f"seed_{index}", name=f"Seed {index}") for index in range(5)
+        ]
         shared_entity = make_entity_for_test("shared", name="Shared Entity")
         vector_only = make_entity_for_test("vector_only", name="Vector Only")
+        graph_only = make_entity_for_test("graph_only", name="Graph Only")
 
         manager.search_results = [
-            (shared_entity, 0.9),
-            (vector_only, 0.85),
+            *[(entity, 0.99 - (index * 0.01)) for index, entity in enumerate(seed_entities)],
+            (shared_entity, 0.5),
+            (vector_only, 0.49),
         ]
 
-        # Entity also appears in graph results
-        client.traversal_results = [
-            {
-                "id": "shared",
-                "name": "Shared Entity",
-                "type": "topic",
-                "description": "",
-                "distance": 1,
-            },
-            {
-                "id": "graph_only",
-                "name": "Graph Only",
-                "type": "topic",
-                "description": "",
-                "distance": 1,
-            },
-        ]
+        relationship_manager = MagicMock()
+        relationship_manager.get_related_entities = AsyncMock(
+            return_value=[(graph_only, MagicMock()), (shared_entity, MagicMock())]
+        )
+
+        monkeypatch.setattr(
+            native_graph_module,
+            "NativeRelationshipManager",
+            MagicMock(return_value=relationship_manager),
+        )
 
         config = HybridConfig(
             vector_weight=1.0,
@@ -1390,13 +1392,9 @@ class TestHybridWithRRFFusion:
             limit=10,
         )
 
-        # Shared entity should have higher score due to appearing in both
-        if result.total >= 2:
-            shared_result = next(
-                ((e, s) for e, s in result.results if e.id == "shared"),
-                None,
-            )
-            assert shared_result is not None
+        result_ids = [entity.id for entity, _score in result.results]
+        assert result_ids[0] == "shared"
+        assert "graph_only" in result_ids
 
 
 class TestEdgeCases:

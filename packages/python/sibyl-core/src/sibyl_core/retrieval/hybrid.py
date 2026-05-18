@@ -171,6 +171,10 @@ async def graph_traversal(
         return []
 
     resolved_group_id = _require_group_id(group_id, "graph traversal")
+    from sibyl_core.services.native_graph import NativeSurrealGraphClient
+
+    if not isinstance(client, NativeSurrealGraphClient):
+        raise RuntimeError("Graph traversal requires a native graph client")
 
     try:
         return await _graph_traversal_via_relationship_manager(

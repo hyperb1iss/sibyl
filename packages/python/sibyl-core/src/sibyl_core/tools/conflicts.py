@@ -30,8 +30,6 @@ async def get_graph_runtime(group_id: str):
     return await get_native_graph_runtime(group_id)
 
 
-EntityManager = None
-
 # Thresholds for conflict classification
 DUPLICATE_THRESHOLD = 0.95  # Near-identical content
 HIGH_OVERLAP_THRESHOLD = 0.85  # Very similar, likely same topic

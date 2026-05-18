@@ -49,7 +49,7 @@ from sibyl_core.models.sources import SourceType
 if TYPE_CHECKING:
     from uuid import UUID
 
-    from sibyl_core.services.native_graph import NativeEntityManager as EntityManager
+    from sibyl_core.services.native_graph import NativeEntityManager
 
 
 class _RollbackSession(Protocol):
@@ -124,7 +124,7 @@ class IngestionPipeline:
         self._crawler: CrawlerService | None = None
         self._embedder: EmbeddingService | None = None
         self._graph_integration: GraphIntegrationService | None = None
-        self._entity_manager: EntityManager | None = None
+        self._entity_manager: NativeEntityManager | None = None
         self._chunker = DocumentChunker()
 
     async def start(self) -> None:

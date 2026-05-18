@@ -9,6 +9,7 @@ DEPRECATION NOTICE:
 - Source/analysis actions: Still use this tool (no REST equivalent yet)
 """
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -42,6 +43,19 @@ class ManageGraphRuntime:
     relationship_manager: Any
 
 
+type _GraphManagerFactory = Callable[..., Any]
+_entity_manager_factory: _GraphManagerFactory | None = None
+_relationship_manager_factory: _GraphManagerFactory | None = None
+
+
+class _MissingGraphManager:
+    def __init__(self, manager_name: str) -> None:
+        self._manager_name = manager_name
+
+    def __getattr__(self, name: str) -> Any:
+        raise RuntimeError(f"{self._manager_name} factory should be patched in tests")
+
+
 async def _default_get_graph_client(group_id: str | None = None) -> Any:
     from sibyl_core.services.native_graph import (
         get_native_graph_client,
@@ -53,16 +67,6 @@ async def _default_get_graph_client(group_id: str | None = None) -> Any:
     return client
 
 
-def _compat_entity_manager(*args: Any, **kwargs: Any) -> Any:
-    raise RuntimeError("EntityManager compatibility shim should be patched in tests")
-
-
-def _compat_relationship_manager(*args: Any, **kwargs: Any) -> Any:
-    raise RuntimeError("RelationshipManager compatibility shim should be patched in tests")
-
-
-EntityManager = _compat_entity_manager
-RelationshipManager = _compat_relationship_manager
 GraphIntegrationService: Any = None
 
 
@@ -92,11 +96,7 @@ async def get_graph_client(group_id: str | None = None) -> Any:
 
 
 async def get_graph_runtime(group_id: str) -> ManageGraphRuntime:
-    # Tests patch these factories directly; unpatched runtime uses native managers.
-    if (
-        EntityManager is _compat_entity_manager
-        and RelationshipManager is _compat_relationship_manager
-    ):
+    if _entity_manager_factory is None and _relationship_manager_factory is None:
         from sibyl_core.services.native_graph import get_native_graph_runtime
 
         native_runtime = await get_native_graph_runtime(str(group_id))
@@ -108,8 +108,16 @@ async def get_graph_runtime(group_id: str) -> ManageGraphRuntime:
 
     client = await get_graph_client(str(group_id))
 
-    entity_manager = EntityManager(client, group_id=str(group_id))
-    relationship_manager = RelationshipManager(client, group_id=str(group_id))
+    entity_manager = (
+        _entity_manager_factory(client, group_id=str(group_id))
+        if _entity_manager_factory is not None
+        else _MissingGraphManager("entity_manager")
+    )
+    relationship_manager = (
+        _relationship_manager_factory(client, group_id=str(group_id))
+        if _relationship_manager_factory is not None
+        else _MissingGraphManager("relationship_manager")
+    )
 
     return ManageGraphRuntime(
         client=client,
@@ -592,7 +600,7 @@ async def _update_task(
     """Update task fields.
 
     Args:
-        entity_manager: EntityManager instance
+        entity_manager: task entity manager
         entity_id: Task ID to update
         data: Dict containing fields to update plus optional control flags:
             - sync: If False, queue update via arq worker (default: True)
@@ -689,8 +697,8 @@ async def _add_note(
     """Add a note to a task.
 
     Args:
-        entity_manager: EntityManager instance
-        relationship_manager: RelationshipManager instance
+        entity_manager: task entity manager
+        relationship_manager: task relationship manager
         task_id: Task ID to add note to
         data: Dict containing note fields:
             - content: Note content (required)

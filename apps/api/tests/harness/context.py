@@ -50,8 +50,8 @@ class ToolTestContext:
         - sibyl_core.tools.core.EntityManager
         - sibyl_core.tools.core.RelationshipManager
         - sibyl_core.tools.manage.get_graph_client (same)
-        - sibyl_core.tools.manage.EntityManager (same)
-        - sibyl_core.tools.manage.RelationshipManager (same)
+        - sibyl_core.tools.manage._entity_manager_factory (same)
+        - sibyl_core.tools.manage._relationship_manager_factory (same)
 
         Yields:
             Self, allowing access to mocks for assertions.

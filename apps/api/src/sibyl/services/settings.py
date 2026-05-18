@@ -397,7 +397,7 @@ async def load_runtime_settings_from_db() -> list[str]:
     """Load runtime settings from database into environment variables.
 
     Only loads values that are not already set in the environment.
-    This should be called at startup before GraphClient is initialized.
+    This should be called at startup before the graph runtime is initialized.
 
     Returns:
         List of settings that were loaded from the database.

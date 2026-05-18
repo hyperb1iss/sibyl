@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import uuid4
 
 import structlog
@@ -35,12 +35,11 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from sibyl_core.services.native_graph import (
-        NativeEntityManager as EntityManager,
+        NativeEntityManager,
         NativeGraphRuntime,
-        NativeRelationshipManager as RelationshipManager,
+        NativeRelationshipManager,
+        NativeSurrealGraphClient,
     )
-
-    GraphClient = Any
 
 log = structlog.get_logger()
 
@@ -54,13 +53,15 @@ _EXTRACTED_TYPE_MAP: dict[str, EntityType] = {
 }
 
 
-def _entity_manager(client: GraphClient, group_id: str) -> EntityManager:
+def _entity_manager(client: NativeSurrealGraphClient, group_id: str) -> NativeEntityManager:
     from sibyl_core.services.native_graph import NativeEntityManager
 
     return NativeEntityManager(client, group_id=group_id)
 
 
-def _relationship_manager(client: GraphClient, group_id: str) -> RelationshipManager:
+def _relationship_manager(
+    client: NativeSurrealGraphClient, group_id: str
+) -> NativeRelationshipManager:
     from sibyl_core.services.native_graph import NativeRelationshipManager
 
     return NativeRelationshipManager(client, group_id=group_id)
@@ -140,16 +141,14 @@ class ExtractedEntitiesPayload(BaseModel):
 
 
 class EntityPayloadExtractor(Protocol):
-    async def extract(self, prompt: str) -> ExtractedEntitiesPayload:
-        ...
+    async def extract(self, prompt: str) -> ExtractedEntitiesPayload: ...
 
     async def extract_many(
         self,
         prompts: Sequence[str],
         *,
         max_concurrent: int = 5,
-    ) -> list[ExtractedEntitiesPayload | LLMError]:
-        ...
+    ) -> list[ExtractedEntitiesPayload | LLMError]: ...
 
 
 @dataclass
@@ -299,9 +298,7 @@ Do not infer entities that aren't explicitly present."""
         log.info("Starting entity extraction", chunk_count=len(chunks), concurrency=max_concurrent)
 
         prompt_chunks = [
-            (content, context, chunk_id)
-            for content, context, chunk_id in chunks
-            if content.strip()
+            (content, context, chunk_id) for content, context, chunk_id in chunks if content.strip()
         ]
         results = await self._extractor.extract_many(
             [self._format_prompt(content, context) for content, context, _ in prompt_chunks],
@@ -381,14 +378,14 @@ class EntityLinker:
 
     def __init__(
         self,
-        graph_client: GraphClient,
+        graph_client: NativeSurrealGraphClient,
         organization_id: str,
         similarity_threshold: float = 0.75,
     ):
         """Initialize the linker.
 
         Args:
-            graph_client: Connected GraphClient
+            graph_client: Connected NativeSurrealGraphClient
             organization_id: Organization ID for graph operations
             similarity_threshold: Minimum similarity for linking
         """
@@ -396,7 +393,7 @@ class EntityLinker:
         self.organization_id = organization_id
         self.similarity_threshold = similarity_threshold
         self._entity_cache: dict[str, list[dict]] = {}
-        self._entity_manager: EntityManager | None = None
+        self._entity_manager: NativeEntityManager | None = None
 
     def invalidate_cache(self, *entity_types: str) -> None:
         """Invalidate cached entity lists after graph writes."""
@@ -408,7 +405,7 @@ class EntityLinker:
         for entity_type in entity_types:
             self._entity_cache.pop(entity_type, None)
 
-    def _get_entity_manager(self) -> EntityManager:
+    def _get_entity_manager(self) -> NativeEntityManager:
         if self._entity_manager is None:
             self._entity_manager = _entity_manager(self.graph_client, self.organization_id)
         return self._entity_manager
@@ -581,7 +578,7 @@ class GraphIntegrationService:
 
     def __init__(
         self,
-        graph_client: GraphClient,
+        graph_client: NativeSurrealGraphClient,
         organization_id: str,
         *,
         extract_entities: bool = True,
@@ -590,7 +587,7 @@ class GraphIntegrationService:
         """Initialize the integration service.
 
         Args:
-            graph_client: Connected GraphClient
+            graph_client: Connected NativeSurrealGraphClient
             organization_id: Organization ID for graph operations
             extract_entities: Whether to extract entities from chunks
             create_new_entities: Whether to create new graph entities for unlinked
@@ -605,17 +602,17 @@ class GraphIntegrationService:
         self.entity_manager = (
             _entity_manager(graph_client, organization_id) if create_new_entities else None
         )
-        self.relationship_manager: RelationshipManager | None = None
+        self.relationship_manager: NativeRelationshipManager | None = None
 
-    def _get_entity_manager(self) -> EntityManager:
+    def _get_entity_manager(self) -> NativeEntityManager:
         if self.entity_manager is None:
             self.entity_manager = _entity_manager(self.graph_client, self.organization_id)
         return self.entity_manager
 
-    def get_entity_manager(self) -> EntityManager:
+    def get_entity_manager(self) -> NativeEntityManager:
         return self._get_entity_manager()
 
-    def _get_relationship_manager(self) -> RelationshipManager:
+    def _get_relationship_manager(self) -> NativeRelationshipManager:
         if self.relationship_manager is None:
             self.relationship_manager = _relationship_manager(
                 self.graph_client,

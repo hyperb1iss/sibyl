@@ -231,7 +231,7 @@ async def get_stats(*, organization_id: str | None = None) -> dict[str, object]:
         stats["entities"] = entity_stats
         stats["total_entities"] = sum(entity_stats.values())
 
-        # TODO: Add relationship stats from RelationshipManager
+        # TODO: Add relationship stats from the native relationship manager
         # TODO: Add storage stats from Graphiti
 
         return stats

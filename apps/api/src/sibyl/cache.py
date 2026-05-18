@@ -397,11 +397,11 @@ def invalidate_on_mutation(func):
 
 
 class CachedEntityManager:
-    """Wrapper that adds caching to EntityManager operations.
+    """Wrapper that adds caching to entity manager operations.
 
     Usage:
         from sibyl.cache import CachedEntityManager
-        manager = EntityManager(client)
+        manager = make_entity_manager(client)
         cached = CachedEntityManager(manager)
 
         # Lookups are cached
@@ -415,7 +415,7 @@ class CachedEntityManager:
         """Initialize cached wrapper.
 
         Args:
-            manager: The underlying EntityManager instance.
+            manager: The underlying entity manager instance.
             entity_ttl: TTL for cached entities (default 10 minutes).
         """
         self._manager = manager

@@ -302,7 +302,7 @@ async def _list_surreal_entity_nodes(
 
 
 class GraphEntityStore(EntityStore):
-    """EntityStore backed by the current EntityManager."""
+    """EntityStore backed by the current native entity manager."""
 
     def __init__(self, manager: Any, *, driver: Any, group_id: str) -> None:
         self._manager = manager
@@ -439,7 +439,7 @@ class GraphEntityStore(EntityStore):
 
 
 class GraphRelationshipStore(RelationshipStore):
-    """RelationshipStore backed by the current RelationshipManager."""
+    """RelationshipStore backed by the current native relationship manager."""
 
     def __init__(self, manager: Any, *, driver: Any, group_id: str) -> None:
         self._manager = manager

@@ -335,8 +335,8 @@ class TestTaskWorkflowHandlers:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine") as mock_workflow,
         ):
             mock_client.return_value = MagicMock()
@@ -364,8 +364,8 @@ class TestTaskWorkflowHandlers:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine") as mock_workflow,
         ):
             mock_client.return_value = MagicMock()
@@ -406,10 +406,10 @@ class TestTaskWorkflowHandlers:
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine") as mock_workflow,
             patch("sibyl.jobs.queue.enqueue_create_learning_episode", enqueue_episode),
             patch("sibyl.jobs.queue.enqueue_create_learning_procedure", enqueue_procedure),
@@ -455,8 +455,8 @@ class TestTaskWorkflowHandlers:
         """complete_task should fail closed without a policy payload."""
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine") as mock_workflow,
             patch("sibyl.persistence.auth_runtime.log_memory_audit_event", AsyncMock()) as audit,
         ):
@@ -486,8 +486,8 @@ class TestTaskWorkflowHandlers:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine") as mock_workflow,
         ):
             mock_client.return_value = MagicMock()
@@ -657,12 +657,12 @@ class TestAnalysisActions:
         """prioritize action should handle empty project."""
         with patch("sibyl_core.tools.manage.get_graph_client") as mock_client:
             mock_client.return_value = MagicMock()
-            with patch("sibyl_core.tools.manage.EntityManager") as mock_manager_class:
+            with patch("sibyl_core.tools.manage._entity_manager_factory") as mock_manager_class:
                 mock_manager = MagicMock()
                 mock_manager.list_by_type = AsyncMock(return_value=[])
                 mock_manager_class.return_value = mock_manager
 
-                with patch("sibyl_core.tools.manage.RelationshipManager"):
+                with patch("sibyl_core.tools.manage._relationship_manager_factory"):
                     result = await manage(
                         action="prioritize",
                         entity_id="proj_123",
@@ -693,8 +693,8 @@ class TestAnalysisActions:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
-            patch("sibyl_core.tools.manage.EntityManager") as mock_manager_class,
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory") as mock_manager_class,
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
         ):
             mock_client.return_value = MagicMock()
             mock_manager = MagicMock()
@@ -725,8 +725,10 @@ class TestAnalysisActions:
         )
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
-            patch("sibyl_core.tools.manage.EntityManager") as entity_manager_cls,
-            patch("sibyl_core.tools.manage.RelationshipManager") as relationship_manager_cls,
+            patch("sibyl_core.tools.manage._entity_manager_factory") as entity_manager_cls,
+            patch(
+                "sibyl_core.tools.manage._relationship_manager_factory"
+            ) as relationship_manager_cls,
             patch(
                 "sibyl_core.tools.manage.detect_dependency_cycles",
                 AsyncMock(return_value=cycle_result),
@@ -807,8 +809,8 @@ class TestEpicActions:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
-            patch("sibyl_core.tools.manage.EntityManager") as mock_manager_class,
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory") as mock_manager_class,
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
         ):
             mock_client.return_value = MagicMock()
             mock_manager = MagicMock()
@@ -838,8 +840,8 @@ class TestEpicActions:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
-            patch("sibyl_core.tools.manage.EntityManager") as mock_manager_class,
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory") as mock_manager_class,
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
         ):
             mock_client.return_value = MagicMock()
             mock_manager = MagicMock()
@@ -873,8 +875,8 @@ class TestEpicActions:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
-            patch("sibyl_core.tools.manage.EntityManager") as mock_manager_class,
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory") as mock_manager_class,
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
         ):
             mock_client.return_value = MagicMock()
             mock_manager = MagicMock()
@@ -904,8 +906,8 @@ class TestEpicActions:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
-            patch("sibyl_core.tools.manage.EntityManager") as mock_manager_class,
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory") as mock_manager_class,
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
         ):
             mock_client.return_value = MagicMock()
             mock_manager = MagicMock()
@@ -937,8 +939,8 @@ class TestEpicActions:
         """Epic action should fail if epic not found."""
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
-            patch("sibyl_core.tools.manage.EntityManager") as mock_manager_class,
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory") as mock_manager_class,
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
         ):
             mock_client.return_value = MagicMock()
             mock_manager = MagicMock()
@@ -965,8 +967,8 @@ class TestEpicActions:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
-            patch("sibyl_core.tools.manage.EntityManager") as mock_manager_class,
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory") as mock_manager_class,
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
         ):
             mock_client.return_value = MagicMock()
             mock_manager = MagicMock()

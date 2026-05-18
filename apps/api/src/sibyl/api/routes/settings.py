@@ -31,16 +31,16 @@ async def reset_graph_runtime() -> None:
 
 
 async def _try_reset_graph_client(context: str) -> None:
-    """Reset the global GraphClient, logging on failure.
+    """Reset the active graph runtime, logging on failure.
 
     Args:
         context: Description for log message (e.g., "API key update", "API key deletion")
     """
     try:
         await reset_graph_runtime()
-        log.info(f"Reset GraphClient after {context}")
+        log.info(f"Reset graph runtime after {context}")
     except Exception as e:
-        log.warning("Failed to reset GraphClient", error=str(e))
+        log.warning("Failed to reset graph runtime", error=str(e))
 
 
 class SettingInfo(BaseModel):
@@ -225,7 +225,7 @@ async def update_settings(
             )
             updated.append("openai_api_key")
             # Update environment variable so running server uses new key immediately
-            # This bridges webapp settings to GraphClient which reads from env vars
+            # This bridges webapp settings to the graph runtime env configuration.
             os.environ["OPENAI_API_KEY"] = body.openai_api_key
             log.info("Updated OpenAI API key in environment")
         else:
@@ -288,7 +288,7 @@ async def update_settings(
         updated.append(key)
         _write_runtime_env(key, value)
 
-    # If API keys or graph embedding settings were updated, reset the GraphClient
+    # If API keys or graph embedding settings were updated, reset the graph runtime
     # so it reconnects with fresh provider/model/key configuration.
     if updated:
         await _try_reset_graph_client(f"API key update keys={updated}")
@@ -317,7 +317,7 @@ async def delete_setting(
     deleted = await service.delete(key)
 
     if deleted:
-        # Clear from environment and reset GraphClient if this was an API key
+        # Clear from environment and reset graph runtime if this was an API key
         if key in _SETTING_ENV_WRITES:
             # Note: This clears the env var even if it was externally set. Since webapp users
             # typically configure keys via UI (not external env), this is the expected behavior.

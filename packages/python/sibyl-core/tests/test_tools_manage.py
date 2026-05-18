@@ -268,8 +268,8 @@ class TestTaskActions:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
@@ -299,8 +299,8 @@ class TestTaskActions:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
@@ -325,8 +325,8 @@ class TestTaskActions:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
@@ -355,8 +355,8 @@ class TestTaskActions:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
@@ -381,8 +381,8 @@ class TestTaskActions:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
@@ -409,8 +409,8 @@ class TestTaskActions:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
@@ -453,10 +453,10 @@ class TestTaskActions:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
@@ -511,8 +511,8 @@ class TestTaskActions:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
@@ -553,10 +553,10 @@ class TestTaskActions:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
@@ -597,10 +597,10 @@ class TestTaskActions:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
@@ -644,8 +644,8 @@ class TestTaskActions:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
@@ -677,8 +677,8 @@ class TestTaskActions:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
@@ -708,8 +708,8 @@ class TestTaskActions:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
@@ -744,10 +744,10 @@ class TestUpdateTask:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine"),
         ):
             response = await manage(
@@ -775,10 +775,10 @@ class TestUpdateTask:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine"),
         ):
             response = await manage(
@@ -802,8 +802,8 @@ class TestUpdateTask:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine"),
         ):
             response = await manage(
@@ -825,10 +825,10 @@ class TestUpdateTask:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine"),
         ):
             response = await manage(
@@ -863,11 +863,11 @@ class TestAddNote:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
             patch(
-                "sibyl_core.tools.manage.RelationshipManager",
+                "sibyl_core.tools.manage._relationship_manager_factory",
                 return_value=mock_rel_manager,
             ),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine"),
@@ -897,10 +897,10 @@ class TestAddNote:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine"),
         ):
             response = await manage(
@@ -922,10 +922,10 @@ class TestAddNote:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine"),
         ):
             response = await manage(
@@ -951,11 +951,11 @@ class TestAddNote:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
             patch(
-                "sibyl_core.tools.manage.RelationshipManager",
+                "sibyl_core.tools.manage._relationship_manager_factory",
                 return_value=mock_rel_manager,
             ),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine"),
@@ -983,11 +983,11 @@ class TestAddNote:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
             patch(
-                "sibyl_core.tools.manage.RelationshipManager",
+                "sibyl_core.tools.manage._relationship_manager_factory",
                 return_value=mock_rel_manager,
             ),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine"),
@@ -1023,7 +1023,7 @@ class TestEpicActions:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
         ):
@@ -1048,7 +1048,7 @@ class TestEpicActions:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
         ):
@@ -1074,7 +1074,7 @@ class TestEpicActions:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
         ):
@@ -1098,7 +1098,7 @@ class TestEpicActions:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
         ):
@@ -1122,7 +1122,7 @@ class TestEpicActions:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
         ):
@@ -1156,7 +1156,7 @@ class TestUpdateEpic:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
         ):
@@ -1185,7 +1185,7 @@ class TestUpdateEpic:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
         ):
@@ -1479,11 +1479,11 @@ class TestAnalysisActions:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
             patch(
-                "sibyl_core.tools.manage.RelationshipManager",
+                "sibyl_core.tools.manage._relationship_manager_factory",
                 return_value=mock_rel_manager,
             ),
         ):
@@ -1554,11 +1554,11 @@ class TestAnalysisActions:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
             patch(
-                "sibyl_core.tools.manage.RelationshipManager",
+                "sibyl_core.tools.manage._relationship_manager_factory",
                 return_value=mock_rel_manager,
             ),
         ):
@@ -1606,11 +1606,11 @@ class TestAnalysisActions:
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl_core.tools.manage.EntityManager",
+                "sibyl_core.tools.manage._entity_manager_factory",
                 return_value=mock_entity_manager,
             ),
             patch(
-                "sibyl_core.tools.manage.RelationshipManager",
+                "sibyl_core.tools.manage._relationship_manager_factory",
                 return_value=mock_rel_manager,
             ),
             patch(
@@ -1654,8 +1654,8 @@ class TestErrorHandling:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
@@ -1682,8 +1682,8 @@ class TestErrorHandling:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
@@ -1721,8 +1721,8 @@ class TestResponseFormatting:
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
