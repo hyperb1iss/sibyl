@@ -12,7 +12,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - Raw SQL query usage files: 0
 - Session-backed storage access files: 0
 - Graphiti import files: 21
-- Retained legacy term files: 90
+- Retained legacy term files: 89
 - Dependency records: 4
 
 ## API Surface
@@ -175,7 +175,6 @@ must carry an owner and reason here.
 | `docs/guide/mcp-configuration.md` | `postgres`, `redis`, `valkey` | 7 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/memory-loop.md` | `redis` | 1 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/migrating-from-falkor.md` | `falkor`, `postgres` | 16 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
-| `docs/guide/quick-start.md` | `redis` | 3 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/semantic-search.md` | `redis` | 1 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/setting-up-prompts.md` | `redis`, `valkey` | 3 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/sources.md` | `redis` | 2 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
