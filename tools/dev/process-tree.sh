@@ -115,17 +115,16 @@ signal_process_tree() {
 
   if process_is_group_leader "$pid"; then
     kill "-$signal" -- "-$pid" 2>/dev/null || true
+  else
+    kill "-$signal" "$pid" 2>/dev/null || true
   fi
 
   if ((${#descendants[@]} > 0)); then
-    local index=0
-    for ((index=${#descendants[@]}-1; index>=0; index--)); do
-      if process_is_group_leader "${descendants[index]}"; then
-        kill "-$signal" -- "-${descendants[index]}" 2>/dev/null || true
+    for child in "${descendants[@]}"; do
+      if process_is_group_leader "$child"; then
+        kill "-$signal" -- "-$child" 2>/dev/null || true
       fi
-      kill "-$signal" "${descendants[index]}" 2>/dev/null || true
+      kill "-$signal" "$child" 2>/dev/null || true
     done
   fi
-
-  kill "-$signal" "$pid" 2>/dev/null || true
 }

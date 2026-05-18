@@ -204,3 +204,60 @@ main
 
     assert result.returncode == 0, result.stderr
     assert "extra_commands[@]: unbound variable" not in result.stderr
+
+
+def test_launch_command_uses_separate_process_group() -> None:
+    bash = which("bash")
+    assert bash is not None
+
+    script = """
+source tools/dev/run-surreal-dev.sh
+launch_command "sleep 30"
+pid="${child_pids[0]}"
+pgid="$(process_pgid "$pid")"
+printf 'pid=%s pgid=%s\\n' "$pid" "$pgid"
+if [[ "$pgid" != "$pid" ]]; then
+  signal_process_tree KILL "$pid"
+  exit 1
+fi
+signal_process_tree TERM "$pid"
+sleep 0.2
+wait "$pid" 2>/dev/null || true
+if process_tree_alive "$pid"; then
+  exit 1
+fi
+"""
+
+    result = subprocess.run(  # noqa: S603
+        [bash, "-c", script],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_signal_process_tree_signals_parent_before_descendants() -> None:
+    bash = which("bash")
+    assert bash is not None
+
+    script = """
+source tools/dev/process-tree.sh
+collect_descendants() { printf '20\\n30\\n'; }
+process_is_group_leader() { return 1; }
+kill() { printf '%s\\n' "$*"; }
+signal_process_tree TERM 10
+"""
+
+    result = subprocess.run(  # noqa: S603
+        [bash, "-c", script],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["-TERM 10", "-TERM 20", "-TERM 30"]
