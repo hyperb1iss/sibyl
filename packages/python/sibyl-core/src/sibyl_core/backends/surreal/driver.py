@@ -32,7 +32,7 @@ import copy
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from functools import cached_property
-from typing import Concatenate, Literal, ParamSpec, TypeVar, cast
+from typing import Any, Concatenate, Literal, ParamSpec, TypeVar, cast
 
 from graphiti_core.driver.driver import (
     GraphDriver,
@@ -659,7 +659,7 @@ class SurrealDriver(GraphDriver):
             SurrealGraphOperationsInterface,
         )
 
-        self.search_interface = SurrealSearchInterface()
+        self.search_interface = cast(Any, SurrealSearchInterface())
         self.graph_operations_interface = SurrealGraphOperationsInterface()
 
     @property

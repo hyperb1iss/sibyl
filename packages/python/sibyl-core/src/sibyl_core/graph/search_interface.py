@@ -1,24 +1,75 @@
-"""Search interface for the SurrealDB-backed Graphiti runtime."""
+"""Search interface for the SurrealDB-backed compatibility runtime."""
 
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from typing import Any
-
-import structlog
-from graphiti_core.driver.record_parsers import (
-    community_node_from_record,
-    entity_edge_from_record,
-    entity_node_from_record,
-    episodic_node_from_record,
-)
-from graphiti_core.driver.search_interface.search_interface import SearchInterface
-from graphiti_core.nodes import CommunityNode, EpisodicNode
-
-from sibyl_core.graph.surreal.compat.ops._common import normalize_embedding, normalize_records
-from sibyl_core.graph.surreal.compat.ops.entity_edge_ops import _ENTITY_EDGE_SELECT
-
-log = structlog.get_logger()
 
 EDGE_FULLTEXT_MATCH_HEADROOM = 8
 EDGE_FULLTEXT_MIN_MATCH_LIMIT = 32
+type SurrealRecord = dict[str, object]
+
+_ENTITY_EDGE_SELECT = """
+SELECT
+    uuid, name, fact, fact_embedding, group_id,
+    episodes, attributes,
+    created_at, expired_at, valid_at, invalid_at,
+    in.uuid AS source_node_uuid,
+    out.uuid AS target_node_uuid
+FROM relates_to
+"""
+
+
+@dataclass(slots=True)
+class _EntitySearchNode:
+    uuid: str
+    name: str
+    group_id: str
+    labels: list[str]
+    summary: str
+    attributes: dict[str, Any] = dataclass_field(default_factory=dict)
+    name_embedding: list[float] | None = None
+    created_at: Any = None
+
+
+@dataclass(slots=True)
+class _EntitySearchEdge:
+    uuid: str
+    source_node_uuid: str
+    target_node_uuid: str
+    fact: str
+    name: str
+    group_id: str
+    episodes: list[str] = dataclass_field(default_factory=list)
+    attributes: dict[str, Any] = dataclass_field(default_factory=dict)
+    fact_embedding: list[float] | None = None
+    created_at: Any = None
+    expired_at: Any = None
+    valid_at: Any = None
+    invalid_at: Any = None
+    reference_time: Any = None
+
+
+@dataclass(slots=True)
+class _EpisodeSearchNode:
+    uuid: str
+    group_id: str
+    name: str
+    content: str
+    source: str
+    source_description: str
+    entity_edges: list[Any] = dataclass_field(default_factory=list)
+    created_at: Any = None
+    valid_at: Any = None
+
+
+@dataclass(slots=True)
+class _CommunitySearchNode:
+    uuid: str
+    name: str
+    group_id: str
+    summary: str
+    name_embedding: list[float] | None = None
+    created_at: Any = None
 
 
 def _group_filter_clause(group_ids: list[str] | None) -> str:
@@ -134,6 +185,123 @@ def _record_uuid(record: dict[str, object]) -> str | None:
     return str(uuid)
 
 
+def _normalize_record(record: object) -> SurrealRecord | None:
+    if record is None or not isinstance(record, dict):
+        return None
+    out = {str(key): value for key, value in record.items()}
+    out.pop("id", None)
+    if "attributes" not in out or out["attributes"] is None:
+        out["attributes"] = {}
+    if "labels" not in out or out["labels"] is None:
+        out["labels"] = []
+    return out
+
+
+def _normalize_records(result: object) -> list[SurrealRecord]:
+    if result is None:
+        return []
+    if isinstance(result, dict):
+        single = _normalize_record(result)
+        return [single] if single is not None else []
+    if isinstance(result, list):
+        records: list[SurrealRecord] = []
+        for item in result:
+            if isinstance(item, list):
+                records.extend(
+                    normalized
+                    for nested in item
+                    if (normalized := _normalize_record(nested)) is not None
+                )
+            elif (normalized := _normalize_record(item)) is not None:
+                records.append(normalized)
+        return records
+    return []
+
+
+def _normalize_embedding(value: object) -> list[float] | None:
+    if not isinstance(value, list):
+        return None
+    embedding: list[float] = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, int | float):
+            return None
+        embedding.append(float(item))
+    return embedding
+
+
+def _attributes_from_record(record: dict[str, Any], excluded: set[str]) -> dict[str, Any]:
+    attributes = dict(record.get("attributes") or {})
+    for key in excluded:
+        attributes.pop(key, None)
+    return attributes
+
+
+def _entity_node_from_record(record: dict[str, Any]) -> _EntitySearchNode:
+    labels = list(record.get("labels") or [])
+    group_id = str(record.get("group_id") or "")
+    dynamic_label = "Entity_" + group_id.replace("-", "")
+    if dynamic_label in labels:
+        labels.remove(dynamic_label)
+
+    return _EntitySearchNode(
+        uuid=str(record["uuid"]),
+        name=str(record["name"]),
+        name_embedding=_normalize_embedding(record.get("name_embedding")),
+        group_id=group_id,
+        labels=labels,
+        created_at=record.get("created_at"),
+        summary=str(record.get("summary") or ""),
+        attributes=_attributes_from_record(
+            record,
+            {
+                "uuid",
+                "name",
+                "group_id",
+                "name_embedding",
+                "summary",
+                "created_at",
+                "labels",
+            },
+        ),
+    )
+
+
+def _entity_edge_from_record(record: dict[str, Any]) -> _EntitySearchEdge:
+    return _EntitySearchEdge(
+        uuid=str(record["uuid"]),
+        source_node_uuid=str(record["source_node_uuid"]),
+        target_node_uuid=str(record["target_node_uuid"]),
+        fact=str(record.get("fact") or ""),
+        fact_embedding=_normalize_embedding(record.get("fact_embedding")),
+        name=str(record["name"]),
+        group_id=str(record["group_id"]),
+        episodes=list(record.get("episodes") or []),
+        created_at=record.get("created_at"),
+        expired_at=record.get("expired_at"),
+        valid_at=record.get("valid_at"),
+        invalid_at=record.get("invalid_at"),
+        reference_time=record.get("reference_time"),
+        attributes=_attributes_from_record(
+            record,
+            {
+                "uuid",
+                "source_node_uuid",
+                "target_node_uuid",
+                "fact",
+                "fact_embedding",
+                "name",
+                "group_id",
+                "episodes",
+                "created_at",
+                "expired_at",
+                "valid_at",
+                "invalid_at",
+                "reference_time",
+            },
+        ),
+    )
+
+
 def _rrf_uuids(results: list[list[str]], rank_const: int = 1) -> list[str]:
     scores: dict[str, float] = {}
     for result in results:
@@ -182,20 +350,37 @@ def _temporal_filter_clause(
     return "(" + " OR ".join(or_clauses) + ")"
 
 
-def _episode_from_record(record: dict[str, Any]) -> EpisodicNode:
+def _episode_from_record(record: dict[str, Any]) -> _EpisodeSearchNode:
     record["source_description"] = record.get("source_description") or ""
     record.setdefault("entity_edges", [])
-    return episodic_node_from_record(record)
+    return _EpisodeSearchNode(
+        uuid=str(record["uuid"]),
+        group_id=str(record["group_id"]),
+        name=str(record.get("name") or ""),
+        content=str(record.get("content") or ""),
+        source=str(record.get("source") or ""),
+        source_description=str(record["source_description"]),
+        entity_edges=list(record["entity_edges"]),
+        created_at=record.get("created_at"),
+        valid_at=record.get("valid_at"),
+    )
 
 
-def _community_from_record(record: dict[str, Any]) -> CommunityNode:
+def _community_from_record(record: dict[str, Any]) -> _CommunitySearchNode:
     record.setdefault("summary", "")
     record.setdefault("name_embedding", None)
-    return community_node_from_record(record)
+    return _CommunitySearchNode(
+        uuid=str(record["uuid"]),
+        name=str(record["name"]),
+        group_id=str(record["group_id"]),
+        name_embedding=_normalize_embedding(record.get("name_embedding")),
+        created_at=record.get("created_at"),
+        summary=str(record["summary"]),
+    )
 
 
-class SurrealSearchInterface(SearchInterface):
-    """Native Graphiti search adapter for SurrealDB."""
+class SurrealSearchInterface:
+    """Native search adapter for SurrealDB compatibility callers."""
 
     async def _mentioned_entity_uuids(
         self,
@@ -208,7 +393,7 @@ class SurrealSearchInterface(SearchInterface):
         group_clause = (
             "AND group_id IN $group_ids AND out.group_id IN $group_ids" if group_ids else ""
         )
-        records = normalize_records(
+        records = _normalize_records(
             await driver.execute_query(
                 """
                 SELECT out.uuid AS uuid
@@ -233,7 +418,7 @@ class SurrealSearchInterface(SearchInterface):
         group_clause = (
             "AND group_id IN $group_ids AND out.group_id IN $group_ids" if group_ids else ""
         )
-        records = normalize_records(
+        records = _normalize_records(
             await driver.execute_query(
                 """
                 SELECT out.uuid AS uuid
@@ -258,7 +443,7 @@ class SurrealSearchInterface(SearchInterface):
         if not uuids:
             return []
         filter_clauses, filter_params = _node_filter_clause(search_filter)
-        records = normalize_records(
+        records = _normalize_records(
             await driver.execute_query(
                 "SELECT * FROM entity WHERE "
                 + _where_clause(
@@ -271,7 +456,7 @@ class SurrealSearchInterface(SearchInterface):
                 **filter_params,
             )
         )
-        nodes_by_uuid = {record["uuid"]: entity_node_from_record(record) for record in records}
+        nodes_by_uuid = {record["uuid"]: _entity_node_from_record(record) for record in records}
         return [nodes_by_uuid[uuid] for uuid in uuids if uuid in nodes_by_uuid]
 
     async def node_fulltext_search(
@@ -287,7 +472,7 @@ class SurrealSearchInterface(SearchInterface):
             return []
 
         filter_clauses, filter_params = _node_filter_clause(search_filter)
-        records = normalize_records(
+        records = _normalize_records(
             await driver.execute_query(
                 """
                 SELECT *,
@@ -316,7 +501,7 @@ class SurrealSearchInterface(SearchInterface):
                 **filter_params,
             )
         )
-        return [entity_node_from_record(record) for record in records]
+        return [_entity_node_from_record(record) for record in records]
 
     async def node_similarity_search(
         self,
@@ -332,7 +517,7 @@ class SurrealSearchInterface(SearchInterface):
 
         filter_clauses, filter_params = _node_filter_clause(search_filter)
         candidate_limit = max(int(limit) * 4, int(limit), 1)
-        records = normalize_records(
+        records = _normalize_records(
             await driver.execute_query(
                 "SELECT * FROM ("
                 "SELECT *, (1 - vector::distance::knn()) AS score FROM entity "
@@ -349,7 +534,7 @@ class SurrealSearchInterface(SearchInterface):
                 **filter_params,
             )
         )
-        return [entity_node_from_record(record) for record in records]
+        return [_entity_node_from_record(record) for record in records]
 
     async def edge_fulltext_search(
         self,
@@ -368,7 +553,7 @@ class SurrealSearchInterface(SearchInterface):
             result_limit * EDGE_FULLTEXT_MATCH_HEADROOM, EDGE_FULLTEXT_MIN_MATCH_LIMIT
         )
         match_clauses, match_params = _edge_match_filter_clause(search_filter)
-        match_records = normalize_records(
+        match_records = _normalize_records(
             await driver.execute_query(
                 """
                 SELECT uuid, created_at, search::score(0) AS score
@@ -396,7 +581,7 @@ class SurrealSearchInterface(SearchInterface):
             return []
 
         filter_clauses, filter_params = _edge_filter_clause(search_filter)
-        records = normalize_records(
+        records = _normalize_records(
             await driver.execute_query(
                 _ENTITY_EDGE_SELECT
                 + " WHERE "
@@ -418,7 +603,7 @@ class SurrealSearchInterface(SearchInterface):
             record = dict(rows_by_uuid[uuid])
             record["score"] = match_scores[uuid]
             ordered_records.append(record)
-        return [entity_edge_from_record(record) for record in ordered_records[:result_limit]]
+        return [_entity_edge_from_record(record) for record in ordered_records[:result_limit]]
 
     async def edge_similarity_search(
         self,
@@ -444,7 +629,7 @@ class SurrealSearchInterface(SearchInterface):
             "FROM relates_to",
             ", (1 - vector::distance::knn()) AS score\nFROM relates_to",
         )
-        records = normalize_records(
+        records = _normalize_records(
             await driver.execute_query(
                 "SELECT * FROM ("
                 + vector_select
@@ -461,7 +646,7 @@ class SurrealSearchInterface(SearchInterface):
                 **filter_params,
             )
         )
-        return [entity_edge_from_record(record) for record in records]
+        return [_entity_edge_from_record(record) for record in records]
 
     async def episode_fulltext_search(
         self,
@@ -477,7 +662,7 @@ class SurrealSearchInterface(SearchInterface):
         if not search_query:
             return []
 
-        records = normalize_records(
+        records = _normalize_records(
             await driver.execute_query(
                 """
                 SELECT *, search::score(0) AS score
@@ -530,7 +715,7 @@ class SurrealSearchInterface(SearchInterface):
                 )
                 next_entities.extend(traversal_targets)
 
-                records = normalize_records(
+                records = _normalize_records(
                     await driver.execute_query(
                         _ENTITY_EDGE_SELECT
                         + " WHERE "
@@ -559,7 +744,7 @@ class SurrealSearchInterface(SearchInterface):
                     seen_edges.add(uuid)
                     result_records.append(record)
                     if len(result_records) >= limit:
-                        return [entity_edge_from_record(r) for r in result_records]
+                        return [_entity_edge_from_record(r) for r in result_records]
 
             entity_frontier = [
                 uuid for uuid in _dedupe(next_entities) if uuid not in visited_entities
@@ -568,7 +753,7 @@ class SurrealSearchInterface(SearchInterface):
             if not entity_frontier:
                 break
 
-        return [entity_edge_from_record(record) for record in result_records]
+        return [_entity_edge_from_record(record) for record in result_records]
 
     async def node_bfs_search(
         self,
@@ -632,7 +817,7 @@ class SurrealSearchInterface(SearchInterface):
         if not search_query:
             return []
 
-        records = normalize_records(
+        records = _normalize_records(
             await driver.execute_query(
                 """
                 SELECT *,
@@ -667,7 +852,7 @@ class SurrealSearchInterface(SearchInterface):
             return []
 
         candidate_limit = max(int(limit) * 4, int(limit), 1)
-        records = normalize_records(
+        records = _normalize_records(
             await driver.execute_query(
                 "SELECT * FROM ("
                 "SELECT *, (1 - vector::distance::knn()) AS score FROM community "
@@ -691,7 +876,7 @@ class SurrealSearchInterface(SearchInterface):
         uuids = [community.uuid for community in communities]
         if not uuids:
             return {}
-        records = normalize_records(
+        records = _normalize_records(
             await driver.execute_query(
                 "SELECT uuid, name_embedding FROM community WHERE uuid IN $uuids;",
                 uuids=uuids,
@@ -700,7 +885,7 @@ class SurrealSearchInterface(SearchInterface):
         embeddings: dict[str, list[float]] = {}
         for record in records:
             uuid = _record_uuid(record)
-            embedding = normalize_embedding(record.get("name_embedding"))
+            embedding = _normalize_embedding(record.get("name_embedding"))
             if uuid is not None and embedding is not None:
                 embeddings[uuid] = embedding
         return embeddings
@@ -715,7 +900,7 @@ class SurrealSearchInterface(SearchInterface):
         filtered_uuids = [uuid for uuid in node_uuids if uuid != center_node_uuid]
         scores: dict[str, float] = {uuid: 0.0 for uuid in filtered_uuids}
         if filtered_uuids:
-            records = normalize_records(
+            records = _normalize_records(
                 await driver.execute_query(
                     """
                     SELECT
@@ -757,7 +942,7 @@ class SurrealSearchInterface(SearchInterface):
         if not sorted_uuids:
             return [], []
 
-        records = normalize_records(
+        records = _normalize_records(
             await driver.execute_query(
                 """
                 SELECT out.uuid AS uuid

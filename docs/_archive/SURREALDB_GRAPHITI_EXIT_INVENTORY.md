@@ -55,11 +55,6 @@ owner, and deletion or retention criterion.
   - Owner: v0.7 native memory
   - Criteria: Native write, exact lookup, semantic search, and entity hydration cover the seeded
     graph behavior without Graphiti node APIs.
-- `packages/python/sibyl-core/src/sibyl_core/graph/search_interface.py`
-  - Class: `compatibility`
-  - Owner: v0.7 native retrieval
-  - Criteria: Compare mode no longer calls Graphiti search and seeded native retrieval is the
-    default path.
 - `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/*`
   - Class: `compatibility`
   - Owner: v0.7 Graphiti exit
@@ -210,13 +205,13 @@ source metadata.
 
 ### `packages/python/sibyl-core/src/sibyl_core/graph/search_interface.py`
 
-- Behavior: Surreal-backed implementation of Graphiti search interface methods.
+- Behavior: Surreal-backed search adapter for compatibility callers.
 - Default-loop usage: compare/fallback search scaffolding, not native retrieval's primary path.
-- Status: retained compatibility adapter.
-- Removal condition: compare mode no longer calls Graphiti search and seeded native retrieval is the
-  default path.
-- Owner: v0.7 native retrieval.
-- Verify: `moon run core:test -- tests/graph/surreal/test_search_interface.py`.
+- Status: Graphiti runtime imports removed in v0.13; legacy search adapter surface remains.
+- Removal condition: compare mode no longer calls the legacy search adapter and seeded native
+  retrieval is the default path.
+- Owner: v0.13 Graphiti runtime import deletion.
+- Verify: `moon run core:graphiti-compatibility-file-test`.
 
 ### `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/*`
 

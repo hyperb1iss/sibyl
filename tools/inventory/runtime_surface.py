@@ -282,12 +282,6 @@ GRAPHITI_COMPATIBILITY_ALLOWLIST = (
         criteria="Native write, exact lookup, semantic search, and entity hydration cover the seeded graph behavior without Graphiti node APIs.",
     ),
     GraphitiCompatibilityRecord(
-        path="packages/python/sibyl-core/src/sibyl_core/graph/search_interface.py",
-        classification="compatibility",
-        owner="v0.7 native retrieval",
-        criteria="Compare mode no longer calls Graphiti search and seeded native retrieval is the default path.",
-    ),
-    GraphitiCompatibilityRecord(
         path="packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/*",
         classification="compatibility",
         owner="v0.7 Graphiti exit",
