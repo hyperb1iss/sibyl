@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
 from sibyl.cli import db as db_cli
@@ -29,21 +28,23 @@ def test_clear_requires_org_id() -> None:
     assert "--org-id is required for graph operations" in result.output
 
 
-@pytest.mark.graphiti_compatibility
-def test_clear_surreal_uses_org_scoped_graph_ops(monkeypatch) -> None:
-    driver = MagicMock()
-    driver.graph_ops = SimpleNamespace(clear_data=AsyncMock())
-    client = MagicMock()
-    client.get_org_driver.return_value = driver
+def test_clear_uses_native_graph_tables() -> None:
+    client = SimpleNamespace(execute_query=AsyncMock(return_value=[]))
 
-    monkeypatch.setattr("sibyl.config.settings.store", "surreal")
-
-    with patch("sibyl_core.graph.client.get_graph_client", AsyncMock(return_value=client)):
+    with (
+        patch(
+            "sibyl_core.services.native_graph.get_native_graph_client",
+            AsyncMock(return_value=client),
+        ),
+        patch("sibyl_core.services.native_graph.prepare_native_graph_schema", AsyncMock()),
+    ):
         result = runner.invoke(db_cli.app, ["clear", "--yes", "--org-id", "org-123"])
 
     assert result.exit_code == 0
-    client.get_org_driver.assert_called_once_with("org-123")
-    driver.graph_ops.clear_data.assert_awaited_once_with(driver, group_ids=["org-123"])
+    assert client.execute_query.await_count >= 1
+    assert all(
+        call.kwargs["group_id"] == "org-123" for call in client.execute_query.await_args_list
+    )
 
 
 def test_stats_requires_org_id() -> None:
@@ -201,31 +202,24 @@ def test_restore_prepares_graph_runtime_before_restore(tmp_path: Path) -> None:
     prepare.assert_awaited_once_with("org-123", clean=False)
 
 
-@pytest.mark.graphiti_compatibility
-def test_prepare_graph_runtime_surreal_bootstraps_schema_and_clears_rows(
-    monkeypatch,
-) -> None:
-    driver = MagicMock()
-    driver.graph_ops = SimpleNamespace(clear_data=AsyncMock())
-    driver.build_indices_and_constraints = AsyncMock()
-
-    client = MagicMock()
-    client.get_org_driver.return_value = driver
-
-    monkeypatch.setattr("sibyl.config.settings.store", "surreal")
-
+def test_prepare_graph_runtime_bootstraps_native_schema_and_clears_rows() -> None:
+    client = SimpleNamespace(execute_query=AsyncMock(return_value=[]))
     bootstrap_schema = AsyncMock()
 
     with (
-        patch("sibyl_core.graph.client.get_graph_client", AsyncMock(return_value=client)),
+        patch(
+            "sibyl_core.services.native_graph.get_native_graph_client",
+            AsyncMock(return_value=client),
+        ),
         patch("sibyl_core.backends.surreal.schema.bootstrap_schema", bootstrap_schema),
     ):
         db_cli._prepare_graph_runtime("org-123", clean=True)
 
-    client.get_org_driver.assert_called_once_with("org-123")
-    bootstrap_schema.assert_awaited_once_with(driver, reset=True)
-    driver.graph_ops.clear_data.assert_awaited_once_with(driver, group_ids=["org-123"])
-    driver.build_indices_and_constraints.assert_not_called()
+    bootstrap_schema.assert_awaited_once_with(client, reset=True)
+    assert client.execute_query.await_count >= 1
+    assert all(
+        call.kwargs["group_id"] == "org-123" for call in client.execute_query.await_args_list
+    )
 
 
 def test_backup_create_uses_database_dump_request_field() -> None:

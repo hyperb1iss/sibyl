@@ -5,7 +5,7 @@ Commands for backup, restore, and database management.
 
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -40,6 +40,27 @@ def _first_count(rows: object) -> int:
         value = row[0]
         return value if isinstance(value, int) else 0
     return 0
+
+
+async def _get_native_graph_client(org_id: str):
+    from sibyl_core.services.native_graph import (
+        get_native_graph_client,
+        prepare_native_graph_schema,
+    )
+
+    client = await get_native_graph_client(org_id)
+    await prepare_native_graph_schema(client)
+    return client
+
+
+async def _clear_native_group_data(client: Any, org_id: str) -> None:
+    from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
+
+    for table in (*GRAPH_EDGES, *GRAPH_TABLES):
+        await client.execute_query(
+            f"DELETE FROM {table} WHERE group_id = $group_id;",  # noqa: S608
+            group_id=org_id,
+        )
 
 
 def _coerce_graph_backup_data(payload: dict[str, object], org_id: str):
@@ -260,16 +281,9 @@ def clear_db(
 
     @run_async
     async def _clear() -> None:
-        from sibyl.config import settings
-        from sibyl_core.graph.client import get_graph_client
-
         try:
-            client = await get_graph_client()
-            if settings.store == "surreal":
-                driver = client.get_org_driver(org_id)
-                await driver.graph_ops.clear_data(driver, group_ids=[org_id])
-            else:
-                await client.execute_write_org("MATCH (n) DETACH DELETE n", org_id)
+            client = await _get_native_graph_client(org_id)
+            await _clear_native_group_data(client, org_id)
 
             success("Database cleared")
             warn("All data has been deleted")
@@ -295,57 +309,35 @@ def db_stats(
 
     @run_async
     async def _stats() -> None:
-        from sibyl.config import settings
-        from sibyl_core.graph.client import get_graph_client
+        from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
 
         try:
-            client = await get_graph_client()
+            client = await _get_native_graph_client(org_id)
 
-            if settings.store == "surreal":
-                from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
-
-                driver = client.get_org_driver(org_id)
-                node_count = 0
-                rel_count = 0
-                for table in GRAPH_TABLES:
-                    rows = await driver.execute_query(
-                        f"SELECT count() AS count FROM {table} WHERE group_id = $group_id GROUP ALL;",  # noqa: S608
-                        group_id=org_id,
-                    )
-                    node_count += _first_count(rows)
-                for table in GRAPH_EDGES:
-                    rows = await driver.execute_query(
-                        f"SELECT count() AS count FROM {table} WHERE group_id = $group_id GROUP ALL;",  # noqa: S608
-                        group_id=org_id,
-                    )
-                    rel_count += _first_count(rows)
-                type_rows = await driver.execute_query(
-                    """
-                    SELECT entity_type AS type, count() AS count
-                    FROM entity
-                    WHERE group_id = $group_id
-                    GROUP BY entity_type
-                    ORDER BY count DESC;
-                    """,
+            node_count = 0
+            rel_count = 0
+            for table in GRAPH_TABLES:
+                rows = await client.execute_query(
+                    f"SELECT count() AS count FROM {table} WHERE group_id = $group_id GROUP ALL;",  # noqa: S608
                     group_id=org_id,
                 )
-            else:
-                node_rows = await client.execute_read_org(
-                    "MATCH (n) RETURN count(n) as count",
-                    org_id,
+                node_count += _first_count(rows)
+            for table in GRAPH_EDGES:
+                rows = await client.execute_query(
+                    f"SELECT count() AS count FROM {table} WHERE group_id = $group_id GROUP ALL;",  # noqa: S608
+                    group_id=org_id,
                 )
-                node_count = _first_count(node_rows)
-
-                rel_rows = await client.execute_read_org(
-                    "MATCH ()-[r]->() RETURN count(r) as count",
-                    org_id,
-                )
-                rel_count = _first_count(rel_rows)
-
-                type_rows = await client.execute_read_org(
-                    "MATCH (n) RETURN n.entity_type as type, count(*) as count ORDER BY count DESC",
-                    org_id,
-                )
+                rel_count += _first_count(rows)
+            type_rows = await client.execute_query(
+                """
+                SELECT entity_type AS type, count() AS count
+                FROM entity
+                WHERE group_id = $group_id
+                GROUP BY entity_type
+                ORDER BY count DESC;
+                """,
+                group_id=org_id,
+            )
 
             console.print(f"\n[{NEON_CYAN}]Database Statistics[/{NEON_CYAN}]\n")
             console.print(f"  Total Nodes: {node_count}")
@@ -681,46 +673,19 @@ def backfill_episode_relationships(
 
 async def _prepare_graph_runtime_async(org_id: str, *, clean: bool) -> None:
     """Ensure the target graph runtime is ready for restore."""
-    from sibyl.config import settings
-    from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES, bootstrap_schema
-    from sibyl_core.graph.client import get_graph_client
+    from sibyl_core.backends.surreal.schema import bootstrap_schema
+    from sibyl_core.services.native_graph import get_native_graph_client
 
-    client = await get_graph_client()
-    if settings.store == "surreal":
-        driver = client.get_org_driver(org_id)
+    client = await get_native_graph_client(org_id)
 
-        # Bootstrap the SCHEMAFULL tables + indexes. With reset=True, this also
-        # drops existing tables (which clears data, replacing the manual delete
-        # path). With reset=False, IF NOT EXISTS lets it run idempotently.
-        await bootstrap_schema(driver, reset=clean)
-
-        # Without reset, schema bootstrap leaves data alone — clear explicitly.
-        if not clean:
-            return
-
-        async def _clear_surreal_group_data() -> None:
-            # Table names come from the static schema constants above.
-            for table in (*GRAPH_EDGES, *GRAPH_TABLES):
-                query = f"DELETE FROM {table} WHERE group_id = $group_id;"  # noqa: S608
-                await driver.execute_query(query, group_id=org_id)
-
-        # `bootstrap_schema(reset=True)` already dropped the per-org tables, so
-        # the data clear is a no-op safety net for any rows left by edge cases.
-        graph_ops = getattr(driver, "graph_ops", None)
-        if graph_ops is not None:
-            try:
-                await graph_ops.clear_data(driver, group_ids=[org_id])
-            except Exception:
-                await _clear_surreal_group_data()
-        else:
-            await _clear_surreal_group_data()
-        return
+    # Bootstrap the SCHEMAFULL tables + indexes. With reset=True, this also
+    # drops existing tables. With reset=False, IF NOT EXISTS lets it run
+    # idempotently.
+    await bootstrap_schema(client, reset=clean)
 
     if clean:
-        await client.execute_write_org(
-            "MATCH (n) DETACH DELETE n RETURN count(n) AS deleted",
-            org_id,
-        )
+        await _clear_native_group_data(client, org_id)
+        return
 
 
 def _prepare_graph_runtime(org_id: str, *, clean: bool) -> None:
