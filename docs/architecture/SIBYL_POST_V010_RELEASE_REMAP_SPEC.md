@@ -477,22 +477,22 @@ evidence refresh, and fixing the smallest remaining blockers.
 
 The RC is complete only when each claim has fresh evidence from the current checkout.
 
-| Claim                                      | Evidence                                                                                                                          |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| Active docs agree on current focus         | `docs:lint`, `docs:build`, this spec, the 1.0 roadmap, and the Northstar all point at v1.0 RC focus                               |
-| Task graph reflects current work           | `sibyl context`, `sibyl epic show epic_19e1dea67ebf`, and task lists show RC work instead of ghosts                               |
-| Source ingest and corpus scale are current | `moon run adapter-ingest-gate` and `moon run large-corpus-rehearsal`                                                              |
-| Synthesis is source-grounded               | `moon run synthesis-gate`                                                                                                         |
-| Automatic memory remains policy-safe       | `moon run autonomy-gate`, `moon run memory-trust-gate`, and `moon run trust-control-gate`                                         |
-| Auth/session behavior is boring            | `moon run auth-session-gate`                                                                                                      |
-| Reflection quality is current              | `moon run reflection-quality-gate`                                                                                                |
-| Context and workspace trust are current    | `moon run context-quality-gate` and `moon run workspace-trust-gate`                                                               |
-| Overview performance has a receipt         | `moon run overview-perf-gate`                                                                                                     |
-| Surreal-only runtime closure holds         | `moon run inventory-check`, `moon run inventory-typecheck`, `moon run inventory-test`, and grep audit                             |
-| Backup/restore is release-gated            | `moon run backup-restore-gate`                                                                                                    |
-| Benchmark ledger is claim-safe             | `moon run bench-gate`                                                                                                             |
-| Install and docs surfaces build            | `moon run docs:lint docs:build` and `moon run :check`                                                                             |
-| Release cut has an explicit boundary       | `VERSION` remains the package version source; `.github/workflows/release.yml` bumps it and generates release notes after go-ahead |
+| Claim                                      | Evidence                                                                                                                                                                     |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Active docs agree on current focus         | `docs:lint`, `docs:build`, this spec, the 1.0 roadmap, and the Northstar all point at v1.0 RC focus                                                                          |
+| Task graph reflects current work           | `sibyl context`, `sibyl epic show epic_19e1dea67ebf`, and task lists show RC work instead of ghosts                                                                          |
+| Source ingest and corpus scale are current | `moon run adapter-ingest-gate` and `moon run large-corpus-rehearsal`                                                                                                         |
+| Synthesis is source-grounded               | `moon run synthesis-gate`                                                                                                                                                    |
+| Automatic memory remains policy-safe       | `moon run autonomy-gate`, `moon run memory-trust-gate`, and `moon run trust-control-gate`                                                                                    |
+| Auth/session behavior is boring            | `moon run auth-session-gate`                                                                                                                                                 |
+| Reflection quality is current              | `moon run reflection-quality-gate`                                                                                                                                           |
+| Context and workspace trust are current    | `moon run context-quality-gate` and `moon run workspace-trust-gate`                                                                                                          |
+| Overview performance has a receipt         | `moon run overview-perf-gate`                                                                                                                                                |
+| Surreal-only runtime closure holds         | `moon run inventory-check`, `moon run inventory-typecheck`, `moon run inventory-test`, and grep audit                                                                        |
+| Backup/restore is release-gated            | `moon run backup-restore-gate`                                                                                                                                               |
+| Benchmark ledger is claim-safe             | `moon run bench-gate`                                                                                                                                                        |
+| Install and docs surfaces build            | `moon run docs:lint docs:build` and `moon run :check`                                                                                                                        |
+| Release cut has an explicit boundary       | `VERSION` remains the package version source; prerelease cuts validate a pre-committed candidate SHA, same-SHA nightly run, RC gate bundle, and release notes after go-ahead |
 
 RC grep audit:
 
