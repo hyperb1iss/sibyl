@@ -447,6 +447,7 @@ class TestListEntitiesRoute:
     async def test_untyped_project_filters_apply_to_bounded_batch(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         manager = MagicMock()
+        manager._surreal_entity_node_ops.return_value = None
         archived_page = [
             _entity("ent-archived-1", project_id="proj-1", name="Archived 1", archived=True),
             _entity("ent-archived-2", project_id="proj-1", name="Archived 2", archived=True),
