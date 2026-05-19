@@ -15,6 +15,11 @@ RC_GATE_TEST_DEPS = {
     "root:overview-perf-gate-test",
 }
 PUBLISH_ARTIFACT_JOB_COUNT = 2
+PYTHON_RELEASE_PACKAGES = {
+    "uv build --package sibyl-core --out-dir dist/",
+    "uv build --package sibyl-dev --out-dir dist/",
+    "uv build --package sibyld --out-dir dist/",
+}
 
 
 def _root_task(task_id: str) -> dict[str, Any]:
@@ -74,6 +79,15 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
 
     assert "rc-gate:" in workflow
     assert "moon run :check" in workflow
-    assert workflow.index("moon run :check") < workflow.index("uv build --package sibyl-core")
+    assert "moon run python-package-build" in workflow
+    assert workflow.index("moon run :check") < workflow.index("moon run python-package-build")
     assert workflow.index("moon run :check") < workflow.index("docker/build-push-action")
     assert workflow.count("needs: rc-gate") == PUBLISH_ARTIFACT_JOB_COUNT
+
+
+def test_python_package_build_covers_cli_core_and_daemon() -> None:
+    task = _root_task("python-package-build")
+    script = task["script"]
+
+    for package_command in PYTHON_RELEASE_PACKAGES:
+        assert package_command in script

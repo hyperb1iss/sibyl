@@ -104,6 +104,7 @@ Installs uv (if needed), installs the `sibyl` CLI, and starts Sibyl. Done.
 
 ```bash
 uv tool install sibyl-dev      # or: pipx install sibyl-dev
+uv tool install sibyld         # optional direct daemon CLI
 sibyl local start
 ```
 
@@ -216,6 +217,7 @@ project workflows.
 
 ```bash
 uv tool install sibyl-dev    # published package
+uv tool install sibyld       # direct daemon CLI package
 moon run cli:install         # or install from source
 ```
 

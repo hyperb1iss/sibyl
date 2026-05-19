@@ -516,6 +516,30 @@ tasks:
       - .github/workflows/publish.yml
       - moon.yml
 
+  python-package-build:
+    script: |
+      rm -rf dist
+      mkdir -p dist
+      uv build --package sibyl-core --out-dir dist/
+      uv build --package sibyl-dev --out-dir dist/
+      uv build --package sibyld --out-dir dist/
+      ls -la dist/
+    inputs:
+      - VERSION
+      - pyproject.toml
+      - uv.lock
+      - apps/api/README.md
+      - apps/api/pyproject.toml
+      - apps/api/src/**/*.py
+      - apps/cli/README.md
+      - apps/cli/pyproject.toml
+      - apps/cli/src/**/*.py
+      - packages/python/sibyl-core/README.md
+      - packages/python/sibyl-core/pyproject.toml
+      - packages/python/sibyl-core/src/**/*.py
+    outputs:
+      - dist/*
+
   bench-gate:
     command: uv run python -m tools.bench.eval_gate
     inputs:

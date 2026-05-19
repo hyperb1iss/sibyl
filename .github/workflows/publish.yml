@@ -105,13 +105,15 @@ jobs:
       - name: "◇ Install uv"
         uses: astral-sh/setup-uv@v6
 
+      - name: "◇ Setup moonrepo toolchain"
+        uses: moonrepo/setup-toolchain@v0.6
+        with:
+          auto-install: true
+          auto-setup: true
+          cache-version: publish-python-v1
+
       - name: "△ Build Python packages"
-        run: |
-          echo "Building sibyl-core..."
-          uv build --package sibyl-core --out-dir dist/
-          echo "Building sibyl-dev..."
-          uv build --package sibyl-dev --out-dir dist/
-          ls -la dist/
+        run: moon run python-package-build
 
       - name: "► Publish to PyPI"
         if: ${{ !inputs.dry_run }}

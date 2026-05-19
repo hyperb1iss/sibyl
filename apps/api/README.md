@@ -6,6 +6,9 @@ loop, task workflow, search, synthesis, and real-time updates.
 ## Quick Reference
 
 ```bash
+# Install published daemon CLI
+uv tool install sibyld
+
 # Start server
 moon run api:serve        # or: uv run sibyld serve
 

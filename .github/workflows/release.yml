@@ -235,6 +235,7 @@ jobs:
             echo "### Published Packages" >> $GITHUB_STEP_SUMMARY
             echo "- [sibyl-core on PyPI](https://pypi.org/project/sibyl-core/${{ steps.version.outputs.version }}/)" >> $GITHUB_STEP_SUMMARY
             echo "- [sibyl-dev on PyPI](https://pypi.org/project/sibyl-dev/${{ steps.version.outputs.version }}/)" >> $GITHUB_STEP_SUMMARY
+            echo "- [sibyld on PyPI](https://pypi.org/project/sibyld/${{ steps.version.outputs.version }}/)" >> $GITHUB_STEP_SUMMARY
             echo "- [Docker Images on GHCR](https://github.com/hyperb1iss/sibyl/pkgs/container/sibyl-api)" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "---" >> $GITHUB_STEP_SUMMARY

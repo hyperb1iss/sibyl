@@ -7,7 +7,7 @@ description: Installing Sibyl and its dependencies
 
 This guide covers the two main ways to run Sibyl:
 
-- install the published CLI and run a local instance with `sibyl local ...`
+- install the published CLI and daemon packages, then run a local instance with `sibyl local ...`
 - work on the monorepo in development mode with `moon run ...`
 
 ## Prerequisites
@@ -39,6 +39,7 @@ The fastest way to run Sibyl locally:
 ```bash
 # Install the published CLI
 uv tool install sibyl-dev
+uv tool install sibyld
 
 # Start local services
 sibyl local start
@@ -192,8 +193,7 @@ moon run api:worker
 moon run api:serve
 
 # Start in stdio mode (for MCP subprocess)
-cd apps/api
-uv run sibyld serve -t stdio
+sibyld serve -t stdio
 ```
 
 ## Verify Installation
@@ -209,6 +209,7 @@ sibyl local setup --status
 curl http://localhost:3334/api/health
 sibyl health
 sibyl version
+sibyld --version
 ```
 
 ### Access Web UI
