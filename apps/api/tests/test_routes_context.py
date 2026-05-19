@@ -565,7 +565,7 @@ class TestReflectRoute:
             None,
             ctx,
             "proj_1",
-            required_role=ProjectRole.VIEWER,
+            required_role=ProjectRole.CONTRIBUTOR,
         )
         assert response.source_title == "Planning"
         assert response.source_id == "session_1"
