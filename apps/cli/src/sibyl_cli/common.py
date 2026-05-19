@@ -72,8 +72,14 @@ def read_content_file(
     follow_symlinks: bool = False,
 ) -> str:
     file_path = Path(path).expanduser()
-    if file_path.is_symlink() and not follow_symlinks:
-        raise ValueError("Refusing to read symlink without --follow-symlinks.")
+    if not file_path.is_absolute():
+        file_path = Path.cwd() / file_path
+
+    if not follow_symlinks:
+        for component in (file_path, *file_path.parents):
+            if component.exists() and component.is_symlink():
+                raise ValueError("Refusing to read symlink without --follow-symlinks.")
+
     if not file_path.exists():
         raise ValueError(f"Content file not found: {file_path}")
     if not file_path.is_file():
@@ -84,10 +90,15 @@ def read_content_file(
         raise ValueError(f"Content file is not readable: {file_path}") from exc
     if size > max_size:
         raise ValueError(f"Content file is too large: {size} bytes exceeds {max_size}.")
-    if not os.access(file_path, os.R_OK):
-        raise ValueError(f"Content file is not readable: {file_path}")
     try:
-        data = file_path.read_bytes()
+        flags = os.O_RDONLY
+        if not follow_symlinks and hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd = os.open(file_path, flags)
+        with os.fdopen(fd, "rb") as stream:
+            data = stream.read(max_size + 1)
+        if len(data) > max_size:
+            raise ValueError(f"Content file is too large: more than {max_size} bytes.")
         data[:CONTENT_FILE_BINARY_CHECK_BYTES].decode("utf-8")
         return data.decode("utf-8")
     except UnicodeDecodeError as exc:
