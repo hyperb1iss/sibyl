@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 import pytest
 
+import sibyl_core.tools.context as context_module
 from sibyl_core.evals import (
     FROZEN_CONTEXT_PACK_SUITE_NAMES,
     ContextPackCaseResult,
@@ -24,11 +24,6 @@ from sibyl_core.models.context import (
     ContextLayer,
     ContextPack,
     ContextSection,
-)
-from sibyl_core.services.surreal_content import (
-    AGENT_DIARY_CAPTURE_SURFACE,
-    MemoryScope,
-    RawMemory,
 )
 from sibyl_core.tools.context import compile_context
 from sibyl_core.tools.responses import SearchResponse, SearchResult
@@ -57,97 +52,78 @@ def _result(
     )
 
 
-def _raw_memory(
-    memory_id: str,
-    *,
-    principal_id: str = "user-123",
-    memory_scope: MemoryScope = MemoryScope.PRIVATE,
-    scope_key: str | None = None,
-    score: float = 0.8,
-    metadata: dict[str, Any] | None = None,
-    capture_surface: str = "cli",
-) -> RawMemory:
-    return RawMemory(
-        id=memory_id,
-        organization_id="org-123",
-        source_id=f"source:{memory_id}",
-        principal_id=principal_id,
-        memory_scope=memory_scope,
-        scope_key=scope_key,
-        title=f"Raw {memory_id}",
-        raw_content=f"Raw {memory_id} content anchors scoped context recall.",
-        tags=["fixture"],
-        metadata={"source_name": "eval-fixture", **(metadata or {})},
-        provenance={"message_id": memory_id},
-        capture_surface=capture_surface,
-        captured_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
-        created_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
-        score=score,
-    )
+def _facet_native_search(responses: dict[ContextFacet, list[SearchResult]]):
+    """Build a fake native_context_search keyed on facet.
 
+    Native retrieval is the only runtime path; eval fixtures exercise
+    context assembly by stubbing native_context_search and routing facet
+    results the way compile_context does.
+    """
 
-async def _compile_context_compat(*args: Any, **kwargs: Any):
-    kwargs.setdefault("retrieval_mode", "graphiti")
-    return await compile_context(*args, **kwargs)
+    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
+        facet = kwargs.get("facet")
+        items = responses.get(facet, []) if facet is not None else []
+        return SearchResponse(
+            results=items,
+            total=len(items),
+            query=kwargs["plan"].query,
+            filters={"types": kwargs.get("types")},
+        )
+
+    return fake_native_context_search
 
 
 @pytest.mark.asyncio
-async def test_context_pack_fixture_passes_coding_handoff_requirements() -> None:
-    async def fake_search(**kwargs: Any) -> SearchResponse:
-        by_types = {
-            ("task", "epic", "project"): [
-                _result(
-                    "task-active",
-                    "task",
-                    "Implement native RawMemory slice",
-                    "Current task is the native RawMemory baseline for scoped recall.",
-                    metadata={"project_id": "project-sibyl"},
-                )
-            ],
-            ("decision",): [
-                _result(
-                    "decision-source-law",
-                    "decision",
-                    "Raw memory stays source-grounded",
-                    "Decision: preserve source IDs before extraction or graph traversal.",
-                    metadata={"project_id": "project-sibyl"},
-                )
-            ],
-            ("artifact", "document", "source", "config_file"): [
-                _result(
-                    "artifact-test",
-                    "artifact",
-                    "Context pack tests",
-                    "Relevant tests include test_context_pack and test_context_pack_evals.",
-                    result_origin="document",
-                    metadata={"project_id": "project-sibyl"},
-                )
-            ],
-            ("error_pattern", "pattern"): [
-                _result(
-                    "risk-privacy",
-                    "pattern",
-                    "Remaining risk: private memory leakage",
-                    "Remaining risk is leaking private memory into project context packs.",
-                    metadata={"project_id": "project-sibyl"},
-                )
-            ],
-        }
-        results = by_types.get(tuple(kwargs["types"] or ()), [])
-        return SearchResponse(
-            results=results,
-            total=len(results),
-            query=kwargs["query"],
-            filters={"types": kwargs["types"]},
-        )
+async def test_context_pack_fixture_passes_coding_handoff_requirements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = {
+        ContextFacet.ACTIVE_WORK: [
+            _result(
+                "task-active",
+                "task",
+                "Implement native RawMemory slice",
+                "Current task is the native RawMemory baseline for scoped recall.",
+                metadata={"project_id": "project-sibyl"},
+            )
+        ],
+        ContextFacet.DECISIONS: [
+            _result(
+                "decision-source-law",
+                "decision",
+                "Raw memory stays source-grounded",
+                "Decision: preserve source IDs before extraction or graph traversal.",
+                metadata={"project_id": "project-sibyl"},
+            )
+        ],
+        ContextFacet.ARTIFACTS: [
+            _result(
+                "artifact-test",
+                "artifact",
+                "Context pack tests",
+                "Relevant tests include test_context_pack and test_context_pack_evals.",
+                result_origin="document",
+                metadata={"project_id": "project-sibyl"},
+            )
+        ],
+        ContextFacet.GOTCHAS: [
+            _result(
+                "risk-privacy",
+                "pattern",
+                "Remaining risk: private memory leakage",
+                "Remaining risk is leaking private memory into project context packs.",
+                metadata={"project_id": "project-sibyl"},
+            )
+        ],
+    }
+    monkeypatch.setattr(context_module, "native_context_search", _facet_native_search(responses))
 
-    pack = await _compile_context_compat(
+    pack = await compile_context(
         "handoff the native memory implementation",
         intent="build",
         domain="sibyl",
         project="project-sibyl",
         organization_id="org-hyperbliss",
-        search_fn=fake_search,
     )
 
     result = evaluate_context_pack(
@@ -178,155 +154,6 @@ async def test_context_pack_fixture_passes_coding_handoff_requirements() -> None
     assert result.metrics["items"] == 4
     assert result.metrics["facet_order_matches"] is True
     assert result.metrics["source_metadata_coverage"] == 1.0
-
-
-@pytest.mark.asyncio
-async def test_context_pack_fixture_passes_raw_memory_scope_requirements() -> None:
-    async def fake_search(**kwargs: Any) -> SearchResponse:
-        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
-
-    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
-        if kwargs["memory_scope"] == "private":
-            return [_raw_memory("private-1")]
-        return [
-            _raw_memory(
-                "project-1",
-                memory_scope=MemoryScope.PROJECT,
-                scope_key="project_123",
-                score=0.9,
-            )
-        ]
-
-    pack = await _compile_context_compat(
-        "raw scoped context",
-        intent="build",
-        project="project_123",
-        accessible_projects={"project_123"},
-        principal_id="user-123",
-        organization_id="org-123",
-        search_fn=fake_search,
-        raw_memory_recall_fn=fake_raw_recall,
-    )
-
-    result = evaluate_context_pack(
-        pack,
-        ContextPackFixture(
-            name="raw-scope-grounding",
-            required_item_ids={"raw_memory:project-1", "raw_memory:private-1"},
-            required_facets={ContextFacet.RECENT_MEMORY},
-            required_layer=ContextLayer.RECALL,
-            required_terms={"verbatim source context", "scoped context recall"},
-            required_item_metadata={
-                "raw_memory:project-1": {
-                    "memory_scope": "project",
-                    "scope_key": "project_123",
-                    "source_id": "source:project-1",
-                },
-                "raw_memory:private-1": {
-                    "memory_scope": "private",
-                    "scope_key": None,
-                    "source_id": "source:private-1",
-                },
-            },
-            require_source_metadata=True,
-        ),
-    )
-
-    assert result.passed, result.failures
-    assert result.metrics["metadata_requirement_coverage"] == 1.0
-
-
-@pytest.mark.asyncio
-async def test_context_pack_policy_omits_inaccessible_project_memory() -> None:
-    async def fake_search(**kwargs: Any) -> SearchResponse:
-        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
-
-    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
-        if kwargs["memory_scope"] == "private":
-            return [_raw_memory("private-1")]
-        return [
-            _raw_memory(
-                "project-1",
-                memory_scope=MemoryScope.PROJECT,
-                scope_key="project_123",
-                score=0.9,
-            )
-        ]
-
-    pack = await _compile_context_compat(
-        "raw scoped context",
-        intent="build",
-        project="project_123",
-        accessible_projects={"project_456"},
-        principal_id="user-123",
-        organization_id="org-123",
-        search_fn=fake_search,
-        raw_memory_recall_fn=fake_raw_recall,
-    )
-
-    result = evaluate_context_pack(
-        pack,
-        ContextPackFixture(
-            name="private-leak-negative",
-            required_item_ids={"raw_memory:private-1"},
-            forbidden_item_ids={"raw_memory:project-1"},
-            require_source_metadata=True,
-        ),
-    )
-
-    assert result.passed, result.failures
-    assert result.metrics["forbidden_item_matches"] == 0
-
-
-@pytest.mark.asyncio
-async def test_context_pack_fixture_passes_multi_user_scope_requirements() -> None:
-    async def fake_search(**kwargs: Any) -> SearchResponse:
-        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
-
-    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
-        assert kwargs["principal_id"] == "user-123"
-        if kwargs["memory_scope"] == "private":
-            return [_raw_memory("user-123-private", principal_id="user-123")]
-        return [
-            _raw_memory(
-                "project-123-shared",
-                principal_id="user-123",
-                memory_scope=MemoryScope.PROJECT,
-                scope_key="project_123",
-                score=0.9,
-            )
-        ]
-
-    pack = await _compile_context_compat(
-        "handoff scoped retrieval",
-        intent="build",
-        project="project_123",
-        accessible_projects={"project_123"},
-        principal_id="user-123",
-        organization_id="org-123",
-        search_fn=fake_search,
-        raw_memory_recall_fn=fake_raw_recall,
-    )
-
-    result = evaluate_context_pack(
-        pack,
-        ContextPackFixture(
-            name="multi-user-scoped-retrieval",
-            required_item_ids={
-                "raw_memory:user-123-private",
-                "raw_memory:project-123-shared",
-            },
-            required_metadata_by_type={
-                "raw_memory": {
-                    "principal_id": "user-123",
-                }
-            },
-            require_source_metadata=True,
-        ),
-    )
-
-    assert result.passed, result.failures
-    assert result.metrics["metadata_requirement_coverage"] == 1.0
 
 
 def test_context_pack_fixture_reports_multi_user_raw_memory_leak() -> None:
@@ -425,68 +252,6 @@ def test_context_pack_fixture_counts_forbidden_item_leaks() -> None:
     assert result.metrics["forbidden_item_matches"] == 1
 
 
-@pytest.mark.asyncio
-async def test_context_pack_fixture_passes_agent_diary_requirements() -> None:
-    async def fake_search(**kwargs: Any) -> SearchResponse:
-        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
-
-    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
-        if kwargs.get("agent_id") == "nova":
-            return [
-                _raw_memory(
-                    "nova-diary-1",
-                    score=0.95,
-                    metadata={
-                        "agent_id": "nova",
-                        "memory_kind": "agent_diary",
-                        "project_id": "project_123",
-                    },
-                    capture_surface=AGENT_DIARY_CAPTURE_SURFACE,
-                )
-            ]
-        if kwargs["memory_scope"] == "private":
-            return [_raw_memory("private-1", score=0.8)]
-        return []
-
-    case = ContextPackEvalCase(
-        name="agent-diary-opt-in",
-        goal="handoff the current implementation stance",
-        project="project_123",
-        agent_id="nova",
-        fixture=ContextPackFixture(
-            name="agent-diary-opt-in",
-            required_item_ids={"raw_memory:nova-diary-1", "raw_memory:private-1"},
-            forbidden_item_ids={"raw_memory:other-agent-diary"},
-            required_facets={ContextFacet.RECENT_MEMORY},
-            required_item_metadata={
-                "raw_memory:nova-diary-1": {
-                    "agent_id": "nova",
-                    "memory_kind": "agent_diary",
-                    "project_id": "project_123",
-                }
-            },
-            require_source_metadata=True,
-        ),
-    )
-    pack = await _compile_context_compat(
-        case.goal,
-        intent=case.intent,
-        layer=case.layer,
-        project=case.project,
-        accessible_projects={"project_123"},
-        principal_id="user-123",
-        agent_id=case.agent_id,
-        organization_id="org-123",
-        search_fn=fake_search,
-        raw_memory_recall_fn=fake_raw_recall,
-    )
-
-    result = evaluate_context_pack(pack, case.fixture)
-
-    assert result.passed, result.failures
-    assert result.metrics["metadata_requirement_coverage"] == 1.0
-
-
 def test_context_pack_fixture_reports_raw_memory_scope_mismatch() -> None:
     item = ContextItem(
         id="raw_memory:private-1",
@@ -541,37 +306,31 @@ def test_context_pack_fixture_reports_raw_memory_scope_mismatch() -> None:
 
 
 @pytest.mark.asyncio
-async def test_context_pack_fixture_passes_haven_privacy_requirements() -> None:
-    async def fake_search(**kwargs: Any) -> SearchResponse:
-        if kwargs["types"] == ["domain", "topic", "claim"]:
-            results = [
-                _result(
-                    "haven-routine-evening",
-                    "claim",
-                    "Evening routine preference",
-                    "Bliss prefers the hallway lights dimmed during evening wind-down.",
-                    metadata={
-                        "project_id": "project-haven",
-                        "memory_space": "household",
-                    },
-                )
-            ]
-        else:
-            results = []
-        return SearchResponse(
-            results=results,
-            total=len(results),
-            query=kwargs["query"],
-            filters={"types": kwargs["types"]},
-        )
+async def test_context_pack_fixture_passes_haven_privacy_requirements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = {
+        ContextFacet.DOMAIN: [
+            _result(
+                "haven-routine-evening",
+                "claim",
+                "Evening routine preference",
+                "Bliss prefers the hallway lights dimmed during evening wind-down.",
+                metadata={
+                    "project_id": "project-haven",
+                    "memory_space": "household",
+                },
+            )
+        ]
+    }
+    monkeypatch.setattr(context_module, "native_context_search", _facet_native_search(responses))
 
-    pack = await _compile_context_compat(
+    pack = await compile_context(
         "what should Haven remember about the evening routine?",
         intent="research",
         domain="haven",
         project="project-haven",
         organization_id="org-home",
-        search_fn=fake_search,
     )
 
     result = evaluate_context_pack(
@@ -656,39 +415,33 @@ def test_context_pack_fixture_allows_forbidden_terms_in_goal_only() -> None:
 
 
 @pytest.mark.asyncio
-async def test_context_pack_fixture_reports_forbidden_haven_memory_leak() -> None:
-    async def fake_search(**kwargs: Any) -> SearchResponse:
-        if kwargs["types"] == ["domain", "topic", "claim"]:
-            results = [
-                _result(
-                    "haven-routine-evening",
-                    "claim",
-                    "Evening routine preference",
-                    "Bliss prefers the hallway lights dimmed during evening wind-down.",
-                ),
-                _result(
-                    "private-unrelated-medical-note",
-                    "claim",
-                    "Private unrelated health note",
-                    "This private health note must not appear in Haven household recall.",
-                ),
-            ]
-        else:
-            results = []
-        return SearchResponse(
-            results=results,
-            total=len(results),
-            query=kwargs["query"],
-            filters={"types": kwargs["types"]},
-        )
+async def test_context_pack_fixture_reports_forbidden_haven_memory_leak(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = {
+        ContextFacet.DOMAIN: [
+            _result(
+                "haven-routine-evening",
+                "claim",
+                "Evening routine preference",
+                "Bliss prefers the hallway lights dimmed during evening wind-down.",
+            ),
+            _result(
+                "private-unrelated-medical-note",
+                "claim",
+                "Private unrelated health note",
+                "This private health note must not appear in Haven household recall.",
+            ),
+        ]
+    }
+    monkeypatch.setattr(context_module, "native_context_search", _facet_native_search(responses))
 
-    pack = await _compile_context_compat(
+    pack = await compile_context(
         "what should Haven remember about the evening routine?",
         intent="research",
         domain="haven",
         project="project-haven",
         organization_id="org-home",
-        search_fn=fake_search,
     )
 
     result = evaluate_context_pack(

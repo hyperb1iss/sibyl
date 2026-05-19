@@ -29,7 +29,6 @@ from sibyl_core.retrieval.native import (
 )
 from sibyl_core.services.native_graph import get_native_graph_runtime
 from sibyl_core.services.surreal_content import (
-    AGENT_DIARY_CAPTURE_SURFACE,
     RawMemory,
     recall_raw_memory,
 )
@@ -146,12 +145,6 @@ LAYER_LIMITS = {
     ContextLayer.WAKE: 8,
     ContextLayer.RECALL: 24,
     ContextLayer.DEEP_SEARCH: 50,
-}
-
-LAYER_RAW_LIMITS = {
-    ContextLayer.WAKE: 2,
-    ContextLayer.RECALL: 4,
-    ContextLayer.DEEP_SEARCH: 8,
 }
 
 
@@ -354,143 +347,6 @@ def _item_from_result(result: SearchResult, facet: ContextFacet) -> ContextItem:
     else:
         metadata["quality"] = quality
     return ContextItem(**kwargs)
-
-
-def _item_from_raw_memory(memory: RawMemory) -> ContextItem:
-    created_at = memory.captured_at.isoformat() if memory.captured_at else None
-    source = memory.source_id or memory.capture_surface
-    project_id = memory.metadata.get("project_id") or (
-        memory.scope_key if memory.memory_scope.value == "project" else None
-    )
-    quality = ContextItemQualityMetadata(
-        origin="raw_memory",
-        source=source,
-        created_at=created_at,
-        updated_at=None,
-        valid_at=created_at,
-        project_id=project_id if isinstance(project_id, str) else None,
-    )
-    metadata = {
-        "source_id": memory.source_id,
-        "principal_id": memory.principal_id,
-        "memory_scope": memory.memory_scope.value,
-        "scope_key": memory.scope_key,
-        "capture_surface": memory.capture_surface,
-        "tags": memory.tags,
-        **memory.metadata,
-    }
-    title = memory.title or "Untitled raw memory"
-    is_agent_diary = (
-        memory.capture_surface == AGENT_DIARY_CAPTURE_SURFACE
-        or memory.metadata.get("memory_kind") == "agent_diary"
-    )
-    reason = (
-        "agent diary matched the goal and preserves the agent's private working context"
-        if is_agent_diary
-        else (
-            f"raw memory matched the goal in {memory.memory_scope.value} scope "
-            "and preserves verbatim source context"
-        )
-    )
-    return ContextItem(
-        id=f"raw_memory:{memory.id}",
-        type="raw_memory",
-        name=title,
-        content=memory.raw_content,
-        score=memory.score,
-        facet=ContextFacet.RECENT_MEMORY,
-        reason=reason,
-        source=source,
-        quality=quality,
-        metadata=metadata,
-    )
-
-
-async def _compile_raw_memory_section(
-    *,
-    query: str,
-    organization_id: str,
-    principal_id: str | None,
-    agent_id: str | None,
-    project: str | None,
-    accessible_projects: set[str] | None,
-    allowed_memory_scope_keys: set[str] | None,
-    limit: int,
-    recall_fn: RawMemoryRecallFn,
-) -> ContextSection | None:
-    if not principal_id or limit <= 0:
-        return None
-
-    memories: list[RawMemory] = []
-    seen_memory_ids: set[str] = set()
-    recall_specs: list[tuple[str, str | None, str | None, str | None]] = [
-        ("private", None, None, None),
-        ("project", project, None, None),
-    ]
-    if agent_id:
-        if project:
-            recall_specs.append(("private", None, agent_id, project))
-        elif accessible_projects is not None:
-            recall_specs.extend(
-                ("private", None, agent_id, scoped_project)
-                for scoped_project in sorted(accessible_projects)
-            )
-        else:
-            recall_specs.append(("private", None, agent_id, None))
-    for memory_scope, scope_key, spec_agent_id, spec_project_id in recall_specs:
-        if allowed_memory_scope_keys is not None:
-            effective_scope_key = principal_id if memory_scope == "private" else scope_key
-            policy_key = f"{memory_scope}\x1f{'' if effective_scope_key is None else str(effective_scope_key).strip()}"
-            if policy_key not in allowed_memory_scope_keys:
-                continue
-        if memory_scope == "project" and not scope_key:
-            continue
-        decision = authorize_memory_read(
-            principal_id=principal_id,
-            memory_scope=memory_scope,
-            scope_key=scope_key,
-            project_id=spec_project_id,
-            agent_id=spec_agent_id,
-            accessible_projects=accessible_projects,
-        )
-        if not decision.allowed:
-            continue
-        try:
-            recalled = await recall_fn(
-                organization_id=organization_id,
-                principal_id=principal_id,
-                query=query,
-                memory_scope=memory_scope,
-                scope_key=scope_key,
-                agent_id=spec_agent_id,
-                project_id=spec_project_id,
-                limit=limit,
-            )
-        except Exception:
-            continue
-        for memory in recalled:
-            if memory.id in seen_memory_ids:
-                continue
-            seen_memory_ids.add(memory.id)
-            memories.append(memory)
-
-    if not memories:
-        return None
-
-    items = sorted(
-        [_item_from_raw_memory(memory) for memory in memories],
-        key=lambda item: item.score,
-        reverse=True,
-    )[:limit]
-    return ContextSection(
-        facet=ContextFacet.RECENT_MEMORY,
-        title=FACET_TITLES[ContextFacet.RECENT_MEMORY],
-        items=items,
-    )
-
-
-async def _empty_context_section() -> None:
-    return None
 
 
 def _dedupe_sections(sections: list[ContextSection], limit: int) -> list[ContextSection]:
@@ -869,62 +725,44 @@ async def compile_context(
         if retrieval_mode is None
         else coerce_native_retrieval_mode(retrieval_mode)
     )
-    native_plan = None
-    selected_search_fn = search_fn
-    if normalized_retrieval_mode is not NativeRetrievalMode.GRAPHITI:
-        native_plan = build_native_context_retrieval_plan(
-            query=query,
-            organization_id=organization_id,
-            facets=facets,
-            facet_types=FACET_TYPES,
-            principal_id=principal_id,
-            project=project,
-            accessible_projects=accessible_projects,
-            agent_id=agent_id,
-            limit=limit,
-            allowed_memory_scope_keys=allowed_memory_scope_keys,
-        )
-
-        async def selected_search_fn(**kwargs: Any) -> SearchResponse:
-            facet = _facet_for_search_types(kwargs.get("types"))
-            native_response = await native_context_search(
-                plan=native_plan,
-                types=kwargs.get("types"),
-                facet=facet,
-                limit=int(kwargs.get("limit") or per_facet_limit),
-                include_content=bool(kwargs.get("include_content", True)),
-                raw_memory_recall_fn=raw_memory_recall_fn,
-            )
-            if normalized_retrieval_mode is NativeRetrievalMode.COMPARE:
-                fallback = await search_fn(**kwargs)
-                fallback = _compare_safe_response(
-                    fallback,
-                    principal_id=principal_id,
-                    project=project,
-                    accessible_projects=accessible_projects,
-                )
-                _log_compare_results(
-                    facet=facet,
-                    native_response=native_response,
-                    fallback_response=fallback,
-                )
-            return native_response
-
-    raw_section_task = (
-        _empty_context_section()
-        if native_plan is not None
-        else _compile_raw_memory_section(
-            query=query,
-            organization_id=organization_id,
-            principal_id=principal_id,
-            agent_id=agent_id,
-            project=project,
-            accessible_projects=accessible_projects,
-            allowed_memory_scope_keys=allowed_memory_scope_keys,
-            limit=min(LAYER_RAW_LIMITS[normalized_layer], limit),
-            recall_fn=raw_memory_recall_fn,
-        )
+    native_plan = build_native_context_retrieval_plan(
+        query=query,
+        organization_id=organization_id,
+        facets=facets,
+        facet_types=FACET_TYPES,
+        principal_id=principal_id,
+        project=project,
+        accessible_projects=accessible_projects,
+        agent_id=agent_id,
+        limit=limit,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
+
+    async def selected_search_fn(**kwargs: Any) -> SearchResponse:
+        facet = _facet_for_search_types(kwargs.get("types"))
+        native_response = await native_context_search(
+            plan=native_plan,
+            types=kwargs.get("types"),
+            facet=facet,
+            limit=int(kwargs.get("limit") or per_facet_limit),
+            include_content=bool(kwargs.get("include_content", True)),
+            raw_memory_recall_fn=raw_memory_recall_fn,
+        )
+        if normalized_retrieval_mode is NativeRetrievalMode.COMPARE:
+            fallback = await search_fn(**kwargs)
+            fallback = _compare_safe_response(
+                fallback,
+                principal_id=principal_id,
+                project=project,
+                accessible_projects=accessible_projects,
+            )
+            _log_compare_results(
+                facet=facet,
+                native_response=native_response,
+                fallback_response=fallback,
+            )
+        return native_response
+
     facet_section_tasks = [
         _compile_facet_section(
             query=query,
@@ -938,10 +776,7 @@ async def compile_context(
         )
         for facet in facets
     ]
-    raw_section, facet_sections = await asyncio.gather(
-        raw_section_task,
-        asyncio.gather(*facet_section_tasks, return_exceptions=True),
-    )
+    facet_sections = await asyncio.gather(*facet_section_tasks, return_exceptions=True)
 
     sections: list[ContextSection] = []
     for facet, facet_section in zip(facets, facet_sections, strict=True):
@@ -953,8 +788,6 @@ async def compile_context(
             )
             continue
         items = list(facet_section.items) if facet_section is not None else []
-        if raw_section is not None and facet == ContextFacet.RECENT_MEMORY:
-            items = [*raw_section.items, *items]
         if items:
             sections.append(ContextSection(facet=facet, title=FACET_TITLES[facet], items=items))
 
@@ -974,13 +807,11 @@ async def compile_context(
             limit,
         )
     if include_related and normalized_layer is not ContextLayer.WAKE:
-        related_projects = accessible_projects
-        if native_plan is not None:
-            related_projects = (
-                set(native_plan.accessible_projects)
-                if native_plan.accessible_projects is not None
-                else None
-            )
+        related_projects = (
+            set(native_plan.accessible_projects)
+            if native_plan.accessible_projects is not None
+            else None
+        )
         sections = await _attach_related_items(
             sections,
             organization_id=organization_id,

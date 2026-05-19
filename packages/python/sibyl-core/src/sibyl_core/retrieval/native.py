@@ -43,7 +43,6 @@ log = structlog.get_logger()
 
 
 class NativeRetrievalMode(StrEnum):
-    GRAPHITI = "graphiti"
     NATIVE = "native"
     COMPARE = "compare"
 

@@ -29,7 +29,7 @@ def test_native_retrieval_mode_defaults_to_native() -> None:
 
 
 def test_native_retrieval_mode_accepts_native_and_compare() -> None:
-    assert coerce_native_retrieval_mode("graphiti") is NativeRetrievalMode.GRAPHITI
+    assert coerce_native_retrieval_mode("graphiti") is NativeRetrievalMode.NATIVE
     assert coerce_native_retrieval_mode("native") is NativeRetrievalMode.NATIVE
     assert coerce_native_retrieval_mode("COMPARE") is NativeRetrievalMode.COMPARE
     assert native_retrieval_mode_from_env({"SIBYL_RETRIEVAL_MODE": "native"}) is (

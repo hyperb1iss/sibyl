@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
-from types import SimpleNamespace
 from typing import Any, Literal
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import sibyl_core.retrieval.native as native_module
 import sibyl_core.tools.context as context_module
-from sibyl_core.auth.memory_policy import memory_scope_policy_key
 from sibyl_core.models.context import (
     ContextFacet,
     ContextIntent,
@@ -19,8 +15,8 @@ from sibyl_core.models.context import (
     ContextLayer,
     ContextRelatedItem,
 )
-from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 from sibyl_core.tools.context import (
+    FACET_TYPES,
     compile_context,
     context_item_freshness,
     context_item_lifecycle_state,
@@ -56,75 +52,59 @@ def _result(
     )
 
 
-def _raw_memory(
-    memory_id: str,
+def _facet_native_search(
+    responses: dict[ContextFacet, list[SearchResult]],
     *,
-    memory_scope: MemoryScope = MemoryScope.PRIVATE,
-    scope_key: str | None = None,
-    score: float = 0.7,
-    metadata: dict[str, Any] | None = None,
-    capture_surface: str = "cli",
-) -> RawMemory:
-    return RawMemory(
-        id=memory_id,
-        organization_id="org-123",
-        source_id=f"source:{memory_id}",
-        principal_id="user-123",
-        memory_scope=memory_scope,
-        scope_key=scope_key,
-        title=f"Raw {memory_id}",
-        raw_content=f"Raw {memory_id} content",
-        tags=["raw"],
-        metadata={"source_name": "session", **(metadata or {})},
-        provenance={"message_id": memory_id},
-        capture_surface=capture_surface,
-        captured_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
-        created_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
-        score=score,
-    )
+    calls: list[dict[str, Any]] | None = None,
+):
+    """Build a fake native_context_search keyed on facet.
 
+    Native retrieval is the only runtime path; tests exercise context
+    assembly by stubbing native_context_search and routing facet results
+    through the plan-driven search the way compile_context does.
+    """
 
-async def _empty_search_response(**kwargs: Any) -> SearchResponse:
-    return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
-
-
-async def _compile_context_compat(*args: Any, **kwargs: Any):
-    kwargs.setdefault("retrieval_mode", "graphiti")
-    return await compile_context(*args, **kwargs)
-
-
-@pytest.mark.asyncio
-async def test_compile_context_groups_build_context_by_agent_facets() -> None:
-    calls: list[dict[str, Any]] = []
-    responses = {
-        ("task", "epic", "project"): [_result("task-1", "task", "Build capture hook")],
-        ("decision",): [_result("decision-1", "decision", "Use context packs")],
-        ("rule", "guide"): [_result("rule-1", "rule", "Keep context precise")],
-        ("procedure", "template", "tool"): [_result("procedure-1", "procedure", "Verify")],
-        ("error_pattern", "pattern"): [_result("pattern-1", "pattern", "Avoid broad search")],
-        ("artifact", "document", "source", "config_file"): [
-            _result("artifact-1", "artifact", "Planning doc")
-        ],
-        ("session", "episode", "note"): [_result("session-1", "session", "Prior session")],
-    }
-
-    async def fake_search(**kwargs: Any) -> SearchResponse:
-        calls.append(kwargs)
-        items = responses.get(tuple(kwargs["types"]), [])
+    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
+        if calls is not None:
+            calls.append(kwargs)
+        facet = kwargs.get("facet")
+        items = responses.get(facet, []) if facet is not None else []
         return SearchResponse(
             results=items,
             total=len(items),
-            query=kwargs["query"],
-            filters={"types": kwargs["types"]},
+            query=kwargs["plan"].query,
+            filters={"types": kwargs.get("types")},
         )
 
-    pack = await _compile_context_compat(
+    return fake_native_context_search
+
+
+@pytest.mark.asyncio
+async def test_compile_context_groups_build_context_by_agent_facets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    responses = {
+        ContextFacet.ACTIVE_WORK: [_result("task-1", "task", "Build capture hook")],
+        ContextFacet.DECISIONS: [_result("decision-1", "decision", "Use context packs")],
+        ContextFacet.CONSTRAINTS: [_result("rule-1", "rule", "Keep context precise")],
+        ContextFacet.PROCEDURES: [_result("procedure-1", "procedure", "Verify")],
+        ContextFacet.GOTCHAS: [_result("pattern-1", "pattern", "Avoid broad search")],
+        ContextFacet.ARTIFACTS: [_result("artifact-1", "artifact", "Planning doc")],
+        ContextFacet.RECENT_MEMORY: [_result("session-1", "session", "Prior session")],
+    }
+    monkeypatch.setattr(
+        context_module,
+        "native_context_search",
+        _facet_native_search(responses, calls=calls),
+    )
+
+    pack = await compile_context(
         "help agents build faster",
         intent="build",
         domain="agent-memory",
         project="sibyl",
         organization_id="org-123",
-        search_fn=fake_search,
     )
 
     assert pack.intent == ContextIntent.BUILD
@@ -139,41 +119,34 @@ async def test_compile_context_groups_build_context_by_agent_facets() -> None:
         ContextFacet.RECENT_MEMORY,
     ]
     assert pack.total_items == 7
-    assert all(call["organization_id"] == "org-123" for call in calls)
-    assert all(call["category"] == "agent-memory" for call in calls)
-    assert all(call["project"] == "sibyl" for call in calls)
+    assert all(call["plan"].organization_id == "org-123" for call in calls)
+    assert all(call["plan"].project == "sibyl" for call in calls)
 
 
 @pytest.mark.asyncio
-async def test_compile_context_supports_review_intent() -> None:
+async def test_compile_context_supports_review_intent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[dict[str, Any]] = []
     responses = {
-        ("claim", "rule", "procedure"): [_result("claim-1", "claim", "Verify behavior")],
-        ("decision",): [_result("decision-1", "decision", "Use full fidelity")],
-        ("rule", "guide"): [_result("rule-1", "rule", "Preserve quality")],
-        ("error_pattern", "pattern"): [_result("error-1", "error_pattern", "Avoid shortcuts")],
-        ("artifact", "document", "source", "config_file"): [
-            _result("artifact-1", "artifact", "Audit doc")
-        ],
-        ("task", "epic", "project"): [_result("task-1", "task", "Review task")],
-        ("session", "episode", "note"): [_result("note-1", "note", "Prior note")],
+        ContextFacet.VERIFICATION: [_result("claim-1", "claim", "Verify behavior")],
+        ContextFacet.DECISIONS: [_result("decision-1", "decision", "Use full fidelity")],
+        ContextFacet.CONSTRAINTS: [_result("rule-1", "rule", "Preserve quality")],
+        ContextFacet.GOTCHAS: [_result("error-1", "error_pattern", "Avoid shortcuts")],
+        ContextFacet.ARTIFACTS: [_result("artifact-1", "artifact", "Audit doc")],
+        ContextFacet.ACTIVE_WORK: [_result("task-1", "task", "Review task")],
+        ContextFacet.RECENT_MEMORY: [_result("note-1", "note", "Prior note")],
     }
+    monkeypatch.setattr(
+        context_module,
+        "native_context_search",
+        _facet_native_search(responses, calls=calls),
+    )
 
-    async def fake_search(**kwargs: Any) -> SearchResponse:
-        calls.append(kwargs)
-        items = responses.get(tuple(kwargs["types"]), [])
-        return SearchResponse(
-            results=items,
-            total=len(items),
-            query=kwargs["query"],
-            filters={"types": kwargs["types"]},
-        )
-
-    pack = await _compile_context_compat(
+    pack = await compile_context(
         "review the patch",
         intent="review",
         organization_id="org-123",
-        search_fn=fake_search,
     )
 
     assert pack.intent == ContextIntent.REVIEW
@@ -187,36 +160,39 @@ async def test_compile_context_supports_review_intent() -> None:
         ContextFacet.RECENT_MEMORY,
     ]
     assert [call["types"] for call in calls] == [
-        ["claim", "rule", "procedure"],
-        ["decision"],
-        ["rule", "guide"],
-        ["error_pattern", "pattern"],
-        ["artifact", "document", "source", "config_file"],
-        ["task", "epic", "project"],
-        ["session", "episode", "note"],
+        FACET_TYPES[ContextFacet.VERIFICATION],
+        FACET_TYPES[ContextFacet.DECISIONS],
+        FACET_TYPES[ContextFacet.CONSTRAINTS],
+        FACET_TYPES[ContextFacet.GOTCHAS],
+        FACET_TYPES[ContextFacet.ARTIFACTS],
+        FACET_TYPES[ContextFacet.ACTIVE_WORK],
+        FACET_TYPES[ContextFacet.RECENT_MEMORY],
     ]
 
 
 @pytest.mark.asyncio
-async def test_compile_context_runs_facet_searches_concurrently() -> None:
+async def test_compile_context_runs_facet_searches_concurrently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     active_calls = 0
     max_active_calls = 0
 
-    async def fake_search(**kwargs: Any) -> SearchResponse:
+    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
         nonlocal active_calls, max_active_calls
         active_calls += 1
         max_active_calls = max(max_active_calls, active_calls)
         try:
             await asyncio.sleep(0.01)
-            return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+            return SearchResponse(results=[], total=0, query=kwargs["plan"].query, filters={})
         finally:
             active_calls -= 1
 
-    pack = await _compile_context_compat(
+    monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
+
+    pack = await compile_context(
         "parallelize context facets",
         intent="build",
         organization_id="org-123",
-        search_fn=fake_search,
     )
 
     assert pack.total_items == 0
@@ -235,23 +211,25 @@ async def test_compile_context_keeps_successful_facets_when_one_fails(
 
     monkeypatch.setattr(context_module, "log", FakeLog())
 
-    async def fake_search(**kwargs: Any) -> SearchResponse:
-        if kwargs["types"] == ["decision"]:
+    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
+        facet = kwargs.get("facet")
+        if facet is ContextFacet.DECISIONS:
             raise RuntimeError("decision search unavailable")
-        if kwargs["types"] == ["task", "epic", "project"]:
+        if facet is ContextFacet.ACTIVE_WORK:
             return SearchResponse(
                 results=[_result("task-1", "task", "Keep moving")],
                 total=1,
-                query=kwargs["query"],
+                query=kwargs["plan"].query,
                 filters={},
             )
-        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+        return SearchResponse(results=[], total=0, query=kwargs["plan"].query, filters={})
 
-    pack = await _compile_context_compat(
+    monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
+
+    pack = await compile_context(
         "resilient context facets",
         intent="build",
         organization_id="org-123",
-        search_fn=fake_search,
     )
 
     assert pack.total_items == 1
@@ -291,7 +269,7 @@ async def test_compile_context_defaults_to_native_retrieval_mode(
         )
 
     async def unexpected_search(**_kwargs: Any) -> SearchResponse:
-        raise AssertionError("graphiti search should not run in native mode")
+        raise AssertionError("fallback search should not run in native mode")
 
     monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
 
@@ -314,6 +292,9 @@ async def test_compile_context_defaults_to_native_retrieval_mode(
 async def test_compile_context_scopes_related_items_to_api_key_grants(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from sibyl_core.auth.memory_policy import memory_scope_policy_key
+    from sibyl_core.services.surreal_content import MemoryScope
+
     related_calls: list[dict[str, Any]] = []
 
     async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
@@ -407,7 +388,7 @@ async def test_compile_context_compare_mode_logs_policy_safe_diff(
     monkeypatch.setattr(context_module, "log", FakeLog())
     monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
 
-    pack = await _compile_context_compat(
+    pack = await compile_context(
         "compare retrieval mode",
         intent="decide",
         project="project_123",
@@ -426,233 +407,18 @@ async def test_compile_context_compare_mode_logs_policy_safe_diff(
 
 
 @pytest.mark.asyncio
-async def test_compile_context_includes_private_and_project_raw_memory() -> None:
-    search_calls: list[dict[str, Any]] = []
-    raw_calls: list[dict[str, Any]] = []
-
-    async def fake_search(**kwargs: Any) -> SearchResponse:
-        search_calls.append(kwargs)
-        if kwargs["types"] == ["session", "episode", "note"]:
-            return SearchResponse(
-                results=[_result("session-1", "session", "Graph session", score=0.75)],
-                total=1,
-                query=kwargs["query"],
-                filters={},
-            )
-        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
-
-    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
-        raw_calls.append(kwargs)
-        if kwargs["memory_scope"] == "private":
-            return [_raw_memory("private-1", score=0.8)]
-        return [
-            _raw_memory(
-                "project-1",
-                memory_scope=MemoryScope.PROJECT,
-                scope_key="project_123",
-                score=0.9,
-            )
-        ]
-
-    pack = await _compile_context_compat(
-        "raw context",
-        intent="build",
-        project="project_123",
-        accessible_projects={"project_123"},
-        principal_id="user-123",
-        organization_id="org-123",
-        search_fn=fake_search,
-        raw_memory_recall_fn=fake_raw_recall,
-    )
-
-    assert pack.layer == ContextLayer.RECALL
-    assert pack.total_items == 3
-    assert pack.sections[0].facet == ContextFacet.RECENT_MEMORY
-    assert [item.id for item in pack.sections[0].items] == [
-        "raw_memory:project-1",
-        "raw_memory:private-1",
-        "session-1",
-    ]
-    assert pack.sections[0].items[0].quality.origin == "raw_memory"
-    assert pack.sections[0].items[0].quality.source == "source:project-1"
-    assert pack.sections[0].items[0].quality.project_id == "project_123"
-    assert "preserves verbatim source context" in pack.sections[0].items[0].reason
-    assert [call["memory_scope"] for call in raw_calls] == ["private", "project"]
-    assert raw_calls[0]["principal_id"] == "user-123"
-    assert raw_calls[1]["scope_key"] == "project_123"
-    assert ["session", "episode", "note"] in [call["types"] for call in search_calls]
-
-
-@pytest.mark.asyncio
-async def test_compile_context_can_include_agent_diary_with_raw_memory() -> None:
-    raw_calls: list[dict[str, Any]] = []
-
-    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
-        raw_calls.append(kwargs)
-        if kwargs.get("agent_id") == "nova":
-            return [
-                _raw_memory(
-                    "diary-1",
-                    score=0.95,
-                    metadata={
-                        "agent_id": "nova",
-                        "memory_kind": "agent_diary",
-                        "project_id": "project_123",
-                    },
-                    capture_surface="agent_diary",
-                )
-            ]
-        if kwargs["memory_scope"] == "private":
-            return [_raw_memory("private-1", score=0.8)]
-        return []
-
-    pack = await _compile_context_compat(
-        "implementation stance",
-        intent="build",
-        project="project_123",
-        accessible_projects={"project_123"},
-        principal_id="user-123",
-        agent_id="nova",
-        organization_id="org-123",
-        search_fn=_empty_search_response,
-        raw_memory_recall_fn=fake_raw_recall,
-    )
-
-    assert [item.id for item in pack.sections[0].items] == [
-        "raw_memory:diary-1",
-        "raw_memory:private-1",
-    ]
-    assert pack.sections[0].items[0].metadata["agent_id"] == "nova"
-    assert pack.sections[0].items[0].metadata["memory_kind"] == "agent_diary"
-    assert pack.sections[0].items[0].metadata["project_id"] == "project_123"
-    assert "agent diary matched the goal" in pack.sections[0].items[0].reason
-    assert raw_calls[0]["agent_id"] is None
-    assert raw_calls[2]["agent_id"] == "nova"
-    assert raw_calls[2]["project_id"] == "project_123"
-
-
-@pytest.mark.asyncio
-async def test_compile_context_scopes_agent_diary_to_accessible_projects() -> None:
-    raw_calls: list[dict[str, Any]] = []
-
-    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
-        raw_calls.append(kwargs)
-        return []
-
-    await _compile_context_compat(
-        "implementation stance",
-        intent="build",
-        project=None,
-        accessible_projects={"project_123", "project_456"},
-        principal_id="user-123",
-        agent_id="nova",
-        organization_id="org-123",
-        search_fn=_empty_search_response,
-        raw_memory_recall_fn=fake_raw_recall,
-    )
-
-    diary_calls = [call for call in raw_calls if call.get("agent_id") == "nova"]
-    assert {call["project_id"] for call in diary_calls} == {"project_123", "project_456"}
-    assert all(call["project_id"] is not None for call in diary_calls)
-
-
-@pytest.mark.asyncio
-async def test_compile_context_skips_agent_diary_without_accessible_projects() -> None:
-    raw_calls: list[dict[str, Any]] = []
-
-    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
-        raw_calls.append(kwargs)
-        return []
-
-    await _compile_context_compat(
-        "implementation stance",
-        intent="build",
-        project=None,
-        accessible_projects=set(),
-        principal_id="user-123",
-        agent_id="nova",
-        organization_id="org-123",
-        search_fn=_empty_search_response,
-        raw_memory_recall_fn=fake_raw_recall,
-    )
-
-    diary_calls = [call for call in raw_calls if call.get("agent_id") == "nova"]
-    assert diary_calls == []
-
-
-@pytest.mark.asyncio
-async def test_compile_context_native_ranks_agent_diary_by_relevance(
+async def test_compile_context_wake_layer_caps_items_and_skips_related(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class EmptyNativeClient:
-        async def execute_query(self, *_args: object, **_kwargs: object) -> list[object]:
-            return []
-
-    class EmptyNativeRuntime:
-        client = EmptyNativeClient()
-
-    async def fake_native_runtime(_organization_id: str) -> EmptyNativeRuntime:
-        return EmptyNativeRuntime()
-
-    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
-        if kwargs.get("agent_id") == "nova":
-            return [
-                RawMemory(
-                    id="diary-1",
-                    organization_id="org-123",
-                    source_id="baseline:agent-diary",
-                    principal_id="user-123",
-                    agent_id="nova",
-                    title="Nova Baseline Diary",
-                    raw_content="Nova diary says checkpoint Neon Thread for delegated handoff.",
-                    metadata={"agent_id": "nova", "memory_kind": "agent_diary"},
-                    capture_surface="agent_diary",
-                    captured_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
-                    created_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
-                    score=0.7,
-                )
-            ]
-        if kwargs["memory_scope"] == "private":
-            return [
-                _raw_memory("private-1", score=0.3),
-                _raw_memory("private-2", score=0.2),
-            ]
-        return []
-
-    monkeypatch.setattr(native_module, "get_native_graph_runtime", fake_native_runtime)
-
-    pack = await _compile_context_compat(
-        "What should Nova recall from the diary for delegated handoff?",
-        intent="learn",
-        domain="sibyl",
-        principal_id="user-123",
-        agent_id="nova",
-        organization_id="org-123",
-        limit=8,
-        raw_memory_recall_fn=fake_raw_recall,
-        retrieval_mode="native",
-    )
-
-    assert pack.sections[0].facet == ContextFacet.RECENT_MEMORY
-    assert [item.id for item in pack.sections[0].items] == [
-        "raw_memory:diary-1",
-        "raw_memory:private-1",
-    ]
-    assert "Neon Thread" in pack.sections[0].items[0].content
-
-
-@pytest.mark.asyncio
-async def test_compile_context_wake_layer_caps_items_and_skips_related() -> None:
     related_calls: list[str] = []
 
-    async def fake_search(**kwargs: Any) -> SearchResponse:
+    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
+        facet = kwargs.get("facet")
+        prefix = facet.value if facet is not None else "memory"
         return SearchResponse(
-            results=[
-                _result(f"{kwargs['types'][0]}-{index}", kwargs["types"][0], f"Memory {index}")
-                for index in range(2)
-            ],
+            results=[_result(f"{prefix}-{index}", "note", f"Memory {index}") for index in range(2)],
             total=2,
-            query=kwargs["query"],
+            query=kwargs["plan"].query,
             filters={},
         )
 
@@ -668,14 +434,15 @@ async def test_compile_context_wake_layer_caps_items_and_skips_related() -> None
             )
         ]
 
-    pack = await _compile_context_compat(
+    monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
+
+    pack = await compile_context(
         "wake up the coding session",
         intent="build",
         layer="wake",
         organization_id="org-123",
         limit=50,
         include_related=True,
-        search_fn=fake_search,
         related_fn=fake_related,
     )
 
@@ -692,42 +459,28 @@ async def test_compile_context_wake_layer_caps_items_and_skips_related() -> None
 
 
 @pytest.mark.asyncio
-async def test_compile_context_skips_raw_memory_without_principal() -> None:
-    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
-        raise AssertionError("raw recall requires a principal")
-
-    pack = await _compile_context_compat(
-        "raw context",
-        intent="build",
-        organization_id="org-123",
-        search_fn=_empty_search_response,
-        raw_memory_recall_fn=fake_raw_recall,
-    )
-
-    assert pack.total_items == 0
-
-
-@pytest.mark.asyncio
-async def test_compile_context_keeps_graph_context_when_raw_memory_fails() -> None:
-    async def fake_search(**kwargs: Any) -> SearchResponse:
+async def test_compile_context_keeps_graph_context_when_a_facet_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
+        facet = kwargs.get("facet")
+        if facet is ContextFacet.RECENT_MEMORY:
+            raise RuntimeError("recent memory unavailable")
         return SearchResponse(
-            results=[_result("decision-1", kwargs["types"][0], "Use layered packs")],
+            results=[_result("decision-1", "decision", "Use layered packs")],
             total=1,
-            query=kwargs["query"],
+            query=kwargs["plan"].query,
             filters={},
         )
 
-    async def failing_raw_recall(**kwargs: Any) -> list[RawMemory]:
-        raise RuntimeError("raw memory unavailable")
+    monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
 
-    pack = await _compile_context_compat(
-        "raw context",
+    pack = await compile_context(
+        "graph context resilience",
         intent="build",
         principal_id="user-123",
         organization_id="org-123",
         limit=1,
-        search_fn=fake_search,
-        raw_memory_recall_fn=failing_raw_recall,
     )
 
     assert pack.total_items == 1
@@ -735,26 +488,20 @@ async def test_compile_context_keeps_graph_context_when_raw_memory_fails() -> No
 
 
 @pytest.mark.asyncio
-async def test_compile_context_supports_non_software_ideation_domains() -> None:
-    async def fake_search(**kwargs: Any) -> SearchResponse:
-        results = []
-        if kwargs["types"] == ["idea"]:
-            results = [_result("idea-1", "idea", "Venue layout concept")]
-        elif kwargs["types"] == ["domain", "topic", "claim"]:
-            results = [_result("domain-1", "domain", "Aerial showcase")]
-        return SearchResponse(
-            results=results,
-            total=len(results),
-            query=kwargs["query"],
-            filters={},
-        )
+async def test_compile_context_supports_non_software_ideation_domains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = {
+        ContextFacet.IDEATION: [_result("idea-1", "idea", "Venue layout concept")],
+        ContextFacet.DOMAIN: [_result("domain-1", "domain", "Aerial showcase")],
+    }
+    monkeypatch.setattr(context_module, "native_context_search", _facet_native_search(responses))
 
-    pack = await _compile_context_compat(
+    pack = await compile_context(
         "design a performance showcase",
         intent="ideate",
         domain="flow arts",
         organization_id="org-123",
-        search_fn=fake_search,
     )
 
     assert pack.intent == ContextIntent.IDEATE
@@ -763,20 +510,23 @@ async def test_compile_context_supports_non_software_ideation_domains() -> None:
 
 
 @pytest.mark.asyncio
-async def test_compile_context_dedupes_results_across_facets() -> None:
-    async def fake_search(**kwargs: Any) -> SearchResponse:
+async def test_compile_context_dedupes_results_across_facets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
         return SearchResponse(
-            results=[_result("same-id", kwargs["types"][0], "Repeated memory")],
+            results=[_result("same-id", "plan", "Repeated memory")],
             total=1,
-            query=kwargs["query"],
+            query=kwargs["plan"].query,
             filters={},
         )
 
-    pack = await _compile_context_compat(
+    monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
+
+    pack = await compile_context(
         "ship faster",
         intent="plan",
         organization_id="org-123",
-        search_fn=fake_search,
     )
 
     assert pack.total_items == 1
@@ -784,13 +534,15 @@ async def test_compile_context_dedupes_results_across_facets() -> None:
 
 
 @pytest.mark.asyncio
-async def test_compile_context_falls_back_to_broad_project_search_when_facets_miss() -> None:
+async def test_compile_context_falls_back_to_broad_search_when_facets_miss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[dict[str, Any]] = []
 
-    async def fake_search(**kwargs: Any) -> SearchResponse:
+    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
         calls.append(kwargs)
         results = []
-        if kwargs["types"] is None:
+        if kwargs.get("types") is None:
             results = [
                 _result(
                     "decision-1",
@@ -802,18 +554,19 @@ async def test_compile_context_falls_back_to_broad_project_search_when_facets_mi
         return SearchResponse(
             results=results,
             total=len(results),
-            query=kwargs["query"],
+            query=kwargs["plan"].query,
             filters={},
         )
 
-    pack = await _compile_context_compat(
+    monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
+
+    pack = await compile_context(
         "build project-scoped remember and recall",
         intent="build",
         domain="sibyl",
         project="project_123",
         accessible_projects={"project_123"},
         organization_id="org-123",
-        search_fn=fake_search,
     )
 
     assert pack.total_items == 1
@@ -821,18 +574,20 @@ async def test_compile_context_falls_back_to_broad_project_search_when_facets_mi
     assert pack.items[0].id == "decision-1"
     fallback_call = calls[-1]
     assert fallback_call["types"] is None
-    assert fallback_call["category"] == "sibyl"
-    assert fallback_call["project"] == "project_123"
-    assert fallback_call["include_documents"] is True
+    assert fallback_call["plan"].project == "project_123"
 
 
 @pytest.mark.asyncio
-async def test_compile_context_can_attach_one_hop_related_items() -> None:
-    async def fake_search(**kwargs: Any) -> SearchResponse:
+async def test_compile_context_can_attach_one_hop_related_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
+        if kwargs.get("facet") is not ContextFacet.DECISIONS:
+            return SearchResponse(results=[], total=0, query=kwargs["plan"].query, filters={})
         return SearchResponse(
-            results=[_result("decision-1", kwargs["types"][0], "Use context packs")],
+            results=[_result("decision-1", "decision", "Use context packs")],
             total=1,
-            query=kwargs["query"],
+            query=kwargs["plan"].query,
             filters={},
         )
 
@@ -850,13 +605,14 @@ async def test_compile_context_can_attach_one_hop_related_items() -> None:
             )
         ]
 
-    pack = await _compile_context_compat(
+    monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
+
+    pack = await compile_context(
         "ship faster",
         intent="decide",
         organization_id="org-123",
         limit=1,
         include_related=True,
-        search_fn=fake_search,
         related_fn=fake_related,
     )
 
@@ -866,17 +622,22 @@ async def test_compile_context_can_attach_one_hop_related_items() -> None:
 
 
 @pytest.mark.asyncio
-async def test_compile_context_filters_related_project_entities_by_own_id() -> None:
-    async def fake_search(**kwargs: Any) -> SearchResponse:
-        results = []
-        if kwargs["types"] == ["decision"]:
-            results = [_result("decision-1", "decision", "Use context packs")]
+async def test_compile_context_filters_related_project_entities_by_own_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
+        if kwargs.get("facet") is not ContextFacet.DECISIONS:
+            return SearchResponse(results=[], total=0, query=kwargs["plan"].query, filters={})
         return SearchResponse(
-            results=results,
-            total=len(results),
-            query=kwargs["query"],
+            results=[_result("decision-1", "decision", "Use context packs")],
+            total=1,
+            query=kwargs["plan"].query,
             filters={},
         )
+
+    monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
 
     def entity(entity_id: str, entity_type: str, project_id: str | None = None) -> SimpleNamespace:
         metadata = {"project_id": project_id} if project_id else {}
@@ -907,7 +668,7 @@ async def test_compile_context_filters_related_project_entities_by_own_id() -> N
     runtime = SimpleNamespace(relationship_manager=relationship_manager)
 
     with patch.object(context_module, "get_graph_runtime", AsyncMock(return_value=runtime)):
-        pack = await _compile_context_compat(
+        pack = await compile_context(
             "ship trust",
             intent="decide",
             organization_id="org-123",
@@ -915,7 +676,6 @@ async def test_compile_context_filters_related_project_entities_by_own_id() -> N
             limit=1,
             include_related=True,
             related_limit=5,
-            search_fn=fake_search,
         )
 
     assert pack.items[0].related is not None
@@ -926,8 +686,10 @@ async def test_compile_context_filters_related_project_entities_by_own_id() -> N
 
 
 @pytest.mark.asyncio
-async def test_compile_context_adds_compact_quality_metadata_from_search_result() -> None:
-    async def fake_search(**kwargs: Any) -> SearchResponse:
+async def test_compile_context_adds_compact_quality_metadata_from_search_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
         return SearchResponse(
             results=[
                 _result(
@@ -947,16 +709,17 @@ async def test_compile_context_adds_compact_quality_metadata_from_search_result(
                 )
             ],
             total=1,
-            query=kwargs["query"],
+            query=kwargs["plan"].query,
             filters={},
         )
 
-    pack = await _compile_context_compat(
+    monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
+
+    pack = await compile_context(
         "judge memory freshness",
         intent="research",
         organization_id="org-123",
         limit=1,
-        search_fn=fake_search,
     )
 
     quality = pack.items[0].quality
@@ -969,27 +732,105 @@ async def test_compile_context_adds_compact_quality_metadata_from_search_result(
 
 
 @pytest.mark.asyncio
-async def test_compile_context_falls_back_to_graph_id_for_source_metadata() -> None:
-    async def fake_search(**kwargs: Any) -> SearchResponse:
+async def test_compile_context_falls_back_to_graph_id_for_source_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
         return SearchResponse(
             results=[_result("decision-1", "decision", "Source-light graph decision")],
             total=1,
-            query=kwargs["query"],
+            query=kwargs["plan"].query,
             filters={},
         )
 
-    pack = await _compile_context_compat(
+    monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
+
+    pack = await compile_context(
         "source metadata coverage",
         intent="decide",
         organization_id="org-123",
         limit=1,
-        search_fn=fake_search,
     )
 
     item = pack.items[0]
     assert item.source == "decision-1"
     assert item.metadata["source_id"] == "decision-1"
     assert item.quality.source == "decision-1"
+
+
+@pytest.mark.asyncio
+async def test_compile_context_native_ranks_agent_diary_by_relevance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+
+    import sibyl_core.retrieval.native as native_module
+    from sibyl_core.services.surreal_content import RawMemory
+
+    class EmptyNativeClient:
+        async def execute_query(self, *_args: object, **_kwargs: object) -> list[object]:
+            return []
+
+    class EmptyNativeRuntime:
+        client = EmptyNativeClient()
+
+    async def fake_native_runtime(_organization_id: str) -> EmptyNativeRuntime:
+        return EmptyNativeRuntime()
+
+    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
+        if kwargs.get("agent_id") == "nova":
+            return [
+                RawMemory(
+                    id="diary-1",
+                    organization_id="org-123",
+                    source_id="baseline:agent-diary",
+                    principal_id="user-123",
+                    agent_id="nova",
+                    title="Nova Baseline Diary",
+                    raw_content="Nova diary says checkpoint Neon Thread for delegated handoff.",
+                    metadata={"agent_id": "nova", "memory_kind": "agent_diary"},
+                    capture_surface="agent_diary",
+                    captured_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
+                    created_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
+                    score=0.7,
+                )
+            ]
+        if kwargs["memory_scope"] == "private":
+            return [
+                RawMemory(
+                    id="private-1",
+                    organization_id="org-123",
+                    source_id="baseline:delegated-recall",
+                    principal_id="user-123",
+                    title="Delegated Recall Baseline",
+                    raw_content="Delegated recall baseline covers storage handoff.",
+                    captured_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
+                    created_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
+                    score=0.3,
+                ),
+            ]
+        return []
+
+    monkeypatch.setattr(native_module, "get_native_graph_runtime", fake_native_runtime)
+
+    pack = await compile_context(
+        "What should Nova recall from the diary for delegated handoff?",
+        intent="learn",
+        domain="sibyl",
+        principal_id="user-123",
+        agent_id="nova",
+        organization_id="org-123",
+        limit=8,
+        raw_memory_recall_fn=fake_raw_recall,
+        retrieval_mode="native",
+    )
+
+    assert pack.sections[0].facet == ContextFacet.RECENT_MEMORY
+    assert [item.id for item in pack.sections[0].items] == [
+        "raw_memory:diary-1",
+        "raw_memory:private-1",
+    ]
+    assert "Neon Thread" in pack.sections[0].items[0].content
 
 
 def test_context_item_metadata_helpers_normalize_source_policy_fields() -> None:
@@ -1043,15 +884,17 @@ def test_context_item_metadata_helpers_fall_back_to_metadata() -> None:
 @pytest.mark.asyncio
 async def test_compile_context_requires_goal_and_org() -> None:
     with pytest.raises(ValueError, match="goal is required"):
-        await _compile_context_compat("", organization_id="org-123")
+        await compile_context("", organization_id="org-123")
 
     with pytest.raises(ValueError, match="organization_id is required"):
-        await _compile_context_compat("ship faster")
+        await compile_context("ship faster")
 
 
 @pytest.mark.asyncio
-async def test_context_pack_to_dict_serializes_dataclasses() -> None:
-    pack = await async_compile_context_for_serialization()
+async def test_context_pack_to_dict_serializes_dataclasses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pack = await async_compile_context_for_serialization(monkeypatch)
     payload = context_pack_to_dict(pack)
 
     assert payload["goal"] == "ship faster"
@@ -1061,8 +904,10 @@ async def test_context_pack_to_dict_serializes_dataclasses() -> None:
 
 
 @pytest.mark.asyncio
-async def test_context_pack_to_markdown_renders_injection_shape() -> None:
-    pack = await async_compile_context_for_serialization()
+async def test_context_pack_to_markdown_renders_injection_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pack = await async_compile_context_for_serialization(monkeypatch)
     markdown = context_pack_to_markdown(pack)
 
     assert "# Sibyl Context Pack: ship faster" in markdown
@@ -1075,8 +920,10 @@ async def test_context_pack_to_markdown_renders_injection_shape() -> None:
     assert "Hint:" in markdown
 
 
-async def async_compile_context_for_serialization():
-    async def fake_search(**kwargs: Any) -> SearchResponse:
+async def async_compile_context_for_serialization(monkeypatch: pytest.MonkeyPatch):
+    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
+        if kwargs.get("facet") is not ContextFacet.ACTIVE_WORK:
+            return SearchResponse(results=[], total=0, query=kwargs["plan"].query, filters={})
         return SearchResponse(
             results=[
                 _result(
@@ -1091,14 +938,15 @@ async def async_compile_context_for_serialization():
                 )
             ],
             total=1,
-            query=kwargs["query"],
+            query=kwargs["plan"].query,
             filters={},
         )
 
-    return await _compile_context_compat(
+    monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
+
+    return await compile_context(
         "ship faster",
         intent="build",
         organization_id="org-123",
         limit=1,
-        search_fn=fake_search,
     )
