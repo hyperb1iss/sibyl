@@ -241,6 +241,36 @@ async def test_plan_synthesis_uses_entity_ids_and_graph_neighborhoods() -> None:
 
 
 @pytest.mark.asyncio
+async def test_plan_synthesis_caps_total_neighborhood_expansion_ids() -> None:
+    related_calls: list[str] = []
+
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
+    async def fake_related(**kwargs: Any) -> list[SynthesisSourceReference]:
+        related_calls.append(kwargs["entity_id"])
+        return []
+
+    run = await plan_synthesis(
+        SynthesisRequest(
+            goal="Bound neighborhood lookups",
+            entity_ids=[f"entity:{idx}" for idx in range(100)],
+            decision_ids=[f"decision:{idx}" for idx in range(100)],
+            task_ids=[f"task:{idx}" for idx in range(100)],
+            artifact_ids=[f"artifact:{idx}" for idx in range(100)],
+        ),
+        organization_id="org-123",
+        search_fn=fake_search,
+        related_fn=fake_related,
+    )
+
+    assert len(related_calls) == 100
+    assert related_calls[0] == "entity:0"
+    assert related_calls[-1] == "entity:99"
+    assert run.verification.source_count >= 100
+
+
+@pytest.mark.asyncio
 async def test_materialize_synthesis_section_packs_filters_unauthorized_text() -> None:
     async def fake_search(**kwargs: Any) -> SearchResponse:
         return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
