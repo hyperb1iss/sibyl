@@ -165,7 +165,7 @@ async def priority_decay(
                 EntityType.EPISODE,
                 limit=page_size,
                 offset=offset,
-                include_archived=True,
+                include_archived=False,
             )
             if not batch:
                 break
