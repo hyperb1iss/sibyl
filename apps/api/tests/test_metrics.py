@@ -813,6 +813,34 @@ class TestGetOrgMetrics:
         assert result.projects_summary[0].id in {"proj_a", "proj_b"}
 
     @pytest.mark.asyncio
+    async def test_org_metrics_rejects_oversized_surreal_fast_path(self) -> None:
+        """Returns 413 when the Surreal metric fast path exceeds the task cap."""
+        from sibyl.api.routes.metrics import METRICS_MAX_TASKS, get_org_metrics
+
+        mock_org = create_mock_org()
+        mock_service = AsyncMock()
+        mock_service.list_entities = AsyncMock(return_value=Page(items=[], next_cursor=None))
+        oversized_rows = [
+            create_metric_task_row(project_id="proj_a", status="todo")
+            for _ in range(METRICS_MAX_TASKS + 1)
+        ]
+
+        with (
+            patch(
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
+                AsyncMock(return_value=mock_service),
+            ),
+            patch(
+                "sibyl.api.routes.metrics.execute_surreal_graph_query",
+                AsyncMock(return_value=oversized_rows),
+            ),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await get_org_metrics(org=mock_org)
+
+        assert exc_info.value.status_code == 413
+
+    @pytest.mark.asyncio
     async def test_org_metrics_rejects_unbounded_service_task_enumeration(self) -> None:
         """Returns 413 when paged task enumeration exceeds metrics safety cap."""
         from sibyl.api.routes.metrics import METRICS_MAX_TASKS, get_org_metrics
@@ -1375,7 +1403,7 @@ class TestGetProjectSummaries:
     @pytest.mark.asyncio
     async def test_project_summaries_uses_surreal_metric_task_fast_path(self) -> None:
         """Surreal-backed summaries fetch lean task rows without paging task entities."""
-        from sibyl.api.routes.metrics import get_project_summaries
+        from sibyl.api.routes.metrics import METRICS_MAX_TASKS, get_project_summaries
 
         mock_org = create_mock_org()
         mock_service = AsyncMock()
@@ -1435,6 +1463,7 @@ class TestGetProjectSummaries:
         )
         assert execute_surreal_query.await_args.kwargs == {
             "task_type": EntityType.TASK.value,
+            "limit": METRICS_MAX_TASKS + 1,
         }
         assert result.projects_summary[0].id == "proj_a"
         assert result.projects_summary[0].total == 2
