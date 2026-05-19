@@ -150,11 +150,9 @@ async def test_list_jobs_filters_limits_and_skips_failed_statuses() -> None:
     jobs = await broker.list_jobs(function="crawl_source", limit=1)
 
     assert [job.job_id for job in jobs] == ["gamma"]
-    assert broker.get_job_status.await_count == 1  # type: ignore[attr-defined]
+    assert broker.get_job_status.await_count == 4  # type: ignore[attr-defined]
     assert pool.scan_iter_calls == 0
     assert pool.zrevrange_calls == 1
-
-
 
 
 @pytest.mark.asyncio
@@ -169,6 +167,35 @@ async def test_list_jobs_with_non_positive_limit_short_circuits() -> None:
     broker.get_job_status.assert_not_called()
     assert pool.scan_iter_calls == 0
     assert pool.zrevrange_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_bounds_status_lookups_by_limit() -> None:
+    now = datetime.now(UTC)
+    recent_ids = [f"job-{i}" for i in range(500)]
+    pool = FakePool(recent_ids)
+
+    async def fake_get_job_status(job_id: str) -> JobInfo:
+        return JobInfo(
+            job_id=job_id,
+            function="crawl_source",
+            status=JobStatus.QUEUED,
+            enqueue_time=now,
+        )
+
+    broker = make_broker(pool)
+    broker.get_job_status = AsyncMock(  # type: ignore[method-assign]
+        side_effect=fake_get_job_status
+    )
+
+    jobs = await broker.list_jobs(limit=5)
+
+    # An unfiltered listing only loads the newest ``limit`` ids, so the
+    # request cannot fan out across the whole recent index.
+    assert len(jobs) == 5
+    assert broker.get_job_status.await_count == 5  # type: ignore[attr-defined]
+    assert [job.job_id for job in jobs] == recent_ids[:5]
+
 
 @pytest.mark.asyncio
 async def test_list_jobs_falls_back_to_scan_when_index_is_empty() -> None:
