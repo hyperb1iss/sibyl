@@ -38,7 +38,19 @@ PROFILE_THRESHOLDS: dict[ProfileName, dict[str, MetricThreshold]] = {
         "leak_count": MetricThreshold(maximum=0.0),
         "forbidden_term_matches": MetricThreshold(maximum=0.0),
     },
-    "ai-memory": {},
+    "ai-memory": {
+        "recall@5": MetricThreshold(minimum=0.75),
+        "ndcg@5": MetricThreshold(minimum=0.70),
+        "recall@10": MetricThreshold(minimum=0.80),
+        "ndcg@10": MetricThreshold(minimum=0.70),
+    },
+}
+
+AI_MEMORY_PER_SLICE_THRESHOLDS: dict[str, MetricThreshold] = {
+    "recall@5": MetricThreshold(minimum=0.70),
+    "ndcg@5": MetricThreshold(minimum=0.55),
+    "recall@10": MetricThreshold(minimum=0.80),
+    "ndcg@10": MetricThreshold(minimum=0.60),
 }
 
 _AI_MEMORY_SUMMARY_KEYS = ("per_type", "per_slice", "per_category", "per_task")
@@ -335,6 +347,40 @@ def _validate_ai_memory_summaries(report: dict[str, Any]) -> list[str]:
     return []
 
 
+def _validate_ai_memory_isolation(report: dict[str, Any]) -> list[str]:
+    overall = report.get("overall")
+    if not isinstance(overall, dict):
+        return []
+    cross_question_count = overall.get("cross_question_result_count")
+    if isinstance(cross_question_count, int | float) and cross_question_count > 0:
+        return [f"overall cross_question_result_count must be 0.0000: {cross_question_count:.4f}"]
+    return []
+
+
+def _validate_ai_memory_per_slice_thresholds(report: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    for summary_key in _AI_MEMORY_SUMMARY_KEYS:
+        summary = report.get(summary_key)
+        if not isinstance(summary, dict):
+            continue
+        for slice_name, metrics in summary.items():
+            if not isinstance(metrics, dict):
+                continue
+            metric_values = {
+                key: float(value)
+                for key, value in metrics.items()
+                if isinstance(value, int | float)
+            }
+            slice_failures = _validate_metric_thresholds(
+                metric_values,
+                AI_MEMORY_PER_SLICE_THRESHOLDS,
+            )
+            failures.extend(
+                f"{summary_key}[{slice_name!r}]: {failure}" for failure in slice_failures
+            )
+    return failures
+
+
 def _validate_ai_memory_cases(report: dict[str, Any]) -> list[str]:
     failures: list[str] = []
     case_results = report.get("case_results")
@@ -365,6 +411,8 @@ def validate_ai_memory_record(report: dict[str, Any]) -> list[str]:
     failures.extend(_validate_ai_memory_scope(report))
     failures.extend(_validate_ai_memory_release_metadata(report))
     failures.extend(_validate_ai_memory_summaries(report))
+    failures.extend(_validate_ai_memory_isolation(report))
+    failures.extend(_validate_ai_memory_per_slice_thresholds(report))
     failures.extend(_validate_ai_memory_cases(report))
     return failures
 

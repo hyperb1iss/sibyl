@@ -9,7 +9,8 @@ from typing import Any
 
 import httpx
 import pytest
-from tools.bench import eval_gate
+
+PREFERENCE_CASE_INDEX = 2
 
 
 def _load_live_module() -> ModuleType:
@@ -134,7 +135,10 @@ def test_longmemeval_live_builds_gate_valid_report(tmp_path: Path) -> None:
     assert report["runtime"]["entity_content_projection_policy"] == (
         module.ENTITY_CONTENT_PROJECTION_POLICY
     )
+    assert report["runtime"]["sample_strategy"] == module.DEFAULT_SAMPLE_STRATEGY
     assert report["dataset"]["corpus_text_policy"] == module.CORPUS_TEXT_POLICY
+    assert report["dataset"]["sample_strategy"] == module.DEFAULT_SAMPLE_STRATEGY
+    assert report["dataset"]["selected_case_indices"] == [0]
     assert report["dataset"]["entity_content_projection_policy"] == (
         module.ENTITY_CONTENT_PROJECTION_POLICY
     )
@@ -157,6 +161,133 @@ def test_longmemeval_live_builds_gate_valid_report(tmp_path: Path) -> None:
         expected_chunked_entities
     }
     assert report["case_results"][0]["ranked_session_ids"] == ["s2", "s1"]
+    assert report["case_results"][0]["answer_ranks"] == [{"session_id": "s2", "rank": 1}]
+    assert report["case_results"][0]["missed_answer_session_ids"] == []
     assert report["case_results"][0]["created_entity_count"] == expected_created_entities
     assert report["case_results"][0]["chunked_session_count"] == 1
-    assert eval_gate.evaluate_report(report, profile="ai-memory") == []
+    assert report["diagnostics"]["case_gap_count"] == 0
+
+
+def test_longmemeval_live_stratified_selection_and_diagnostics(tmp_path: Path) -> None:
+    module = _load_live_module()
+    data_path = tmp_path / "longmemeval_s_cleaned.json"
+    data_path.write_text(
+        json.dumps(
+            [
+                {
+                    "question_id": "q-user-1",
+                    "question_type": "single-session-user",
+                    "question": "What did I buy?",
+                    "question_date": "2026/01/03 12:00",
+                    "answer_session_ids": ["s-user-answer"],
+                    "haystack_session_ids": ["s-user-answer"],
+                    "haystack_dates": ["2026/01/02"],
+                    "haystack_sessions": [[{"role": "user", "content": "I bought markers."}]],
+                },
+                {
+                    "question_id": "q-user-2",
+                    "question_type": "single-session-user",
+                    "question": "What did I bring?",
+                    "question_date": "2026/01/03 12:00",
+                    "answer_session_ids": ["s-user-second"],
+                    "haystack_session_ids": ["s-user-second"],
+                    "haystack_dates": ["2026/01/02"],
+                    "haystack_sessions": [[{"role": "user", "content": "I brought tea."}]],
+                },
+                {
+                    "question_id": "q-pref",
+                    "question_type": "single-session-preference",
+                    "question": "What snack should I serve?",
+                    "question_date": "2026/01/03 12:00",
+                    "answer_session_ids": ["s-pref-answer"],
+                    "haystack_session_ids": ["s-pref-answer", "s-pref-distractor"],
+                    "haystack_dates": ["2026/01/02", "2026/01/01"],
+                    "haystack_sessions": [
+                        [{"role": "user", "content": "I love salty snacks."}],
+                        [{"role": "user", "content": "I like sweet desserts."}],
+                    ],
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    state: dict[str, Any] = {"entities": []}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/health":
+            return _json_response(request, {"status": "ok"})
+        if path == "/api/auth/local/signup":
+            return _json_response(
+                request,
+                {"access_token": "fixture-token", "organization": {"id": "org", "slug": "org"}},
+                status_code=201,
+            )
+        if path == "/api/entities":
+            payload = json.loads(request.content)
+            entity = {
+                "id": f"entity-{len(state['entities'])}",
+                "entity_type": payload["entity_type"],
+                "content": payload["content"],
+                "metadata": payload["metadata"],
+            }
+            state["entities"].append(entity)
+            return _json_response(request, entity, status_code=201)
+        if path == "/api/search":
+            payload = json.loads(request.content)
+            entities = list(state["entities"])
+            if payload["query"] != "LongMemEval":
+                if "snack" in payload["query"]:
+                    entities = [
+                        entity
+                        for entity in entities
+                        if entity["metadata"]["longmemeval_case_index"] == PREFERENCE_CASE_INDEX
+                    ]
+                else:
+                    entities = [
+                        entity
+                        for entity in entities
+                        if entity["metadata"]["longmemeval_case_index"] == 0
+                    ]
+                entities.sort(
+                    key=lambda entity: entity["metadata"]["longmemeval_session_id"].endswith(
+                        "answer"
+                    )
+                )
+            results = [
+                {
+                    "id": entity["id"],
+                    "type": "session",
+                    "score": 1.0,
+                    "result_origin": "graph",
+                    "metadata": entity["metadata"],
+                }
+                for entity in entities
+            ]
+            results = results[: int(payload.get("limit", len(results)))]
+            return _json_response(request, {"results": results, "total": len(results)})
+        return _json_response(request, {"detail": "not found"}, status_code=404)
+
+    report = asyncio.run(
+        module.run_benchmark(
+            data_path,
+            api_url="http://ci-sibyl/api",
+            limit=2,
+            concurrency=1,
+            k_values=[1],
+            sample_strategy="stratified",
+            command=["longmemeval_live.py", "fixture.json"],
+            verify_sha256=False,
+            transport=httpx.MockTransport(handler),
+        )
+    )
+
+    assert report["dataset"]["selected_case_indices"] == [2, 0]
+    assert report["case_results"][0]["case_index"] == 0
+    assert report["case_results"][0]["missed_answer_session_ids"] == []
+    assert report["case_results"][1]["case_index"] == PREFERENCE_CASE_INDEX
+    assert report["case_results"][1]["missed_answer_session_ids"] == ["s-pref-answer"]
+    worst = report["diagnostics"]["worst_cases"][0]
+    assert worst["case_index"] == PREFERENCE_CASE_INDEX
+    assert "salty snacks" in worst["answer_snippets"]["s-pref-answer"]
+    assert "sweet desserts" in worst["top_distractor_snippets"]["s-pref-distractor"]

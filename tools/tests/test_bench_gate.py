@@ -67,8 +67,20 @@ def _ai_memory_report(mode: str = "raw") -> dict[str, Any]:
         "mode": mode,
         "repeat_count": 1,
         "auth_manifest_id": "not-applicable:offline",
-        "overall": {"recall@5": 1.0, "ndcg@5": 1.0},
-        "per_type": {"temporal-reasoning": {"recall@5": 1.0}},
+        "overall": {
+            "recall@5": 1.0,
+            "ndcg@5": 1.0,
+            "recall@10": 1.0,
+            "ndcg@10": 1.0,
+        },
+        "per_type": {
+            "temporal-reasoning": {
+                "recall@5": 1.0,
+                "ndcg@5": 1.0,
+                "recall@10": 1.0,
+                "ndcg@10": 1.0,
+            }
+        },
         "case_results": [
             {
                 "question_id": "q1",
@@ -253,8 +265,20 @@ def test_evaluate_report_ai_memory_profile_accepts_full_records() -> None:
         "mode": "raw",
         "repeat_count": 1,
         "auth_manifest_id": "not-applicable:offline",
-        "overall": {"recall@5": 1.0, "ndcg@5": 1.0},
-        "per_type": {"temporal-reasoning": {"recall@5": 1.0}},
+        "overall": {
+            "recall@5": 1.0,
+            "ndcg@5": 1.0,
+            "recall@10": 1.0,
+            "ndcg@10": 1.0,
+        },
+        "per_type": {
+            "temporal-reasoning": {
+                "recall@5": 1.0,
+                "ndcg@5": 1.0,
+                "recall@10": 1.0,
+                "ndcg@10": 1.0,
+            }
+        },
         "case_results": [
             {
                 "question_id": "q1",
@@ -310,6 +334,21 @@ def test_evaluate_report_ai_memory_profile_rejects_headline_only_records() -> No
     assert "missing non-empty field 'case_results'" in failures
 
 
+def test_evaluate_report_ai_memory_profile_enforces_quality_thresholds() -> None:
+    report = _ai_memory_report(mode="hybrid")
+    report["overall"]["recall@5"] = 0.70
+    report["overall"]["cross_question_result_count"] = 1.0
+    report["per_type"]["temporal-reasoning"]["ndcg@10"] = 0.50
+
+    failures = eval_gate.evaluate_report(report, profile="ai-memory")
+
+    assert "metric 'recall@5' below minimum 0.7500: 0.7000" in failures
+    assert "overall cross_question_result_count must be 0.0000: 1.0000" in failures
+    assert (
+        "per_type['temporal-reasoning']: metric 'ndcg@10' below minimum 0.6000: 0.5000" in failures
+    )
+
+
 def test_evaluate_report_reports_threshold_and_metadata_failures() -> None:
     report = {
         "metrics": {
@@ -360,8 +399,20 @@ def test_main_can_gate_ai_memory_record(tmp_path: Path, capsys: pytest.CaptureFi
                 "mode": "raw",
                 "repeat_count": 1,
                 "auth_manifest_id": "not-applicable:offline",
-                "overall": {"recall@5": 1.0},
-                "per_type": {"single-session-user": {"recall@5": 1.0}},
+                "overall": {
+                    "recall@5": 1.0,
+                    "ndcg@5": 1.0,
+                    "recall@10": 1.0,
+                    "ndcg@10": 1.0,
+                },
+                "per_type": {
+                    "single-session-user": {
+                        "recall@5": 1.0,
+                        "ndcg@5": 1.0,
+                        "recall@10": 1.0,
+                        "ndcg@10": 1.0,
+                    }
+                },
                 "case_results": [
                     {
                         "question_id": "q1",

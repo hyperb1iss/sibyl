@@ -49,6 +49,32 @@ def test_longmemeval_corpus_uses_user_turns_and_keeps_timestamps() -> None:
     ]
 
 
+def test_longmemeval_corpus_can_include_assistant_turns() -> None:
+    module = _load_bench_module()
+
+    documents = module.build_longmemeval_corpus(
+        {
+            "haystack_session_ids": ["s1"],
+            "haystack_dates": ["2026/01/01"],
+            "haystack_sessions": [
+                [
+                    {"role": "user", "content": "What term did you suggest?"},
+                    {"role": "assistant", "content": "I suggested retrieval planning."},
+                ]
+            ],
+        },
+        text_policy="user-and-assistant-turns-v1",
+    )
+
+    assert [(document.session_id, document.text, document.timestamp) for document in documents] == [
+        (
+            "s1",
+            "User: What term did you suggest?\nAssistant: I suggested retrieval planning.",
+            "2026/01/01",
+        )
+    ]
+
+
 def test_longmemeval_report_includes_full_case_records(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

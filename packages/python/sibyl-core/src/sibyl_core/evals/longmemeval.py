@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import Any
 
 CORPUS_TEXT_POLICY = "user-turns-only-v1"
+USER_AND_ASSISTANT_CORPUS_TEXT_POLICY = "user-and-assistant-turns-v1"
+CORPUS_TEXT_POLICIES = (CORPUS_TEXT_POLICY, USER_AND_ASSISTANT_CORPUS_TEXT_POLICY)
 
 
 @dataclass(frozen=True)
@@ -19,21 +21,34 @@ class LongMemEvalCorpusDocument:
 
 def build_longmemeval_corpus(
     entry: Mapping[str, Any],
+    *,
+    text_policy: str = CORPUS_TEXT_POLICY,
 ) -> list[LongMemEvalCorpusDocument]:
+    if text_policy not in CORPUS_TEXT_POLICIES:
+        msg = f"Unsupported LongMemEval corpus text policy: {text_policy}"
+        raise ValueError(msg)
+
     documents: list[LongMemEvalCorpusDocument] = []
     sessions = entry["haystack_sessions"]
     session_ids = entry["haystack_session_ids"]
     timestamps = entry.get("haystack_dates", [])
 
     for index, (session, session_id) in enumerate(zip(sessions, session_ids, strict=False)):
-        user_turns = [turn["content"] for turn in session if turn.get("role") == "user"]
-        if not user_turns:
+        if text_policy == CORPUS_TEXT_POLICY:
+            turns = [turn["content"] for turn in session if turn.get("role") == "user"]
+        else:
+            turns = [
+                f"{str(turn.get('role')).title()}: {turn['content']}"
+                for turn in session
+                if turn.get("role") in {"user", "assistant"} and turn.get("content")
+            ]
+        if not turns:
             continue
         timestamp = timestamps[index] if index < len(timestamps) else ""
         documents.append(
             LongMemEvalCorpusDocument(
                 session_id=str(session_id),
-                text="\n".join(user_turns),
+                text="\n".join(turns),
                 timestamp=str(timestamp),
             )
         )

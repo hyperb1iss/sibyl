@@ -13,7 +13,9 @@ from sibyl_core.evals.context import (
     load_context_pack_cases,
 )
 from sibyl_core.evals.longmemeval import (
+    CORPUS_TEXT_POLICIES,
     CORPUS_TEXT_POLICY,
+    USER_AND_ASSISTANT_CORPUS_TEXT_POLICY,
     LongMemEvalCorpusDocument,
     average_metric,
     build_longmemeval_corpus,
@@ -44,8 +46,10 @@ from sibyl_core.evals.runtime import (
 )
 
 __all__ = [
+    "CORPUS_TEXT_POLICIES",
     "CORPUS_TEXT_POLICY",
     "FROZEN_CONTEXT_PACK_SUITE_NAMES",
+    "USER_AND_ASSISTANT_CORPUS_TEXT_POLICY",
     "ContextPackCaseResult",
     "ContextPackEvalCase",
     "ContextPackEvalReport",

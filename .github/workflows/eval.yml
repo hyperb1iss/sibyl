@@ -307,6 +307,7 @@ jobs:
             --api-url http://localhost:3334/api \
             --allow-localhost \
             --limit "${{ inputs.longmemeval_smoke_limit }}" \
+            --sample-strategy stratified \
             --concurrency "${{ inputs.longmemeval_concurrency }}" \
             --output .moon/cache/evals/longmemeval_live_smoke.json \
             --label live-smoke \

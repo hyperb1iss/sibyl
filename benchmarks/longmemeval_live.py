@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages" / "python" / "sibyl-core" / "src"))
 
 from sibyl_core.evals.longmemeval import (
+    CORPUS_TEXT_POLICIES,
     CORPUS_TEXT_POLICY,
     average_metric,
     build_longmemeval_corpus,
@@ -36,6 +37,10 @@ LIVE_RETRIEVAL_MODE = "hybrid"
 AUTH_MANIFEST_ID = "ephemeral-local-signup-v1"
 ENTITY_CONTENT_MAX_CHARS = 50_000
 ENTITY_CONTENT_PROJECTION_POLICY = "api-entity-content-chunked-v1"
+DEFAULT_SAMPLE_STRATEGY = "prefix"
+SAMPLE_STRATEGIES = ("prefix", "stratified")
+DIAGNOSTIC_CASE_LIMIT = 25
+DIAGNOSTIC_SNIPPET_CHARS = 360
 
 
 class LongMemEvalLiveError(RuntimeError):
@@ -73,6 +78,47 @@ def _corpus_hash(path: Path) -> str:
 
 def _load_dataset(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _select_entries(
+    entries: list[dict[str, Any]],
+    *,
+    limit: int | None,
+    sample_strategy: str,
+) -> tuple[list[dict[str, Any]], list[int]]:
+    if sample_strategy not in SAMPLE_STRATEGIES:
+        msg = f"Unsupported LongMemEval sample strategy: {sample_strategy}"
+        raise LongMemEvalLiveError(msg)
+    if limit is None:
+        return entries, list(range(len(entries)))
+    if sample_strategy == "prefix":
+        return entries[:limit], list(range(min(limit, len(entries))))
+
+    by_type: dict[str, list[tuple[int, dict[str, Any]]]] = defaultdict(list)
+    for index, entry in enumerate(entries):
+        by_type[str(entry.get("question_type") or "unknown")].append((index, entry))
+
+    selected: list[dict[str, Any]] = []
+    selected_indices: list[int] = []
+    offsets = dict.fromkeys(by_type, 0)
+    question_types = sorted(by_type)
+    while len(selected) < limit:
+        added = False
+        for question_type in question_types:
+            offset = offsets[question_type]
+            type_entries = by_type[question_type]
+            if offset >= len(type_entries):
+                continue
+            original_index, entry = type_entries[offset]
+            selected.append(entry)
+            selected_indices.append(original_index)
+            offsets[question_type] += 1
+            added = True
+            if len(selected) >= limit:
+                break
+        if not added:
+            break
+    return selected, selected_indices
 
 
 def _is_loopback_url(api_url: str) -> bool:
@@ -195,12 +241,13 @@ async def _ingest_haystack(
     entry: dict[str, Any],
     run_id: str,
     case_index: int,
+    corpus_text_policy: str,
 ) -> tuple[list[str], float, int]:
     start = time.perf_counter()
     question_id = str(entry["question_id"])
     created_ids: list[str] = []
     chunked_session_count = 0
-    documents = build_longmemeval_corpus(entry)
+    documents = build_longmemeval_corpus(entry, text_policy=corpus_text_policy)
     for document_index, document in enumerate(documents):
         content_chunks = _chunk_entity_content(document.text)
         if len(content_chunks) > 1:
@@ -234,7 +281,7 @@ async def _ingest_haystack(
                         "entity_content_max_chars": ENTITY_CONTENT_MAX_CHARS,
                         "entity_content_projection_policy": ENTITY_CONTENT_PROJECTION_POLICY,
                         "valid_at": document.timestamp,
-                        "corpus_text_policy": CORPUS_TEXT_POLICY,
+                        "corpus_text_policy": corpus_text_policy,
                         "capture_surface": "longmemeval-live",
                     },
                 },
@@ -343,6 +390,114 @@ def _ranked_sessions(results: list[Any]) -> tuple[list[str], list[dict[str, Any]
     return ranked_session_ids, ranked_results, cross_question_count
 
 
+def _answer_ranks(
+    ranked_session_ids: list[str],
+    answer_session_ids: list[str],
+) -> list[dict[str, int | str | None]]:
+    ranks: list[dict[str, int | str | None]] = []
+    for session_id in answer_session_ids:
+        rank = ranked_session_ids.index(session_id) + 1 if session_id in ranked_session_ids else None
+        ranks.append({"session_id": session_id, "rank": rank})
+    return ranks
+
+
+def _snippet(text: str, max_chars: int = DIAGNOSTIC_SNIPPET_CHARS) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= max_chars:
+        return compact
+    return f"{compact[: max_chars - 1].rstrip()}…"
+
+
+def _session_text_lookup(
+    entry: dict[str, Any],
+    *,
+    corpus_text_policy: str,
+) -> dict[str, str]:
+    return {
+        document.session_id: document.text
+        for document in build_longmemeval_corpus(entry, text_policy=corpus_text_policy)
+    }
+
+
+def _build_diagnostics(
+    *,
+    results: list[dict[str, Any]],
+    entries_by_case_index: dict[int, dict[str, Any]],
+    corpus_text_policy: str,
+    k_values: list[int],
+) -> dict[str, Any]:
+    max_k = max(k_values)
+    min_k = min(k_values)
+    hit_key = f"hit@{max_k}"
+    recall_key = f"recall@{max_k}"
+    ndcg_key = f"ndcg@{max_k}"
+    cases_with_gaps = [
+        result
+        for result in results
+        if float(result.get(hit_key, 0.0)) < 1.0 or float(result.get(recall_key, 0.0)) < 1.0
+    ]
+    worst_cases = sorted(
+        cases_with_gaps,
+        key=lambda result: (
+            float(result.get(recall_key, 0.0)),
+            float(result.get(ndcg_key, 0.0)),
+            float(result.get(f"recall@{min_k}", 0.0)),
+        ),
+    )[:DIAGNOSTIC_CASE_LIMIT]
+
+    type_counts: dict[str, dict[str, float]] = defaultdict(
+        lambda: {"cases": 0.0, "hit_misses": 0.0, "missing_answer_slots": 0.0, "answer_slots": 0.0}
+    )
+    for result in results:
+        question_type = str(result.get("question_type") or "unknown")
+        answer_ids = {str(session_id) for session_id in result.get("answer_session_ids", [])}
+        ranked_ids = [str(session_id) for session_id in result.get("ranked_session_ids", [])]
+        stats = type_counts[question_type]
+        stats["cases"] += 1.0
+        if float(result.get(hit_key, 0.0)) < 1.0:
+            stats["hit_misses"] += 1.0
+        stats["missing_answer_slots"] += len(answer_ids - set(ranked_ids[:max_k]))
+        stats["answer_slots"] += len(answer_ids)
+
+    diagnostic_cases: list[dict[str, Any]] = []
+    for result in worst_cases:
+        case_index = int(result["case_index"])
+        entry = entries_by_case_index[case_index]
+        answer_ids = [str(session_id) for session_id in result["answer_session_ids"]]
+        ranked_ids = [str(session_id) for session_id in result["ranked_session_ids"]]
+        top_distractors = [session_id for session_id in ranked_ids if session_id not in answer_ids]
+        text_by_session_id = _session_text_lookup(entry, corpus_text_policy=corpus_text_policy)
+        diagnostic_cases.append(
+            {
+                "case_index": case_index,
+                "question_id": result.get("question_id"),
+                "question_type": result.get("question_type"),
+                "question": result.get("question"),
+                "answer_ranks": result.get("answer_ranks"),
+                "metrics": {
+                    key: result[key]
+                    for key in sorted(result)
+                    if key.startswith(("hit@", "recall@", "ndcg@"))
+                },
+                "answer_snippets": {
+                    session_id: _snippet(text_by_session_id.get(session_id, ""))
+                    for session_id in answer_ids
+                },
+                "top_distractor_snippets": {
+                    session_id: _snippet(text_by_session_id.get(session_id, ""))
+                    for session_id in top_distractors[:3]
+                },
+            }
+        )
+
+    return {
+        "max_k": max_k,
+        "case_gap_count": len(cases_with_gaps),
+        "question_type_counts": dict(sorted(type_counts.items())),
+        "worst_cases": diagnostic_cases,
+    }
+
+
 async def _run_case(
     entry: dict[str, Any],
     *,
@@ -352,6 +507,7 @@ async def _run_case(
     k_values: list[int],
     readiness_timeout_seconds: float,
     timeout_seconds: float,
+    corpus_text_policy: str,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
@@ -368,6 +524,7 @@ async def _run_case(
             entry=entry,
             run_id=run_id,
             case_index=case_index,
+            corpus_text_policy=corpus_text_policy,
         )
         readiness = await _verify_namespace_probe(
             client,
@@ -385,6 +542,7 @@ async def _run_case(
     ranked_session_ids, ranked_results, cross_question_count = _ranked_sessions(results)
     answer_session_ids = sorted(str(value) for value in entry.get("answer_session_ids", []))
     metrics = score_longmemeval_ranking(ranked_session_ids, answer_session_ids, k_values)
+    answer_ranks = _answer_ranks(ranked_session_ids, answer_session_ids)
     return {
         "case_index": case_index,
         "question_id": entry["question_id"],
@@ -392,6 +550,10 @@ async def _run_case(
         "question": entry.get("question"),
         "question_date": entry.get("question_date"),
         "answer_session_ids": answer_session_ids,
+        "answer_ranks": answer_ranks,
+        "missed_answer_session_ids": [
+            rank["session_id"] for rank in answer_ranks if rank["rank"] is None
+        ],
         "ranked_session_ids": ranked_session_ids,
         "ranked_results": ranked_results,
         "tenant": tenant,
@@ -406,7 +568,7 @@ async def _run_case(
 
 
 async def _run_cases(
-    entries: list[dict[str, Any]],
+    entries: list[tuple[int, dict[str, Any]]],
     *,
     api_url: str,
     run_id: str,
@@ -414,6 +576,7 @@ async def _run_cases(
     k_values: list[int],
     readiness_timeout_seconds: float,
     timeout_seconds: float,
+    corpus_text_policy: str,
     transport: httpx.AsyncBaseTransport | None,
 ) -> list[dict[str, Any]]:
     semaphore = asyncio.Semaphore(max(1, concurrency))
@@ -428,10 +591,11 @@ async def _run_cases(
                 k_values=k_values,
                 readiness_timeout_seconds=readiness_timeout_seconds,
                 timeout_seconds=timeout_seconds,
+                corpus_text_policy=corpus_text_policy,
                 transport=transport,
             )
 
-    tasks = [asyncio.create_task(run_one(index, entry)) for index, entry in enumerate(entries)]
+    tasks = [asyncio.create_task(run_one(case_index, entry)) for case_index, entry in entries]
     results: list[dict[str, Any]] = []
     for completed, task in enumerate(asyncio.as_completed(tasks), start=1):
         result = await task
@@ -480,6 +644,8 @@ async def run_benchmark(
     metadata: dict[str, str] | None = None,
     readiness_timeout_seconds: float = 30.0,
     timeout_seconds: float = 60.0,
+    sample_strategy: str = DEFAULT_SAMPLE_STRATEGY,
+    corpus_text_policy: str = CORPUS_TEXT_POLICY,
     verify_sha256: bool = True,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, Any]:
@@ -496,33 +662,50 @@ async def run_benchmark(
     if not isinstance(entries, list):
         raise LongMemEvalLiveError("dataset must be a JSON list")
     total_entries = len(entries)
-    if limit is not None:
-        entries = entries[:limit]
-    if not entries:
+    selected_entries, selected_indices = _select_entries(
+        entries,
+        limit=limit,
+        sample_strategy=sample_strategy,
+    )
+    if not selected_entries:
         raise LongMemEvalLiveError("no LongMemEval entries selected")
+    if corpus_text_policy not in CORPUS_TEXT_POLICIES:
+        msg = f"Unsupported LongMemEval corpus text policy: {corpus_text_policy}"
+        raise LongMemEvalLiveError(msg)
+    selected_cases = list(zip(selected_indices, selected_entries, strict=True))
+    entries_by_case_index = dict(selected_cases)
 
     run_id = uuid4().hex[:12]
     started = time.perf_counter()
     print("\n============================================================")
     print("  Sibyl x LongMemEval Live API Benchmark")
     print(f"  API: {api_url}")
-    print(f"  Questions: {len(entries)}")
+    print(f"  Questions: {len(selected_entries)}")
+    print(f"  Sample strategy: {sample_strategy}")
+    print(f"  Corpus text policy: {corpus_text_policy}")
     print(f"  Concurrency: {concurrency}")
     print(f"  K values: {k_values}")
     print("============================================================\n")
 
     case_results = await _run_cases(
-        entries,
+        selected_cases,
         api_url=api_url,
         run_id=run_id,
         concurrency=concurrency,
         k_values=k_values,
         readiness_timeout_seconds=readiness_timeout_seconds,
         timeout_seconds=timeout_seconds,
+        corpus_text_policy=corpus_text_policy,
         transport=transport,
     )
     elapsed = time.perf_counter() - started
     overall, per_type = _aggregate(case_results, k_values)
+    diagnostics = _build_diagnostics(
+        results=case_results,
+        entries_by_case_index=entries_by_case_index,
+        corpus_text_policy=corpus_text_policy,
+        k_values=k_values,
+    )
 
     print("\n============================================================")
     print("  RESULTS - live /api/search")
@@ -561,24 +744,29 @@ async def run_benchmark(
             "per_question_isolation": "throwaway organization namespace per question",
             "entity_content_max_chars": ENTITY_CONTENT_MAX_CHARS,
             "entity_content_projection_policy": ENTITY_CONTENT_PROJECTION_POLICY,
+            "sample_strategy": sample_strategy,
+            "corpus_text_policy": corpus_text_policy,
         },
         "dataset": {
             "name": dataset_path.stem,
             "path": str(dataset_path),
             "corpus_hash": _corpus_hash(dataset_path),
             "total_entries": total_entries,
-            "evaluated_entries": len(entries),
+            "evaluated_entries": len(selected_entries),
             "limit": limit,
-            "corpus_text_policy": CORPUS_TEXT_POLICY,
+            "sample_strategy": sample_strategy,
+            "selected_case_indices": selected_indices,
+            "corpus_text_policy": corpus_text_policy,
             "entity_content_projection_policy": ENTITY_CONTENT_PROJECTION_POLICY,
         },
         "metadata": metadata or {},
         "repeat_count": 1,
         "auth_manifest_id": AUTH_MANIFEST_ID,
         "k_values": k_values,
-        "total_questions": len(entries),
+        "total_questions": len(selected_entries),
         "overall": overall,
         "per_type": per_type,
+        "diagnostics": diagnostics,
         "case_results": case_results,
         "elapsed_seconds": elapsed,
         "claim_boundary": (
@@ -607,6 +795,18 @@ def main() -> None:
     )
     parser.add_argument("--readiness-timeout", type=float, default=30.0)
     parser.add_argument("--timeout", type=float, default=60.0)
+    parser.add_argument(
+        "--sample-strategy",
+        choices=SAMPLE_STRATEGIES,
+        default=DEFAULT_SAMPLE_STRATEGY,
+        help="How to select cases when --limit is set.",
+    )
+    parser.add_argument(
+        "--corpus-text-policy",
+        choices=CORPUS_TEXT_POLICIES,
+        default=CORPUS_TEXT_POLICY,
+        help="Which conversation roles to project into session entities.",
+    )
     parser.add_argument("--skip-sha256-check", action="store_true")
     args = parser.parse_args()
 
@@ -627,6 +827,8 @@ def main() -> None:
                 metadata=metadata,
                 readiness_timeout_seconds=args.readiness_timeout,
                 timeout_seconds=args.timeout,
+                sample_strategy=args.sample_strategy,
+                corpus_text_policy=args.corpus_text_policy,
                 verify_sha256=not args.skip_sha256_check,
             )
         )
