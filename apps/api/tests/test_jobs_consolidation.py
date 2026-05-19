@@ -244,8 +244,8 @@ async def test_priority_decay_archives_only_old_unarchived_episodes(
         "min_age_days": 180,
     }
     assert entity_manager.list_by_type.await_args_list == [
-        call(EntityType.EPISODE, limit=200, offset=0, include_archived=True),
-        call(EntityType.EPISODE, limit=200, offset=3, include_archived=True),
+        call(EntityType.EPISODE, limit=200, offset=0, include_archived=False),
+        call(EntityType.EPISODE, limit=200, offset=3, include_archived=False),
     ]
     entity_manager.update.assert_awaited_once()
     assert entity_manager.update.await_args.args[0] == "episode-old"
@@ -295,8 +295,8 @@ async def test_priority_decay_respects_archive_cap_across_pages(
     assert result["candidates_found"] == 3
     assert result["archived"] == 3
     assert entity_manager.list_by_type.await_args_list == [
-        call(EntityType.EPISODE, limit=200, offset=0, include_archived=True),
-        call(EntityType.EPISODE, limit=200, offset=2, include_archived=True),
+        call(EntityType.EPISODE, limit=200, offset=0, include_archived=False),
+        call(EntityType.EPISODE, limit=200, offset=2, include_archived=False),
     ]
     assert [await_call.args[0] for await_call in entity_manager.update.await_args_list] == [
         "episode-1",
