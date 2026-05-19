@@ -26,6 +26,13 @@ from sibyl_core.observability import telemetry_registry
 
 log = structlog.get_logger()
 
+# Upper bound on get_job_status round-trips for a function-filtered
+# list_jobs scan. The filter is applied after loading, so the scan
+# window must exceed the requested limit to surface matches, but it
+# stays capped so a request cannot fan out across the whole recent
+# index. Never larger than the index itself.
+LIST_JOBS_FILTER_SCAN_CAP = min(200, RECENT_JOB_INDEX_LIMIT)
+
 
 @dataclass
 class EnqueueResult:
@@ -380,12 +387,24 @@ class RedisQueueBroker:
         function: str | None = None,
         limit: int = 50,
     ) -> list[JobInfo]:
-        """List recent jobs."""
+        """List recent jobs newest-first, bounding backend work by ``limit``.
+
+        ``_list_recent_job_ids`` already returns ids newest-first, so an
+        unfiltered listing only needs to load the first ``limit`` ids. A
+        ``function`` filter is applied after loading, so the scan window is
+        widened to ``LIST_JOBS_FILTER_SCAN_CAP`` to still surface matches
+        beyond the newest ``limit`` jobs while keeping the number of
+        ``get_job_status`` round-trips bounded regardless of how many jobs
+        the recent index holds.
+        """
         pool = await self.get_pool()
         job_ids = await self._list_recent_job_ids(pool)
 
-        if not job_ids:
+        if limit <= 0 or not job_ids:
             return []
+
+        scan_window = limit if function is None else max(limit, LIST_JOBS_FILTER_SCAN_CAP)
+        job_ids = job_ids[:scan_window]
 
         semaphore = asyncio.Semaphore(25)
 
