@@ -21,7 +21,6 @@ from sibyl_core.observability import telemetry_registry
 _READ_ROLES = (
     OrganizationRole.OWNER,
     OrganizationRole.ADMIN,
-    OrganizationRole.MEMBER,
 )
 
 router = APIRouter(
