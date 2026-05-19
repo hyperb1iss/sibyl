@@ -176,6 +176,35 @@ async def test_import_source_archive_resumes_from_checkpoint(tmp_path: Path) -> 
     assert first_result["dedupe_keys"] != second_result["dedupe_keys"]
 
 
+
+
+@pytest.mark.asyncio
+async def test_import_source_archive_duplicate_lookup_is_policy_scoped(tmp_path: Path) -> None:
+    mbox_path = _write_mbox(tmp_path / "scoped-dedupe.mbox")
+    lookup_calls: list[dict[str, object]] = []
+
+    async def capture_lookup(**kwargs: object) -> RawMemory | None:
+        lookup_calls.append(dict(kwargs))
+        return None
+
+    with patch(
+        "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
+        AsyncMock(side_effect=capture_lookup),
+    ):
+        await source_imports.import_source_archive(
+            {},
+            str(mbox_path),
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+        )
+
+    assert len(lookup_calls) == 1
+    assert lookup_calls[0]["organization_id"] == "org-1"
+    assert lookup_calls[0]["principal_id"] == "user-1"
+    assert lookup_calls[0]["memory_scope"] is MemoryScope.PRIVATE
+    assert lookup_calls[0]["scope_key"] is None
+
 @pytest.mark.asyncio
 async def test_import_source_archive_fails_closed_without_policy_context(tmp_path: Path) -> None:
     mbox_path = _write_mbox(tmp_path / "job.mbox")

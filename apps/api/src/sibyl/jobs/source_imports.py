@@ -403,6 +403,9 @@ def _default_duplicate_checker(
         existing = await get_raw_memory_by_source_id(
             organization_id=organization_id,
             source_id=payload.source_id,
+            principal_id=payload.principal_id,
+            memory_scope=payload.memory_scope,
+            scope_key=payload.scope_key,
         )
         if existing is not None:
             return existing.id
