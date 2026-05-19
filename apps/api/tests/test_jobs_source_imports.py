@@ -182,14 +182,16 @@ async def test_import_source_archive_resumes_from_checkpoint(tmp_path: Path) -> 
 async def test_import_source_archive_fails_closed_without_policy_context(tmp_path: Path) -> None:
     mbox_path = _write_mbox(tmp_path / "job.mbox")
 
-    with patch("sibyl.jobs.source_imports.settings.source_import_dir", tmp_path):
-        with pytest.raises(ValueError, match="job_policy_context_missing"):
-            await source_imports.import_source_archive(
-                {},
-                str(mbox_path),
-                organization_id="org-1",
-                principal_id="user-1",
-            )
+    with (
+        patch("sibyl.jobs.source_imports.settings.source_import_dir", tmp_path),
+        pytest.raises(ValueError, match="job_policy_context_missing"),
+    ):
+        await source_imports.import_source_archive(
+            {},
+            str(mbox_path),
+            organization_id="org-1",
+            principal_id="user-1",
+        )
 
 
 @pytest.mark.asyncio
@@ -198,15 +200,17 @@ async def test_import_source_archive_denies_paths_outside_import_root(tmp_path: 
     staged_dir.mkdir()
     outside_mbox = _write_mbox(tmp_path / "outside.mbox")
 
-    with patch("sibyl.jobs.source_imports.settings.source_import_dir", staged_dir):
-        with pytest.raises(PermissionError, match="source_import_path_denied"):
-            await source_imports.import_source_archive(
-                {},
-                str(outside_mbox),
-                organization_id="org-1",
-                principal_id="user-1",
-                policy_context=_policy_context(),
-            )
+    with (
+        patch("sibyl.jobs.source_imports.settings.source_import_dir", staged_dir),
+        pytest.raises(PermissionError, match="source_import_path_denied"),
+    ):
+        await source_imports.import_source_archive(
+            {},
+            str(outside_mbox),
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+        )
 
 
 @pytest.mark.asyncio
@@ -220,10 +224,13 @@ async def test_source_import_run_resumes_from_persisted_checkpoint(
         writes.append(dict(kwargs))
         return _raw_memory_from_kwargs(dict(kwargs), raw_id=f"raw-{len(writes)}")
 
-    with patch(
-        "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
-        AsyncMock(return_value=None),
-    ), patch("sibyl.jobs.source_imports.settings.source_import_dir", tmp_path):
+    with (
+        patch(
+            "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
+            AsyncMock(return_value=None),
+        ),
+        patch("sibyl.jobs.source_imports.settings.source_import_dir", tmp_path),
+    ):
         first = await source_imports.start_source_import(
             source_uri=str(mbox_path),
             organization_id="org-1",
@@ -316,9 +323,12 @@ async def test_source_import_run_records_dedupe_without_duplicate_write(
         writes.append(dict(kwargs))
         return _raw_memory_from_kwargs(dict(kwargs), raw_id="raw-existing")
 
-    with patch(
-        "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
-        AsyncMock(return_value=None),
+    with (
+        patch(
+            "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
+            AsyncMock(return_value=None),
+        ),
+        patch("sibyl.jobs.source_imports.settings.source_import_dir", tmp_path),
     ):
         first = await source_imports.start_source_import(
             source_uri=str(mbox_path),
@@ -333,9 +343,12 @@ async def test_source_import_run_records_dedupe_without_duplicate_write(
     run.status = source_imports.SourceImportStatus.PAUSED
     run.completed_at = None
 
-    with patch(
-        "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
-        AsyncMock(return_value=None),
+    with (
+        patch(
+            "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
+            AsyncMock(return_value=None),
+        ),
+        patch("sibyl.jobs.source_imports.settings.source_import_dir", tmp_path),
     ):
         second = await source_imports.resume_source_import(
             first["import_id"],
@@ -358,9 +371,12 @@ async def test_cancel_source_import_blocks_resume(tmp_path: Path) -> None:
     async def fake_remember(**kwargs: object) -> RawMemory:
         return _raw_memory_from_kwargs(dict(kwargs), raw_id=str(kwargs["source_id"]))
 
-    with patch(
-        "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
-        AsyncMock(return_value=None),
+    with (
+        patch(
+            "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
+            AsyncMock(return_value=None),
+        ),
+        patch("sibyl.jobs.source_imports.settings.source_import_dir", tmp_path),
     ):
         first = await source_imports.start_source_import(
             source_uri=str(mbox_path),
@@ -395,9 +411,12 @@ async def test_source_import_controls_are_principal_bound(tmp_path: Path) -> Non
     async def fake_remember(**kwargs: object) -> RawMemory:
         return _raw_memory_from_kwargs(dict(kwargs), raw_id=str(kwargs["source_id"]))
 
-    with patch(
-        "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
-        AsyncMock(return_value=None),
+    with (
+        patch(
+            "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
+            AsyncMock(return_value=None),
+        ),
+        patch("sibyl.jobs.source_imports.settings.source_import_dir", tmp_path),
     ):
         first = await source_imports.start_source_import(
             source_uri=str(mbox_path),
@@ -431,9 +450,12 @@ async def test_resume_source_import_rechecks_current_policy_context(tmp_path: Pa
     async def fake_remember(**kwargs: object) -> RawMemory:
         return _raw_memory_from_kwargs(dict(kwargs), raw_id=str(kwargs["source_id"]))
 
-    with patch(
-        "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
-        AsyncMock(return_value=None),
+    with (
+        patch(
+            "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
+            AsyncMock(return_value=None),
+        ),
+        patch("sibyl.jobs.source_imports.settings.source_import_dir", tmp_path),
     ):
         first = await source_imports.start_source_import(
             source_uri=str(mbox_path),
@@ -449,17 +471,17 @@ async def test_resume_source_import_rechecks_current_policy_context(tmp_path: Pa
             remember=fake_remember,
         )
 
-    stale_context = _policy_context(memory_space="project", scope_key="project-1")
-    stale_context["accessible_projects"] = []
-    with pytest.raises(ValueError, match="unverified_membership"):
-        await source_imports.resume_source_import(
-            first["import_id"],
-            organization_id="org-1",
-            principal_id="user-1",
-            policy_context=stale_context,
-            promotion_preview_approved=True,
-            remember=fake_remember,
-        )
+        stale_context = _policy_context(memory_space="project", scope_key="project-1")
+        stale_context["accessible_projects"] = []
+        with pytest.raises(ValueError, match="unverified_membership"):
+            await source_imports.resume_source_import(
+                first["import_id"],
+                organization_id="org-1",
+                principal_id="user-1",
+                policy_context=stale_context,
+                promotion_preview_approved=True,
+                remember=fake_remember,
+            )
 
 
 def test_worker_settings_registers_source_import_job() -> None:
