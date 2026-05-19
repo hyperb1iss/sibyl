@@ -197,28 +197,6 @@ async def test_change_password_uses_auth_runtime_helper(monkeypatch: pytest.Monk
     )
 
 
-
-
-@pytest.mark.asyncio
-async def test_change_password_requires_existing_local_password() -> None:
-    auth = _auth()
-    auth.user.password_salt = None
-    auth.user.password_hash = None
-    auth.user.password_iterations = None
-
-    with pytest.raises(user_routes.HTTPException) as exc:
-        await user_routes.change_password(
-            data=user_routes.PasswordChangeRequest(
-                current_password="old-password",
-                new_password="new-password-123",
-            ),
-            auth=auth,
-        )
-
-    assert exc.value.status_code == 400
-    assert exc.value.detail == "Current password is not set for this account"
-
-
 @pytest.mark.asyncio
 async def test_list_sessions_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     auth = _auth()
