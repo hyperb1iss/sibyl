@@ -1,11 +1,13 @@
 # Sibyl Post-v0.10 Release Remap Spec
 
-- Status: active release planning spec
+- Status: active RC evidence checklist
 - Created: 2026-05-17
 - Baseline release: v0.10.0, published 2026-05-17
 - Baseline head at planning time: `v0.10.0-2-g5dc7a398`
 - Tracking task: `12b1fee4-7bdd-45c8-8a6a-b13fd6eab308`
 - Parent roadmap: [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
+- Current focus: v1.0 RC Evidence Freeze
+- RC audit task: `218ca5c5-1920-4689-9ab7-16ac04a73404`
 
 ## 1. Decision
 
@@ -31,6 +33,10 @@ schedule. The new schedule should be product-shaped:
 4. v1.0 RC: evidence freeze, docs/install rehearsal, and boring release gates
 
 Keep v0.14 in reserve only if v0.13 discovers a release-sized distribution or migration gap.
+
+Current state as of 2026-05-18: the v0.11 Corpus Runtime packets, v0.12 gate additions, and v0.13
+runtime-closure packets have landed in the task graph. This document remains active as the RC
+evidence checklist; future-looking packet text below is retained as release provenance.
 
 ## 2. Why Remap Now
 
@@ -358,12 +364,12 @@ v0.13 removes the remaining supported runtime dependence on Graphiti-shaped code
 single-machine assumptions.
 
 A fresh install should run with SurrealDB as the only required data service. Legacy Graphiti-shaped
-archives should remain readable through Sibyl-owned import/projection code that does not import
-`graphiti_core`.
+archives should remain readable through Sibyl-owned import/projection code that does not import the
+Graphiti Core module.
 
 ### In Scope
 
-- delete `graphiti-core` from package metadata, default dependency groups, optional extras, and CI
+- delete Graphiti Core from package metadata, default dependency groups, optional extras, and CI
   paths
 - replace remaining Graphiti-shaped entity, relationship, search, embedder, extraction, and restore
   adapters with Sibyl-native services or explicit migration readers
@@ -392,7 +398,7 @@ Verify:
 - `moon run inventory-check`
 - `moon run inventory-typecheck`
 - `moon run inventory-test`
-- `rg "graphiti_core|graphiti-core"` only returns accepted historical or migration-format labels
+- `rg "graphiti[_-]core"` only returns accepted historical or migration-format labels
 
 #### Packet B: Backup/Restore Release Gate
 
@@ -441,8 +447,8 @@ moon run :check
 
 Additional deletion receipts:
 
-- `rg "graphiti_core|graphiti-core"` returns only historical docs, archived benchmark notes, or
-  explicit migration-format labels
+- `rg "graphiti[_-]core"` returns only historical docs, archived benchmark notes, or explicit
+  migration-format labels
 - no default install, local dev, Docker, Helm, CI, or test task installs Graphiti
 - backup/restore round-trip artifact is attached to release notes
 - fresh quickstart works with only SurrealDB as required infrastructure
@@ -464,7 +470,41 @@ evidence refresh, and fixing the smallest remaining blockers.
 - install, local dev, Docker, Helm, Homebrew, and docs tell one story
 - auth, retrieval, memory trust, source ingest, synthesis, overview performance, product flows, and
   Graphiti deletion all have current receipts
-- version, changelog, release notes, and package metadata are aligned
+- the versioning and release-note contract is clear before the explicit release cut
+
+### RC Completion Checklist
+
+The RC is complete only when each claim has fresh evidence from the current checkout.
+
+| Claim                                      | Evidence                                                                                                                          |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| Active docs agree on current focus         | `docs:lint`, `docs:build`, this spec, the 1.0 roadmap, and the Northstar all point at v1.0 RC focus                               |
+| Task graph reflects current work           | `sibyl context`, `sibyl epic show epic_19e1dea67ebf`, and task lists show RC work instead of ghosts                               |
+| Source ingest and corpus scale are current | `moon run adapter-ingest-gate` and `moon run large-corpus-rehearsal`                                                              |
+| Synthesis is source-grounded               | `moon run synthesis-gate`                                                                                                         |
+| Automatic memory remains policy-safe       | `moon run autonomy-gate`, `moon run memory-trust-gate`, and `moon run trust-control-gate`                                         |
+| Auth/session behavior is boring            | `moon run auth-session-gate`                                                                                                      |
+| Reflection quality is current              | `moon run reflection-quality-gate`                                                                                                |
+| Context and workspace trust are current    | `moon run context-quality-gate` and `moon run workspace-trust-gate`                                                               |
+| Overview performance has a receipt         | `moon run overview-perf-gate`                                                                                                     |
+| Surreal-only runtime closure holds         | `moon run inventory-check`, `moon run inventory-typecheck`, `moon run inventory-test`, and grep audit                             |
+| Backup/restore is release-gated            | `moon run backup-restore-gate`                                                                                                    |
+| Benchmark ledger is claim-safe             | `moon run bench-gate`                                                                                                             |
+| Install and docs surfaces build            | `moon run docs:lint docs:build` and `moon run :check`                                                                             |
+| Release cut has an explicit boundary       | `VERSION` remains the package version source; `.github/workflows/release.yml` bumps it and generates release notes after go-ahead |
+
+RC grep audit:
+
+```bash
+rg -n "graphiti[_-]core" apps packages tools docs \
+  --glob '!docs/_archive/**' \
+  --glob '!docs/architecture/**' \
+  --glob '!contexts/**'
+```
+
+Expected result: no supported runtime, test helper, package metadata, install doc, or active guide
+contains a Graphiti Core dependency or import-module reference. Historical archive docs may still
+contain exact legacy names as provenance.
 
 ### Release Decision Format
 
@@ -481,27 +521,28 @@ Residual risk:
 
 ## 10. Task Graph Reconciliation
 
-The project task graph still contains stale v0.8-era tasks after v0.10. Before v0.11 work starts,
-reconcile the graph so recall does not inject obsolete blockers.
+The project task graph contained stale v0.8-era tasks after v0.10. Packet A reconciled them so
+recall no longer injects obsolete blockers.
 
 Actions:
 
-- mark shipped v0.8/v0.10 tasks done with release receipts
-- archive obsolete v0.8 epics if their remaining tasks are historical
-- keep truly unfinished Graphiti-deletion tasks, but retag them under v0.13
-- create the v0.11 Corpus Runtime epic and child tasks from this spec
-- create placeholder v0.12 and v0.13 epics only if they help planning; avoid detailed future tasks
-  until the prior release lands
+- shipped v0.8/v0.10 tasks are done with release receipts
+- obsolete v0.8 epics are archived or marked complete
+- Graphiti-deletion work is retagged under v0.13
+- v0.11 Corpus Runtime packet tasks were created and completed
+- v0.12, v0.13, and v1.0 RC epics exist for current planning
 
 Verification:
 
 ```bash
 sibyl context
+sibyl epic show epic_19e1dea67ebf
 sibyl task list --status doing
 sibyl task list --status todo
 ```
 
-The output should show current work, not stale release ghosts.
+The output should show v1.0 RC evidence work and any explicitly active v0.13 closure task, not stale
+v0.8 release ghosts.
 
 ## 11. Gate Matrix
 
@@ -516,9 +557,9 @@ The output should show current work, not stale release ghosts.
 | `adapter-ingest-gate`              | exists         | Primary v0.11 gate                                                         |
 | `synthesis-gate`                   | exists         | Primary v0.11 gate                                                         |
 | `large-corpus-rehearsal`           | exists         | v0.11 dogfood volume, resume, search, dedupe, and policy receipt           |
-| `context-quality-gate`             | missing        | Add in v0.12                                                               |
-| `workspace-trust-gate`             | missing        | Add in v0.12                                                               |
-| no-Graphiti supported-runtime gate | partial        | Strengthen in v0.13                                                        |
+| `context-quality-gate`             | exists         | v0.12 context-pack quality receipt                                         |
+| `workspace-trust-gate`             | exists         | v0.12 browser-visible trust-flow receipt                                   |
+| no-Graphiti supported-runtime gate | exists         | v0.13 supported-runtime proof via no-Graphiti smoke and inventory gates    |
 | `backup-restore-gate`              | exists         | Required v0.13 round-trip proof for archive restore scope and provenance   |
 
 ## 12. Risk Register

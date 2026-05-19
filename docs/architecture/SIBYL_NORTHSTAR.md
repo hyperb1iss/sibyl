@@ -18,7 +18,7 @@ implementation threads inside this larger product direction.
 Active executable plan:
 
 - v1.0 automatic memory operating system: [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
-- post-v0.10 release remap and v0.11 Corpus Runtime:
+- post-v0.10 release remap and v1.0 RC evidence freeze:
   [`SIBYL_POST_V010_RELEASE_REMAP_SPEC.md`](SIBYL_POST_V010_RELEASE_REMAP_SPEC.md)
 
 Shipped execution plans, kept in `docs/_archive/` as release receipts and design contracts:
@@ -236,7 +236,7 @@ These pieces are part of the foundation and must not get lost while we push towa
   import, and the Memory Workspace as the primary product surface.
 - Legacy FalkorDB and PostgreSQL services are out of the default local, CI, and Helm paths. They
   remain migration/archive source surfaces only.
-- Default `sibyl-core` installs do not require `graphiti-core`; retained compatibility code is
+- Default `sibyl-core` installs do not require Graphiti Core; retained compatibility code is
   optional, historical, migration, admin, or test scaffolding.
 - Graph archives can be exported, imported, verified, and dry-run merged.
 - Merge tooling can rewrite source org data into a target organization.
@@ -678,9 +678,9 @@ Worse if we delete too early:
 - permission-aware retrieval and capture are proven before multi-user defaults
 - migration and rollback are rehearsed
 - legacy services are out of the default path
-- the `graphiti-core` dependency is removed from package metadata, optional extras, dev dependency
+- the Graphiti Core dependency is removed from package metadata, optional extras, dev dependency
   groups, CI, Docker, Helm, and install docs
-- all `graphiti_core` imports are deleted from supported runtime and tests
+- all Graphiti Core imports are deleted from supported runtime and tests
 - legacy Graphiti-shaped archives are readable through Sibyl-owned projection/import code that does
   not import Graphiti
 - benchmark baselines remain as archived artifacts, not live compatibility runtime paths

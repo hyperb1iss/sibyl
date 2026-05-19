@@ -3,7 +3,7 @@
 - Status: active planning baseline
 - Created: 2026-05-15
 - Current release floor: v0.10.0
-- Current implementation focus: v0.11 Corpus Runtime
+- Current implementation focus: v1.0 RC Evidence Freeze
 - Active remap spec:
   [`SIBYL_POST_V010_RELEASE_REMAP_SPEC.md`](SIBYL_POST_V010_RELEASE_REMAP_SPEC.md)
 - Tracking task: `12b1fee4-7bdd-45c8-8a6a-b13fd6eab308`
@@ -32,7 +32,7 @@ These living docs in `docs/architecture/` remain active planning inputs:
 
 - [`SIBYL_NORTHSTAR.md`](SIBYL_NORTHSTAR.md): product and architecture truth.
 - [`SIBYL_POST_V010_RELEASE_REMAP_SPEC.md`](SIBYL_POST_V010_RELEASE_REMAP_SPEC.md): current
-  post-v0.10 release schedule and v0.11 execution spec.
+  post-v0.10 release schedule and RC evidence checklist.
 - [`PERMISSION_SYSTEM_AUDIT.md`](PERMISSION_SYSTEM_AUDIT.md): current auth, policy, project RBAC,
   MCP, and trust-surface audit.
 - [`TASKIQ_MIGRATION_PLAN.md`](TASKIQ_MIGRATION_PLAN.md): coordination backend boundary and
@@ -89,8 +89,8 @@ Sibyl 1.0 is ready when all of these are true:
 - Overview, metrics, context, and memory routes have measured latency budgets and do not run
   unbounded repeated graph scans while idle.
 - SurrealDB is the only required default data plane. Graphiti is gone entirely from the supported
-  runtime: no `graphiti-core` dependency, no `graphiti_core` imports, no compatibility extra, and no
-  Graphiti-shaped fallback path.
+  runtime: no Graphiti Core dependency, no Graphiti Core import module, no compatibility extra, and
+  no Graphiti-shaped fallback path.
 - Default install, local dev, CI, Docker, Helm, and docs agree.
 
 ## 4. Workstreams
@@ -228,8 +228,8 @@ Make 1.0 shippable outside Bliss's terminal:
 - Surreal-only default deployment
 - Graphiti removed entirely from supported runtime, package metadata, optional extras, import
   allowlists, and compatibility tests
-- legacy Graphiti-shaped archives imported through Sibyl-owned readers that do not import
-  `graphiti_core`
+- legacy Graphiti-shaped archives imported through Sibyl-owned readers that do not import the
+  Graphiti Core module
 - backup and restore round-trips for auth, graph, content, raw memory, tasks, and settings
 - Docker, Helm, Homebrew, and docs match the same install story
 - local coordination works for single-machine installs; Redis remains opt-in for distributed runs
@@ -247,7 +247,7 @@ Delete Graphiti as a product and dependency concern, not merely as a default-loo
 
 - replace remaining Graphiti-shaped entity, episode, relationship, search, extraction, embedder,
   maintenance, and restore adapters with Sibyl-native services
-- delete `graphiti_core` imports and the generated allowlist entries that currently classify them
+- delete Graphiti Core imports and the generated allowlist entries that currently classify them
 - delete the `sibyl-core[compatibility]` extra and any dev-only Graphiti dependency once replacement
   tests exist
 - replace compatibility tests with native archive/import regression tests
@@ -256,12 +256,12 @@ Delete Graphiti as a product and dependency concern, not merely as a default-loo
 
 Exit criteria:
 
-- `rg "graphiti_core|graphiti-core"` returns only historical docs, archived benchmark notes, or
-  explicit migration-format labels
+- `rg "graphiti[_-]core"` returns only historical docs, archived benchmark notes, or explicit
+  migration-format labels
 - no Python package metadata, lockfile default set, optional extra, test dependency group, Docker,
   Helm, CI, or dev command installs Graphiti
 - no application, CLI, MCP, worker, crawler, prompt hook, backup, restore, or test helper imports
-  `graphiti_core`
+  the Graphiti Core module
 - `moon run inventory-check inventory-typecheck inventory-test` fails on any new Graphiti import or
   dependency
 - no-Graphiti smoke becomes a deletion proof, not just a default-loop proof
@@ -337,8 +337,8 @@ Goal: remove remaining Graphiti and Redis-required default-runtime assumptions.
 
 - Graphiti removed from supported runtime, package metadata, optional extras, dev dependencies, CI,
   and live compatibility tests
-- legacy Graphiti-shaped archives imported through Sibyl-owned readers that do not import
-  `graphiti_core`
+- legacy Graphiti-shaped archives imported through Sibyl-owned readers that do not import the
+  Graphiti Core module
 - no-Graphiti smoke strengthened from default-loop proof to supported-runtime proof
 - Redis remains opt-in for distributed deployments while local single-machine installs work with
   SurrealDB as the only required data service
@@ -405,8 +405,8 @@ Current gates remain useful, but 1.0 needs named gates that map to product claim
 - backup/restore round-trip gate: auth, graph, content, raw memory, tasks, settings, and source
   imports survive export and restore
 
-`context-quality-gate`, `workspace-trust-gate`, and the backup/restore round-trip gate are the
-remaining missing release gates in the post-v0.10 schedule.
+`context-quality-gate`, `workspace-trust-gate`, and the backup/restore round-trip gate now exist.
+The RC work is receipt refresh and release rehearsal, not adding new gate names.
 
 ## 7. Strategic Boundary
 
@@ -430,10 +430,9 @@ Separate:
 
 ## 8. Recommendation
 
-Start v0.11 as the Corpus Runtime release described in
+Finish v1.0 RC as the Evidence Freeze release described in
 [`SIBYL_POST_V010_RELEASE_REMAP_SPEC.md`](SIBYL_POST_V010_RELEASE_REMAP_SPEC.md).
 
-v0.10 already made Sibyl less needy, safer, and more model/runtime-aware. The next high-leverage
-step is proving the system can ingest a real private corpus, keep it policy-safe, synthesize
-source-grounded artifacts from it, and carry corrections forward. That produces the evidence needed
-for workspace polish, Graphiti deletion, and a boring v1.0 release candidate.
+v0.10 already made Sibyl less needy, safer, and more model/runtime-aware. The v0.11 through v0.13
+packets have produced the needed gate surfaces. The final job is to refresh receipts, align active
+docs and install surfaces, and make the ship/no-ship decision boring.
