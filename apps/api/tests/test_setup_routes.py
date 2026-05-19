@@ -9,7 +9,7 @@ from sibyl.persistence.surreal import setup as surreal_setup
 
 
 @pytest.mark.asyncio
-async def test_get_setup_status_uses_runtime_status_and_validates_keys(
+async def test_get_setup_status_skips_provider_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = AsyncMock()
@@ -23,9 +23,11 @@ async def test_get_setup_status_uses_runtime_status_and_validates_keys(
         AsyncMock(return_value=SetupStatus(has_users=False, has_orgs=False)),
     )
     monkeypatch.setattr(setup_routes, "get_settings_service", lambda: service)
-    monkeypatch.setattr(setup_routes, "_check_openai_key", AsyncMock(return_value=(True, None)))
-    monkeypatch.setattr(setup_routes, "_check_anthropic_key", AsyncMock(return_value=(False, None)))
+    openai_check = AsyncMock(return_value=(True, None))
+    anthropic_check = AsyncMock(return_value=(False, None))
     gemini_check = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr(setup_routes, "_check_openai_key", openai_check)
+    monkeypatch.setattr(setup_routes, "_check_anthropic_key", anthropic_check)
     monkeypatch.setattr(setup_routes, "_check_gemini_key", gemini_check)
 
     response = await setup_routes.get_setup_status(validate_keys=True)
@@ -37,9 +39,13 @@ async def test_get_setup_status_uses_runtime_status_and_validates_keys(
     assert response.openai_configured is True
     assert response.anthropic_configured is False
     assert response.gemini_configured is True
-    assert response.openai_valid is True
+    # The public endpoint never validates keys: no provider probe runs,
+    # so every *_valid stays None regardless of validate_keys.
+    assert response.openai_valid is None
     assert response.anthropic_valid is None
     assert response.gemini_valid is None
+    openai_check.assert_not_awaited()
+    anthropic_check.assert_not_awaited()
     gemini_check.assert_not_awaited()
 
 

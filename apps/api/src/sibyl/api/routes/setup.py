@@ -135,18 +135,21 @@ def _validation_error(result: KeyValidationResult) -> str | None:
 
 @router.get("/status", response_model=SetupStatus)
 async def get_setup_status(
-    validate_keys: bool = False,
+    validate_keys: bool = False,  # noqa: ARG001 - retained for API compatibility
 ) -> SetupStatus:
     """Check if this Sibyl instance needs initial setup.
 
     Returns the current setup state including:
     - Whether setup is complete
     - Whether API keys are configured
-    - Optionally validates API keys work (validate_keys=true)
 
-    This endpoint requires no authentication since it must work
-    before setup completes. Public validation skips Gemini to avoid unauthenticated
-    quota burn; use /setup/validate-keys for Gemini checks.
+    This endpoint requires no authentication since it must work before
+    setup completes, so it never performs provider key validation: doing
+    so would let unauthenticated callers burn provider quota and incur
+    cost using the server-stored OpenAI, Anthropic, and Gemini keys. Use
+    the authenticated /setup/validate-keys route for full key validation.
+    The validate_keys parameter is retained only for backward
+    compatibility and is ignored.
     """
     setup_status = await get_runtime_setup_status()
 
@@ -159,17 +162,6 @@ async def get_setup_status(
     anthropic_configured = bool(anthropic_key)
     gemini_configured = bool(gemini_key)
 
-    # Optionally validate keys work
-    openai_valid: bool | None = None
-    anthropic_valid: bool | None = None
-    gemini_valid: bool | None = None
-
-    if validate_keys and not setup_status.setup_complete:
-        if openai_configured:
-            openai_valid, _ = await _check_openai_key(openai_key)
-        if anthropic_configured:
-            anthropic_valid, _ = await _check_anthropic_key(anthropic_key)
-
     return SetupStatus(
         needs_setup=not setup_status.setup_complete,
         has_users=setup_status.has_users,
@@ -178,9 +170,9 @@ async def get_setup_status(
         openai_configured=openai_configured,
         anthropic_configured=anthropic_configured,
         gemini_configured=gemini_configured,
-        openai_valid=openai_valid,
-        anthropic_valid=anthropic_valid,
-        gemini_valid=gemini_valid,
+        openai_valid=None,
+        anthropic_valid=None,
+        gemini_valid=None,
     )
 
 
