@@ -41,6 +41,8 @@ DEFAULT_SAMPLE_STRATEGY = "prefix"
 SAMPLE_STRATEGIES = ("prefix", "stratified")
 DIAGNOSTIC_CASE_LIMIT = 25
 DIAGNOSTIC_SNIPPET_CHARS = 360
+DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30.0
+DEFAULT_STALL_TIMEOUT_SECONDS = 300.0
 
 
 class LongMemEvalLiveError(RuntimeError):
@@ -49,6 +51,12 @@ class LongMemEvalLiveError(RuntimeError):
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _format_ms(value: Any) -> str:
+    if not isinstance(value, int | float):
+        return "n/a"
+    return f"{value:.0f}ms"
 
 
 def _git_commit() -> str:
@@ -242,7 +250,7 @@ async def _ingest_haystack(
     run_id: str,
     case_index: int,
     corpus_text_policy: str,
-) -> tuple[list[str], float, int]:
+) -> tuple[list[str], float, int, int]:
     start = time.perf_counter()
     question_id = str(entry["question_id"])
     created_ids: list[str] = []
@@ -287,7 +295,7 @@ async def _ingest_haystack(
                 },
             )
             created_ids.append(str(created.get("id") or ""))
-    return created_ids, (time.perf_counter() - start) * 1000, chunked_session_count
+    return created_ids, (time.perf_counter() - start) * 1000, chunked_session_count, len(documents)
 
 
 async def _verify_namespace_probe(
@@ -511,32 +519,42 @@ async def _run_case(
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
+    timings_ms: dict[str, float] = {}
     async with httpx.AsyncClient(
         base_url=api_url,
         timeout=timeout_seconds,
         headers={"Content-Type": "application/json"},
         transport=transport,
     ) as client:
+        phase_started = time.perf_counter()
         await _get_json(client, "/health")
+        timings_ms["health"] = (time.perf_counter() - phase_started) * 1000
+        phase_started = time.perf_counter()
         tenant = await _signup_throwaway_tenant(client, run_id=run_id, case_index=case_index)
-        created_ids, ingest_ms, chunked_session_count = await _ingest_haystack(
+        timings_ms["signup"] = (time.perf_counter() - phase_started) * 1000
+        created_ids, ingest_ms, chunked_session_count, document_count = await _ingest_haystack(
             client,
             entry=entry,
             run_id=run_id,
             case_index=case_index,
             corpus_text_policy=corpus_text_policy,
         )
+        timings_ms["ingest"] = ingest_ms
+        phase_started = time.perf_counter()
         readiness = await _verify_namespace_probe(
             client,
             run_id=run_id,
             question_id=str(entry["question_id"]),
             timeout_seconds=readiness_timeout_seconds,
         )
+        timings_ms["readiness"] = (time.perf_counter() - phase_started) * 1000
+        phase_started = time.perf_counter()
         search = await _search_question(
             client,
             query=str(entry["question"]),
             limit=max(k_values),
         )
+        timings_ms["search"] = (time.perf_counter() - phase_started) * 1000
 
     results = search.get("results") if isinstance(search.get("results"), list) else []
     ranked_session_ids, ranked_results, cross_question_count = _ranked_sessions(results)
@@ -557,11 +575,13 @@ async def _run_case(
         "ranked_session_ids": ranked_session_ids,
         "ranked_results": ranked_results,
         "tenant": tenant,
+        "document_count": document_count,
         "created_entity_count": len(created_ids),
         "chunked_session_count": chunked_session_count,
         "readiness": readiness,
         "ingest_ms": ingest_ms,
         "latency_ms": (time.perf_counter() - started) * 1000,
+        "timings_ms": timings_ms,
         "cross_question_result_count": cross_question_count,
         **metrics,
     }
@@ -578,32 +598,142 @@ async def _run_cases(
     timeout_seconds: float,
     corpus_text_policy: str,
     transport: httpx.AsyncBaseTransport | None,
+    heartbeat_interval_seconds: float,
+    stall_timeout_seconds: float,
 ) -> list[dict[str, Any]]:
-    semaphore = asyncio.Semaphore(max(1, concurrency))
+    worker_count = max(1, concurrency)
+    queue: asyncio.Queue[tuple[int, dict[str, Any]]] = asyncio.Queue()
+    for entry in entries:
+        queue.put_nowait(entry)
 
-    async def run_one(case_index: int, entry: dict[str, Any]) -> dict[str, Any]:
-        async with semaphore:
-            return await _run_case(
-                entry,
-                api_url=api_url,
-                run_id=run_id,
-                case_index=case_index,
-                k_values=k_values,
-                readiness_timeout_seconds=readiness_timeout_seconds,
-                timeout_seconds=timeout_seconds,
-                corpus_text_policy=corpus_text_policy,
-                transport=transport,
-            )
-
-    tasks = [asyncio.create_task(run_one(case_index, entry)) for case_index, entry in entries]
     results: list[dict[str, Any]] = []
-    for completed, task in enumerate(asyncio.as_completed(tasks), start=1):
-        result = await task
-        results.append(result)
-        progress_k = 5 if 5 in k_values else min(k_values)
-        progress_key = f"recall@{progress_k}"
-        recall = average_metric(results, progress_key) * 100
-        print(f"  [{completed:3d}/{len(entries)}] R@{progress_k}: {recall:.1f}%")
+    active_cases: dict[int, dict[str, Any]] = {}
+    lock = asyncio.Lock()
+    done_event = asyncio.Event()
+    last_progress_at = time.monotonic()
+    completed_count = 0
+    total_count = len(entries)
+
+    async def worker(worker_index: int) -> None:
+        nonlocal completed_count, last_progress_at
+        while True:
+            try:
+                case_index, entry = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            async with lock:
+                active_cases[case_index] = {
+                    "started_at": time.monotonic(),
+                    "question_type": entry.get("question_type"),
+                    "worker": worker_index,
+                }
+            try:
+                result = await _run_case(
+                    entry,
+                    api_url=api_url,
+                    run_id=run_id,
+                    case_index=case_index,
+                    k_values=k_values,
+                    readiness_timeout_seconds=readiness_timeout_seconds,
+                    timeout_seconds=timeout_seconds,
+                    corpus_text_policy=corpus_text_policy,
+                    transport=transport,
+                )
+            finally:
+                async with lock:
+                    active_cases.pop(case_index, None)
+                queue.task_done()
+
+            async with lock:
+                results.append(result)
+                completed_count += 1
+                last_progress_at = time.monotonic()
+                progress_k = 5 if 5 in k_values else min(k_values)
+                progress_key = f"recall@{progress_k}"
+                recall = average_metric(results, progress_key) * 100
+                timings = result.get("timings_ms")
+                timings = timings if isinstance(timings, dict) else {}
+                readiness = result.get("readiness")
+                readiness = readiness if isinstance(readiness, dict) else {}
+                print(
+                    f"  [{completed_count:3d}/{total_count}] "
+                    f"case={case_index} type={result.get('question_type')} "
+                    f"R@{progress_k}: {recall:.1f}% "
+                    f"latency={_format_ms(result.get('latency_ms'))} "
+                    f"signup={_format_ms(timings.get('signup'))} "
+                    f"ingest={_format_ms(timings.get('ingest'))} "
+                    f"ready={_format_ms(timings.get('readiness'))}/"
+                    f"{readiness.get('attempts', 'n/a')} "
+                    f"search={_format_ms(timings.get('search'))} "
+                    f"docs={result.get('document_count')} "
+                    f"entities={result.get('created_entity_count')}",
+                    flush=True,
+                )
+
+    async def monitor(workers: list[asyncio.Task[None]]) -> None:
+        interval = heartbeat_interval_seconds
+        if interval <= 0:
+            interval = min(stall_timeout_seconds, 30.0) if stall_timeout_seconds > 0 else 30.0
+        while any(not worker.done() for worker in workers):
+            try:
+                await asyncio.wait_for(done_event.wait(), timeout=interval)
+            except TimeoutError:
+                pass
+            else:
+                return
+
+            now = time.monotonic()
+            async with lock:
+                idle_seconds = now - last_progress_at
+                active_summary = ", ".join(
+                    f"case={case_index} type={metadata.get('question_type')} "
+                    f"worker={metadata.get('worker')} "
+                    f"elapsed={now - float(metadata['started_at']):.1f}s"
+                    for case_index, metadata in sorted(active_cases.items())
+                )
+                completed_snapshot = completed_count
+                queued_snapshot = queue.qsize()
+            if heartbeat_interval_seconds > 0:
+                print(
+                    "  heartbeat "
+                    f"completed={completed_snapshot}/{total_count} "
+                    f"queued={queued_snapshot} "
+                    f"active=[{active_summary or 'none'}] "
+                    f"no_case_completed_for={idle_seconds:.1f}s",
+                    flush=True,
+                )
+            if stall_timeout_seconds > 0 and idle_seconds >= stall_timeout_seconds:
+                raise LongMemEvalLiveError(
+                    "LongMemEval live stalled: no case completed for "
+                    f"{idle_seconds:.1f}s; active=[{active_summary or 'none'}]"
+                )
+
+    workers = [asyncio.create_task(worker(index)) for index in range(worker_count)]
+
+    async def run_workers() -> None:
+        try:
+            await asyncio.gather(*workers)
+        finally:
+            done_event.set()
+
+    worker_group = asyncio.create_task(run_workers())
+    monitor_task = asyncio.create_task(monitor(workers))
+    try:
+        done, pending = await asyncio.wait(
+            {worker_group, monitor_task},
+            return_when=asyncio.FIRST_EXCEPTION,
+        )
+        for task in done:
+            exc = task.exception()
+            if exc is not None:
+                raise exc
+        await asyncio.gather(*pending)
+    except (Exception, asyncio.CancelledError):
+        for task in [worker_group, monitor_task, *workers]:
+            task.cancel()
+        await asyncio.gather(worker_group, monitor_task, *workers, return_exceptions=True)
+        raise
+
     return sorted(results, key=lambda record: int(record["case_index"]))
 
 
@@ -646,6 +776,8 @@ async def run_benchmark(
     timeout_seconds: float = 60.0,
     sample_strategy: str = DEFAULT_SAMPLE_STRATEGY,
     corpus_text_policy: str = CORPUS_TEXT_POLICY,
+    heartbeat_interval_seconds: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+    stall_timeout_seconds: float = DEFAULT_STALL_TIMEOUT_SECONDS,
     verify_sha256: bool = True,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, Any]:
@@ -677,15 +809,20 @@ async def run_benchmark(
 
     run_id = uuid4().hex[:12]
     started = time.perf_counter()
-    print("\n============================================================")
-    print("  Sibyl x LongMemEval Live API Benchmark")
-    print(f"  API: {api_url}")
-    print(f"  Questions: {len(selected_entries)}")
-    print(f"  Sample strategy: {sample_strategy}")
-    print(f"  Corpus text policy: {corpus_text_policy}")
-    print(f"  Concurrency: {concurrency}")
-    print(f"  K values: {k_values}")
-    print("============================================================\n")
+    print("\n============================================================", flush=True)
+    print("  Sibyl x LongMemEval Live API Benchmark", flush=True)
+    print(f"  API: {api_url}", flush=True)
+    print(f"  Questions: {len(selected_entries)}", flush=True)
+    print(f"  Sample strategy: {sample_strategy}", flush=True)
+    print(f"  Corpus text policy: {corpus_text_policy}", flush=True)
+    print(f"  Concurrency: {concurrency}", flush=True)
+    print(f"  K values: {k_values}", flush=True)
+    print(
+        f"  Heartbeat: {heartbeat_interval_seconds:.1f}s; "
+        f"stall timeout: {stall_timeout_seconds:.1f}s",
+        flush=True,
+    )
+    print("============================================================\n", flush=True)
 
     case_results = await _run_cases(
         selected_cases,
@@ -697,6 +834,8 @@ async def run_benchmark(
         timeout_seconds=timeout_seconds,
         corpus_text_policy=corpus_text_policy,
         transport=transport,
+        heartbeat_interval_seconds=heartbeat_interval_seconds,
+        stall_timeout_seconds=stall_timeout_seconds,
     )
     elapsed = time.perf_counter() - started
     overall, per_type = _aggregate(case_results, k_values)
@@ -707,18 +846,19 @@ async def run_benchmark(
         k_values=k_values,
     )
 
-    print("\n============================================================")
-    print("  RESULTS - live /api/search")
-    print("============================================================")
+    print("\n============================================================", flush=True)
+    print("  RESULTS - live /api/search", flush=True)
+    print("============================================================", flush=True)
     for k in k_values:
         print(
             f"  Overall H@{k}: {overall[f'hit@{k}'] * 100:.1f}%  "
             f"R@{k}: {overall[f'recall@{k}'] * 100:.1f}%  "
-            f"NDCG@{k}: {overall[f'ndcg@{k}']:.3f}"
+            f"NDCG@{k}: {overall[f'ndcg@{k}']:.3f}",
+            flush=True,
         )
-    print(f"  Cross-question results: {overall['cross_question_result_count']:.0f}")
-    print(f"  Time: {elapsed:.1f}s")
-    print("============================================================\n")
+    print(f"  Cross-question results: {overall['cross_question_result_count']:.0f}", flush=True)
+    print(f"  Time: {elapsed:.1f}s", flush=True)
+    print("============================================================\n", flush=True)
 
     return {
         "schema_version": "longmemeval-live-v1",
@@ -746,6 +886,8 @@ async def run_benchmark(
             "entity_content_projection_policy": ENTITY_CONTENT_PROJECTION_POLICY,
             "sample_strategy": sample_strategy,
             "corpus_text_policy": corpus_text_policy,
+            "heartbeat_interval_seconds": heartbeat_interval_seconds,
+            "stall_timeout_seconds": stall_timeout_seconds,
         },
         "dataset": {
             "name": dataset_path.stem,
@@ -796,6 +938,18 @@ def main() -> None:
     parser.add_argument("--readiness-timeout", type=float, default=30.0)
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument(
+        "--heartbeat-interval",
+        type=float,
+        default=DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+        help="Seconds between progress heartbeats while cases are in flight.",
+    )
+    parser.add_argument(
+        "--stall-timeout",
+        type=float,
+        default=DEFAULT_STALL_TIMEOUT_SECONDS,
+        help="Fail when no LongMemEval case completes for this many seconds.",
+    )
+    parser.add_argument(
         "--sample-strategy",
         choices=SAMPLE_STRATEGIES,
         default=DEFAULT_SAMPLE_STRATEGY,
@@ -829,6 +983,8 @@ def main() -> None:
                 timeout_seconds=args.timeout,
                 sample_strategy=args.sample_strategy,
                 corpus_text_policy=args.corpus_text_policy,
+                heartbeat_interval_seconds=args.heartbeat_interval,
+                stall_timeout_seconds=args.stall_timeout,
                 verify_sha256=not args.skip_sha256_check,
             )
         )
@@ -842,7 +998,7 @@ def main() -> None:
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    print(f"  Results saved to {out_path}")
+    print(f"  Results saved to {out_path}", flush=True)
 
 
 if __name__ == "__main__":

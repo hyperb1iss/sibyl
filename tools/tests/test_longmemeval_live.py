@@ -168,6 +168,57 @@ def test_longmemeval_live_builds_gate_valid_report(tmp_path: Path) -> None:
     assert report["diagnostics"]["case_gap_count"] == 0
 
 
+def test_longmemeval_live_stall_timeout_reports_active_case(tmp_path: Path) -> None:
+    module = _load_live_module()
+    data_path = tmp_path / "longmemeval_s_cleaned.json"
+    data_path.write_text(
+        json.dumps(
+            [
+                {
+                    "question_id": "q1",
+                    "question_type": "single-session-user",
+                    "question": "What did I buy?",
+                    "question_date": "2026/01/03 12:00",
+                    "answer_session_ids": ["s1"],
+                    "haystack_session_ids": ["s1"],
+                    "haystack_dates": ["2026/01/02"],
+                    "haystack_sessions": [[{"role": "user", "content": "I bought markers."}]],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/health":
+            return _json_response(request, {"status": "ok"})
+        if path == "/api/auth/local/signup":
+            return _json_response(
+                request,
+                {"access_token": "fixture-token", "organization": {"id": "org", "slug": "org"}},
+                status_code=201,
+            )
+        if path == "/api/entities":
+            await asyncio.sleep(1.0)
+        return _json_response(request, {"results": []})
+
+    with pytest.raises(module.LongMemEvalLiveError, match=r"active=\[case=0"):
+        asyncio.run(
+            module.run_benchmark(
+                data_path,
+                api_url="http://ci-sibyl/api",
+                limit=1,
+                concurrency=1,
+                command=["longmemeval_live.py", "fixture.json"],
+                heartbeat_interval_seconds=0.01,
+                stall_timeout_seconds=0.01,
+                verify_sha256=False,
+                transport=httpx.MockTransport(handler),
+            )
+        )
+
+
 def test_longmemeval_live_stratified_selection_and_diagnostics(tmp_path: Path) -> None:
     module = _load_live_module()
     data_path = tmp_path / "longmemeval_s_cleaned.json"

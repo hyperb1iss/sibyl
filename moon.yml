@@ -562,6 +562,7 @@ tasks:
     inputs:
       - tools/**/*.py
       - benchmarks/longmemeval_bench.py
+      - benchmarks/longmemeval_live.py
       - benchmarks/results/ai-memory/*.json
       - pyproject.toml
 
