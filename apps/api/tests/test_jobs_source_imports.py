@@ -11,7 +11,8 @@ import pytest
 
 from sibyl.jobs import source_imports
 from sibyl.jobs.worker import WorkerSettings
-from sibyl_core.services.source_adapters import clear_source_adapters
+from sibyl_core.models.sources import SourceRecord
+from sibyl_core.services.source_adapters import SourceRawMemoryWrite, clear_source_adapters
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 
 
@@ -176,34 +177,86 @@ async def test_import_source_archive_resumes_from_checkpoint(tmp_path: Path) -> 
     assert first_result["dedupe_keys"] != second_result["dedupe_keys"]
 
 
+def _source_record(source_id: str = "msg-1") -> SourceRecord:
+    return SourceRecord(
+        adapter_record_id=source_id,
+        source_id=source_id,
+        source_type="mbox",
+        content_hash=f"hash-{source_id}",
+        dedupe_key=f"dedupe-{source_id}",
+    )
+
+
+def _raw_memory_write(
+    *,
+    source_id: str = "msg-1",
+    principal_id: str = "user-1",
+    memory_scope: MemoryScope = MemoryScope.PRIVATE,
+    scope_key: str | None = None,
+) -> SourceRawMemoryWrite:
+    return SourceRawMemoryWrite(
+        organization_id="org-1",
+        principal_id=principal_id,
+        source_id=source_id,
+        raw_content="body",
+        title="subject",
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+        tags=[],
+        metadata={},
+        provenance={},
+    )
 
 
 @pytest.mark.asyncio
-async def test_import_source_archive_duplicate_lookup_is_policy_scoped(tmp_path: Path) -> None:
-    mbox_path = _write_mbox(tmp_path / "scoped-dedupe.mbox")
+async def test_duplicate_checker_scopes_db_lookup_to_principal_and_scope() -> None:
     lookup_calls: list[dict[str, object]] = []
 
     async def capture_lookup(**kwargs: object) -> RawMemory | None:
         lookup_calls.append(dict(kwargs))
         return None
 
+    checker = source_imports._default_duplicate_checker(
+        organization_id="org-1",
+        record_source_ids={},
+    )
     with patch(
         "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
         AsyncMock(side_effect=capture_lookup),
     ):
-        await source_imports.import_source_archive(
-            {},
-            str(mbox_path),
-            organization_id="org-1",
-            principal_id="user-1",
-            policy_context=_policy_context(),
+        result = await checker(
+            record=_source_record(),
+            payload=_raw_memory_write(
+                memory_scope=MemoryScope.PROJECT,
+                scope_key="project-7",
+            ),
         )
 
+    assert result is None
     assert len(lookup_calls) == 1
     assert lookup_calls[0]["organization_id"] == "org-1"
     assert lookup_calls[0]["principal_id"] == "user-1"
-    assert lookup_calls[0]["memory_scope"] is MemoryScope.PRIVATE
-    assert lookup_calls[0]["scope_key"] is None
+    assert lookup_calls[0]["memory_scope"] is MemoryScope.PROJECT
+    assert lookup_calls[0]["scope_key"] == "project-7"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_checker_prefers_in_run_source_ids_over_db() -> None:
+    async def fail_lookup(**kwargs: object) -> RawMemory | None:
+        raise AssertionError("db lookup should be skipped for in-run duplicates")
+
+    checker = source_imports._default_duplicate_checker(
+        organization_id="org-1",
+        record_source_ids={"msg-1": "raw-existing"},
+    )
+    with patch(
+        "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
+        AsyncMock(side_effect=fail_lookup),
+    ):
+        result = await checker(record=_source_record(), payload=_raw_memory_write())
+
+    assert result == "raw-existing"
+
 
 @pytest.mark.asyncio
 async def test_import_source_archive_fails_closed_without_policy_context(tmp_path: Path) -> None:
