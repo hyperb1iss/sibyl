@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import shutil
 import socket
+from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlparse
@@ -56,6 +57,36 @@ app.add_typer(migrate_app, name="migrate")
 app.command("up")(up)
 app.command("down")(down)
 app.command("status")(up_status)
+
+
+def get_version() -> str:
+    try:
+        return pkg_version("sibyld")
+    except PackageNotFoundError:
+        from sibyl import __version__
+
+        return __version__
+
+
+def version_callback(value: bool) -> None:
+    if value:
+        console.print(f"sibyld {get_version()}")
+        raise typer.Exit
+
+
+@app.callback()
+def root(
+    show_version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            help="Show version and exit",
+            callback=version_callback,
+            is_eager=True,
+        ),
+    ] = False,
+) -> None:
+    del show_version
 
 
 # ============================================================================
@@ -363,7 +394,7 @@ def version() -> None:
     console.print(
         create_panel(
             f"[{ELECTRIC_PURPLE}]Sibyld[/{ELECTRIC_PURPLE}] [{NEON_CYAN}]Sibyl Daemon[/{NEON_CYAN}]\n"
-            f"Version 0.1.0\n"
+            f"Version {get_version()}\n"
             f"[dim]Knowledge graph and task workflow server[/dim]"
         )
     )

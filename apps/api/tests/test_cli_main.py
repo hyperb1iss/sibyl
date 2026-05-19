@@ -13,6 +13,24 @@ runner = CliRunner()
 cli_main = import_module("sibyl.cli.main")
 
 
+def test_top_level_version_uses_package_metadata(monkeypatch) -> None:
+    monkeypatch.setattr(cli_main, "pkg_version", lambda package_name: "9.9.9")
+
+    result = runner.invoke(app, ["--version"])
+
+    assert result.exit_code == 0
+    assert result.output.strip() == "sibyld 9.9.9"
+
+
+def test_version_command_uses_package_metadata(monkeypatch) -> None:
+    monkeypatch.setattr(cli_main, "pkg_version", lambda package_name: "9.9.9")
+
+    result = runner.invoke(app, ["version"])
+
+    assert result.exit_code == 0
+    assert "Version 9.9.9" in result.output
+
+
 def test_worker_command_exits_cleanly_in_local_mode(monkeypatch) -> None:
     monkeypatch.setattr("sibyl.config.settings.store", "surreal")
     monkeypatch.setattr("sibyl.config.settings.auth_store", "surreal")
