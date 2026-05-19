@@ -89,6 +89,7 @@ async def test_create_project_routes_through_runtime_project_record() -> None:
         )
 
     assert response.id == "project_new"
+    runtime.entity_manager.get.assert_not_awaited()
     create_project.assert_awaited_once_with(
         organization_id=org.id,
         owner_user_id=ctx.user.id,

@@ -1328,28 +1328,20 @@ async def create_entity(
                 )
             return response
 
-        # Sync creation - fetch the created entity
-        runtime = await get_entity_graph_runtime(group_id)
-        created = await runtime.entity_manager.get(result.id)
-
-        if not created:
-            raise HTTPException(status_code=500, detail="Entity created but not found")
-
+        response_timestamp = getattr(result, "timestamp", None) or datetime.now(UTC)
         response = EntityResponse(
-            id=created.id,
-            entity_type=created.entity_type,
-            name=created.name,
-            description=created.description or "",
-            content=created.content or "",
-            category=getattr(created, "category", None) or created.metadata.get("category"),
-            languages=getattr(created, "languages", None)
-            or created.metadata.get("languages", [])
-            or [],
-            tags=getattr(created, "tags", None) or created.metadata.get("tags", []) or [],
-            metadata=getattr(created, "metadata", {}) or {},
-            source_file=getattr(created, "source_file", None),
-            created_at=getattr(created, "created_at", None),
-            updated_at=getattr(created, "updated_at", None),
+            id=result.id,
+            entity_type=entity.entity_type,
+            name=entity.name,
+            description=entity.description or "",
+            content=content,
+            category=entity.category,
+            languages=entity.languages or [],
+            tags=entity.tags or [],
+            metadata=merged_metadata,
+            source_file=None,
+            created_at=response_timestamp,
+            updated_at=response_timestamp,
         )
 
         # Broadcast creation event (scoped to org)
@@ -1357,20 +1349,20 @@ async def create_entity(
             WSEvent.ENTITY_CREATED, response.model_dump(mode="json"), org_id=str(org.id)
         )
 
-        if created.entity_type == EntityType.PROJECT:
+        if entity.entity_type == EntityType.PROJECT:
             await create_project_record(
                 organization_id=org.id,
                 owner_user_id=ctx.user.id,
-                graph_project_id=created.id,
-                name=created.name,
-                description=created.description,
+                graph_project_id=result.id,
+                name=entity.name,
+                description=content,
             )
             await log_audit_event(
                 action="project.create",
                 user_id=ctx.user.id,
                 organization_id=org.id,
                 request=request,
-                details={"project_id": created.id, "name": created.name},
+                details={"project_id": result.id, "name": entity.name},
             )
 
         if ctx.user is not None:
