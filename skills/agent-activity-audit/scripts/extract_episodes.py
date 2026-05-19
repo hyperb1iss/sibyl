@@ -34,10 +34,16 @@ def extract_text(content) -> str:
 
 
 def sanitize_untrusted_text(text: str) -> str:
-    """Render transcript content as inert markdown data."""
+    """Render transcript content as inert markdown data.
+
+    Backslash-escape every backtick so no run of backticks survives. A
+    targeted ``replace("```", ...)`` is not enough: it misses longer runs
+    (e.g. five backticks collapse back into a three-backtick run that still
+    closes the enclosing ```text fence), reopening the breakout.
+    """
     if not text:
         return ""
-    return text.replace("```", "``\\`")
+    return text.replace("`", "\\`")
 
 
 def make_matchers(target: str) -> tuple[re.Pattern, re.Pattern, re.Pattern]:
