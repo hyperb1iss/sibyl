@@ -912,4 +912,3 @@ async def integrate_document_with_graph(
         return IntegrationStats()
 
     return await service.process_chunks(chunks, source_name)
-    DEFAULT_MAX_TOKENS = 1000
