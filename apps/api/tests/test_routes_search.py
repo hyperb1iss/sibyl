@@ -114,6 +114,7 @@ class TestSearchRoute:
             ctx,
             "proj_1",
             required_role=ProjectRole.VIEWER,
+            require_existing_project=True,
         )
         assert response.total == 1
         assert response.results[0].id == "pattern_1"
@@ -180,6 +181,7 @@ class TestExploreRoute:
             ctx,
             "proj_1",
             required_role=ProjectRole.VIEWER,
+            require_existing_project=True,
         )
         assert response.total == 1
         assert response.entities[0]["id"] == "task_1"
@@ -288,6 +290,7 @@ class TestExploreRoute:
             ctx,
             "proj_1",
             required_role=ProjectRole.VIEWER,
+            require_existing_project=True,
         )
         assert response.total == 1
         assert core_explore.await_args.kwargs["project"] == "proj_1"

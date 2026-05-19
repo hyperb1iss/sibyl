@@ -75,6 +75,7 @@ async def search(
                 ctx,
                 project_filter,
                 required_role=ProjectRole.VIEWER,
+                require_existing_project=True,
             )
             accessible_projects = None
         else:
@@ -163,6 +164,7 @@ async def explore(
                     ctx,
                     project_id,
                     required_role=ProjectRole.VIEWER,
+                    require_existing_project=True,
                 )
             accessible_filter = (
                 set(request.project_ids) if request.mode in {"related", "traverse"} else None
@@ -173,6 +175,7 @@ async def explore(
                 ctx,
                 request.project,
                 required_role=ProjectRole.VIEWER,
+                require_existing_project=True,
             )
             accessible_filter = (
                 {request.project} if request.mode in {"related", "traverse"} else None
