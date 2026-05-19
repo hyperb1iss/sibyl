@@ -1262,6 +1262,12 @@ async def test_inspect_memory_source_redacts_project_content_without_access() ->
         scope_key="project_hidden",
         project_id="project_hidden",
         raw_content="Private project detail.",
+        metadata={
+            "domain": "sibyl",
+            "memory_lifecycle": {"state": "promoted"},
+            "reflection_findings": [{"kind": "promotion"}],
+            "claim_records": [{"content": "Private project detail."}],
+        },
     )
     event = {
         "uuid": "audit-1",
@@ -1306,6 +1312,9 @@ async def test_inspect_memory_source_redacts_project_content_without_access() ->
     assert response.visibility["content_visible"] is False
     assert response.available_actions[1]["available"] is False
     assert response.metadata == {"domain": "sibyl"}
+    assert response.lifecycle == {}
+    assert response.reflection_findings == []
+    assert response.claim_records == []
     assert response.recent_audit_events[0].details == {}
     audit.assert_awaited_once()
     assert audit.await_args.kwargs["policy_allowed"] is False
@@ -1320,6 +1329,12 @@ async def test_inspect_memory_source_redacts_other_private_principal() -> None:
         organization_id=str(org.id),
         principal_id="other-user",
         raw_content="Another user's private note.",
+        metadata={
+            "domain": "sibyl",
+            "memory_lifecycle": {"state": "active"},
+            "reflection_findings": [{"kind": "correction"}],
+            "claim_records": [{"content": "Another user's private note."}],
+        },
     )
 
     with (
@@ -1341,6 +1356,10 @@ async def test_inspect_memory_source_redacts_other_private_principal() -> None:
     assert response.content_redacted is True
     assert response.policy_allowed is False
     assert response.policy_reason == "principal_mismatch"
+    assert response.metadata == {"domain": "sibyl"}
+    assert response.lifecycle == {}
+    assert response.reflection_findings == []
+    assert response.claim_records == []
     audit.assert_awaited_once()
     assert audit.await_args.kwargs["policy_reason"] == "principal_mismatch"
 

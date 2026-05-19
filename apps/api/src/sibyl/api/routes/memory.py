@@ -1131,6 +1131,11 @@ def _memory_source_inspect_response(
     audit_events: list[MemoryAuditEventResponse],
 ) -> MemorySourceInspectResponse:
     content_redacted = not policy_decision.allowed or _memory_lifecycle_redacts_content(memory)
+    metadata = dict(memory.metadata)
+    if content_redacted:
+        metadata.pop("memory_lifecycle", None)
+        metadata.pop("reflection_findings", None)
+        metadata.pop("claim_records", None)
     visible_audit_events = _audit_events_for_visibility(
         audit_events,
         content_visible=policy_decision.allowed,
@@ -1139,15 +1144,25 @@ def _memory_source_inspect_response(
     derived_ids = [record.id for record in derived_records]
     derived_types = list(dict.fromkeys(record.record_type for record in derived_records))
     project_id = _memory_project_id(memory)
-    lifecycle = memory_lifecycle_from_metadata(
-        memory.metadata,
-        source_id=memory.id,
-        review_state=memory.review_state,
-    ).to_dict()
-    reflection_findings = [
-        finding.to_dict() for finding in reflection_findings_from_metadata(memory.metadata)
-    ]
-    claim_records = [claim.to_dict() for claim in claim_records_from_metadata(memory.metadata)]
+    lifecycle = (
+        {}
+        if content_redacted
+        else memory_lifecycle_from_metadata(
+            memory.metadata,
+            source_id=memory.id,
+            review_state=memory.review_state,
+        ).to_dict()
+    )
+    reflection_findings = (
+        []
+        if content_redacted
+        else [finding.to_dict() for finding in reflection_findings_from_metadata(memory.metadata)]
+    )
+    claim_records = (
+        []
+        if content_redacted
+        else [claim.to_dict() for claim in claim_records_from_metadata(memory.metadata)]
+    )
     return MemorySourceInspectResponse(
         id=memory.id,
         organization_id=memory.organization_id,
@@ -1187,7 +1202,7 @@ def _memory_source_inspect_response(
         content_redacted=content_redacted,
         raw_content_length=len(memory.raw_content),
         tags=memory.tags,
-        metadata=memory.metadata,
+        metadata=metadata,
         provenance=memory.provenance,
         capture_surface=memory.capture_surface,
         captured_at=memory.captured_at,
