@@ -298,6 +298,65 @@ async def test_maildir_adapter_preserves_metadata_and_resumes(tmp_path: Path) ->
     } == {"maildir-1@example.com", "maildir-2@example.com"}
 
 
+@pytest.mark.asyncio
+async def test_maildir_manifest_rejects_symlinked_maildir_subdirectories(
+    tmp_path: Path,
+) -> None:
+    source = _write_maildir(tmp_path / "maildir", [_message()])
+    cur_dir = source / "cur"
+    shadow = tmp_path / "outside-cur"
+    shadow.mkdir()
+    cur_dir.rename(source / "cur.real")
+    cur_dir.symlink_to(shadow, target_is_directory=True)
+    adapter = MaildirSourceAdapter()
+
+    with pytest.raises(ValueError, match="symlinked directories"):
+        await adapter.prepare_manifest(source_uri=str(source))
+
+
+@pytest.mark.asyncio
+async def test_maildir_manifest_ignores_symlinked_entries(tmp_path: Path) -> None:
+    source = _write_maildir(
+        tmp_path / "maildir",
+        [_message(message_id="maildir-1@example.com", attachment=None)],
+    )
+    outside_message = tmp_path / "outside.eml"
+    outside_message.write_text(
+        "From: attacker@example.com\nSubject: outside\n\nsecret\n",
+        encoding="utf-8",
+    )
+    (source / "cur" / "leak:2,").symlink_to(outside_message)
+    adapter = MaildirSourceAdapter()
+
+    manifest = await adapter.prepare_manifest(source_uri=str(source))
+
+    assert manifest.metadata["message_count"] == 1
+    assert manifest.source_version.startswith("entries:1:mtime:")
+
+
+@pytest.mark.asyncio
+async def test_maildir_iter_records_skips_symlinked_entries(tmp_path: Path) -> None:
+    source = _write_maildir(
+        tmp_path / "maildir",
+        [_message(message_id="maildir-1@example.com", attachment=None)],
+    )
+    outside_message = tmp_path / "outside.eml"
+    outside_message.write_text(
+        "From: attacker@example.com\nSubject: outside\n\nsecret host data\n",
+        encoding="utf-8",
+    )
+    (source / "cur" / "leak:2,").symlink_to(outside_message)
+    adapter = MaildirSourceAdapter()
+    manifest = await adapter.prepare_manifest(source_uri=str(source))
+
+    batches = [batch async for batch in adapter.iter_records(manifest, batch_size=10)]
+
+    ingested = [record for batch in batches for record in batch.records]
+    assert len(ingested) == 1
+    assert ingested[0].adapter_record_id == "maildir-1@example.com"
+    assert all("secret host data" not in record.body for record in ingested)
+
+
 def test_ensure_mailbox_adapter_registers_once() -> None:
     ensure_mailbox_adapter_registered()
     ensure_mailbox_adapter_registered()

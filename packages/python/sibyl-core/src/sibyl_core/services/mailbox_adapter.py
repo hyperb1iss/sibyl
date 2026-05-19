@@ -253,7 +253,13 @@ class MaildirSourceAdapter:
 
         maildir = mailbox.Maildir(path, create=False)
         try:
-            keys = sorted(maildir.keys())
+            symlinked_keys = _maildir_symlinked_keys(path, maildir.colon)
+            # iterating the mailbox yields messages, not keys, so .keys() is required
+            keys = sorted(
+                key
+                for key in maildir.keys()  # noqa: SIM118
+                if key not in symlinked_keys
+            )
             message_count = len(keys)
             for index, key in enumerate(keys):
                 if index < start:
@@ -338,6 +344,10 @@ def _resolve_maildir_path(source_uri: str) -> Path:
     missing = [name for name in ("cur", "new", "tmp") if not (path / name).is_dir()]
     if missing:
         msg = f"Maildir source is missing required directories: {', '.join(missing)}"
+        raise ValueError(msg)
+    symlinked_dirs = [name for name in ("cur", "new", "tmp") if (path / name).is_symlink()]
+    if symlinked_dirs:
+        msg = f"Maildir source has symlinked directories: {', '.join(symlinked_dirs)}"
         raise ValueError(msg)
     return path
 
@@ -600,8 +610,28 @@ def _part_payload_bytes(part: Message) -> bytes:
 def _maildir_entries(path: Path) -> list[Path]:
     entries: list[Path] = []
     for folder in ("cur", "new"):
-        entries.extend(child for child in (path / folder).iterdir() if child.is_file())
+        entries.extend(
+            child
+            for child in (path / folder).iterdir()
+            if child.is_file() and not child.is_symlink()
+        )
     return entries
+
+
+def _maildir_symlinked_keys(path: Path, colon: str) -> set[str]:
+    """Maildir keys whose backing file is a symlink and must not be ingested.
+
+    `mailbox.Maildir` happily reads through symlinked message files, so an
+    attacker who stages a Maildir with a symlinked entry could exfiltrate
+    arbitrary host files. The Maildir key is the unique-name prefix of the
+    filename (everything before the ``colon`` info separator).
+    """
+    symlinked: set[str] = set()
+    for folder in ("cur", "new"):
+        for child in (path / folder).iterdir():
+            if child.is_symlink():
+                symlinked.add(child.name.split(colon)[0])
+    return symlinked
 
 
 def _maildir_source_version(entries: list[Path]) -> str:
