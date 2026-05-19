@@ -414,7 +414,7 @@ def _default_duplicate_checker(
 
 
 def _resolve_import_source_uri(source_uri: str) -> str:
-    raw_path = source_uri[7:] if source_uri.startswith("file://") else source_uri
+    raw_path = source_uri.removeprefix("file://")
     source_path = Path(raw_path).expanduser().resolve()
     import_root = settings.source_import_dir.expanduser().resolve()
     try:
