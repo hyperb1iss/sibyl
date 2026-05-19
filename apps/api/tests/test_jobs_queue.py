@@ -150,10 +150,25 @@ async def test_list_jobs_filters_limits_and_skips_failed_statuses() -> None:
     jobs = await broker.list_jobs(function="crawl_source", limit=1)
 
     assert [job.job_id for job in jobs] == ["gamma"]
-    assert broker.get_job_status.await_count == 4  # type: ignore[attr-defined]
+    assert broker.get_job_status.await_count == 1  # type: ignore[attr-defined]
     assert pool.scan_iter_calls == 0
     assert pool.zrevrange_calls == 1
 
+
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_with_non_positive_limit_short_circuits() -> None:
+    pool = FakePool(["alpha", "beta"])
+
+    broker = make_broker(pool)
+    broker.get_job_status = AsyncMock()  # type: ignore[method-assign]
+
+    assert await broker.list_jobs(limit=0) == []
+    assert await broker.list_jobs(limit=-5) == []
+    broker.get_job_status.assert_not_called()
+    assert pool.scan_iter_calls == 0
+    assert pool.zrevrange_calls == 2
 
 @pytest.mark.asyncio
 async def test_list_jobs_falls_back_to_scan_when_index_is_empty() -> None:

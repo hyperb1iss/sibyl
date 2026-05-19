@@ -384,8 +384,10 @@ class RedisQueueBroker:
         pool = await self.get_pool()
         job_ids = await self._list_recent_job_ids(pool)
 
-        if not job_ids:
+        if limit <= 0 or not job_ids:
             return []
+
+        job_ids = job_ids[:limit]
 
         semaphore = asyncio.Semaphore(25)
 
