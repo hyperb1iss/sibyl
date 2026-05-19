@@ -102,7 +102,7 @@ class TestListEntitiesRoute:
                 EntityType.TASK,
                 limit=1000,
                 offset=0,
-                include_archived=True,
+                include_archived=False,
                 project_id="proj-1",
             ),
         ]
@@ -157,7 +157,7 @@ class TestListEntitiesRoute:
                 EntityType.TASK,
                 limit=1000,
                 offset=0,
-                include_archived=True,
+                include_archived=False,
             ),
         ]
         manager.list_all.assert_not_awaited()
@@ -281,9 +281,9 @@ class TestListEntitiesRoute:
             )
 
         assert manager.list_by_type.await_args_list == [
-            call(EntityType.TASK, limit=2, offset=0, include_archived=True),
-            call(EntityType.TASK, limit=2, offset=2, include_archived=True),
-            call(EntityType.TASK, limit=2, offset=4, include_archived=True),
+            call(EntityType.TASK, limit=2, offset=0, include_archived=False),
+            call(EntityType.TASK, limit=2, offset=2, include_archived=False),
+            call(EntityType.TASK, limit=2, offset=4, include_archived=False),
         ]
         manager.list_all.assert_not_awaited()
         assert [entity.id for entity in response.entities] == ["ent-1", "ent-2", "ent-3"]

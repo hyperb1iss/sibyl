@@ -267,7 +267,7 @@ async def _list_entities_by_type_paginated(
         list_kwargs: dict[str, Any] = {
             "limit": batch_size,
             "offset": offset,
-            "include_archived": True,
+            "include_archived": False,
             **_lightweight_entity_list_kwargs(entity_manager),
         }
         if project_id:
