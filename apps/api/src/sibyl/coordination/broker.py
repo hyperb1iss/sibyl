@@ -176,7 +176,7 @@ _broker_backend: QueueBackend | None = None
 
 def get_queue_backend() -> QueueBackend:
     """Return the queue backend used for job execution."""
-    return get_coordination_backend()
+    return "redis"
 
 
 def get_broker() -> QueueBroker:
