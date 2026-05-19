@@ -25,7 +25,8 @@ async def test_get_setup_status_uses_runtime_status_and_validates_keys(
     monkeypatch.setattr(setup_routes, "get_settings_service", lambda: service)
     monkeypatch.setattr(setup_routes, "_check_openai_key", AsyncMock(return_value=(True, None)))
     monkeypatch.setattr(setup_routes, "_check_anthropic_key", AsyncMock(return_value=(False, None)))
-    monkeypatch.setattr(setup_routes, "_check_gemini_key", AsyncMock(return_value=(True, None)))
+    gemini_check = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr(setup_routes, "_check_gemini_key", gemini_check)
 
     response = await setup_routes.get_setup_status(validate_keys=True)
 
@@ -38,7 +39,8 @@ async def test_get_setup_status_uses_runtime_status_and_validates_keys(
     assert response.gemini_configured is True
     assert response.openai_valid is True
     assert response.anthropic_valid is None
-    assert response.gemini_valid is True
+    assert response.gemini_valid is None
+    gemini_check.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -145,8 +145,8 @@ async def get_setup_status(
     - Optionally validates API keys work (validate_keys=true)
 
     This endpoint requires no authentication since it must work
-    before setup completes. Key validation only runs before setup completes;
-    initialized instances should use owner/admin validation routes.
+    before setup completes. Public validation skips Gemini to avoid unauthenticated
+    quota burn; use /setup/validate-keys for Gemini checks.
     """
     setup_status = await get_runtime_setup_status()
 
@@ -169,8 +169,6 @@ async def get_setup_status(
             openai_valid, _ = await _check_openai_key(openai_key)
         if anthropic_configured:
             anthropic_valid, _ = await _check_anthropic_key(anthropic_key)
-        if gemini_configured:
-            gemini_valid, _ = await _check_gemini_key(gemini_key)
 
     return SetupStatus(
         needs_setup=not setup_status.setup_complete,
