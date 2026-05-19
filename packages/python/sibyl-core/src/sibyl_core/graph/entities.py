@@ -69,6 +69,7 @@ _SEARCH_STOP_WORDS = {
     "to",
     "with",
 }
+_MAX_TASK_FILTER_VALUES = 25
 
 
 class EpisodeType(StrEnum):
@@ -248,6 +249,24 @@ def _metadata_json_contains_any_params(
     if not clauses:
         return {}, "FALSE"
     return params, " OR ".join(clauses)
+
+
+def _normalized_filter_values(value: str | None) -> list[str]:
+    """Parse comma-separated filter values with normalization and caps."""
+    if not value:
+        return []
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for raw_value in value.split(","):
+        normalized = raw_value.strip().lower()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+        if len(deduped) >= _MAX_TASK_FILTER_VALUES:
+            break
+    return deduped
 
 
 class EntityManager:
@@ -2095,9 +2114,9 @@ class EntityManager:
             "n.group_id = $group_id",
         ]
 
-        status_list = [s.strip().lower() for s in status.split(",")] if status else []
-        priority_list = [p.strip().lower() for p in priority.split(",")] if priority else []
-        complexity_list = [c.strip().lower() for c in complexity.split(",")] if complexity else []
+        status_list = _normalized_filter_values(status)
+        priority_list = _normalized_filter_values(priority)
+        complexity_list = _normalized_filter_values(complexity)
 
         if self._surreal_entity_node_ops() is not None:
             try:
