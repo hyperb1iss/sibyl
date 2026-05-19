@@ -7,6 +7,7 @@ from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.settings import ModelSettings
 
 from sibyl_core.ai.errors import LLMProviderError, LLMRateLimitError, LLMValidationError
 from sibyl_core.ai.llm import Extractor
@@ -55,6 +56,32 @@ async def test_extract_many_returns_partial_errors() -> None:
 
     assert results[0] == Payload(name="good", score=1.0)
     assert isinstance(results[1], LLMProviderError)
+
+
+@pytest.mark.asyncio
+async def test_extractor_applies_max_tokens_model_settings() -> None:
+    captured_settings: list[ModelSettings | None] = []
+
+    async def record_settings(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        captured_settings.append(info.model_settings)
+        output_tool = info.output_tools[0]
+        return ModelResponse(
+            parts=[ToolCallPart(output_tool.name, {"name": "Sibyl", "score": 0.9})],
+            model_name="function",
+        )
+
+    extractor = Extractor(
+        Payload,
+        agent=Agent(FunctionModel(record_settings), output_type=Payload),
+        max_tokens=123,
+    )
+
+    result = await extractor.extract("extract")
+
+    assert result == Payload(name="Sibyl", score=0.9)
+    assert len(captured_settings) == 1
+    assert captured_settings[0] is not None
+    assert captured_settings[0].get("max_tokens") == 123
 
 
 async def _invalid_json_response(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:

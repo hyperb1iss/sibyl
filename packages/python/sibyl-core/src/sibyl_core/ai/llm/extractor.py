@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from pydantic_ai import Agent
+from pydantic_ai.models import ModelSettings
 
 from sibyl_core.ai.clients import get_agent
 from sibyl_core.ai.errors import LLMError, classify_llm_exception
@@ -24,6 +25,7 @@ class Extractor[T]:
         system_prompt: str | Sequence[str] | None = None,
         model_override: str | None = None,
         output_retries: int | None = 2,
+        max_tokens: int | None = None,
         agent: Agent[Any, Any] | None = None,
     ) -> None:
         self.output_type = output_type
@@ -31,13 +33,17 @@ class Extractor[T]:
         self.system_prompt = system_prompt
         self.model_override = model_override
         self.output_retries = output_retries
+        self.max_tokens = max_tokens
         self._agent = agent
 
     async def extract(self, prompt: str) -> T:
         started_at = time.perf_counter()
         try:
             agent = await self._get_agent()
-            result = await agent.run(prompt)
+            result = await agent.run(
+                prompt,
+                model_settings=_model_settings(self.max_tokens),
+            )
             telemetry_registry().record_llm_call(
                 surface=self.surface.value,
                 provider="runtime",
@@ -90,3 +96,9 @@ class Extractor[T]:
             model=self.model_override,
             surface=self.surface.value,
         )
+
+
+def _model_settings(max_tokens: int | None) -> ModelSettings | None:
+    if max_tokens is None:
+        return None
+    return ModelSettings(max_tokens=max_tokens)

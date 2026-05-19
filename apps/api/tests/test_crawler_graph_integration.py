@@ -119,6 +119,14 @@ class TestEntityExtractor:
     """Tests for LLM-based entity extraction."""
 
     @pytest.mark.asyncio
+    async def test_default_extractor_uses_token_cap(self):
+        """Test default extractor keeps crawler token cap."""
+        with patch("sibyl.crawler.graph_integration.Extractor") as extractor_cls:
+            EntityExtractor()
+            _, kwargs = extractor_cls.call_args
+            assert kwargs["max_tokens"] == EntityExtractor.DEFAULT_MAX_TOKENS
+
+    @pytest.mark.asyncio
     async def test_extract_from_chunk_success(self, sample_chunk_content):
         """Test successful entity extraction from chunk."""
         structured = FakeStructuredExtractor(

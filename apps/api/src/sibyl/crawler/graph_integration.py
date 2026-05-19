@@ -217,6 +217,7 @@ Entity types to extract:
 
 Only extract entities that are clearly mentioned or demonstrated.
 Do not infer entities that aren't explicitly present."""
+    DEFAULT_MAX_TOKENS = 1000
 
     def __init__(
         self,
@@ -235,6 +236,7 @@ Do not infer entities that aren't explicitly present."""
             surface=LLMSurface.CRAWLER,
             model_override=model,
             output_retries=2,
+            max_tokens=self.DEFAULT_MAX_TOKENS,
         )
         log.debug("Entity extractor initialized", model=model or "surface default")
 
@@ -910,3 +912,4 @@ async def integrate_document_with_graph(
         return IntegrationStats()
 
     return await service.process_chunks(chunks, source_name)
+    DEFAULT_MAX_TOKENS = 1000
