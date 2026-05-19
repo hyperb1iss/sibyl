@@ -29,6 +29,7 @@ from sibyl_core.tools.helpers import (
     MAX_CONTENT_LENGTH,
     MAX_TITLE_LENGTH,
     VALID_ENTITY_TYPES,
+    _auto_discover_links,
     _build_entity_metadata,
     _generate_id,
     _get_field,
@@ -2625,6 +2626,25 @@ class TestAddTool:
 
         assert response.success is True
         detect_conflicts.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_auto_discover_links_skips_empty_candidate_types(self) -> None:
+        entity_manager = SimpleNamespace(
+            count_by_type=AsyncMock(return_value={"session": 50}),
+            search=AsyncMock(return_value=[]),
+        )
+
+        links = await _auto_discover_links(
+            entity_manager=entity_manager,
+            title="LongMemEval session",
+            content="A source session with no linkable knowledge candidates.",
+            technologies=[],
+            category=None,
+            exclude_id="session_123",
+        )
+
+        assert links == []
+        entity_manager.search.assert_not_awaited()
 
 
 class TestAddEntityTypes:

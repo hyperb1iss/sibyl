@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from collections.abc import Mapping
 from typing import Any
 
 import structlog
@@ -11,6 +12,13 @@ from sibyl_core.models.entities import EntityType
 log = structlog.get_logger()
 
 VALID_ENTITY_TYPES = {t.value for t in EntityType}
+AUTO_LINK_ENTITY_TYPES = (
+    EntityType.PATTERN,
+    EntityType.RULE,
+    EntityType.TEMPLATE,
+    EntityType.GUIDE,
+    EntityType.TOPIC,
+)
 
 # Validation constants
 MAX_TITLE_LENGTH = 200
@@ -515,19 +523,13 @@ async def _auto_discover_links(
 
     query = " ".join(query_parts)
 
-    # Search for linkable entity types
-    linkable_types = [
-        EntityType.PATTERN,
-        EntityType.RULE,
-        EntityType.TEMPLATE,
-        EntityType.GUIDE,
-        EntityType.TOPIC,
-    ]
-
     try:
+        if not await _has_auto_link_candidates(entity_manager):
+            return []
+
         results = await entity_manager.search(
             query=query,
-            entity_types=linkable_types,
+            entity_types=AUTO_LINK_ENTITY_TYPES,
             limit=limit * 2,  # Over-fetch to filter by threshold
         )
 
@@ -546,3 +548,25 @@ async def _auto_discover_links(
     except Exception as e:
         log.warning("auto_discover_search_failed", error=str(e))
         return []
+
+
+async def _has_auto_link_candidates(entity_manager: Any) -> bool:
+    count_by_type = getattr(entity_manager, "count_by_type", None)
+    if count_by_type is None:
+        return True
+    try:
+        counts = await count_by_type(include_archived=False)
+    except TypeError:
+        try:
+            counts = await count_by_type()
+        except Exception as e:
+            log.debug("auto_discover_candidate_count_failed", error=str(e))
+            return True
+    except Exception as e:
+        log.debug("auto_discover_candidate_count_failed", error=str(e))
+        return True
+    if not isinstance(counts, Mapping):
+        return True
+    return any(
+        int(counts.get(entity_type.value) or 0) > 0 for entity_type in AUTO_LINK_ENTITY_TYPES
+    )
