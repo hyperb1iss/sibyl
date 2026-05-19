@@ -244,13 +244,9 @@ def create_combined_app(  # noqa: PLR0915
         try:
             from sibyl.persistence.surreal.auth import close_shared_surreal_auth_client
             from sibyl.persistence.surreal.content import close_shared_surreal_content_client
-            from sibyl_core.services.surreal_content import (
-                close_shared_surreal_content_client as close_core_surreal_content_client,
-            )
 
             await close_shared_surreal_auth_client()
             await close_shared_surreal_content_client()
-            await close_core_surreal_content_client()
         except Exception as e:
             log.warning("Error shutting down shared Surreal client", error=str(e))
 
