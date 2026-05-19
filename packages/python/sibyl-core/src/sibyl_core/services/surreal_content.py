@@ -903,11 +903,11 @@ async def get_raw_memory_by_source_id(
     if memory_scope is not None:
         filters.append("memory_scope = $memory_scope")
         params["memory_scope"] = _coerce_memory_scope(memory_scope).value
-    if scope_key is None:
-        filters.append("scope_key IS NONE")
-    else:
-        filters.append("scope_key = $scope_key")
-        params["scope_key"] = scope_key
+        if scope_key is None:
+            filters.append("scope_key IS NONE")
+        else:
+            filters.append("scope_key = $scope_key")
+            params["scope_key"] = scope_key
 
     async with surreal_content_client() as client:
         record = await _select_one(

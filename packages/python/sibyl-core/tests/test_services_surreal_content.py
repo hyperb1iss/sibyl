@@ -12,6 +12,7 @@ from sibyl_core.services.surreal_content import (
     MemoryScope,
     _replace_record,
     get_or_create_source,
+    get_raw_memory_by_source_id,
     list_unlinked_document_chunks,
     load_search_scope,
     recall_raw_memory,
@@ -1090,3 +1091,89 @@ class TestSurrealContentHelpers:
                 raw_content="context",
                 memory_scope=memory_scope,
             )
+
+
+class TestGetRawMemoryBySourceId:
+    @pytest.mark.asyncio
+    async def test_unscoped_lookup_does_not_filter_by_scope(self) -> None:
+        fake_client = FakeClient([_query_result([])])
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(
+                content_service,
+                "surreal_content_client",
+                lambda: _yield_client(fake_client),
+            )
+            await get_raw_memory_by_source_id(
+                organization_id="org-1",
+                source_id="source-1",
+            )
+
+        query, params = fake_client.calls[0]
+        assert "scope_key" not in query
+        assert "principal_id" not in query
+        assert "memory_scope" not in query
+        assert params == {"organization_id": "org-1", "source_id": "source-1"}
+
+    @pytest.mark.asyncio
+    async def test_private_scope_lookup_filters_principal_and_null_scope_key(self) -> None:
+        fake_client = FakeClient([_query_result([])])
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(
+                content_service,
+                "surreal_content_client",
+                lambda: _yield_client(fake_client),
+            )
+            await get_raw_memory_by_source_id(
+                organization_id="org-1",
+                source_id="source-1",
+                principal_id="user-a",
+                memory_scope=MemoryScope.PRIVATE,
+                scope_key=None,
+            )
+
+        query, params = fake_client.calls[0]
+        assert "principal_id = $principal_id" in query
+        assert "memory_scope = $memory_scope" in query
+        assert "scope_key IS NONE" in query
+        assert params == {
+            "organization_id": "org-1",
+            "source_id": "source-1",
+            "principal_id": "user-a",
+            "memory_scope": MemoryScope.PRIVATE.value,
+        }
+
+    @pytest.mark.asyncio
+    async def test_keyed_scope_lookup_filters_scope_key_value(self) -> None:
+        fake_client = FakeClient([_query_result([])])
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(
+                content_service,
+                "surreal_content_client",
+                lambda: _yield_client(fake_client),
+            )
+            await get_raw_memory_by_source_id(
+                organization_id="org-1",
+                source_id="source-1",
+                principal_id="user-a",
+                memory_scope=MemoryScope.PROJECT,
+                scope_key="project-7",
+            )
+
+        query, params = fake_client.calls[0]
+        assert "scope_key = $scope_key" in query
+        assert "scope_key IS NONE" not in query
+        assert params["scope_key"] == "project-7"
+
+
+@asynccontextmanager
+async def _yield_client(fake_client: FakeClient):
+    yield fake_client
