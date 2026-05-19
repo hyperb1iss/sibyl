@@ -32,6 +32,8 @@ DOCUMENT_VECTOR_WEIGHT = 0.7
 DOCUMENT_LEXICAL_WEIGHT = 0.3
 DOCUMENT_EMBEDDING_TIMEOUT_SECONDS = 2.0
 DOCUMENT_EMBEDDING_CACHE_SIZE = 1000
+RUNTIME_SCAN_CHUNK_LIMIT_MULTIPLIER = 25
+RUNTIME_SCAN_CHUNK_LIMIT_MAX = 2000
 
 _document_embedding_provider: NativeEmbeddingProvider | None = None
 _document_embedding_fingerprint: tuple[NativeEmbeddingProviderName, str, int, str] | None = None
@@ -435,6 +437,7 @@ async def _search_documents_runtime_scan(
 
     org_uuid = UUID(organization_id)
     requested_source_id = UUID(source_id) if source_id else None
+    chunk_budget = min(max(limit, 1) * RUNTIME_SCAN_CHUNK_LIMIT_MULTIPLIER, RUNTIME_SCAN_CHUNK_LIMIT_MAX)
 
     async with get_content_read_session() as session:
         sources = await list_sources_for_graph_linking(
@@ -454,10 +457,24 @@ async def _search_documents_runtime_scan(
             documents = await list_source_documents(session, source_id=source.id)
             for document in documents:
                 documents_by_id[str(document.id)] = cast(DocumentSearchDocument, document)
+            source_chunks = await list_source_chunks(session, source_id=source.id)
+            remaining_budget = chunk_budget - len(chunks)
+            if remaining_budget <= 0:
+                break
             chunks.extend(
                 cast(DocumentSearchChunk, chunk)
-                for chunk in await list_source_chunks(session, source_id=source.id)
+                for chunk in source_chunks[:remaining_budget]
             )
+            if len(chunks) >= chunk_budget:
+                break
+
+    if len(chunks) >= chunk_budget:
+        log.warning(
+            "document_runtime_scan_chunk_budget_exhausted",
+            organization_id=organization_id,
+            limit=limit,
+            chunk_budget=chunk_budget,
+        )
 
     return _search_documents_from_scope(
         query=query,
