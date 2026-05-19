@@ -13,6 +13,7 @@ from difflib import SequenceMatcher
 from enum import Enum
 from typing import Any, cast
 
+import structlog
 from surrealdb import RecordID
 
 from sibyl_core.backends.surreal.connection import _is_transient_connection_error
@@ -47,6 +48,7 @@ _prepare_lock = asyncio.Lock()
 _client_lock = asyncio.Lock()
 _clients: OrderedDict[str, NativeSurrealGraphClient] = OrderedDict()
 _ENTITY_LIST_FIELDS = "* OMIT content, embedding, name_embedding, attributes.content"
+log = structlog.get_logger()
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +110,7 @@ class NativeEntityManager:
         return entity.id
 
     async def create(self, entity: Entity) -> str:
-        return await self.create_direct(entity, generate_embedding=False)
+        return await self.create_direct(entity, generate_embedding=True)
 
     async def delete(self, entity_id: str) -> bool:
         rows = normalize_records(
@@ -228,6 +230,7 @@ class NativeEntityManager:
             return []
         type_values = [entity_type.value for entity_type in entity_types or ()]
         type_clause = "AND entity_type IN $entity_types" if type_values else ""
+        result_limit = max(int(limit), 1)
         rows = normalize_records(
             await self._client.execute_query(
                 """
@@ -255,13 +258,27 @@ class NativeEntityManager:
                 group_id=self._group_id,
                 search_query=search_query,
                 entity_types=type_values,
-                limit=max(int(limit), 1),
+                limit=result_limit,
             )
         )
-        results: list[tuple[Entity, float]] = []
+        fulltext_results: list[tuple[Entity, float]] = []
         for row in rows:
             entity = _entity_from_row(row)
-            results.append((entity, _bounded_similarity_score(query, entity)))
+            fulltext_results.append((entity, _bounded_similarity_score(query, entity)))
+
+        vector_results = await self._vector_search(
+            query=query,
+            entity_types=entity_types,
+            limit=result_limit,
+        )
+
+        results = _merge_ranked_entity_results(
+            [
+                (vector_results, 1.2),
+                (fulltext_results, 1.0),
+            ],
+            limit=result_limit,
+        )
         if not results:
             results = await self._fallback_text_search(
                 query=query,
@@ -269,6 +286,59 @@ class NativeEntityManager:
                 limit=limit,
             )
         return results
+
+    async def _vector_search(
+        self,
+        *,
+        query: str,
+        entity_types: Sequence[EntityType] | None,
+        limit: int,
+    ) -> list[tuple[Entity, float]]:
+        if self._embedding_provider is None:
+            return []
+        type_values = [entity_type.value for entity_type in entity_types or ()]
+        type_clause = "AND entity_type IN $entity_types" if type_values else ""
+        candidate_limit = min(max(int(limit) * 4, 32), 200)
+        try:
+            embeddings = await self._embedding_provider.embed_texts(
+                [query],
+                input_kind="query",
+            )
+            query_embedding = _embedding_vector_from_batch(
+                embeddings,
+                self._embedding_provider.metadata.dimensions,
+            )
+            rows = normalize_records(
+                await self._client.execute_query(
+                    """
+                    SELECT *
+                    FROM (
+                        SELECT *,
+                               (1 - vector::distance::knn()) AS score
+                        FROM entity
+                        WHERE group_id = $group_id
+                    """
+                    + type_clause
+                    + f"""
+                          AND name_embedding <|{candidate_limit}, 40|> $query_embedding
+                    )
+                    ORDER BY score DESC, created_at DESC, uuid DESC
+                    LIMIT $limit;
+                    """,
+                    group_id=self._group_id,
+                    query_embedding=query_embedding,
+                    entity_types=type_values,
+                    limit=candidate_limit,
+                )
+            )
+        except Exception as exc:
+            log.warning(
+                "native_entity_vector_search_failed",
+                error_type=type(exc).__name__,
+            )
+            return []
+
+        return [(_entity_from_row(row), _row_score(row)) for row in rows]
 
     async def _fallback_text_search(
         self,
@@ -1603,6 +1673,31 @@ def _row_score(row: SurrealRecord) -> float:
     if isinstance(score, int | float):
         return float(score)
     return 1.0
+
+
+def _merge_ranked_entity_results(
+    ranked_lists: Sequence[tuple[Sequence[tuple[Entity, float]], float]],
+    *,
+    limit: int,
+    rrf_k: float = 60.0,
+) -> list[tuple[Entity, float]]:
+    scores: dict[str, float] = {}
+    entities: dict[str, Entity] = {}
+    original_scores: dict[str, float] = {}
+
+    for results, weight in ranked_lists:
+        for rank, (entity, score) in enumerate(results, start=1):
+            key = entity.id
+            scores[key] = scores.get(key, 0.0) + (weight / (rrf_k + rank))
+            original_scores[key] = max(original_scores.get(key, 0.0), score)
+            entities.setdefault(key, entity)
+
+    ordered = sorted(
+        scores,
+        key=lambda key: (scores[key], original_scores[key], entities[key].created_at, key),
+        reverse=True,
+    )
+    return [(entities[key], scores[key]) for key in ordered[: max(int(limit), 1)]]
 
 
 def _surreal_indexed_field_missing(field: str) -> str:

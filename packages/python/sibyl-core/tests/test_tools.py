@@ -2659,7 +2659,7 @@ class TestAddEntityTypes:
         mock_entity_manager = MagicMock()
         created_entity = None
 
-        async def capture_create(entity):
+        async def capture_create(entity, **_: object):
             nonlocal created_entity
             created_entity = entity
             return entity.id
@@ -2697,7 +2697,7 @@ class TestAddEntityTypes:
         mock_entity_manager = MagicMock()
         created_entity = None
 
-        async def capture_create(entity):
+        async def capture_create(entity, **_: object):
             nonlocal created_entity
             created_entity = entity
             return entity.id
@@ -2734,7 +2734,7 @@ class TestAddEntityTypes:
         mock_entity_manager = MagicMock()
         created_entity = None
 
-        async def capture_create(entity):
+        async def capture_create(entity, **_: object):
             nonlocal created_entity
             created_entity = entity
             return entity.id
@@ -2774,7 +2774,7 @@ class TestAddEntityTypes:
         created_entity = None
         created_relationships = []
 
-        async def capture_create(entity):
+        async def capture_create(entity, **_: object):
             nonlocal created_entity
             created_entity = entity
             return entity.id
@@ -2828,7 +2828,7 @@ class TestAddEntityTypes:
         mock_rel_manager = MagicMock()
         created_relationships = []
 
-        async def capture_create(entity):
+        async def capture_create(entity, **_: object):
             return entity.id
 
         async def capture_rel_create_bulk(rels):

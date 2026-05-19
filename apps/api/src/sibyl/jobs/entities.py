@@ -12,6 +12,7 @@ from sibyl.api.event_types import WSEvent
 from sibyl.persistence.auth_runtime import log_memory_audit_event
 from sibyl_core.auth import MemoryPolicyContext, OrganizationRole, authorize_memory_write
 from sibyl_core.auth.memory_policy import MemoryPolicyAction, MemoryPolicyDecision
+from sibyl_core.embeddings.native import configured_native_embedding_provider
 from sibyl_core.services.native_graph import get_native_graph_runtime
 from sibyl_core.services.surreal_content import MemoryScope
 from sibyl_core.tasks.distillation import build_learning_episode, build_learning_procedure
@@ -308,7 +309,10 @@ async def create_entity(  # noqa: PLR0915
     )
 
     try:
-        runtime = await get_native_graph_runtime(group_id)
+        runtime = await get_native_graph_runtime(
+            group_id,
+            embedding_provider=configured_native_embedding_provider(),
+        )
         entity_manager = runtime.entity_manager
 
         # Reconstruct the entity from serialized data
@@ -358,7 +362,7 @@ async def create_entity(  # noqa: PLR0915
 
         # Always create the entity so the queued ID stays valid
         if entity_type in ("task", "project", "epic", "pattern", "procedure"):
-            created_id = await entity_manager.create_direct(entity)
+            created_id = await entity_manager.create_direct(entity, generate_embedding=True)
         else:
             created_id = await entity_manager.create(entity)
 

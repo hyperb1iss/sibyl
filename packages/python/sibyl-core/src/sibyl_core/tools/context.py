@@ -10,6 +10,7 @@ from typing import Any
 import structlog
 
 from sibyl_core.auth.memory_policy import authorize_memory_read
+from sibyl_core.embeddings.native import configured_native_embedding_provider
 from sibyl_core.models.context import (
     ContextFacet,
     ContextIntent,
@@ -227,7 +228,10 @@ def _reason_for(result: SearchResult, facet: ContextFacet) -> str:
 
 
 async def get_graph_runtime(group_id: str):
-    return await get_native_graph_runtime(group_id)
+    return await get_native_graph_runtime(
+        group_id,
+        embedding_provider=configured_native_embedding_provider(),
+    )
 
 
 async def default_search(**kwargs: Any) -> SearchResponse:
@@ -746,6 +750,7 @@ async def compile_context(
             facet=facet,
             limit=int(kwargs.get("limit") or per_facet_limit),
             include_content=bool(kwargs.get("include_content", True)),
+            embedding_provider=configured_native_embedding_provider(),
             raw_memory_recall_fn=raw_memory_recall_fn,
         )
         if normalized_retrieval_mode is NativeRetrievalMode.COMPARE:

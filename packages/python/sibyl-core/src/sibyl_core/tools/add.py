@@ -5,6 +5,7 @@ from typing import Any
 
 import structlog
 
+from sibyl_core.embeddings.native import configured_native_embedding_provider
 from sibyl_core.models.entities import (
     Entity,
     EntityType,
@@ -57,7 +58,10 @@ DIRECT_ENTITY_TYPES = {
 
 
 async def get_graph_runtime(group_id: str):
-    return await get_native_graph_runtime(group_id)
+    return await get_native_graph_runtime(
+        group_id,
+        embedding_provider=configured_native_embedding_provider(),
+    )
 
 
 def _build_relationship(rel_data: dict[str, Any]) -> Relationship:
@@ -509,7 +513,7 @@ async def add(
         if sync:
             # Use create_direct() for structured entities and create() for episode-compatible managers.
             if entity_type in DIRECT_ENTITY_TYPES:
-                created_id = await entity_manager.create_direct(entity)
+                created_id = await entity_manager.create_direct(entity, generate_embedding=True)
             else:
                 created_id = await entity_manager.create(entity)
 
@@ -591,7 +595,7 @@ async def add(
             log.warning("arq_queue_failed_falling_back_to_sync", error=str(e))
             # Use create_direct() for structured entities and create() for episode-compatible managers.
             if entity_type in DIRECT_ENTITY_TYPES:
-                created_id = await entity_manager.create_direct(entity)
+                created_id = await entity_manager.create_direct(entity, generate_embedding=True)
             else:
                 created_id = await entity_manager.create(entity)
 

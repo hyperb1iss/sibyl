@@ -9,6 +9,7 @@ from typing import Any, Self
 
 import structlog
 
+from sibyl_core.embeddings.native import configured_native_embedding_provider
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.services import KnowledgeReadService, KnowledgeWriteService
@@ -41,7 +42,10 @@ _MISSING = object()
 
 
 async def _get_graph_runtime(group_id: str) -> NativeGraphRuntime:
-    return await get_native_graph_runtime(group_id)
+    return await get_native_graph_runtime(
+        group_id,
+        embedding_provider=configured_native_embedding_provider(),
+    )
 
 
 def _normalize_result(result: object) -> list[dict[str, object]]:

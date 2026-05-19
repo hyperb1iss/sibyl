@@ -5,17 +5,22 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import math
+import os
 from collections import OrderedDict
 from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import asdict, dataclass, replace
 from typing import Any, Literal, Protocol, cast
 
+import structlog
+
 from sibyl_core.embeddings.gemini import (
     build_gemini_contents,
     format_gemini_embedding_text,
 )
 from sibyl_core.models.entities import Entity, Relationship
+
+log = structlog.get_logger()
 
 type NativeEmbeddingInputKind = Literal["query", "document"]
 type NativeEmbeddingProviderName = Literal["openai", "gemini"]
@@ -311,6 +316,53 @@ def create_native_embedding_provider(
     )
 
 
+def configured_native_embedding_provider() -> NativeEmbeddingProvider | None:
+    from sibyl_core.config import settings
+
+    provider = (
+        os.getenv("SIBYL_GRAPH_EMBEDDING_PROVIDER") or settings.graph_embedding_provider
+    ).strip()
+    if provider not in ("gemini", "openai"):
+        raise ValueError(f"unsupported native graph embedding provider: {provider}")
+
+    model = os.getenv("SIBYL_GRAPH_EMBEDDING_MODEL", "").strip()
+    if not model:
+        if provider == "gemini" and settings.graph_embedding_model == "text-embedding-3-small":
+            model = "gemini-embedding-2"
+        else:
+            model = settings.graph_embedding_model
+
+    dimensions_raw = os.getenv("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", "").strip()
+    dimensions = int(dimensions_raw) if dimensions_raw else settings.graph_embedding_dimensions
+
+    if provider == "gemini":
+        api_key = (
+            os.getenv("SIBYL_GEMINI_API_KEY", "")
+            or os.getenv("GEMINI_API_KEY", "")
+            or os.getenv("GOOGLE_API_KEY", "")
+            or settings.gemini_api_key.get_secret_value()
+        )
+    else:
+        api_key = (
+            os.getenv("SIBYL_OPENAI_API_KEY", "")
+            or os.getenv("OPENAI_API_KEY", "")
+            or settings.openai_api_key.get_secret_value()
+        )
+
+    if not api_key:
+        log.info("native_graph_embeddings_disabled", provider=provider, reason="missing_key")
+        return None
+
+    return create_native_embedding_provider(
+        provider=cast(NativeEmbeddingProviderName, provider),
+        model=model,
+        dimensions=dimensions,
+        cache_namespace="graph",
+        api_key=api_key,
+        max_cache_size=2000,
+    )
+
+
 def native_embedding_cache_key(
     metadata: NativeEmbeddingMetadata,
     text: str,
@@ -409,6 +461,7 @@ __all__ = [
     "NativeEmbeddingProvider",
     "NativeEmbeddingProviderName",
     "OpenAINativeEmbeddingProvider",
+    "configured_native_embedding_provider",
     "create_native_embedding_provider",
     "native_embedding_cache_key",
     "native_entity_embedding_text",

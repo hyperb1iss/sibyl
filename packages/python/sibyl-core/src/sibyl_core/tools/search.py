@@ -7,6 +7,7 @@ from typing import Any
 
 import structlog
 
+from sibyl_core.embeddings.native import configured_native_embedding_provider
 from sibyl_core.models.entities import EntityType
 from sibyl_core.retrieval import HybridConfig, hybrid_search, temporal_boost
 from sibyl_core.retrieval.fusion import rrf_merge
@@ -31,7 +32,10 @@ DOCUMENT_SEARCH_GRAPH_JOIN_TIMEOUT_SECONDS = min(2.0, DOCUMENT_SEARCH_TIMEOUT_SE
 async def get_graph_runtime(group_id: str):
     from sibyl_core.services.native_graph import get_native_graph_runtime
 
-    return await get_native_graph_runtime(group_id)
+    return await get_native_graph_runtime(
+        group_id,
+        embedding_provider=configured_native_embedding_provider(),
+    )
 
 
 __all__ = [
