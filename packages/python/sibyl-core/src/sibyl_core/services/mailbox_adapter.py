@@ -339,6 +339,10 @@ def _resolve_maildir_path(source_uri: str) -> Path:
     if missing:
         msg = f"Maildir source is missing required directories: {', '.join(missing)}"
         raise ValueError(msg)
+    symlinked_dirs = [name for name in ("cur", "new", "tmp") if (path / name).is_symlink()]
+    if symlinked_dirs:
+        msg = f"Maildir source has symlinked directories: {', '.join(symlinked_dirs)}"
+        raise ValueError(msg)
     return path
 
 
@@ -600,7 +604,11 @@ def _part_payload_bytes(part: Message) -> bytes:
 def _maildir_entries(path: Path) -> list[Path]:
     entries: list[Path] = []
     for folder in ("cur", "new"):
-        entries.extend(child for child in (path / folder).iterdir() if child.is_file())
+        entries.extend(
+            child
+            for child in (path / folder).iterdir()
+            if child.is_file() and not child.is_symlink()
+        )
     return entries
 
 
