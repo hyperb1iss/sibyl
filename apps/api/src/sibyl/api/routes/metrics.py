@@ -455,9 +455,11 @@ async def _list_surreal_metric_task_rows(group_id: str) -> list[dict[str, Any]] 
             FROM entity
             WHERE group_id = $group_id
                 AND entity_type = $task_type
-                AND string::lowercase(status ?? attributes.status ?? '') != 'archived';
+                AND string::lowercase(status ?? attributes.status ?? '') != 'archived'
+            LIMIT $limit;
             """,
             task_type=EntityType.TASK.value,
+            limit=METRICS_MAX_TASKS + 1,
         )
     except Exception as exc:
         log.warning(
@@ -469,6 +471,13 @@ async def _list_surreal_metric_task_rows(group_id: str) -> list[dict[str, Any]] 
 
     if rows is None:
         return None
+
+    # Outside the try/except above on purpose: raising inside it would be
+    # swallowed as a fast-path failure instead of surfacing the 413.
+    if len(rows) > METRICS_MAX_TASKS:
+        raise MetricsEntityLimitExceededError(
+            f"surreal metric fast-path exceeded task cap: {METRICS_MAX_TASKS}"
+        )
 
     tasks = [_normalize_metric_task_row(row) for row in rows]
     return [
