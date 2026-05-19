@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from sibyl.api.schemas import (
     AssigneeStats,
@@ -47,6 +47,14 @@ async def execute_surreal_graph_query(
     from sibyl.persistence.graph_runtime import execute_surreal_graph_query
 
     return await execute_surreal_graph_query(group_id, query, **params)
+
+
+
+METRICS_MAX_TASKS = 10_000
+
+
+class MetricsEntityLimitExceededError(RuntimeError):
+    """Raised when metrics endpoint pagination exceeds the allowed entity cap."""
 
 
 router = APIRouter(
@@ -212,6 +220,7 @@ async def _list_entities_by_type_paginated_via_service(
     entity_type: EntityType,
     *,
     batch_size: int = 1000,
+    max_entities: int | None = None,
 ) -> list[Any]:
     """List all entities of a type by following service cursors."""
     entities: list[Any] = []
@@ -227,6 +236,10 @@ async def _list_entities_by_type_paginated_via_service(
             break
 
         entities.extend(page.items)
+        if max_entities is not None and len(entities) > max_entities:
+            raise MetricsEntityLimitExceededError(
+                f"metrics entity limit exceeded for {entity_type.value}: {max_entities}"
+            )
         if page.next_cursor is None:
             break
         cursor = page.next_cursor
@@ -451,6 +464,7 @@ async def _list_summary_metric_tasks(
             service,
             EntityType.TASK,
             batch_size=1000,
+            max_entities=METRICS_MAX_TASKS,
         )
     ]
 
@@ -551,6 +565,12 @@ async def get_project_summaries(
             projects_summary=_build_project_summaries(projects, counts_by_project)
         )
 
+    except MetricsEntityLimitExceededError as e:
+        log.warning("get_project_summaries_entity_limit_exceeded", error=str(e), group_id=str(org.id))
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Too many tasks to compute project summaries. Please narrow scope.",
+        ) from e
     except Exception as e:
         log.exception("get_project_summaries_failed", error=str(e))
         raise HTTPException(
@@ -608,6 +628,12 @@ async def get_org_metrics(
             projects_summary=projects_summary,
         )
 
+    except MetricsEntityLimitExceededError as e:
+        log.warning("get_org_metrics_entity_limit_exceeded", error=str(e), group_id=str(org.id))
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Too many tasks to compute organization metrics. Please narrow scope.",
+        ) from e
     except Exception as e:
         log.exception("get_org_metrics_failed", error=str(e))
         raise HTTPException(

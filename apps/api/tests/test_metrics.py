@@ -811,6 +811,59 @@ class TestGetOrgMetrics:
         assert result.top_assignees[0].name == "alice"
         assert result.projects_summary[0].id in {"proj_a", "proj_b"}
 
+
+    @pytest.mark.asyncio
+    async def test_org_metrics_rejects_unbounded_service_task_enumeration(self) -> None:
+        """Returns 413 when paged task enumeration exceeds metrics safety cap."""
+        from sibyl.api.routes.metrics import METRICS_MAX_TASKS, get_org_metrics
+
+        mock_org = create_mock_org()
+        mock_service = AsyncMock()
+
+        mock_projects = [
+            create_mock_entity(entity_type="project", name="Project A", entity_id="proj_a"),
+        ]
+        first_page = [
+            create_mock_entity(
+                entity_type="task",
+                name=f"Task {index}",
+                entity_id=f"task_{index}",
+                metadata={"project_id": "proj_a", "status": "todo"},
+            )
+            for index in range(METRICS_MAX_TASKS)
+        ]
+        overflow_page = [
+            create_mock_entity(
+                entity_type="task",
+                name="Overflow Task",
+                entity_id="task_overflow",
+                metadata={"project_id": "proj_a", "status": "todo"},
+            )
+        ]
+
+        mock_service.list_entities = AsyncMock(
+            side_effect=[
+                Page(items=mock_projects, next_cursor=None),
+                Page(items=first_page, next_cursor="cursor-2"),
+                Page(items=overflow_page, next_cursor=None),
+            ]
+        )
+
+        with (
+            patch(
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
+                AsyncMock(return_value=mock_service),
+            ),
+            patch(
+                "sibyl.api.routes.metrics._list_surreal_metric_task_rows",
+                AsyncMock(return_value=None),
+            ),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await get_org_metrics(org=mock_org)
+
+        assert exc_info.value.status_code == 413
+
     @pytest.mark.asyncio
     async def test_org_metrics_empty(self) -> None:
         """Returns metrics with no projects or tasks."""
