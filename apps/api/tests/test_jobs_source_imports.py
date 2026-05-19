@@ -115,14 +115,15 @@ async def test_import_source_archive_imports_mbox_with_private_scope(tmp_path: P
         writes.append(dict(kwargs))
         return _raw_memory_from_kwargs(dict(kwargs), raw_id=f"raw-{len(writes)}")
 
-    result = await source_imports.import_source_archive(
-        {},
-        str(mbox_path),
-        organization_id="org-1",
-        principal_id="user-1",
-        policy_context=_policy_context(),
-        remember=fake_remember,
-    )
+    with patch("sibyl.jobs.source_imports.settings.source_import_dir", tmp_path):
+        result = await source_imports.import_source_archive(
+            {},
+            str(mbox_path),
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            remember=fake_remember,
+        )
 
     assert result["adapter_name"] == "mbox"
     assert result["imported_count"] == 1
@@ -149,25 +150,26 @@ async def test_import_source_archive_resumes_from_checkpoint(tmp_path: Path) -> 
     async def fake_remember(**kwargs: object) -> RawMemory:
         return _raw_memory_from_kwargs(dict(kwargs), raw_id=str(kwargs["source_id"]))
 
-    first_result = await source_imports.import_source_archive(
-        {},
-        str(tmp_path / "resume.mbox"),
-        organization_id="org-1",
-        principal_id="user-1",
-        policy_context=_policy_context(),
-        batch_size=1,
-        remember=fake_remember,
-    )
-    second_result = await source_imports.import_source_archive(
-        {},
-        str(tmp_path / "resume.mbox"),
-        organization_id="org-1",
-        principal_id="user-1",
-        policy_context=_policy_context(),
-        checkpoint=first_result["checkpoint"],
-        batch_size=1,
-        remember=fake_remember,
-    )
+    with patch("sibyl.jobs.source_imports.settings.source_import_dir", tmp_path):
+        first_result = await source_imports.import_source_archive(
+            {},
+            str(tmp_path / "resume.mbox"),
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            batch_size=1,
+            remember=fake_remember,
+        )
+        second_result = await source_imports.import_source_archive(
+            {},
+            str(tmp_path / "resume.mbox"),
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            checkpoint=first_result["checkpoint"],
+            batch_size=1,
+            remember=fake_remember,
+        )
 
     assert first_result["checkpoint"]["cursor"] == "1"
     assert first_result["checkpoint"]["done"] is False
@@ -180,13 +182,31 @@ async def test_import_source_archive_resumes_from_checkpoint(tmp_path: Path) -> 
 async def test_import_source_archive_fails_closed_without_policy_context(tmp_path: Path) -> None:
     mbox_path = _write_mbox(tmp_path / "job.mbox")
 
-    with pytest.raises(ValueError, match="job_policy_context_missing"):
-        await source_imports.import_source_archive(
-            {},
-            str(mbox_path),
-            organization_id="org-1",
-            principal_id="user-1",
-        )
+    with patch("sibyl.jobs.source_imports.settings.source_import_dir", tmp_path):
+        with pytest.raises(ValueError, match="job_policy_context_missing"):
+            await source_imports.import_source_archive(
+                {},
+                str(mbox_path),
+                organization_id="org-1",
+                principal_id="user-1",
+            )
+
+
+@pytest.mark.asyncio
+async def test_import_source_archive_denies_paths_outside_import_root(tmp_path: Path) -> None:
+    staged_dir = tmp_path / "staged"
+    staged_dir.mkdir()
+    outside_mbox = _write_mbox(tmp_path / "outside.mbox")
+
+    with patch("sibyl.jobs.source_imports.settings.source_import_dir", staged_dir):
+        with pytest.raises(PermissionError, match="source_import_path_denied"):
+            await source_imports.import_source_archive(
+                {},
+                str(outside_mbox),
+                organization_id="org-1",
+                principal_id="user-1",
+                policy_context=_policy_context(),
+            )
 
 
 @pytest.mark.asyncio
@@ -203,7 +223,7 @@ async def test_source_import_run_resumes_from_persisted_checkpoint(
     with patch(
         "sibyl.jobs.source_imports.get_raw_memory_by_source_id",
         AsyncMock(return_value=None),
-    ):
+    ), patch("sibyl.jobs.source_imports.settings.source_import_dir", tmp_path):
         first = await source_imports.start_source_import(
             source_uri=str(mbox_path),
             organization_id="org-1",
@@ -250,6 +270,7 @@ async def test_source_import_run_broadcasts_status_changes(tmp_path: Path) -> No
             "sibyl.jobs.source_imports._safe_broadcast_source_import",
             AsyncMock(side_effect=capture_status),
         ),
+        patch("sibyl.jobs.source_imports.settings.source_import_dir", tmp_path),
     ):
         first = await source_imports.start_source_import(
             source_uri=str(mbox_path),

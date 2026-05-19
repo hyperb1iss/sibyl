@@ -5,12 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import structlog
 
 from sibyl.api.event_types import WSEvent
+from sibyl.config import settings
 from sibyl_core.auth import MemoryPolicyContext, authorize_memory_write
 from sibyl_core.models.sources import SourceImportCheckpoint, SourceRecord
 from sibyl_core.services.mailbox_adapter import ensure_mailbox_adapter_registered
@@ -411,6 +413,17 @@ def _default_duplicate_checker(
     return check_duplicate
 
 
+def _resolve_import_source_uri(source_uri: str) -> str:
+    raw_path = source_uri[7:] if source_uri.startswith("file://") else source_uri
+    source_path = Path(raw_path).expanduser().resolve()
+    import_root = settings.source_import_dir.expanduser().resolve()
+    try:
+        source_path.relative_to(import_root)
+    except ValueError as exc:
+        raise PermissionError("source_import_path_denied") from exc
+    return str(source_path)
+
+
 async def import_source_archive(
     ctx: dict[str, Any],
     source_uri: str,
@@ -427,6 +440,7 @@ async def import_source_archive(
     duplicate_checker: SourceRecordDuplicateChecker | None = None,
 ) -> dict[str, Any]:
     """Import a bounded source archive batch into raw memory."""
+    source_uri = _resolve_import_source_uri(source_uri)
     ensure_mailbox_adapter_registered()
     adapter = get_source_adapter(adapter_name)
     manifest = await adapter.prepare_manifest(
