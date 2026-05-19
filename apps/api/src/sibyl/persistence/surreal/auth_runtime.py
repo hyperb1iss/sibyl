@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 from collections.abc import AsyncIterator, Awaitable, Mapping
 from contextlib import asynccontextmanager
@@ -59,6 +60,9 @@ from sibyl_core.auth import (
     ProjectVisibility,
 )
 from sibyl_core.backends.surreal import SurrealAuthClient
+from sibyl_core.backends.surreal.connection import _is_transient_connection_error
+
+logger = logging.getLogger(__name__)
 
 _ORG_ADMIN_ROLE_VALUES = {"owner", "admin"}
 _PROJECT_ROLE_LEVELS: dict[ProjectRole, int] = {
@@ -1039,7 +1043,17 @@ async def _log_audit_event(
         "created_at": now,
         "updated_at": now,
     }
-    await client.execute_query("CREATE audit_logs CONTENT $record;", record=record)
+    try:
+        await client.execute_query("CREATE audit_logs CONTENT $record;", record=record)
+    except Exception as exc:
+        if _is_transient_connection_error(exc):
+            logger.warning(
+                "Skipped transient auth audit log write action=%s error=%s",
+                action,
+                exc,
+            )
+            return
+        raise
 
 
 async def _list_user_org_records(client: QueryClient, *, user_id: UUID) -> list[SurrealRecord]:

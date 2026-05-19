@@ -283,6 +283,42 @@ async def test_surreal_content_client_retries_closed_raw_let_read(monkeypatch) -
 
 
 @pytest.mark.asyncio
+async def test_surreal_dedicated_client_drops_query_id_keyerror_on_write(monkeypatch) -> None:
+    clients: list[FakeAsyncSurreal] = []
+
+    class FakeAsyncSurreal:
+        def __init__(self, url: str) -> None:
+            self.closed = False
+            clients.append(self)
+
+        async def signin(self, credentials: dict[str, str]) -> None:
+            self.credentials = credentials
+
+        async def use(self, namespace: str, database: str) -> None:
+            self.namespace = namespace
+            self.database = database
+
+        async def query(self, query: str, params: object | None = None) -> list[dict[str, str]]:
+            raise KeyError("c87ffcce-66d3-4c07-aa06-7e40f3a9e67f")
+
+        async def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    client = SurrealAuthClient(
+        url="ws://localhost:8000/rpc",
+        username="root",
+        password="root",
+    )
+
+    with pytest.raises(KeyError):
+        await client.execute_query("CREATE audit_logs CONTENT $record;", record={})
+
+    assert len(clients) == 1
+    assert clients[0].closed is True
+
+
+@pytest.mark.asyncio
 async def test_surreal_content_client_retries_closed_socket_during_connect(monkeypatch) -> None:
     class ConnectionClosedError(RuntimeError):
         pass

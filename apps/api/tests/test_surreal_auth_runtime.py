@@ -730,6 +730,39 @@ async def test_log_audit_event_records_request_attribution() -> None:
 
 
 @pytest.mark.asyncio
+async def test_log_audit_event_skips_transient_query_id_failure() -> None:
+    client = SimpleNamespace(
+        execute_query=AsyncMock(side_effect=KeyError("c87ffcce-66d3-4c07-aa06-7e40f3a9e67f"))
+    )
+
+    await surreal_auth_runtime._log_audit_event(
+        client,
+        action="auth.login",
+        user_id=None,
+        organization_id=None,
+        request=None,
+        details={},
+    )
+
+    client.execute_query.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_log_audit_event_raises_non_transient_keyerror() -> None:
+    client = SimpleNamespace(execute_query=AsyncMock(side_effect=KeyError("missing_field")))
+
+    with pytest.raises(KeyError):
+        await surreal_auth_runtime._log_audit_event(
+            client,
+            action="auth.login",
+            user_id=None,
+            organization_id=None,
+            request=None,
+            details={},
+        )
+
+
+@pytest.mark.asyncio
 async def test_list_memory_audit_events_filters_memory_receipts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

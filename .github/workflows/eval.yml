@@ -29,9 +29,9 @@ on:
         type: string
         default: "25"
       longmemeval_concurrency:
-        description: "LongMemEval live concurrency"
+        description: "LongMemEval live concurrency (1 recommended for full runs)"
         type: string
-        default: "2"
+        default: "1"
       longmemeval_corpus_text_policy:
         description: "LongMemEval session content projection"
         type: choice

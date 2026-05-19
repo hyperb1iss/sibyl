@@ -24,6 +24,10 @@ _WRITE_QUERY_TOKENS = {
 }
 
 _TOKEN_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_SURREAL_QUERY_ID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 def _query_tokens(query: str) -> list[str]:
@@ -51,6 +55,10 @@ def _is_connection_closed_error(exc: BaseException) -> bool:
 def _is_transient_connection_error(exc: BaseException) -> bool:
     if _is_connection_closed_error(exc):
         return True
+    if isinstance(exc, KeyError) and exc.args:
+        missing_key = str(exc.args[0])
+        if _SURREAL_QUERY_ID_PATTERN.fullmatch(missing_key):
+            return True
     return isinstance(exc, TimeoutError) and "opening handshake" in str(exc).lower()
 
 
