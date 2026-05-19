@@ -437,7 +437,10 @@ async def _search_documents_runtime_scan(
 
     org_uuid = UUID(organization_id)
     requested_source_id = UUID(source_id) if source_id else None
-    chunk_budget = min(max(limit, 1) * RUNTIME_SCAN_CHUNK_LIMIT_MULTIPLIER, RUNTIME_SCAN_CHUNK_LIMIT_MAX)
+    chunk_budget = min(
+        max(limit, 1) * RUNTIME_SCAN_CHUNK_LIMIT_MULTIPLIER,
+        RUNTIME_SCAN_CHUNK_LIMIT_MAX,
+    )
 
     async with get_content_read_session() as session:
         sources = await list_sources_for_graph_linking(
@@ -462,8 +465,7 @@ async def _search_documents_runtime_scan(
             if remaining_budget <= 0:
                 break
             chunks.extend(
-                cast(DocumentSearchChunk, chunk)
-                for chunk in source_chunks[:remaining_budget]
+                cast(DocumentSearchChunk, chunk) for chunk in source_chunks[:remaining_budget]
             )
             if len(chunks) >= chunk_budget:
                 break
