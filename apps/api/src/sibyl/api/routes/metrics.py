@@ -49,7 +49,6 @@ async def execute_surreal_graph_query(
     return await execute_surreal_graph_query(group_id, query, **params)
 
 
-
 METRICS_MAX_TASKS = 10_000
 
 
@@ -566,7 +565,9 @@ async def get_project_summaries(
         )
 
     except MetricsEntityLimitExceededError as e:
-        log.warning("get_project_summaries_entity_limit_exceeded", error=str(e), group_id=str(org.id))
+        log.warning(
+            "get_project_summaries_entity_limit_exceeded", error=str(e), group_id=str(org.id)
+        )
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail="Too many tasks to compute project summaries. Please narrow scope.",

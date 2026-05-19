@@ -811,7 +811,6 @@ class TestGetOrgMetrics:
         assert result.top_assignees[0].name == "alice"
         assert result.projects_summary[0].id in {"proj_a", "proj_b"}
 
-
     @pytest.mark.asyncio
     async def test_org_metrics_rejects_unbounded_service_task_enumeration(self) -> None:
         """Returns 413 when paged task enumeration exceeds metrics safety cap."""
@@ -858,9 +857,9 @@ class TestGetOrgMetrics:
                 "sibyl.api.routes.metrics._list_surreal_metric_task_rows",
                 AsyncMock(return_value=None),
             ),
+            pytest.raises(HTTPException) as exc_info,
         ):
-            with pytest.raises(HTTPException) as exc_info:
-                await get_org_metrics(org=mock_org)
+            await get_org_metrics(org=mock_org)
 
         assert exc_info.value.status_code == 413
 
