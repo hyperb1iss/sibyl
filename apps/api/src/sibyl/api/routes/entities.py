@@ -363,6 +363,36 @@ async def _require_entity_read_access(ctx: AuthContext, entity: Any) -> set[str]
     return accessible_projects
 
 
+async def _validate_related_to_targets_for_write(
+    *,
+    ctx: AuthContext,
+    entity_manager: Any,
+    related_to: list[str] | None,
+) -> None:
+    if not related_to:
+        return
+
+    checked_ids: set[str] = set()
+    for related_id in related_to:
+        if related_id in checked_ids:
+            continue
+        checked_ids.add(related_id)
+
+        try:
+            related_entity = await entity_manager.get(related_id)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail=f"Related entity not found: {related_id}") from exc
+
+        related_project_id = _entity_read_project_id(related_entity)
+        if related_project_id is not None:
+            await verify_entity_project_access(
+                None,
+                ctx,
+                related_project_id,
+                required_role=ProjectRole.CONTRIBUTOR,
+            )
+
+
 def _entity_matches_project_filter(
     entity: Any,
     *,
@@ -1188,6 +1218,12 @@ async def create_entity(
                 required_role=ProjectRole.CONTRIBUTOR,
                 require_existing_project=True,
             )
+        runtime = await get_entity_graph_runtime(group_id)
+        await _validate_related_to_targets_for_write(
+            ctx=ctx,
+            entity_manager=runtime.entity_manager,
+            related_to=entity.related_to,
+        )
 
         # Use description as content fallback (frontend sends description, add() needs content)
         content = entity.content or entity.description or entity.name
