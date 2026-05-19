@@ -208,6 +208,52 @@ async def test_local_queue_broker_executes_local_jobs_and_reports_health() -> No
         )
         return {"group_id": group_id, "ok": True}
 
+    async def priority_decay(
+        ctx: dict[str, object],
+        group_id: str,
+        *,
+        min_age_days: int = 180,
+        max_archives_per_run: int = 100,
+    ) -> dict[str, object]:
+        calls.append(
+            (
+                "priority_decay",
+                (group_id,),
+                {
+                    "min_age_days": min_age_days,
+                    "max_archives_per_run": max_archives_per_run,
+                    "ctx_has_start_time": "start_time" in ctx,
+                },
+            )
+        )
+        return {"group_id": group_id, "archived": max_archives_per_run}
+
+    async def run_reflection_dream_cycle(
+        ctx: dict[str, object],
+        group_id: str,
+        *,
+        dry_run: bool = False,
+        source_limit: int = 20,
+        candidate_limit: int = 50,
+        archive_exceptions: bool = True,
+        confidence_threshold: float | None = None,
+    ) -> dict[str, object]:
+        calls.append(
+            (
+                "run_reflection_dream_cycle",
+                (group_id,),
+                {
+                    "dry_run": dry_run,
+                    "source_limit": source_limit,
+                    "candidate_limit": candidate_limit,
+                    "archive_exceptions": archive_exceptions,
+                    "confidence_threshold": confidence_threshold,
+                    "ctx_has_start_time": "start_time" in ctx,
+                },
+            )
+        )
+        return {"group_id": group_id, "dry_run": dry_run, "ok": True}
+
     broker = LocalQueueBroker(
         functions={
             "crawl_source": crawl_source,
@@ -215,6 +261,8 @@ async def test_local_queue_broker_executes_local_jobs_and_reports_health() -> No
             "update_task": update_task,
             "run_backup": run_backup,
             "consolidate_org": consolidate_org,
+            "priority_decay": priority_decay,
+            "run_reflection_dream_cycle": run_reflection_dream_cycle,
         },
         max_concurrency=1,
         result_ttl_seconds=60,
@@ -242,6 +290,19 @@ async def test_local_queue_broker_executes_local_jobs_and_reports_health() -> No
         )
         backup_job_id = await broker.enqueue_backup("org_456", backup_id="backup_123")
         consolidation_job_id = await broker.enqueue_consolidation("org_456")
+        priority_decay_job_id = await broker.enqueue_priority_decay(
+            "org_456",
+            min_age_days=90,
+            max_archives_per_run=12,
+        )
+        reflection_job_id = await broker.enqueue_reflection_dream_cycle(
+            "org_456",
+            dry_run=True,
+            source_limit=3,
+            candidate_limit=7,
+            archive_exceptions=False,
+            confidence_threshold=0.91,
+        )
 
         mark_pending.assert_awaited_once_with(
             "entity_123",
@@ -259,18 +320,28 @@ async def test_local_queue_broker_executes_local_jobs_and_reports_health() -> No
         consolidation_job_id,
         JobStatus.COMPLETE,
     )
+    priority_decay_info = await _wait_for_job_status(
+        broker,
+        priority_decay_job_id,
+        JobStatus.COMPLETE,
+    )
+    reflection_info = await _wait_for_job_status(broker, reflection_job_id, JobStatus.COMPLETE)
 
     assert crawl_info.result == {"source_id": "source_123", "ok": True}
     assert entity_info.result == {"entity_id": "entity_123", "ok": True}
     assert task_info.result == {"task_id": "task_123", "ok": True}
     assert backup_info.result == {"backup_id": "backup_123", "ok": True}
     assert consolidation_info.result == {"group_id": "org_456", "ok": True}
+    assert priority_decay_info.result == {"group_id": "org_456", "archived": 12}
+    assert reflection_info.result == {"group_id": "org_456", "dry_run": True, "ok": True}
     assert [call[0] for call in calls] == [
         "crawl_source",
         "create_entity",
         "update_task",
         "run_backup",
         "consolidate_org",
+        "priority_decay",
+        "run_reflection_dream_cycle",
     ]
     assert all(call[2]["ctx_has_start_time"] is True for call in calls)
 
