@@ -117,7 +117,15 @@ def _store_run(run: SourceImportRun) -> None:
 
 
 def _source_import_event_payload(run: SourceImportRun) -> dict[str, Any]:
-    payload = run.status_payload()
+    status_payload = run.status_payload()
+    payload = {
+        "import_id": status_payload["import_id"],
+        "status": status_payload["status"],
+        "progress": status_payload["progress"],
+        "created_at": status_payload["created_at"],
+        "updated_at": status_payload["updated_at"],
+        "completed_at": status_payload["completed_at"],
+    }
     for field_name in ("created_at", "updated_at", "completed_at"):
         value = payload.get(field_name)
         if isinstance(value, datetime):

@@ -282,6 +282,14 @@ def test_source_import_event_payload_is_json_ready(tmp_path: Path) -> None:
     assert payload["import_id"] == "source_import:test"
     assert isinstance(payload["created_at"], str)
     assert isinstance(payload["updated_at"], str)
+    assert set(payload) == {
+        "import_id",
+        "status",
+        "progress",
+        "created_at",
+        "updated_at",
+        "completed_at",
+    }
 
 
 @pytest.mark.asyncio
