@@ -444,7 +444,7 @@ class TestListEntitiesRoute:
         assert response.has_more is True
 
     @pytest.mark.asyncio
-    async def test_untyped_project_filters_skip_archived_only_pages(self) -> None:
+    async def test_untyped_project_filters_apply_to_bounded_batch(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         manager = MagicMock()
         archived_page = [
@@ -456,7 +456,7 @@ class TestListEntitiesRoute:
             _entity("ent-unassigned", project_id=None, name="Unassigned"),
         ]
         manager.list_by_type = AsyncMock()
-        manager.list_all = AsyncMock(side_effect=[archived_page, live_page, []])
+        manager.list_all = AsyncMock(return_value=archived_page + live_page)
         runtime = SimpleNamespace(entity_manager=manager)
 
         with (
@@ -485,11 +485,7 @@ class TestListEntitiesRoute:
             )
 
         manager.list_by_type.assert_not_awaited()
-        assert manager.list_all.await_args_list == [
-            call(limit=2, offset=0, include_archived=True),
-            call(limit=2, offset=2, include_archived=True),
-            call(limit=2, offset=4, include_archived=True),
-        ]
+        manager.list_all.assert_awaited_once_with(limit=2, offset=0, include_archived=True)
         assert [entity.id for entity in response.entities] == ["ent-match", "ent-unassigned"]
         assert response.total == 2
         assert response.has_more is False

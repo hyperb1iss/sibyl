@@ -230,26 +230,14 @@ async def _list_all_entities_paginated(
     batch_size: int | None = None,
 ) -> list[Any]:
     batch_size = LIST_ALL_PAGE_SIZE if batch_size is None else batch_size
-    entities: list[Any] = []
-    offset = 0
-
-    while True:
-        list_kwargs: dict[str, Any] = {
-            "limit": batch_size,
-            "offset": offset,
-            "include_archived": True,
-            **_lightweight_entity_list_kwargs(entity_manager),
-        }
-        batch = await entity_manager.list_all(
-            **list_kwargs,
-        )
-        if not batch:
-            break
-
-        entities.extend(entity for entity in batch if not _entity_is_archived(entity))
-        offset += batch_size
-
-    return entities
+    list_kwargs: dict[str, Any] = {
+        "limit": batch_size,
+        "offset": 0,
+        "include_archived": True,
+        **_lightweight_entity_list_kwargs(entity_manager),
+    }
+    batch = await entity_manager.list_all(**list_kwargs)
+    return [entity for entity in batch if not _entity_is_archived(entity)]
 
 
 async def _list_entities_by_type_paginated(
