@@ -55,13 +55,14 @@ async def _resolve_accessible_context_projects(
     *,
     ctx: AuthContext,
     project: str | None,
+    required_project_role: ProjectRole = ProjectRole.VIEWER,
 ) -> set[str] | None:
     if project:
         await verify_entity_project_access(
             None,
             ctx,
             project,
-            required_role=ProjectRole.VIEWER,
+            required_role=required_project_role,
         )
         return {str(project)}
     accessible_projects = await list_accessible_project_graph_ids(ctx)
@@ -231,6 +232,9 @@ async def reflect_context(
         accessible_projects = await _resolve_accessible_context_projects(
             ctx=ctx,
             project=request.project,
+            required_project_role=(
+                ProjectRole.CONTRIBUTOR if request.persist else ProjectRole.VIEWER
+            ),
         )
         related_to = await _resolve_reflection_links(
             org_id=str(org.id),
