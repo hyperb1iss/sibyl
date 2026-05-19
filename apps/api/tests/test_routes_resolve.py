@@ -11,11 +11,16 @@ from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 
 
-def _auth_context(org: AuthOrganization) -> AuthContext:
+def _auth_context(
+    org: AuthOrganization,
+    *,
+    api_key_memory_scope_keys: set[str] | None = None,
+) -> AuthContext:
     return AuthContext(
         user=AuthUser(id=uuid4(), email="nova@example.test"),
         organization=org,
         org_role=OrganizationRole.MEMBER,
+        api_key_memory_scope_keys=api_key_memory_scope_keys,
     )
 
 
@@ -138,8 +143,7 @@ async def test_resolve_raw_memory_prefix_filters_api_key_memory_scope_matches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     org = AuthOrganization(id=uuid4(), name="Sibyl", slug="sibyl")
-    ctx = _auth_context(org)
-    ctx.api_key_memory_scope_keys = {"project\x1fproject-visible"}
+    ctx = _auth_context(org, api_key_memory_scope_keys={"project\x1fproject-visible"})
     memories = [
         RawMemory(
             id="memory-visible",
