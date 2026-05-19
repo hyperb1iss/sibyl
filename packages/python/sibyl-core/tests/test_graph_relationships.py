@@ -438,7 +438,7 @@ class TestRelationshipBulkCreate:
         surreal_relationship_manager: RelationshipManager,
     ) -> None:
         ops = surreal_relationship_manager._driver.entity_edge_ops
-        ops.get_by_node_uuids = AsyncMock(return_value=[])
+        ops.get_between_nodes = AsyncMock(return_value=[])
         ops.save_bulk = AsyncMock()
         relationships = [
             Relationship(
@@ -477,6 +477,7 @@ class TestRelationshipBulkCreate:
             ("entity-1", "RELATED_TO", "entity-2"),
             ("entity-2", "DEPENDS_ON", "entity-3"),
         }
+        assert ops.get_between_nodes.await_count == 2
 
     @pytest.mark.asyncio
     async def test_bulk_create_is_idempotent_against_existing_surreal_edges(
@@ -485,7 +486,7 @@ class TestRelationshipBulkCreate:
         sample_entity_edge: EntityEdge,
     ) -> None:
         ops = surreal_relationship_manager._driver.entity_edge_ops
-        ops.get_by_node_uuids = AsyncMock(return_value=[sample_entity_edge])
+        ops.get_between_nodes = AsyncMock(side_effect=[[sample_entity_edge], []])
         ops.save_bulk = AsyncMock()
         relationships = [
             Relationship(
@@ -508,11 +509,16 @@ class TestRelationshipBulkCreate:
 
         assert created == 2
         assert failed == 0
-        ops.get_by_node_uuids.assert_awaited_once_with(
+        first_call = ops.get_between_nodes.await_args_list[0]
+        assert first_call.args == (
             surreal_relationship_manager._driver,
-            ["entity-001", "entity-002", "entity-003", "entity-004"],
-            group_ids=[surreal_relationship_manager._group_id],
+            "entity-001",
+            "entity-002",
         )
+        assert first_call.kwargs == {
+            "group_ids": [surreal_relationship_manager._group_id],
+            "limit": 1000,
+        }
         ops.save_bulk.assert_awaited_once()
         saved_edges = ops.save_bulk.await_args.args[1]
         assert [

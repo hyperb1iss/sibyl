@@ -561,35 +561,22 @@ class RelationshipManager:
         surreal_edge_ops = self._surreal_entity_edge_ops()
         if surreal_edge_ops is not None:
             try:
-                node_ids = sorted(
-                    {
-                        node_id
-                        for relationship in relationships
-                        for node_id in (relationship.source_id, relationship.target_id)
-                    }
-                )
-                existing_edges = await surreal_edge_ops.get_by_node_uuids(
-                    self._driver,
-                    node_ids,
-                    group_ids=[self._group_id],
-                )
-                existing_keys = {
-                    (edge.source_node_uuid, edge.name, edge.target_node_uuid)
-                    for edge in existing_edges
-                    if edge.group_id == self._group_id
-                }
                 edges = []
                 skipped = 0
                 for relationship in relationships:
-                    key = (
+                    existing = await surreal_edge_ops.get_between_nodes(
+                        self._driver,
                         relationship.source_id,
-                        relationship.relationship_type.value,
                         relationship.target_id,
+                        group_ids=[self._group_id],
+                        limit=1000,
                     )
-                    if key in existing_keys:
+                    if any(
+                        edge.name == relationship.relationship_type.value and edge.group_id == self._group_id
+                        for edge in existing
+                    ):
                         skipped += 1
                         continue
-                    existing_keys.add(key)
                     edges.append(self._to_graphiti_edge(relationship))
                 if edges:
                     await surreal_edge_ops.save_bulk(self._driver, edges)
