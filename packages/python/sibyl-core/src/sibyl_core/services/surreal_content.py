@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 from collections.abc import AsyncIterator, Iterable, Mapping
 from contextlib import asynccontextmanager
@@ -61,15 +60,6 @@ _SCOPES_REQUIRING_SCOPE_KEY = {
     MemoryScope.TEAM,
     MemoryScope.SHARED,
 }
-
-
-@dataclass(slots=True)
-class _SharedContentClientState:
-    client: SurrealContentClient | None = None
-
-
-_shared_content_client_state = _SharedContentClientState()
-_shared_content_client_lock = asyncio.Lock()
 
 
 @dataclass(slots=True)
@@ -195,27 +185,13 @@ def build_surreal_content_client() -> SurrealContentClient:
     )
 
 
-async def get_shared_surreal_content_client() -> SurrealContentClient:
-    if _shared_content_client_state.client is not None:
-        return _shared_content_client_state.client
-
-    async with _shared_content_client_lock:
-        if _shared_content_client_state.client is None:
-            _shared_content_client_state.client = build_surreal_content_client()
-        return _shared_content_client_state.client
-
-
-async def close_shared_surreal_content_client() -> None:
-    async with _shared_content_client_lock:
-        client = _shared_content_client_state.client
-        _shared_content_client_state.client = None
-        if client is not None:
-            await client.close()
-
-
 @asynccontextmanager
 async def surreal_content_client() -> AsyncIterator[SurrealContentClient]:
-    yield await get_shared_surreal_content_client()
+    client = build_surreal_content_client()
+    try:
+        yield client
+    finally:
+        await client.close()
 
 
 def _normalize_record(record: object) -> SurrealRecord | None:
@@ -1484,11 +1460,9 @@ __all__ = [
     "MemoryScope",
     "RawMemory",
     "build_surreal_content_client",
-    "close_shared_surreal_content_client",
     "get_or_create_source",
     "get_raw_memory",
     "get_raw_memory_by_source_id",
-    "get_shared_surreal_content_client",
     "lexical_score",
     "lexical_score_from_tokens",
     "list_raw_memories_for_scope",

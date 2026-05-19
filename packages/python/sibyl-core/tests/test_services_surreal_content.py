@@ -73,29 +73,25 @@ class FakeClient:
 
 class TestSurrealContentHelpers:
     @pytest.mark.asyncio
-    async def test_surreal_content_client_reuses_shared_client(self) -> None:
-        fake_client = FakeClient([])
+    async def test_surreal_content_client_creates_per_context_client(self) -> None:
+        first_client = FakeClient([])
+        second_client = FakeClient([])
 
         from sibyl_core.services import surreal_content as content_service
 
-        await content_service.close_shared_surreal_content_client()
-        try:
-            with pytest.MonkeyPatch.context() as monkeypatch:
-                monkeypatch.setattr(
-                    content_service,
-                    "build_surreal_content_client",
-                    lambda: fake_client,
-                )
-                async with (
-                    content_service.surreal_content_client() as first,
-                    content_service.surreal_content_client() as second,
-                ):
-                    assert first is fake_client
-                    assert second is fake_client
-        finally:
-            await content_service.close_shared_surreal_content_client()
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(
+                content_service,
+                "build_surreal_content_client",
+                lambda: first_client if first_client.closed == 0 else second_client,
+            )
+            async with content_service.surreal_content_client() as first:
+                assert first is first_client
+            async with content_service.surreal_content_client() as second:
+                assert second is second_client
 
-        assert fake_client.closed == 1
+        assert first_client.closed == 1
+        assert second_client.closed == 1
 
     @pytest.mark.asyncio
     async def test_replace_record_uses_single_upsert_statement(self) -> None:
