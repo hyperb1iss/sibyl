@@ -17,6 +17,7 @@ from sibyl.api.routes.metrics import (
     _parse_iso_date,
 )
 from sibyl_core.models.entities import Entity, EntityType
+from sibyl.auth.context import AuthContext
 from sibyl_core.storage import Page
 
 # =============================================================================
@@ -1173,6 +1174,64 @@ class TestGetOrgMetrics:
             ),
         ]
 
+
+
+    @pytest.mark.asyncio
+    async def test_org_metrics_filters_to_accessible_projects(self) -> None:
+        """Org metrics includes only projects/tasks in the caller access set."""
+        from sibyl.api.routes.metrics import get_org_metrics
+
+        mock_org = create_mock_org()
+        mock_service = AsyncMock()
+
+        mock_projects = [
+            create_mock_entity(entity_type="project", name="Public", entity_id="proj_public"),
+            create_mock_entity(entity_type="project", name="Secret", entity_id="proj_secret"),
+        ]
+        mock_tasks = [
+            create_mock_entity(
+                entity_type="task",
+                name="Public Task",
+                entity_id="task_public",
+                metadata={"project_id": "proj_public", "status": "doing", "priority": "high"},
+            ),
+            create_mock_entity(
+                entity_type="task",
+                name="Secret Task",
+                entity_id="task_secret",
+                metadata={"project_id": "proj_secret", "status": "done", "priority": "critical"},
+            ),
+        ]
+
+        mock_service.list_entities = AsyncMock(
+            side_effect=[
+                Page(items=mock_projects, next_cursor=None),
+                Page(items=mock_tasks, next_cursor=None),
+            ]
+        )
+        mock_ctx = MagicMock(spec=AuthContext)
+
+        with (
+            patch(
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
+                AsyncMock(return_value=mock_service),
+            ),
+            patch(
+                "sibyl.api.routes.metrics._list_surreal_metric_task_rows",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "sibyl.api.routes.metrics.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"proj_public"}),
+            ),
+        ):
+            result = await get_org_metrics(org=mock_org, ctx=mock_ctx)
+
+        assert result.total_projects == 1
+        assert result.total_tasks == 1
+        assert [summary.id for summary in result.projects_summary] == ["proj_public"]
+        assert result.status_distribution.doing == 1
+        assert result.status_distribution.done == 0
 
 class TestGetProjectSummaries:
     """Tests for get_project_summaries endpoint."""

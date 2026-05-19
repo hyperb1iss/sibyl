@@ -19,8 +19,10 @@ from sibyl.api.schemas import (
     TaskStatusDistribution,
     TimeSeriesPoint,
 )
-from sibyl.auth.dependencies import get_current_organization, require_org_role
+from sibyl.auth.context import AuthContext
+from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl_core.auth import AuthOrganization, OrganizationRole
+from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService
 
@@ -367,6 +369,29 @@ def _prefer_valid_datetime_value(
     return metadata_value or row_value
 
 
+
+
+def _filter_projects_by_access(projects: list[Any], accessible_project_ids: set[str] | None) -> list[Any]:
+    """Filter projects to the caller's accessible set when provided."""
+    if accessible_project_ids is None:
+        return projects
+    return [project for project in projects if str(project.id) in accessible_project_ids]
+
+
+def _filter_tasks_by_access(
+    tasks: list[dict[str, Any]], accessible_project_ids: set[str] | None
+) -> list[dict[str, Any]]:
+    """Filter tasks to accessible projects when project RBAC set is available."""
+    if accessible_project_ids is None:
+        return tasks
+
+    filtered: list[dict[str, Any]] = []
+    for task in tasks:
+        project_id = str(task.get("metadata", {}).get("project_id") or "")
+        if project_id and project_id in accessible_project_ids:
+            filtered.append(task)
+    return filtered
+
 def _normalize_metric_task_row(row: dict[str, Any]) -> dict[str, Any]:
     """Normalize raw task rows into the legacy task-shaped metrics format."""
     metadata = _parse_metadata_dict(row.get("metadata"))
@@ -531,6 +556,7 @@ async def get_project_metrics(
 @router.get("/projects-summary", response_model=ProjectSummariesResponse)
 async def get_project_summaries(
     org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext | Any = Depends(get_auth_context),
 ) -> ProjectSummariesResponse:
     """Get the lean project-summary payload for the projects page."""
     try:
@@ -541,7 +567,13 @@ async def get_project_summaries(
             EntityType.PROJECT,
             batch_size=500,
         )
+        accessible_project_ids = (
+            await list_accessible_project_graph_ids(ctx) if isinstance(ctx, AuthContext) else None
+        )
+        projects = _filter_projects_by_access(projects, accessible_project_ids)
+
         tasks = await _list_summary_metric_tasks(group_id, service)
+        tasks = _filter_tasks_by_access(tasks, accessible_project_ids)
         counts_by_project = _compute_project_task_counts(
             tasks,
             now=datetime.now(UTC),
@@ -561,6 +593,7 @@ async def get_project_summaries(
 @router.get("", response_model=OrgMetricsResponse)
 async def get_org_metrics(
     org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext | Any = Depends(get_auth_context),
 ) -> OrgMetricsResponse:
     """Get organization-wide metrics aggregating all projects."""
     try:
@@ -573,7 +606,13 @@ async def get_org_metrics(
             EntityType.PROJECT,
             batch_size=500,
         )
+        accessible_project_ids = (
+            await list_accessible_project_graph_ids(ctx) if isinstance(ctx, AuthContext) else None
+        )
+        projects = _filter_projects_by_access(projects, accessible_project_ids)
+
         tasks = await _list_summary_metric_tasks(group_id, service)
+        tasks = _filter_tasks_by_access(tasks, accessible_project_ids)
 
         status_dist = _compute_status_distribution(tasks)
         priority_dist = _compute_priority_distribution(tasks)
