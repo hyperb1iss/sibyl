@@ -43,9 +43,21 @@ async def test_entities_create_passes_task_fields_to_add() -> None:
     add_result.id = "task_new"
     add_result.message = "ok"
 
+    related_target = MagicMock()
+    related_target.entity_type = EntityType.DECISION
+    related_target.project_id = None
+    related_target.metadata = {}
+    runtime = MagicMock()
+    runtime.entity_manager = MagicMock()
+    runtime.entity_manager.get = AsyncMock(return_value=related_target)
+
     with (
         patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)) as add,
         patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
         patch(
             "sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()
         ) as verify_access,
@@ -98,22 +110,25 @@ async def test_entities_create_rejects_missing_related_to_target() -> None:
 
     runtime = MagicMock()
     runtime.entity_manager = MagicMock()
-    runtime.entity_manager.get = AsyncMock(side_effect=Exception("not found"))
+    runtime.entity_manager.get = AsyncMock(side_effect=KeyError("not found"))
 
     with (
-        patch("sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock(return_value=runtime)),
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
         patch("sibyl_core.tools.core.add", AsyncMock()) as add,
         patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        pytest.raises(HTTPException) as exc,
     ):
-        with pytest.raises(HTTPException) as exc:
-            await create_entity(
-                request=request,
-                entity=entity,
-                org=org,
-                ctx=ctx,
-                content_session=content_session,
-                sync=False,
-            )
+        await create_entity(
+            request=request,
+            entity=entity,
+            org=org,
+            ctx=ctx,
+            content_session=content_session,
+            sync=False,
+        )
 
     assert exc.value.status_code == 404
     assert exc.value.detail == "Related entity not found: decision_missing"

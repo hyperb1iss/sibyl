@@ -381,7 +381,11 @@ async def _validate_related_to_targets_for_write(
         try:
             related_entity = await entity_manager.get(related_id)
         except Exception as exc:
-            raise HTTPException(status_code=404, detail=f"Related entity not found: {related_id}") from exc
+            raise HTTPException(
+                status_code=404, detail=f"Related entity not found: {related_id}"
+            ) from exc
+        if related_entity is None:
+            raise HTTPException(status_code=404, detail=f"Related entity not found: {related_id}")
 
         related_project_id = _entity_read_project_id(related_entity)
         if related_project_id is not None:
