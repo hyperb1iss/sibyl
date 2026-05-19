@@ -1,0 +1,122 @@
+{
+  "schema_version": "sibyl-longmemeval-live-preflight-v1",
+  "generated_at": "2026-05-19T15:09:24.447464+00:00",
+  "sibyl_commit": "aec99f9323577bd6faf55be2c40af792f04b55e1",
+  "api_url": "http://localhost:3334/api",
+  "status": "blocked",
+  "blocking_findings": [
+    "search result did not carry embedding metadata or dimensions",
+    "/api/search session path is fulltext/lexical, not KNN vector search",
+    "context-pack native retrieval is not passed an embedding provider"
+  ],
+  "contracts": {
+    "ingestion_retrieval": {
+      "health": {
+        "status": "healthy",
+        "version": "1.0.0-rc.1"
+      },
+      "tenant": {
+        "organization_id": "aa7d624e-e356-403c-a50a-8fabd9857db9",
+        "organization_slug": "u-9ece48ba-19ea-42fd-a842-5a9d54fc7de2",
+        "user_email": "longmemeval-preflight-6015a2430282@example.invalid"
+      },
+      "ingestion_endpoint": "POST /api/entities?sync=true",
+      "retrieval_endpoint": "POST /api/search",
+      "created_entity": {
+        "id": "session_6293b55884fd",
+        "entity_type": "session",
+        "metadata_roundtrip": true
+      },
+      "search": {
+        "query": "cobalt quartz orchard 6015a2430282",
+        "result_count": 1,
+        "matched_expected_session": true,
+        "rank": 1,
+        "metadata_roundtrip": true,
+        "embedding_metadata_present": false,
+        "embedding_dimensions": null,
+        "top_result_ids": [
+          "lme-preflight-session-6015a2430282"
+        ]
+      }
+    },
+    "retrieval_path_semantics": {
+      "api_search_graph_function": {
+        "path": "packages/python/sibyl-core/src/sibyl_core/services/native_graph.py",
+        "line": 217,
+        "uses_fulltext_scores": true,
+        "uses_knn_vector": false,
+        "uses_embedding_provider": false
+      },
+      "context_pack_native_function": {
+        "path": "packages/python/sibyl-core/src/sibyl_core/tools/context.py",
+        "line": 741,
+        "passes_embedding_provider": false
+      },
+      "verified_result_signal_label": "node_fulltext"
+    },
+    "artifact_contract": {
+      "valid_sample_failures": [],
+      "mode_live_failures": [
+        "runtime['retrieval_mode'] has unsupported retrieval mode 'live'; expected one of compare, hybrid, native, post-graphiti, pre-graphiti, raw"
+      ],
+      "required_fields": {
+        "header": [
+          "schema_version",
+          "suite",
+          "generated_at",
+          "sibyl_commit",
+          "command"
+        ],
+        "runtime": [
+          "runtime_mode",
+          "graph_engine",
+          "store",
+          "retrieval_mode",
+          "embedding_provider",
+          "embedding_model",
+          "embedding_dimensions",
+          "tokenizer_estimate_method"
+        ],
+        "dataset": [
+          "name",
+          "corpus_hash"
+        ],
+        "release": [
+          "repeat_count",
+          "auth_manifest_id",
+          "mode"
+        ],
+        "summary": [
+          "overall",
+          "per_type"
+        ],
+        "cases": [
+          "case identifier",
+          "answer IDs",
+          "ranked result IDs",
+          "numeric metric"
+        ]
+      },
+      "allowed_ai_memory_modes": [
+        "compare",
+        "hybrid",
+        "native",
+        "post-graphiti",
+        "pre-graphiti",
+        "raw"
+      ]
+    },
+    "abstention": {
+      "dataset_path": ".moon/cache/benchmarks/longmemeval_s_cleaned.json",
+      "dataset_available": true,
+      "dataset_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+      "expected_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+      "sha256_matches_expected": true,
+      "total_entries": 500,
+      "empty_answer_session_id_count": 0,
+      "abstention_present": false,
+      "resolved": true
+    }
+  }
+}
