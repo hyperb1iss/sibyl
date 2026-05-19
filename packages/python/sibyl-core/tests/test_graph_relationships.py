@@ -1596,6 +1596,7 @@ class TestGetRelatedEntities:
             surreal_relationship_manager._driver,
             ["entity-001", "entity-003"],
             group_ids=["test-org-123"],
+            limit=10,
         )
         node_ops.get_by_uuids.assert_awaited_once_with(
             surreal_relationship_manager._driver,

@@ -937,10 +937,12 @@ class RelationshipManager:
                     )
                 return results
 
+            batch_limit = max(limit_per_entity, 1) * len(seed_ids)
             edges = await surreal_edge_ops.get_by_node_uuids(
                 self._driver,
                 seed_ids,
                 group_ids=[self._group_id],
+                limit=batch_limit,
             )
 
             type_values = {t.value for t in relationship_types} if relationship_types else None
