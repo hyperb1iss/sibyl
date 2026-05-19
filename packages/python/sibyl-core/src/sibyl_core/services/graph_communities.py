@@ -327,6 +327,8 @@ async def _get_graph_snapshot(
             max_entities=max_entities,
             max_relationships=max_relationships,
         )
+        # Joiners shield the shared load: a cancelled joiner must not
+        # cancel the task that the owner (and other joiners) still await.
         return await asyncio.shield(in_flight)
 
     task = asyncio.create_task(
@@ -339,9 +341,12 @@ async def _get_graph_snapshot(
     )
     GRAPH_SNAPSHOT_LOADS[cache_key] = task
     try:
-        return await asyncio.shield(task)
+        # Owner awaits unshielded so request cancellation propagates to
+        # the loader task and abandoned background scans are stopped.
+        return await task
     finally:
-        GRAPH_SNAPSHOT_LOADS.pop(cache_key, None)
+        if GRAPH_SNAPSHOT_LOADS.get(cache_key) is task:
+            GRAPH_SNAPSHOT_LOADS.pop(cache_key, None)
 
 
 async def _load_graph_snapshot(

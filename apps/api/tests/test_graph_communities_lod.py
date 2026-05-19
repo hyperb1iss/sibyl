@@ -285,3 +285,51 @@ async def test_get_graph_snapshot_cancels_inflight_load_on_request_cancel(
 
     assert cancelled.is_set()
     assert communities.GRAPH_SNAPSHOT_LOADS == {}
+
+
+
+@pytest.mark.asyncio
+async def test_get_graph_snapshot_joiner_cancel_does_not_cancel_shared_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_load_graph_snapshot(*args, **kwargs) -> communities.GraphSnapshot:
+        started.set()
+        await release.wait()
+        return communities.GraphSnapshot(entities=[], relationships=[], entity_by_id={})
+
+    communities.GRAPH_SNAPSHOT_CACHE.clear()
+    communities.GRAPH_SNAPSHOT_LOADS.clear()
+    monkeypatch.setattr(communities, "_load_graph_snapshot", fake_load_graph_snapshot)
+
+    owner = asyncio.create_task(
+        communities._get_graph_snapshot(
+            object(),
+            "org-join-cancel",
+            max_entities=100,
+            max_relationships=200,
+        )
+    )
+    await started.wait()
+
+    joiner = asyncio.create_task(
+        communities._get_graph_snapshot(
+            object(),
+            "org-join-cancel",
+            max_entities=100,
+            max_relationships=200,
+        )
+    )
+    await asyncio.sleep(0)
+
+    joiner.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await joiner
+
+    # The joiner's cancellation must not abort the shared loader the owner
+    # still awaits; the owner must complete normally.
+    release.set()
+    snapshot = await asyncio.wait_for(owner, timeout=1)
+    assert snapshot.entities == []
