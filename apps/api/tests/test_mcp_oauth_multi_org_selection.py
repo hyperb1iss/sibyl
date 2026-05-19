@@ -142,9 +142,43 @@ async def test_mcp_oauth_org_selection_issues_code(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_mcp_oauth_org_page_escapes_org_name(monkeypatch) -> None:
+    provider = SibylMcpOAuthProvider()
+
+    user = SimpleNamespace(id=uuid4(), name="Test User")
+    hostile_org = SimpleNamespace(
+        id=uuid4(),
+        name='</strong><script>alert("xss")</script><strong>',
+        slug="evil",
+        is_personal=False,
+    )
+
+    provider._pending["req123"] = _PendingAuth(
+        client_id="client1", expires_at=time.time() + 600, params=None
+    )
+    provider._authed["req123"] = _AuthedUser(user_id=user.id, expires_at=time.time() + 300)
+
+    monkeypatch.setattr(
+        provider,
+        "_list_user_orgs",
+        AsyncMock(return_value=[hostile_org]),
+    )
+
+    req = _make_get_request(path="/_oauth/org", query={"req": "req123"})
+    resp = await provider.ui_org_get(req)
+
+    assert resp.status_code == 200
+    body = resp.body.decode("utf-8")
+    assert '<script>alert("xss")</script>' not in body
+    assert "&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;" in body
+
+
+@pytest.mark.asyncio
 async def test_mcp_oauth_login_page_escapes_client_name() -> None:
     provider = SibylMcpOAuthProvider()
-    provider._pending["req123"] = _PendingAuth(client_id="client1", expires_at=time.time() + 600, params=None)
+    provider._pending["req123"] = _PendingAuth(
+        client_id="client1", expires_at=time.time() + 600, params=None
+    )
     await provider.register_client(
         OAuthClientInformationFull(
             client_id="client1",
@@ -161,5 +195,7 @@ async def test_mcp_oauth_login_page_escapes_client_name() -> None:
 
     assert resp.status_code == 200
     body = resp.body.decode("utf-8")
-    assert "<script>alert(\"xss\")</script>" not in body
-    assert "&lt;/strong&gt;&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;&lt;strong&gt;" in body
+    assert '<script>alert("xss")</script>' not in body
+    assert (
+        "&lt;/strong&gt;&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;&lt;strong&gt;" in body
+    )

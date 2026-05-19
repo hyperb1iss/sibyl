@@ -537,7 +537,7 @@ class SibylMcpOAuthProvider(
     <h1>Login to Sibyl</h1>
     <div class="sub">Authorize <strong>{client_name}</strong> to access your MCP tools.</div>
     <form method="post" action="/_oauth/login">
-      <input type="hidden" name="req" value="{request_id}" />
+      <input type="hidden" name="req" value="{escape(request_id, quote=True)}" />
       <label>Email</label>
       <input name="email" type="email" autocomplete="username" required />
       <label>Password</label>
