@@ -1,0 +1,204 @@
+name: Live Runtime Eval
+
+# Manual, on-demand evaluation of the live Sibyl retrieval runtime.
+#
+# Unlike the nightly regression — which runs deterministically with mock keys
+# to validate plumbing and policy — this workflow runs against the real native
+# embedder (OpenAI text-embedding-3-small) so the numbers reflect actual
+# semantic retrieval quality. Trigger it before an RC cut for fresh receipts.
+#
+# Requires repo secrets OPENAI_API_KEY and ANTHROPIC_API_KEY.
+
+on:
+  workflow_dispatch:
+    inputs:
+      retrieval_mode:
+        description: "Retrieval mode to evaluate"
+        type: choice
+        options:
+          - native
+          - compare
+        default: native
+      repeat:
+        description: "Repeat count per case (higher = lower variance)"
+        type: string
+        default: "20"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  COMPOSE_PROJECT_NAME: sibyl-eval
+
+jobs:
+  live-eval:
+    name: Live Context-Pack Eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SIBYL_ENVIRONMENT: production
+      SIBYL_JWT_SECRET: test-secret-for-eval
+      SIBYL_STORE: surreal
+      SIBYL_AUTH_STORE: surreal
+      SIBYL_COORDINATION_BACKEND: local
+      SIBYL_SURREAL_URL: ws://localhost:8000/rpc
+      SIBYL_SURREAL_USERNAME: sibyl_ci
+      SIBYL_SURREAL_PASSWORD: sibyl_ci_password
+      SIBYL_RETRIEVAL_MODE: ${{ inputs.retrieval_mode }}
+      SIBYL_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SIBYL_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Guard required secrets
+        run: |
+          if [[ -z "${SIBYL_OPENAI_API_KEY}" ]]; then
+            echo "::error::OPENAI_API_KEY repo secret is not set; the embedder cannot run."
+            exit 1
+          fi
+
+      - name: Start SurrealDB
+        uses: ./.github/actions/start-surrealdb
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt-dev
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6
+        with:
+          auto-install: true
+          auto-setup: true
+          cache-version: surreal-ci-v1
+
+      - name: Verify toolchain
+        run: |
+          chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
+          chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
+          moon --version
+          proto --version
+          uv --version
+
+      - name: Cache moon outputs
+        uses: actions/cache@v5
+        with:
+          path: .moon/cache
+          key: moon-eval-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          restore-keys: |
+            moon-eval-${{ runner.os }}-
+
+      - name: Cache uv
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/uv
+          key: uv-eval-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-eval-${{ runner.os }}-
+
+      - name: Start backend server
+        run: |
+          cd apps/api
+          uv run sibyld serve > /tmp/sibyld.log 2>&1 &
+          echo "Waiting for backend to start..."
+          for i in {1..60}; do
+            if curl -fsS http://localhost:3334/api/health > /dev/null; then
+              echo "Backend is ready!"
+              sleep 2
+              break
+            fi
+            echo "Attempt $i: Backend not ready yet..."
+            sleep 1
+          done
+          curl -fsS http://localhost:3334/api/health | head -c 200
+
+      - name: Start background job worker
+        run: |
+          cd apps/api
+          uv run sibyld worker > /tmp/sibyl-worker.log 2>&1 &
+          echo "Background job worker started"
+          sleep 2
+
+      - name: Seed deterministic baseline fixture
+        run: moon run baseline-seed
+
+      - name: Replay committed baseline corpus
+        run: moon run baseline-replay-runtime
+
+      - name: Run live context-pack eval
+        id: eval
+        run: |
+          set +e
+          moon run core:bench-context -- \
+            --cases benchmarks/context_pack_cases.json \
+            --auth-manifest .moon/cache/baseline-runtime-manifest.json \
+            --label "retrieval-${{ inputs.retrieval_mode }}" \
+            --repeat "${{ inputs.repeat }}" \
+            --metadata "retrieval_mode=${{ inputs.retrieval_mode }}"
+          bench_status="$?"
+          set -e
+
+          report="$(
+            find .moon/cache/evals -maxdepth 1 -name 'eval_context_pack_*.json' \
+              -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-
+          )"
+          test -n "$report"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+
+          if [[ "$bench_status" -ne 0 ]]; then
+            python - "$report" <<'PY'
+          import json, sys
+          report = json.load(open(sys.argv[1], encoding="utf-8"))
+          print("\nContext-pack failures")
+          seen = set()
+          for case in report.get("per_case", []):
+              if case.get("passed"):
+                  continue
+              reasons = tuple(case.get("failures") or [])
+              key = (case.get("name"), reasons)
+              if key in seen:
+                  continue
+              seen.add(key)
+              print(f"  {case.get('name')} repeat {case.get('repeat_index')}:")
+              for reason in reasons:
+                  print(f"    - {reason}")
+          PY
+            exit "$bench_status"
+          fi
+
+      - name: Gate the eval report
+        run: |
+          moon run bench-gate -- "${{ steps.eval.outputs.report }}" \
+            --profile context-pack \
+            --require-metadata "retrieval_mode=${{ inputs.retrieval_mode }}" \
+            --require-metadata "repeat_count=${{ inputs.repeat }}"
+
+      - name: Upload eval report
+        if: always() && steps.eval.outputs.report != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-context-pack-eval-${{ github.sha }}
+          path: ${{ steps.eval.outputs.report }}
+          if-no-files-found: error
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: |
+          echo "=== Backend server logs ==="
+          tail -n 200 /tmp/sibyld.log || true
+          echo ""
+          echo "=== Worker logs ==="
+          tail -n 200 /tmp/sibyl-worker.log || true
+          echo ""
+          echo "=== SurrealDB logs ==="
+          docker compose logs surrealdb || true
