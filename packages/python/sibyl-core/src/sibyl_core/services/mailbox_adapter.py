@@ -253,7 +253,13 @@ class MaildirSourceAdapter:
 
         maildir = mailbox.Maildir(path, create=False)
         try:
-            keys = sorted(maildir.keys())
+            symlinked_keys = _maildir_symlinked_keys(path, maildir.colon)
+            # iterating the mailbox yields messages, not keys, so .keys() is required
+            keys = sorted(
+                key
+                for key in maildir.keys()  # noqa: SIM118
+                if key not in symlinked_keys
+            )
             message_count = len(keys)
             for index, key in enumerate(keys):
                 if index < start:
@@ -610,6 +616,22 @@ def _maildir_entries(path: Path) -> list[Path]:
             if child.is_file() and not child.is_symlink()
         )
     return entries
+
+
+def _maildir_symlinked_keys(path: Path, colon: str) -> set[str]:
+    """Maildir keys whose backing file is a symlink and must not be ingested.
+
+    `mailbox.Maildir` happily reads through symlinked message files, so an
+    attacker who stages a Maildir with a symlinked entry could exfiltrate
+    arbitrary host files. The Maildir key is the unique-name prefix of the
+    filename (everything before the ``colon`` info separator).
+    """
+    symlinked: set[str] = set()
+    for folder in ("cur", "new"):
+        for child in (path / folder).iterdir():
+            if child.is_symlink():
+                symlinked.add(child.name.split(colon)[0])
+    return symlinked
 
 
 def _maildir_source_version(entries: list[Path]) -> str:
