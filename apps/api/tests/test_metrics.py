@@ -16,8 +16,8 @@ from sibyl.api.routes.metrics import (
     _normalize_metric_task_row,
     _parse_iso_date,
 )
-from sibyl_core.models.entities import Entity, EntityType
 from sibyl.auth.context import AuthContext
+from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.storage import Page
 
 # =============================================================================
@@ -1174,8 +1174,6 @@ class TestGetOrgMetrics:
             ),
         ]
 
-
-
     @pytest.mark.asyncio
     async def test_org_metrics_filters_to_accessible_projects(self) -> None:
         """Org metrics includes only projects/tasks in the caller access set."""
@@ -1232,6 +1230,7 @@ class TestGetOrgMetrics:
         assert [summary.id for summary in result.projects_summary] == ["proj_public"]
         assert result.status_distribution.doing == 1
         assert result.status_distribution.done == 0
+
 
 class TestGetProjectSummaries:
     """Tests for get_project_summaries endpoint."""

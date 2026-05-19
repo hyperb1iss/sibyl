@@ -21,8 +21,8 @@ from sibyl.api.schemas import (
 )
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
-from sibyl_core.auth import AuthOrganization, OrganizationRole
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
+from sibyl_core.auth import AuthOrganization, OrganizationRole
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService
 
@@ -369,9 +369,9 @@ def _prefer_valid_datetime_value(
     return metadata_value or row_value
 
 
-
-
-def _filter_projects_by_access(projects: list[Any], accessible_project_ids: set[str] | None) -> list[Any]:
+def _filter_projects_by_access(
+    projects: list[Any], accessible_project_ids: set[str] | None
+) -> list[Any]:
     """Filter projects to the caller's accessible set when provided."""
     if accessible_project_ids is None:
         return projects
@@ -391,6 +391,7 @@ def _filter_tasks_by_access(
         if project_id and project_id in accessible_project_ids:
             filtered.append(task)
     return filtered
+
 
 def _normalize_metric_task_row(row: dict[str, Any]) -> dict[str, Any]:
     """Normalize raw task rows into the legacy task-shaped metrics format."""
