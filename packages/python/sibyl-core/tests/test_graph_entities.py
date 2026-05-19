@@ -1303,6 +1303,25 @@ class TestEntityListByType:
         assert ids == {"task-001", "task-002"}
 
     @pytest.mark.asyncio
+    async def test_list_by_type_caps_status_filter_value_expansion(
+        self,
+        entity_manager: EntityManager,
+        mock_driver: MagicMock,
+    ) -> None:
+        """list_by_type() caps comma-separated filter expansion to prevent query blowups."""
+        mock_driver.execute_query.return_value = ([], None, None)
+        status_filter = ",".join(f"value{i}" for i in range(60))
+
+        await entity_manager.list_by_type(EntityType.TASK, status=status_filter)
+
+        kwargs = mock_driver.execute_query.await_args.kwargs
+        assert len(kwargs["status_values"]) == 25
+        assert kwargs["status_values"][0] == "value0"
+        assert kwargs["status_values"][-1] == "value24"
+        legacy_keys = [k for k in kwargs if k.startswith("legacy_status_")]
+        assert len(legacy_keys) == 50
+
+    @pytest.mark.asyncio
     async def test_list_by_type_with_priority_filter(
         self,
         entity_manager: EntityManager,
