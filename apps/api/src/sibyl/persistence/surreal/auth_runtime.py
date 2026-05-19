@@ -443,27 +443,36 @@ def _apply_password_change(
     new_password: str,
 ) -> SurrealRecord:
     updated = dict(record)
-    if (
+    has_local_password = bool(
         record.get("password_salt")
         and record.get("password_hash")
         and record.get("password_iterations")
-    ):
-        if not current_password:
-            raise HTTPException(status_code=400, detail="Current password is required")
-        try:
-            password_matches = verify_password(
-                current_password,
-                salt_hex=str(record["password_salt"]),
-                hash_hex=str(record["password_hash"]),
-                iterations=_coerce_int(
-                    record.get("password_iterations"),
-                    field_name="user.password_iterations",
-                ),
-            )
-        except (TypeError, ValueError):
-            password_matches = False
-        if not password_matches:
-            raise HTTPException(status_code=400, detail="Invalid current password")
+    )
+    if not has_local_password:
+        # OAuth-only accounts have no credential to verify, so a change-password
+        # request here would set a new local password unauthenticated, turning a
+        # transient OAuth session into persistent takeover. Adding a first local
+        # password must go through a dedicated, re-authenticated flow.
+        raise HTTPException(
+            status_code=400,
+            detail="This account has no password to change",
+        )
+    if not current_password:
+        raise HTTPException(status_code=400, detail="Current password is required")
+    try:
+        password_matches = verify_password(
+            current_password,
+            salt_hex=str(record["password_salt"]),
+            hash_hex=str(record["password_hash"]),
+            iterations=_coerce_int(
+                record.get("password_iterations"),
+                field_name="user.password_iterations",
+            ),
+        )
+    except (TypeError, ValueError):
+        password_matches = False
+    if not password_matches:
+        raise HTTPException(status_code=400, detail="Invalid current password")
 
     try:
         password_state = hash_password(new_password)

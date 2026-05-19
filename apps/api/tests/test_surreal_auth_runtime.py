@@ -2674,3 +2674,56 @@ async def test_resolve_request_claims_allows_rest_write_with_api_write_scope(
 
     assert claims is not None
     assert claims["typ"] == "api_key"
+
+
+def test_apply_password_change_rejects_oauth_only_account() -> None:
+    record = {"uuid": str(uuid4()), "email": "oauth@example.com"}
+
+    with pytest.raises(HTTPException) as exc:
+        surreal_auth_runtime._apply_password_change(
+            record,
+            current_password=None,
+            new_password="attacker-controlled-pw",
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "This account has no password to change"
+
+
+def test_apply_password_change_requires_current_password() -> None:
+    existing = hash_password("real-current-password")
+    record = {
+        "uuid": str(uuid4()),
+        "password_salt": existing.salt_hex,
+        "password_hash": existing.hash_hex,
+        "password_iterations": existing.iterations,
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        surreal_auth_runtime._apply_password_change(
+            record,
+            current_password=None,
+            new_password="new-password-123",
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Current password is required"
+
+
+def test_apply_password_change_rotates_credential_for_local_account() -> None:
+    existing = hash_password("real-current-password")
+    record = {
+        "uuid": str(uuid4()),
+        "password_salt": existing.salt_hex,
+        "password_hash": existing.hash_hex,
+        "password_iterations": existing.iterations,
+    }
+
+    updated = surreal_auth_runtime._apply_password_change(
+        record,
+        current_password="real-current-password",
+        new_password="brand-new-password",
+    )
+
+    assert updated["password_hash"] != existing.hash_hex
+    assert updated["password_salt"] != existing.salt_hex
