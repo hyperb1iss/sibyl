@@ -420,6 +420,13 @@ main() {
 
     surreal_volume_dir="$(resolve_surreal_volume_dir)"
     mkdir -p "$surreal_volume_dir"
+    # The compose `surrealdb` service mounts this dir with the podman `:U` flag,
+    # which should chown it to the container UID. But `docker compose` (the
+    # plugin podman delegates to by default) silently drops `:U`, leaving the
+    # SurrealDB image's non-root user (uid 65532) unable to write a host-owned
+    # bind mount and exiting with `Failed to create RocksDB directory`. Open
+    # the directory so RocksDB initialisation succeeds regardless of mapping.
+    chmod 0777 "$surreal_volume_dir"
     export SURREAL_DATA_DIR="$surreal_volume_dir"
     export SIBYL_SURREAL_URL="ws://127.0.0.1:${SIBYL_SURREAL_PORT:-8000}/rpc"
     export SIBYL_SURREAL_USERNAME="${SIBYL_SURREAL_USERNAME:-root}"
