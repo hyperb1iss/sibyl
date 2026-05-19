@@ -9,9 +9,10 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Self--hostable-Yes-e135ff?style=for-the-badge" alt="Self-hostable">
-  <img src="https://img.shields.io/badge/Graph-Bi--temporal-80ffea?style=for-the-badge" alt="Bi-temporal graph">
   <img src="https://img.shields.io/badge/Storage-SurrealDB-ff6ac1?style=for-the-badge&logo=surrealdb&logoColor=white" alt="SurrealDB">
-  <img src="https://img.shields.io/badge/Agents-MCP_%2B_Skills-50fa7b?style=for-the-badge" alt="MCP + Skills">
+  <img src="https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/Frontend-Next.js_16-000000?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js 16">
+  <img src="https://img.shields.io/badge/Python-3.13-3776ab?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.13">
 </p>
 
 <p align="center">
