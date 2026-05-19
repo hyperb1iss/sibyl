@@ -12,6 +12,13 @@ from sibyl_core.evals.context import (
     get_sample_context_pack_cases,
     load_context_pack_cases,
 )
+from sibyl_core.evals.longmemeval import (
+    CORPUS_TEXT_POLICY,
+    LongMemEvalCorpusDocument,
+    average_metric,
+    build_longmemeval_corpus,
+    score_longmemeval_ranking,
+)
 from sibyl_core.evals.metrics import (
     EvalMetrics,
     EvalQuery,
@@ -37,6 +44,7 @@ from sibyl_core.evals.runtime import (
 )
 
 __all__ = [
+    "CORPUS_TEXT_POLICY",
     "FROZEN_CONTEXT_PACK_SUITE_NAMES",
     "ContextPackCaseResult",
     "ContextPackEvalCase",
@@ -49,8 +57,11 @@ __all__ = [
     "EvalReport",
     "EvalResult",
     "EvalRunner",
+    "LongMemEvalCorpusDocument",
     "RetrievalResult",
     "aggregate_metrics",
+    "average_metric",
+    "build_longmemeval_corpus",
     "compute_metrics",
     "context_pack_from_dict",
     "dcg_at_k",
@@ -65,5 +76,6 @@ __all__ = [
     "recall_at_k",
     "run_context_pack_evaluation_cli",
     "run_evaluation_cli",
+    "score_longmemeval_ranking",
     "success_at_k",
 ]

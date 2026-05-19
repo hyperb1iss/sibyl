@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ruff: noqa: B905, PLC0415, PLR0915, PLR2004, S110, S607, SIM105, T201
+# ruff: noqa: B905, I001, PLC0415, PLR2004, S110, S607, SIM105, T201
 """
 Sibyl x LongMemEval Offline Baseline
 ====================================
@@ -27,7 +27,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import math
 import re
 import subprocess
 import sys
@@ -43,32 +42,12 @@ except ModuleNotFoundError:
     chromadb = None
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "python" / "sibyl-core" / "src"))
-
-
-# =============================================================================
-# METRICS (same as MemPalace for apple-to-apple comparison)
-# =============================================================================
-
-
-def dcg(relevances: list[float], k: int) -> float:
-    score = 0.0
-    for i, rel in enumerate(relevances[:k]):
-        score += rel / math.log2(i + 2)
-    return score
-
-
-def ndcg_score(rankings: list[int], correct_ids: set[str], corpus_ids: list[str], k: int) -> float:
-    relevances = [1.0 if corpus_ids[idx] in correct_ids else 0.0 for idx in rankings[:k]]
-    ideal = sorted(relevances, reverse=True)
-    idcg = dcg(ideal, k)
-    if idcg == 0:
-        return 0.0
-    return dcg(relevances, k) / idcg
-
-
-def recall_at_k(rankings: list[int], correct_ids: set[str], corpus_ids: list[str], k: int) -> float:
-    top_k = {corpus_ids[idx] for idx in rankings[:k]}
-    return float(any(cid in top_k for cid in correct_ids))
+from sibyl_core.evals.longmemeval import (
+    CORPUS_TEXT_POLICY,
+    average_metric,
+    build_longmemeval_corpus,
+    score_longmemeval_ranking,
+)
 
 
 # =============================================================================
@@ -193,8 +172,9 @@ def retrieve_raw(entry: dict, n_results: int = 50) -> tuple[list[int], list[str]
 def retrieve_hybrid(entry: dict, n_results: int = 50) -> tuple[list[int], list[str]]:
     """Sibyl-style hybrid: embedding + keyword overlap + temporal proximity."""
 
-    corpus, corpus_ids = _build_corpus(entry)
-    timestamps = entry.get("haystack_dates", [])
+    documents = build_longmemeval_corpus(entry)
+    corpus = [document.text for document in documents]
+    corpus_ids = [document.session_id for document in documents]
     if not corpus:
         return [], corpus_ids
 
@@ -203,10 +183,8 @@ def retrieve_hybrid(entry: dict, n_results: int = 50) -> tuple[list[int], list[s
         documents=corpus,
         ids=[f"doc_{i}" for i in range(len(corpus))],
         metadatas=[
-            {"corpus_id": cid, "timestamp": ts if i < len(timestamps) else ""}
-            for i, (cid, ts) in enumerate(
-                zip(corpus_ids, timestamps + [""] * max(0, len(corpus_ids) - len(timestamps)))
-            )
+            {"corpus_id": document.session_id, "timestamp": document.timestamp}
+            for document in documents
         ],
     )
 
@@ -278,14 +256,10 @@ def retrieve_hybrid(entry: dict, n_results: int = 50) -> tuple[list[int], list[s
 
 def _build_corpus(entry: dict) -> tuple[list[str], list[str]]:
     """Build corpus from haystack sessions (user turns only, one doc per session)."""
-    corpus = []
-    corpus_ids = []
-    for session, sess_id in zip(entry["haystack_sessions"], entry["haystack_session_ids"]):
-        user_turns = [t["content"] for t in session if t["role"] == "user"]
-        if user_turns:
-            corpus.append("\n".join(user_turns))
-            corpus_ids.append(sess_id)
-    return corpus, corpus_ids
+    documents = build_longmemeval_corpus(entry)
+    return [document.text for document in documents], [
+        document.session_id for document in documents
+    ]
 
 
 def _parse_date(date_str: str):
@@ -397,15 +371,8 @@ def run_benchmark(
         correct = set(entry["answer_session_ids"])
 
         rankings, corpus_ids = retrieve_fn(entry)
-
-        metrics = {}
-        for k in k_values:
-            r = recall_at_k(rankings, correct, corpus_ids, k)
-            n = ndcg_score(rankings, correct, corpus_ids, k)
-            metrics[f"recall@{k}"] = r
-            metrics[f"ndcg@{k}"] = n
-
         ranked_session_ids = [corpus_ids[idx] for idx in rankings]
+        metrics = score_longmemeval_ranking(ranked_session_ids, correct, k_values)
         result = {
             "question_id": entry["question_id"],
             "question_type": q_type,
@@ -434,18 +401,24 @@ def run_benchmark(
     print(f"{'=' * 60}")
 
     overall = {}
+    metric_names = [
+        f"{metric}@{k}" for k in k_values for metric in ("hit", "legacy_recall", "recall", "ndcg")
+    ]
     for k in k_values:
-        rk = f"recall@{k}"
-        nk = f"ndcg@{k}"
-        overall[rk] = sum(r[rk] for r in all_results) / len(all_results)
-        overall[nk] = sum(r[nk] for r in all_results) / len(all_results)
-        print(f"  Overall R@{k}: {overall[rk] * 100:.1f}%  NDCG@{k}: {overall[nk]:.3f}")
+        for metric in ("hit", "legacy_recall", "recall", "ndcg"):
+            key = f"{metric}@{k}"
+            overall[key] = average_metric(all_results, key)
+        print(
+            f"  Overall H@{k}: {overall[f'hit@{k}'] * 100:.1f}%  "
+            f"R@{k}: {overall[f'recall@{k}'] * 100:.1f}%  "
+            f"NDCG@{k}: {overall[f'ndcg@{k}']:.3f}"
+        )
 
     print("\n  Per question type:")
     for q_type, type_results in sorted(results_by_type.items()):
         for k in k_values:
             rk = f"recall@{k}"
-            avg = sum(r[rk] for r in type_results) / len(type_results)
+            avg = average_metric(type_results, rk)
             print(f"    {q_type:35s} R@{k}: {avg * 100:.1f}% ({len(type_results)} questions)")
 
     print(f"\n  Time: {elapsed:.1f}s ({elapsed / len(entries) * 1000:.0f}ms/question)")
@@ -473,6 +446,7 @@ def run_benchmark(
             "name": dataset_path.stem,
             "path": data_path,
             "corpus_hash": _sha256_file(dataset_path),
+            "corpus_text_policy": CORPUS_TEXT_POLICY,
             "total_entries": total_entries,
             "evaluated_entries": total,
             "limit": limit,
@@ -483,11 +457,7 @@ def run_benchmark(
         "total_questions": total,
         "overall": overall,
         "per_type": {
-            qt: {
-                metric: sum(r[metric] for r in results) / len(results)
-                for metric in results[0]
-                if metric.startswith(("recall", "ndcg"))
-            }
+            qt: {metric: average_metric(results, metric) for metric in metric_names}
             for qt, results in results_by_type.items()
         },
         "case_results": all_results,
