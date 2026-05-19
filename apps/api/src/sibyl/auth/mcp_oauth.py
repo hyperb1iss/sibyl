@@ -636,8 +636,8 @@ class SibylMcpOAuthProvider(
         options = "\n".join(
             (
                 '<label style="display:block;margin:10px 0;padding:10px;border:1px solid #2a2a3a;border-radius:10px;">'
-                f'<input type="radio" name="org_id" value="{org.id}" required style="margin-right:10px;" />'
-                f"<strong>{org.name}</strong>"
+                f'<input type="radio" name="org_id" value="{escape(str(org.id), quote=True)}" required style="margin-right:10px;" />'
+                f"<strong>{escape(org.name)}</strong>"
                 + (' <span style="color:#a7a7c7">(personal)</span>' if org.is_personal else "")
                 + "</label>"
             )
@@ -666,12 +666,12 @@ class SibylMcpOAuthProvider(
     <h1>Select an organization</h1>
     <div class="sub">Choose which org to use for this MCP session.</div>
     <form method="post" action="/_oauth/org">
-      <input type="hidden" name="req" value="{request_id}" />
+      <input type="hidden" name="req" value="{escape(request_id, quote=True)}" />
       {options}
       <button type="submit">Continue</button>
     </form>
     <form method="post" action="/_oauth/org">
-      <input type="hidden" name="req" value="{request_id}" />
+      <input type="hidden" name="req" value="{escape(request_id, quote=True)}" />
       <input type="hidden" name="create_personal" value="1" />
       <button class="secondary" type="submit">Create / use personal org</button>
     </form>
