@@ -536,12 +536,16 @@ async def materialize_synthesis_section_packs(
             freshness[source_id] = item_freshness
             unresolved_claims.extend(_metadata_unresolved_claims(metadata))
             source_metadata = {
-                **metadata,
                 "facet": item.facet.value,
                 "freshness": item_freshness,
                 "project_id": project_id,
                 "reason": item.reason,
             }
+            if not redacted:
+                source_metadata = {
+                    **metadata,
+                    **source_metadata,
+                }
             sources.append(
                 SynthesisSourceReference(
                     id=source_id,

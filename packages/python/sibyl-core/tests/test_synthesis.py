@@ -398,6 +398,12 @@ async def test_materialize_synthesis_section_packs_redacts_visible_text() -> Non
     assert pack.redaction_count == 1
     assert pack.sources[0].content_preview == ""
     assert pack.unresolved_claims == ["needs citation"]
+    assert pack.sources[0].metadata == {
+        "facet": ContextFacet.RECENT_MEMORY.value,
+        "freshness": None,
+        "project_id": None,
+        "reason": "redacted source",
+    }
 
 
 @pytest.mark.asyncio
