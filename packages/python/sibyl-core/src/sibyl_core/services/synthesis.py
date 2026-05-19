@@ -109,6 +109,7 @@ CORRECTED_LIFECYCLE_STATES = {
     "superseded",
     "wrong",
 }
+MAX_EXPLICIT_NEIGHBORHOOD_IDS = 100
 
 
 async def default_search(**kwargs: Any) -> SearchResponse:
@@ -940,6 +941,7 @@ async def plan_synthesis(
             for source_id in request.artifact_ids
         ],
     ]
+    explicit_sources = _dedupe_sources(explicit_sources)[:MAX_EXPLICIT_NEIGHBORHOOD_IDS]
     searched_sources = await _search_sources(
         query=base_query,
         organization_id=organization_id,
