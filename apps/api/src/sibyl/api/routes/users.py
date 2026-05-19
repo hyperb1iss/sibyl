@@ -215,6 +215,16 @@ async def change_password(
     auth: AuthContext = Depends(get_auth_context),
 ) -> None:
     """Change current user's password."""
+    if not (
+        auth.user.password_salt
+        and auth.user.password_hash
+        and auth.user.password_iterations
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is not set for this account",
+        )
+
     user = await update_auth_user(
         user_id=auth.user.id,
         email=None,
