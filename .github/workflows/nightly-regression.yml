@@ -182,6 +182,29 @@ jobs:
             --workflow "${GITHUB_WORKFLOW}" \
             "${history_args[@]}"
 
+      - name: Record baseline parity receipt
+        if: always()
+        run: |
+          mkdir -p .moon/cache/nightly
+          {
+            echo "workflow=${GITHUB_WORKFLOW}"
+            echo "job=baseline-parity"
+            echo "candidate_sha=${GITHUB_SHA}"
+            echo "ref=${GITHUB_REF_NAME}"
+            echo "run_id=${GITHUB_RUN_ID}"
+            echo "run_attempt=${GITHUB_RUN_ATTEMPT}"
+            echo "event=${GITHUB_EVENT_NAME}"
+            echo "completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > .moon/cache/nightly/baseline-parity-receipt.txt
+
+      - name: Upload baseline parity receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-parity-receipt-${{ github.sha }}
+          path: .moon/cache/nightly/baseline-parity-receipt.txt
+          if-no-files-found: error
+
       - name: Upload context-pack retrieval compare report
         if: always() && steps.context-pack-compare.outputs.report != ''
         uses: actions/upload-artifact@v4
@@ -269,3 +292,26 @@ jobs:
 
       - name: Run live graph regression suite
         run: moon run api:test-live
+
+      - name: Record live graph receipt
+        if: always()
+        run: |
+          mkdir -p .moon/cache/nightly
+          {
+            echo "workflow=${GITHUB_WORKFLOW}"
+            echo "job=live-graph"
+            echo "candidate_sha=${GITHUB_SHA}"
+            echo "ref=${GITHUB_REF_NAME}"
+            echo "run_id=${GITHUB_RUN_ID}"
+            echo "run_attempt=${GITHUB_RUN_ATTEMPT}"
+            echo "event=${GITHUB_EVENT_NAME}"
+            echo "completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > .moon/cache/nightly/live-graph-receipt.txt
+
+      - name: Upload live graph receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-graph-receipt-${{ github.sha }}
+          path: .moon/cache/nightly/live-graph-receipt.txt
+          if-no-files-found: error

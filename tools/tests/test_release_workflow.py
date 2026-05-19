@@ -62,8 +62,10 @@ def test_release_workflow_gates_before_tag_or_publish() -> None:
     workflow = (REPO_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
     gate_index = workflow.index("moon run :check")
+    nightly_index = workflow.index("Validate nightly regression receipt")
     assert gate_index < workflow.index('git tag -a "v${{ steps.version.outputs.version }}"')
     assert gate_index < workflow.index("gh workflow run publish.yml")
+    assert nightly_index < workflow.index('git tag -a "v${{ steps.version.outputs.version }}"')
     assert 'git commit -m "🔖' not in workflow
     assert "chore(release): prepare v${{ steps.version.outputs.version }}" in workflow
     assert "Release gates run on this exact commit before the tag is pushed." in workflow
@@ -72,6 +74,21 @@ def test_release_workflow_gates_before_tag_or_publish() -> None:
     assert "Build and checks passed. Ready to release." not in workflow
     assert "rc-gate-receipt-${{ steps.candidate.outputs.short_sha }}" in workflow
     assert r"(-[a-zA-Z0-9.]+)?" in workflow
+    assert "nightly_run_id" in workflow
+    assert 'workflowName") != "Nightly Regression"' in workflow
+    assert 'run.get("headSha") != candidate_sha' in workflow
+    assert "Prerelease candidates must have VERSION committed" in workflow
+    assert "steps.version.outputs.needs_version_commit == 'true'" in workflow
+    assert "from: ${{ steps.version.outputs.previous_tag }}" in workflow
+
+
+def test_nightly_regression_uploads_candidate_sha_receipts() -> None:
+    workflow = (REPO_ROOT / ".github/workflows/nightly-regression.yml").read_text(encoding="utf-8")
+
+    assert "baseline-parity-receipt-${{ github.sha }}" in workflow
+    assert "live-graph-receipt-${{ github.sha }}" in workflow
+    assert "candidate_sha=${GITHUB_SHA}" in workflow
+    assert "run_id=${GITHUB_RUN_ID}" in workflow
 
 
 def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
