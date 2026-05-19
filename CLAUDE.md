@@ -92,7 +92,6 @@ cross-package dependencies. Never use raw `pnpm`/`uv` commands for lint, test, b
 ```bash
 # Lifecycle
 moon run dev              # Start SurrealDB, API with in-process jobs, and web. Default.
-moon run migrate-local-surreal  # Move local legacy data into SurrealDB.
 moon run stop             # Stop all services
 
 # Quality (from any directory)
