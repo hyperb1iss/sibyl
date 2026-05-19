@@ -40,22 +40,25 @@
 
 ## 🔮 Why Sibyl
 
-Sibyl is the persistent memory layer for the AI you build with — yours alone, in your
-projects, and in the systems you share with others. One self-hostable knowledge graph,
-scoped by context. Yours.
+Sibyl is persistent memory for the coding agents that live in your terminal, the
+copilots you talk to all day, and the shared systems you build with others. One
+self-hostable knowledge graph, scoped by context. Yours to run, yours to keep.
 
 Most AI sessions start cold. Coding agents forget yesterday's decisions. Voice
 assistants don't know your preferences. Personal copilots lose the thread between
-conversations. Notes drift. Tasks scatter. Useful context evaporates.
+conversations. Notes drift, tasks scatter, useful context evaporates.
 
-**Sibyl changes that.**
-
-A durable knowledge graph holds the things that matter — personal context, project
-work, shared spaces, source documents, decisions, agent state — each in its own scope,
-tied together when context calls for it. A built-in memory loop
+A durable knowledge graph holds what matters: personal context, project work, shared
+spaces, source documents, decisions, agent state. Each lives in its own scope and
+gets tied to the others when context calls for it. A built-in memory loop
 (`recall → act → remember → reflect`) keeps hard-won context close at hand for humans
 and AI alike. Source-grounded synthesis turns what you already know into verified
 documents.
+
+The CLI is the interaction surface. Any agent that runs shell commands (Claude Code,
+Codex, Cursor, Aider, Cline, your own scripts) can recall context, capture learnings,
+and run task workflows the same way you do. MCP is available for clients that prefer
+it; the depth lives in the CLI.
 
 **Every session adds up instead of starting over.**
 
@@ -63,13 +66,13 @@ documents.
 
 | Capability | What It Means |
 | ---------- | ------------- |
-| 🔮 **Collective Intelligence** | Every session compounds. The graph gets smarter as your team and tools capture real work |
-| 🪄 **The Memory Loop** | `recall → act → remember → reflect` is built into the CLI, MCP, and hooks. Agents wake up with context and leave it behind |
-| 🎯 **Semantic Search** | Find knowledge by meaning. "Authentication patterns" finds OAuth solutions even when "OAuth" isn't in the text |
-| 🦋 **Task Workflow** | Plan with epics and tasks. Track execution across sessions and teammates in one place |
-| 🧪 **Source-Grounded Synthesis** | Draft verified documents from your own memory, with citation, freshness, and gap checks |
-| 🌊 **Doc & Source Ingestion** | Crawl documentation sites and import sources (like mailboxes) into the same graph |
-| 💎 **Multi-Tenancy** | Isolated graphs per organization, with role-based access. Enterprise-ready from day one |
+| 🔮 **Compounding Context** | Every session adds to the graph instead of starting over. The longer you use it, the sharper it gets |
+| 🪄 **The Memory Loop** | `recall → act → remember → reflect` runs through the CLI, MCP, and hooks. Agents wake with context and leave it behind |
+| 🎯 **Semantic Search** | Find knowledge by meaning. "Authentication patterns" surfaces OAuth notes even when "OAuth" isn't in the text |
+| 🦋 **Task Workflow** | Plan with epics and tasks, then track execution across sessions and teammates in one place |
+| 🧪 **Source-Grounded Synthesis** | Draft verified documents from your own memory with citation, freshness, and gap checks |
+| 🌊 **Source Ingestion** | Crawl documentation sites and import sources (mailboxes, archives) into the same graph |
+| 💎 **Scoped Multi-Tenancy** | Isolated graphs per organization with role-based access. Personal, project, and team scopes stay separate by design |
 
 <table>
   <tr>
@@ -366,8 +369,8 @@ sibyl/
 - **Frontend:** Next.js 16 / React 19 / React Query / Tailwind 4
 - **Storage:** SurrealDB unifies graph, content, and auth. PostgreSQL is retained only
   for migration and archive rehearsal.
-- **AI:** A native LLM substrate routes Anthropic, OpenAI, and Gemini per surface, with
-  pluggable embeddings.
+- **AI routing:** Anthropic, OpenAI, and Gemini swap per surface; embeddings are
+  pluggable.
 - **Coordination:** In-process by default; Redis/Valkey is optional for multi-process
   or distributed deployments.
 - **Build:** moonrepo + uv (Python) + pnpm (TypeScript)
@@ -465,9 +468,9 @@ scattering them across tools.
   crawler extraction, synthesis, and reflection.
 - **OpenAI or Gemini** (required): for embeddings and semantic search.
 
-Providers and models are configurable globally or per surface through the native LLM
-substrate. The web admin settings page can also save instance-wide model routing. A
-typical solo developer uses around $5/month in API costs.
+Providers and models are configurable globally or per surface, and the web admin
+settings page can save instance-wide model routing. A typical solo developer uses
+around $5/month in API costs.
 
 ### Is it production-ready?
 
