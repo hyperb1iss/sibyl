@@ -972,11 +972,7 @@ def _edge_filter_clause(
 def _edge_match_filter_clause(
     search_filter: NativeSearchFilter,
 ) -> tuple[list[str], dict[str, Any]]:
-    clauses, params = _edge_filter_clause(search_filter)
-    if search_filter.edge_uuids:
-        clauses.append("uuid IN $edge_uuids")
-        params["edge_uuids"] = list(search_filter.edge_uuids)
-    return clauses, params
+    return _edge_filter_clause(search_filter)
 
 
 def _edge_select(extra: str | None = None) -> str:
