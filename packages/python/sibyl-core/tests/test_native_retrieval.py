@@ -943,11 +943,12 @@ async def test_edge_fulltext_splits_matches_from_relation_hydration() -> None:
     match_query = client.calls[0][0]
     hydrate_query = client.calls[1][0]
     assert "fact @0@" in match_query
-    assert "in." not in match_query
-    assert "out." not in match_query
-    assert "attributes." not in match_query
+    assert "attributes.project_id IN $project_ids" in match_query
+    assert "in.project_id IN $project_ids" in match_query
+    assert "out.project_id IN $project_ids" in match_query
     assert "uuid IN $edge_uuids" in match_query
     assert "name IN $edge_types" in match_query
     assert client.calls[0][1]["match_limit"] == 32
+    assert client.calls[0][1]["project_ids"] == ["project_123"]
     assert "fact @0@" not in hydrate_query
     assert "uuid IN $match_uuids" in hydrate_query
