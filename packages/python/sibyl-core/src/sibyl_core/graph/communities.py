@@ -44,6 +44,8 @@ _COMMUNITY_PAGE_SIZE = 500
 _GRAPH_DIVERSITY_THRESHOLD = 100
 _GRAPH_PRIMARY_SAMPLE_SHARE = 0.8
 _GRAPH_MISSING_TYPE_MIN_RESERVE = 5
+_GRAPH_FETCH_NODE_MULTIPLIER = 3
+_GRAPH_FETCH_EDGE_MULTIPLIER = 3
 GRAPH_RESOLUTION_OVERVIEW = "overview"
 GRAPH_RESOLUTION_DETAIL = "detail"
 
@@ -1349,8 +1351,18 @@ async def _fetch_graph_nodes(
 ) -> tuple[list[dict[str, Any]], set[str]]:
     """Fetch nodes with cluster assignments, optionally filtered by project/type."""
     try:
-        entities = await _list_all_entities(client, organization_id)
-        relationships = await _list_all_relationships(client, organization_id)
+        max_entities = max(max_nodes * _GRAPH_FETCH_NODE_MULTIPLIER, max_nodes)
+        estimated_max_edges = max_nodes * 5
+        max_relationships = max(
+            estimated_max_edges * _GRAPH_FETCH_EDGE_MULTIPLIER,
+            estimated_max_edges,
+        )
+        entities = await _list_all_entities(client, organization_id, max_items=max_entities)
+        relationships = await _list_all_relationships(
+            client,
+            organization_id,
+            max_items=max_relationships,
+        )
         return _build_graph_nodes_from_snapshot(
             entities,
             relationships,
@@ -1375,7 +1387,12 @@ async def _fetch_graph_edges(
         return []
 
     try:
-        relationships = await _list_all_relationships(client, organization_id)
+        max_relationships = max(max_edges * _GRAPH_FETCH_EDGE_MULTIPLIER, max_edges)
+        relationships = await _list_all_relationships(
+            client,
+            organization_id,
+            max_items=max_relationships,
+        )
         return _build_graph_edges_from_snapshot(
             relationships,
             node_ids,
