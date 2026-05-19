@@ -3,7 +3,8 @@ name: sibyl
 description:
   Graph-RAG knowledge system with CLI interface. Use for semantic search, task management, knowledge
   capture, project audits, and sprint planning. Invoke when you need persistent memory across
-  sessions, pattern/learning lookup, or task tracking. Requires the Sibyl data services running.
+  sessions, pattern/learning lookup, or task tracking. Also covers migrating a legacy
+  FalkorDB+PostgreSQL install onto SurrealDB. Requires the Sibyl data services running.
 allowed-tools: Bash, Grep, Glob, Read
 ---
 
@@ -595,6 +596,23 @@ sibyl add "Descriptive title" "What you learned and why it matters"
 ```bash
 sibyl task complete task_a1b2c3d4e5f6 --hours 4.5 --learnings "Key insight: The OAuth flow requires..."
 ```
+
+---
+
+## Migrating from FalkorDB + PostgreSQL
+
+If a local install still has legacy FalkorDB + PostgreSQL data — typical signs are `moon run dev` aborting with `⚠️  Local legacy data detected`, the Sibyl server unreachable, and writes piling up in `~/.config/sibyl/pending_writes/` — follow the agent playbook in [MIGRATION.md](MIGRATION.md).
+
+The playbook covers:
+
+- Anchoring on commit `290b824b` (v0.6.0 — version-bumped but never tagged; `git tag` stops at `v0.4.1`).
+- Bringing up legacy FalkorDB + Postgres on the real data volumes (the `_data`-suffixed ones are empty post-rename targets).
+- Exporting from the v0.6.0 worktree, then importing through the current branch with `sibyld migrate import --source-type legacy-archive --target-mode surreal --yes --clean`.
+- Two latent bugs you will hit:
+  - The compose file's `:U` bind-mount flag is silently dropped under `podman compose`'s docker-compose plugin → SurrealDB fails to start with `Failed to create RocksDB directory: PermissionDenied`. Fix: `chmod 0777 .moon/cache/surreal-dev`.
+  - `sibyld migrate verify` reports false-positive `missing imported episode` errors on legacy archives — the importer rekeys episodes to native Surreal record IDs while preserving the legacy ID in the `uuid` field. Verify counts directly via the SurrealDB `/sql` endpoint when this happens.
+
+Do not auto-start `moon run dev` after migration — propose it; let the user run it. Sacred Boundary.
 
 ---
 
