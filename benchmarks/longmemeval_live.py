@@ -243,6 +243,56 @@ def _chunk_entity_content(text: str) -> list[str]:
     ]
 
 
+def _set_active_phase(
+    active_case: dict[str, Any] | None,
+    phase: str,
+    **metadata: object,
+) -> None:
+    if active_case is None:
+        return
+    for key in (
+        "document_index",
+        "document_count",
+        "chunk_index",
+        "chunk_count",
+        "path",
+    ):
+        active_case.pop(key, None)
+    active_case["phase"] = phase
+    active_case["phase_started_at"] = time.monotonic()
+    active_case.update(metadata)
+
+
+def _format_active_case_summary(
+    case_index: int,
+    metadata: dict[str, Any],
+    now: float,
+) -> str:
+    parts = [
+        f"case={case_index}",
+        f"type={metadata.get('question_type')}",
+        f"worker={metadata.get('worker')}",
+        f"elapsed={now - float(metadata['started_at']):.1f}s",
+    ]
+    phase = metadata.get("phase")
+    if phase:
+        phase_started = float(metadata.get("phase_started_at") or metadata["started_at"])
+        parts.append(f"phase={phase}")
+        parts.append(f"phase_elapsed={now - phase_started:.1f}s")
+    document_index = metadata.get("document_index")
+    document_count = metadata.get("document_count")
+    if document_index is not None and document_count is not None:
+        parts.append(f"doc={document_index}/{document_count}")
+    chunk_index = metadata.get("chunk_index")
+    chunk_count = metadata.get("chunk_count")
+    if chunk_index is not None and chunk_count is not None:
+        parts.append(f"chunk={chunk_index}/{chunk_count}")
+    path = metadata.get("path")
+    if path:
+        parts.append(f"path={path}")
+    return " ".join(parts)
+
+
 async def _ingest_haystack(
     client: httpx.AsyncClient,
     *,
@@ -250,6 +300,7 @@ async def _ingest_haystack(
     run_id: str,
     case_index: int,
     corpus_text_policy: str,
+    active_case: dict[str, Any] | None = None,
 ) -> tuple[list[str], float, int, int]:
     start = time.perf_counter()
     question_id = str(entry["question_id"])
@@ -261,6 +312,15 @@ async def _ingest_haystack(
         if len(content_chunks) > 1:
             chunked_session_count += 1
         for chunk_index, content_chunk in enumerate(content_chunks):
+            _set_active_phase(
+                active_case,
+                "ingest",
+                document_index=document_index + 1,
+                document_count=len(documents),
+                chunk_index=chunk_index + 1,
+                chunk_count=len(content_chunks),
+                path="/entities",
+            )
             created = await _post_json(
                 client,
                 "/entities",
@@ -517,6 +577,7 @@ async def _run_case(
     timeout_seconds: float,
     corpus_text_policy: str,
     transport: httpx.AsyncBaseTransport | None = None,
+    active_case: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     timings_ms: dict[str, float] = {}
@@ -526,20 +587,25 @@ async def _run_case(
         headers={"Content-Type": "application/json"},
         transport=transport,
     ) as client:
+        _set_active_phase(active_case, "health", path="/health")
         phase_started = time.perf_counter()
         await _get_json(client, "/health")
         timings_ms["health"] = (time.perf_counter() - phase_started) * 1000
+        _set_active_phase(active_case, "signup", path="/auth/local/signup")
         phase_started = time.perf_counter()
         tenant = await _signup_throwaway_tenant(client, run_id=run_id, case_index=case_index)
         timings_ms["signup"] = (time.perf_counter() - phase_started) * 1000
+        _set_active_phase(active_case, "ingest")
         created_ids, ingest_ms, chunked_session_count, document_count = await _ingest_haystack(
             client,
             entry=entry,
             run_id=run_id,
             case_index=case_index,
             corpus_text_policy=corpus_text_policy,
+            active_case=active_case,
         )
         timings_ms["ingest"] = ingest_ms
+        _set_active_phase(active_case, "readiness", path="/search")
         phase_started = time.perf_counter()
         readiness = await _verify_namespace_probe(
             client,
@@ -548,6 +614,7 @@ async def _run_case(
             timeout_seconds=readiness_timeout_seconds,
         )
         timings_ms["readiness"] = (time.perf_counter() - phase_started) * 1000
+        _set_active_phase(active_case, "search", path="/search")
         phase_started = time.perf_counter()
         search = await _search_question(
             client,
@@ -638,6 +705,7 @@ async def _run_cases(
                     timeout_seconds=timeout_seconds,
                     corpus_text_policy=corpus_text_policy,
                     transport=transport,
+                    active_case=active_cases[case_index],
                 )
             finally:
                 async with lock:
@@ -686,9 +754,7 @@ async def _run_cases(
             async with lock:
                 idle_seconds = now - last_progress_at
                 active_summary = ", ".join(
-                    f"case={case_index} type={metadata.get('question_type')} "
-                    f"worker={metadata.get('worker')} "
-                    f"elapsed={now - float(metadata['started_at']):.1f}s"
+                    _format_active_case_summary(case_index, metadata, now)
                     for case_index, metadata in sorted(active_cases.items())
                 )
                 completed_snapshot = completed_count

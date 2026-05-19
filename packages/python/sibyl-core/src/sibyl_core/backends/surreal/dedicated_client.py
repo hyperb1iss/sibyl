@@ -91,7 +91,7 @@ class DedicatedSurrealClient:
         return await self._execute(query, params=params, raw=True)
 
     async def close(self) -> None:
-        async with self._connect_lock:
+        async with self._query_lock, self._connect_lock:
             if self._client is not None:
                 await self._client.close()
                 self._client = None

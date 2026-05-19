@@ -78,6 +78,11 @@ class CoreConfig(BaseSettings):
         ge=0.0,
         description="Log SurrealDB queries at warning level when elapsed time exceeds this threshold.",
     )
+    surreal_native_graph_client_cache_size: int = Field(
+        default=64,
+        ge=1,
+        description="Maximum org-scoped native graph clients kept open per process.",
+    )
 
     # LLM Provider configuration
     llm_provider: Literal["openai", "anthropic"] = Field(

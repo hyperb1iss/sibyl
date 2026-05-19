@@ -203,7 +203,7 @@ def test_longmemeval_live_stall_timeout_reports_active_case(tmp_path: Path) -> N
             await asyncio.sleep(1.0)
         return _json_response(request, {"results": []})
 
-    with pytest.raises(module.LongMemEvalLiveError, match=r"active=\[case=0"):
+    with pytest.raises(module.LongMemEvalLiveError, match=r"active=\[case=0") as exc_info:
         asyncio.run(
             module.run_benchmark(
                 data_path,
@@ -217,6 +217,10 @@ def test_longmemeval_live_stall_timeout_reports_active_case(tmp_path: Path) -> N
                 transport=httpx.MockTransport(handler),
             )
         )
+    message = str(exc_info.value)
+    assert "phase=ingest" in message
+    assert "doc=1/1" in message
+    assert "path=/entities" in message
 
 
 def test_longmemeval_live_stratified_selection_and_diagnostics(tmp_path: Path) -> None:

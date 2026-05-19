@@ -4,9 +4,11 @@ import builtins
 import json
 from datetime import UTC, datetime
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 
+import sibyl_core.services.native_graph as native_graph_module
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.embeddings.native import (
     DeterministicNativeEmbeddingProvider,
@@ -71,6 +73,71 @@ def _deterministic_provider() -> DeterministicNativeEmbeddingProvider:
             tokenizer_estimate_method="utf8-byte-length",
         )
     )
+
+
+@pytest.mark.asyncio
+async def test_native_graph_client_cache_evicts_oldest_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await native_graph_module.close_native_graph_clients()
+    closed: list[str] = []
+
+    class FakeNativeGraphClient:
+        def __init__(self, *, group_id: str, **_: object) -> None:
+            self.group_id = group_id
+
+        async def close(self) -> None:
+            closed.append(self.group_id)
+
+    monkeypatch.setattr(native_graph_module, "NativeSurrealGraphClient", FakeNativeGraphClient)
+    monkeypatch.setattr(native_graph_module.settings, "surreal_native_graph_client_cache_size", 2)
+
+    await native_graph_module.get_native_graph_client("org-a")
+    await native_graph_module.get_native_graph_client("org-b")
+    native_graph_module._prepared_groups.update({"org-a", "org-b"})
+    await native_graph_module.get_native_graph_client("org-c")
+
+    assert closed == ["org-a"]
+    assert list(native_graph_module._clients) == ["org-b", "org-c"]
+    assert "org-a" not in native_graph_module._prepared_groups
+
+    await native_graph_module.close_native_graph_clients()
+
+
+@pytest.mark.asyncio
+async def test_replace_entity_retries_transient_surreal_query_id_keyerror(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _TransientEntityWriteClient()
+    bootstrap_schema = AsyncMock()
+    monkeypatch.setattr(native_graph_module, "bootstrap_schema", bootstrap_schema)
+    native_graph_module._prepared_groups.add(client.group_id)
+
+    try:
+        row = await native_graph_module._replace_entity(
+            cast("Any", client),
+            Entity(id="entity-retry", entity_type=EntityType.SESSION, name="Retry Session"),
+            group_id=client.group_id,
+        )
+    finally:
+        native_graph_module._prepared_groups.discard(client.group_id)
+
+    assert row["uuid"] == "entity-retry"
+    assert client.calls == 2
+    bootstrap_schema.assert_awaited_once_with(client)
+
+
+class _TransientEntityWriteClient:
+    group_id = "org-retry"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls += 1
+        if self.calls == 1:
+            raise KeyError("c4ae8fd2-a34d-4f8f-8225-1fd0f7a91cf6")
+        return [{"uuid": params["uuid"], "name": params["name"]}]
 
 
 def test_native_embedding_dimension_validation_requires_schema_match() -> None:

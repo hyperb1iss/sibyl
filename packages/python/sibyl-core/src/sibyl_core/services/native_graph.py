@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from collections import OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,6 +15,7 @@ from typing import Any, cast
 
 from surrealdb import RecordID
 
+from sibyl_core.backends.surreal.connection import _is_transient_connection_error
 from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, bootstrap_schema
@@ -43,7 +45,7 @@ type SurrealRecord = dict[str, object]
 _prepared_groups: set[str] = set()
 _prepare_lock = asyncio.Lock()
 _client_lock = asyncio.Lock()
-_clients: dict[str, NativeSurrealGraphClient] = {}
+_clients: OrderedDict[str, NativeSurrealGraphClient] = OrderedDict()
 _ENTITY_LIST_FIELDS = "* OMIT content, embedding, name_embedding, attributes.content"
 
 
@@ -1230,6 +1232,7 @@ def _validate_native_embedding_dimensions(
 
 
 async def get_native_graph_client(group_id: str) -> NativeSurrealGraphClient:
+    evicted: list[NativeSurrealGraphClient] = []
     async with _client_lock:
         client = _clients.get(group_id)
         if client is None:
@@ -1243,7 +1246,16 @@ async def get_native_graph_client(group_id: str) -> NativeSurrealGraphClient:
                 database=settings.surreal_database,
             )
             _clients[group_id] = client
+            while len(_clients) > settings.surreal_native_graph_client_cache_size:
+                evicted_group_id, evicted_client = _clients.popitem(last=False)
+                _prepared_groups.discard(evicted_group_id)
+                evicted.append(evicted_client)
+        else:
+            _clients.move_to_end(group_id)
+    if evicted:
+        await asyncio.gather(*(client.close() for client in evicted), return_exceptions=True)
         return client
+    return client
 
 
 async def close_native_graph_clients() -> None:
@@ -1980,34 +1992,16 @@ async def _replace_entity(
     group_id: str,
 ) -> SurrealRecord:
     record = _entity_record(entity, group_id=group_id)
+    try:
+        result = await _execute_replace_entity_query(client, record)
+    except Exception as exc:
+        if not _is_transient_connection_error(exc):
+            raise
+        _prepared_groups.discard(client.group_id)
+        await prepare_native_graph_schema(client)
+        result = await _execute_replace_entity_query(client, record)
     rows = normalize_records(
-        await client.execute_query(
-            """
-            UPSERT entity SET
-                uuid = $uuid,
-                name = $name,
-                entity_type = $entity_type,
-                summary = $summary,
-                description = $description,
-                content = $content,
-                labels = $labels,
-                attributes = $attributes,
-                group_id = $group_id,
-                created_at = $created_at,
-                updated_at = $updated_at,
-                project_id = $project_id,
-                epic_id = $epic_id,
-                task_id = $task_id,
-                status = $status,
-                priority = $priority,
-                complexity = $complexity,
-                feature = $feature,
-                tags = $tags,
-                name_embedding = $name_embedding
-            WHERE uuid = $uuid;
-            """,
-            **record,
-        )
+        result
     )
     if rows:
         return rows[0]
@@ -2017,6 +2011,39 @@ async def _replace_entity(
     if stored is None:
         raise RuntimeError(f"failed to persist entity {entity.id}")
     return stored
+
+
+async def _execute_replace_entity_query(
+    client: NativeSurrealGraphClient,
+    record: SurrealRecord,
+) -> object:
+    return await client.execute_query(
+        """
+        UPSERT entity SET
+            uuid = $uuid,
+            name = $name,
+            entity_type = $entity_type,
+            summary = $summary,
+            description = $description,
+            content = $content,
+            labels = $labels,
+            attributes = $attributes,
+            group_id = $group_id,
+            created_at = $created_at,
+            updated_at = $updated_at,
+            project_id = $project_id,
+            epic_id = $epic_id,
+            task_id = $task_id,
+            status = $status,
+            priority = $priority,
+            complexity = $complexity,
+            feature = $feature,
+            tags = $tags,
+            name_embedding = $name_embedding
+        WHERE uuid = $uuid;
+        """,
+        **record,
+    )
 
 
 def _entity_record(entity: Entity, *, group_id: str) -> SurrealRecord:
