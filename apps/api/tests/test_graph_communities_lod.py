@@ -247,3 +247,41 @@ async def test_get_graph_snapshot_joins_concurrent_loads(
 
     assert first is second
     assert load_count == 1
+
+
+@pytest.mark.asyncio
+async def test_get_graph_snapshot_cancels_inflight_load_on_request_cancel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def fake_load_graph_snapshot(*args, **kwargs) -> communities.GraphSnapshot:
+        started.set()
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        raise AssertionError("snapshot load should have been cancelled")
+
+    communities.GRAPH_SNAPSHOT_CACHE.clear()
+    communities.GRAPH_SNAPSHOT_LOADS.clear()
+    monkeypatch.setattr(communities, "_load_graph_snapshot", fake_load_graph_snapshot)
+
+    task = asyncio.create_task(
+        communities._get_graph_snapshot(
+            object(),
+            "org-cancel",
+            max_entities=100,
+            max_relationships=200,
+        )
+    )
+    await started.wait()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert cancelled.is_set()
+    assert communities.GRAPH_SNAPSHOT_LOADS == {}
