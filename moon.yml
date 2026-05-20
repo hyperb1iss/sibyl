@@ -632,6 +632,8 @@ tasks:
       - packages/python/sibyl-core/pyproject.toml
     outputs:
       - .moon/cache/baseline-runtime-manifest.json
+    options:
+      cache: false
 
   baseline-replay:
     command: uv run python -m tools.baselines.replay
@@ -642,6 +644,8 @@ tasks:
       - pyproject.toml
       - apps/api/pyproject.toml
       - packages/python/sibyl-core/pyproject.toml
+    options:
+      cache: false
 
   baseline-replay-runtime:
     command:
@@ -654,6 +658,8 @@ tasks:
       - pyproject.toml
       - apps/api/pyproject.toml
       - packages/python/sibyl-core/pyproject.toml
+    options:
+      cache: false
 
   baseline-test:
     command: uv run pytest tools/tests/test_baselines.py -v
