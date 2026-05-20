@@ -154,6 +154,7 @@ class HybridConfig:
     rerank_top_k: int = 20
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     apply_keyword_boost: bool = True
+    apply_query_entity_linking: bool = True
     reference_time: datetime | None = None
 
 
@@ -203,6 +204,26 @@ async def _vector_search_attempt(
     except Exception as e:
         log.warning("vector_search_failed", **query_log_fields(query), error_type=type(e).__name__)
         return _VectorSearchAttempt(results=[], completed=False)
+
+
+def _entity_matches_types(entity: Any, entity_types: list[Any] | None) -> bool:
+    if not entity_types:
+        return True
+    entity_type = (
+        entity.get("entity_type")
+        if isinstance(entity, dict)
+        else getattr(entity, "entity_type", None)
+    )
+    if entity_type is None:
+        return False
+    normalized = str(getattr(entity_type, "value", entity_type)).lower()
+    return normalized in {
+        str(getattr(candidate, "value", candidate)).lower() for candidate in entity_types
+    }
+
+
+def _entity_id(entity: Any) -> str:
+    return str(entity.get("id", "") if isinstance(entity, dict) else getattr(entity, "id", ""))
 
 
 async def vector_search(
@@ -396,16 +417,27 @@ async def hybrid_search(
     vector_task = asyncio.create_task(
         _vector_search_attempt(query, entity_manager, entity_types, limit=limit * 2)
     )
+    link_task: asyncio.Task[_VectorSearchAttempt] | None = None
+    if entity_types and config.apply_query_entity_linking and config.graph_weight > 0:
+        link_task = asyncio.create_task(
+            _vector_search_attempt(query, entity_manager, None, limit=limit * 2)
+        )
 
     # Get vector results first (we need them for graph seeds)
     vector_attempt = await vector_task
     vector_results = vector_attempt.results
+    link_attempt = await link_task if link_task is not None else _VectorSearchAttempt([], True)
+    vector_ids = {_entity_id(entity) for entity, _score in vector_results}
+    link_results = [
+        result for result in link_attempt.results if _entity_id(result[0]) not in vector_ids
+    ]
 
     # Phase 2: Graph traversal from top vector results
     graph_results: list[tuple[Any, float]] = []
-    if vector_results and config.graph_weight > 0:
+    graph_seed_results = [*vector_results[:5], *link_results[:5]]
+    if graph_seed_results and config.graph_weight > 0:
         # Use top 5 results as seeds
-        seed_ids = [e.id if hasattr(e, "id") else e.get("id", "") for e, _ in vector_results[:5]]
+        seed_ids = [_entity_id(e) for e, _ in graph_seed_results[:8]]
         seed_ids = [sid for sid in seed_ids if sid]
 
         if seed_ids:
@@ -416,6 +448,12 @@ async def hybrid_search(
                 limit=limit * 2,
                 group_id=resolved_group_id,
             )
+            if entity_types:
+                graph_results = [
+                    (entity, score)
+                    for entity, score in graph_results
+                    if _entity_matches_types(entity, entity_types)
+                ]
 
     # Phase 3: Merge results using RRF
     result_lists = []
@@ -439,7 +477,9 @@ async def hybrid_search(
                 "sources": [],
                 "query": query,
                 "entity_manager_search_completed": vector_attempt.completed,
+                "link_search_completed": link_attempt.completed,
                 "vector_count": len(vector_results),
+                "link_count": len(link_results),
                 "graph_count": len(graph_results),
             },
         )
@@ -514,7 +554,9 @@ async def hybrid_search(
         "query": query,
         "sources": list_names,
         "entity_manager_search_completed": vector_attempt.completed,
+        "link_search_completed": link_attempt.completed,
         "vector_count": len(vector_results),
+        "link_count": len(link_results),
         "graph_count": len(graph_results),
         "merged_count": len(merged),
         "reranking_applied": reranking_applied,

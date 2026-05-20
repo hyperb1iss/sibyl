@@ -24,6 +24,7 @@ from sibyl_core.models.tasks import (
     TaskPriority,
     TaskStatus,
 )
+from sibyl_core.projection import project_memory_entity
 from sibyl_core.services.native_graph import get_native_graph_runtime
 from sibyl_core.tools.helpers import (
     MAX_CONTENT_LENGTH,
@@ -557,6 +558,33 @@ async def add(
             except Exception as e:
                 log.warning("auto_link_search_failed", error=str(e))
 
+            projection_result = await project_memory_entity(
+                entity_manager=entity_manager,
+                relationship_manager=relationship_manager,
+                source=entity,
+                group_id=org_id,
+                created_source_id=created_id,
+                generate_embeddings=False,
+            )
+            if projection_result.errors:
+                log.warning(
+                    "add_projection_failed",
+                    entity_id=created_id,
+                    extracted=projection_result.extracted,
+                    projected_entities=projection_result.projected_entities,
+                    relationships=projection_result.relationships,
+                    errors=projection_result.errors,
+                )
+            elif projection_result.extracted:
+                log.info(
+                    "add_projection_complete",
+                    entity_id=created_id,
+                    extracted=projection_result.extracted,
+                    projected_entities=projection_result.projected_entities,
+                    relationships=projection_result.relationships,
+                    errors=len(projection_result.errors),
+                )
+
             message = f"Added: {title}"
             if relationships_to_create:
                 message += f" (linked: {len(relationships_to_create)})"
@@ -604,6 +632,33 @@ async def add(
                 relationships_to_create,
                 "relationship_creation_partial_failure",
             )
+
+            projection_result = await project_memory_entity(
+                entity_manager=entity_manager,
+                relationship_manager=relationship_manager,
+                source=entity,
+                group_id=org_id,
+                created_source_id=created_id,
+                generate_embeddings=False,
+            )
+            if projection_result.errors:
+                log.warning(
+                    "add_projection_failed",
+                    entity_id=created_id,
+                    extracted=projection_result.extracted,
+                    projected_entities=projection_result.projected_entities,
+                    relationships=projection_result.relationships,
+                    errors=projection_result.errors,
+                )
+            elif projection_result.extracted:
+                log.info(
+                    "add_projection_complete",
+                    entity_id=created_id,
+                    extracted=projection_result.extracted,
+                    projected_entities=projection_result.projected_entities,
+                    relationships=projection_result.relationships,
+                    errors=len(projection_result.errors),
+                )
 
             fallback_message = f"Added (sync fallback): {title}"
             if conflicts:

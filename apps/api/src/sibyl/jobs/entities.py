@@ -13,6 +13,7 @@ from sibyl.persistence.auth_runtime import log_memory_audit_event
 from sibyl_core.auth import MemoryPolicyContext, OrganizationRole, authorize_memory_write
 from sibyl_core.auth.memory_policy import MemoryPolicyAction, MemoryPolicyDecision
 from sibyl_core.embeddings.native import configured_native_embedding_provider
+from sibyl_core.projection import project_memory_entities, project_memory_entity
 from sibyl_core.services.native_graph import get_native_graph_runtime
 from sibyl_core.services.surreal_content import MemoryScope
 from sibyl_core.tasks.distillation import build_learning_episode, build_learning_procedure
@@ -474,6 +475,33 @@ async def create_entity(  # noqa: PLR0915
             except Exception as e:
                 log.warning("create_entity_auto_link_search_failed", error=str(e))
 
+        projection_result = await project_memory_entity(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+            source=entity,
+            group_id=group_id,
+            created_source_id=created_id,
+            generate_embeddings=False,
+        )
+        if projection_result.errors:
+            log.warning(
+                "create_entity_projection_failed",
+                entity_id=created_id,
+                extracted=projection_result.extracted,
+                projected_entities=projection_result.projected_entities,
+                relationships=projection_result.relationships,
+                errors=projection_result.errors,
+            )
+        elif projection_result.extracted:
+            log.info(
+                "create_entity_projection_complete",
+                entity_id=created_id,
+                extracted=projection_result.extracted,
+                projected_entities=projection_result.projected_entities,
+                relationships=projection_result.relationships,
+                errors=len(projection_result.errors),
+            )
+
         # Clear pending status and process any queued operations
         from sibyl.jobs.pending import clear_pending, process_pending_operations
 
@@ -485,6 +513,8 @@ async def create_entity(  # noqa: PLR0915
             "entity_type": entity_type,
             "relationships_created": relationships_created,
             "auto_links_created": auto_links_created,
+            "projected_entities": projection_result.projected_entities,
+            "projection_relationships": projection_result.relationships,
             "pending_ops_processed": len(pending_results),
             "deduplicated": deduplicated,
         }
@@ -510,6 +540,45 @@ async def create_entity(  # noqa: PLR0915
             entity_id=entity_data.get("id"),
         )
         raise
+
+
+async def project_memory_batch(
+    ctx: dict[str, Any],  # noqa: ARG001
+    sources_data: list[dict[str, Any]],
+    group_id: str,
+    *,
+    created_source_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Project prose-bearing source entities into native graph handles."""
+    from sibyl_core.models.entities import Entity
+
+    sources = [Entity.model_validate(source_data) for source_data in sources_data]
+    runtime = await get_native_graph_runtime(
+        group_id,
+        embedding_provider=configured_native_embedding_provider(),
+    )
+    projection = await project_memory_entities(
+        entity_manager=runtime.entity_manager,
+        relationship_manager=runtime.relationship_manager,
+        sources=sources,
+        group_id=group_id,
+        created_source_ids=created_source_ids,
+        generate_embeddings=False,
+    )
+
+    result = {
+        "sources": projection.sources,
+        "extracted": projection.extracted,
+        "projected_entities": projection.projected_entities,
+        "relationships": projection.relationships,
+        "skipped": projection.skipped,
+        "errors": list(projection.errors),
+    }
+    if projection.errors:
+        log.warning("memory_projection_batch_failed", **result)
+    else:
+        log.info("memory_projection_batch_complete", **result)
+    return result
 
 
 async def create_learning_episode(

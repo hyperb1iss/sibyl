@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from hashlib import sha256
 from typing import Any, Literal, Protocol, cast
 from uuid import UUID
 
@@ -41,6 +42,19 @@ class JobInfo:
     error: str | None = None
     args: tuple[Any, ...] | None = None
     kwargs: dict[str, Any] | None = None
+
+
+def memory_projection_job_id(
+    sources_data: list[dict[str, Any]],
+    group_id: str,
+    *,
+    created_source_ids: list[str] | None = None,
+) -> str:
+    source_ids = list(created_source_ids or [])
+    if not source_ids:
+        source_ids = [str(source.get("id") or "") for source in sources_data]
+    digest = sha256("|".join([group_id, *source_ids]).encode()).hexdigest()[:16]
+    return f"project_memory:{digest}"
 
 
 class QueueBroker(Protocol):
@@ -92,6 +106,14 @@ class QueueBroker(Protocol):
         updates: dict[str, Any],
         entity_type: str,
         group_id: str,
+    ) -> str: ...
+
+    async def enqueue_memory_projection(
+        self,
+        sources_data: list[dict[str, Any]],
+        group_id: str,
+        *,
+        created_source_ids: list[str] | None = None,
     ) -> str: ...
 
     async def enqueue_create_learning_episode(

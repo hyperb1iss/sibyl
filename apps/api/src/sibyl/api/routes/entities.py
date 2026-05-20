@@ -53,6 +53,7 @@ from sibyl.persistence.content_runtime import (
 )
 from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.projection import extract_projected_memory_entities
 from sibyl_core.services import KnowledgeReadService
 from sibyl_core.tools.helpers import _generate_id
 
@@ -1299,6 +1300,34 @@ async def create_entities_bulk(
         )
     if relationships:
         await runtime.relationship_manager.create_bulk(relationships)
+
+    projection_sources: list[Entity] = []
+    projection_source_ids: list[str] = []
+    for source, created_id in zip(entities, created_ids, strict=True):
+        if extract_projected_memory_entities(source):
+            projection_sources.append(source)
+            projection_source_ids.append(created_id)
+
+    if projection_sources:
+        try:
+            from sibyl.jobs.queue import enqueue_memory_projection
+
+            projection_job_id = await enqueue_memory_projection(
+                [source.model_dump(mode="json") for source in projection_sources],
+                group_id,
+                created_source_ids=projection_source_ids,
+            )
+            log.info(
+                "bulk_entity_projection_enqueued",
+                job_id=projection_job_id,
+                sources=len(projection_sources),
+            )
+        except Exception as exc:
+            log.warning(
+                "bulk_entity_projection_enqueue_failed",
+                sources=len(projection_sources),
+                error=str(exc),
+            )
 
     responses = [
         _entity_response_from_bulk_create(

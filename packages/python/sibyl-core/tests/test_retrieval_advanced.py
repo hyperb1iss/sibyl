@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, call
 import numpy as np
 import pytest
 
+import sibyl_core.retrieval.hybrid as hybrid_module
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.retrieval.dedup import (
     DedupConfig,
@@ -1208,6 +1209,56 @@ class TestHybridSearch:
         )
 
         assert result.entities[0].id == "text-match"
+
+    @pytest.mark.asyncio
+    async def test_hybrid_search_uses_unfiltered_link_seeds_for_typed_results(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Typed searches can traverse from projected concepts back to source sessions."""
+        client = MockGraphClientForHybrid()
+        manager = MockEntityManagerForHybrid()
+
+        projected = make_entity_for_test(
+            "topic_samsung",
+            name="Samsung TV",
+            entity_type=EntityType.TOPIC,
+            description="I bought a Samsung TV for the den.",
+        )
+        answer = make_entity_for_test(
+            "session_answer",
+            name="Answer session",
+            entity_type=EntityType.SESSION,
+            description="Source session",
+        )
+        manager.search_results = [(projected, 0.9)]
+
+        async def fake_graph_traversal(
+            seed_ids: list[str],
+            client: Any,
+            depth: int = 2,
+            limit: int = 20,
+            group_id: str | None = None,
+        ) -> list[tuple[Entity, float]]:
+            del client, depth, limit, group_id
+            assert seed_ids == ["topic_samsung"]
+            return [(answer, 0.5)]
+
+        monkeypatch.setattr(hybrid_module, "graph_traversal", fake_graph_traversal)
+
+        result = await hybrid_search(
+            "what did I buy?",
+            client,  # type: ignore[arg-type]
+            manager,  # type: ignore[arg-type]
+            entity_types=[EntityType.SESSION],
+            config=HybridConfig(apply_temporal=False, apply_keyword_boost=False),
+        )
+
+        assert [entity.id for entity in result.entities] == ["session_answer"]
+        assert result.metadata["link_count"] == 1
+        search_types = [call["entity_types"] for call in manager.search_calls]
+        assert [EntityType.SESSION] in search_types
+        assert None in search_types
 
     @pytest.mark.asyncio
     async def test_hybrid_search_temporal_reference_promotes_near_match(self) -> None:

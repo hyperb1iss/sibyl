@@ -21,6 +21,7 @@ from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_LIMIT,
     JobInfo,
     JobStatus,
+    memory_projection_job_id,
 )
 from sibyl_core.observability import telemetry_registry
 
@@ -232,6 +233,38 @@ class RedisQueueBroker:
             entity_id=entity_id,
             entity_type=entity_type,
             fields=list(updates.keys()),
+        )
+        return result.job_id
+
+    async def enqueue_memory_projection(
+        self,
+        sources_data: list[dict[str, Any]],
+        group_id: str,
+        *,
+        created_source_ids: list[str] | None = None,
+    ) -> str:
+        """Enqueue native memory projection for created source entities."""
+        job_id = memory_projection_job_id(
+            sources_data,
+            group_id,
+            created_source_ids=created_source_ids,
+        )
+        result = await self._enqueue_unique(
+            "project_memory_batch",
+            sources_data,
+            group_id,
+            job_id=job_id,
+            created_source_ids=created_source_ids,
+        )
+
+        if not result.created:
+            log.info("Memory projection job already exists", job_id=job_id)
+            return result.job_id
+
+        log.info(
+            "Enqueued memory projection job",
+            job_id=result.job_id,
+            sources=len(sources_data),
         )
         return result.job_id
 

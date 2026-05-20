@@ -19,6 +19,7 @@ from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_LIMIT,
     JobInfo,
     JobStatus,
+    memory_projection_job_id,
 )
 from sibyl.jobs.worker import WorkerSettings
 from sibyl_core.observability import telemetry_registry
@@ -253,6 +254,27 @@ class LocalQueueBroker:
             entity_type,
             group_id,
             job_id=f"update_entity:{entity_id}",
+        )
+        return result.job_id
+
+    async def enqueue_memory_projection(
+        self,
+        sources_data: list[dict[str, Any]],
+        group_id: str,
+        *,
+        created_source_ids: list[str] | None = None,
+    ) -> str:
+        job_id = memory_projection_job_id(
+            sources_data,
+            group_id,
+            created_source_ids=created_source_ids,
+        )
+        result = await self._enqueue_unique(
+            "project_memory_batch",
+            sources_data,
+            group_id,
+            job_id=job_id,
+            created_source_ids=created_source_ids,
         )
         return result.job_id
 

@@ -29,6 +29,7 @@ from sibyl.jobs.entities import (
     create_entity,
     create_learning_episode,
     create_learning_procedure,
+    project_memory_batch,
     update_entity,
     update_task,
 )
@@ -236,6 +237,7 @@ class WorkerSettings:
         sync_all_sources,
         # Entity jobs
         create_entity,
+        project_memory_batch,
         create_learning_episode,
         create_learning_procedure,
         update_entity,

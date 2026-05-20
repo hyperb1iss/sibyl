@@ -21,6 +21,7 @@ from sibyl.jobs.entities import (
     create_entity,
     create_learning_episode,
     create_learning_procedure,
+    project_memory_batch,
     update_entity,
     update_task,
 )
@@ -42,6 +43,7 @@ from sibyl.jobs.queue import (
     enqueue_create_entity,
     enqueue_create_learning_episode,
     enqueue_create_learning_procedure,
+    enqueue_memory_projection,
     enqueue_priority_decay,
     enqueue_reflection_dream_cycle,
     enqueue_sync,
@@ -69,6 +71,7 @@ __all__ = [
     "enqueue_create_entity",
     "enqueue_create_learning_episode",
     "enqueue_create_learning_procedure",
+    "enqueue_memory_projection",
     "enqueue_update_entity",
     "enqueue_update_task",
     # Pending entity registry
@@ -93,6 +96,7 @@ __all__ = [
     "create_entity",
     "create_learning_episode",
     "create_learning_procedure",
+    "project_memory_batch",
     "update_entity",
     "update_task",
     "run_reflection_dream_cycle",

@@ -30,6 +30,7 @@ __all__ = [
     "enqueue_create_entity",
     "enqueue_create_learning_episode",
     "enqueue_create_learning_procedure",
+    "enqueue_memory_projection",
     "enqueue_priority_decay",
     "enqueue_reflection_dream_cycle",
     "enqueue_sync",
@@ -115,6 +116,20 @@ async def enqueue_update_entity(
 ) -> str:
     """Enqueue an entity update job."""
     return await get_queue().enqueue_update_entity(entity_id, updates, entity_type, group_id)
+
+
+async def enqueue_memory_projection(
+    sources_data: list[dict[str, Any]],
+    group_id: str,
+    *,
+    created_source_ids: list[str] | None = None,
+) -> str:
+    """Enqueue graph projection for prose-bearing memory sources."""
+    return await get_queue().enqueue_memory_projection(
+        sources_data,
+        group_id,
+        created_source_ids=created_source_ids,
+    )
 
 
 async def enqueue_create_learning_episode(

@@ -155,6 +155,47 @@ async def test_create_entities_bulk_uses_runtime_bulk_create() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_entities_bulk_enqueues_memory_projection() -> None:
+    org = _org()
+    ctx = _ctx()
+    batch = EntityBulkCreateRequest(
+        entities=[
+            EntityCreate(
+                name="Session one",
+                content="I bought a Samsung TV for the den.",
+                entity_type=EntityType.SESSION,
+                skip_conflicts=True,
+                metadata={"source": "import"},
+            )
+        ]
+    )
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(create_direct_bulk=AsyncMock(return_value=["session_one"])),
+        relationship_manager=SimpleNamespace(create_bulk=AsyncMock(return_value=(0, 0))),
+    )
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch("sibyl.jobs.queue.enqueue_memory_projection", AsyncMock()) as enqueue_projection,
+    ):
+        await create_entities_bulk(
+            batch=batch,
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    enqueue_projection.assert_awaited_once()
+    payload, group_id = enqueue_projection.await_args.args
+    assert group_id == str(org.id)
+    assert payload[0]["content"] == "I bought a Samsung TV for the den."
+    assert enqueue_projection.await_args.kwargs == {"created_source_ids": ["session_one"]}
+
+
+@pytest.mark.asyncio
 async def test_create_entities_bulk_requires_explicit_conflict_skip() -> None:
     org = _org()
     ctx = _ctx()
