@@ -22,6 +22,18 @@ def test_local_compose_defaults_to_fully_surreal_runtime() -> None:
     assert api["environment"]["SIBYL_SURREAL_URL"] == "ws://surrealdb:8000/rpc"
 
 
+def test_local_compose_uses_versioned_sibyl_images() -> None:
+    services = local.COMPOSE_CONFIG["services"]
+
+    assert local._version_to_image_tag("1.0.0rc1") == "1.0.0-rc.1"
+    assert services["api"]["image"] == f"ghcr.io/hyperb1iss/sibyl-api:{local.DEFAULT_IMAGE_TAG}"
+    assert services["worker"]["image"] == f"ghcr.io/hyperb1iss/sibyl-api:{local.DEFAULT_IMAGE_TAG}"
+    assert services["web"]["image"] == f"ghcr.io/hyperb1iss/sibyl-web:{local.DEFAULT_IMAGE_TAG}"
+    assert ":latest" not in services["api"]["image"]
+    assert ":latest" not in services["worker"]["image"]
+    assert ":latest" not in services["web"]["image"]
+
+
 def test_local_worker_uses_same_surreal_runtime_as_api() -> None:
     api_env = local.COMPOSE_CONFIG["services"]["api"]["environment"]
     worker_env = local.COMPOSE_CONFIG["services"]["worker"]["environment"]

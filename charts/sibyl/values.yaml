@@ -21,7 +21,7 @@ backend:
 
   image:
     # -- Backend image repository
-    repository: ghcr.io/hyperb1iss/sibyl
+    repository: ghcr.io/hyperb1iss/sibyl-api
     # -- Image pull policy
     pullPolicy: IfNotPresent
     # -- Image tag (defaults to chart appVersion)

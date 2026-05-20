@@ -169,6 +169,19 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           echo "$VERSION" > VERSION
+          python - <<'PY'
+          from pathlib import Path
+
+          version = Path("VERSION").read_text().strip()
+          chart = Path("charts/sibyl/Chart.yaml")
+          lines = chart.read_text().splitlines()
+          for index, line in enumerate(lines):
+              if line.startswith("version: "):
+                  lines[index] = f"version: {version}"
+              elif line.startswith("appVersion: "):
+                  lines[index] = f'appVersion: "{version}"'
+          chart.write_text("\n".join(lines) + "\n")
+          PY
           echo "Updated VERSION to $VERSION"
 
       - name: "◈ Generate release notes"
@@ -188,9 +201,10 @@ jobs:
         if: ${{ !inputs.dry_run && steps.version.outputs.needs_version_commit == 'true' }}
         run: |
           git add VERSION
+          git add charts/sibyl/Chart.yaml
           git commit \
             -m "chore(release): prepare v${{ steps.version.outputs.version }}" \
-            -m "Update the repository version before tagging the release candidate." \
+            -m "Update repository and chart versions before tagging the candidate." \
             -m "Release gates run on this exact commit before the tag is pushed."
 
       - name: "◇ Validate release commit message"

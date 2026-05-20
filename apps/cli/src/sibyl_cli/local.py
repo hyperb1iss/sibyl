@@ -11,11 +11,14 @@ Provides Supabase-style local development experience:
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import shutil
 import subprocess
 import time
 import webbrowser
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as pkg_version
 from pathlib import Path
 from typing import Annotated
 
@@ -50,11 +53,32 @@ SIBYL_LOCAL_DIR = Path.home() / ".sibyl" / "local"
 SIBYL_LOCAL_ENV = SIBYL_LOCAL_DIR / ".env"
 SIBYL_LOCAL_COMPOSE = SIBYL_LOCAL_DIR / "docker-compose.yml"
 
+
+def _version_to_image_tag(version: str) -> str:
+    match = re.fullmatch(r"(\d+\.\d+\.\d+)rc(\d+)", version)
+    if match:
+        return f"{match.group(1)}-rc.{match.group(2)}"
+    return version
+
+
+def _default_image_tag() -> str:
+    override = os.getenv("SIBYL_IMAGE_TAG")
+    if override:
+        return override
+    try:
+        return _version_to_image_tag(pkg_version("sibyl-dev"))
+    except PackageNotFoundError:
+        return "1.0.0-rc.1"
+
+
+DEFAULT_IMAGE_TAG = _default_image_tag()
+
+
 # Docker Compose configuration embedded in the CLI
 COMPOSE_CONFIG = {
     "services": {
         "api": {
-            "image": "ghcr.io/hyperb1iss/sibyl-api:latest",
+            "image": f"ghcr.io/hyperb1iss/sibyl-api:{DEFAULT_IMAGE_TAG}",
             "container_name": "sibyl-api",
             "ports": ["3334:3334"],
             "depends_on": {
@@ -92,7 +116,7 @@ COMPOSE_CONFIG = {
             "restart": "unless-stopped",
         },
         "worker": {
-            "image": "ghcr.io/hyperb1iss/sibyl-api:latest",
+            "image": f"ghcr.io/hyperb1iss/sibyl-api:{DEFAULT_IMAGE_TAG}",
             "container_name": "sibyl-worker",
             "command": ["sibyld", "worker"],
             "depends_on": {
@@ -113,7 +137,7 @@ COMPOSE_CONFIG = {
             "restart": "unless-stopped",
         },
         "web": {
-            "image": "ghcr.io/hyperb1iss/sibyl-web:latest",
+            "image": f"ghcr.io/hyperb1iss/sibyl-web:{DEFAULT_IMAGE_TAG}",
             "container_name": "sibyl-web",
             "ports": ["3337:3337"],
             "depends_on": {
