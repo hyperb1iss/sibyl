@@ -31,6 +31,7 @@ from sibyl_core.evals.longmemeval import (
     build_longmemeval_corpus,
     score_longmemeval_ranking,
 )
+from sibyl_core.config import settings
 
 DATASET_SHA256 = "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442"
 DEFAULT_K_VALUES = [5, 10]
@@ -198,6 +199,48 @@ async def _get_json(client: httpx.AsyncClient, path: str) -> dict[str, Any]:
 
 def _env_flag(name: str) -> bool:
     return str(os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _graph_embedding_runtime_metadata() -> dict[str, Any]:
+    provider = (
+        os.environ.get("SIBYL_GRAPH_EMBEDDING_PROVIDER") or settings.graph_embedding_provider
+    ).strip()
+    model = os.environ.get("SIBYL_GRAPH_EMBEDDING_MODEL", "").strip()
+    if not model:
+        if provider == "gemini" and settings.graph_embedding_model == "text-embedding-3-small":
+            model = "gemini-embedding-2"
+        else:
+            model = settings.graph_embedding_model
+
+    raw_dimensions = os.environ.get("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", "").strip()
+    dimensions = int(raw_dimensions) if raw_dimensions else settings.graph_embedding_dimensions
+    if provider == "gemini":
+        api_key_present = bool(
+            os.environ.get("SIBYL_GEMINI_API_KEY")
+            or os.environ.get("GEMINI_API_KEY")
+            or os.environ.get("GOOGLE_API_KEY")
+            or settings.gemini_api_key.get_secret_value()
+        )
+    else:
+        api_key_present = bool(
+            os.environ.get("SIBYL_OPENAI_API_KEY")
+            or os.environ.get("OPENAI_API_KEY")
+            or settings.openai_api_key.get_secret_value()
+        )
+
+    return {
+        "retrieval_semantics": (
+            "API graph hybrid retrieval with native vector/fulltext seed search "
+            "plus graph traversal"
+        ),
+        "embedding_provider": provider if api_key_present else "disabled",
+        "embedding_model": model if api_key_present else "not-applicable",
+        "embedding_dimensions": dimensions if api_key_present else 0,
+        "embedding_provider_configured": provider,
+        "embedding_provider_status": "enabled" if api_key_present else "missing_key",
+        "tokenizer_estimate_method": "provider-default" if api_key_present else "not-applicable",
+        "vector_search_surface": "entity.name_embedding KNN via NativeEntityManager.search",
+    }
 
 
 def _background_job_info(response: dict[str, Any], key: str) -> dict[str, Any]:
@@ -1191,6 +1234,7 @@ async def run_benchmark(
         corpus_text_policy=corpus_text_policy,
         k_values=k_values,
     )
+    embedding_runtime = _graph_embedding_runtime_metadata()
 
     print("\n============================================================", flush=True)
     print("  RESULTS - live /api/search", flush=True)
@@ -1221,11 +1265,7 @@ async def run_benchmark(
             "retrieval_mode": LIVE_RETRIEVAL_MODE,
             "retrieval_surface": "POST /api/search",
             "retrieval_contract": "sync entity writes plus /api/search graph results",
-            "retrieval_semantics": "existing API graph hybrid/fulltext; no native vector claim",
-            "embedding_provider": "none",
-            "embedding_model": "not-applicable",
-            "embedding_dimensions": 0,
-            "tokenizer_estimate_method": "not-applicable",
+            **embedding_runtime,
             "readiness_strategy": "sync_write_plus_search_probe",
             "per_question_isolation": "throwaway organization namespace per question",
             "entity_content_max_chars": ENTITY_CONTENT_MAX_CHARS,
@@ -1270,8 +1310,9 @@ async def run_benchmark(
         "claim_boundary": (
             "Live API runtime evidence for /api/search against an ephemeral "
             "Sibyl stack with per-question throwaway org namespaces. This "
-            "artifact measures the existing graph hybrid/full-text path and "
-            "does not claim native vector embedding retrieval."
+            "artifact measures the production graph hybrid search path, "
+            "including native graph vector search when embedding config is "
+            "enabled."
         ),
     }
 
