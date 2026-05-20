@@ -48,6 +48,29 @@ _prepare_lock = asyncio.Lock()
 _client_lock = asyncio.Lock()
 _clients: OrderedDict[str, NativeSurrealGraphClient] = OrderedDict()
 _ENTITY_LIST_FIELDS = "* OMIT content, embedding, name_embedding, attributes.content"
+_ENTITY_BULK_UPSERT_QUERY = """
+INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
+    uuid = $input.uuid,
+    name = $input.name,
+    entity_type = $input.entity_type,
+    summary = $input.summary,
+    description = $input.description,
+    content = $input.content,
+    labels = $input.labels,
+    attributes = $input.attributes,
+    group_id = $input.group_id,
+    created_at = $input.created_at,
+    updated_at = $input.updated_at,
+    project_id = $input.project_id,
+    epic_id = $input.epic_id,
+    task_id = $input.task_id,
+    status = $input.status,
+    priority = $input.priority,
+    complexity = $input.complexity,
+    feature = $input.feature,
+    tags = $input.tags,
+    name_embedding = $input.name_embedding;
+"""
 log = structlog.get_logger()
 
 
@@ -115,6 +138,7 @@ class NativeEntityManager:
         *,
         generate_embeddings: bool = False,
         embedding_batch_size: int = 64,
+        write_batch_size: int = 128,
     ) -> list[str]:
         prepared_entities = list(entities)
         if not prepared_entities:
@@ -127,9 +151,11 @@ class NativeEntityManager:
             )
 
         created_ids: list[str] = []
-        for entity in prepared_entities:
-            await _replace_entity(self._client, entity, group_id=self._group_id)
-            created_ids.append(entity.id)
+        batch_size = max(int(write_batch_size), 1)
+        for index in range(0, len(prepared_entities), batch_size):
+            batch = prepared_entities[index : index + batch_size]
+            await _replace_entities_bulk(self._client, batch, group_id=self._group_id)
+            created_ids.extend(entity.id for entity in batch)
         return created_ids
 
     async def create(self, entity: Entity) -> str:
@@ -2171,6 +2197,26 @@ async def _replace_entity(
     return stored
 
 
+async def _replace_entities_bulk(
+    client: NativeSurrealGraphClient,
+    entities: Sequence[Entity],
+    *,
+    group_id: str,
+) -> list[SurrealRecord]:
+    records = [_entity_record(entity, group_id=group_id) for entity in entities]
+    if not records:
+        return []
+    try:
+        result = await _execute_replace_entities_bulk_query(client, records)
+    except Exception as exc:
+        if not _is_transient_connection_error(exc):
+            raise
+        _prepared_groups.discard(client.group_id)
+        await prepare_native_graph_schema(client)
+        result = await _execute_replace_entities_bulk_query(client, records)
+    return normalize_records(result)
+
+
 async def _execute_replace_entity_query(
     client: NativeSurrealGraphClient,
     record: SurrealRecord,
@@ -2202,6 +2248,13 @@ async def _execute_replace_entity_query(
         """,
         **record,
     )
+
+
+async def _execute_replace_entities_bulk_query(
+    client: NativeSurrealGraphClient,
+    records: Sequence[SurrealRecord],
+) -> object:
+    return await client.execute_query(_ENTITY_BULK_UPSERT_QUERY, rows=list(records))
 
 
 def _entity_record(entity: Entity, *, group_id: str) -> SurrealRecord:

@@ -56,6 +56,9 @@ class _EmbeddingWriteClient:
         self.calls.append((query, params))
         if "SELECT id AS record_id FROM entity" in query:
             return [{"record_id": f"entity:{params['uuid']}"}]
+        if "INSERT INTO entity $rows ON DUPLICATE KEY UPDATE" in query:
+            rows = cast("list[dict[str, object]]", params["rows"])
+            return [{"uuid": row["uuid"], "name_embedding": row["name_embedding"]} for row in rows]
         if "UPSERT entity" in query:
             return [{"uuid": params["uuid"], "name_embedding": params["name_embedding"]}]
         if "RELATE $src->$rel->$tgt" in query:
@@ -288,9 +291,78 @@ async def test_native_entity_manager_bulk_generates_embeddings_in_batches() -> N
     )
 
     assert created_ids == ["entity_embed_one", "entity_embed_two"]
-    write_calls = [params for query, params in client.calls if "UPSERT entity" in query]
-    assert len(write_calls) == 2
-    assert all(len(cast(list[float], params["name_embedding"])) == 4 for params in write_calls)
+    write_calls = [
+        params
+        for query, params in client.calls
+        if "INSERT INTO entity $rows ON DUPLICATE KEY UPDATE" in query
+    ]
+    assert len(write_calls) == 1
+    rows = cast("list[dict[str, object]]", write_calls[0]["rows"])
+    assert [row["uuid"] for row in rows] == ["entity_embed_one", "entity_embed_two"]
+    assert all(len(cast("list[float]", row["name_embedding"])) == 4 for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_bulk_writes_entities_in_one_surreal_batch() -> None:
+    client = NativeSurrealGraphClient(group_id="org-native-bulk-write", url="memory://")
+    try:
+        await prepare_native_graph_schema(client)
+        manager = NativeEntityManager(client, group_id=client.group_id)
+
+        created_ids = await manager.create_direct_bulk(
+            [
+                Entity(
+                    id="session_bulk_one",
+                    entity_type=EntityType.SESSION,
+                    name="Bulk Session One",
+                    content="First live bulk record.",
+                    organization_id=client.group_id,
+                    metadata={"valid_at": "2026/01/01 10:00"},
+                ),
+                Entity(
+                    id="session_bulk_two",
+                    entity_type=EntityType.SESSION,
+                    name="Bulk Session Two",
+                    content="Second live bulk record.",
+                    organization_id=client.group_id,
+                    metadata={"valid_at": "2026/01/02 10:00"},
+                ),
+            ]
+        )
+        updated_ids = await manager.create_direct_bulk(
+            [
+                Entity(
+                    id="session_bulk_two",
+                    entity_type=EntityType.SESSION,
+                    name="Bulk Session Two Updated",
+                    content="Second live bulk record updated.",
+                    organization_id=client.group_id,
+                    metadata={"valid_at": "2026/01/03 10:00"},
+                ),
+            ]
+        )
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT uuid, name, entity_type, group_id, content, attributes
+                FROM entity
+                WHERE uuid IN ["session_bulk_one", "session_bulk_two"]
+                ORDER BY uuid ASC;
+                """
+            )
+        )
+    finally:
+        await client.close()
+
+    assert created_ids == ["session_bulk_one", "session_bulk_two"]
+    assert updated_ids == ["session_bulk_two"]
+    assert [row["uuid"] for row in rows] == ["session_bulk_one", "session_bulk_two"]
+    assert all(row["group_id"] == client.group_id for row in rows)
+    assert rows[0]["attributes"]["valid_at"] == "2026/01/01 10:00"
+    assert rows[1]["name"] == "Bulk Session Two Updated"
+    assert rows[1]["content"] == "Second live bulk record updated."
+    assert rows[1]["attributes"]["valid_at"] == "2026/01/03 10:00"
 
 
 @pytest.mark.asyncio
