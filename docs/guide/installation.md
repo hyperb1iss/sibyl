@@ -169,8 +169,8 @@ sibyl serve
 sibyl doctor
 ```
 
-Use `sibyl start`/`sibyl stop` for a background daemon. To install a native user-service file without
-starting it automatically, run `sibyl service install`.
+Use `sibyl start`/`sibyl stop` for a background daemon. To install a native user-service file
+without starting it automatically, run `sibyl service install`.
 
 ### Development Mode
 
