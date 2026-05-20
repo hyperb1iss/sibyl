@@ -4,6 +4,7 @@ Provides maintenance and diagnostic capabilities.
 """
 
 import contextlib
+import json
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -14,10 +15,30 @@ import structlog
 from surrealdb import RecordID
 
 from sibyl_core.config import settings
-from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.models.entities import (
+    ConfigFile,
+    Entity,
+    EntityType,
+    Episode,
+    KnowledgeSource,
+    Language,
+    Pattern,
+    Procedure,
+    Relationship,
+    RelationshipType,
+    Rule,
+    SlashCommand,
+    Template,
+    Tool,
+    Topic,
+)
+from sibyl_core.models.sources import Community, Document, Source
+from sibyl_core.models.tasks import Epic, ErrorPattern, Milestone, Note, Project, Task, Team
 from sibyl_core.services.native_graph import normalize_records
 
 log = structlog.get_logger()
+
+type EntityModel = type[Entity]
 
 
 async def get_graph_client():
@@ -533,9 +554,57 @@ def _parse_backup_datetime(value: Any) -> datetime:
     if isinstance(value, datetime):
         return value
     if isinstance(value, str) and value:
-        with contextlib.suppress(ValueError):
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return datetime.now(UTC)
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    raise ValueError(f"Invalid backup datetime: {value!r}")
+
+
+ENTITY_RESTORE_MODELS: dict[EntityType, EntityModel] = {
+    EntityType.PATTERN: Pattern,
+    EntityType.RULE: Rule,
+    EntityType.TEMPLATE: Template,
+    EntityType.TOOL: Tool,
+    EntityType.LANGUAGE: Language,
+    EntityType.TOPIC: Topic,
+    EntityType.EPISODE: Episode,
+    EntityType.KNOWLEDGE_SOURCE: KnowledgeSource,
+    EntityType.CONFIG_FILE: ConfigFile,
+    EntityType.SLASH_COMMAND: SlashCommand,
+    EntityType.PROCEDURE: Procedure,
+    EntityType.PROJECT: Project,
+    EntityType.EPIC: Epic,
+    EntityType.TASK: Task,
+    EntityType.TEAM: Team,
+    EntityType.ERROR_PATTERN: ErrorPattern,
+    EntityType.MILESTONE: Milestone,
+    EntityType.SOURCE: Source,
+    EntityType.DOCUMENT: Document,
+    EntityType.COMMUNITY: Community,
+    EntityType.NOTE: Note,
+}
+
+
+def _entity_restore_model(entity_type: EntityType) -> EntityModel:
+    return ENTITY_RESTORE_MODELS.get(entity_type, Entity)
+
+
+def _entity_from_backup_data(entity_data: dict[str, Any]) -> Entity:
+    payload = dict(entity_data)
+    entity_type = EntityType(str(payload.get("entity_type") or EntityType.TOPIC.value))
+    model = _entity_restore_model(entity_type)
+    if model in {Task, Project, Epic} and "title" not in payload:
+        payload["title"] = str(payload.get("name") or "")
+    return model.model_validate(payload)
+
+
+def _metadata_from_record(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        with contextlib.suppress(json.JSONDecodeError):
+            decoded = json.loads(value)
+            if isinstance(decoded, dict):
+                return decoded
+    return {}
 
 
 def _coerce_episode_source(value: Any) -> BackupEpisodeSource:
@@ -998,6 +1067,8 @@ async def _list_backup_relationships(
                    source.uuid AS source_id,
                    target.uuid AS target_id,
                    type(rel) AS rel_type,
+                   rel.weight AS weight,
+                   rel.metadata AS metadata,
                    rel.created_at AS created_at
             ORDER BY id DESC
             SKIP {offset}
@@ -1015,7 +1086,11 @@ async def _list_backup_relationships(
                     source_id=str(row.get("source_id") or ""),
                     target_id=str(row.get("target_id") or ""),
                     relationship_type=RelationshipType(str(row.get("rel_type") or "")),
-                    weight=1.0,
+                    weight=float(row.get("weight") or 1.0),
+                    metadata=_metadata_from_record(row.get("metadata")),
+                    created_at=_parse_backup_datetime(row.get("created_at"))
+                    if row.get("created_at") is not None
+                    else datetime.now(UTC),
                 )
             )
         if len(rows) < BACKFILL_PAGE_SIZE:
@@ -1025,14 +1100,7 @@ async def _list_backup_relationships(
 
 
 def _legacy_record_to_backup_entity(record: dict[str, Any], *, organization_id: str) -> Entity:
-    import json
-
-    metadata = record.get("metadata") or {}
-    if isinstance(metadata, str):
-        with contextlib.suppress(json.JSONDecodeError, TypeError):
-            metadata = json.loads(metadata)
-    if not isinstance(metadata, dict):
-        metadata = {}
+    metadata = _metadata_from_record(record.get("metadata"))
 
     raw_entity_type = str(record.get("entity_type") or "").strip().lower()
     entity_type = EntityType.TOPIC
@@ -1268,7 +1336,7 @@ async def restore_backup(
         entities_to_restore: list[Entity] = []
         for entity_data in backup_data.entities:
             try:
-                entity = Entity.model_validate(entity_data)
+                entity = _entity_from_backup_data(entity_data)
                 # Check if entity exists (get() raises on missing)
                 if skip_existing:
                     try:

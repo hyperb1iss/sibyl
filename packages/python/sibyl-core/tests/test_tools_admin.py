@@ -8,6 +8,7 @@ from unittest.mock import ANY, AsyncMock, call, patch
 import pytest
 
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.models.tasks import Epic, Project, ProjectStatus, Task, TaskPriority, TaskStatus
 from sibyl_core.services.native_graph import (
     NativeEntityManager,
     NativeRelationshipManager,
@@ -152,6 +153,8 @@ class TestBackupInventory:
                             "source_id": "document-1",
                             "target_id": "entity-2",
                             "rel_type": "MENTIONS",
+                            "weight": 0.75,
+                            "metadata": {"source_ids": ["source:doc"]},
                             "created_at": "2026-04-19T00:00:00Z",
                         }
                     ],
@@ -222,8 +225,17 @@ class TestBackupInventory:
             if entity["id"] == "entity-2"
         } == {"topic"}
         assert result.backup_data.relationships[0]["relationship_type"] == "MENTIONS"
+        assert result.backup_data.relationships[0]["weight"] == 0.75
+        assert result.backup_data.relationships[0]["metadata"] == {
+            "source_ids": ["source:doc"]
+        }
+        assert result.backup_data.relationships[0]["created_at"] == "2026-04-19T00:00:00Z"
         assert result.backup_data.episodes[0]["uuid"] == "episode-1"
         assert result.backup_data.mentions[0]["uuid"] == "mention-1"
+
+    def test_parse_backup_datetime_rejects_invalid_values(self) -> None:
+        with pytest.raises(ValueError):
+            admin_module._parse_backup_datetime("not-a-date")
 
 
 class TestHealthAndStats:
@@ -388,6 +400,79 @@ class TestRestoreBackup:
         relationship_manager.create.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_restore_rehydrates_typed_entities_losslessly(self) -> None:
+        org_id = "00000000-0000-0000-0000-000000000111"
+        entity_manager = AsyncMock()
+        relationship_manager = AsyncMock()
+        entity_manager.bulk_create_direct = AsyncMock(return_value=(3, 0))
+        relationship_manager.create_bulk = AsyncMock(return_value=(0, 0))
+        task = Task(
+            id="task-1",
+            name="Ship packaging",
+            title="Ship packaging",
+            status=TaskStatus.DOING,
+            priority=TaskPriority.CRITICAL,
+            project_id="project-1",
+            assignees=["nova"],
+            technologies=["uv", "homebrew"],
+        )
+        project = Project(
+            id="project-1",
+            name="Sibyl",
+            title="Sibyl",
+            status=ProjectStatus.ACTIVE,
+            repository_url="https://github.com/hyperb1iss/sibyl",
+            tech_stack=["python", "surrealdb"],
+        )
+        epic = Epic(
+            id="epic-1",
+            name="Launch",
+            title="Launch",
+            project_id="project-1",
+            priority=TaskPriority.HIGH,
+        )
+        backup_data = BackupData(
+            version="2.0",
+            created_at="2026-04-19T00:00:00Z",
+            organization_id=org_id,
+            entity_count=3,
+            relationship_count=0,
+            entities=[
+                task.model_dump(mode="json"),
+                project.model_dump(mode="json"),
+                epic.model_dump(mode="json"),
+            ],
+            relationships=[],
+        )
+
+        with patch(
+            "sibyl_core.tools.admin.get_graph_runtime",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    client=SimpleNamespace(get_org_driver=lambda group_id: SimpleNamespace()),
+                    entity_manager=entity_manager,
+                    relationship_manager=relationship_manager,
+                )
+            ),
+        ):
+            result = await restore_backup(
+                backup_data,
+                organization_id=org_id,
+                skip_existing=False,
+            )
+
+        assert result.success is True
+        restored = entity_manager.bulk_create_direct.await_args.args[0]
+        assert [type(entity) for entity in restored] == [Task, Project, Epic]
+        assert restored[0].status is TaskStatus.DOING
+        assert restored[0].priority is TaskPriority.CRITICAL
+        assert restored[0].project_id == "project-1"
+        assert restored[0].assignees == ["nova"]
+        assert restored[1].repository_url == "https://github.com/hyperb1iss/sibyl"
+        assert restored[1].tech_stack == ["python", "surrealdb"]
+        assert restored[2].project_id == "project-1"
+
+    @pytest.mark.asyncio
     async def test_skip_existing_restore_uses_direct_create_without_embeddings(self) -> None:
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()
@@ -462,7 +547,7 @@ class TestRestoreBackup:
             entities=[
                 Entity(
                     id="entity-1",
-                    entity_type=EntityType.NOTE,
+                    entity_type=EntityType.TOPIC,
                     name="Mentioned entity",
                     organization_id=org_id,
                 ).model_dump(mode="json")
