@@ -89,6 +89,7 @@ def test_build_native_context_retrieval_plan_records_scopes_and_weights() -> Non
     assert plan.weights.active_task_state_boost == 1.3
     assert plan.weights.project_match_boost == 1.2
     assert plan.weights.direct_raw_source_boost == 1.4
+    assert plan.weights.graph_expansion_only_boost == 0.45
     assert plan.weights.freshness_boost_cap == 1.5
     assert plan.filter_selectivity_threshold == DEFAULT_FILTER_SELECTIVITY_THRESHOLD
     assert NativeRetrievalSignal.RAW_LEXICAL in plan.signals
@@ -546,6 +547,49 @@ def test_vector_matches_with_lexical_signal_do_not_demote() -> None:
     )
 
     assert "vector_only_demoted" not in ranked[0][2]
+
+
+def test_graph_expansion_only_sessions_demote_below_direct_hits() -> None:
+    plan = build_native_context_retrieval_plan(
+        query="coffee limit",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["session"]},
+        principal_id="user-123",
+        project=None,
+        accessible_projects=None,
+    )
+    graph_candidate = NativeRetrievalCandidate(
+        id="graph-only",
+        type="session",
+        name="Graph only",
+        content="A session found only through projected memory graph expansion.",
+        score=1.0,
+        source=None,
+        metadata={},
+    )
+    direct_candidate = NativeRetrievalCandidate(
+        id="direct",
+        type="session",
+        name="Direct",
+        content="A direct lexical session hit.",
+        score=1.0,
+        source=None,
+        metadata={},
+    )
+
+    ranked = native_module._fuse_candidates(
+        [
+            (NativeRetrievalSignal.GRAPH_EXPANSION, [graph_candidate]),
+            (NativeRetrievalSignal.NODE_FULLTEXT, [direct_candidate]),
+        ],
+        plan=plan,
+        limit=2,
+    )
+
+    assert [candidate.id for candidate, _, _ in ranked] == ["direct", "graph-only"]
+    assert ranked[1][2]["graph_expansion_only_demoted"] is True
+    assert ranked[1][2]["graph_expansion_only_multiplier"] == 0.45
 
 
 class _RrfClient:

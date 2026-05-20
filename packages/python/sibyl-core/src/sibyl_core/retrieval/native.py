@@ -75,6 +75,7 @@ class NativeRetrievalWeights:
     active_task_state_boost: float = 1.3
     project_match_boost: float = 1.2
     direct_raw_source_boost: float = 1.4
+    graph_expansion_only_boost: float = 0.45
     freshness_boost_cap: float = 1.5
 
 
@@ -1728,11 +1729,7 @@ async def _surreal_rrf_scores(
     if not any(rrf_inputs):
         return {}
     unique_candidate_count = len(
-        {
-            candidate.id
-            for _signal, candidates in source_lists
-            for candidate in candidates
-        }
+        {candidate.id for _signal, candidates in source_lists for candidate in candidates}
     )
     try:
         rows = normalize_records(
@@ -1797,6 +1794,14 @@ def _rank_fused_candidates(
             fusion_metadata["vector_only_demoted"] = True
             fusion_metadata["filter_selectivity"] = plan.filter_selectivity
             fusion_metadata["vector_only_demote_multiplier"] = demote_multiplier
+        graph_multiplier = _graph_expansion_only_multiplier(
+            plan,
+            signals=fusion_metadata["sources"],
+        )
+        if graph_multiplier < 1.0:
+            score *= graph_multiplier
+            fusion_metadata["graph_expansion_only_demoted"] = True
+            fusion_metadata["graph_expansion_only_multiplier"] = graph_multiplier
         boosted = _boost_score(candidate, score, plan=plan)
         ranked.append((candidate, boosted, fusion_metadata))
     ranked.sort(key=lambda item: item[1], reverse=True)
@@ -1824,6 +1829,16 @@ def _vector_only_demote_multiplier(
     if plan.filter_selectivity_threshold <= 0:
         return 1.0
     return max(plan.filter_selectivity / plan.filter_selectivity_threshold, 0.1)
+
+
+def _graph_expansion_only_multiplier(
+    plan: NativeRetrievalPlan,
+    *,
+    signals: Sequence[str],
+) -> float:
+    if set(signals) != {NativeRetrievalSignal.GRAPH_EXPANSION.value}:
+        return 1.0
+    return max(min(plan.weights.graph_expansion_only_boost, 1.0), 0.0)
 
 
 def _boost_score(
