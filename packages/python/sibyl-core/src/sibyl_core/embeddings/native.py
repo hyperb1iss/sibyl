@@ -344,6 +344,20 @@ def create_native_embedding_provider(
 def configured_native_embedding_provider() -> NativeEmbeddingProvider | None:
     from sibyl_core.config import settings
 
+    dimensions_raw = os.getenv("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", "").strip()
+    dimensions = int(dimensions_raw) if dimensions_raw else settings.graph_embedding_dimensions
+
+    if os.getenv("SIBYL_MOCK_LLM", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return DeterministicNativeEmbeddingProvider(
+            NativeEmbeddingMetadata(
+                provider="deterministic",
+                model="mock-llm-v1",
+                dimensions=dimensions,
+                cache_namespace="graph-mock",
+                tokenizer_estimate_method="sha256",
+            )
+        )
+
     provider = (
         os.getenv("SIBYL_GRAPH_EMBEDDING_PROVIDER") or settings.graph_embedding_provider
     ).strip()
@@ -356,9 +370,6 @@ def configured_native_embedding_provider() -> NativeEmbeddingProvider | None:
             model = "gemini-embedding-2"
         else:
             model = settings.graph_embedding_model
-
-    dimensions_raw = os.getenv("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", "").strip()
-    dimensions = int(dimensions_raw) if dimensions_raw else settings.graph_embedding_dimensions
 
     if provider == "gemini":
         api_key = (

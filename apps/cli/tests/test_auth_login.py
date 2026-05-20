@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 from typer.testing import CliRunner
 
 from sibyl_cli import auth
 from sibyl_cli.main import app
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(text: str) -> str:
+    return _ANSI_RE.sub("", text)
 
 
 def test_top_level_auth_aliases_are_registered() -> None:
@@ -15,11 +23,11 @@ def test_top_level_auth_aliases_are_registered() -> None:
     whoami = runner.invoke(app, ["whoami", "--help"])
 
     assert login.exit_code == 0
-    assert "--no-browser" in login.stdout
+    assert "--no-browser" in _plain(login.stdout)
     assert logout.exit_code == 0
-    assert "--all" in logout.stdout
+    assert "--all" in _plain(logout.stdout)
     assert whoami.exit_code == 0
-    assert "Show auth status" in whoami.stdout
+    assert "Show auth status" in _plain(whoami.stdout)
 
 
 def test_device_no_browser_prints_url_without_polling(

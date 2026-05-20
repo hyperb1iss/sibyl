@@ -10,6 +10,7 @@ from sibyl_core.config import CoreConfig
 from sibyl_core.embeddings import native as native_module
 from sibyl_core.embeddings.native import (
     CachedNativeEmbeddingProvider,
+    DeterministicNativeEmbeddingProvider,
     NativeEmbeddingInputKind,
     NativeEmbeddingMetadata,
     OpenAINativeEmbeddingProvider,
@@ -205,6 +206,18 @@ def test_native_embedding_cache_key_includes_provider_shape() -> None:
         "same text",
         input_kind="query",
     )
+
+
+def test_configured_native_embedding_provider_uses_mock_when_requested(monkeypatch) -> None:
+    monkeypatch.setenv("SIBYL_MOCK_LLM", "true")
+    monkeypatch.setenv("SIBYL_OPENAI_API_KEY", "sk-test-key")
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", "16")
+
+    provider = configured_native_embedding_provider()
+
+    assert isinstance(provider, DeterministicNativeEmbeddingProvider)
+    assert provider.metadata.provider == "deterministic"
+    assert provider.metadata.dimensions == 16
 
 
 class _FakeOpenAIEmbeddingClient:
