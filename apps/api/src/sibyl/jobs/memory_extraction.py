@@ -15,8 +15,15 @@ from sibyl_core.ai.memory_extraction import (
     build_memory_entity_extraction_prompt,
     memory_entity_extractor,
 )
-from sibyl_core.models.memory_extraction import MemoryEntityExtractionResult
+from sibyl_core.embeddings.native import configured_native_embedding_provider
+from sibyl_core.models.entities import Entity
+from sibyl_core.models.memory_extraction import (
+    ExtractedMemoryEntity,
+    MemoryEntityExtractionResult,
+)
 from sibyl_core.observability import elapsed_ms, telemetry_registry
+from sibyl_core.projection import project_extracted_memory_entities
+from sibyl_core.services.native_graph import get_native_graph_runtime
 
 log = structlog.get_logger()
 
@@ -162,6 +169,7 @@ async def extract_memory_entities(
 
     errors: list[dict[str, str]] = []
     extractions: list[dict[str, Any]] = []
+    extracted_by_source_id: dict[str, list[ExtractedMemoryEntity]] = {}
     extracted_entities = 0
     results = await extractor.extract_many(prompts, max_concurrent=max_concurrent)
     for source, result in zip(source_payloads, results, strict=True):
@@ -174,13 +182,21 @@ async def extract_memory_entities(
                 }
             )
             continue
-        entities = [
-            entity.model_dump(mode="json") for entity in _limited_entities(result, max_entities_per_source)
-        ]
+        limited_entities = _limited_entities(result, max_entities_per_source)
+        extracted_by_source_id[source.source_id] = limited_entities
+        entities = [entity.model_dump(mode="json") for entity in limited_entities]
         extractions.append({"source_id": source.source_id, "entities": entities})
         extracted_entities += len(entities)
 
-    status = "ok" if not errors else "partial" if extractions else "error"
+    projection = await _project_extracted_entities(
+        source_payloads,
+        group_id=group_id,
+        extracted_by_source_id=extracted_by_source_id,
+        max_entities_per_source=max_entities_per_source,
+    )
+    projection_errors = list(projection["errors"])
+    has_errors = bool(errors or projection_errors)
+    status = "ok" if not has_errors else "partial" if extractions else "error"
     duration_ms = elapsed_ms(started_at)
     telemetry_registry().record_memory_extraction_run(
         status=status,
@@ -188,16 +204,22 @@ async def extract_memory_entities(
         sources=len(source_payloads),
         extracted_entities=extracted_entities,
         estimated_input_tokens=estimated_input_tokens,
+        projected_entities=int(projection["projected_entities"]),
+        relationships=int(projection["relationships"]),
+        projection_errors=len(projection_errors),
     )
     result = {
         "group_id": group_id,
         "sources": len(source_payloads),
         "extracted_entities": extracted_entities,
+        "projected_entities": projection["projected_entities"],
+        "relationships": projection["relationships"],
         "estimated_input_tokens": estimated_input_tokens,
         "errors": errors,
+        "projection_errors": projection_errors,
         "extractions": extractions,
     }
-    if errors:
+    if has_errors:
         log.warning("memory_extraction_complete", status=status, **result)
     else:
         log.info("memory_extraction_complete", status=status, **result)
@@ -261,8 +283,54 @@ def _batch_source_payloads(
 def _limited_entities(
     result: MemoryEntityExtractionResult,
     max_entities: int,
-) -> list[Any]:
+) -> list[ExtractedMemoryEntity]:
     return result.entities[:max(1, max_entities)]
+
+
+async def _project_extracted_entities(
+    source_payloads: list[_SourcePayload],
+    *,
+    group_id: str,
+    extracted_by_source_id: dict[str, list[ExtractedMemoryEntity]],
+    max_entities_per_source: int,
+) -> dict[str, Any]:
+    if not extracted_by_source_id:
+        return {"projected_entities": 0, "relationships": 0, "errors": []}
+
+    try:
+        sources = [Entity.model_validate(source.source) for source in source_payloads]
+        runtime = await get_native_graph_runtime(
+            group_id,
+            embedding_provider=configured_native_embedding_provider(),
+        )
+        projection = await project_extracted_memory_entities(
+            entity_manager=runtime.entity_manager,
+            relationship_manager=runtime.relationship_manager,
+            sources=sources,
+            extractions_by_source_id=extracted_by_source_id,
+            group_id=group_id,
+            created_source_ids=[source.source_id for source in source_payloads],
+            max_entities=max_entities_per_source,
+            generate_embeddings=False,
+        )
+        return {
+            "projected_entities": projection.projected_entities,
+            "relationships": projection.relationships,
+            "errors": list(projection.errors),
+        }
+    except Exception as exc:
+        log.warning(
+            "memory_extraction_projection_failed",
+            group_id=group_id,
+            sources=len(source_payloads),
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        return {
+            "projected_entities": 0,
+            "relationships": 0,
+            "errors": [str(exc)],
+        }
 
 
 def _estimate_tokens(text: str) -> int:

@@ -5,6 +5,7 @@ from sibyl_core.projection.memory import (
     MemoryProjectionResult,
     ProjectedMemoryEntity,
     extract_projected_memory_entities,
+    project_extracted_memory_entities,
     project_memory_entities,
     project_memory_entity,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "MemoryProjectionResult",
     "ProjectedMemoryEntity",
     "extract_projected_memory_entities",
+    "project_extracted_memory_entities",
     "project_memory_entities",
     "project_memory_entity",
 ]

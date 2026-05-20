@@ -355,6 +355,9 @@ class TelemetryRegistry:
         sources: int,
         extracted_entities: int,
         estimated_input_tokens: int,
+        projected_entities: int = 0,
+        relationships: int = 0,
+        projection_errors: int = 0,
     ) -> None:
         labels = {"status": status}
         self.increment("sibyl_memory_extraction_runs_total", labels=labels)
@@ -370,12 +373,33 @@ class TelemetryRegistry:
             estimated_input_tokens,
             labels=labels,
         )
+        self.observe(
+            "sibyl_memory_extraction_projected_entities",
+            projected_entities,
+            labels=labels,
+        )
+        self.observe(
+            "sibyl_memory_extraction_relationships",
+            relationships,
+            labels=labels,
+        )
+        self.observe(
+            "sibyl_memory_extraction_projection_errors",
+            projection_errors,
+            labels=labels,
+        )
         self.record_event(
             "memory_extraction",
             status=status,
             duration_ms=duration_ms,
             value=extracted_entities,
-            labels={**labels, "sources": sources},
+            labels={
+                **labels,
+                "sources": sources,
+                "projected_entities": projected_entities,
+                "relationships": relationships,
+                "projection_errors": projection_errors,
+            },
         )
 
     def record_queue_health(

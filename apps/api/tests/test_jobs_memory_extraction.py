@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 
 from sibyl.config import settings
@@ -65,7 +68,21 @@ async def test_extract_memory_entities_runs_bounded_llm_extraction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = FakeExtractor()
+    entity_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda entities, **_: [entity.id for entity in entities]
+        )
+    )
+    relationship_manager = SimpleNamespace(create_bulk=AsyncMock(return_value=(1, 0)))
+
+    async def fake_runtime(*_: object, **__: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+        )
+
     monkeypatch.setattr(memory_extraction, "memory_entity_extractor", lambda **_: fake)
+    monkeypatch.setattr(memory_extraction, "get_native_graph_runtime", fake_runtime)
 
     result = await memory_extraction.extract_memory_entities(
         {},
@@ -87,11 +104,15 @@ async def test_extract_memory_entities_runs_bounded_llm_extraction(
 
     assert result["sources"] == 1
     assert result["extracted_entities"] == 1
+    assert result["projected_entities"] == 1
+    assert result["relationships"] == 1
     assert result["extractions"][0]["source_id"] == "session-created"
     assert result["extractions"][0]["entities"][0]["name"] == "SurrealDB"
     assert fake.max_concurrent == 1
     assert "SurrealDB 3.0 adds n" in fake.prompts[0]
     assert "native RRF" not in fake.prompts[0]
+    created_entities = entity_manager.create_direct_bulk.await_args.args[0]
+    assert created_entities[0].metadata["projection_extractor"] == "llm"
 
 
 @pytest.mark.asyncio

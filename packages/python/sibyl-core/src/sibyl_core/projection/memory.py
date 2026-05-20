@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +13,7 @@ import structlog
 
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.models.memory_extraction import ExtractedMemoryEntity
 from sibyl_core.tools.helpers import _generate_id
 
 log = structlog.get_logger()
@@ -268,24 +269,96 @@ async def project_memory_entities(
             skipped += 1
             continue
         extracted_count += len(extracted)
-        for candidate in extracted:
-            entity = _projected_entity(
-                candidate,
-                group_id=group_id,
-                now=now,
-                source=projected_source,
-            )
-            projected_by_id.setdefault(entity.id, entity)
-            relationships.append(
-                _projection_relationship(
-                    source=projected_source,
-                    source_id=source_id,
-                    target_id=entity.id,
-                    candidate=candidate,
-                    now=now,
-                )
-            )
+        _add_projection_candidates(
+            group_id=group_id,
+            now=now,
+            source=projected_source,
+            source_id=source_id,
+            candidates=extracted,
+            projected_by_id=projected_by_id,
+            relationships=relationships,
+        )
 
+    return await _persist_projection_batch(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        sources_count=len(sources),
+        extracted_count=extracted_count,
+        skipped=skipped,
+        projected_by_id=projected_by_id,
+        relationships=relationships,
+        generate_embeddings=generate_embeddings,
+    )
+
+
+async def project_extracted_memory_entities(
+    *,
+    entity_manager: Any,
+    relationship_manager: Any,
+    sources: Sequence[Entity],
+    extractions_by_source_id: Mapping[str, Sequence[ExtractedMemoryEntity]],
+    group_id: str,
+    created_source_ids: Sequence[str] | None = None,
+    max_entities: int = DEFAULT_MAX_PROJECTED_ENTITIES,
+    min_confidence: float = DEFAULT_MIN_CONFIDENCE,
+    generate_embeddings: bool = True,
+) -> MemoryProjectionBatchResult:
+    now = datetime.now(UTC)
+    source_ids = list(created_source_ids or [])
+    projected_by_id: dict[str, Entity] = {}
+    relationships: list[Relationship] = []
+    extracted_count = 0
+    skipped = 0
+
+    for index, source in enumerate(sources):
+        source_id = source_ids[index] if index < len(source_ids) else source.id
+        if source.entity_type not in PROJECTABLE_ENTITY_TYPES:
+            skipped += 1
+            continue
+        projected_source = source.model_copy(update={"id": source_id})
+        extracted = _projected_from_extracted_entities(
+            extractions_by_source_id.get(source_id, ()),
+            source=projected_source,
+            max_entities=max_entities,
+            min_confidence=min_confidence,
+        )
+        if not extracted:
+            skipped += 1
+            continue
+        extracted_count += len(extracted)
+        _add_projection_candidates(
+            group_id=group_id,
+            now=now,
+            source=projected_source,
+            source_id=source_id,
+            candidates=extracted,
+            projected_by_id=projected_by_id,
+            relationships=relationships,
+        )
+
+    return await _persist_projection_batch(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        sources_count=len(sources),
+        extracted_count=extracted_count,
+        skipped=skipped,
+        projected_by_id=projected_by_id,
+        relationships=relationships,
+        generate_embeddings=generate_embeddings,
+    )
+
+
+async def _persist_projection_batch(
+    *,
+    entity_manager: Any,
+    relationship_manager: Any,
+    sources_count: int,
+    extracted_count: int,
+    skipped: int,
+    projected_by_id: dict[str, Entity],
+    relationships: list[Relationship],
+    generate_embeddings: bool,
+) -> MemoryProjectionBatchResult:
     if not projected_by_id:
         return MemoryProjectionBatchResult(sources=0, skipped=skipped)
 
@@ -303,11 +376,11 @@ async def project_memory_entities(
     except Exception as exc:
         log.warning(
             "memory_projection_entities_failed",
-            sources=len(sources),
+            sources=sources_count,
             error_type=type(exc).__name__,
         )
         return MemoryProjectionBatchResult(
-            sources=len(sources),
+            sources=sources_count,
             extracted=extracted_count,
             skipped=skipped,
             errors=(str(exc),),
@@ -323,13 +396,13 @@ async def project_memory_entities(
         except Exception as exc:
             log.warning(
                 "memory_projection_relationships_failed",
-                sources=len(sources),
+                sources=sources_count,
                 error_type=type(exc).__name__,
             )
             errors.append(str(exc))
 
     return MemoryProjectionBatchResult(
-        sources=len(sources),
+        sources=sources_count,
         extracted=extracted_count,
         projected_entities=len(created_ids),
         relationships=relationship_count,
@@ -373,6 +446,78 @@ async def _create_projected_entities(
         ]
 
     return [await entity_manager.create(entity) for entity in entities]
+
+
+def _add_projection_candidates(
+    *,
+    group_id: str,
+    now: datetime,
+    source: Entity,
+    source_id: str,
+    candidates: Sequence[ProjectedMemoryEntity],
+    projected_by_id: dict[str, Entity],
+    relationships: list[Relationship],
+) -> None:
+    for candidate in candidates:
+        entity = _projected_entity(
+            candidate,
+            group_id=group_id,
+            now=now,
+            source=source,
+        )
+        projected_by_id.setdefault(entity.id, entity)
+        relationships.append(
+            _projection_relationship(
+                source=source,
+                source_id=source_id,
+                target_id=entity.id,
+                candidate=candidate,
+                now=now,
+            )
+        )
+
+
+def _projected_from_extracted_entities(
+    extracted_entities: Sequence[ExtractedMemoryEntity],
+    *,
+    source: Entity,
+    max_entities: int,
+    min_confidence: float,
+) -> list[ProjectedMemoryEntity]:
+    if max_entities <= 0:
+        return []
+
+    deduped: dict[str, ProjectedMemoryEntity] = {}
+    for extracted in extracted_entities:
+        name = _clean_extracted_name(extracted.name)
+        if not _valid_extracted_name(name):
+            continue
+        confidence = 0.75 if extracted.confidence is None else extracted.confidence
+        confidence = max(0.0, min(confidence, 1.0))
+        if confidence < min_confidence:
+            continue
+        candidate = ProjectedMemoryEntity(
+            name=name,
+            entity_type=extracted.to_entity_type(),
+            description=(extracted.summary or f"{name} mentioned in {source.name}")[
+                :_MAX_DESCRIPTION_CHARS
+            ],
+            context=extracted.evidence[:_MAX_CONTEXT_CHARS],
+            confidence=confidence,
+            extractor="llm",
+            kind="llm_mention",
+        )
+        key = f"{candidate.entity_type.value}:{candidate.name.lower()}"
+        existing = deduped.get(key)
+        if existing is None or candidate.confidence > existing.confidence:
+            deduped[key] = candidate
+
+    ordered = sorted(
+        deduped.values(),
+        key=lambda item: (item.confidence, len(item.name)),
+        reverse=True,
+    )
+    return ordered[:max_entities]
 
 
 async def _missing_projected_entities(
@@ -590,6 +735,10 @@ def _clean_phrase(phrase: str) -> str:
     return cleaned.strip(" .,:;!?-")
 
 
+def _clean_extracted_name(name: str) -> str:
+    return " ".join(name.replace("_", " ").split()).strip(" .,:;!?-")
+
+
 def _valid_phrase(phrase: str) -> bool:
     if len(phrase) < 3 or len(phrase) > 80:
         return False
@@ -599,3 +748,14 @@ def _valid_phrase(phrase: str) -> bool:
     if len(words) > 8:
         return False
     return not (Path(phrase).suffix and "/" in phrase)
+
+
+def _valid_extracted_name(name: str) -> bool:
+    if len(name) < 2 or len(name) > 120:
+        return False
+    words = [word.lower().strip("'.-") for word in _WORD_RE.findall(name)]
+    if not words or all(word in _STOPWORDS for word in words):
+        return False
+    if len(words) > 12:
+        return False
+    return not (Path(name).suffix and "/" in name)
