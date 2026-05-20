@@ -13,6 +13,9 @@ import pytest
 PREFERENCE_CASE_INDEX = 2
 EXPECTED_CREATED_ENTITIES = 3
 EXPECTED_CHUNKED_ENTITIES = 2
+EXPECTED_EXTRACTION_QUEUE_DEPTH = 3
+EXPECTED_EXTRACTION_TOKENS = 128
+EXPECTED_EXTRACTED_ENTITIES = 2
 
 
 def _load_live_module() -> ModuleType:
@@ -49,6 +52,88 @@ def _assert_question_search_payload(module: ModuleType, payload: dict[str, Any])
     assert payload["boost_recent"] is True
     assert payload["reference_time"] == "2026/01/03 12:00"
     assert payload["limit"] == module.DEFAULT_DIAGNOSTIC_SEARCH_LIMIT
+
+
+def _assert_memory_extraction_stats(report: dict[str, Any]) -> None:
+    assert report["overall"]["memory_extraction_queued_sources"] == float(EXPECTED_CREATED_ENTITIES)
+    assert report["overall"]["memory_extraction_skipped_sources"] == 0.0
+    assert report["overall"]["memory_extraction_queue_depth_max"] == float(
+        EXPECTED_EXTRACTION_QUEUE_DEPTH
+    )
+    assert report["overall"]["memory_extraction_estimated_input_tokens"] == float(
+        EXPECTED_EXTRACTION_TOKENS
+    )
+    assert report["overall"]["memory_extraction_projected_entities"] == 1.0
+    assert report["overall"]["memory_extraction_relationships"] == 1.0
+    assert report["case_results"][0]["memory_extraction"] == {
+        "batches": 1,
+        "job_count": 1,
+        "job_result_count": 1,
+        "queued_sources": EXPECTED_CREATED_ENTITIES,
+        "skipped_sources": 0,
+        "queue_depth_max": EXPECTED_EXTRACTION_QUEUE_DEPTH,
+        "estimated_input_tokens": EXPECTED_EXTRACTION_TOKENS,
+        "sources": EXPECTED_CREATED_ENTITIES,
+        "extracted_entities": EXPECTED_EXTRACTED_ENTITIES,
+        "projected_entities": 1,
+        "relationships": 1,
+        "errors": 0,
+        "projection_errors": 0,
+        "statuses": {"queued": 1},
+        "reasons": {},
+    }
+
+
+def _assert_gate_valid_report(module: ModuleType, report: dict[str, Any]) -> None:
+    assert report["schema_version"] == "longmemeval-live-v1"
+    assert report["mode"] == "hybrid"
+    assert report["runtime"]["embedding_provider"] == "none"
+    assert report["runtime"]["embedding_dimensions"] == 0
+    assert report["runtime"]["entity_content_projection_policy"] == (
+        module.ENTITY_CONTENT_PROJECTION_POLICY
+    )
+    assert report["runtime"]["sample_strategy"] == module.DEFAULT_SAMPLE_STRATEGY
+    assert report["runtime"]["diagnostic_search_limit"] == module.DEFAULT_DIAGNOSTIC_SEARCH_LIMIT
+    assert report["runtime"]["wait_for_memory_extraction"] is True
+    assert report["dataset"]["corpus_text_policy"] == module.CORPUS_TEXT_POLICY
+    assert report["dataset"]["sample_strategy"] == module.DEFAULT_SAMPLE_STRATEGY
+    assert report["dataset"]["diagnostic_search_limit"] == module.DEFAULT_DIAGNOSTIC_SEARCH_LIMIT
+    assert report["dataset"]["wait_for_memory_extraction"] is True
+    assert report["dataset"]["selected_case_indices"] == [0]
+    assert report["dataset"]["entity_content_projection_policy"] == (
+        module.ENTITY_CONTENT_PROJECTION_POLICY
+    )
+    assert report["overall"]["hit@1"] == 1.0
+    assert report["overall"]["recall@1"] == 1.0
+    assert report["overall"]["cross_question_result_count"] == 0.0
+    assert report["overall"]["created_entity_count"] == float(EXPECTED_CREATED_ENTITIES)
+    assert report["overall"]["chunked_session_count"] == 1.0
+    assert report["overall"]["memory_extraction_job_count"] == 1.0
+    assert report["case_results"][0]["ranked_session_ids"] == ["s2", "s1"]
+    assert report["case_results"][0]["answer_ranks"] == [{"session_id": "s2", "rank": 1}]
+    assert report["case_results"][0]["missed_answer_session_ids"] == []
+    assert report["case_results"][0]["created_entity_count"] == EXPECTED_CREATED_ENTITIES
+    assert report["case_results"][0]["chunked_session_count"] == 1
+    assert report["diagnostics"]["case_gap_count"] == 0
+
+
+def _assert_chunked_entities(
+    module: ModuleType,
+    state: dict[str, Any],
+) -> None:
+    assert max(len(entity["content"]) for entity in state["entities"]) <= (
+        module.ENTITY_CONTENT_MAX_CHARS
+    )
+    chunked_entities = [
+        entity
+        for entity in state["entities"]
+        if entity["metadata"]["longmemeval_session_id"] == "s2"
+    ]
+    assert len(chunked_entities) == EXPECTED_CHUNKED_ENTITIES
+    assert [entity["metadata"]["longmemeval_chunk_index"] for entity in chunked_entities] == [0, 1]
+    assert {entity["metadata"]["longmemeval_chunk_count"] for entity in chunked_entities} == {
+        EXPECTED_CHUNKED_ENTITIES
+    }
 
 
 def test_longmemeval_live_refuses_localhost_without_explicit_allow() -> None:
@@ -112,7 +197,15 @@ def test_longmemeval_live_builds_gate_valid_report(tmp_path: Path) -> None:
                 "job_id": job_id,
                 "function": "extract_memory_entities",
                 "status": "complete",
-                "result": {"projected_entities": 1, "relationships": 1},
+                "result": {
+                    "estimated_input_tokens": EXPECTED_EXTRACTION_TOKENS,
+                    "sources": len(created),
+                    "extracted_entities": EXPECTED_EXTRACTED_ENTITIES,
+                    "projected_entities": 1,
+                    "relationships": 1,
+                    "errors": [],
+                    "projection_errors": [],
+                },
                 "error": None,
             }
             return _json_response(
@@ -125,6 +218,7 @@ def test_longmemeval_live_builds_gate_valid_report(tmp_path: Path) -> None:
                             "job_ids": [job_id],
                             "queued_sources": len(created),
                             "skipped_sources": 0,
+                            "queue_depth": EXPECTED_EXTRACTION_QUEUE_DEPTH,
                         }
                     },
                 },
@@ -172,49 +266,9 @@ def test_longmemeval_live_builds_gate_valid_report(tmp_path: Path) -> None:
         )
     )
 
-    assert report["schema_version"] == "longmemeval-live-v1"
-    assert report["mode"] == "hybrid"
-    assert report["runtime"]["embedding_provider"] == "none"
-    assert report["runtime"]["embedding_dimensions"] == 0
-    assert report["runtime"]["entity_content_projection_policy"] == (
-        module.ENTITY_CONTENT_PROJECTION_POLICY
-    )
-    assert report["runtime"]["sample_strategy"] == module.DEFAULT_SAMPLE_STRATEGY
-    assert report["runtime"]["diagnostic_search_limit"] == module.DEFAULT_DIAGNOSTIC_SEARCH_LIMIT
-    assert report["runtime"]["wait_for_memory_extraction"] is True
-    assert report["dataset"]["corpus_text_policy"] == module.CORPUS_TEXT_POLICY
-    assert report["dataset"]["sample_strategy"] == module.DEFAULT_SAMPLE_STRATEGY
-    assert report["dataset"]["diagnostic_search_limit"] == module.DEFAULT_DIAGNOSTIC_SEARCH_LIMIT
-    assert report["dataset"]["wait_for_memory_extraction"] is True
-    assert report["dataset"]["selected_case_indices"] == [0]
-    assert report["dataset"]["entity_content_projection_policy"] == (
-        module.ENTITY_CONTENT_PROJECTION_POLICY
-    )
-    assert report["overall"]["hit@1"] == 1.0
-    assert report["overall"]["recall@1"] == 1.0
-    assert report["overall"]["cross_question_result_count"] == 0.0
-    assert report["overall"]["created_entity_count"] == float(EXPECTED_CREATED_ENTITIES)
-    assert report["overall"]["chunked_session_count"] == 1.0
-    assert report["overall"]["memory_extraction_job_count"] == 1.0
-    assert max(len(entity["content"]) for entity in state["entities"]) <= (
-        module.ENTITY_CONTENT_MAX_CHARS
-    )
-    chunked_entities = [
-        entity
-        for entity in state["entities"]
-        if entity["metadata"]["longmemeval_session_id"] == "s2"
-    ]
-    assert len(chunked_entities) == EXPECTED_CHUNKED_ENTITIES
-    assert [entity["metadata"]["longmemeval_chunk_index"] for entity in chunked_entities] == [0, 1]
-    assert {entity["metadata"]["longmemeval_chunk_count"] for entity in chunked_entities} == {
-        EXPECTED_CHUNKED_ENTITIES
-    }
-    assert report["case_results"][0]["ranked_session_ids"] == ["s2", "s1"]
-    assert report["case_results"][0]["answer_ranks"] == [{"session_id": "s2", "rank": 1}]
-    assert report["case_results"][0]["missed_answer_session_ids"] == []
-    assert report["case_results"][0]["created_entity_count"] == EXPECTED_CREATED_ENTITIES
-    assert report["case_results"][0]["chunked_session_count"] == 1
-    assert report["diagnostics"]["case_gap_count"] == 0
+    _assert_gate_valid_report(module, report)
+    _assert_memory_extraction_stats(report)
+    _assert_chunked_entities(module, state)
 
 
 def test_longmemeval_live_stall_timeout_reports_active_case(tmp_path: Path) -> None:

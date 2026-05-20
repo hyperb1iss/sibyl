@@ -200,13 +200,105 @@ def _env_flag(name: str) -> bool:
     return str(os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _background_job_ids(response: dict[str, Any], key: str) -> list[str]:
+def _background_job_info(response: dict[str, Any], key: str) -> dict[str, Any]:
     background_jobs = response.get("background_jobs")
     if not isinstance(background_jobs, dict):
-        return []
+        return {}
     job_info = background_jobs.get(key)
     if not isinstance(job_info, dict):
-        return []
+        return {}
+    return dict(job_info)
+
+
+def _new_memory_extraction_stats() -> dict[str, Any]:
+    return {
+        "batches": 0,
+        "job_count": 0,
+        "job_result_count": 0,
+        "queued_sources": 0,
+        "skipped_sources": 0,
+        "queue_depth_max": None,
+        "estimated_input_tokens": 0,
+        "sources": 0,
+        "extracted_entities": 0,
+        "projected_entities": 0,
+        "relationships": 0,
+        "errors": 0,
+        "projection_errors": 0,
+        "statuses": {},
+        "reasons": {},
+    }
+
+
+def _int_metric(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _optional_int_metric(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _increment_counter(counter: dict[str, int], key: str) -> None:
+    counter[key] = int(counter.get(key, 0)) + 1
+
+
+def _record_memory_extraction_enqueue(
+    stats: dict[str, Any],
+    job_info: dict[str, Any],
+) -> None:
+    if not job_info:
+        return
+    stats["batches"] += 1
+    stats["job_count"] += len(_job_ids_from_info(job_info))
+    stats["queued_sources"] += _int_metric(job_info.get("queued_sources"))
+    stats["skipped_sources"] += _int_metric(job_info.get("skipped_sources"))
+    queue_depth = _optional_int_metric(job_info.get("queue_depth"))
+    if queue_depth is not None:
+        current = stats.get("queue_depth_max")
+        stats["queue_depth_max"] = queue_depth if current is None else max(current, queue_depth)
+    status = str(job_info.get("status") or "unknown")
+    _increment_counter(stats["statuses"], status)
+    reason = str(job_info.get("reason") or "").strip()
+    if reason:
+        _increment_counter(stats["reasons"], reason)
+
+
+def _record_memory_extraction_job_results(
+    stats: dict[str, Any],
+    completed_jobs: list[dict[str, Any]],
+) -> None:
+    for job in completed_jobs:
+        result = job.get("result")
+        if not isinstance(result, dict):
+            continue
+        stats["job_result_count"] += 1
+        for key in (
+            "estimated_input_tokens",
+            "sources",
+            "extracted_entities",
+            "projected_entities",
+            "relationships",
+        ):
+            stats[key] += _int_metric(result.get(key))
+        errors = result.get("errors")
+        if isinstance(errors, list):
+            stats["errors"] += len(errors)
+        projection_errors = result.get("projection_errors")
+        if isinstance(projection_errors, list):
+            stats["projection_errors"] += len(projection_errors)
+
+
+def _job_ids_from_info(job_info: dict[str, Any]) -> list[str]:
     job_ids = job_info.get("job_ids")
     if not isinstance(job_ids, list):
         return []
@@ -363,11 +455,12 @@ async def _ingest_haystack(
     wait_for_memory_extraction: bool,
     memory_extraction_timeout_seconds: float,
     active_case: dict[str, Any] | None = None,
-) -> tuple[list[str], float, int, int, int, float]:
+) -> tuple[list[str], float, int, int, int, float, dict[str, Any]]:
     start = time.perf_counter()
     question_id = str(entry["question_id"])
     created_ids: list[str] = []
     memory_extraction_job_ids: list[str] = []
+    memory_extraction_stats = _new_memory_extraction_stats()
     chunked_session_count = 0
     documents = build_longmemeval_corpus(entry, text_policy=corpus_text_policy)
     entities: list[dict[str, Any]] = []
@@ -428,7 +521,9 @@ async def _ingest_haystack(
             for entity in created_entities
             if isinstance(entity, dict)
         )
-        memory_extraction_job_ids.extend(_background_job_ids(created, "memory_extraction"))
+        memory_extraction_info = _background_job_info(created, "memory_extraction")
+        memory_extraction_job_ids.extend(_job_ids_from_info(memory_extraction_info))
+        _record_memory_extraction_enqueue(memory_extraction_stats, memory_extraction_info)
 
     ingest_ms = (time.perf_counter() - start) * 1000
     memory_extraction_wait_ms = 0.0
@@ -439,11 +534,12 @@ async def _ingest_haystack(
             path="/jobs",
         )
         wait_start = time.perf_counter()
-        await _wait_for_jobs(
+        completed_jobs = await _wait_for_jobs(
             client,
             memory_extraction_job_ids,
             timeout_seconds=memory_extraction_timeout_seconds,
         )
+        _record_memory_extraction_job_results(memory_extraction_stats, completed_jobs)
         memory_extraction_wait_ms = (time.perf_counter() - wait_start) * 1000
 
     return (
@@ -453,6 +549,7 @@ async def _ingest_haystack(
         len(documents),
         len(memory_extraction_job_ids),
         memory_extraction_wait_ms,
+        memory_extraction_stats,
     )
 
 
@@ -708,6 +805,7 @@ async def _run_case(
             document_count,
             memory_extraction_job_count,
             memory_extraction_wait_ms,
+            memory_extraction_stats,
         ) = await _ingest_haystack(
             client,
             entry=entry,
@@ -767,6 +865,7 @@ async def _run_case(
         "chunked_session_count": chunked_session_count,
         "memory_extraction_job_count": memory_extraction_job_count,
         "memory_extraction_wait_ms": memory_extraction_wait_ms,
+        "memory_extraction": memory_extraction_stats,
         "readiness": readiness,
         "ingest_ms": ingest_ms,
         "latency_ms": (time.perf_counter() - started) * 1000,
@@ -849,6 +948,8 @@ async def _run_cases(
                 recall = average_metric(results, progress_key) * 100
                 timings = result.get("timings_ms")
                 timings = timings if isinstance(timings, dict) else {}
+                extraction = result.get("memory_extraction")
+                extraction = extraction if isinstance(extraction, dict) else {}
                 readiness = result.get("readiness")
                 readiness = readiness if isinstance(readiness, dict) else {}
                 print(
@@ -863,7 +964,9 @@ async def _run_cases(
                     f"search={_format_ms(timings.get('search'))} "
                     f"docs={result.get('document_count')} "
                     f"entities={result.get('created_entity_count')} "
-                    f"extract_jobs={result.get('memory_extraction_job_count')}",
+                    f"extract_jobs={result.get('memory_extraction_job_count')} "
+                    f"extract_skipped={extraction.get('skipped_sources', 0)} "
+                    f"extract_tokens={extraction.get('estimated_input_tokens', 0)}",
                     flush=True,
                 )
 
@@ -952,6 +1055,28 @@ def _aggregate(results: list[dict[str, Any]], k_values: list[int]) -> tuple[dict
     overall["memory_extraction_wait_ms"] = sum(
         float(result.get("memory_extraction_wait_ms", 0.0)) for result in results
     )
+    extraction_keys = (
+        "queued_sources",
+        "skipped_sources",
+        "job_result_count",
+        "estimated_input_tokens",
+        "sources",
+        "extracted_entities",
+        "projected_entities",
+        "relationships",
+        "errors",
+        "projection_errors",
+    )
+    for key in extraction_keys:
+        overall[f"memory_extraction_{key}"] = sum(
+            float(result.get("memory_extraction", {}).get(key, 0.0)) for result in results
+        )
+    queue_depths = [
+        result.get("memory_extraction", {}).get("queue_depth_max")
+        for result in results
+        if result.get("memory_extraction", {}).get("queue_depth_max") is not None
+    ]
+    overall["memory_extraction_queue_depth_max"] = float(max(queue_depths)) if queue_depths else 0.0
 
     results_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for result in results:
