@@ -8,6 +8,7 @@ import pytest
 import typer
 
 import sibyl_cli.client as client_module
+from sibyl_cli import config_store
 from sibyl_cli import pending_writes
 from sibyl_cli.client import SibylClient, SibylClientError
 from sibyl_cli.common import handle_client_error
@@ -122,6 +123,24 @@ async def test_mutating_request_buffers_and_deletes_on_success(
     await client.close()
     assert data == {"ok": True}
     assert seen_headers
+    assert pending_writes.list_pending_writes() == []
+
+
+@pytest.mark.asyncio
+async def test_mutating_request_requires_explicit_context_before_first_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client = SibylClient(auth_token="token")
+
+    with pytest.raises(SibylClientError) as exc:
+        await client.post("/entities", json={"name": "No context", "content": "Body"})
+
+    await client.close()
+    assert "No Sibyl context is configured" in str(exc.value)
+    assert exc.value.remediation == client_module.INIT_REMEDIATION
     assert pending_writes.list_pending_writes() == []
 
 

@@ -16,6 +16,7 @@ from uuid import UUID
 
 import typer
 
+from sibyl_cli import config_store
 from sibyl_cli.archive import app as archive_app
 from sibyl_cli.auth import app as auth_app
 from sibyl_cli.client import SibylClientError, get_client
@@ -1189,6 +1190,92 @@ def health(
             _handle_client_error(e)
 
     check_health()
+
+
+@app.command("init")
+def init_cmd(
+    remote: Annotated[
+        str | None,
+        typer.Option("--remote", help="Remote Sibyl server URL for CLI-only mode"),
+    ] = None,
+    local: Annotated[
+        bool,
+        typer.Option("--local", help="Create a localhost context"),
+    ] = False,
+    name: Annotated[
+        str | None,
+        typer.Option("--name", "-n", help="Context name"),
+    ] = None,
+    org: Annotated[str, typer.Option("--org", "-o", help="Organization slug")] = "",
+    project: Annotated[str, typer.Option("--project", "-p", help="Default project ID")] = "",
+    insecure: Annotated[
+        bool, typer.Option("--insecure", "-k", help="Skip SSL verification for this context")
+    ] = False,
+    force: Annotated[bool, typer.Option("--force", "-f", help="Update an existing context")] = False,
+    json_output: Annotated[bool, typer.Option("--json", "-j", help="Output as JSON")] = False,
+) -> None:
+    """Create an explicit local or remote context for first-run setup."""
+    if remote and local:
+        error("--remote and --local cannot be combined")
+        raise typer.Exit(1)
+
+    server_url = remote or "http://localhost:3334"
+    context_name = name or ("remote" if remote else "local")
+    existing = config_store.get_context(context_name)
+
+    try:
+        if existing:
+            if not force:
+                error(f"Context '{context_name}' already exists. Use --force to update it.")
+                raise typer.Exit(1)
+            ctx = config_store.update_context(
+                context_name,
+                server_url=server_url,
+                org_slug=org or None,
+                default_project=project or None,
+                insecure=insecure,
+            )
+            config_store.set_active_context(context_name)
+            action = "updated"
+        else:
+            ctx = config_store.create_context(
+                context_name,
+                server_url=server_url,
+                org_slug=org or None,
+                default_project=project or None,
+                set_active=True,
+                insecure=insecure,
+            )
+            action = "created"
+    except ValueError as exc:
+        error(str(exc))
+        raise typer.Exit(1) from None
+
+    if json_output:
+        print_json(
+            {
+                "context": context_name,
+                "server_url": ctx.server_url,
+                "org_slug": ctx.org_slug,
+                "default_project": ctx.default_project,
+                "active": True,
+                "mode": "remote" if remote else "local",
+                "action": action,
+            }
+        )
+        return
+
+    success(f"{action.capitalize()} context '{context_name}'")
+    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}]  {ctx.server_url}")
+    console.print(f"  [{NEON_CYAN}]Org:[/{NEON_CYAN}]     {ctx.org_slug or '[dim]auto[/dim]'}")
+    console.print(
+        f"  [{NEON_CYAN}]Project:[/{NEON_CYAN}] {ctx.default_project or '[dim]none[/dim]'}"
+    )
+    console.print()
+    if remote:
+        info("Next: sibyl auth login && sibyl doctor")
+    else:
+        info("Next: sibyl serve, then sibyl doctor")
 
 
 @app.command()

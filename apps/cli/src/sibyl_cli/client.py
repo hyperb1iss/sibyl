@@ -33,6 +33,7 @@ FAILURE_THRESHOLD = 3
 _FAILURE_WINDOWS: dict[tuple[str, str], deque[float]] = {}
 BUFFERED_WRITE_METHODS = {"POST", "PATCH", "DELETE"}
 PENDING_WRITE_REMEDIATION = "Run 'sibyl auth login' then 'sibyl pending-writes flush'."
+INIT_REMEDIATION = "Run 'sibyl init' for local mode or 'sibyl init --remote <url>'."
 
 
 @dataclass
@@ -219,6 +220,12 @@ def _should_buffer_request(method: str, path: str) -> bool:
     return not path.startswith("/auth/")
 
 
+def _requires_initialized_context(method: str, path: str) -> bool:
+    if method.upper() not in BUFFERED_WRITE_METHODS:
+        return False
+    return not path.startswith("/auth/")
+
+
 def _should_keep_pending_write(status_code: int) -> bool:
     return status_code in {401, 408, 429} or status_code >= 500
 
@@ -252,6 +259,7 @@ class SibylClient:
             context_name: Optional context name to use for URL and auth resolution.
         """
         self.context_name = context_name
+        self._explicit_base_url = base_url is not None
         self.base_url = normalize_api_url(base_url or _get_default_api_url(context_name))
         self.timeout = timeout
         self._uses_stored_auth = (
@@ -477,6 +485,19 @@ class SibylClient:
             _, refresh_failure = await self._refresh_token()
 
         method = method.upper()
+        if (
+            not self._explicit_base_url
+            and _requires_initialized_context(method, path)
+            and not os.environ.get("SIBYL_API_URL", "").strip()
+        ):
+            from sibyl_cli import config_store
+
+            if not config_store.config_exists():
+                raise SibylClientError(
+                    "No Sibyl context is configured; refusing to write to implicit localhost.",
+                    remediation=INIT_REMEDIATION,
+                )
+
         pending_write_id = _pending_write_id
         idempotency_key = _idempotency_key
         if _buffer_pending and pending_write_id is None and _should_buffer_request(method, path):
