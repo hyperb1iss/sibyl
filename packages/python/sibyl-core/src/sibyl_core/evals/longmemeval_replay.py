@@ -480,7 +480,7 @@ def _score_query_coverage(
             1.0,
             math.sqrt(len(candidate.tokens)),
         )
-        score = (0.75 * original_rank_score) + (0.30 * overlap) + (0.05 * density)
+        score = (0.75 * original_rank_score) + (0.30 * overlap) + (0.08 * density)
         scored.append((score, candidate))
 
     return sorted(scored, key=lambda item: (-item[0], item[1].original_rank))
