@@ -123,6 +123,64 @@ jobs:
           skip-existing: true
 
   # =========================================================================
+  # Homebrew: generate the tap formula from published PyPI artifacts
+  # =========================================================================
+  homebrew:
+    name: "► Homebrew: Update tap"
+    needs: python
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: "◆ Checkout Sibyl"
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: "◇ Setup Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: "◆ Checkout Homebrew tap"
+        uses: actions/checkout@v4
+        with:
+          repository: hyperb1iss/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: "△ Extract version from tag"
+        id: version
+        run: echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+        env:
+          TAG: ${{ inputs.tag }}
+
+      - name: "△ Generate formula"
+        run: |
+          python tools/release/homebrew_formula.py \
+            --version "${{ steps.version.outputs.version }}" \
+            --output homebrew-tap/Formula/sibyl.rb
+
+      - name: "► Commit tap update"
+        working-directory: homebrew-tap
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet -- Formula/sibyl.rb; then
+            echo "Formula/sibyl.rb already matches v${{ steps.version.outputs.version }}"
+            exit 0
+          fi
+
+          git add Formula/sibyl.rb
+          git commit \
+            -m "feat: update sibyl to v${{ steps.version.outputs.version }}" \
+            -m "Generate the formula from the published PyPI artifacts." \
+            -m "The tap now installs both the sibyl CLI and sibyld daemon."
+          git push
+
+  # =========================================================================
   # Docker: build each (image, platform) on its native runner, push by digest
   # =========================================================================
   docker-build:
@@ -244,7 +302,7 @@ jobs:
   # =========================================================================
   release:
     name: "◆ Release: Update"
-    needs: [python, docker-merge]
+    needs: [python, homebrew, docker-merge]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

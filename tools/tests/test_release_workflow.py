@@ -6,6 +6,7 @@ import subprocess
 from shutil import which
 from typing import Any, cast
 
+from tools.release.homebrew_formula import PackageArtifact, pep440_version, render_formula
 from tools.tests.conftest import REPO_ROOT
 
 RC_GATE_TEST_DEPS = {
@@ -95,10 +96,15 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     workflow = (REPO_ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8")
 
     assert "rc-gate:" in workflow
+    assert "homebrew:" in workflow
     assert "moon run :check" in workflow
     assert "moon run python-package-build" in workflow
+    assert "tools/release/homebrew_formula.py" in workflow
+    assert "hyperb1iss/homebrew-tap" in workflow
+    assert "HOMEBREW_TAP_TOKEN" in workflow
     assert workflow.index("moon run :check") < workflow.index("moon run python-package-build")
     assert workflow.index("moon run :check") < workflow.index("docker/build-push-action")
+    assert workflow.index("gh-action-pypi-publish") < workflow.index("homebrew_formula.py")
     assert workflow.count("needs: rc-gate") == PUBLISH_ARTIFACT_JOB_COUNT
     assert "uv tool install sibyld" in workflow
     assert "[sibyld](https://pypi.org/project/sibyld/" in workflow
@@ -110,3 +116,37 @@ def test_python_package_build_covers_cli_core_and_daemon() -> None:
 
     for package_command in PYTHON_RELEASE_PACKAGES:
         assert package_command in script
+
+
+def test_homebrew_formula_renders_cli_and_daemon_formula() -> None:
+    artifacts = {
+        "sibyl-dev": PackageArtifact(
+            name="sibyl-dev",
+            url="https://files.pythonhosted.org/sibyl_dev-1.0.0rc1.tar.gz",
+            sha256="a" * 64,
+        ),
+        "sibyld": PackageArtifact(
+            name="sibyld",
+            url="https://files.pythonhosted.org/sibyld-1.0.0rc1.tar.gz",
+            sha256="b" * 64,
+        ),
+        "sibyl-core": PackageArtifact(
+            name="sibyl-core",
+            url="https://files.pythonhosted.org/sibyl_core-1.0.0rc1.tar.gz",
+            sha256="c" * 64,
+        ),
+    }
+
+    formula = render_formula(
+        release_version="1.0.0-rc.1",
+        python_version=pep440_version("1.0.0-rc.1"),
+        artifacts=artifacts,
+    )
+
+    assert 'class Sibyl < Formula' in formula
+    assert 'version "1.0.0-rc.1"' in formula
+    assert 'PYTHON_PACKAGE_VERSION = "1.0.0rc1"' in formula
+    assert 'resource "sibyl-core"' in formula
+    assert 'resource "sibyld"' in formula
+    assert 'bin.install_symlink libexec/"bin/sibyl"' in formula
+    assert 'bin.install_symlink libexec/"bin/sibyld"' in formula
