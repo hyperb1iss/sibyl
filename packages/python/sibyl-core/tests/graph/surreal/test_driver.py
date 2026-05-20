@@ -1191,6 +1191,40 @@ class TestSchemaBootstrap:
         with pytest.raises(ValueError, match="group_id"):
             await bootstrap_schema(d)
 
+    async def test_relation_tables_reject_dangling_edges(
+        self, surreal_schema: SurrealDriver
+    ) -> None:
+        with pytest.raises(Exception, match="does not exist"):
+            await surreal_schema.execute_query(
+                "RELATE entity:missing_source->relates_to->entity:missing_target;"
+            )
+
+    async def test_bootstrap_removes_dangling_edges_before_enforcement(
+        self, surreal_driver: SurrealDriver
+    ) -> None:
+        await surreal_driver.execute_query(
+            """
+            RELATE entity:missing_source->relates_to->entity:missing_target SET
+                uuid = "dangling-edge",
+                name = "RELATED_TO",
+                fact = "",
+                group_id = $gid;
+            """,
+            gid=surreal_driver.group_id,
+        )
+
+        rows = await surreal_driver.execute_query(
+            'SELECT uuid FROM relates_to WHERE uuid = "dangling-edge";'
+        )
+        assert isinstance(rows, list) and len(rows) == 1
+
+        await bootstrap_schema(surreal_driver)
+
+        rows = await surreal_driver.execute_query(
+            'SELECT uuid FROM relates_to WHERE uuid = "dangling-edge";'
+        )
+        assert rows == []
+
     async def test_entity_crud_roundtrip(self, surreal_schema: SurrealDriver) -> None:
         # Create
         await surreal_schema.execute_query(

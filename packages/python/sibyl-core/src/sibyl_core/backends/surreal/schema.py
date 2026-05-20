@@ -146,8 +146,34 @@ DEFINE INDEX IF NOT EXISTS idx_saga_group ON saga FIELDS group_id;
 """
 
 
+RELATION_EDGE_CLEANUP_DEFINITIONS = """
+DELETE FROM relates_to
+WHERE in NOT IN (SELECT VALUE id FROM entity)
+   OR out NOT IN (SELECT VALUE id FROM entity);
+
+DELETE FROM mentions
+WHERE in NOT IN (SELECT VALUE id FROM episode)
+   OR out NOT IN (SELECT VALUE id FROM entity);
+
+DELETE FROM has_episode
+WHERE in NOT IN (SELECT VALUE id FROM saga)
+   OR out NOT IN (SELECT VALUE id FROM episode);
+
+DELETE FROM next_episode
+WHERE in NOT IN (SELECT VALUE id FROM episode)
+   OR out NOT IN (SELECT VALUE id FROM episode);
+
+DELETE FROM has_member
+WHERE in NOT IN (SELECT VALUE id FROM community)
+   OR (
+       out NOT IN (SELECT VALUE id FROM entity)
+       AND out NOT IN (SELECT VALUE id FROM community)
+   );
+"""
+
+
 EDGE_DEFINITIONS = f"""
-DEFINE TABLE IF NOT EXISTS relates_to TYPE RELATION IN entity OUT entity SCHEMAFULL;
+DEFINE TABLE OVERWRITE relates_to SCHEMAFULL TYPE RELATION IN entity OUT entity ENFORCED;
 ALTER TABLE IF EXISTS relates_to SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON relates_to TYPE string;
 DEFINE FIELD IF NOT EXISTS name ON relates_to TYPE string;
@@ -175,7 +201,7 @@ DEFINE INDEX IF NOT EXISTS idx_relates_fact_ft ON relates_to FIELDS fact FULLTEX
 DEFINE INDEX IF NOT EXISTS idx_relates_fact_embedding ON relates_to FIELDS fact_embedding
     HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12;
 
-DEFINE TABLE IF NOT EXISTS mentions TYPE RELATION IN episode OUT entity SCHEMAFULL;
+DEFINE TABLE OVERWRITE mentions SCHEMAFULL TYPE RELATION IN episode OUT entity ENFORCED;
 ALTER TABLE IF EXISTS mentions SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON mentions TYPE string;
 DEFINE FIELD IF NOT EXISTS group_id ON mentions TYPE string;
@@ -184,7 +210,7 @@ DEFINE FIELD IF NOT EXISTS created_at ON mentions TYPE datetime DEFAULT time::no
 DEFINE INDEX IF NOT EXISTS idx_mentions_uuid ON mentions FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_mentions_group ON mentions FIELDS group_id;
 
-DEFINE TABLE IF NOT EXISTS has_episode TYPE RELATION IN saga OUT episode SCHEMAFULL;
+DEFINE TABLE OVERWRITE has_episode SCHEMAFULL TYPE RELATION IN saga OUT episode ENFORCED;
 ALTER TABLE IF EXISTS has_episode SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON has_episode TYPE string;
 DEFINE FIELD IF NOT EXISTS group_id ON has_episode TYPE string;
@@ -192,7 +218,7 @@ DEFINE FIELD IF NOT EXISTS created_at ON has_episode TYPE datetime DEFAULT time:
 
 DEFINE INDEX IF NOT EXISTS idx_has_ep_uuid ON has_episode FIELDS uuid UNIQUE;
 
-DEFINE TABLE IF NOT EXISTS next_episode TYPE RELATION IN episode OUT episode SCHEMAFULL;
+DEFINE TABLE OVERWRITE next_episode SCHEMAFULL TYPE RELATION IN episode OUT episode ENFORCED;
 ALTER TABLE IF EXISTS next_episode SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON next_episode TYPE string;
 DEFINE FIELD IF NOT EXISTS group_id ON next_episode TYPE string;
@@ -200,7 +226,7 @@ DEFINE FIELD IF NOT EXISTS created_at ON next_episode TYPE datetime DEFAULT time
 
 DEFINE INDEX IF NOT EXISTS idx_next_ep_uuid ON next_episode FIELDS uuid UNIQUE;
 
-DEFINE TABLE IF NOT EXISTS has_member TYPE RELATION IN community OUT entity | community SCHEMAFULL;
+DEFINE TABLE OVERWRITE has_member SCHEMAFULL TYPE RELATION IN community OUT entity | community ENFORCED;
 ALTER TABLE IF EXISTS has_member SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON has_member TYPE string;
 DEFINE FIELD IF NOT EXISTS group_id ON has_member TYPE string;
@@ -232,6 +258,7 @@ async def bootstrap_schema(driver: SurrealDriver, *, reset: bool = False) -> Non
     compatible_blocks = (
         ANALYZER_DEFINITIONS,
         render_fulltext_compatible_sql(NODE_DEFINITIONS, url=driver._url),
+        RELATION_EDGE_CLEANUP_DEFINITIONS,
         render_fulltext_compatible_sql(EDGE_DEFINITIONS, url=driver._url),
     )
     for block in compatible_blocks:
@@ -265,6 +292,7 @@ __all__ = [
     "GRAPH_EDGES",
     "GRAPH_TABLES",
     "NODE_DEFINITIONS",
+    "RELATION_EDGE_CLEANUP_DEFINITIONS",
     "bootstrap_schema",
     "drop_all_indexes",
     "render_fulltext_compatible_sql",

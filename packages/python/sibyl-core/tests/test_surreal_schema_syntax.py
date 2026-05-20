@@ -17,6 +17,7 @@ from sibyl_core.backends.surreal.content_schema import (
 from sibyl_core.backends.surreal.schema import (
     EDGE_DEFINITIONS,
     NODE_DEFINITIONS,
+    RELATION_EDGE_CLEANUP_DEFINITIONS,
     render_fulltext_compatible_sql,
 )
 
@@ -93,6 +94,30 @@ def test_entity_fulltext_uses_top_level_description_and_content_indexes() -> Non
     assert NODE_DEFINITIONS.index("REMOVE INDEX IF EXISTS idx_entity_content_ft") < (
         NODE_DEFINITIONS.index("DEFINE INDEX IF NOT EXISTS idx_entity_content_text_ft")
     )
+
+
+def test_graph_relation_tables_are_enforced() -> None:
+    for relation in ("relates_to", "mentions", "has_episode", "next_episode", "has_member"):
+        assert f"DEFINE TABLE OVERWRITE {relation} SCHEMAFULL TYPE RELATION" in EDGE_DEFINITIONS
+
+    assert "relates_to SCHEMAFULL TYPE RELATION IN entity OUT entity ENFORCED" in EDGE_DEFINITIONS
+    assert "mentions SCHEMAFULL TYPE RELATION IN episode OUT entity ENFORCED" in EDGE_DEFINITIONS
+    assert "has_episode SCHEMAFULL TYPE RELATION IN saga OUT episode ENFORCED" in EDGE_DEFINITIONS
+    assert "next_episode SCHEMAFULL TYPE RELATION IN episode OUT episode ENFORCED" in EDGE_DEFINITIONS
+    assert (
+        "has_member SCHEMAFULL TYPE RELATION IN community OUT entity | community ENFORCED"
+        in EDGE_DEFINITIONS
+    )
+
+
+def test_graph_relation_cleanup_covers_all_relation_tables() -> None:
+    for relation in ("relates_to", "mentions", "has_episode", "next_episode", "has_member"):
+        assert f"DELETE FROM {relation}" in RELATION_EDGE_CLEANUP_DEFINITIONS
+
+    assert "SELECT VALUE id FROM entity" in RELATION_EDGE_CLEANUP_DEFINITIONS
+    assert "SELECT VALUE id FROM episode" in RELATION_EDGE_CLEANUP_DEFINITIONS
+    assert "SELECT VALUE id FROM saga" in RELATION_EDGE_CLEANUP_DEFINITIONS
+    assert "SELECT VALUE id FROM community" in RELATION_EDGE_CLEANUP_DEFINITIONS
 
 
 @pytest.mark.asyncio
