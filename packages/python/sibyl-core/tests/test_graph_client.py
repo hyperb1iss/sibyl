@@ -7,10 +7,13 @@ import pytest
 
 from sibyl_core.backends.surreal import SurrealDriver
 from sibyl_core.config import CoreConfig
+from sibyl_core.embeddings import native as native_module
 from sibyl_core.embeddings.native import (
     CachedNativeEmbeddingProvider,
     NativeEmbeddingInputKind,
     NativeEmbeddingMetadata,
+    OpenAINativeEmbeddingProvider,
+    configured_native_embedding_provider,
     native_embedding_cache_key,
 )
 from sibyl_core.errors import GraphConnectionError
@@ -202,6 +205,218 @@ def test_native_embedding_cache_key_includes_provider_shape() -> None:
         "same text",
         input_kind="query",
     )
+
+
+class _FakeOpenAIEmbeddingClient:
+    def __init__(self) -> None:
+        self.embeddings = self
+        self.inputs: list[list[str]] = []
+
+    async def create(
+        self,
+        *,
+        model: str,
+        input: list[str],
+        dimensions: int,
+    ) -> SimpleNamespace:
+        del model
+        self.inputs.append(list(input))
+        return SimpleNamespace(
+            data=[SimpleNamespace(embedding=[0.1] * dimensions) for _text in input]
+        )
+
+
+@pytest.mark.asyncio
+async def test_openai_native_provider_truncates_oversized_inputs() -> None:
+    client = _FakeOpenAIEmbeddingClient()
+    provider = OpenAINativeEmbeddingProvider(
+        metadata=NativeEmbeddingMetadata(
+            provider="openai",
+            model="text-embedding-3-small",
+            dimensions=3,
+            cache_namespace="graph",
+            tokenizer_estimate_method="provider-default",
+        ),
+        client=client,
+    )
+    long_text = "head fact " + ("middle fact " * 12_000) + "tail fact"
+
+    vectors = await provider.embed_texts([long_text])
+
+    sent = client.inputs[0][0]
+    assert len(sent) < len(long_text)
+    assert "head fact" in sent
+    assert "tail fact" in sent
+    assert "truncated for embedding" in sent
+    encoding = native_module._openai_embedding_encoding(provider.metadata.model)
+    if encoding is not None:
+        assert (
+            len(native_module._encode_openai_embedding_text(encoding, sent))
+            <= native_module._OPENAI_EMBEDDING_INPUT_MAX_TOKENS
+        )
+    assert vectors == [[0.1, 0.1, 0.1]]
+
+
+@pytest.mark.asyncio
+async def test_openai_native_provider_truncates_without_tokenizer(monkeypatch) -> None:
+    client = _FakeOpenAIEmbeddingClient()
+    provider = OpenAINativeEmbeddingProvider(
+        metadata=NativeEmbeddingMetadata(
+            provider="openai",
+            model="text-embedding-3-small",
+            dimensions=3,
+            cache_namespace="graph",
+            tokenizer_estimate_method="provider-default",
+        ),
+        client=client,
+    )
+    monkeypatch.setattr(native_module, "_openai_embedding_encoding", lambda _model: None)
+    long_text = "head fact " + ("middle fact " * 12_000) + "tail fact"
+
+    await provider.embed_texts([long_text])
+
+    sent = client.inputs[0][0]
+    assert len(sent) <= native_module._OPENAI_EMBEDDING_FALLBACK_MAX_CHARS
+    assert "head fact" in sent
+    assert "tail fact" in sent
+    assert "truncated for embedding" in sent
+
+
+@pytest.mark.asyncio
+async def test_openai_native_provider_batches_by_item_limit(monkeypatch) -> None:
+    client = _FakeOpenAIEmbeddingClient()
+    provider = OpenAINativeEmbeddingProvider(
+        metadata=NativeEmbeddingMetadata(
+            provider="openai",
+            model="text-embedding-3-small",
+            dimensions=2,
+            cache_namespace="graph",
+            tokenizer_estimate_method="provider-default",
+        ),
+        client=client,
+    )
+    monkeypatch.setattr(native_module, "_OPENAI_EMBEDDING_REQUEST_MAX_ITEMS", 2)
+
+    vectors = await provider.embed_texts(["one", "two", "three"])
+
+    assert client.inputs == [["one", "two"], ["three"]]
+    assert vectors == [[0.1, 0.1], [0.1, 0.1], [0.1, 0.1]]
+
+
+@pytest.mark.asyncio
+async def test_openai_native_provider_replaces_blank_inputs() -> None:
+    client = _FakeOpenAIEmbeddingClient()
+    provider = OpenAINativeEmbeddingProvider(
+        metadata=NativeEmbeddingMetadata(
+            provider="openai",
+            model="text-embedding-3-small",
+            dimensions=2,
+            cache_namespace="graph",
+            tokenizer_estimate_method="provider-default",
+        ),
+        client=client,
+    )
+
+    vectors = await provider.embed_texts(["   "])
+
+    assert client.inputs == [[native_module._OPENAI_EMBEDDING_EMPTY_TEXT]]
+    assert vectors == [[0.1, 0.1]]
+
+
+@pytest.mark.asyncio
+async def test_configured_native_embedding_provider_reuses_loop_cache(monkeypatch) -> None:
+    native_module._configured_provider_cache.clear()
+    created: list[dict[str, object]] = []
+
+    class FakeProvider:
+        metadata = NativeEmbeddingMetadata(
+            provider="openai",
+            model="text-embedding-3-small",
+            dimensions=1024,
+            cache_namespace="graph",
+            tokenizer_estimate_method="provider-default",
+        )
+
+        async def embed_texts(
+            self,
+            texts: Sequence[str],
+            *,
+            input_kind: NativeEmbeddingInputKind = "document",
+        ) -> list[list[float]]:
+            del input_kind
+            return [[0.1] * 1024 for _text in texts]
+
+    def fake_create_native_embedding_provider(**kwargs: object) -> FakeProvider:
+        created.append(kwargs)
+        return FakeProvider()
+
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_PROVIDER", "openai")
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_MODEL", "text-embedding-3-small")
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", "1024")
+    monkeypatch.setenv("SIBYL_OPENAI_API_KEY", "secret")
+    monkeypatch.setattr(
+        native_module,
+        "create_native_embedding_provider",
+        fake_create_native_embedding_provider,
+    )
+
+    try:
+        first = configured_native_embedding_provider()
+        second = configured_native_embedding_provider()
+    finally:
+        native_module._configured_provider_cache.clear()
+
+    assert first is second
+    assert len(created) == 1
+
+
+def test_configured_native_embedding_provider_scopes_cache_to_event_loop(monkeypatch) -> None:
+    native_module._configured_provider_cache.clear()
+    created: list[dict[str, object]] = []
+
+    class FakeProvider:
+        metadata = NativeEmbeddingMetadata(
+            provider="openai",
+            model="text-embedding-3-small",
+            dimensions=1024,
+            cache_namespace="graph",
+            tokenizer_estimate_method="provider-default",
+        )
+
+        async def embed_texts(
+            self,
+            texts: Sequence[str],
+            *,
+            input_kind: NativeEmbeddingInputKind = "document",
+        ) -> list[list[float]]:
+            del input_kind
+            return [[0.1] * 1024 for _text in texts]
+
+    def fake_create_native_embedding_provider(**kwargs: object) -> FakeProvider:
+        created.append(kwargs)
+        return FakeProvider()
+
+    async def configured_provider() -> FakeProvider | None:
+        return configured_native_embedding_provider()
+
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_PROVIDER", "openai")
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_MODEL", "text-embedding-3-small")
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", "1024")
+    monkeypatch.setenv("SIBYL_OPENAI_API_KEY", "secret")
+    monkeypatch.setattr(
+        native_module,
+        "create_native_embedding_provider",
+        fake_create_native_embedding_provider,
+    )
+
+    try:
+        first = asyncio.run(configured_provider())
+        second = asyncio.run(configured_provider())
+    finally:
+        native_module._configured_provider_cache.clear()
+
+    assert first is not second
+    assert len(created) == 2
 
 
 class _CountingNativeProvider:

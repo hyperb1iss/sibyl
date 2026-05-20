@@ -6,10 +6,13 @@ import asyncio
 import hashlib
 import math
 import os
+import threading
+import weakref
 from collections import OrderedDict
 from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import asdict, dataclass, replace
+from functools import lru_cache
 from typing import Any, Literal, Protocol, cast
 
 import structlog
@@ -24,6 +27,19 @@ log = structlog.get_logger()
 
 type NativeEmbeddingInputKind = Literal["query", "document"]
 type NativeEmbeddingProviderName = Literal["openai", "gemini"]
+type _ConfiguredProviderCacheKey = tuple[NativeEmbeddingProviderName, str, int, str]
+
+_OPENAI_EMBEDDING_INPUT_MAX_TOKENS = 6000
+_OPENAI_EMBEDDING_REQUEST_MAX_TOKENS = 240_000
+_OPENAI_EMBEDDING_REQUEST_MAX_ITEMS = 2000
+_OPENAI_EMBEDDING_FALLBACK_MAX_CHARS = 12_000
+_OPENAI_EMBEDDING_EMPTY_TEXT = "[empty]"
+_OPENAI_EMBEDDING_TRUNCATION_MARKER = "\n...[truncated for embedding]...\n"
+_configured_provider_cache: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop,
+    dict[_ConfiguredProviderCacheKey, NativeEmbeddingProvider],
+] = weakref.WeakKeyDictionary()
+_configured_provider_lock = threading.Lock()
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,12 +125,21 @@ class OpenAINativeEmbeddingProvider:
         del input_kind
         if not texts:
             return []
-        result = await self._client.embeddings.create(
-            model=self.metadata.model,
-            input=list(texts),
-            dimensions=self.metadata.dimensions,
-        )
-        return [list(item.embedding) for item in result.data]
+        prepared = [
+            _prepare_openai_embedding_text(text, model=self.metadata.model) for text in texts
+        ]
+        embeddings: list[list[float]] = []
+        for input_batch in _openai_embedding_batches(
+            [text for text, _token_count in prepared],
+            [token_count for _text, token_count in prepared],
+        ):
+            result = await self._client.embeddings.create(
+                model=self.metadata.model,
+                input=input_batch,
+                dimensions=self.metadata.dimensions,
+            )
+            embeddings.extend([list(item.embedding) for item in result.data])
+        return embeddings
 
 
 class GeminiNativeEmbeddingProvider:
@@ -353,14 +378,137 @@ def configured_native_embedding_provider() -> NativeEmbeddingProvider | None:
         log.info("native_graph_embeddings_disabled", provider=provider, reason="missing_key")
         return None
 
-    return create_native_embedding_provider(
-        provider=cast(NativeEmbeddingProviderName, provider),
+    provider_name = cast(NativeEmbeddingProviderName, provider)
+    cache_entry = _configured_provider_cache_entry(
+        provider=provider_name,
         model=model,
         dimensions=dimensions,
-        cache_namespace="graph",
         api_key=api_key,
-        max_cache_size=2000,
     )
+    if cache_entry is None:
+        return create_native_embedding_provider(
+            provider=provider_name,
+            model=model,
+            dimensions=dimensions,
+            cache_namespace="graph",
+            api_key=api_key,
+            max_cache_size=2000,
+        )
+
+    loop, cache_key = cache_entry
+    with _configured_provider_lock:
+        loop_cache = _configured_provider_cache.setdefault(loop, {})
+        cached = loop_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        created = create_native_embedding_provider(
+            provider=provider_name,
+            model=model,
+            dimensions=dimensions,
+            cache_namespace="graph",
+            api_key=api_key,
+            max_cache_size=2000,
+        )
+        loop_cache[cache_key] = created
+        return created
+
+
+def _configured_provider_cache_entry(
+    *,
+    provider: NativeEmbeddingProviderName,
+    model: str,
+    dimensions: int,
+    api_key: str,
+) -> tuple[asyncio.AbstractEventLoop, _ConfiguredProviderCacheKey] | None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    api_key_fingerprint = hashlib.sha256(api_key.encode()).hexdigest()
+    return loop, (provider, model, dimensions, api_key_fingerprint)
+
+
+def _prepare_openai_embedding_text(text: str, *, model: str) -> tuple[str, int]:
+    cleaned = text.strip()
+    if not cleaned:
+        return _OPENAI_EMBEDDING_EMPTY_TEXT, 1
+
+    encoding = _openai_embedding_encoding(model)
+    if encoding is None:
+        prepared = _truncate_openai_embedding_text_chars(cleaned)
+        return prepared, _estimate_openai_token_count(prepared)
+
+    tokens = _encode_openai_embedding_text(encoding, cleaned)
+    if len(tokens) <= _OPENAI_EMBEDDING_INPUT_MAX_TOKENS:
+        return cleaned, len(tokens)
+
+    marker_tokens = _encode_openai_embedding_text(
+        encoding,
+        _OPENAI_EMBEDDING_TRUNCATION_MARKER,
+    )
+    budget = max(_OPENAI_EMBEDDING_INPUT_MAX_TOKENS - len(marker_tokens), 1)
+    head_count = max(1, budget * 3 // 4)
+    tail_count = max(1, budget - head_count)
+    truncated_tokens = [
+        *tokens[:head_count],
+        *marker_tokens,
+        *tokens[-tail_count:],
+    ]
+    return encoding.decode(truncated_tokens), len(truncated_tokens)
+
+
+@lru_cache(maxsize=16)
+def _openai_embedding_encoding(model: str) -> Any | None:
+    try:
+        import tiktoken
+    except ImportError:
+        return None
+
+    try:
+        return tiktoken.encoding_for_model(model)
+    except KeyError:
+        return tiktoken.get_encoding("cl100k_base")
+
+
+def _encode_openai_embedding_text(encoding: Any, text: str) -> list[int]:
+    return list(encoding.encode(text, disallowed_special=()))
+
+
+def _truncate_openai_embedding_text_chars(text: str) -> str:
+    if len(text) <= _OPENAI_EMBEDDING_FALLBACK_MAX_CHARS:
+        return text
+    marker = _OPENAI_EMBEDDING_TRUNCATION_MARKER
+    budget = max(_OPENAI_EMBEDDING_FALLBACK_MAX_CHARS - len(marker), 1)
+    head_chars = max(1, budget * 3 // 4)
+    tail_chars = max(1, budget - head_chars)
+    return f"{text[:head_chars].rstrip()}{marker}{text[-tail_chars:].lstrip()}"
+
+
+def _estimate_openai_token_count(text: str) -> int:
+    return max(math.ceil(len(text) / 4), 1)
+
+
+def _openai_embedding_batches(
+    texts: Sequence[str],
+    token_counts: Sequence[int],
+) -> list[list[str]]:
+    batches: list[list[str]] = []
+    current: list[str] = []
+    current_tokens = 0
+    for text, token_count in zip(texts, token_counts, strict=True):
+        next_count = max(token_count, 1)
+        if current and (
+            current_tokens + next_count > _OPENAI_EMBEDDING_REQUEST_MAX_TOKENS
+            or len(current) >= _OPENAI_EMBEDDING_REQUEST_MAX_ITEMS
+        ):
+            batches.append(current)
+            current = []
+            current_tokens = 0
+        current.append(text)
+        current_tokens += next_count
+    if current:
+        batches.append(current)
+    return batches
 
 
 def native_embedding_cache_key(
