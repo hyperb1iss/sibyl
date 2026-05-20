@@ -16,6 +16,10 @@ EXPECTED_CHUNKED_ENTITIES = 2
 EXPECTED_EXTRACTION_QUEUE_DEPTH = 3
 EXPECTED_EXTRACTION_TOKENS = 128
 EXPECTED_EXTRACTED_ENTITIES = 2
+EXPECTED_PROJECTION_EXTRACTED = 3
+EXPECTED_PROJECTION_PROJECTED_ENTITIES = 2
+EXPECTED_PROJECTION_RELATIONSHIPS = 2
+EXPECTED_PROJECTION_SKIPPED = 1
 
 
 def _load_live_module() -> ModuleType:
@@ -84,6 +88,34 @@ def _assert_memory_extraction_stats(report: dict[str, Any]) -> None:
     }
 
 
+def _assert_memory_projection_stats(report: dict[str, Any]) -> None:
+    assert report["overall"]["memory_projection_job_count"] == 1.0
+    assert report["overall"]["memory_projection_queued_sources"] == float(EXPECTED_CREATED_ENTITIES)
+    assert report["overall"]["memory_projection_skipped_sources"] == 0.0
+    assert report["overall"]["memory_projection_extracted"] == float(EXPECTED_PROJECTION_EXTRACTED)
+    assert report["overall"]["memory_projection_projected_entities"] == float(
+        EXPECTED_PROJECTION_PROJECTED_ENTITIES
+    )
+    assert report["overall"]["memory_projection_relationships"] == float(
+        EXPECTED_PROJECTION_RELATIONSHIPS
+    )
+    assert report["overall"]["memory_projection_skipped"] == float(EXPECTED_PROJECTION_SKIPPED)
+    assert report["case_results"][0]["memory_projection"] == {
+        "batches": 1,
+        "job_count": 1,
+        "job_result_count": 1,
+        "queued_sources": EXPECTED_CREATED_ENTITIES,
+        "skipped_sources": 0,
+        "sources": EXPECTED_CREATED_ENTITIES,
+        "extracted": EXPECTED_PROJECTION_EXTRACTED,
+        "projected_entities": EXPECTED_PROJECTION_PROJECTED_ENTITIES,
+        "relationships": EXPECTED_PROJECTION_RELATIONSHIPS,
+        "skipped": EXPECTED_PROJECTION_SKIPPED,
+        "errors": 0,
+        "statuses": {"queued": 1},
+    }
+
+
 def _assert_gate_valid_report(module: ModuleType, report: dict[str, Any]) -> None:
     assert report["schema_version"] == "longmemeval-live-v1"
     assert report["mode"] == "hybrid"
@@ -108,6 +140,7 @@ def _assert_gate_valid_report(module: ModuleType, report: dict[str, Any]) -> Non
     assert report["overall"]["cross_question_result_count"] == 0.0
     assert report["overall"]["created_entity_count"] == float(EXPECTED_CREATED_ENTITIES)
     assert report["overall"]["chunked_session_count"] == 1.0
+    assert report["overall"]["memory_projection_job_count"] == 1.0
     assert report["overall"]["memory_extraction_job_count"] == 1.0
     assert report["case_results"][0]["ranked_session_ids"] == ["s2", "s1"]
     assert report["case_results"][0]["answer_ranks"] == [{"session_id": "s2", "rank": 1}]
@@ -192,9 +225,24 @@ def test_longmemeval_live_builds_gate_valid_report(tmp_path: Path) -> None:
         if path == "/api/entities/bulk":
             payload = json.loads(request.content)
             created = _bulk_create_fixture_entities(state, payload)
-            job_id = f"extract-{len(state['jobs'])}"
-            state["jobs"][job_id] = {
-                "job_id": job_id,
+            projection_job_id = f"project-{len(state['jobs'])}"
+            state["jobs"][projection_job_id] = {
+                "job_id": projection_job_id,
+                "function": "project_memory_batch",
+                "status": "complete",
+                "result": {
+                    "sources": len(created),
+                    "extracted": EXPECTED_PROJECTION_EXTRACTED,
+                    "projected_entities": EXPECTED_PROJECTION_PROJECTED_ENTITIES,
+                    "relationships": EXPECTED_PROJECTION_RELATIONSHIPS,
+                    "skipped": EXPECTED_PROJECTION_SKIPPED,
+                    "errors": [],
+                },
+                "error": None,
+            }
+            extraction_job_id = f"extract-{len(state['jobs'])}"
+            state["jobs"][extraction_job_id] = {
+                "job_id": extraction_job_id,
                 "function": "extract_memory_entities",
                 "status": "complete",
                 "result": {
@@ -213,13 +261,19 @@ def test_longmemeval_live_builds_gate_valid_report(tmp_path: Path) -> None:
                 {
                     "entities": created,
                     "background_jobs": {
+                        "memory_projection": {
+                            "status": "queued",
+                            "job_ids": [projection_job_id],
+                            "queued_sources": len(created),
+                            "skipped_sources": 0,
+                        },
                         "memory_extraction": {
                             "status": "queued",
-                            "job_ids": [job_id],
+                            "job_ids": [extraction_job_id],
                             "queued_sources": len(created),
                             "skipped_sources": 0,
                             "queue_depth": EXPECTED_EXTRACTION_QUEUE_DEPTH,
-                        }
+                        },
                     },
                 },
                 status_code=201,
@@ -268,6 +322,7 @@ def test_longmemeval_live_builds_gate_valid_report(tmp_path: Path) -> None:
 
     _assert_gate_valid_report(module, report)
     _assert_memory_extraction_stats(report)
+    _assert_memory_projection_stats(report)
     _assert_chunked_entities(module, state)
 
 

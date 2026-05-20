@@ -13,9 +13,10 @@ import subprocess
 import sys
 import time
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -24,6 +25,7 @@ import httpx
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages" / "python" / "sibyl-core" / "src"))
 
+from sibyl_core.config import settings
 from sibyl_core.evals.longmemeval import (
     CORPUS_TEXT_POLICIES,
     CORPUS_TEXT_POLICY,
@@ -31,7 +33,6 @@ from sibyl_core.evals.longmemeval import (
     build_longmemeval_corpus,
     score_longmemeval_ranking,
 )
-from sibyl_core.config import settings
 
 DATASET_SHA256 = "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442"
 DEFAULT_K_VALUES = [5, 10]
@@ -273,6 +274,23 @@ def _new_memory_extraction_stats() -> dict[str, Any]:
     }
 
 
+def _new_memory_projection_stats() -> dict[str, Any]:
+    return {
+        "batches": 0,
+        "job_count": 0,
+        "job_result_count": 0,
+        "queued_sources": 0,
+        "skipped_sources": 0,
+        "sources": 0,
+        "extracted": 0,
+        "projected_entities": 0,
+        "relationships": 0,
+        "skipped": 0,
+        "errors": 0,
+        "statuses": {},
+    }
+
+
 def _int_metric(value: Any) -> int:
     if isinstance(value, bool):
         return 0
@@ -316,6 +334,20 @@ def _record_memory_extraction_enqueue(
         _increment_counter(stats["reasons"], reason)
 
 
+def _record_memory_projection_enqueue(
+    stats: dict[str, Any],
+    job_info: dict[str, Any],
+) -> None:
+    if not job_info:
+        return
+    stats["batches"] += 1
+    stats["job_count"] += len(_job_ids_from_info(job_info))
+    stats["queued_sources"] += _int_metric(job_info.get("queued_sources"))
+    stats["skipped_sources"] += _int_metric(job_info.get("skipped_sources"))
+    status = str(job_info.get("status") or "unknown")
+    _increment_counter(stats["statuses"], status)
+
+
 def _record_memory_extraction_job_results(
     stats: dict[str, Any],
     completed_jobs: list[dict[str, Any]],
@@ -341,6 +373,28 @@ def _record_memory_extraction_job_results(
             stats["projection_errors"] += len(projection_errors)
 
 
+def _record_memory_projection_job_results(
+    stats: dict[str, Any],
+    completed_jobs: list[dict[str, Any]],
+) -> None:
+    for job in completed_jobs:
+        result = job.get("result")
+        if not isinstance(result, dict):
+            continue
+        stats["job_result_count"] += 1
+        for key in (
+            "sources",
+            "extracted",
+            "projected_entities",
+            "relationships",
+            "skipped",
+        ):
+            stats[key] += _int_metric(result.get(key))
+        errors = result.get("errors")
+        if isinstance(errors, list):
+            stats["errors"] += len(errors)
+
+
 def _job_ids_from_info(job_info: dict[str, Any]) -> list[str]:
     job_ids = job_info.get("job_ids")
     if not isinstance(job_ids, list):
@@ -352,6 +406,7 @@ async def _wait_for_jobs(
     client: httpx.AsyncClient,
     job_ids: list[str],
     *,
+    job_kind: str,
     timeout_seconds: float,
 ) -> list[dict[str, Any]]:
     if not job_ids:
@@ -369,7 +424,7 @@ async def _wait_for_jobs(
             if status_value == "complete":
                 if status.get("error"):
                     raise LongMemEvalLiveError(
-                        f"job {job_id} failed during memory extraction: {status['error']}"
+                        f"job {job_id} failed during {job_kind}: {status['error']}"
                     )
                 pending.remove(job_id)
                 completed.append(status)
@@ -380,7 +435,7 @@ async def _wait_for_jobs(
             break
         if time.monotonic() >= deadline:
             raise LongMemEvalLiveError(
-                "timed out waiting for memory extraction jobs: "
+                f"timed out waiting for {job_kind} jobs: "
                 + ", ".join(f"{job_id}={last_statuses.get(job_id)}" for job_id in sorted(pending))
             )
         await asyncio.sleep(0.5)
@@ -497,11 +552,14 @@ async def _ingest_haystack(
     corpus_text_policy: str,
     wait_for_memory_extraction: bool,
     memory_extraction_timeout_seconds: float,
+    memory_projection_timeout_seconds: float,
     active_case: dict[str, Any] | None = None,
-) -> tuple[list[str], float, int, int, int, float, dict[str, Any]]:
+) -> tuple[list[str], float, int, int, int, float, dict[str, Any], int, float, dict[str, Any]]:
     start = time.perf_counter()
     question_id = str(entry["question_id"])
     created_ids: list[str] = []
+    memory_projection_job_ids: list[str] = []
+    memory_projection_stats = _new_memory_projection_stats()
     memory_extraction_job_ids: list[str] = []
     memory_extraction_stats = _new_memory_extraction_stats()
     chunked_session_count = 0
@@ -558,17 +616,37 @@ async def _ingest_haystack(
             "/entities/bulk",
             payload={"entities": batch},
         )
-        created_entities = created.get("entities") if isinstance(created.get("entities"), list) else []
+        created_entities = (
+            created.get("entities") if isinstance(created.get("entities"), list) else []
+        )
         created_ids.extend(
-            str(entity.get("id") or "")
-            for entity in created_entities
-            if isinstance(entity, dict)
+            str(entity.get("id") or "") for entity in created_entities if isinstance(entity, dict)
         )
         memory_extraction_info = _background_job_info(created, "memory_extraction")
         memory_extraction_job_ids.extend(_job_ids_from_info(memory_extraction_info))
         _record_memory_extraction_enqueue(memory_extraction_stats, memory_extraction_info)
+        memory_projection_info = _background_job_info(created, "memory_projection")
+        memory_projection_job_ids.extend(_job_ids_from_info(memory_projection_info))
+        _record_memory_projection_enqueue(memory_projection_stats, memory_projection_info)
 
     ingest_ms = (time.perf_counter() - start) * 1000
+    memory_projection_wait_ms = 0.0
+    if memory_projection_job_ids:
+        _set_active_phase(
+            active_case,
+            "memory_projection",
+            path="/jobs",
+        )
+        wait_start = time.perf_counter()
+        completed_jobs = await _wait_for_jobs(
+            client,
+            memory_projection_job_ids,
+            job_kind="memory projection",
+            timeout_seconds=memory_projection_timeout_seconds,
+        )
+        _record_memory_projection_job_results(memory_projection_stats, completed_jobs)
+        memory_projection_wait_ms = (time.perf_counter() - wait_start) * 1000
+
     memory_extraction_wait_ms = 0.0
     if wait_for_memory_extraction and memory_extraction_job_ids:
         _set_active_phase(
@@ -580,6 +658,7 @@ async def _ingest_haystack(
         completed_jobs = await _wait_for_jobs(
             client,
             memory_extraction_job_ids,
+            job_kind="memory extraction",
             timeout_seconds=memory_extraction_timeout_seconds,
         )
         _record_memory_extraction_job_results(memory_extraction_stats, completed_jobs)
@@ -593,6 +672,9 @@ async def _ingest_haystack(
         len(memory_extraction_job_ids),
         memory_extraction_wait_ms,
         memory_extraction_stats,
+        len(memory_projection_job_ids),
+        memory_projection_wait_ms,
+        memory_projection_stats,
     )
 
 
@@ -706,7 +788,9 @@ def _answer_ranks(
 ) -> list[dict[str, int | str | None]]:
     ranks: list[dict[str, int | str | None]] = []
     for session_id in answer_session_ids:
-        rank = ranked_session_ids.index(session_id) + 1 if session_id in ranked_session_ids else None
+        rank = (
+            ranked_session_ids.index(session_id) + 1 if session_id in ranked_session_ids else None
+        )
         ranks.append({"session_id": session_id, "rank": rank})
     return ranks
 
@@ -849,6 +933,9 @@ async def _run_case(
             memory_extraction_job_count,
             memory_extraction_wait_ms,
             memory_extraction_stats,
+            memory_projection_job_count,
+            memory_projection_wait_ms,
+            memory_projection_stats,
         ) = await _ingest_haystack(
             client,
             entry=entry,
@@ -857,9 +944,12 @@ async def _run_case(
             corpus_text_policy=corpus_text_policy,
             wait_for_memory_extraction=wait_for_memory_extraction,
             memory_extraction_timeout_seconds=memory_extraction_timeout_seconds,
+            memory_projection_timeout_seconds=readiness_timeout_seconds,
             active_case=active_case,
         )
         timings_ms["ingest"] = ingest_ms
+        if memory_projection_wait_ms:
+            timings_ms["memory_projection"] = memory_projection_wait_ms
         if memory_extraction_wait_ms:
             timings_ms["memory_extraction"] = memory_extraction_wait_ms
         _set_active_phase(active_case, "readiness", path="/search")
@@ -909,6 +999,9 @@ async def _run_case(
         "memory_extraction_job_count": memory_extraction_job_count,
         "memory_extraction_wait_ms": memory_extraction_wait_ms,
         "memory_extraction": memory_extraction_stats,
+        "memory_projection_job_count": memory_projection_job_count,
+        "memory_projection_wait_ms": memory_projection_wait_ms,
+        "memory_projection": memory_projection_stats,
         "readiness": readiness,
         "ingest_ms": ingest_ms,
         "latency_ms": (time.perf_counter() - started) * 1000,
@@ -996,6 +1089,8 @@ async def _run_cases(
                 timings = timings if isinstance(timings, dict) else {}
                 extraction = result.get("memory_extraction")
                 extraction = extraction if isinstance(extraction, dict) else {}
+                projection = result.get("memory_projection")
+                projection = projection if isinstance(projection, dict) else {}
                 readiness = result.get("readiness")
                 readiness = readiness if isinstance(readiness, dict) else {}
                 print(
@@ -1010,6 +1105,8 @@ async def _run_cases(
                     f"search={_format_ms(timings.get('search'))} "
                     f"docs={result.get('document_count')} "
                     f"entities={result.get('created_entity_count')} "
+                    f"project_jobs={result.get('memory_projection_job_count')} "
+                    f"projected={projection.get('projected_entities', 0)} "
                     f"extract_jobs={result.get('memory_extraction_job_count')} "
                     f"extract_skipped={extraction.get('skipped_sources', 0)} "
                     f"extract_tokens={extraction.get('estimated_input_tokens', 0)}",
@@ -1101,6 +1198,27 @@ def _aggregate(results: list[dict[str, Any]], k_values: list[int]) -> tuple[dict
     overall["memory_extraction_wait_ms"] = sum(
         float(result.get("memory_extraction_wait_ms", 0.0)) for result in results
     )
+    overall["memory_projection_job_count"] = sum(
+        float(result.get("memory_projection_job_count", 0)) for result in results
+    )
+    overall["memory_projection_wait_ms"] = sum(
+        float(result.get("memory_projection_wait_ms", 0.0)) for result in results
+    )
+    projection_keys = (
+        "queued_sources",
+        "skipped_sources",
+        "job_result_count",
+        "sources",
+        "extracted",
+        "projected_entities",
+        "relationships",
+        "skipped",
+        "errors",
+    )
+    for key in projection_keys:
+        overall[f"memory_projection_{key}"] = sum(
+            float(result.get("memory_projection", {}).get(key, 0.0)) for result in results
+        )
     extraction_keys = (
         "queued_sources",
         "skipped_sources",
@@ -1200,9 +1318,7 @@ def _build_live_report(
             "stall_timeout_seconds": stall_timeout_seconds,
             "auto_extract_entities_env": _env_flag("SIBYL_AUTO_EXTRACT_ENTITIES"),
             "wait_for_memory_extraction": wait_for_memory_extraction,
-            "memory_enrichment_consistency": (
-                "strong" if wait_for_memory_extraction else "async"
-            ),
+            "memory_enrichment_consistency": ("strong" if wait_for_memory_extraction else "async"),
             "memory_extraction_timeout_seconds": memory_extraction_timeout_seconds,
             "graph_hnsw_efc_env": os.environ.get("SIBYL_GRAPH_HNSW_EFC", ""),
             "graph_hnsw_m_env": os.environ.get("SIBYL_GRAPH_HNSW_M", ""),
@@ -1223,9 +1339,7 @@ def _build_live_report(
             "diagnostic_search_limit": diagnostic_search_limit,
             "entity_content_projection_policy": ENTITY_CONTENT_PROJECTION_POLICY,
             "wait_for_memory_extraction": wait_for_memory_extraction,
-            "memory_enrichment_consistency": (
-                "strong" if wait_for_memory_extraction else "async"
-            ),
+            "memory_enrichment_consistency": ("strong" if wait_for_memory_extraction else "async"),
         },
         "metadata": metadata or {},
         "repeat_count": 1,
@@ -1311,8 +1425,7 @@ async def run_benchmark(
     print(f"  Diagnostic search limit: {diagnostic_search_limit}", flush=True)
     print(f"  Wait for memory extraction: {wait_for_memory_extraction}", flush=True)
     print(
-        "  Memory enrichment consistency: "
-        f"{'strong' if wait_for_memory_extraction else 'async'}",
+        f"  Memory enrichment consistency: {'strong' if wait_for_memory_extraction else 'async'}",
         flush=True,
     )
     print(
@@ -1323,8 +1436,7 @@ async def run_benchmark(
         flush=True,
     )
     print(
-        "  Native fusion backend: "
-        f"{os.environ.get('SIBYL_NATIVE_FUSION_BACKEND', 'python_rrf')}",
+        f"  Native fusion backend: {os.environ.get('SIBYL_NATIVE_FUSION_BACKEND', 'python_rrf')}",
         flush=True,
     )
     print(
