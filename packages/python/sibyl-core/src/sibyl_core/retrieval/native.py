@@ -19,6 +19,7 @@ from sibyl_core.auth.memory_policy import (
     memory_scope_policy_key,
 )
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
+from sibyl_core.config import core_config
 from sibyl_core.embeddings.native import NativeEmbeddingMetadata, NativeEmbeddingProvider
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.services.native_graph import get_native_graph_runtime, normalize_records
@@ -473,6 +474,10 @@ def _project_filter_selectivity(
     return 1.0 / len(accessible_projects)
 
 
+def _graph_knn_effort() -> int:
+    return max(1, int(core_config.graph_knn_ef))
+
+
 def _explicit_project_denied(plan: NativeRetrievalPlan) -> bool:
     return bool(plan.project and not _authorized_project_ids(plan))
 
@@ -786,6 +791,7 @@ async def _node_vector_candidates(
         return []
     filter_clauses, filter_params = _node_filter_clause(search_filter)
     candidate_limit = max(int(limit), 1)
+    knn_effort = _graph_knn_effort()
     rows = normalize_records(
         await client.execute_query(
             """
@@ -797,7 +803,7 @@ async def _node_vector_candidates(
                 WHERE """
             + _where_clause(["group_id = $group_id", *filter_clauses])
             + f"""
-                  AND name_embedding <|{candidate_limit}, 40|> $query_embedding
+                  AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
             )
             WHERE score >= $min_score
             ORDER BY score DESC, created_at DESC, uuid DESC
@@ -834,6 +840,7 @@ async def _edge_vector_candidates(
         return []
     filter_clauses, filter_params = _edge_filter_clause(search_filter)
     candidate_limit = max(int(limit), 1)
+    knn_effort = _graph_knn_effort()
     rows = normalize_records(
         await client.execute_query(
             "SELECT * FROM ("
@@ -841,7 +848,7 @@ async def _edge_vector_candidates(
             + " WHERE "
             + _where_clause(["group_id = $group_id", *filter_clauses])
             + f"""
-              AND fact_embedding <|{candidate_limit}, 40|> $query_embedding
+              AND fact_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
             )
             WHERE score >= $min_score
             ORDER BY score DESC, created_at DESC, uuid DESC

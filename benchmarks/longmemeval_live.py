@@ -1149,6 +1149,13 @@ async def run_benchmark(
     print(f"  Diagnostic search limit: {diagnostic_search_limit}", flush=True)
     print(f"  Wait for memory extraction: {wait_for_memory_extraction}", flush=True)
     print(
+        "  Graph HNSW: "
+        f"EFC={os.environ.get('SIBYL_GRAPH_HNSW_EFC', '150')} "
+        f"M={os.environ.get('SIBYL_GRAPH_HNSW_M', '12')} "
+        f"KNN_EF={os.environ.get('SIBYL_GRAPH_KNN_EF', '40')}",
+        flush=True,
+    )
+    print(
         f"  Heartbeat: {heartbeat_interval_seconds:.1f}s; "
         f"stall timeout: {stall_timeout_seconds:.1f}s",
         flush=True,
@@ -1226,6 +1233,9 @@ async def run_benchmark(
             "auto_extract_entities_env": _env_flag("SIBYL_AUTO_EXTRACT_ENTITIES"),
             "wait_for_memory_extraction": wait_for_memory_extraction,
             "memory_extraction_timeout_seconds": memory_extraction_timeout_seconds,
+            "graph_hnsw_efc_env": os.environ.get("SIBYL_GRAPH_HNSW_EFC", ""),
+            "graph_hnsw_m_env": os.environ.get("SIBYL_GRAPH_HNSW_M", ""),
+            "graph_knn_ef_env": os.environ.get("SIBYL_GRAPH_KNN_EF", ""),
         },
         "dataset": {
             "name": dataset_path.stem,

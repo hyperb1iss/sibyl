@@ -37,6 +37,8 @@ def _index_names_from_info(value: object) -> list[str]:
 # Graph node embeddings are configured separately from the OpenAI chunk embedder.
 # Default is 1024-dim; override via SIBYL_GRAPH_EMBEDDING_DIMENSIONS.
 EMBEDDING_DIM = core_config.graph_embedding_dimensions
+HNSW_EFC = core_config.graph_hnsw_efc
+HNSW_M = core_config.graph_hnsw_m
 
 ANALYZER_DEFINITIONS = """
 DEFINE ANALYZER IF NOT EXISTS name_analyzer
@@ -101,7 +103,7 @@ WHERE description = NONE OR content = NONE;
 DEFINE INDEX IF NOT EXISTS idx_entity_description_text_ft ON entity FIELDS description FULLTEXT ANALYZER content_analyzer BM25;
 DEFINE INDEX IF NOT EXISTS idx_entity_content_text_ft ON entity FIELDS content FULLTEXT ANALYZER content_analyzer BM25;
 DEFINE INDEX IF NOT EXISTS idx_entity_embedding ON entity FIELDS name_embedding
-    HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12;
+    HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC {HNSW_EFC} M {HNSW_M};
 
 DEFINE TABLE IF NOT EXISTS episode SCHEMAFULL;
 ALTER TABLE IF EXISTS episode SCHEMAFULL;
@@ -137,7 +139,7 @@ DEFINE INDEX IF NOT EXISTS idx_community_group ON community FIELDS group_id;
 DEFINE INDEX IF NOT EXISTS idx_community_name_ft ON community FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
 DEFINE INDEX IF NOT EXISTS idx_community_summary_ft ON community FIELDS summary FULLTEXT ANALYZER content_analyzer BM25;
 DEFINE INDEX IF NOT EXISTS idx_community_embedding ON community FIELDS name_embedding
-    HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32;
+    HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC {HNSW_EFC} M {HNSW_M};
 
 DEFINE TABLE IF NOT EXISTS saga SCHEMAFULL;
 ALTER TABLE IF EXISTS saga SCHEMAFULL;
@@ -205,7 +207,7 @@ DEFINE INDEX IF NOT EXISTS idx_relates_group_source_target_name ON relates_to FI
 DEFINE INDEX IF NOT EXISTS idx_relates_group_created ON relates_to FIELDS group_id, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_relates_fact_ft ON relates_to FIELDS fact FULLTEXT ANALYZER content_analyzer BM25;
 DEFINE INDEX IF NOT EXISTS idx_relates_fact_embedding ON relates_to FIELDS fact_embedding
-    HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12;
+    HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC {HNSW_EFC} M {HNSW_M};
 
 DEFINE TABLE OVERWRITE mentions SCHEMAFULL TYPE RELATION IN episode OUT entity ENFORCED;
 ALTER TABLE IF EXISTS mentions SCHEMAFULL;

@@ -47,6 +47,18 @@ on:
         description: "Wait for memory extraction jobs before each LongMemEval search"
         type: boolean
         default: false
+      longmemeval_graph_hnsw_efc:
+        description: "Surreal graph HNSW EF construction value"
+        type: string
+        default: "150"
+      longmemeval_graph_hnsw_m:
+        description: "Surreal graph HNSW max connections per element"
+        type: string
+        default: "12"
+      longmemeval_graph_knn_ef:
+        description: "Surreal graph KNN query effort"
+        type: string
+        default: "40"
       run_longmemeval_full:
         description: "Run the full 500-question LongMemEval live job"
         type: boolean
@@ -246,6 +258,9 @@ jobs:
       SIBYL_SURREAL_PASSWORD: sibyl_ci_password
       SIBYL_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SIBYL_AUTO_EXTRACT_ENTITIES: ${{ inputs.longmemeval_auto_extract_entities }}
+      SIBYL_GRAPH_HNSW_EFC: ${{ inputs.longmemeval_graph_hnsw_efc }}
+      SIBYL_GRAPH_HNSW_M: ${{ inputs.longmemeval_graph_hnsw_m }}
+      SIBYL_GRAPH_KNN_EF: ${{ inputs.longmemeval_graph_knn_ef }}
       SIBYL_LLM_MEMORY_PROVIDER: openai
       SIBYL_LLM_MEMORY_MODEL: gpt-5.4-nano
       PYTHONUNBUFFERED: "1"
@@ -352,6 +367,9 @@ jobs:
             --metadata ci_job=longmemeval-live-smoke \
             --metadata auto_extract_entities="${SIBYL_AUTO_EXTRACT_ENTITIES}" \
             --metadata wait_for_memory_extraction="$wait_for_extraction" \
+            --metadata graph_hnsw_efc="${SIBYL_GRAPH_HNSW_EFC}" \
+            --metadata graph_hnsw_m="${SIBYL_GRAPH_HNSW_M}" \
+            --metadata graph_knn_ef="${SIBYL_GRAPH_KNN_EF}" \
             "${extraction_args[@]}"
 
       - name: Gate LongMemEval live smoke
@@ -421,6 +439,9 @@ jobs:
       SIBYL_SURREAL_PATH: rocksdb:///data/sibyl-longmemeval-full.db
       SIBYL_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SIBYL_AUTO_EXTRACT_ENTITIES: ${{ inputs.longmemeval_auto_extract_entities }}
+      SIBYL_GRAPH_HNSW_EFC: ${{ inputs.longmemeval_graph_hnsw_efc }}
+      SIBYL_GRAPH_HNSW_M: ${{ inputs.longmemeval_graph_hnsw_m }}
+      SIBYL_GRAPH_KNN_EF: ${{ inputs.longmemeval_graph_knn_ef }}
       SIBYL_LLM_MEMORY_PROVIDER: openai
       SIBYL_LLM_MEMORY_MODEL: gpt-5.4-nano
       PYTHONUNBUFFERED: "1"
@@ -525,6 +546,9 @@ jobs:
             --metadata ci_job=longmemeval-live-full \
             --metadata auto_extract_entities="${SIBYL_AUTO_EXTRACT_ENTITIES}" \
             --metadata wait_for_memory_extraction="$wait_for_extraction" \
+            --metadata graph_hnsw_efc="${SIBYL_GRAPH_HNSW_EFC}" \
+            --metadata graph_hnsw_m="${SIBYL_GRAPH_HNSW_M}" \
+            --metadata graph_knn_ef="${SIBYL_GRAPH_KNN_EF}" \
             "${extraction_args[@]}"
 
       - name: Gate LongMemEval live full

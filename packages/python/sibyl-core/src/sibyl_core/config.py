@@ -196,6 +196,24 @@ class CoreConfig(BaseSettings):
         le=3072,
         description="Graph embedding dimensions; also sizes native Surreal vector indexes",
     )
+    graph_hnsw_efc: int = Field(
+        default=150,
+        ge=1,
+        le=10_000,
+        description="Surreal HNSW graph index EF construction value.",
+    )
+    graph_hnsw_m: int = Field(
+        default=12,
+        ge=1,
+        le=512,
+        description="Surreal HNSW graph index max connections per element.",
+    )
+    graph_knn_ef: int = Field(
+        default=40,
+        ge=1,
+        le=10_000,
+        description="Surreal KNN query effort for graph vector retrieval.",
+    )
     graphiti_semaphore_limit: int = Field(
         default=50,
         ge=1,

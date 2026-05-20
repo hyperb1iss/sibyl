@@ -111,6 +111,14 @@ def test_graph_relation_tables_are_enforced() -> None:
     )
 
 
+def test_graph_hnsw_indexes_use_configurable_defaults() -> None:
+    assert "idx_entity_embedding" in NODE_DEFINITIONS
+    assert "idx_community_embedding" in NODE_DEFINITIONS
+    assert "idx_relates_fact_embedding" in EDGE_DEFINITIONS
+    assert "HNSW DIMENSION 1024 DIST COSINE TYPE F32 EFC 150 M 12" in NODE_DEFINITIONS
+    assert "HNSW DIMENSION 1024 DIST COSINE TYPE F32 EFC 150 M 12" in EDGE_DEFINITIONS
+
+
 def test_graph_relation_cleanup_covers_all_relation_tables() -> None:
     for relation in ("relates_to", "mentions", "has_episode", "next_episode", "has_member"):
         assert f"DELETE FROM {relation}" in RELATION_EDGE_CLEANUP_DEFINITIONS

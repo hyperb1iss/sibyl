@@ -642,6 +642,44 @@ async def test_vector_candidate_sources_use_native_embedding_contract() -> None:
     assert edge_params["project_ids"] == ["project_123"]
 
 
+@pytest.mark.asyncio
+async def test_vector_candidate_sources_use_configured_knn_effort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(native_module.core_config, "graph_knn_ef", 96)
+    plan = build_native_context_retrieval_plan(
+        query="native vectors",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project="project_123",
+        accessible_projects={"project_123"},
+    )
+    provider = DeterministicNativeEmbeddingProvider(
+        NativeEmbeddingMetadata(
+            provider="deterministic",
+            model="unit-test",
+            dimensions=4,
+            cache_namespace="retrieval-test",
+            tokenizer_estimate_method="utf8-byte-length",
+        )
+    )
+    client = _VectorClient()
+
+    await native_module._vector_candidate_sources(
+        client=client,
+        plan=plan,
+        search_filter=native_module.NativeSearchFilter(project_ids=("project_123",)),
+        embedding_provider=provider,
+    )
+
+    node_query = next(call for call in client.calls if "name_embedding" in call[0])[0]
+    edge_query = next(call for call in client.calls if "fact_embedding" in call[0])[0]
+    assert "name_embedding <|8, 96|> $query_embedding" in node_query
+    assert "fact_embedding <|8, 96|> $query_embedding" in edge_query
+
+
 def test_node_record_candidates_keep_top_level_provenance_metadata() -> None:
     candidate = native_module._candidate_from_node_record(
         {
