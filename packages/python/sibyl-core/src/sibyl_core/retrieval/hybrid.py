@@ -18,7 +18,7 @@ from typing import Any, TypeVar
 import structlog
 
 from sibyl_core.models.entities import Entity
-from sibyl_core.retrieval.fusion import rrf_merge, rrf_merge_with_metadata
+from sibyl_core.retrieval.fusion import rrf_merge_with_metadata
 from sibyl_core.retrieval.temporal import (
     resolve_temporal_reference,
     temporal_boost,
@@ -156,6 +156,7 @@ class HybridConfig:
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     apply_keyword_boost: bool = True
     apply_query_entity_linking: bool = True
+    graph_expansion_only_boost: float = 0.45
     reference_time: datetime | None = None
 
 
@@ -510,27 +511,28 @@ async def hybrid_search(
             },
         )
 
-    # Merge with or without metadata
-    if include_metadata:
-        merged_with_meta = rrf_merge_with_metadata(
-            result_lists,
-            list_names=list_names,
-            k=config.rrf_k,
-            weights=weights,
-            limit=limit * 2,  # Get extra for temporal filtering
-        )
-        merged = [(e, s) for e, s, _ in merged_with_meta]
-        source_metadata = {
-            e.id if hasattr(e, "id") else e.get("id", ""): m for e, _, m in merged_with_meta
+    merged_with_meta = rrf_merge_with_metadata(
+        result_lists,
+        list_names=list_names,
+        k=config.rrf_k,
+        weights=weights,
+        limit=limit * 2,
+    )
+    has_vector_source = "vector" in list_names
+    merged = []
+    source_metadata = {}
+    for entity, score, metadata in merged_with_meta:
+        sources = set(metadata.get("sources") or [])
+        graph_expansion_only = has_vector_source and sources == {"graph"}
+        if graph_expansion_only:
+            score *= config.graph_expansion_only_boost
+        merged.append((entity, score))
+        source_metadata[_entity_id(entity)] = {
+            **metadata,
+            "graph_expansion_only": graph_expansion_only,
+            "fused_score": score,
         }
-    else:
-        merged = rrf_merge(
-            result_lists,
-            k=config.rrf_k,
-            weights=weights,
-            limit=limit * 2,
-        )
-        source_metadata = {}
+    merged.sort(key=lambda item: item[1], reverse=True)
 
     # Phase 4: Apply cross-encoder reranking (optional)
     reranking_applied = False

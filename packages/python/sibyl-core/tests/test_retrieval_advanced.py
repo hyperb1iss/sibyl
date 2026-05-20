@@ -773,6 +773,7 @@ class TestHybridConfig:
         assert config.apply_temporal is True
         assert config.temporal_decay_days == 365.0
         assert config.apply_keyword_boost is True
+        assert config.graph_expansion_only_boost == 0.45
         assert config.reference_time is None
 
     def test_hybrid_config_custom(self) -> None:
@@ -783,12 +784,14 @@ class TestHybridConfig:
             rrf_k=30.0,
             apply_temporal=False,
             apply_keyword_boost=False,
+            graph_expansion_only_boost=0.2,
         )
         assert config.vector_weight == 2.0
         assert config.graph_weight == 0.5
         assert config.rrf_k == 30.0
         assert config.apply_temporal is False
         assert config.apply_keyword_boost is False
+        assert config.graph_expansion_only_boost == 0.2
 
 
 class TestHybridResult:
@@ -1259,6 +1262,78 @@ class TestHybridSearch:
         search_types = [call["entity_types"] for call in manager.search_calls]
         assert [EntityType.SESSION] in search_types
         assert None in search_types
+
+    @pytest.mark.asyncio
+    async def test_hybrid_search_demotes_graph_expansion_only_results(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        client = MockGraphClientForHybrid()
+        manager = MockEntityManagerForHybrid()
+
+        answer = make_entity_for_test(
+            "session_answer",
+            entity_type=EntityType.SESSION,
+            description="Direct session match",
+        )
+        projected = make_entity_for_test(
+            "topic_camera",
+            entity_type=EntityType.TOPIC,
+            description="Projected camera preference",
+        )
+        distractor = make_entity_for_test(
+            "session_distractor",
+            entity_type=EntityType.SESSION,
+            description="Expansion-only session",
+        )
+
+        async def fake_search(
+            query: str,
+            entity_types: list[EntityType] | None = None,
+            limit: int = 10,
+        ) -> list[tuple[Entity, float]]:
+            manager.search_calls.append(
+                {"query": query, "entity_types": entity_types, "limit": limit}
+            )
+            if entity_types == [EntityType.SESSION]:
+                return [(answer, 0.4)]
+            return [(projected, 0.9)]
+
+        async def fake_graph_traversal(
+            seed_ids: list[str],
+            client: Any,
+            depth: int = 2,
+            limit: int = 20,
+            group_id: str | None = None,
+        ) -> list[tuple[Entity, float]]:
+            del client, depth, limit, group_id
+            assert "topic_camera" in seed_ids
+            return [(distractor, 0.9)]
+
+        manager.search = fake_search  # type: ignore[method-assign]
+        monkeypatch.setattr(hybrid_module, "graph_traversal", fake_graph_traversal)
+
+        result = await hybrid_search(
+            "camera setup",
+            client,  # type: ignore[arg-type]
+            manager,  # type: ignore[arg-type]
+            entity_types=[EntityType.SESSION],
+            config=HybridConfig(
+                graph_weight=4.0,
+                graph_expansion_only_boost=0.1,
+                apply_temporal=False,
+                apply_keyword_boost=False,
+            ),
+            include_metadata=True,
+        )
+
+        assert [entity.id for entity in result.entities] == [
+            "session_answer",
+            "session_distractor",
+        ]
+        source_details = result.metadata["source_details"]
+        assert source_details["session_answer"]["graph_expansion_only"] is False
+        assert source_details["session_distractor"]["graph_expansion_only"] is True
 
     @pytest.mark.asyncio
     async def test_hybrid_search_filters_untyped_link_seeds_before_traversal(
