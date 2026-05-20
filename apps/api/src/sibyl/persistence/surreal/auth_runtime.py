@@ -3520,33 +3520,6 @@ async def has_owner_membership(*, org_id: str, user_id: str | None) -> bool:
         return bool(records) and _role_value(records[0].get("role")) == "owner"
 
 
-async def _list_graph_project_fallback_ids(org_id: str) -> set[str]:
-    from sibyl.persistence.graph_runtime import get_graph_query_adapter
-    from sibyl_core.models.entities import EntityType
-
-    adapter = await get_graph_query_adapter(org_id)
-    project_ids: set[str] = set()
-    offset = 0
-    page_size = 1000
-    while True:
-        batch = await adapter.list_entities_by_type(
-            EntityType.PROJECT,
-            limit=page_size,
-            offset=offset,
-            include_archived=True,
-        )
-        if not batch:
-            break
-        project_ids.update(
-            project.id
-            for project in batch
-            if project.id
-            and str((project.metadata or {}).get("status") or "").lower() != "archived"
-        )
-        offset += page_size
-    return project_ids
-
-
 async def list_accessible_project_graph_ids(ctx) -> set[str]:
     if ctx.organization is None:
         return set()
@@ -3600,13 +3573,7 @@ async def list_accessible_project_graph_ids(ctx) -> set[str]:
             payload = _record_payload(raw_payload)
             project_records = _normalize_records(payload.get("projects"))
         if not project_records:
-            if ctx.org_role is None:
-                return set()
-            fallback_ids = await _list_graph_project_fallback_ids(org_id)
-            api_key_allowed = getattr(ctx, "api_key_project_ids", None)
-            if api_key_allowed is not None:
-                return fallback_ids & {str(project_id) for project_id in api_key_allowed}
-            return fallback_ids
+            return set()
         if org_role in _ORG_ADMIN_ROLE_VALUES:
             accessible = {
                 str(record["graph_project_id"])

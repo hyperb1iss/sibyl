@@ -1871,26 +1871,18 @@ async def test_list_accessible_project_graph_ids_admin_skips_grant_reads(
 
 
 @pytest.mark.asyncio
-async def test_list_accessible_project_graph_ids_uses_graph_runtime_fallback(
+async def test_list_accessible_project_graph_ids_fails_closed_without_project_records(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from sibyl.persistence import graph_runtime
-    from sibyl_core.models.entities import EntityType
 
     org_id = uuid4()
     user_id = uuid4()
     client = _RecordingAuthClient([])
-    calls: list[dict[str, object]] = []
 
     class ProjectAdapter:
         async def list_entities_by_type(self, entity_type, **kwargs):
-            calls.append({"entity_type": entity_type, **kwargs})
-            if len(calls) == 1:
-                return [
-                    SimpleNamespace(id="project_active", metadata={}),
-                    SimpleNamespace(id="project_archived", metadata={"status": "archived"}),
-                ]
-            return []
+            raise AssertionError("graph fallback should not be used")
 
     get_adapter = AsyncMock(return_value=ProjectAdapter())
     ctx = SimpleNamespace(
@@ -1908,22 +1900,8 @@ async def test_list_accessible_project_graph_ids_uses_graph_runtime_fallback(
 
     accessible = await surreal_auth_runtime.list_accessible_project_graph_ids(ctx)
 
-    assert accessible == {"project_active"}
-    get_adapter.assert_awaited_once_with(str(org_id))
-    assert calls == [
-        {
-            "entity_type": EntityType.PROJECT,
-            "limit": 1000,
-            "offset": 0,
-            "include_archived": True,
-        },
-        {
-            "entity_type": EntityType.PROJECT,
-            "limit": 1000,
-            "offset": 1000,
-            "include_archived": True,
-        },
-    ]
+    assert accessible == set()
+    get_adapter.assert_not_awaited()
 
 
 @pytest.mark.asyncio
