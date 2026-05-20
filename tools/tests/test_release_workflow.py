@@ -100,6 +100,8 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     assert workflow.index("moon run :check") < workflow.index("moon run python-package-build")
     assert workflow.index("moon run :check") < workflow.index("docker/build-push-action")
     assert workflow.count("needs: rc-gate") == PUBLISH_ARTIFACT_JOB_COUNT
+    assert "uv tool install sibyld" in workflow
+    assert "[sibyld](https://pypi.org/project/sibyld/" in workflow
 
 
 def test_python_package_build_covers_cli_core_and_daemon() -> None:

@@ -270,6 +270,11 @@ jobs:
             uv tool install sibyl-dev
             ```
 
+            **Daemon**
+            ```bash
+            uv tool install sibyld
+            ```
+
             **Docker**
             ```bash
             docker pull ghcr.io/hyperb1iss/sibyl-api:${{ steps.version.outputs.version }}
@@ -283,6 +288,7 @@ jobs:
           echo "### Python Packages" >> $GITHUB_STEP_SUMMARY
           echo "- [sibyl-core](https://pypi.org/project/sibyl-core/${{ steps.version.outputs.version }}/)" >> $GITHUB_STEP_SUMMARY
           echo "- [sibyl-dev](https://pypi.org/project/sibyl-dev/${{ steps.version.outputs.version }}/)" >> $GITHUB_STEP_SUMMARY
+          echo "- [sibyld](https://pypi.org/project/sibyld/${{ steps.version.outputs.version }}/)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Images (multi-arch: linux/amd64, linux/arm64)" >> $GITHUB_STEP_SUMMARY
           echo "- \`ghcr.io/hyperb1iss/sibyl-api:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
