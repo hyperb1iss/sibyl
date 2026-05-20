@@ -6,13 +6,15 @@ Requires organization OWNER role.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, cast
 
 import typer
+from rich.table import Table
 
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
     CORAL,
+    ELECTRIC_YELLOW,
     NEON_CYAN,
     console,
     create_table,
@@ -41,6 +43,10 @@ def query(
         bool,
         typer.Option("--json", "-j", help="Output as JSON"),
     ] = False,
+    explain: Annotated[
+        bool,
+        typer.Option("--explain", help="Run EXPLAIN ANALYZE FORMAT JSON"),
+    ] = False,
 ) -> None:
     """Execute a read-only graph query against the active runtime.
 
@@ -49,9 +55,11 @@ def query(
 
     Examples:
         sibyl debug query "SELECT name, entity_type FROM entity LIMIT 5;"
+        sibyl debug query --explain "SELECT name FROM entity LIMIT 5;"
         sibyl debug query "SELECT entity_type, count() AS count FROM entity GROUP BY entity_type;" -j
         sibyl debug query "SELECT name, metadata.status AS status FROM entity WHERE entity_type = 'task' LIMIT 10;"
     """
+    cypher = f"EXPLAIN ANALYZE FORMAT JSON {query_text}" if explain else query_text
 
     @run_async
     async def _run() -> None:
@@ -59,7 +67,7 @@ def query(
             async with get_client() as client:
                 result = await client.post(
                     "/admin/debug/query",
-                    json={"cypher": query_text},
+                    json={"cypher": cypher},
                 )
 
                 if result.get("error"):
@@ -75,6 +83,10 @@ def query(
 
                 if not rows:
                     info("Query returned no results")
+                    return
+
+                if explain:
+                    _print_explain_plan(rows, row_count)
                     return
 
                 console.print(f"\n[bold]Query returned {row_count} rows:[/bold]\n")
@@ -114,6 +126,111 @@ def query(
             handle_client_error(e)
 
     _run()
+
+
+def _print_explain_plan(rows: list[object], row_count: int) -> None:
+    nodes = _explain_nodes(rows)
+    if not nodes:
+        print_json(rows)
+        return
+
+    console.print(f"\n[bold]Explain returned {row_count} rows:[/bold]\n")
+    table = Table(
+        box=None,
+        show_header=True,
+        header_style=f"bold {NEON_CYAN}",
+        pad_edge=False,
+    )
+    table.add_column("Operator", style=NEON_CYAN)
+    table.add_column("Context")
+    table.add_column("Rows", justify="right", style=CORAL)
+    table.add_column("Batches", justify="right", style=CORAL)
+    table.add_column("Elapsed", justify="right", style=ELECTRIC_YELLOW)
+    table.add_column("Details")
+
+    for node in nodes:
+        raw_metrics = node.get("metrics")
+        metrics = cast(dict[str, object], raw_metrics) if isinstance(raw_metrics, dict) else {}
+        table.add_row(
+            str(node.get("operator") or "unknown"),
+            str(node.get("context") or ""),
+            _metric_value(metrics.get("output_rows")),
+            _metric_value(metrics.get("output_batches")),
+            _elapsed_value(metrics.get("elapsed_ns")),
+            _explain_details(node),
+        )
+    console.print(table)
+    console.print()
+
+
+def _explain_nodes(rows: list[object]) -> list[dict[str, object]]:
+    nodes: list[dict[str, object]] = []
+    for row in rows:
+        nodes.extend(_coerce_explain_node(row))
+    return nodes
+
+
+def _coerce_explain_node(value: object) -> list[dict[str, object]]:
+    if isinstance(value, dict):
+        node = cast(dict[str, object], value)
+        if isinstance(node.get("operator"), str):
+            return [node]
+        raw_value = node.get("value")
+        if set(node) == {"value"}:
+            return _coerce_explain_node(raw_value)
+        if isinstance(raw_value, (dict, list)):
+            return _coerce_explain_node(raw_value)
+    if isinstance(value, list):
+        nodes: list[dict[str, object]] = []
+        for item in value:
+            nodes.extend(_coerce_explain_node(item))
+        return nodes
+    return []
+
+
+def _metric_value(value: object) -> str:
+    if value is None:
+        return "[dim]-[/dim]"
+    return str(value)
+
+
+def _elapsed_value(value: object) -> str:
+    if not isinstance(value, int | float):
+        return "[dim]-[/dim]"
+    if value < 1_000:
+        return f"{value:g}ns"
+    if value < 1_000_000:
+        return f"{value / 1_000:g}us"
+    if value < 1_000_000_000:
+        return f"{value / 1_000_000:g}ms"
+    return f"{value / 1_000_000_000:g}s"
+
+
+def _explain_details(node: dict[str, object]) -> str:
+    parts: list[str] = []
+    attributes = node.get("attributes")
+    if isinstance(attributes, dict):
+        for key, value in sorted(attributes.items()):
+            parts.append(f"{key}={_short_detail(value)}")
+    expressions = node.get("expressions")
+    if isinstance(expressions, list):
+        for expression in expressions[:2]:
+            if isinstance(expression, dict):
+                role = expression.get("role") or "expr"
+                sql = expression.get("sql")
+                if sql:
+                    parts.append(f"{role}={_short_detail(sql)}")
+    total_rows = node.get("total_rows")
+    if total_rows is not None:
+        parts.append(f"total_rows={total_rows}")
+    return ", ".join(parts) if parts else "[dim]-[/dim]"
+
+
+def _short_detail(value: object) -> str:
+    text = str(value)
+    if len(text) > 60:
+        return text[:57] + "..."
+    return text
 
 
 def _format_value(value: object) -> str:

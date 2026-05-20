@@ -51,3 +51,43 @@ def test_debug_status_includes_pending_write_metrics(
     assert result.exit_code == 0
     assert '"pending_writes"' in result.stdout
     assert '"attempted": 3' in result.stdout
+
+
+@patch("sibyl_cli.debug.get_client")
+def test_debug_query_explain_prefixes_query_and_formats_plan(
+    mock_get_client: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.post = AsyncMock(
+        return_value={
+            "rows": [
+                {
+                    "operator": "TableScan",
+                    "context": "Db",
+                    "attributes": {"table": "entity"},
+                    "metrics": {
+                        "elapsed_ns": 1250,
+                        "output_batches": 1,
+                        "output_rows": 2,
+                    },
+                    "total_rows": 2,
+                }
+            ],
+            "row_count": 1,
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    result = CliRunner().invoke(
+        debug.app,
+        ["query", "--explain", "SELECT name FROM entity LIMIT 2;"],
+    )
+
+    assert result.exit_code == 0
+    mock_client.post.assert_awaited_once_with(
+        "/admin/debug/query",
+        json={"cypher": "EXPLAIN ANALYZE FORMAT JSON SELECT name FROM entity LIMIT 2;"},
+    )
+    assert "TableScan" in result.stdout
+    assert "entity" in result.stdout
+    assert "1.25us" in result.stdout
