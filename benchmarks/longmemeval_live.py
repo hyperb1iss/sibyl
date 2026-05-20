@@ -1200,6 +1200,9 @@ def _build_live_report(
             "stall_timeout_seconds": stall_timeout_seconds,
             "auto_extract_entities_env": _env_flag("SIBYL_AUTO_EXTRACT_ENTITIES"),
             "wait_for_memory_extraction": wait_for_memory_extraction,
+            "memory_enrichment_consistency": (
+                "strong" if wait_for_memory_extraction else "async"
+            ),
             "memory_extraction_timeout_seconds": memory_extraction_timeout_seconds,
             "graph_hnsw_efc_env": os.environ.get("SIBYL_GRAPH_HNSW_EFC", ""),
             "graph_hnsw_m_env": os.environ.get("SIBYL_GRAPH_HNSW_M", ""),
@@ -1220,6 +1223,9 @@ def _build_live_report(
             "diagnostic_search_limit": diagnostic_search_limit,
             "entity_content_projection_policy": ENTITY_CONTENT_PROJECTION_POLICY,
             "wait_for_memory_extraction": wait_for_memory_extraction,
+            "memory_enrichment_consistency": (
+                "strong" if wait_for_memory_extraction else "async"
+            ),
         },
         "metadata": metadata or {},
         "repeat_count": 1,
@@ -1304,6 +1310,11 @@ async def run_benchmark(
     print(f"  K values: {k_values}", flush=True)
     print(f"  Diagnostic search limit: {diagnostic_search_limit}", flush=True)
     print(f"  Wait for memory extraction: {wait_for_memory_extraction}", flush=True)
+    print(
+        "  Memory enrichment consistency: "
+        f"{'strong' if wait_for_memory_extraction else 'async'}",
+        flush=True,
+    )
     print(
         "  Graph HNSW: "
         f"EFC={os.environ.get('SIBYL_GRAPH_HNSW_EFC', '150')} "

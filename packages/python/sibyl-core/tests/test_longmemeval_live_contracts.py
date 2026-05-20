@@ -123,5 +123,7 @@ def test_longmemeval_live_checkpoints_partial_output(
     saved = json.loads(output.read_text(encoding="utf-8"))
     assert seen_statuses == ["partial", "partial"]
     assert report["completion_status"] == "complete"
+    assert report["runtime"]["memory_enrichment_consistency"] == "async"
+    assert report["dataset"]["memory_enrichment_consistency"] == "async"
     assert saved["completion_status"] == "complete"
     assert saved["completed_questions"] == 1

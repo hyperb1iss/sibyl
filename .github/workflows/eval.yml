@@ -44,7 +44,7 @@ on:
         type: boolean
         default: false
       longmemeval_wait_for_memory_extraction:
-        description: "Wait for memory extraction jobs before each LongMemEval search"
+        description: "Strong consistency mode for small enriched LongMemEval runs only"
         type: boolean
         default: false
       longmemeval_graph_hnsw_efc:
@@ -354,9 +354,6 @@ jobs:
         run: |
           mkdir -p .moon/cache/evals
           wait_for_extraction="${{ inputs.longmemeval_wait_for_memory_extraction }}"
-          if [[ "${SIBYL_AUTO_EXTRACT_ENTITIES}" == "true" ]]; then
-            wait_for_extraction="true"
-          fi
           extraction_args=()
           if [[ "$wait_for_extraction" == "true" ]]; then
             extraction_args+=(--wait-for-memory-extraction --memory-extraction-timeout 600)
@@ -537,9 +534,9 @@ jobs:
       - name: Run LongMemEval live full
         run: |
           mkdir -p .moon/cache/evals
-          wait_for_extraction="${{ inputs.longmemeval_wait_for_memory_extraction }}"
-          if [[ "${SIBYL_AUTO_EXTRACT_ENTITIES}" == "true" ]]; then
-            wait_for_extraction="true"
+          wait_for_extraction="false"
+          if [[ "${{ inputs.longmemeval_wait_for_memory_extraction }}" == "true" ]]; then
+            echo "::notice::Full LongMemEval runs are raw-first; extraction waits apply to the smoke job."
           fi
           extraction_args=()
           if [[ "$wait_for_extraction" == "true" ]]; then

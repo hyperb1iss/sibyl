@@ -200,6 +200,38 @@ async def test_enqueue_memory_extraction_batches_chunks_bounded_jobs(
     assert first_kwargs["max_tokens"] == 512
 
 
+@pytest.mark.asyncio
+async def test_enqueue_memory_extraction_batches_reports_partial_backpressure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue = FakeQueue(queue_depth=9)
+    monkeypatch.setattr(settings, "auto_extract_entities", True)
+    monkeypatch.setattr(settings, "memory_extraction_max_queue_depth", 10)
+    monkeypatch.setattr(settings, "memory_extraction_max_sources_per_job", 1)
+    monkeypatch.setattr(settings, "memory_extraction_max_source_chars", 128)
+    monkeypatch.setattr(settings, "memory_extraction_max_job_chars", 128)
+    monkeypatch.setattr(settings, "memory_extraction_max_entities_per_source", 3)
+    monkeypatch.setattr(settings, "memory_extraction_max_concurrency", 1)
+    monkeypatch.setattr(settings, "memory_extraction_max_tokens", 512)
+    monkeypatch.setattr(memory_extraction, "get_queue", lambda: queue)
+
+    result = await memory_extraction.enqueue_memory_extraction_batches(
+        [
+            {"id": "session-a", "entity_type": "session", "content": "first memory"},
+            {"id": "session-b", "entity_type": "session", "content": "second memory"},
+        ],
+        "org-123",
+        created_source_ids=["created-a", "created-b"],
+    )
+
+    assert result.status == "partial"
+    assert result.job_ids == ("extract-0",)
+    assert result.queued_sources == 1
+    assert result.skipped_sources == 1
+    assert result.reason == "queue_depth"
+    assert len(queue.calls) == 1
+
+
 def test_memory_extraction_telemetry_records_enqueue_and_run() -> None:
     telemetry_registry().reset()
 

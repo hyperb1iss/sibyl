@@ -1344,12 +1344,14 @@ async def create_entities_bulk(
             group_id,
             created_source_ids=list(created_ids),
         )
-        if extraction_enqueue.status == "queued":
+        if extraction_enqueue.status in {"queued", "partial"}:
             log.info(
                 "bulk_entity_memory_extraction_enqueued",
+                status=extraction_enqueue.status,
                 jobs=len(extraction_enqueue.job_ids),
                 queued_sources=extraction_enqueue.queued_sources,
                 skipped_sources=extraction_enqueue.skipped_sources,
+                reason=extraction_enqueue.reason,
             )
             background_jobs["memory_extraction"] = {
                 "status": extraction_enqueue.status,
@@ -1357,6 +1359,7 @@ async def create_entities_bulk(
                 "queued_sources": extraction_enqueue.queued_sources,
                 "skipped_sources": extraction_enqueue.skipped_sources,
                 "queue_depth": extraction_enqueue.queue_depth,
+                "reason": extraction_enqueue.reason,
             }
         elif extraction_enqueue.reason != "disabled":
             log.info(

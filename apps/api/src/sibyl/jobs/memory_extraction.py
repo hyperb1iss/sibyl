@@ -120,7 +120,10 @@ async def enqueue_memory_extraction_batches(
         )
         job_ids.append(job_id)
 
-    status = "queued" if job_ids else "backpressure"
+    if job_ids and skipped_sources:
+        status = "partial"
+    else:
+        status = "queued" if job_ids else "backpressure"
     telemetry_registry().record_memory_extraction_enqueue(
         status=status,
         sources=sum(len(batch) for batch in batches_to_enqueue),
@@ -133,7 +136,7 @@ async def enqueue_memory_extraction_batches(
         queued_sources=sum(len(batch) for batch in batches_to_enqueue),
         skipped_sources=skipped_sources,
         queue_depth=queue_depth,
-        reason=None if job_ids else "queue_depth",
+        reason="queue_depth" if skipped_sources or not job_ids else None,
     )
 
 

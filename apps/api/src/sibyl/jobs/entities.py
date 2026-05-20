@@ -510,12 +510,15 @@ async def create_entity(  # noqa: PLR0915
                 group_id,
                 created_source_ids=[created_id],
             )
-            if extraction_enqueue.status == "queued":
+            if extraction_enqueue.status in {"queued", "partial"}:
                 log.info(
                     "create_entity_memory_extraction_enqueued",
                     entity_id=created_id,
+                    status=extraction_enqueue.status,
                     jobs=len(extraction_enqueue.job_ids),
                     queued_sources=extraction_enqueue.queued_sources,
+                    skipped_sources=extraction_enqueue.skipped_sources,
+                    reason=extraction_enqueue.reason,
                 )
             elif extraction_enqueue.reason != "disabled":
                 log.info(
