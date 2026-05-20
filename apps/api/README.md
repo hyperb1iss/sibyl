@@ -1,7 +1,7 @@
 # Sibyl API Server
 
-`sibyld` is the FastAPI + FastMCP server behind Sibyl's knowledge graph, agent memory
-loop, task workflow, search, synthesis, and real-time updates.
+`sibyld` is the FastAPI + FastMCP server behind Sibyl's knowledge graph, agent memory loop, task
+workflow, search, synthesis, and real-time updates.
 
 ## Quick Reference
 
@@ -23,14 +23,13 @@ moon run api:typecheck    # Type check
 
 ## What's Here
 
-- **MCP Server:** eleven tools for search, context packs, exploration, capture,
-  memory, synthesis, and management
-- **REST API:** 26 routers covering entities, tasks, projects, memory, synthesis,
-  sources, auth, settings, and admin
-- **Auth System:** JWT sessions, GitHub OAuth, API keys with scopes, MCP OAuth
-  clients, RBAC
-- **Background Jobs:** in-process local runtime or Redis-backed `arq` workers,
-  including the nightly reflection dream-cycle
+- **MCP Server:** eleven tools for search, context packs, exploration, capture, memory, synthesis,
+  and management
+- **REST API:** 26 routers covering entities, tasks, projects, memory, synthesis, sources, auth,
+  settings, and admin
+- **Auth System:** JWT sessions, GitHub OAuth, API keys with scopes, MCP OAuth clients, RBAC
+- **Background Jobs:** in-process local runtime or Redis-backed `arq` workers, including the nightly
+  reflection dream-cycle
 - **WebSocket:** Real-time updates for entities and tasks
 
 ## Architecture
@@ -46,18 +45,18 @@ Sibyl API (port 3334)
 
 ## Key Directories
 
-| Directory       | Purpose                                                          |
-| --------------- | ---------------------------------------------------------------- |
+| Directory       | Purpose                                                                                         |
+| --------------- | ----------------------------------------------------------------------------------------------- |
 | `api/routes/`   | REST endpoints (26 routers: tasks, entities, memory, synthesis, crawler, auth, admin, and more) |
-| `ai/`           | DB-backed LLM settings, model validation routes, runtime invalidation |
-| `auth/`         | JWT, sessions, API keys, RBAC, MCP OAuth clients                 |
-| `persistence/`  | SurrealDB-native runtimes for auth, content, graph, and backups  |
-| `crawler/`      | Documentation crawl and ingestion pipeline                       |
-| `ingestion/`    | Source import pipeline (mailbox and other adapters)              |
-| `jobs/`         | Background jobs (reflection dream-cycle, crawl, backups)         |
-| `coordination/` | Local and Redis brokers for jobs, locks, and pub/sub             |
-| `email/`        | Transactional email delivery                                     |
-| `generator/`    | Synthetic test-data generation                                   |
+| `ai/`           | DB-backed LLM settings, model validation routes, runtime invalidation                           |
+| `auth/`         | JWT, sessions, API keys, RBAC, MCP OAuth clients                                                |
+| `persistence/`  | SurrealDB-native runtimes for auth, content, graph, and backups                                 |
+| `crawler/`      | Documentation crawl and ingestion pipeline                                                      |
+| `ingestion/`    | Source import pipeline (mailbox and other adapters)                                             |
+| `jobs/`         | Background jobs (reflection dream-cycle, crawl, backups)                                        |
+| `coordination/` | Local and Redis brokers for jobs, locks, and pub/sub                                            |
+| `email/`        | Transactional email delivery                                                                    |
+| `generator/`    | Synthetic test-data generation                                                                  |
 
 ## Configuration
 
@@ -98,17 +97,16 @@ SIBYL_GRAPH_EMBEDDING_MODEL=text-embedding-3-small
 SIBYL_GRAPH_EMBEDDING_DIMENSIONS=1024
 ```
 
-PostgreSQL settings are only for historical archive rehearsal commands that explicitly
-restore a retained `postgres.sql` payload against an operator-managed database. They are
-not part of default Surreal runtime startup.
+PostgreSQL settings are only for historical archive rehearsal commands that explicitly restore a
+retained `postgres.sql` payload against an operator-managed database. They are not part of default
+Surreal runtime startup.
 
-Gemini keys can also be supplied through `GEMINI_API_KEY` or `GOOGLE_API_KEY`. Changing
-embedding provider, model, or dimensions changes vector spaces; re-crawl sources and
-rebuild graph indexes before mixing old and new search results.
+Gemini keys can also be supplied through `GEMINI_API_KEY` or `GOOGLE_API_KEY`. Changing embedding
+provider, model, or dimensions changes vector spaces; re-crawl sources and rebuild graph indexes
+before mixing old and new search results.
 
-LLM settings are instance-wide. Environment variables win over database settings field
-by field; env-backed fields return `409 LOCKED_BY_ENV` on write. Database settings are
-managed under:
+LLM settings are instance-wide. Environment variables win over database settings field by field;
+env-backed fields return `409 LOCKED_BY_ENV` on write. Database settings are managed under:
 
 ```text
 GET  /api/settings/ai/llm
@@ -119,10 +117,9 @@ POST /api/settings/ai/models/{model_alias}/test
 GET  /api/settings/ai/registry?kind=llm
 ```
 
-Crawler extraction and synthesis generation call `sibyl_core.ai` rather than provider
-SDKs directly. Custom model IDs are accepted as database settings with an
-`unverified_model` warning; validate them with the model test endpoint before using
-them in production flows.
+Crawler extraction and synthesis generation call `sibyl_core.ai` rather than provider SDKs directly.
+Custom model IDs are accepted as database settings with an `unverified_model` warning; validate them
+with the model test endpoint before using them in production flows.
 
 ## CLI Commands
 
@@ -140,13 +137,11 @@ sibyld generate realistic # Generate sample data
 ## Runtime Modes
 
 For single-machine Surreal development, run `sibyld serve` or `sibyld up` with
-`SIBYL_STORE=surreal`. The default `coordination_backend=auto` resolves to `local`, so
-background jobs, pending state, locks, pub/sub, and schedules all stay in-process with
-no Redis requirement.
+`SIBYL_STORE=surreal`. The default `coordination_backend=auto` resolves to `local`, so background
+jobs, pending state, locks, pub/sub, and schedules all stay in-process with no Redis requirement.
 
-Redis remains available for distributed or multi-process dev. Set
-`SIBYL_COORDINATION_BACKEND=redis` when you want the `arq` worker model, then run
-`sibyld worker` or `moon run api:worker` separately.
+Redis remains available for distributed or multi-process dev. Set `SIBYL_COORDINATION_BACKEND=redis`
+when you want the `arq` worker model, then run `sibyld worker` or `moon run api:worker` separately.
 
 ## Key Patterns
 
@@ -156,8 +151,8 @@ Redis remains available for distributed or multi-process dev. Set
 manager = EntityManager(client, group_id=str(org.id))
 ```
 
-Write concurrency: the SurrealDB driver serializes WebSocket operations per client.
-Clone graph drivers per organization rather than sharing one driver across org scopes.
+Write concurrency: the SurrealDB driver serializes WebSocket operations per client. Clone graph
+drivers per organization rather than sharing one driver across org scopes.
 
 **Request context:** Auth middleware injects user and org.
 
@@ -167,5 +162,4 @@ from sibyl.auth.dependencies import get_current_user, get_current_organization
 
 ## Dependencies
 
-Depends on `sibyl-core` for models, graph client, AI substrate, and tool
-implementations.
+Depends on `sibyl-core` for models, graph client, AI substrate, and tool implementations.
