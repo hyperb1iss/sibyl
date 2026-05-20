@@ -558,11 +558,12 @@ tasks:
   bench-gate-test:
     command:
       uv run pytest tools/tests/test_bench_gate.py tools/tests/test_longmemeval_bench.py
-      tools/tests/test_longmemeval_live.py -v
+      tools/tests/test_longmemeval_live.py tools/tests/test_longmemeval_replay.py -v
     inputs:
       - tools/**/*.py
       - benchmarks/longmemeval_bench.py
       - benchmarks/longmemeval_live.py
+      - benchmarks/longmemeval_replay.py
       - benchmarks/results/ai-memory/*.json
       - pyproject.toml
 
@@ -949,6 +950,9 @@ tasks:
 
   bench-longmemeval-live:
     command: uv run python benchmarks/longmemeval_live.py
+
+  bench-longmemeval-replay:
+    command: uv run python benchmarks/longmemeval_replay.py
 
   bench-live-smoke:
     command: uv run pytest packages/python/sibyl-core/tests/test_retrieval_live.py -v -s

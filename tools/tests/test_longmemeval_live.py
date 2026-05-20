@@ -87,7 +87,7 @@ def _assert_memory_extraction_stats(report: dict[str, Any]) -> None:
 def _assert_gate_valid_report(module: ModuleType, report: dict[str, Any]) -> None:
     assert report["schema_version"] == "longmemeval-live-v1"
     assert report["mode"] == "hybrid"
-    assert report["runtime"]["embedding_provider"] == "none"
+    assert report["runtime"]["embedding_provider"] == "disabled"
     assert report["runtime"]["embedding_dimensions"] == 0
     assert report["runtime"]["entity_content_projection_policy"] == (
         module.ENTITY_CONTENT_PROJECTION_POLICY

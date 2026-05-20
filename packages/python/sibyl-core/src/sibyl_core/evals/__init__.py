@@ -21,6 +21,13 @@ from sibyl_core.evals.longmemeval import (
     build_longmemeval_corpus,
     score_longmemeval_ranking,
 )
+from sibyl_core.evals.longmemeval_replay import (
+    ReplaySummary,
+    replay_longmemeval_report,
+    replay_longmemeval_report_path,
+    rerank_longmemeval_case,
+    summary_to_dict,
+)
 from sibyl_core.evals.metrics import (
     EvalMetrics,
     EvalQuery,
@@ -62,6 +69,7 @@ __all__ = [
     "EvalResult",
     "EvalRunner",
     "LongMemEvalCorpusDocument",
+    "ReplaySummary",
     "RetrievalResult",
     "aggregate_metrics",
     "average_metric",
@@ -78,8 +86,12 @@ __all__ = [
     "ndcg_at_k",
     "precision_at_k",
     "recall_at_k",
+    "replay_longmemeval_report",
+    "replay_longmemeval_report_path",
+    "rerank_longmemeval_case",
     "run_context_pack_evaluation_cli",
     "run_evaluation_cli",
     "score_longmemeval_ranking",
     "success_at_k",
+    "summary_to_dict",
 ]
