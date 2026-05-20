@@ -9,7 +9,8 @@ from sibyl.config import settings
 from sibyl.jobs import memory_extraction
 from sibyl_core.models.memory_extraction import (
     ExtractedMemoryEntity,
-    MemoryEntityExtractionResult,
+    MemoryBatchEntityExtractionResult,
+    SourceMemoryExtraction,
 )
 from sibyl_core.observability import telemetry_registry
 
@@ -24,19 +25,24 @@ class FakeExtractor:
         prompts: list[str],
         *,
         max_concurrent: int,
-    ) -> list[MemoryEntityExtractionResult]:
+    ) -> list[MemoryBatchEntityExtractionResult]:
         self.prompts = prompts
         self.max_concurrent = max_concurrent
         return [
-            MemoryEntityExtractionResult(
-                entities=[
-                    ExtractedMemoryEntity(
-                        name="SurrealDB",
-                        entity_type="tool",
-                        summary="Native graph database",
-                        confidence=0.9,
+            MemoryBatchEntityExtractionResult(
+                sources=[
+                    SourceMemoryExtraction(
+                        source_id="session-created",
+                        entities=[
+                            ExtractedMemoryEntity(
+                                name="SurrealDB",
+                                entity_type="tool",
+                                summary="Native graph database",
+                                confidence=0.9,
+                            )
+                        ],
                     )
-                ]
+                ],
             )
             for _ in prompts
         ]
@@ -81,7 +87,7 @@ async def test_extract_memory_entities_runs_bounded_llm_extraction(
             relationship_manager=relationship_manager,
         )
 
-    monkeypatch.setattr(memory_extraction, "memory_entity_extractor", lambda **_: fake)
+    monkeypatch.setattr(memory_extraction, "memory_batch_entity_extractor", lambda **_: fake)
     monkeypatch.setattr(memory_extraction, "get_native_graph_runtime", fake_runtime)
 
     result = await memory_extraction.extract_memory_entities(
@@ -109,6 +115,8 @@ async def test_extract_memory_entities_runs_bounded_llm_extraction(
     assert result["extractions"][0]["source_id"] == "session-created"
     assert result["extractions"][0]["entities"][0]["name"] == "SurrealDB"
     assert fake.max_concurrent == 1
+    assert len(fake.prompts) == 1
+    assert "source_id: session-created" in fake.prompts[0]
     assert "SurrealDB 3.0 adds n" in fake.prompts[0]
     assert "native RRF" not in fake.prompts[0]
     created_entities = entity_manager.create_direct_bulk.await_args.args[0]

@@ -12,14 +12,14 @@ from sibyl.config import settings
 from sibyl.jobs.queue import get_queue
 from sibyl_core.ai.errors import LLMError
 from sibyl_core.ai.memory_extraction import (
-    build_memory_entity_extraction_prompt,
-    memory_entity_extractor,
+    build_memory_batch_entity_extraction_prompt,
+    memory_batch_entity_extractor,
 )
 from sibyl_core.embeddings.native import configured_native_embedding_provider
 from sibyl_core.models.entities import Entity
 from sibyl_core.models.memory_extraction import (
     ExtractedMemoryEntity,
-    MemoryEntityExtractionResult,
+    SourceMemoryExtraction,
 )
 from sibyl_core.observability import elapsed_ms, telemetry_registry
 from sibyl_core.projection import project_extracted_memory_entities
@@ -155,38 +155,79 @@ async def extract_memory_entities(
         created_source_ids=created_source_ids,
         max_source_chars=max_source_chars,
     )
-    prompts = [
-        build_memory_entity_extraction_prompt(
-            title=str(source.source.get("name") or source.source_id),
-            content=str(source.source.get("content") or ""),
-            source_type=str(source.source.get("entity_type") or "memory"),
-            max_entities=max_entities_per_source,
+    if not source_payloads:
+        duration_ms = elapsed_ms(started_at)
+        telemetry_registry().record_memory_extraction_run(
+            status="skipped",
+            duration_ms=duration_ms,
+            sources=0,
+            extracted_entities=0,
+            estimated_input_tokens=0,
         )
-        for source in source_payloads
-    ]
-    estimated_input_tokens = sum(_estimate_tokens(prompt) for prompt in prompts)
-    extractor = memory_entity_extractor(max_tokens=max_tokens)
+        return {
+            "group_id": group_id,
+            "sources": 0,
+            "extracted_entities": 0,
+            "projected_entities": 0,
+            "relationships": 0,
+            "estimated_input_tokens": 0,
+            "errors": [],
+            "projection_errors": [],
+            "extractions": [],
+        }
+    prompt = build_memory_batch_entity_extraction_prompt(
+        sources=[
+            {
+                "source_id": source.source_id,
+                "title": str(source.source.get("name") or source.source_id),
+                "source_type": str(source.source.get("entity_type") or "memory"),
+                "content": str(source.source.get("content") or ""),
+            }
+            for source in source_payloads
+        ],
+        max_entities_per_source=max_entities_per_source,
+    )
+    estimated_input_tokens = _estimate_tokens(prompt)
+    extractor = memory_batch_entity_extractor(max_tokens=max_tokens)
 
     errors: list[dict[str, str]] = []
     extractions: list[dict[str, Any]] = []
     extracted_by_source_id: dict[str, list[ExtractedMemoryEntity]] = {}
     extracted_entities = 0
-    results = await extractor.extract_many(prompts, max_concurrent=max_concurrent)
-    for source, result in zip(source_payloads, results, strict=True):
-        if isinstance(result, LLMError):
-            errors.append(
-                {
-                    "source_id": source.source_id,
-                    "error_type": type(result).__name__,
-                    "message": str(result),
-                }
-            )
-            continue
-        limited_entities = _limited_entities(result, max_entities_per_source)
-        extracted_by_source_id[source.source_id] = limited_entities
-        entities = [entity.model_dump(mode="json") for entity in limited_entities]
-        extractions.append({"source_id": source.source_id, "entities": entities})
-        extracted_entities += len(entities)
+    results = await extractor.extract_many([prompt], max_concurrent=max_concurrent)
+    result = results[0] if results else None
+    payloads_by_source_id = {source.source_id: source for source in source_payloads}
+    if isinstance(result, LLMError) or result is None:
+        error = result if isinstance(result, LLMError) else LLMError("empty extraction result")
+        errors.extend(
+            {
+                "source_id": source.source_id,
+                "error_type": type(error).__name__,
+                "message": str(error),
+            }
+            for source in source_payloads
+        )
+    else:
+        for source_result in result.sources:
+            source_id = source_result.source_id
+            if source_id not in payloads_by_source_id:
+                errors.append(
+                    {
+                        "source_id": source_id,
+                        "error_type": "UnknownSourceID",
+                        "message": "LLM returned an extraction for an unknown source_id",
+                    }
+                )
+                continue
+            limited_entities = _limited_entities(source_result, max_entities_per_source)
+            extracted_by_source_id[source_id] = limited_entities
+            entities = [entity.model_dump(mode="json") for entity in limited_entities]
+            extractions.append({"source_id": source_id, "entities": entities})
+            extracted_entities += len(entities)
+        for source in source_payloads:
+            if source.source_id not in extracted_by_source_id:
+                extracted_by_source_id[source.source_id] = []
+                extractions.append({"source_id": source.source_id, "entities": []})
 
     projection = await _project_extracted_entities(
         source_payloads,
@@ -281,7 +322,7 @@ def _batch_source_payloads(
 
 
 def _limited_entities(
-    result: MemoryEntityExtractionResult,
+    result: SourceMemoryExtraction,
     max_entities: int,
 ) -> list[ExtractedMemoryEntity]:
     return result.entities[:max(1, max_entities)]

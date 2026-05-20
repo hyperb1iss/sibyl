@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sibyl_core.models.entities import EntityType
 
 MAX_MEMORY_EXTRACTED_ENTITIES = 12
+MAX_MEMORY_EXTRACTION_BATCH_SOURCES = 100
 
 
 class MemoryExtractionEntityType(StrEnum):
@@ -56,9 +57,36 @@ class MemoryEntityExtractionResult(BaseModel):
     )
 
 
+class SourceMemoryExtraction(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    source_id: str = Field(min_length=1, max_length=240)
+    entities: list[ExtractedMemoryEntity] = Field(
+        default_factory=list,
+        max_length=MAX_MEMORY_EXTRACTED_ENTITIES,
+    )
+
+    @field_validator("source_id")
+    @classmethod
+    def _collapse_source_id(cls, value: str) -> str:
+        return " ".join(value.split())
+
+
+class MemoryBatchEntityExtractionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sources: list[SourceMemoryExtraction] = Field(
+        default_factory=list,
+        max_length=MAX_MEMORY_EXTRACTION_BATCH_SOURCES,
+    )
+
+
 __all__ = [
     "MAX_MEMORY_EXTRACTED_ENTITIES",
+    "MAX_MEMORY_EXTRACTION_BATCH_SOURCES",
     "ExtractedMemoryEntity",
+    "MemoryBatchEntityExtractionResult",
     "MemoryEntityExtractionResult",
     "MemoryExtractionEntityType",
+    "SourceMemoryExtraction",
 ]
