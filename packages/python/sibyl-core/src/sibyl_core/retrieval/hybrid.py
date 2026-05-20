@@ -33,18 +33,25 @@ T = TypeVar("T")
 _KEYWORD_STOPWORDS = {
     "about",
     "also",
+    "and",
+    "are",
     "could",
+    "did",
     "does",
     "doing",
     "during",
     "from",
+    "for",
     "have",
     "having",
+    "how",
     "into",
     "like",
+    "many",
     "more",
     "much",
     "need",
+    "please",
     "should",
     "that",
     "the",
@@ -60,6 +67,9 @@ _KEYWORD_STOPWORDS = {
     "would",
     "your",
 }
+_QUERY_COVERAGE_RANK_WEIGHT = 0.85
+_QUERY_COVERAGE_OVERLAP_WEIGHT = 0.15
+_QUERY_COVERAGE_DENSITY_WEIGHT = 0.03
 
 
 def _require_group_id(group_id: str | None, operation: str) -> str:
@@ -86,11 +96,22 @@ def _extract_keywords(query: str) -> list[str]:
     keywords: list[str] = []
     seen: set[str] = set()
     for token in tokens:
+        token = _normalize_keyword_token(token)
         if token in _KEYWORD_STOPWORDS or token in seen:
             continue
         keywords.append(token)
         seen.add(token)
     return keywords
+
+
+def _normalize_keyword_token(token: str) -> str:
+    if len(token) > 4 and token.endswith("ies"):
+        return f"{token[:-3]}y"
+    if len(token) > 4 and token.endswith("es"):
+        return token[:-2]
+    if len(token) > 3 and token.endswith("s"):
+        return token[:-1]
+    return token
 
 
 def _entity_text(entity: Any) -> str:
@@ -104,6 +125,13 @@ def _entity_text(entity: Any) -> str:
             parts.append(value)
 
     return " ".join(parts).lower()
+
+
+def _entity_keyword_tokens(entity: Any) -> list[str]:
+    return [
+        _normalize_keyword_token(token)
+        for token in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9'-]{2,}", _entity_text(entity))
+    ]
 
 
 def _apply_keyword_boost(
@@ -126,6 +154,46 @@ def _apply_keyword_boost(
 
     boosted_results.sort(key=lambda item: item[1], reverse=True)
     return boosted_results, applied
+
+
+def _apply_query_coverage_rerank(
+    query: str,
+    results: list[tuple[Any, float]],
+) -> tuple[list[tuple[Any, float]], bool]:
+    keywords = _extract_keywords(query)
+    if len(keywords) < 2 or len(results) < 2:
+        return results, False
+
+    query_terms = set(keywords)
+    rank_span = max(1, len(results) - 1)
+    reranked: list[tuple[Any, float, int]] = []
+    has_text_signal = False
+    for index, (entity, _score) in enumerate(results):
+        tokens = _entity_keyword_tokens(entity)
+        token_set = set(tokens)
+        overlap = len(query_terms & token_set) / len(query_terms)
+        density = sum(1 for token in tokens if token in query_terms) / max(
+            1.0,
+            len(tokens) ** 0.5,
+        )
+        rank_score = 1.0 - (index / rank_span)
+        score = (
+            (_QUERY_COVERAGE_RANK_WEIGHT * rank_score)
+            + (_QUERY_COVERAGE_OVERLAP_WEIGHT * overlap)
+            + (_QUERY_COVERAGE_DENSITY_WEIGHT * density)
+        )
+        has_text_signal = has_text_signal or overlap > 0.0 or density > 0.0
+        reranked.append((entity, score, index))
+
+    if not has_text_signal:
+        return results, False
+
+    reranked.sort(key=lambda item: (-item[1], item[2]))
+    changed = any(
+        entity is not results[index][0]
+        for index, (entity, _score, _rank) in enumerate(reranked)
+    )
+    return [(entity, score) for entity, score, _rank in reranked], changed
 
 
 @dataclass
@@ -155,6 +223,7 @@ class HybridConfig:
     rerank_top_k: int = 20
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     apply_keyword_boost: bool = True
+    apply_query_coverage_rerank: bool = True
     apply_query_entity_linking: bool = True
     graph_expansion_only_boost: float = 0.45
     reference_time: datetime | None = None
@@ -575,10 +644,14 @@ async def hybrid_search(
                 reference_time=config.reference_time,
             )
 
+    query_coverage_rerank_applied = False
+    if config.apply_query_coverage_rerank and merged:
+        merged, query_coverage_rerank_applied = _apply_query_coverage_rerank(query, merged)
+
     # Trim to limit
     final_results = merged[:limit]
 
-    metadata = {
+    metadata: dict[str, Any] = {
         "query": query,
         "sources": list_names,
         "entity_manager_search_completed": vector_attempt.completed,
@@ -589,6 +662,7 @@ async def hybrid_search(
         "merged_count": len(merged),
         "reranking_applied": reranking_applied,
         "keyword_boost_applied": keyword_boost_applied,
+        "query_coverage_rerank_applied": query_coverage_rerank_applied,
         "temporal_applied": config.apply_temporal,
         "temporal_target": temporal_target.isoformat() if temporal_target else None,
     }

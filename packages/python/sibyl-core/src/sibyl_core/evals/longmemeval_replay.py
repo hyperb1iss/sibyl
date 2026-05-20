@@ -19,7 +19,7 @@ from sibyl_core.evals.longmemeval import (
     score_longmemeval_ranking,
 )
 
-ReplayStrategy = Literal["identity", "heuristic", "oracle"]
+ReplayStrategy = Literal["identity", "heuristic", "coverage", "oracle"]
 
 STOP_WORDS = {
     "a",
@@ -315,6 +315,9 @@ def rerank_longmemeval_case(
             )
         )
     query = str(case_result.get("question") or "")
+    if strategy == "coverage":
+        return [candidate.session_id for _, candidate in _score_query_coverage(query, candidates)]
+
     intents = _detect_intents(
         query,
         question_type=str(case_result.get("question_type") or ""),
@@ -452,6 +455,32 @@ def _score_candidates(
         if intents.temporal:
             score += _temporal_score(candidate.timestamp, intents)
 
+        scored.append((score, candidate))
+
+    return sorted(scored, key=lambda item: (-item[0], item[1].original_rank))
+
+
+def _score_query_coverage(
+    query: str,
+    candidates: Sequence[_Candidate],
+) -> list[tuple[float, _Candidate]]:
+    query_tokens = set(_tokenize(query))
+    if len(query_tokens) < 2:
+        return [
+            (1.0 - ((candidate.original_rank - 1) / max(1, len(candidates) - 1)), candidate)
+            for candidate in candidates
+        ]
+
+    scored: list[tuple[float, _Candidate]] = []
+    total = max(1, len(candidates) - 1)
+    for candidate in candidates:
+        original_rank_score = 1.0 - ((candidate.original_rank - 1) / total)
+        overlap = len(query_tokens & candidate.token_set) / len(query_tokens)
+        density = sum(1 for token in candidate.tokens if token in query_tokens) / max(
+            1.0,
+            math.sqrt(len(candidate.tokens)),
+        )
+        score = (0.85 * original_rank_score) + (0.15 * overlap) + (0.03 * density)
         scored.append((score, candidate))
 
     return sorted(scored, key=lambda item: (-item[0], item[1].original_rank))

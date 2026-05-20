@@ -1214,6 +1214,46 @@ class TestHybridSearch:
         assert result.entities[0].id == "text-match"
 
     @pytest.mark.asyncio
+    async def test_hybrid_search_query_coverage_rerank_promotes_relevant_top_ten(
+        self,
+    ) -> None:
+        client = MockGraphClientForHybrid()
+        manager = MockEntityManagerForHybrid()
+
+        distractors = [
+            make_entity_for_test(f"distractor-{index}", description="generic travel planning")
+            for index in range(5)
+        ]
+        answer = make_entity_for_test(
+            "answer",
+            description="bike service receipt and total maintenance expense",
+        )
+        tail = [
+            make_entity_for_test(f"tail-{index}", description="unrelated cookbook note")
+            for index in range(4)
+        ]
+        manager.search_results = [
+            *[(entity, 1.0 - (index * 0.01)) for index, entity in enumerate(distractors)],
+            (answer, 0.94),
+            *[(entity, 0.8 - (index * 0.01)) for index, entity in enumerate(tail)],
+        ]
+
+        result = await hybrid_search(
+            "bike service expense total",
+            client,  # type: ignore[arg-type]
+            manager,  # type: ignore[arg-type]
+            limit=5,
+            config=HybridConfig(
+                graph_weight=0,
+                apply_temporal=False,
+                apply_keyword_boost=False,
+            ),
+        )
+
+        assert "answer" in [entity.id for entity in result.entities]
+        assert result.metadata["query_coverage_rerank_applied"] is True
+
+    @pytest.mark.asyncio
     async def test_hybrid_search_uses_unfiltered_link_seeds_for_typed_results(
         self,
         monkeypatch: pytest.MonkeyPatch,

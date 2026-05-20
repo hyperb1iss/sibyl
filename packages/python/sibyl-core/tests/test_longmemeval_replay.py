@@ -84,6 +84,62 @@ def test_heuristic_rerank_preserves_candidate_set() -> None:
     assert sorted(reranked) == sorted(_case_result()["ranked_session_ids"])
 
 
+def test_coverage_rerank_uses_query_terms_without_answer_oracle() -> None:
+    haystack_ids = [
+        *(f"distractor-{index}" for index in range(5)),
+        "answer-session",
+        *(f"tail-{index}" for index in range(4)),
+    ]
+    haystack_sessions = [
+        [{"role": "user", "content": "I need generic travel planning help."}]
+        for _ in range(5)
+    ]
+    haystack_sessions.append(
+        [
+            {
+                "role": "user",
+                "content": "The bike service receipt is part of my total maintenance expense.",
+            }
+        ]
+    )
+    haystack_sessions.extend(
+        [{"role": "user", "content": "I saved an unrelated cookbook note."}]
+        for _ in range(4)
+    )
+    entry = {
+        "question_id": "q1",
+        "question_type": "multi-session",
+        "question": "How much was my bike service expense total?",
+        "question_date": "2026/01/20 12:00",
+        "answer_session_ids": ["answer-session"],
+        "haystack_session_ids": haystack_ids,
+        "haystack_dates": ["2026/01/19"] * len(haystack_ids),
+        "haystack_sessions": haystack_sessions,
+    }
+    case = {
+        "case_index": 0,
+        "question_id": "q1",
+        "question_type": "multi-session",
+        "question": entry["question"],
+        "question_date": entry["question_date"],
+        "answer_session_ids": ["answer-session"],
+        "ranked_session_ids": haystack_ids,
+        "ranked_results": [
+            {"longmemeval_session_id": session_id, "score": 1.0 - (index * 0.01)}
+            for index, session_id in enumerate(haystack_ids)
+        ],
+    }
+
+    reranked = rerank_longmemeval_case(
+        case,
+        entry,
+        strategy="coverage",
+        corpus_text_policy="user-and-assistant-turns-v1",
+    )
+
+    assert reranked.index("answer-session") < 5
+
+
 def test_oracle_rerank_is_explicit_upper_bound() -> None:
     reranked = rerank_longmemeval_case(
         _case_result(),
