@@ -11,11 +11,14 @@ from sibyl_core.embeddings.native import (
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.retrieval.native import (
     DEFAULT_FILTER_SELECTIVITY_THRESHOLD,
+    NativeFusionBackend,
     NativeRetrievalCandidate,
     NativeRetrievalMode,
     NativeRetrievalSignal,
     build_native_context_retrieval_plan,
+    coerce_native_fusion_backend,
     coerce_native_retrieval_mode,
+    native_fusion_backend_from_env,
     native_retrieval_mode_from_env,
 )
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
@@ -34,6 +37,21 @@ def test_native_retrieval_mode_accepts_native_and_compare() -> None:
     assert coerce_native_retrieval_mode("COMPARE") is NativeRetrievalMode.COMPARE
     assert native_retrieval_mode_from_env({"SIBYL_RETRIEVAL_MODE": "native"}) is (
         NativeRetrievalMode.NATIVE
+    )
+
+
+def test_native_fusion_backend_defaults_to_python_rrf() -> None:
+    assert coerce_native_fusion_backend(None) is NativeFusionBackend.PYTHON_RRF
+    assert coerce_native_fusion_backend("") is NativeFusionBackend.PYTHON_RRF
+    assert coerce_native_fusion_backend("invalid") is NativeFusionBackend.PYTHON_RRF
+    assert native_fusion_backend_from_env({}) is NativeFusionBackend.PYTHON_RRF
+
+
+def test_native_fusion_backend_accepts_surreal_rrf() -> None:
+    assert coerce_native_fusion_backend("surreal_rrf") is NativeFusionBackend.SURREAL_RRF
+    assert coerce_native_fusion_backend("SURREAL_RRF") is NativeFusionBackend.SURREAL_RRF
+    assert native_fusion_backend_from_env({"SIBYL_NATIVE_FUSION_BACKEND": "surreal_rrf"}) is (
+        NativeFusionBackend.SURREAL_RRF
     )
 
 
@@ -528,6 +546,109 @@ def test_vector_matches_with_lexical_signal_do_not_demote() -> None:
     )
 
     assert "vector_only_demoted" not in ranked[0][2]
+
+
+class _RrfClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        return [
+            {"id": "shared", "rrf_score": 0.05},
+            {"id": "lexical", "rrf_score": 0.01},
+        ]
+
+
+class _FailingRrfClient:
+    async def execute_query(self, _query: str, **_params: object) -> list[dict[str, object]]:
+        raise RuntimeError("search::rrf unavailable")
+
+
+@pytest.mark.asyncio
+async def test_surreal_rrf_backend_uses_database_fusion_scores() -> None:
+    plan = build_native_context_retrieval_plan(
+        query="surreal rrf",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project="project_123",
+        accessible_projects={"project_123"},
+    )
+    lexical = NativeRetrievalCandidate(
+        id="lexical",
+        type="task",
+        name="Lexical",
+        content="A lexical-only result.",
+        score=0.9,
+        source=None,
+        metadata={},
+        project_id="project_123",
+    )
+    shared = NativeRetrievalCandidate(
+        id="shared",
+        type="task",
+        name="Shared",
+        content="A result in both lists.",
+        score=0.8,
+        source=None,
+        metadata={},
+        project_id="project_123",
+    )
+    client = _RrfClient()
+
+    ranked = await native_module._fuse_candidates_for_plan(
+        client=client,
+        source_lists=[
+            (NativeRetrievalSignal.NODE_FULLTEXT, [lexical, shared]),
+            (NativeRetrievalSignal.NODE_VECTOR, [shared]),
+        ],
+        plan=plan,
+        limit=2,
+        fusion_backend=NativeFusionBackend.SURREAL_RRF,
+    )
+
+    assert [candidate.id for candidate, _, _ in ranked] == ["shared", "lexical"]
+    query, params = client.calls[0]
+    assert "search::rrf($lists, $limit, $k)" in query
+    assert params["limit"] == 2
+    assert params["k"] == 60
+    assert ranked[0][2]["fusion_backend"] == "surreal_rrf"
+    assert ranked[0][2]["ranks"] == {"node_fulltext": 2, "node_vector": 1}
+
+
+@pytest.mark.asyncio
+async def test_surreal_rrf_backend_falls_back_to_python_rrf_on_error() -> None:
+    plan = build_native_context_retrieval_plan(
+        query="surreal rrf fallback",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project=None,
+        accessible_projects=None,
+    )
+    candidate = NativeRetrievalCandidate(
+        id="candidate",
+        type="task",
+        name="Candidate",
+        content="Fallback result.",
+        score=0.9,
+        source=None,
+        metadata={},
+    )
+
+    ranked = await native_module._fuse_candidates_for_plan(
+        client=_FailingRrfClient(),
+        source_lists=[(NativeRetrievalSignal.NODE_FULLTEXT, [candidate])],
+        plan=plan,
+        limit=1,
+        fusion_backend=NativeFusionBackend.SURREAL_RRF,
+    )
+
+    assert ranked[0][0].id == "candidate"
+    assert ranked[0][2]["fusion_backend"] == "python_rrf"
 
 
 @pytest.mark.asyncio

@@ -51,6 +51,14 @@ class NativeRetrievalMode(StrEnum):
 DEFAULT_NATIVE_RETRIEVAL_MODE = NativeRetrievalMode.NATIVE
 
 
+class NativeFusionBackend(StrEnum):
+    PYTHON_RRF = "python_rrf"
+    SURREAL_RRF = "surreal_rrf"
+
+
+DEFAULT_NATIVE_FUSION_BACKEND = NativeFusionBackend.PYTHON_RRF
+
+
 class NativeRetrievalSignal(StrEnum):
     RAW_LEXICAL = "raw_lexical"
     NODE_FULLTEXT = "node_fulltext"
@@ -158,6 +166,26 @@ def native_retrieval_mode_from_env(
 ) -> NativeRetrievalMode:
     source = os.environ if environ is None else environ
     return coerce_native_retrieval_mode(source.get("SIBYL_RETRIEVAL_MODE"))
+
+
+def coerce_native_fusion_backend(
+    value: str | NativeFusionBackend | None,
+) -> NativeFusionBackend:
+    if isinstance(value, NativeFusionBackend):
+        return value
+    if value is None or not value.strip():
+        return DEFAULT_NATIVE_FUSION_BACKEND
+    try:
+        return NativeFusionBackend(value.strip().lower())
+    except ValueError:
+        return DEFAULT_NATIVE_FUSION_BACKEND
+
+
+def native_fusion_backend_from_env(
+    environ: Mapping[str, str] | None = None,
+) -> NativeFusionBackend:
+    source = os.environ if environ is None else environ
+    return coerce_native_fusion_backend(source.get("SIBYL_NATIVE_FUSION_BACKEND"))
 
 
 def build_native_context_retrieval_plan(
@@ -340,7 +368,14 @@ async def native_context_search(
         )
         for signal, candidates in source_lists
     ]
-    fused = _fuse_candidates(filtered_lists, plan=plan, limit=limit)
+    fusion_backend = native_fusion_backend_from_env()
+    fused = await _fuse_candidates_for_plan(
+        client=client,
+        source_lists=filtered_lists,
+        plan=plan,
+        limit=limit,
+        fusion_backend=fusion_backend,
+    )
     results = [
         _search_result_from_candidate(
             candidate,
@@ -358,6 +393,7 @@ async def native_context_search(
             "types": list(types) if types else None,
             "project": plan.project,
             "retrieval_mode": NativeRetrievalMode.NATIVE.value,
+            "fusion_backend": fusion_backend.value,
         },
         graph_count=len([result for result in results if result.result_origin == "graph"]),
         document_count=0,
@@ -1629,15 +1665,120 @@ def _fuse_candidates(
     plan: NativeRetrievalPlan,
     limit: int,
 ) -> list[tuple[NativeRetrievalCandidate, float, dict[str, Any]]]:
+    return _rank_fused_candidates(
+        source_lists,
+        plan=plan,
+        limit=limit,
+        rrf_scores=_python_rrf_scores(source_lists, rrf_k=plan.weights.rrf_k),
+    )
+
+
+async def _fuse_candidates_for_plan(
+    *,
+    client: Any,
+    source_lists: Sequence[tuple[NativeRetrievalSignal, Sequence[NativeRetrievalCandidate]]],
+    plan: NativeRetrievalPlan,
+    limit: int,
+    fusion_backend: NativeFusionBackend | None = None,
+) -> list[tuple[NativeRetrievalCandidate, float, dict[str, Any]]]:
+    backend = fusion_backend or DEFAULT_NATIVE_FUSION_BACKEND
+    if backend is NativeFusionBackend.SURREAL_RRF:
+        native_scores = await _surreal_rrf_scores(client, source_lists, plan=plan, limit=limit)
+        if native_scores:
+            return _rank_fused_candidates(
+                source_lists,
+                plan=plan,
+                limit=limit,
+                rrf_scores=native_scores,
+                backend=backend,
+            )
+    return _fuse_candidates(source_lists, plan=plan, limit=limit)
+
+
+def _python_rrf_scores(
+    source_lists: Sequence[tuple[NativeRetrievalSignal, Sequence[NativeRetrievalCandidate]]],
+    *,
+    rrf_k: int,
+) -> dict[str, float]:
+    scores: dict[str, float] = defaultdict(float)
+    for _signal, candidates in source_lists:
+        for rank, candidate in enumerate(candidates, start=1):
+            scores[candidate.id] += 1.0 / (rrf_k + rank)
+    return dict(scores)
+
+
+async def _surreal_rrf_scores(
+    client: Any,
+    source_lists: Sequence[tuple[NativeRetrievalSignal, Sequence[NativeRetrievalCandidate]]],
+    *,
+    plan: NativeRetrievalPlan,
+    limit: int,
+) -> dict[str, float]:
+    rrf_inputs = [
+        [
+            {
+                "id": candidate.id,
+                "source_signal": signal.value,
+                "score": candidate.score,
+            }
+            for candidate in candidates
+        ]
+        for signal, candidates in source_lists
+    ]
+    if not any(rrf_inputs):
+        return {}
+    unique_candidate_count = len(
+        {
+            candidate.id
+            for _signal, candidates in source_lists
+            for candidate in candidates
+        }
+    )
+    try:
+        rows = normalize_records(
+            await client.execute_query(
+                "RETURN search::rrf($lists, $limit, $k);",
+                lists=rrf_inputs,
+                limit=max(int(limit), unique_candidate_count, 1),
+                k=plan.weights.rrf_k,
+            )
+        )
+    except Exception as exc:
+        log.warning(
+            "native_surreal_rrf_failed",
+            organization_id=plan.organization_id,
+            error_type=type(exc).__name__,
+        )
+        return {}
+
+    scores: dict[str, float] = {}
+    for row in rows:
+        candidate_id = _string_value(row.get("id") or row.get("uuid") or row.get("record_id"))
+        if not candidate_id:
+            continue
+        raw_score = row.get("rrf_score", row.get("fuse_score"))
+        if isinstance(raw_score, int | float):
+            scores[candidate_id] = float(raw_score)
+    return scores
+
+
+def _rank_fused_candidates(
+    source_lists: Sequence[tuple[NativeRetrievalSignal, Sequence[NativeRetrievalCandidate]]],
+    *,
+    plan: NativeRetrievalPlan,
+    limit: int,
+    rrf_scores: Mapping[str, float],
+    backend: NativeFusionBackend = NativeFusionBackend.PYTHON_RRF,
+) -> list[tuple[NativeRetrievalCandidate, float, dict[str, Any]]]:
     score_by_id: dict[str, float] = defaultdict(float)
     candidates_by_id: dict[str, NativeRetrievalCandidate] = {}
     metadata_by_id: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {"sources": [], "ranks": {}, "original_scores": {}}
+        lambda: {"sources": [], "ranks": {}, "original_scores": {}, "fusion_backend": backend.value}
     )
 
     for signal, candidates in source_lists:
         for rank, candidate in enumerate(candidates, start=1):
-            score_by_id[candidate.id] += 1.0 / (plan.weights.rrf_k + rank)
+            score_by_id[candidate.id] = float(rrf_scores.get(candidate.id, 0.0))
             candidates_by_id.setdefault(candidate.id, candidate)
             metadata_by_id[candidate.id]["sources"].append(signal.value)
             metadata_by_id[candidate.id]["ranks"][signal.value] = rank

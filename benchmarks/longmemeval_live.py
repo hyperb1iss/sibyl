@@ -1156,6 +1156,11 @@ async def run_benchmark(
         flush=True,
     )
     print(
+        "  Native fusion backend: "
+        f"{os.environ.get('SIBYL_NATIVE_FUSION_BACKEND', 'python_rrf')}",
+        flush=True,
+    )
+    print(
         f"  Heartbeat: {heartbeat_interval_seconds:.1f}s; "
         f"stall timeout: {stall_timeout_seconds:.1f}s",
         flush=True,
@@ -1236,6 +1241,7 @@ async def run_benchmark(
             "graph_hnsw_efc_env": os.environ.get("SIBYL_GRAPH_HNSW_EFC", ""),
             "graph_hnsw_m_env": os.environ.get("SIBYL_GRAPH_HNSW_M", ""),
             "graph_knn_ef_env": os.environ.get("SIBYL_GRAPH_KNN_EF", ""),
+            "native_fusion_backend_env": os.environ.get("SIBYL_NATIVE_FUSION_BACKEND", ""),
         },
         "dataset": {
             "name": dataset_path.stem,

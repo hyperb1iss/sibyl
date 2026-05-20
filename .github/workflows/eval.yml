@@ -59,6 +59,13 @@ on:
         description: "Surreal graph KNN query effort"
         type: string
         default: "40"
+      longmemeval_native_fusion_backend:
+        description: "Native retrieval fusion backend"
+        type: choice
+        options:
+          - python_rrf
+          - surreal_rrf
+        default: python_rrf
       run_longmemeval_full:
         description: "Run the full 500-question LongMemEval live job"
         type: boolean
@@ -261,6 +268,7 @@ jobs:
       SIBYL_GRAPH_HNSW_EFC: ${{ inputs.longmemeval_graph_hnsw_efc }}
       SIBYL_GRAPH_HNSW_M: ${{ inputs.longmemeval_graph_hnsw_m }}
       SIBYL_GRAPH_KNN_EF: ${{ inputs.longmemeval_graph_knn_ef }}
+      SIBYL_NATIVE_FUSION_BACKEND: ${{ inputs.longmemeval_native_fusion_backend }}
       SIBYL_LLM_MEMORY_PROVIDER: openai
       SIBYL_LLM_MEMORY_MODEL: gpt-5.4-nano
       PYTHONUNBUFFERED: "1"
@@ -370,6 +378,7 @@ jobs:
             --metadata graph_hnsw_efc="${SIBYL_GRAPH_HNSW_EFC}" \
             --metadata graph_hnsw_m="${SIBYL_GRAPH_HNSW_M}" \
             --metadata graph_knn_ef="${SIBYL_GRAPH_KNN_EF}" \
+            --metadata native_fusion_backend="${SIBYL_NATIVE_FUSION_BACKEND}" \
             "${extraction_args[@]}"
 
       - name: Gate LongMemEval live smoke
@@ -442,6 +451,7 @@ jobs:
       SIBYL_GRAPH_HNSW_EFC: ${{ inputs.longmemeval_graph_hnsw_efc }}
       SIBYL_GRAPH_HNSW_M: ${{ inputs.longmemeval_graph_hnsw_m }}
       SIBYL_GRAPH_KNN_EF: ${{ inputs.longmemeval_graph_knn_ef }}
+      SIBYL_NATIVE_FUSION_BACKEND: ${{ inputs.longmemeval_native_fusion_backend }}
       SIBYL_LLM_MEMORY_PROVIDER: openai
       SIBYL_LLM_MEMORY_MODEL: gpt-5.4-nano
       PYTHONUNBUFFERED: "1"
@@ -549,6 +559,7 @@ jobs:
             --metadata graph_hnsw_efc="${SIBYL_GRAPH_HNSW_EFC}" \
             --metadata graph_hnsw_m="${SIBYL_GRAPH_HNSW_M}" \
             --metadata graph_knn_ef="${SIBYL_GRAPH_KNN_EF}" \
+            --metadata native_fusion_backend="${SIBYL_NATIVE_FUSION_BACKEND}" \
             "${extraction_args[@]}"
 
       - name: Gate LongMemEval live full
