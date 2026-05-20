@@ -918,6 +918,37 @@ class TestSearchTool:
         assert response.filters["project"] == "proj_123"
 
     @pytest.mark.asyncio
+    async def test_search_passes_reference_time_to_hybrid_config(self) -> None:
+        """Search forwards as-of time into enhanced graph ranking."""
+        from sibyl_core.retrieval.hybrid import HybridResult
+
+        search_module = import_module("sibyl_core.tools.search")
+        hybrid_search = AsyncMock(
+            return_value=HybridResult(
+                results=[],
+                metadata={"entity_manager_search_completed": True},
+            )
+        )
+
+        with (
+            patch(
+                "sibyl_core.tools.search.get_graph_runtime",
+                AsyncMock(return_value=make_graph_runtime(entity_manager=AsyncMock())),
+            ),
+            patch("sibyl_core.tools.search.hybrid_search", hybrid_search),
+        ):
+            response = await search_module.search(
+                query="What happened 10 days ago?",
+                organization_id="org_123",
+                include_documents=False,
+                reference_time="2026/01/20 00:00",
+            )
+
+        config = hybrid_search.await_args.kwargs["config"]
+        assert response.filters["reference_time"] == "2026/01/20 00:00"
+        assert config.reference_time == datetime(2026, 1, 20, tzinfo=UTC)
+
+    @pytest.mark.asyncio
     async def test_search_document_only_mode(self) -> None:
         """Search with types=['document'] skips graph search."""
         from sibyl_core.tools.search import search

@@ -11,6 +11,7 @@ from sibyl_core.embeddings.native import configured_native_embedding_provider
 from sibyl_core.models.entities import EntityType
 from sibyl_core.retrieval import HybridConfig, hybrid_search, temporal_boost
 from sibyl_core.retrieval.fusion import rrf_merge
+from sibyl_core.retrieval.temporal import parse_temporal_datetime
 from sibyl_core.services import document_search as document_search_service
 from sibyl_core.tools.helpers import (
     VALID_ENTITY_TYPES,
@@ -341,6 +342,7 @@ async def search(
     use_enhanced: bool = True,
     boost_recent: bool = True,
     temporal_decay_days: float | None = None,
+    reference_time: str | datetime | None = None,
     organization_id: str | None = None,
 ) -> SearchResponse:
     """Unified semantic search across knowledge graph AND documentation.
@@ -382,6 +384,7 @@ async def search(
         include_graph: Include knowledge graph entities in search (default True).
         use_enhanced: Use enhanced hybrid retrieval for graph (default True).
         boost_recent: Apply temporal boosting for graph results (default True).
+        reference_time: Optional query as-of timestamp for temporal ranking.
 
     Returns:
         SearchResponse with ranked results from both sources, including
@@ -432,6 +435,9 @@ async def search(
         filters["assignee"] = assignee
     if since:
         filters["since"] = since
+    resolved_reference_time = parse_temporal_datetime(reference_time)
+    if reference_time:
+        filters["reference_time"] = str(reference_time)
 
     # Determine if we should search documents based on types filter
     search_documents = include_documents
@@ -556,6 +562,7 @@ async def search(
                         apply_reranking=core_config.rerank_enabled,
                         rerank_top_k=core_config.rerank_top_k,
                         rerank_model=core_config.rerank_model,
+                        reference_time=resolved_reference_time,
                     )
 
                     hybrid_result = await with_timeout(
@@ -596,7 +603,11 @@ async def search(
                         from sibyl_core.config import core_config
 
                         decay = temporal_decay_days or core_config.temporal_decay_days
-                        raw_results = temporal_boost(raw_results, decay_days=decay)
+                        raw_results = temporal_boost(
+                            raw_results,
+                            decay_days=decay,
+                            reference_time=resolved_reference_time,
+                        )
                 except Exception as e:
                     log.warning("fallback_graph_search_failed", error_type=type(e).__name__)
                     graph_search_failed = True

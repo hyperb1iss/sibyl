@@ -38,8 +38,11 @@ from sibyl_core.retrieval.temporal import (
     calculate_age_days,
     calculate_boost,
     get_entity_timestamp,
+    parse_temporal_datetime,
+    resolve_temporal_reference,
     temporal_boost,
     temporal_boost_single,
+    temporal_proximity_boost,
 )
 
 # =============================================================================
@@ -761,6 +764,14 @@ class TestGetEntityTimestamp:
         ts = get_entity_timestamp(entity, field="auto")
         assert ts == valid
 
+    def test_timestamp_auto_prefers_valid_at_metadata(self) -> None:
+        """Auto mode prefers valid_at metadata over created_at."""
+        created = datetime(2023, 1, 1, tzinfo=UTC)
+        valid_at = datetime(2024, 2, 5, 12, 0, tzinfo=UTC)
+        entity = {"created_at": created, "metadata": {"valid_at": "2024/02/05 12:00"}}
+        ts = get_entity_timestamp(entity, field="auto")
+        assert ts == valid_at
+
     def test_timestamp_from_metadata(self) -> None:
         """Extract timestamp from metadata dict."""
         now = datetime.now(UTC)
@@ -776,11 +787,31 @@ class TestGetEntityTimestamp:
         assert ts.year == 2024
         assert ts.month == 6
 
+    def test_parse_temporal_datetime_accepts_longmemeval_format(self) -> None:
+        """Parse LongMemEval timestamps with weekday markers."""
+        parsed = parse_temporal_datetime("2025/05/17 (Sat) 09:30")
+        assert parsed == datetime(2025, 5, 17, 9, 30, tzinfo=UTC)
+
+    def test_parse_temporal_datetime_rejects_timezone_parenthetical(self) -> None:
+        """Do not mistake timezone annotations for weekday markers."""
+        parsed = parse_temporal_datetime("2025/05/17 (PST) 09:30")
+        assert parsed is None
+
     def test_timestamp_missing(self) -> None:
         """Missing timestamp returns None."""
         entity = {"id": "1", "name": "test"}
         ts = get_entity_timestamp(entity, field="created_at")
         assert ts is None
+
+    def test_resolve_temporal_reference_with_words_and_weekday(self) -> None:
+        """Resolve relative query time against the question as-of time."""
+        reference = datetime(2026, 3, 28, 12, 0, tzinfo=UTC)
+        target = resolve_temporal_reference(
+            "What did I do with Rachel on the Wednesday two months ago?",
+            reference,
+        )
+
+        assert target == datetime(2026, 1, 28, 12, 0, tzinfo=UTC)
 
 
 class TestCalculateAgeDays:
@@ -962,6 +993,18 @@ class TestTemporalBoost:
 
         # Recent item should now rank first despite lower original score
         assert boosted[0][0]["id"] == "recent"
+
+    def test_temporal_proximity_boost_reorders_by_query_time(self) -> None:
+        """Explicit temporal intent boosts records near the target time."""
+        target = datetime(2026, 1, 10, tzinfo=UTC)
+        results = [
+            ({"id": "far", "metadata": {"valid_at": "2026/01/01 00:00"}}, 1.0),
+            ({"id": "near", "metadata": {"valid_at": "2026/01/11 00:00"}}, 0.8),
+        ]
+
+        boosted = temporal_proximity_boost(results, target_time=target)
+
+        assert boosted[0][0]["id"] == "near"
 
 
 class TestTemporalBoostSingle:

@@ -9,19 +9,56 @@ Implements a two-phase retrieval strategy:
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, TypeVar
 
 import structlog
 
 from sibyl_core.models.entities import Entity
 from sibyl_core.retrieval.fusion import rrf_merge, rrf_merge_with_metadata
-from sibyl_core.retrieval.temporal import temporal_boost
+from sibyl_core.retrieval.temporal import (
+    resolve_temporal_reference,
+    temporal_boost,
+    temporal_proximity_boost,
+)
 from sibyl_core.utils.log_safety import query_log_fields
 
 log = structlog.get_logger()
 
 T = TypeVar("T")
+
+_KEYWORD_STOPWORDS = {
+    "about",
+    "also",
+    "could",
+    "does",
+    "doing",
+    "during",
+    "from",
+    "have",
+    "having",
+    "into",
+    "like",
+    "more",
+    "much",
+    "need",
+    "should",
+    "that",
+    "the",
+    "there",
+    "they",
+    "this",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "with",
+    "would",
+    "your",
+}
 
 
 def _require_group_id(group_id: str | None, operation: str) -> str:
@@ -41,6 +78,53 @@ def _resolve_group_id(entity_manager: Any, group_id: str | None) -> str:
     if not resolved:
         raise ValueError("group_id is required for hybrid retrieval")
     return str(resolved)
+
+
+def _extract_keywords(query: str) -> list[str]:
+    tokens = re.findall(r"[a-zA-Z0-9][a-zA-Z0-9'-]{2,}", query.lower())
+    keywords: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        if token in _KEYWORD_STOPWORDS or token in seen:
+            continue
+        keywords.append(token)
+        seen.add(token)
+    return keywords
+
+
+def _entity_text(entity: Any) -> str:
+    parts: list[str] = []
+    for field_name in ("name", "description", "content"):
+        if isinstance(entity, dict):
+            value = entity.get(field_name)
+        else:
+            value = getattr(entity, field_name, None)
+        if isinstance(value, str) and value:
+            parts.append(value)
+
+    return " ".join(parts).lower()
+
+
+def _apply_keyword_boost(
+    query: str,
+    results: list[tuple[Any, float]],
+) -> tuple[list[tuple[Any, float]], bool]:
+    keywords = _extract_keywords(query)
+    if not keywords:
+        return results, False
+
+    boosted_results: list[tuple[Any, float]] = []
+    applied = False
+    for entity, score in results:
+        entity_text = _entity_text(entity)
+        hit_count = sum(1 for keyword in keywords if keyword in entity_text)
+        if hit_count:
+            applied = True
+            score *= 1.0 + min(0.75, 0.3 * (hit_count / len(keywords)))
+        boosted_results.append((entity, score))
+
+    boosted_results.sort(key=lambda item: item[1], reverse=True)
+    return boosted_results, applied
 
 
 @dataclass
@@ -69,6 +153,8 @@ class HybridConfig:
     apply_reranking: bool = False
     rerank_top_k: int = 20
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    apply_keyword_boost: bool = True
+    reference_time: datetime | None = None
 
 
 @dataclass
@@ -403,12 +489,23 @@ async def hybrid_search(
         except Exception as e:
             log.warning("reranking_failed_continuing", error=str(e))
 
-    # Phase 5: Apply temporal boosting
+    # Phase 5: Apply lightweight lexical boosting
+    keyword_boost_applied = False
+    if config.apply_keyword_boost and merged:
+        boosted, keyword_boost_applied = _apply_keyword_boost(query, merged)
+        merged = boosted
+
+    # Phase 6: Apply temporal boosting
+    temporal_target = resolve_temporal_reference(query, config.reference_time)
     if config.apply_temporal and merged:
-        merged = temporal_boost(
-            merged,
-            decay_days=config.temporal_decay_days,
-        )
+        if temporal_target is not None:
+            merged = temporal_proximity_boost(merged, target_time=temporal_target)
+        else:
+            merged = temporal_boost(
+                merged,
+                decay_days=config.temporal_decay_days,
+                reference_time=config.reference_time,
+            )
 
     # Trim to limit
     final_results = merged[:limit]
@@ -421,7 +518,9 @@ async def hybrid_search(
         "graph_count": len(graph_results),
         "merged_count": len(merged),
         "reranking_applied": reranking_applied,
+        "keyword_boost_applied": keyword_boost_applied,
         "temporal_applied": config.apply_temporal,
+        "temporal_target": temporal_target.isoformat() if temporal_target else None,
     }
 
     if include_metadata:

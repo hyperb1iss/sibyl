@@ -7,8 +7,9 @@ Uses the formula: boosted_score = original_score * exp(-age_days / decay_days)
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 import structlog
@@ -24,6 +25,57 @@ class HasTimestamp(Protocol):
 
     @property
     def valid_from(self) -> datetime | None: ...
+
+    @property
+    def valid_at(self) -> datetime | None: ...
+
+
+_NUMBER_WORDS = {
+    "a": 1,
+    "an": 1,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+}
+
+_WEEKDAYS = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
+
+_TIME_UNIT_DAYS = {
+    "day": 1,
+    "days": 1,
+    "week": 7,
+    "weeks": 7,
+    "month": 30,
+    "months": 30,
+    "year": 365,
+    "years": 365,
+}
+
+_TEMPORAL_DATETIME_FORMATS = (
+    "%Y/%m/%d %H:%M",
+    "%Y/%m/%d %H:%M:%S",
+    "%Y/%m/%d",
+    "%Y-%m-%d %H:%M",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d",
+)
 
 
 @dataclass
@@ -48,18 +100,18 @@ def get_entity_timestamp(entity: Any, field: str = "auto") -> datetime | None:
 
     Args:
         entity: Entity object or dict.
-        field: Which field to use ('created_at', 'valid_from', 'auto').
-               'auto' tries valid_from first, then created_at.
+        field: Which field to use ('created_at', 'valid_at', 'valid_from', 'auto').
+               'auto' tries valid_at, then valid_from, then created_at.
 
     Returns:
         Datetime or None if no timestamp found.
     """
     if field == "auto":
-        # Try valid_from first (more semantically correct for knowledge)
-        ts = get_entity_timestamp(entity, "valid_from")
-        if ts is not None:
-            return ts
-        return get_entity_timestamp(entity, "created_at")
+        for candidate_field in ("valid_at", "valid_from", "created_at"):
+            timestamp = get_entity_timestamp(entity, candidate_field)
+            if timestamp is not None:
+                return timestamp
+        return None
 
     # Handle dict-like objects
     if isinstance(entity, dict):
@@ -77,15 +129,98 @@ def get_entity_timestamp(entity: Any, field: str = "auto") -> datetime | None:
             if isinstance(metadata, dict):
                 value = metadata.get(field)
 
-    # Parse string timestamps
-    if isinstance(value, str):
-        try:
-            # Handle ISO format with timezone
-            value = datetime.fromisoformat(value)
-        except ValueError:
-            return None
+    return parse_temporal_datetime(value)
 
-    return value if isinstance(value, datetime) else None
+
+def parse_temporal_datetime(value: Any) -> datetime | None:
+    """Parse datetime values used by graph records and eval metadata."""
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+
+    cleaned = re.sub(r"\s+\((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\)", "", value.strip())
+    if not cleaned:
+        return None
+
+    iso_value = cleaned.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(iso_value)
+    except ValueError:
+        pass
+
+    for date_format in _TEMPORAL_DATETIME_FORMATS:
+        try:
+            return datetime.strptime(cleaned, date_format).replace(tzinfo=UTC)
+        except ValueError:
+            continue
+
+    return None
+
+
+def _parse_relative_count(value: str) -> int | None:
+    if value.isdigit():
+        return int(value)
+    return _NUMBER_WORDS.get(value.lower())
+
+
+def _align_to_weekday(target: datetime, query: str) -> datetime:
+    normalized = query.lower()
+    matched_weekday = next(
+        (weekday for name, weekday in _WEEKDAYS.items() if name in normalized),
+        None,
+    )
+    if matched_weekday is None:
+        return target
+
+    candidates = [target + timedelta(days=offset) for offset in range(-3, 4)]
+    return min(
+        candidates,
+        key=lambda candidate: min(
+            abs(candidate.weekday() - matched_weekday),
+            7 - abs(candidate.weekday() - matched_weekday),
+        ),
+    )
+
+
+def resolve_temporal_reference(
+    query: str,
+    reference_time: datetime | None,
+) -> datetime | None:
+    """Resolve relative temporal language in a query against an as-of time."""
+    if reference_time is None:
+        return None
+    if reference_time.tzinfo is None:
+        reference_time = reference_time.replace(tzinfo=UTC)
+
+    normalized = query.lower()
+    target: datetime | None = None
+
+    relative_match = re.search(
+        r"\b(?P<count>\d+|[a-z]+)\s+(?P<unit>days?|weeks?|months?|years?)\s+ago\b",
+        normalized,
+    )
+    if relative_match is not None:
+        count = _parse_relative_count(relative_match.group("count"))
+        unit_days = _TIME_UNIT_DAYS.get(relative_match.group("unit"))
+        if count is not None and unit_days is not None:
+            target = reference_time - timedelta(days=count * unit_days)
+    elif "yesterday" in normalized:
+        target = reference_time - timedelta(days=1)
+    elif "last week" in normalized:
+        target = reference_time - timedelta(days=7)
+    elif "last month" in normalized:
+        target = reference_time - timedelta(days=30)
+    elif "last year" in normalized:
+        target = reference_time - timedelta(days=365)
+    elif "recently" in normalized:
+        target = reference_time - timedelta(days=7)
+    elif "today" in normalized:
+        target = reference_time
+
+    if target is None:
+        return None
+    return _align_to_weekday(target, normalized)
 
 
 def calculate_age_days(timestamp: datetime, reference: datetime | None = None) -> float:
@@ -208,6 +343,41 @@ def temporal_boost(
         decay_days=decay_days,
     )
 
+    return boosted_results
+
+
+def temporal_proximity_boost(
+    results: list[tuple[Any, float]],
+    target_time: datetime | None,
+    timestamp_field: str = "auto",
+) -> list[tuple[Any, float]]:
+    """Boost records whose timestamp is close to an explicit query time."""
+    if not results or target_time is None:
+        return list(results)
+    if target_time.tzinfo is None:
+        target_time = target_time.replace(tzinfo=UTC)
+
+    boosted_results: list[tuple[Any, float]] = []
+    for entity, score in results:
+        timestamp = get_entity_timestamp(entity, timestamp_field)
+        if timestamp is None:
+            boosted_results.append((entity, score))
+            continue
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=UTC)
+
+        distance_days = abs((target_time - timestamp).total_seconds()) / 86400.0
+        if distance_days <= 3:
+            multiplier = 1.4
+        elif distance_days <= 7:
+            multiplier = 1.25
+        elif distance_days <= 14:
+            multiplier = 1.1
+        else:
+            multiplier = 1.0
+        boosted_results.append((entity, score * multiplier))
+
+    boosted_results.sort(key=lambda x: x[1], reverse=True)
     return boosted_results
 
 

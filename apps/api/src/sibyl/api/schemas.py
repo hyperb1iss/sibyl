@@ -772,6 +772,10 @@ class SearchRequest(BaseModel):
     since: str | None = Field(
         default=None, description="Filter by creation date (ISO: 2024-03-15 or relative: 7d, 2w)"
     )
+    reference_time: str | None = Field(
+        default=None,
+        description="Query as-of timestamp for relative temporal ranking",
+    )
     limit: int = Field(default=10, ge=1, le=50, description="Maximum results")
     offset: int = Field(default=0, ge=0, description="Offset for pagination")
     include_content: bool = Field(default=True, description="Include full content in results")

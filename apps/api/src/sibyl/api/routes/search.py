@@ -96,6 +96,7 @@ async def search(
             source_name=request.source_name,
             assignee=request.assignee,
             since=request.since,
+            reference_time=request.reference_time,
             limit=request.limit,
             offset=request.offset,
             include_content=request.include_content,

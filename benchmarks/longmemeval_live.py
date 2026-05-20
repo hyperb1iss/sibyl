@@ -41,6 +41,7 @@ DEFAULT_SAMPLE_STRATEGY = "prefix"
 SAMPLE_STRATEGIES = ("prefix", "stratified")
 DIAGNOSTIC_CASE_LIMIT = 25
 DIAGNOSTIC_SNIPPET_CHARS = 360
+DEFAULT_DIAGNOSTIC_SEARCH_LIMIT = 50
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30.0
 DEFAULT_STALL_TIMEOUT_SECONDS = 300.0
 
@@ -416,7 +417,10 @@ async def _search_question(
     *,
     query: str,
     limit: int,
+    reference_time: str | None,
+    diagnostic_search_limit: int,
 ) -> dict[str, Any]:
+    search_limit = max(limit, max(1, min(diagnostic_search_limit, 50)))
     return await _post_json(
         client,
         "/search",
@@ -427,8 +431,9 @@ async def _search_question(
             "include_graph": True,
             "include_content": False,
             "use_enhanced": True,
-            "boost_recent": False,
-            "limit": limit,
+            "boost_recent": True,
+            "reference_time": reference_time,
+            "limit": search_limit,
         },
     )
 
@@ -586,6 +591,7 @@ async def _run_case(
     readiness_timeout_seconds: float,
     timeout_seconds: float,
     corpus_text_policy: str,
+    diagnostic_search_limit: int,
     transport: httpx.AsyncBaseTransport | None = None,
     active_case: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -630,6 +636,10 @@ async def _run_case(
             client,
             query=str(entry["question"]),
             limit=max(k_values),
+            reference_time=(
+                str(entry["question_date"]) if entry.get("question_date") is not None else None
+            ),
+            diagnostic_search_limit=diagnostic_search_limit,
         )
         timings_ms["search"] = (time.perf_counter() - phase_started) * 1000
 
@@ -677,6 +687,7 @@ async def _run_cases(
     transport: httpx.AsyncBaseTransport | None,
     heartbeat_interval_seconds: float,
     stall_timeout_seconds: float,
+    diagnostic_search_limit: int,
 ) -> list[dict[str, Any]]:
     worker_count = max(1, concurrency)
     queue: asyncio.Queue[tuple[int, dict[str, Any]]] = asyncio.Queue()
@@ -714,6 +725,7 @@ async def _run_cases(
                     readiness_timeout_seconds=readiness_timeout_seconds,
                     timeout_seconds=timeout_seconds,
                     corpus_text_policy=corpus_text_policy,
+                    diagnostic_search_limit=diagnostic_search_limit,
                     transport=transport,
                     active_case=active_cases[case_index],
                 )
@@ -854,6 +866,7 @@ async def run_benchmark(
     corpus_text_policy: str = CORPUS_TEXT_POLICY,
     heartbeat_interval_seconds: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
     stall_timeout_seconds: float = DEFAULT_STALL_TIMEOUT_SECONDS,
+    diagnostic_search_limit: int = DEFAULT_DIAGNOSTIC_SEARCH_LIMIT,
     verify_sha256: bool = True,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, Any]:
@@ -893,6 +906,7 @@ async def run_benchmark(
     print(f"  Corpus text policy: {corpus_text_policy}", flush=True)
     print(f"  Concurrency: {concurrency}", flush=True)
     print(f"  K values: {k_values}", flush=True)
+    print(f"  Diagnostic search limit: {diagnostic_search_limit}", flush=True)
     print(
         f"  Heartbeat: {heartbeat_interval_seconds:.1f}s; "
         f"stall timeout: {stall_timeout_seconds:.1f}s",
@@ -912,6 +926,7 @@ async def run_benchmark(
         transport=transport,
         heartbeat_interval_seconds=heartbeat_interval_seconds,
         stall_timeout_seconds=stall_timeout_seconds,
+        diagnostic_search_limit=diagnostic_search_limit,
     )
     elapsed = time.perf_counter() - started
     overall, per_type = _aggregate(case_results, k_values)
@@ -962,6 +977,7 @@ async def run_benchmark(
             "entity_content_projection_policy": ENTITY_CONTENT_PROJECTION_POLICY,
             "sample_strategy": sample_strategy,
             "corpus_text_policy": corpus_text_policy,
+            "diagnostic_search_limit": diagnostic_search_limit,
             "heartbeat_interval_seconds": heartbeat_interval_seconds,
             "stall_timeout_seconds": stall_timeout_seconds,
         },
@@ -975,6 +991,7 @@ async def run_benchmark(
             "sample_strategy": sample_strategy,
             "selected_case_indices": selected_indices,
             "corpus_text_policy": corpus_text_policy,
+            "diagnostic_search_limit": diagnostic_search_limit,
             "entity_content_projection_policy": ENTITY_CONTENT_PROJECTION_POLICY,
         },
         "metadata": metadata or {},
@@ -1026,6 +1043,12 @@ def main() -> None:
         help="Fail when no LongMemEval case completes for this many seconds.",
     )
     parser.add_argument(
+        "--diagnostic-search-limit",
+        type=int,
+        default=DEFAULT_DIAGNOSTIC_SEARCH_LIMIT,
+        help="Search result count to request while still scoring configured k values.",
+    )
+    parser.add_argument(
         "--sample-strategy",
         choices=SAMPLE_STRATEGIES,
         default=DEFAULT_SAMPLE_STRATEGY,
@@ -1061,6 +1084,7 @@ def main() -> None:
                 corpus_text_policy=args.corpus_text_policy,
                 heartbeat_interval_seconds=args.heartbeat_interval,
                 stall_timeout_seconds=args.stall_timeout,
+                diagnostic_search_limit=args.diagnostic_search_limit,
                 verify_sha256=not args.skip_sha256_check,
             )
         )

@@ -771,6 +771,8 @@ class TestHybridConfig:
         assert config.graph_depth == 2
         assert config.apply_temporal is True
         assert config.temporal_decay_days == 365.0
+        assert config.apply_keyword_boost is True
+        assert config.reference_time is None
 
     def test_hybrid_config_custom(self) -> None:
         """HybridConfig accepts custom values."""
@@ -779,11 +781,13 @@ class TestHybridConfig:
             graph_weight=0.5,
             rrf_k=30.0,
             apply_temporal=False,
+            apply_keyword_boost=False,
         )
         assert config.vector_weight == 2.0
         assert config.graph_weight == 0.5
         assert config.rrf_k == 30.0
         assert config.apply_temporal is False
+        assert config.apply_keyword_boost is False
 
 
 class TestHybridResult:
@@ -1158,6 +1162,83 @@ class TestHybridSearch:
         )
 
         assert result.metadata["temporal_applied"] is True
+
+    @pytest.mark.asyncio
+    async def test_hybrid_search_keyword_boost_promotes_matching_content(self) -> None:
+        """Keyword boost can promote the answer from a shallow second place."""
+        client = MockGraphClientForHybrid()
+        manager = MockEntityManagerForHybrid()
+
+        noisy = make_entity_for_test("noisy", description="travel receipt")
+        answer = make_entity_for_test("answer", description="phone battery tips and settings")
+        manager.search_results = [(noisy, 0.9), (answer, 0.8)]
+
+        result = await hybrid_search(
+            "phone battery tips",
+            client,  # type: ignore[arg-type]
+            manager,  # type: ignore[arg-type]
+            config=HybridConfig(graph_weight=0, apply_temporal=False),
+        )
+
+        assert result.entities[0].id == "answer"
+        assert result.metadata["keyword_boost_applied"] is True
+
+    @pytest.mark.asyncio
+    async def test_hybrid_search_keyword_boost_ignores_bookkeeping_metadata(self) -> None:
+        """Keyword boost uses entity text, not system metadata labels."""
+        client = MockGraphClientForHybrid()
+        manager = MockEntityManagerForHybrid()
+
+        metadata_only = make_entity_for_test(
+            "metadata-only",
+            description="unrelated text",
+            metadata={"capture_surface": "longmemeval-live"},
+        )
+        text_match = make_entity_for_test(
+            "text-match",
+            description="LongMemEval retrieval notes",
+        )
+        manager.search_results = [(metadata_only, 0.9), (text_match, 0.8)]
+
+        result = await hybrid_search(
+            "LongMemEval",
+            client,  # type: ignore[arg-type]
+            manager,  # type: ignore[arg-type]
+            config=HybridConfig(graph_weight=0, apply_temporal=False),
+        )
+
+        assert result.entities[0].id == "text-match"
+
+    @pytest.mark.asyncio
+    async def test_hybrid_search_temporal_reference_promotes_near_match(self) -> None:
+        """Relative time in the query uses the supplied as-of timestamp."""
+        client = MockGraphClientForHybrid()
+        manager = MockEntityManagerForHybrid()
+
+        far = make_entity_for_test(
+            "far",
+            description="I bought a toaster.",
+            metadata={"valid_at": "2026/01/01 00:00"},
+        )
+        near = make_entity_for_test(
+            "near",
+            description="I bought a blender.",
+            metadata={"valid_at": "2026/01/11 00:00"},
+        )
+        manager.search_results = [(far, 0.9), (near, 0.8)]
+
+        result = await hybrid_search(
+            "What appliance did I buy 10 days ago?",
+            client,  # type: ignore[arg-type]
+            manager,  # type: ignore[arg-type]
+            config=HybridConfig(
+                graph_weight=0,
+                reference_time=datetime(2026, 1, 20, tzinfo=UTC),
+            ),
+        )
+
+        assert result.entities[0].id == "near"
+        assert result.metadata["temporal_target"] == "2026-01-10T00:00:00+00:00"
 
     @pytest.mark.asyncio
     async def test_hybrid_search_metadata_inclusion(self) -> None:

@@ -146,6 +146,29 @@ class TestSearchRoute:
         assert exc.value.status_code == 403
         assert exc.value.detail["error"] == "project_access_denied"
 
+    @pytest.mark.asyncio
+    async def test_search_passes_reference_time_to_core(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        result = _SearchResult(results=[], total=0, query="seam")
+
+        with (
+            patch(
+                "sibyl.api.routes.search.list_accessible_project_graph_ids",
+                AsyncMock(return_value=set()),
+            ),
+            patch("sibyl_core.tools.core.search", AsyncMock(return_value=result)) as core_search,
+        ):
+            await search(
+                request=SearchRequest(
+                    query="What happened 10 days ago?",
+                    reference_time="2026/01/20 00:00",
+                ),
+                org=org,
+                ctx=SimpleNamespace(),
+            )
+
+        assert core_search.await_args.kwargs["reference_time"] == "2026/01/20 00:00"
+
 
 class TestExploreRoute:
     @pytest.mark.asyncio

@@ -11,6 +11,8 @@ import httpx
 import pytest
 
 PREFERENCE_CASE_INDEX = 2
+EXPECTED_CREATED_ENTITIES = 3
+EXPECTED_CHUNKED_ENTITIES = 2
 
 
 def _load_live_module() -> ModuleType:
@@ -27,6 +29,28 @@ def _json_response(request: httpx.Request, payload: dict[str, Any], status_code:
     return httpx.Response(status_code, json=payload, request=request)
 
 
+def _bulk_create_fixture_entities(
+    state: dict[str, Any], payload: dict[str, Any]
+) -> list[dict[str, Any]]:
+    created = []
+    for entity_payload in payload["entities"]:
+        entity = {
+            "id": f"entity-{len(state['entities'])}",
+            "entity_type": entity_payload["entity_type"],
+            "content": entity_payload["content"],
+            "metadata": entity_payload["metadata"],
+        }
+        state["entities"].append(entity)
+        created.append(entity)
+    return created
+
+
+def _assert_question_search_payload(module: ModuleType, payload: dict[str, Any]) -> None:
+    assert payload["boost_recent"] is True
+    assert payload["reference_time"] == "2026/01/03 12:00"
+    assert payload["limit"] == module.DEFAULT_DIAGNOSTIC_SEARCH_LIMIT
+
+
 def test_longmemeval_live_refuses_localhost_without_explicit_allow() -> None:
     module = _load_live_module()
 
@@ -38,8 +62,6 @@ def test_longmemeval_live_refuses_localhost_without_explicit_allow() -> None:
 
 def test_longmemeval_live_builds_gate_valid_report(tmp_path: Path) -> None:
     module = _load_live_module()
-    expected_created_entities = 3
-    expected_chunked_entities = 2
     data_path = tmp_path / "longmemeval_s_cleaned.json"
     data_path.write_text(
         json.dumps(
@@ -82,21 +104,16 @@ def test_longmemeval_live_builds_gate_valid_report(tmp_path: Path) -> None:
                 },
                 status_code=201,
             )
-        if path == "/api/entities":
+        if path == "/api/entities/bulk":
             payload = json.loads(request.content)
-            entity = {
-                "id": f"entity-{len(state['entities'])}",
-                "entity_type": payload["entity_type"],
-                "content": payload["content"],
-                "metadata": payload["metadata"],
-            }
-            state["entities"].append(entity)
-            return _json_response(request, entity, status_code=201)
+            created = _bulk_create_fixture_entities(state, payload)
+            return _json_response(request, {"entities": created}, status_code=201)
         if path == "/api/search":
             payload = json.loads(request.content)
             query = payload["query"]
             entities = list(state["entities"])
             if query != "LongMemEval":
+                _assert_question_search_payload(module, payload)
                 entities.sort(
                     key=lambda entity: entity["metadata"]["longmemeval_session_id"] != "s2"
                 )
@@ -136,8 +153,10 @@ def test_longmemeval_live_builds_gate_valid_report(tmp_path: Path) -> None:
         module.ENTITY_CONTENT_PROJECTION_POLICY
     )
     assert report["runtime"]["sample_strategy"] == module.DEFAULT_SAMPLE_STRATEGY
+    assert report["runtime"]["diagnostic_search_limit"] == module.DEFAULT_DIAGNOSTIC_SEARCH_LIMIT
     assert report["dataset"]["corpus_text_policy"] == module.CORPUS_TEXT_POLICY
     assert report["dataset"]["sample_strategy"] == module.DEFAULT_SAMPLE_STRATEGY
+    assert report["dataset"]["diagnostic_search_limit"] == module.DEFAULT_DIAGNOSTIC_SEARCH_LIMIT
     assert report["dataset"]["selected_case_indices"] == [0]
     assert report["dataset"]["entity_content_projection_policy"] == (
         module.ENTITY_CONTENT_PROJECTION_POLICY
@@ -145,7 +164,7 @@ def test_longmemeval_live_builds_gate_valid_report(tmp_path: Path) -> None:
     assert report["overall"]["hit@1"] == 1.0
     assert report["overall"]["recall@1"] == 1.0
     assert report["overall"]["cross_question_result_count"] == 0.0
-    assert report["overall"]["created_entity_count"] == float(expected_created_entities)
+    assert report["overall"]["created_entity_count"] == float(EXPECTED_CREATED_ENTITIES)
     assert report["overall"]["chunked_session_count"] == 1.0
     assert max(len(entity["content"]) for entity in state["entities"]) <= (
         module.ENTITY_CONTENT_MAX_CHARS
@@ -155,15 +174,15 @@ def test_longmemeval_live_builds_gate_valid_report(tmp_path: Path) -> None:
         for entity in state["entities"]
         if entity["metadata"]["longmemeval_session_id"] == "s2"
     ]
-    assert len(chunked_entities) == expected_chunked_entities
+    assert len(chunked_entities) == EXPECTED_CHUNKED_ENTITIES
     assert [entity["metadata"]["longmemeval_chunk_index"] for entity in chunked_entities] == [0, 1]
     assert {entity["metadata"]["longmemeval_chunk_count"] for entity in chunked_entities} == {
-        expected_chunked_entities
+        EXPECTED_CHUNKED_ENTITIES
     }
     assert report["case_results"][0]["ranked_session_ids"] == ["s2", "s1"]
     assert report["case_results"][0]["answer_ranks"] == [{"session_id": "s2", "rank": 1}]
     assert report["case_results"][0]["missed_answer_session_ids"] == []
-    assert report["case_results"][0]["created_entity_count"] == expected_created_entities
+    assert report["case_results"][0]["created_entity_count"] == EXPECTED_CREATED_ENTITIES
     assert report["case_results"][0]["chunked_session_count"] == 1
     assert report["diagnostics"]["case_gap_count"] == 0
 
@@ -199,7 +218,7 @@ def test_longmemeval_live_stall_timeout_reports_active_case(tmp_path: Path) -> N
                 {"access_token": "fixture-token", "organization": {"id": "org", "slug": "org"}},
                 status_code=201,
             )
-        if path == "/api/entities":
+        if path == "/api/entities/bulk":
             await asyncio.sleep(1.0)
         return _json_response(request, {"results": []})
 
@@ -278,16 +297,10 @@ def test_longmemeval_live_stratified_selection_and_diagnostics(tmp_path: Path) -
                 {"access_token": "fixture-token", "organization": {"id": "org", "slug": "org"}},
                 status_code=201,
             )
-        if path == "/api/entities":
+        if path == "/api/entities/bulk":
             payload = json.loads(request.content)
-            entity = {
-                "id": f"entity-{len(state['entities'])}",
-                "entity_type": payload["entity_type"],
-                "content": payload["content"],
-                "metadata": payload["metadata"],
-            }
-            state["entities"].append(entity)
-            return _json_response(request, entity, status_code=201)
+            created = _bulk_create_fixture_entities(state, payload)
+            return _json_response(request, {"entities": created}, status_code=201)
         if path == "/api/search":
             payload = json.loads(request.content)
             entities = list(state["entities"])
@@ -341,7 +354,8 @@ def test_longmemeval_live_stratified_selection_and_diagnostics(tmp_path: Path) -
     assert report["case_results"][0]["case_index"] == 0
     assert report["case_results"][0]["missed_answer_session_ids"] == []
     assert report["case_results"][1]["case_index"] == PREFERENCE_CASE_INDEX
-    assert report["case_results"][1]["missed_answer_session_ids"] == ["s-pref-answer"]
+    assert report["case_results"][1]["answer_ranks"] == [{"session_id": "s-pref-answer", "rank": 2}]
+    assert report["case_results"][1]["missed_answer_session_ids"] == []
     worst = report["diagnostics"]["worst_cases"][0]
     assert worst["case_index"] == PREFERENCE_CASE_INDEX
     assert "salty snacks" in worst["answer_snippets"]["s-pref-answer"]
