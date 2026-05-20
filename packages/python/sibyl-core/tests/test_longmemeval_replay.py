@@ -140,6 +140,58 @@ def test_coverage_rerank_uses_query_terms_without_answer_oracle() -> None:
     assert reranked.index("answer-session") < 5
 
 
+def test_coverage_rerank_demotes_generic_assistant_advice() -> None:
+    haystack_ids = [
+        "generic-session",
+        "answer-session",
+        *(f"distractor-{index}" for index in range(4)),
+    ]
+    entry = {
+        "question_id": "q1",
+        "question_type": "single-session-preference",
+        "question": "Can you recommend a movie tonight?",
+        "question_date": "2026/01/20 12:00",
+        "answer_session_ids": ["answer-session"],
+        "haystack_session_ids": haystack_ids,
+        "haystack_dates": ["2026/01/19"] * len(haystack_ids),
+        "haystack_sessions": [
+            [
+                {
+                    "role": "assistant",
+                    "content": "As an AI, here are some movie ideas for tonight.",
+                }
+            ],
+            [{"role": "user", "content": "I recommend a comedy movie tonight."}],
+            *(
+                [{"role": "user", "content": "I saved an unrelated travel note."}]
+                for _index in range(4)
+            ),
+        ],
+    }
+    case = {
+        "case_index": 0,
+        "question_id": "q1",
+        "question_type": entry["question_type"],
+        "question": entry["question"],
+        "question_date": entry["question_date"],
+        "answer_session_ids": ["answer-session"],
+        "ranked_session_ids": haystack_ids,
+        "ranked_results": [
+            {"longmemeval_session_id": session_id, "score": 1.0 - (index * 0.01)}
+            for index, session_id in enumerate(haystack_ids)
+        ],
+    }
+
+    reranked = rerank_longmemeval_case(
+        case,
+        entry,
+        strategy="coverage",
+        corpus_text_policy="user-and-assistant-turns-v1",
+    )
+
+    assert reranked[0] == "answer-session"
+
+
 def test_oracle_rerank_is_explicit_upper_bound() -> None:
     reranked = rerank_longmemeval_case(
         _case_result(),

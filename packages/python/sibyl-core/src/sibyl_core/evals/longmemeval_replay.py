@@ -26,6 +26,11 @@ EVIDENCE_SET_QUERY_PATTERN = re.compile(
 EVIDENCE_SET_WINDOW = 6
 EVIDENCE_SET_MIN_OVERLAP = 0.25
 EVIDENCE_SET_INSERT_MARGIN = 0.08
+QUERY_COVERAGE_RANK_WEIGHT = 0.75
+QUERY_COVERAGE_PRIOR_WEIGHT = 0.04
+QUERY_COVERAGE_OVERLAP_WEIGHT = 0.30
+QUERY_COVERAGE_DENSITY_WEIGHT = 0.08
+QUERY_COVERAGE_GENERIC_ASSISTANT_PENALTY = 0.04
 
 STOP_WORDS = {
     "a",
@@ -78,6 +83,7 @@ PREFERENCE_TERMS = {
     "activity",
     "activities",
     "advice",
+    "advic",
     "choose",
     "dinner",
     "hotel",
@@ -88,6 +94,7 @@ PREFERENCE_TERMS = {
     "serve",
     "show",
     "suggest",
+    "suggestion",
     "tip",
     "tips",
 }
@@ -477,6 +484,9 @@ def _score_query_coverage(
     candidates: Sequence[_Candidate],
 ) -> list[tuple[float, _Candidate]]:
     query_tokens = set(_tokenize(query))
+    intent_words = set(_tokenize(query, keep_stopwords=True))
+    is_preference_query = bool(intent_words & PREFERENCE_TERMS)
+    max_candidate_score = max((candidate.score for candidate in candidates), default=0.0) or 1.0
     if len(query_tokens) < 2:
         return [
             (1.0 - ((candidate.original_rank - 1) / max(1, len(candidates) - 1)), candidate)
@@ -492,7 +502,19 @@ def _score_query_coverage(
             1.0,
             math.sqrt(len(candidate.tokens)),
         )
-        score = (0.75 * original_rank_score) + (0.30 * overlap) + (0.08 * density)
+        provider_score = candidate.score / max_candidate_score if candidate.score > 0 else 0.0
+        score = (
+            (QUERY_COVERAGE_RANK_WEIGHT * original_rank_score)
+            + (QUERY_COVERAGE_PRIOR_WEIGHT * provider_score)
+            + (QUERY_COVERAGE_OVERLAP_WEIGHT * overlap)
+            + (QUERY_COVERAGE_DENSITY_WEIGHT * density)
+        )
+        if is_preference_query:
+            score -= (
+                QUERY_COVERAGE_GENERIC_ASSISTANT_PENALTY
+                * _generic_assistant_count(candidate.text)
+                * (1.0 - min(1.0, overlap))
+            )
         scored.append((score, candidate, overlap))
 
     if EVIDENCE_SET_QUERY_PATTERN.search(query.lower()):

@@ -68,14 +68,32 @@ _KEYWORD_STOPWORDS = {
     "your",
 }
 _QUERY_COVERAGE_RANK_WEIGHT = 0.75
+_QUERY_COVERAGE_PRIOR_WEIGHT = 0.04
 _QUERY_COVERAGE_OVERLAP_WEIGHT = 0.30
 _QUERY_COVERAGE_DENSITY_WEIGHT = 0.08
+_QUERY_COVERAGE_GENERIC_ASSISTANT_PENALTY = 0.04
 _EVIDENCE_SET_QUERY_PATTERN = re.compile(
     r"\b(how many|how much|total number|number of|count of)\b",
 )
 _EVIDENCE_SET_WINDOW = 6
 _EVIDENCE_SET_MIN_OVERLAP = 0.25
 _EVIDENCE_SET_INSERT_MARGIN = 0.08
+_PREFERENCE_QUERY_TERMS = {
+    "advice",
+    "advic",
+    "choose",
+    "recommend",
+    "recommendation",
+    "serve",
+    "suggest",
+    "suggestion",
+    "tip",
+}
+_GENERIC_ASSISTANT_PATTERNS = (
+    re.compile(r"\bas an ai\b"),
+    re.compile(r"\bi (?:can|cannot|can't) (?:help|assist)\b"),
+    re.compile(r"\bhere are (?:some|a few)\b"),
+)
 
 
 def _require_group_id(group_id: str | None, operation: str) -> str:
@@ -172,9 +190,11 @@ def _apply_query_coverage_rerank(
 
     query_terms = set(keywords)
     rank_span = max(1, len(results) - 1)
+    max_prior_score = max((score for _entity, score in results), default=0.0) or 1.0
+    is_preference_query = bool(query_terms & _PREFERENCE_QUERY_TERMS)
     reranked: list[tuple[Any, float, int, float]] = []
     has_text_signal = False
-    for index, (entity, _score) in enumerate(results):
+    for index, (entity, prior_score) in enumerate(results):
         tokens = _entity_keyword_tokens(entity)
         token_set = set(tokens)
         overlap = len(query_terms & token_set) / len(query_terms)
@@ -183,11 +203,19 @@ def _apply_query_coverage_rerank(
             len(tokens) ** 0.5,
         )
         rank_score = 1.0 - (index / rank_span)
+        normalized_prior_score = prior_score / max_prior_score if prior_score > 0 else 0.0
         score = (
             (_QUERY_COVERAGE_RANK_WEIGHT * rank_score)
+            + (_QUERY_COVERAGE_PRIOR_WEIGHT * normalized_prior_score)
             + (_QUERY_COVERAGE_OVERLAP_WEIGHT * overlap)
             + (_QUERY_COVERAGE_DENSITY_WEIGHT * density)
         )
+        if is_preference_query:
+            score -= (
+                _QUERY_COVERAGE_GENERIC_ASSISTANT_PENALTY
+                * _generic_assistant_marker_count(entity)
+                * (1.0 - min(1.0, overlap))
+            )
         has_text_signal = has_text_signal or overlap > 0.0 or density > 0.0
         reranked.append((entity, score, index, overlap))
 
@@ -340,6 +368,11 @@ def _entity_matches_types(entity: Any, entity_types: list[Any] | None) -> bool:
 
 def _entity_id(entity: Any) -> str:
     return str(entity.get("id", "") if isinstance(entity, dict) else getattr(entity, "id", ""))
+
+
+def _generic_assistant_marker_count(entity: Any) -> int:
+    text = _entity_text(entity)
+    return sum(1 for pattern in _GENERIC_ASSISTANT_PATTERNS if pattern.search(text))
 
 
 def _filter_entity_results(

@@ -1254,6 +1254,46 @@ class TestHybridSearch:
         assert result.metadata["query_coverage_rerank_applied"] is True
 
     @pytest.mark.asyncio
+    async def test_hybrid_search_query_coverage_demotes_generic_assistant_text(
+        self,
+    ) -> None:
+        client = MockGraphClientForHybrid()
+        manager = MockEntityManagerForHybrid()
+
+        generic = make_entity_for_test(
+            "generic",
+            description="As an AI, here are some movie ideas for tonight.",
+        )
+        answer = make_entity_for_test(
+            "answer",
+            description="I recommend a comedy movie tonight.",
+        )
+        distractors = [
+            make_entity_for_test(f"distractor-{index}", description="unrelated travel note")
+            for index in range(4)
+        ]
+        manager.search_results = [
+            (generic, 1.0),
+            (answer, 0.99),
+            *[(entity, 0.8 - (index * 0.01)) for index, entity in enumerate(distractors)],
+        ]
+
+        result = await hybrid_search(
+            "Can you recommend a movie tonight?",
+            client,  # type: ignore[arg-type]
+            manager,  # type: ignore[arg-type]
+            limit=5,
+            config=HybridConfig(
+                graph_weight=0,
+                apply_temporal=False,
+                apply_keyword_boost=False,
+            ),
+        )
+
+        assert result.entities[0].id == "answer"
+        assert result.metadata["query_coverage_rerank_applied"] is True
+
+    @pytest.mark.asyncio
     async def test_hybrid_search_evidence_set_rerank_promotes_count_evidence(
         self,
     ) -> None:
