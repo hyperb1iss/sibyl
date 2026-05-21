@@ -206,6 +206,55 @@ def test_query_coverage_uses_temporal_target_with_concept_evidence() -> None:
     assert "smoker" in [candidate.stable_id for candidate in result.ranked[:5]]
 
 
+def test_query_coverage_promotes_brand_lookup_evidence() -> None:
+    ranked = _rank_query_ids(
+        "What brand of shampoo do I currently use?",
+        [
+            "User: I bought skincare products from Sephora for dry skin.",
+            "User: I washed running socks after a workout.",
+            "User: I organized my bathroom cleaning schedule.",
+            "User: I compared hair dryers and towels.",
+            "User: I asked for generic hair care tips.",
+            "User: I've been using a lavender scented shampoo that I picked up "
+            "at Trader Joe's.",
+        ],
+    )
+
+    assert "5" in ranked[:5]
+
+
+def test_query_coverage_promotes_sibling_count_evidence_set() -> None:
+    ranked = _rank_query_ids(
+        "What is the total number of siblings I have?",
+        [
+            "User: I read demographic tables about age groups.",
+            "User: I asked about area calculations for a circular shield.",
+            "User: I researched professional network gender dynamics.",
+            "User: I come from a family with 3 sisters.",
+            "User: I have a brother who influences my social circle.",
+            "User: I compared book club participation by age.",
+        ],
+    )
+
+    assert {"3", "4"} <= set(ranked[:5])
+
+
+def test_query_coverage_promotes_age_arithmetic_evidence_set() -> None:
+    ranked = _rank_query_ids(
+        "How many years older am I than when I graduated from college?",
+        [
+            "User: I planned a graduation ceremony for a colleague's daughter.",
+            "User: I asked about online marketing courses.",
+            "User: I have a Bachelor's degree that I completed at the age of 25.",
+            "User: As a 32-year-old Digital Marketing Specialist, I want to advance.",
+            "User: I saved notes about certification providers.",
+            "User: I organized old photos from my grandma's album.",
+        ],
+    )
+
+    assert {"2", "3"} <= set(ranked[:5])
+
+
 def _rank_query_ids(query: str, texts: list[str]) -> list[str]:
     result = rank_by_query_coverage(
         query,

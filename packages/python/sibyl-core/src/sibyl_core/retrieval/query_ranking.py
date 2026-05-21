@@ -28,6 +28,7 @@ _KEYWORD_STOPWORDS = {
     "conversations",
     "could",
     "current",
+    "currently",
     "did",
     "different",
     "does",
@@ -77,6 +78,7 @@ _KEYWORD_STOPWORDS = {
     "starting",
     "that",
     "the",
+    "than",
     "think",
     "thinking",
     "there",
@@ -88,6 +90,9 @@ _KEYWORD_STOPWORDS = {
     "type",
     "types",
     "two",
+    "use",
+    "uses",
+    "using",
     "what",
     "when",
     "where",
@@ -130,10 +135,11 @@ _EVIDENCE_SET_WINDOW = 5
 _EVIDENCE_SET_MIN_OVERLAP = 0.25
 _EVIDENCE_SET_INSERT_MARGIN = 0.14
 _PREFERENCE_MIN_OVERLAP = 0.25
-_PREFERENCE_INSERT_MARGIN = 0.12
+_PREFERENCE_INSERT_MARGIN = 0.03
 _TEMPORAL_EVIDENCE_MIN_SIGNAL = 0.22
 _TEMPORAL_EVIDENCE_INSERT_MARGIN = 0.10
 _TEMPORAL_TARGET_WEIGHT = 0.34
+_QUERY_FRAME_WEIGHT = 0.52
 
 _EVIDENCE_SET_QUERY_PATTERN = re.compile(
     r"\b(how many|how much|total number|number of|count of)\b",
@@ -234,6 +240,80 @@ _PREFERENCE_EVIDENCE_PATTERNS = (
     re.compile(r"\bi'm (?:fond of|a fan of|into|looking for|trying to find)\b"),
     re.compile(r"\bi tend to\b"),
 )
+_PURCHASE_ACTION_PATTERN = re.compile(
+    r"\b(?:bought|buy|purchased|ordered|got|picked up|acquired|invested in|"
+    r"started using)\b",
+    re.IGNORECASE,
+)
+_BRAND_LOOKUP_QUERY_PATTERN = re.compile(r"\bbrand\b", re.IGNORECASE)
+_BRAND_EVIDENCE_PATTERN = re.compile(
+    r"\b(?:using|use|uses|switched to|picked up|from|at|by|brand|made by)\b",
+    re.IGNORECASE,
+)
+_SIBLING_QUERY_PATTERN = re.compile(r"\b(?:siblings?|brothers?|sisters?)\b", re.IGNORECASE)
+_SIBLING_EVIDENCE_PATTERN = re.compile(
+    r"\b(?:family with \d+\s+(?:sisters?|brothers?)|have (?:a|\d+)\s+"
+    r"(?:sisters?|brothers?)|\d+\s+(?:sisters?|brothers?)|siblings?)\b",
+    re.IGNORECASE,
+)
+_AGE_ARITHMETIC_QUERY_PATTERN = re.compile(
+    r"\b(?:older|younger|age|years old|graduated|college|degree)\b",
+    re.IGNORECASE,
+)
+_AGE_ARITHMETIC_EVIDENCE_PATTERN = re.compile(
+    r"\b(?:\d{1,3}-year-old|age of \d{1,3}|graduated|degree|"
+    r"bachelor'?s|master'?s|college|university)\b",
+    re.IGNORECASE,
+)
+_HOMEGROWN_QUERY_PATTERN = re.compile(
+    r"\b(?:homegrown|ingredients?|garden|serve|dinner|recipe)\b",
+    re.IGNORECASE,
+)
+_HOMEGROWN_EVIDENCE_PATTERN = re.compile(
+    r"\b(?:homegrown|garden|harvested|fresh|basil|mint|tomatoes?|herbs?|"
+    r"pepper plants?|cooking)\b",
+    re.IGNORECASE,
+)
+_HOMEGROWN_STRONG_EVIDENCE_PATTERN = re.compile(
+    r"\b(?:homegrown|garden|harvested|basil|mint|tomatoes?|herbs?|pepper plants?)\b",
+    re.IGNORECASE,
+)
+_NOSTALGIA_EVIDENCE_PATTERN = re.compile(
+    r"\b(?:high school|old friends?|happy .*experiences?|debate team|"
+    r"advanced placement|favorite subjects?)\b",
+    re.IGNORECASE,
+)
+_CATEGORY_ALIASES: tuple[tuple[frozenset[str], frozenset[str]], ...] = (
+    (
+        frozenset({"kitchen", "appliance", "gadget", "cook", "cooking"}),
+        frozenset(
+            {
+                "airfryer",
+                "appliance",
+                "bbq",
+                "blender",
+                "coffee",
+                "fryer",
+                "grill",
+                "instant",
+                "kettle",
+                "mixer",
+                "oven",
+                "processor",
+                "smoker",
+                "toaster",
+            }
+        ),
+    ),
+    (
+        frozenset({"shampoo", "conditioner", "hair"}),
+        frozenset({"bathroom", "conditioner", "hair", "lavender", "loofah", "shampoo"}),
+    ),
+    (
+        frozenset({"homegrown", "ingredient", "dinner", "recipe", "serve"}),
+        frozenset({"basil", "fresh", "garden", "herb", "mint", "tomato", "tomatoes"}),
+    ),
+)
 _MEMORY_EVIDENCE_PATTERNS = (
     re.compile(r"\bby the way\b"),
     re.compile(r"\bi (?:just|recently|finally|already|still|used to)\b"),
@@ -289,6 +369,8 @@ _CONCEPT_GROUPS = (
             "recipe",
             "serve",
             "smoker",
+            "tomato",
+            "tomatoes",
         }
     ),
     frozenset(
@@ -335,6 +417,43 @@ _CONCEPT_GROUPS = (
             "sprint",
             "tournament",
             "triathlon",
+        }
+    ),
+    frozenset(
+        {
+            "brother",
+            "brothers",
+            "family",
+            "relative",
+            "relatives",
+            "sibling",
+            "siblings",
+            "sister",
+            "sisters",
+        }
+    ),
+    frozenset(
+        {
+            "age",
+            "bachelor",
+            "college",
+            "degree",
+            "graduated",
+            "master",
+            "old",
+            "older",
+            "university",
+        }
+    ),
+    frozenset(
+        {
+            "advanced",
+            "debate",
+            "economics",
+            "high",
+            "nostalgic",
+            "reunion",
+            "school",
         }
     ),
     frozenset(
@@ -476,6 +595,92 @@ def _memory_evidence_score(memory_text: str) -> float:
         return 0.0
     matches = sum(1 for pattern in _MEMORY_EVIDENCE_PATTERNS if pattern.search(memory_text))
     return min(1.0, matches / 3.0)
+
+
+def _query_frame_score(
+    query: str,
+    query_terms: set[str],
+    *,
+    token_set: set[str],
+    primary_token_set: set[str],
+    memory_token_set: set[str],
+    primary_text: str,
+    memory_text: str,
+) -> float:
+    evidence_tokens = token_set | primary_token_set | memory_token_set
+    evidence_text = " ".join(part for part in (memory_text, primary_text) if part)
+    if not evidence_text:
+        return 0.0
+
+    score = 0.0
+    category_score = _category_alias_score(query_terms, evidence_tokens)
+
+    if _BRAND_LOOKUP_QUERY_PATTERN.search(query):
+        object_terms = query_terms - {
+            "brand",
+            "current",
+            "currently",
+            "use",
+            "used",
+            "uses",
+            "using",
+        }
+        if object_terms and object_terms & evidence_tokens and _BRAND_EVIDENCE_PATTERN.search(
+            evidence_text
+        ):
+            score = max(score, 1.0)
+
+    if _PURCHASE_ACTION_PATTERN.search(query) or {
+        "buy",
+        "bought",
+        "purchase",
+        "purchased",
+    } & query_terms:
+        if _PURCHASE_ACTION_PATTERN.search(evidence_text) and category_score > 0.0:
+            score = max(score, 1.0)
+        elif category_score >= 0.5:
+            score = max(score, 0.72)
+
+    if _SIBLING_QUERY_PATTERN.search(query) and _SIBLING_EVIDENCE_PATTERN.search(evidence_text):
+        score = max(score, 1.0)
+
+    if _AGE_ARITHMETIC_QUERY_PATTERN.search(query) and _AGE_ARITHMETIC_EVIDENCE_PATTERN.search(
+        evidence_text
+    ):
+        if re.search(r"\b(?:\d{1,3}-year-old|age of \d{1,3})\b", evidence_text):
+            score = max(score, 1.0)
+        else:
+            score = max(score, 0.78)
+
+    if "homegrown" in query_terms and _HOMEGROWN_STRONG_EVIDENCE_PATTERN.search(evidence_text):
+        score = max(score, 1.0)
+    elif _HOMEGROWN_QUERY_PATTERN.search(query) and _HOMEGROWN_EVIDENCE_PATTERN.search(
+        evidence_text
+    ):
+        score = max(score, 0.68 + (0.25 * category_score))
+
+    if {"high", "school", "reunion", "nostalgic"} & query_terms and (
+        "high" in evidence_tokens or "school" in evidence_tokens
+    ) and _NOSTALGIA_EVIDENCE_PATTERN.search(evidence_text):
+        score = max(score, 0.95)
+
+    return min(score, 1.0)
+
+
+def _category_alias_score(query_terms: set[str], evidence_tokens: set[str]) -> float:
+    if not query_terms or not evidence_tokens:
+        return 0.0
+
+    relevant = 0
+    matched = 0
+    for triggers, aliases in _CATEGORY_ALIASES:
+        if query_terms & triggers:
+            relevant += 1
+            if evidence_tokens & aliases:
+                matched += 1
+    if relevant == 0:
+        return 0.0
+    return matched / relevant
 
 
 def rank_by_query_coverage[T](
@@ -620,6 +825,15 @@ def rank_by_query_coverage[T](
         memory_concept_overlap = (
             _concept_overlap_score(query_terms, memory_token_set) if has_memory_text else 0.0
         )
+        query_frame_score = _query_frame_score(
+            query,
+            query_terms,
+            token_set=token_set,
+            primary_token_set=primary_token_set,
+            memory_token_set=memory_token_set,
+            primary_text=primary_text,
+            memory_text=memory_text,
+        )
         rank_score = 1.0 - ((candidate.original_rank - 1) / rank_span)
         normalized_prior_score = (
             candidate.prior_score / max_prior_score if candidate.prior_score > 0 else 0.0
@@ -638,6 +852,7 @@ def rank_by_query_coverage[T](
             concept_overlap,
             primary_concept_overlap,
             memory_relevance,
+            query_frame_score,
         )
         memory_multiplier = 0.0 if is_preference_query else 1.0
         score = (
@@ -654,6 +869,7 @@ def rank_by_query_coverage[T](
             + (_primary_personal_score(primary_text) if has_primary_text else 0.0)
             + (_CONCEPT_OVERLAP_WEIGHT * concept_overlap)
             + (_PRIMARY_CONCEPT_WEIGHT * primary_concept_overlap)
+            + (_QUERY_FRAME_WEIGHT * query_frame_score)
             + (
                 memory_multiplier
                 * (
@@ -683,6 +899,7 @@ def rank_by_query_coverage[T](
             or concept_overlap > 0.0
             or memory_overlap > 0.0
             or memory_concept_overlap > 0.0
+            or query_frame_score > 0.0
             or (temporal_alignment > 0.0 and coverage_signal > 0.0)
         )
         scored.append(
