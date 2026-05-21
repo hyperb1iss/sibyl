@@ -550,9 +550,10 @@ async def _ingest_haystack(
     run_id: str,
     case_index: int,
     corpus_text_policy: str,
+    wait_for_memory_projection: bool,
     wait_for_memory_extraction: bool,
-    memory_extraction_timeout_seconds: float,
     memory_projection_timeout_seconds: float,
+    memory_extraction_timeout_seconds: float,
     active_case: dict[str, Any] | None = None,
 ) -> tuple[list[str], float, int, int, int, float, dict[str, Any], int, float, dict[str, Any]]:
     start = time.perf_counter()
@@ -631,7 +632,7 @@ async def _ingest_haystack(
 
     ingest_ms = (time.perf_counter() - start) * 1000
     memory_projection_wait_ms = 0.0
-    if memory_projection_job_ids:
+    if wait_for_memory_projection and memory_projection_job_ids:
         _set_active_phase(
             active_case,
             "memory_projection",
@@ -903,7 +904,9 @@ async def _run_case(
     timeout_seconds: float,
     corpus_text_policy: str,
     diagnostic_search_limit: int,
+    wait_for_memory_projection: bool,
     wait_for_memory_extraction: bool,
+    memory_projection_timeout_seconds: float,
     memory_extraction_timeout_seconds: float,
     transport: httpx.AsyncBaseTransport | None = None,
     active_case: dict[str, Any] | None = None,
@@ -942,9 +945,10 @@ async def _run_case(
             run_id=run_id,
             case_index=case_index,
             corpus_text_policy=corpus_text_policy,
+            wait_for_memory_projection=wait_for_memory_projection,
             wait_for_memory_extraction=wait_for_memory_extraction,
+            memory_projection_timeout_seconds=memory_projection_timeout_seconds,
             memory_extraction_timeout_seconds=memory_extraction_timeout_seconds,
-            memory_projection_timeout_seconds=readiness_timeout_seconds,
             active_case=active_case,
         )
         timings_ms["ingest"] = ingest_ms
@@ -1025,7 +1029,9 @@ async def _run_cases(
     heartbeat_interval_seconds: float,
     stall_timeout_seconds: float,
     diagnostic_search_limit: int,
+    wait_for_memory_projection: bool,
     wait_for_memory_extraction: bool,
+    memory_projection_timeout_seconds: float,
     memory_extraction_timeout_seconds: float,
     on_progress: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None,
 ) -> list[dict[str, Any]]:
@@ -1066,7 +1072,9 @@ async def _run_cases(
                     timeout_seconds=timeout_seconds,
                     corpus_text_policy=corpus_text_policy,
                     diagnostic_search_limit=diagnostic_search_limit,
+                    wait_for_memory_projection=wait_for_memory_projection,
                     wait_for_memory_extraction=wait_for_memory_extraction,
+                    memory_projection_timeout_seconds=memory_projection_timeout_seconds,
                     memory_extraction_timeout_seconds=memory_extraction_timeout_seconds,
                     transport=transport,
                     active_case=active_cases[case_index],
@@ -1276,7 +1284,9 @@ def _build_live_report(
     diagnostic_search_limit: int,
     heartbeat_interval_seconds: float,
     stall_timeout_seconds: float,
+    wait_for_memory_projection: bool,
     wait_for_memory_extraction: bool,
+    memory_projection_timeout_seconds: float,
     memory_extraction_timeout_seconds: float,
     elapsed_seconds: float,
     completion_status: str,
@@ -1316,9 +1326,23 @@ def _build_live_report(
             "diagnostic_search_limit": diagnostic_search_limit,
             "heartbeat_interval_seconds": heartbeat_interval_seconds,
             "stall_timeout_seconds": stall_timeout_seconds,
+            "wait_for_memory_projection": wait_for_memory_projection,
             "auto_extract_entities_env": _env_flag("SIBYL_AUTO_EXTRACT_ENTITIES"),
             "wait_for_memory_extraction": wait_for_memory_extraction,
-            "memory_enrichment_consistency": ("strong" if wait_for_memory_extraction else "async"),
+            "memory_projection_consistency": (
+                "strong" if wait_for_memory_projection else "async"
+            ),
+            "memory_extraction_consistency": (
+                "strong" if wait_for_memory_extraction else "async"
+            ),
+            "memory_enrichment_consistency": (
+                "strong"
+                if wait_for_memory_projection and wait_for_memory_extraction
+                else "mixed"
+                if wait_for_memory_projection or wait_for_memory_extraction
+                else "async"
+            ),
+            "memory_projection_timeout_seconds": memory_projection_timeout_seconds,
             "memory_extraction_timeout_seconds": memory_extraction_timeout_seconds,
             "graph_hnsw_efc_env": os.environ.get("SIBYL_GRAPH_HNSW_EFC", ""),
             "graph_hnsw_m_env": os.environ.get("SIBYL_GRAPH_HNSW_M", ""),
@@ -1338,8 +1362,21 @@ def _build_live_report(
             "corpus_text_policy": corpus_text_policy,
             "diagnostic_search_limit": diagnostic_search_limit,
             "entity_content_projection_policy": ENTITY_CONTENT_PROJECTION_POLICY,
+            "wait_for_memory_projection": wait_for_memory_projection,
             "wait_for_memory_extraction": wait_for_memory_extraction,
-            "memory_enrichment_consistency": ("strong" if wait_for_memory_extraction else "async"),
+            "memory_projection_consistency": (
+                "strong" if wait_for_memory_projection else "async"
+            ),
+            "memory_extraction_consistency": (
+                "strong" if wait_for_memory_extraction else "async"
+            ),
+            "memory_enrichment_consistency": (
+                "strong"
+                if wait_for_memory_projection and wait_for_memory_extraction
+                else "mixed"
+                if wait_for_memory_projection or wait_for_memory_extraction
+                else "async"
+            ),
         },
         "metadata": metadata or {},
         "repeat_count": 1,
@@ -1380,7 +1417,9 @@ async def run_benchmark(
     heartbeat_interval_seconds: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
     stall_timeout_seconds: float = DEFAULT_STALL_TIMEOUT_SECONDS,
     diagnostic_search_limit: int = DEFAULT_DIAGNOSTIC_SEARCH_LIMIT,
+    wait_for_memory_projection: bool = False,
     wait_for_memory_extraction: bool = False,
+    memory_projection_timeout_seconds: float = 180.0,
     memory_extraction_timeout_seconds: float = DEFAULT_MEMORY_EXTRACTION_TIMEOUT_SECONDS,
     verify_sha256: bool = True,
     output_path: Path | None = None,
@@ -1423,9 +1462,17 @@ async def run_benchmark(
     print(f"  Concurrency: {concurrency}", flush=True)
     print(f"  K values: {k_values}", flush=True)
     print(f"  Diagnostic search limit: {diagnostic_search_limit}", flush=True)
+    print(f"  Wait for memory projection: {wait_for_memory_projection}", flush=True)
     print(f"  Wait for memory extraction: {wait_for_memory_extraction}", flush=True)
     print(
-        f"  Memory enrichment consistency: {'strong' if wait_for_memory_extraction else 'async'}",
+        "  Memory enrichment consistency: "
+        + (
+            "strong"
+            if wait_for_memory_projection and wait_for_memory_extraction
+            else "mixed"
+            if wait_for_memory_projection or wait_for_memory_extraction
+            else "async"
+        ),
         flush=True,
     )
     print(
@@ -1465,7 +1512,9 @@ async def run_benchmark(
             diagnostic_search_limit=diagnostic_search_limit,
             heartbeat_interval_seconds=heartbeat_interval_seconds,
             stall_timeout_seconds=stall_timeout_seconds,
+            wait_for_memory_projection=wait_for_memory_projection,
             wait_for_memory_extraction=wait_for_memory_extraction,
+            memory_projection_timeout_seconds=memory_projection_timeout_seconds,
             memory_extraction_timeout_seconds=memory_extraction_timeout_seconds,
             elapsed_seconds=time.perf_counter() - started,
             completion_status="partial",
@@ -1487,7 +1536,9 @@ async def run_benchmark(
         heartbeat_interval_seconds=heartbeat_interval_seconds,
         stall_timeout_seconds=stall_timeout_seconds,
         diagnostic_search_limit=diagnostic_search_limit,
+        wait_for_memory_projection=wait_for_memory_projection,
         wait_for_memory_extraction=wait_for_memory_extraction,
+        memory_projection_timeout_seconds=memory_projection_timeout_seconds,
         memory_extraction_timeout_seconds=memory_extraction_timeout_seconds,
         on_progress=checkpoint,
     )
@@ -1508,7 +1559,9 @@ async def run_benchmark(
         diagnostic_search_limit=diagnostic_search_limit,
         heartbeat_interval_seconds=heartbeat_interval_seconds,
         stall_timeout_seconds=stall_timeout_seconds,
+        wait_for_memory_projection=wait_for_memory_projection,
         wait_for_memory_extraction=wait_for_memory_extraction,
+        memory_projection_timeout_seconds=memory_projection_timeout_seconds,
         memory_extraction_timeout_seconds=memory_extraction_timeout_seconds,
         elapsed_seconds=elapsed,
         completion_status="complete",
@@ -1570,6 +1623,17 @@ def main() -> None:
         help="Search result count to request while still scoring configured k values.",
     )
     parser.add_argument(
+        "--wait-for-memory-projection",
+        action="store_true",
+        help="Wait for queued deterministic memory projection jobs before scoring each case.",
+    )
+    parser.add_argument(
+        "--memory-projection-timeout",
+        type=float,
+        default=180.0,
+        help="Seconds to wait for each case's memory projection jobs.",
+    )
+    parser.add_argument(
         "--wait-for-memory-extraction",
         action="store_true",
         help="Wait for queued memory extraction jobs before scoring each case.",
@@ -1621,7 +1685,9 @@ def main() -> None:
                 heartbeat_interval_seconds=args.heartbeat_interval,
                 stall_timeout_seconds=args.stall_timeout,
                 diagnostic_search_limit=args.diagnostic_search_limit,
+                wait_for_memory_projection=args.wait_for_memory_projection,
                 wait_for_memory_extraction=args.wait_for_memory_extraction,
+                memory_projection_timeout_seconds=args.memory_projection_timeout,
                 memory_extraction_timeout_seconds=args.memory_extraction_timeout,
                 verify_sha256=not args.skip_sha256_check,
                 output_path=out_path,

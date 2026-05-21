@@ -4,7 +4,7 @@ import asyncio
 import importlib.util
 import json
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -124,6 +124,76 @@ def test_longmemeval_live_checkpoints_partial_output(
     assert seen_statuses == ["partial", "partial"]
     assert report["completion_status"] == "complete"
     assert report["runtime"]["memory_enrichment_consistency"] == "async"
+    assert report["runtime"]["memory_projection_consistency"] == "async"
+    assert report["runtime"]["memory_extraction_consistency"] == "async"
+    assert report["runtime"]["wait_for_memory_projection"] is False
     assert report["dataset"]["memory_enrichment_consistency"] == "async"
+    assert report["dataset"]["memory_projection_consistency"] == "async"
     assert saved["completion_status"] == "complete"
     assert saved["completed_questions"] == 1
+
+
+def test_longmemeval_ingest_only_waits_for_projection_when_requested(monkeypatch) -> None:
+    module = _load_script("benchmarks/longmemeval_live.py")
+    entry = {"question_id": "q1"}
+    document = SimpleNamespace(
+        text="User: I bought a Samsung TV for the den.",
+        session_id="s1",
+        timestamp="2026/01/03 12:00",
+    )
+    wait_calls: list[list[str]] = []
+
+    async def fake_post_json(*_: object, **__: object) -> dict[str, object]:
+        return {
+            "entities": [{"id": "session_one"}],
+            "background_jobs": {
+                "memory_projection": {
+                    "status": "queued",
+                    "job_ids": ["project_memory:one"],
+                    "queued_sources": 1,
+                    "skipped_sources": 0,
+                }
+            },
+        }
+
+    async def fake_wait_for_jobs(
+        _client: object,
+        job_ids: list[str],
+        **_: object,
+    ) -> list[dict[str, object]]:
+        wait_calls.append(job_ids)
+        return [{"result": {"sources": 1, "projected_entities": 1}}]
+
+    monkeypatch.setattr(module, "build_longmemeval_corpus", lambda *_args, **_kwargs: [document])
+    monkeypatch.setattr(module, "_post_json", fake_post_json)
+    monkeypatch.setattr(module, "_wait_for_jobs", fake_wait_for_jobs)
+
+    asyncio.run(
+        module._ingest_haystack(
+            SimpleNamespace(),
+            entry=entry,
+            run_id="run",
+            case_index=0,
+            corpus_text_policy="user-and-assistant-turns-v1",
+            wait_for_memory_projection=False,
+            wait_for_memory_extraction=False,
+            memory_projection_timeout_seconds=1,
+            memory_extraction_timeout_seconds=1,
+        )
+    )
+    assert wait_calls == []
+
+    asyncio.run(
+        module._ingest_haystack(
+            SimpleNamespace(),
+            entry=entry,
+            run_id="run",
+            case_index=0,
+            corpus_text_policy="user-and-assistant-turns-v1",
+            wait_for_memory_projection=True,
+            wait_for_memory_extraction=False,
+            memory_projection_timeout_seconds=1,
+            memory_extraction_timeout_seconds=1,
+        )
+    )
+    assert wait_calls == [["project_memory:one"]]

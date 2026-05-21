@@ -47,6 +47,14 @@ on:
         description: "Strong consistency mode for small enriched LongMemEval runs only"
         type: boolean
         default: false
+      longmemeval_wait_for_memory_projection:
+        description: "Wait for deterministic memory projection before scoring"
+        type: boolean
+        default: false
+      longmemeval_memory_projection_timeout:
+        description: "Seconds to wait for memory projection jobs when enabled"
+        type: string
+        default: "180"
       longmemeval_graph_hnsw_efc:
         description: "Surreal graph HNSW EF construction value"
         type: string
@@ -358,6 +366,14 @@ jobs:
           if [[ "$wait_for_extraction" == "true" ]]; then
             extraction_args+=(--wait-for-memory-extraction --memory-extraction-timeout 600)
           fi
+          wait_for_projection="${{ inputs.longmemeval_wait_for_memory_projection }}"
+          projection_args=()
+          if [[ "$wait_for_projection" == "true" ]]; then
+            projection_args+=(
+              --wait-for-memory-projection
+              --memory-projection-timeout "${{ inputs.longmemeval_memory_projection_timeout }}"
+            )
+          fi
           moon run bench-longmemeval-live -- \
             .moon/cache/benchmarks/longmemeval_s_cleaned.json \
             --api-url http://localhost:3334/api \
@@ -372,11 +388,13 @@ jobs:
             --label live-smoke \
             --metadata ci_job=longmemeval-live-smoke \
             --metadata auto_extract_entities="${SIBYL_AUTO_EXTRACT_ENTITIES}" \
+            --metadata wait_for_memory_projection="$wait_for_projection" \
             --metadata wait_for_memory_extraction="$wait_for_extraction" \
             --metadata graph_hnsw_efc="${SIBYL_GRAPH_HNSW_EFC}" \
             --metadata graph_hnsw_m="${SIBYL_GRAPH_HNSW_M}" \
             --metadata graph_knn_ef="${SIBYL_GRAPH_KNN_EF}" \
             --metadata native_fusion_backend="${SIBYL_NATIVE_FUSION_BACKEND}" \
+            "${projection_args[@]}" \
             "${extraction_args[@]}"
 
       - name: Gate LongMemEval live smoke
@@ -542,6 +560,14 @@ jobs:
           if [[ "$wait_for_extraction" == "true" ]]; then
             extraction_args+=(--wait-for-memory-extraction --memory-extraction-timeout 600)
           fi
+          wait_for_projection="${{ inputs.longmemeval_wait_for_memory_projection }}"
+          projection_args=()
+          if [[ "$wait_for_projection" == "true" ]]; then
+            projection_args+=(
+              --wait-for-memory-projection
+              --memory-projection-timeout "${{ inputs.longmemeval_memory_projection_timeout }}"
+            )
+          fi
           moon run bench-longmemeval-live -- \
             .moon/cache/benchmarks/longmemeval_s_cleaned.json \
             --api-url http://localhost:3334/api \
@@ -554,11 +580,13 @@ jobs:
             --label live-full \
             --metadata ci_job=longmemeval-live-full \
             --metadata auto_extract_entities="${SIBYL_AUTO_EXTRACT_ENTITIES}" \
+            --metadata wait_for_memory_projection="$wait_for_projection" \
             --metadata wait_for_memory_extraction="$wait_for_extraction" \
             --metadata graph_hnsw_efc="${SIBYL_GRAPH_HNSW_EFC}" \
             --metadata graph_hnsw_m="${SIBYL_GRAPH_HNSW_M}" \
             --metadata graph_knn_ef="${SIBYL_GRAPH_KNN_EF}" \
             --metadata native_fusion_backend="${SIBYL_NATIVE_FUSION_BACKEND}" \
+            "${projection_args[@]}" \
             "${extraction_args[@]}"
 
       - name: Gate LongMemEval live full
