@@ -1339,6 +1339,77 @@ class TestHybridSearch:
         assert result.metadata["query_coverage_rerank_applied"] is True
 
     @pytest.mark.asyncio
+    async def test_hybrid_search_query_coverage_uses_primary_user_turn_signal(
+        self,
+    ) -> None:
+        client = MockGraphClientForHybrid()
+        manager = MockEntityManagerForHybrid()
+
+        distractors = [
+            make_entity_for_test(
+                f"distractor-{index}",
+                description=(
+                    "User: I need generic calendar help. Assistant: Here are tips "
+                    "about what time people usually get home from work on weeknights."
+                ),
+            )
+            for index in range(5)
+        ]
+        answer = make_entity_for_test(
+            "answer",
+            description=(
+                "User: I usually get home from work around 6:30 pm on weeknights. "
+                "Assistant: Here are some easy dinner ideas."
+            ),
+        )
+        tail = [
+            make_entity_for_test(f"tail-{index}", description="unrelated cookbook note")
+            for index in range(3)
+        ]
+        manager.search_results = [
+            *[(entity, 1.0 - (index * 0.01)) for index, entity in enumerate(distractors)],
+            (answer, 0.92),
+            *[(entity, 0.8 - (index * 0.01)) for index, entity in enumerate(tail)],
+        ]
+
+        result = await hybrid_search(
+            "What time do I usually get home from work on weeknights?",
+            client,  # type: ignore[arg-type]
+            manager,  # type: ignore[arg-type]
+            limit=5,
+            config=HybridConfig(
+                graph_weight=0,
+                apply_temporal=False,
+                apply_keyword_boost=False,
+            ),
+        )
+
+        assert "answer" in [entity.id for entity in result.entities]
+        assert result.metadata["query_coverage_rerank_applied"] is True
+
+    def test_hybrid_search_primary_text_ignores_assistant_turn_answers(self) -> None:
+        entity = make_entity_for_test(
+            "assistant-answer",
+            description=(
+                "User: I need generic cleaning advice. Assistant: I avoid lavender "
+                "laundry detergent on towels."
+            ),
+        )
+
+        primary_text = hybrid_module._entity_primary_text(entity)
+
+        assert "generic cleaning advice" in primary_text
+        assert "lavender laundry detergent" not in primary_text
+
+    def test_hybrid_search_plain_text_is_not_primary_scoped(self) -> None:
+        primary_text, has_primary_text = hybrid_module._extract_primary_text_from_text(
+            "plain memory about lavender laundry detergent"
+        )
+
+        assert primary_text == "plain memory about lavender laundry detergent"
+        assert has_primary_text is False
+
+    @pytest.mark.asyncio
     async def test_hybrid_search_evidence_set_rerank_promotes_count_evidence(
         self,
     ) -> None:

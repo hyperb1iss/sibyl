@@ -257,6 +257,72 @@ def test_coverage_rerank_uses_best_local_segment() -> None:
     assert reranked.index("answer-session") < 5
 
 
+def test_coverage_rerank_uses_primary_user_turn_signal() -> None:
+    haystack_ids = [
+        *(f"distractor-{index}" for index in range(5)),
+        "answer-session",
+        *(f"tail-{index}" for index in range(5)),
+    ]
+    haystack_sessions = [
+        [
+            {"role": "user", "content": "I need generic calendar help."},
+            {
+                "role": "assistant",
+                "content": (
+                    "Here are tips about what time people usually get home from "
+                    "work on weeknights."
+                ),
+            },
+        ]
+        for _index in range(5)
+    ]
+    haystack_sessions.append(
+        [
+            {
+                "role": "user",
+                "content": "I usually get home from work around 6:30 pm on weeknights.",
+            },
+            {"role": "assistant", "content": "Here are some easy dinner ideas."},
+        ]
+    )
+    haystack_sessions.extend(
+        [{"role": "user", "content": "I saved an unrelated cookbook note."}]
+        for _index in range(5)
+    )
+    entry = {
+        "question_id": "q1",
+        "question_type": "single-session-user",
+        "question": "What time do I usually get home from work on weeknights?",
+        "question_date": "2026/01/20 12:00",
+        "answer_session_ids": ["answer-session"],
+        "haystack_session_ids": haystack_ids,
+        "haystack_dates": ["2026/01/19"] * len(haystack_ids),
+        "haystack_sessions": haystack_sessions,
+    }
+    case = {
+        "case_index": 0,
+        "question_id": "q1",
+        "question_type": entry["question_type"],
+        "question": entry["question"],
+        "question_date": entry["question_date"],
+        "answer_session_ids": ["answer-session"],
+        "ranked_session_ids": haystack_ids,
+        "ranked_results": [
+            {"longmemeval_session_id": session_id, "score": 1.0 - (index * 0.01)}
+            for index, session_id in enumerate(haystack_ids)
+        ],
+    }
+
+    reranked = rerank_longmemeval_case(
+        case,
+        entry,
+        strategy="coverage",
+        corpus_text_policy="user-and-assistant-turns-v1",
+    )
+
+    assert reranked.index("answer-session") < 5
+
+
 def test_coverage_rerank_keeps_partial_segment_from_evicting_count_evidence() -> None:
     haystack_ids = [
         *(f"answer-{index}" for index in range(5)),

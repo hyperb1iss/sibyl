@@ -9,6 +9,7 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Literal
 
@@ -34,6 +35,12 @@ QUERY_COVERAGE_SEGMENT_OVERLAP_WEIGHT = 0.20
 QUERY_COVERAGE_SEGMENT_WINDOW = 18
 QUERY_COVERAGE_SEGMENT_STRIDE = 6
 QUERY_COVERAGE_GENERIC_ASSISTANT_PENALTY = 0.04
+QUERY_COVERAGE_IDF_OVERLAP_WEIGHT = 0.10
+QUERY_COVERAGE_IDF_SEGMENT_OVERLAP_WEIGHT = 0.12
+QUERY_COVERAGE_PRIMARY_OVERLAP_WEIGHT = 0.18
+QUERY_COVERAGE_PRIMARY_SEGMENT_WEIGHT = 0.20
+QUERY_COVERAGE_PHRASE_WEIGHT = 0.08
+QUERY_COVERAGE_PRIMARY_PERSONAL_WEIGHT = 0.04
 
 STOP_WORDS = {
     "a",
@@ -157,6 +164,10 @@ GENERIC_ASSISTANT_PATTERNS = (
     re.compile(r"\bas an ai\b", re.IGNORECASE),
     re.compile(r"\bi (?:can|cannot|can't) (?:help|assist)\b", re.IGNORECASE),
     re.compile(r"\bhere are (?:some|a few)\b", re.IGNORECASE),
+)
+TRANSCRIPT_USER_TURN_PATTERN = re.compile(
+    r"user:\s*(.*?)(?=\s+assistant:|\s+user:|$)",
+    re.IGNORECASE | re.DOTALL,
 )
 TOKEN_PATTERN = re.compile(r"[a-z0-9']+")
 
@@ -486,7 +497,8 @@ def _score_query_coverage(
     query: str,
     candidates: Sequence[_Candidate],
 ) -> list[tuple[float, _Candidate]]:
-    query_tokens = set(_tokenize(query))
+    query_token_order = list(dict.fromkeys(_tokenize(query)))
+    query_tokens = set(query_token_order)
     intent_words = set(_tokenize(query, keep_stopwords=True))
     is_preference_query = bool(intent_words & PREFERENCE_TERMS)
     max_candidate_score = max((candidate.score for candidate in candidates), default=0.0) or 1.0
@@ -496,6 +508,7 @@ def _score_query_coverage(
             for candidate in candidates
         ]
 
+    term_weights = _query_term_weights(candidates, query_tokens)
     scored: list[tuple[float, _Candidate, float]] = []
     total = max(1, len(candidates) - 1)
     for candidate in candidates:
@@ -506,6 +519,35 @@ def _score_query_coverage(
             math.sqrt(len(candidate.tokens)),
         )
         segment_overlap = _best_segment_overlap(candidate.tokens, query_tokens)
+        idf_overlap = _weighted_overlap(candidate.token_set, query_tokens, term_weights)
+        idf_segment_overlap = _best_weighted_segment_overlap(
+            candidate.tokens,
+            query_tokens,
+            term_weights,
+        )
+        primary_text, has_primary_text = _extract_candidate_primary_text(candidate)
+        primary_tokens = tuple(_tokenize(primary_text)) if has_primary_text else ()
+        primary_token_set = frozenset(primary_tokens)
+        primary_overlap = (
+            _weighted_overlap(primary_token_set, query_tokens, term_weights)
+            if has_primary_text
+            else 0.0
+        )
+        primary_segment_overlap = (
+            _best_weighted_segment_overlap(
+                primary_tokens,
+                query_tokens,
+                term_weights,
+            )
+            if has_primary_text
+            else 0.0
+        )
+        phrase_score = _phrase_adjacency_score(candidate.tokens, query_token_order)
+        if has_primary_text:
+            phrase_score = max(
+                phrase_score,
+                _phrase_adjacency_score(primary_tokens, query_token_order),
+            )
         provider_score = candidate.score / max_candidate_score if candidate.score > 0 else 0.0
         score = (
             (QUERY_COVERAGE_RANK_WEIGHT * original_rank_score)
@@ -513,6 +555,12 @@ def _score_query_coverage(
             + (QUERY_COVERAGE_OVERLAP_WEIGHT * overlap)
             + (QUERY_COVERAGE_DENSITY_WEIGHT * density)
             + (QUERY_COVERAGE_SEGMENT_OVERLAP_WEIGHT * segment_overlap)
+            + (QUERY_COVERAGE_IDF_OVERLAP_WEIGHT * idf_overlap)
+            + (QUERY_COVERAGE_IDF_SEGMENT_OVERLAP_WEIGHT * idf_segment_overlap)
+            + (QUERY_COVERAGE_PRIMARY_OVERLAP_WEIGHT * primary_overlap)
+            + (QUERY_COVERAGE_PRIMARY_SEGMENT_WEIGHT * primary_segment_overlap)
+            + (QUERY_COVERAGE_PHRASE_WEIGHT * phrase_score)
+            + (_primary_personal_score(primary_text) if has_primary_text else 0.0)
         )
         if is_preference_query:
             score -= (
@@ -528,6 +576,38 @@ def _score_query_coverage(
         scored = sorted(scored, key=lambda item: (-item[0], item[1].original_rank))
 
     return [(score, candidate) for score, candidate, _overlap in scored]
+
+
+def _extract_candidate_primary_text(candidate: _Candidate) -> tuple[str, bool]:
+    user_turns = [
+        match.group(1) for match in TRANSCRIPT_USER_TURN_PATTERN.finditer(candidate.text)
+    ]
+    if user_turns:
+        return " ".join(user_turns), True
+    return candidate.text, False
+
+
+def _query_term_weights(
+    candidates: Sequence[_Candidate],
+    query_tokens: set[str],
+) -> dict[str, float]:
+    total = max(1, len(candidates))
+    weights: dict[str, float] = {}
+    for token in query_tokens:
+        document_frequency = sum(1 for candidate in candidates if token in candidate.token_set)
+        weights[token] = math.log((total + 1.0) / (document_frequency + 0.5)) + 1.0
+    return weights
+
+
+def _weighted_overlap(
+    token_set: frozenset[str] | set[str],
+    query_tokens: set[str],
+    term_weights: Mapping[str, float],
+) -> float:
+    total_weight = sum(term_weights.get(token, 1.0) for token in query_tokens)
+    if not token_set or not query_tokens or total_weight <= 0:
+        return 0.0
+    return sum(term_weights.get(token, 1.0) for token in query_tokens & token_set) / total_weight
 
 
 def _stabilize_evidence_set_scores(
@@ -575,6 +655,42 @@ def _best_segment_overlap(tokens: Sequence[str], query_tokens: set[str]) -> floa
         segment = tokens[start : start + QUERY_COVERAGE_SEGMENT_WINDOW]
         best = max(best, len(query_tokens & set(segment)) / len(query_tokens))
     return best
+
+
+def _best_weighted_segment_overlap(
+    tokens: Sequence[str],
+    query_tokens: set[str],
+    term_weights: Mapping[str, float],
+) -> float:
+    if not tokens or not query_tokens:
+        return 0.0
+    if len(tokens) <= QUERY_COVERAGE_SEGMENT_WINDOW:
+        return _weighted_overlap(set(tokens), query_tokens, term_weights)
+
+    best = 0.0
+    last_start = max(0, len(tokens) - QUERY_COVERAGE_SEGMENT_WINDOW)
+    starts = list(range(0, last_start + 1, QUERY_COVERAGE_SEGMENT_STRIDE))
+    if starts[-1] != last_start:
+        starts.append(last_start)
+    for start in starts:
+        segment = tokens[start : start + QUERY_COVERAGE_SEGMENT_WINDOW]
+        best = max(best, _weighted_overlap(set(segment), query_tokens, term_weights))
+    return best
+
+
+def _phrase_adjacency_score(tokens: Sequence[str], query_tokens: Sequence[str]) -> float:
+    if len(tokens) < 2 or len(query_tokens) < 2:
+        return 0.0
+
+    query_pairs = list(pairwise(query_tokens))
+    token_pairs = set(pairwise(tokens))
+    return sum(1 for pair in query_pairs if pair in token_pairs) / len(query_pairs)
+
+
+def _primary_personal_score(primary_text: str) -> float:
+    if PERSONAL_PATTERN.search(primary_text):
+        return QUERY_COVERAGE_PRIMARY_PERSONAL_WEIGHT
+    return 0.0
 
 
 def _diversify_ranking(scored: Sequence[tuple[float, _Candidate]]) -> list[str]:
