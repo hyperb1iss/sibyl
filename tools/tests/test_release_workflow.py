@@ -106,8 +106,22 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     assert workflow.index("moon run :check") < workflow.index("docker/build-push-action")
     assert workflow.index("gh-action-pypi-publish") < workflow.index("homebrew_formula.py")
     assert workflow.count("needs: rc-gate") == PUBLISH_ARTIFACT_JOB_COUNT
-    assert "uv tool install sibyld" in workflow
+    assert "install.sh | sh -s -- --version ${{ steps.version.outputs.version }}" in workflow
+    assert (
+        "install.sh | sh -s -- --remote --version ${{ steps.version.outputs.version }}" in workflow
+    )
+    assert "uv tool install sibyld" not in workflow
     assert "[sibyld](https://pypi.org/project/sibyld/" in workflow
+
+
+def test_install_script_defaults_to_bundled_local_story() -> None:
+    installer = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+
+    assert 'MODE="${SIBYL_INSTALL_MODE:-local}"' in installer
+    assert 'install_tool "sibyl-dev" "sibyl" "Sibyl CLI"' in installer
+    assert 'install_tool "sibyld" "sibyld" "Sibyl local daemon"' in installer
+    assert "--remote|remote|--cli|cli" in installer
+    assert "uv tool upgrade" not in installer
 
 
 def test_python_package_build_covers_cli_core_and_daemon() -> None:

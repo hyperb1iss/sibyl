@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Sibyl Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote
+#   curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --docker
 #
 # This script:
-#   1. Installs uv (if not present)
-#   2. Installs the Sibyl CLI via uv
-#   3. Prints explicit local, remote, and Docker next steps
+#   1. Installs uv as bootstrap plumbing when needed
+#   2. Installs the Sibyl CLI and, by default, the local daemon
+#   3. Prints one coherent next step for the chosen install mode
 
 set -eu
 
@@ -28,6 +31,24 @@ info() { printf '%s\n' "${CYAN}▸${RESET} $1"; }
 success() { printf '%s\n' "${GREEN}✓${RESET} $1"; }
 warn() { printf '%s\n' "${YELLOW}!${RESET} $1"; }
 error() { printf '%s\n' "${RED}✗${RESET} $1"; exit 1; }
+
+usage() {
+    cat << EOF
+Sibyl installer
+
+Usage:
+  install.sh [--local|--remote|--docker] [--version VERSION]
+
+Modes:
+  --local    Install sibyl + sibyld for an embedded local daemon (default)
+  --remote   Install the sibyl CLI for an existing remote Sibyl server
+  --docker   Install the sibyl CLI for Docker self-host management
+
+Environment:
+  SIBYL_INSTALL_MODE      local, remote, or docker
+  SIBYL_INSTALL_VERSION   package version to install, such as 1.0.0rc1
+EOF
+}
 
 banner() {
     printf '%s' "${PURPLE}${BOLD}"
@@ -89,43 +110,53 @@ install_uv() {
     fi
 }
 
-install_sibyl() {
-    info "Installing sibyl-dev..."
-
-    if uv tool list 2>/dev/null | grep -q "sibyl-dev"; then
-        warn "sibyl-dev is already installed, upgrading..."
-        uv tool upgrade sibyl-dev
-    else
-        uv tool install sibyl-dev
+normalize_version() {
+    if [ -z "${SIBYL_INSTALL_VERSION:-}" ]; then
+        return 0
     fi
 
-    # Ensure tool bin is in PATH
-    export PATH="$HOME/.local/bin:$PATH"
+    SIBYL_PYPI_VERSION=$(printf '%s' "$SIBYL_INSTALL_VERSION" | sed -E 's/-(alpha|beta|a|b|rc)\.?/\1/')
+}
 
-    if command -v sibyl >/dev/null 2>&1; then
-        success "sibyl-dev installed successfully"
+package_spec() {
+    package="$1"
+    if [ -n "${SIBYL_PYPI_VERSION:-}" ]; then
+        printf '%s==%s' "$package" "$SIBYL_PYPI_VERSION"
     else
-        error "Failed to install sibyl-dev"
+        printf '%s' "$package"
     fi
 }
 
-install_sibyld() {
-    info "Installing sibyld..."
+install_tool() {
+    package="$1"
+    command_name="$2"
+    label="$3"
+    spec=$(package_spec "$package")
 
-    if uv tool list 2>/dev/null | grep -q "sibyld"; then
-        warn "sibyld is already installed, upgrading..."
-        uv tool upgrade sibyld
+    if command -v "$command_name" >/dev/null 2>&1; then
+        info "Updating $label..."
     else
-        uv tool install sibyld
+        info "Installing $label..."
     fi
 
+    if ! uv tool install "$spec" --force; then
+        error "Failed to install $label ($spec). Check that the package is published."
+    fi
     export PATH="$HOME/.local/bin:$PATH"
 
-    if command -v sibyld >/dev/null 2>&1; then
-        success "sibyld installed successfully"
+    if command -v "$command_name" >/dev/null 2>&1; then
+        success "$label installed"
     else
-        error "Failed to install sibyld"
+        error "$label was installed, but '$command_name' is not on PATH. Add $HOME/.local/bin to PATH."
     fi
+}
+
+install_sibyl() {
+    install_tool "sibyl-dev" "sibyl" "Sibyl CLI"
+}
+
+install_sibyld() {
+    install_tool "sibyld" "sibyld" "Sibyl local daemon"
 }
 
 # ============================================================================
@@ -144,22 +175,63 @@ print_next_steps() {
     echo
     printf '%s\n' "${GREEN}${BOLD}Installation complete!${RESET}"
     echo
-    printf '%s\n' "${BOLD}Local embedded daemon:${RESET}"
-    printf '%s\n' "  sibyl init --local"
-    printf '%s\n' "  sibyl serve"
-    echo
-    printf '%s\n' "${BOLD}Remote server:${RESET}"
-    printf '%s\n' "  sibyl init --remote https://sibyl.example.com"
-    printf '%s\n' "  sibyl auth login"
-    echo
-    printf '%s\n' "${BOLD}Docker self-host:${RESET}"
-    printf '%s\n' "  sibyl docker init"
-    printf '%s\n' "  sibyl docker up"
+    case "$MODE" in
+        local)
+            printf '%s\n' "${BOLD}Start a local embedded daemon:${RESET}"
+            printf '%s\n' "  sibyl init --local"
+            printf '%s\n' "  sibyl serve"
+            ;;
+        remote)
+            printf '%s\n' "${BOLD}Connect to a remote Sibyl server:${RESET}"
+            printf '%s\n' "  sibyl init --remote https://sibyl.example.com"
+            printf '%s\n' "  sibyl auth login"
+            ;;
+        docker)
+            printf '%s\n' "${BOLD}Create a Docker self-host stack:${RESET}"
+            printf '%s\n' "  sibyl docker init"
+            printf '%s\n' "  sibyl docker up"
+            ;;
+    esac
+}
+
+parse_args() {
+    MODE="${SIBYL_INSTALL_MODE:-local}"
+    SIBYL_INSTALL_VERSION="${SIBYL_INSTALL_VERSION:-}"
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --local|local)
+                MODE=local
+                ;;
+            --remote|remote|--cli|cli)
+                MODE=remote
+                ;;
+            --docker|docker)
+                MODE=docker
+                ;;
+            --version|-v)
+                if [ "$#" -lt 2 ]; then
+                    error "--version requires a value"
+                fi
+                SIBYL_INSTALL_VERSION="$2"
+                shift
+                ;;
+            --help|-h)
+                usage
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1"
+                ;;
+        esac
+        shift
+    done
 }
 
 main() {
     banner
-    MODE="${SIBYL_INSTALL_MODE:-${1:-cli}}"
+    parse_args "$@"
+    normalize_version
 
     check_os
 
@@ -168,10 +240,10 @@ main() {
     install_sibyl
 
     case "$MODE" in
-        cli|remote)
-            ;;
         local)
             install_sibyld
+            ;;
+        remote)
             ;;
         docker)
             check_docker

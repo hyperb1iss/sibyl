@@ -220,7 +220,9 @@ jobs:
           context: .
           file: apps/${{ matrix.image }}/Dockerfile
           platforms: linux/${{ matrix.platform }}
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=${{ !inputs.dry_run }}
+          outputs: >-
+            type=image,name=${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-${{
+            matrix.image }},push-by-digest=true,name-canonical=true,push=${{ !inputs.dry_run }}
           cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.platform }}
 
@@ -323,30 +325,30 @@ jobs:
 
             ## Install
 
-            **Homebrew local**
+            **Local daemon**
             ```bash
-            brew install hyperb1iss/tap/sibyl
+            curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --version ${{ steps.version.outputs.version }}
             sibyl init --local
             sibyl serve
             ```
 
             **Remote CLI**
             ```bash
-            uv tool install sibyl-dev
+            curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote --version ${{ steps.version.outputs.version }}
             sibyl init --remote https://sibyl.example.com
             sibyl auth login
             ```
 
-            **Python local**
+            **Homebrew**
             ```bash
-            uv tool install sibyl-dev
-            uv tool install sibyld
+            brew install hyperb1iss/tap/sibyl
             sibyl init --local
             sibyl serve
             ```
 
             **Docker**
             ```bash
+            curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --docker --version ${{ steps.version.outputs.version }}
             sibyl docker init --tag ${{ steps.version.outputs.version }}
             sibyl docker up --pull
             ```

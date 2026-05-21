@@ -11,19 +11,18 @@ minutes.
 ::: tip Working on Sibyl itself? This guide is for _using_ Sibyl. To set up the monorepo for
 development, see [Installation](./installation.md). :::
 
-## Step 1: Install the CLI
+## Step 1: Install Sibyl
 
-Homebrew installs the CLI and the local daemon:
+The shell installer puts the CLI and the local daemon on your PATH:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
+```
+
+Already use Homebrew?
 
 ```bash
 brew install hyperb1iss/tap/sibyl
-```
-
-Already manage Python tools with uv? Install it directly:
-
-```bash
-uv tool install sibyl-dev
-uv tool install sibyld
 ```
 
 ## Step 2: Start Sibyl

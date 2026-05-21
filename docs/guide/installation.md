@@ -7,8 +7,8 @@ description: Installing Sibyl and its dependencies
 
 This guide covers the main ways to run Sibyl:
 
-- install the Homebrew formula and run the embedded local daemon
-- install the published CLI for a remote server
+- run the shell installer and start the embedded local daemon
+- install the Homebrew formula on systems where you already use Homebrew
 - run a self-hosted Docker stack with `sibyl docker ...`
 - work on the monorepo in development mode with `moon run ...`
 
@@ -34,9 +34,17 @@ curl -fsSL https://moonrepo.dev/install/proto.sh | bash
 
 ## Quick Install
 
-### Homebrew Local
+### Local Daemon
 
 The recommended local install bundles the CLI and daemon:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
+sibyl init --local
+sibyl serve
+```
+
+Homebrew uses the same bundled shape:
 
 ```bash
 brew install hyperb1iss/tap/sibyl
@@ -47,16 +55,16 @@ sibyl serve
 ### Remote CLI
 
 ```bash
-uv tool install sibyl-dev
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote
 sibyl init --remote https://sibyl.example.com
-sibyl login
+sibyl auth login
 sibyl doctor
 ```
 
 ### Docker Self-Host
 
 ```bash
-uv tool install sibyl-dev
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --docker
 sibyl docker init
 sibyl docker up
 sibyl docker logs
@@ -86,6 +94,9 @@ pnpm install
 moon run cli:install-dev
 moon run api:install-dev
 ```
+
+Direct `uv tool install` commands are developer and CI escape hatches. User-facing installs should
+go through the shell installer, Homebrew, or Docker flow so the CLI and daemon stay paired.
 
 ## Infrastructure Setup
 

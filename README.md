@@ -45,8 +45,8 @@ and the teams you build alongside. One self-hostable knowledge graph, scoped by 
 run, yours to keep.
 
 Most AI sessions start cold. Coding agents forget yesterday's decisions. Notes drift between
-worktrees, tasks scatter across tools, and the context you earned the hard way evaporates the
-moment a session ends.
+worktrees, tasks scatter across tools, and the context you earned the hard way evaporates the moment
+a session ends.
 
 A durable knowledge graph holds what matters: personal context, project work, shared spaces, source
 documents, decisions, agent state. Each lives in its own scope and gets tied to the others when
@@ -97,6 +97,18 @@ same way you do. MCP is available for clients that prefer it; the depth lives in
 
 ## ⚡ Quickstart
 
+### Shell Installer
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
+sibyl init --local
+sibyl serve
+```
+
+The installer puts both `sibyl` and `sibyld` on your PATH. The local context runs an embedded
+SurrealDB store under `~/.sibyl/data/surreal`; use `sibyl start`/`sibyl stop` for a background
+daemon or `sibyl service install` to write a launchd/systemd user service.
+
 ### Homebrew
 
 ```bash
@@ -105,24 +117,12 @@ sibyl init --local
 sibyl serve
 ```
 
-Homebrew installs both `sibyl` and `sibyld`. The local context runs an embedded SurrealDB store
-under `~/.sibyl/data/surreal`; use `sibyl start`/`sibyl stop` for a background daemon or
-`sibyl service install` to write a launchd/systemd user service.
-
-### Python Tools
+### Remote CLI
 
 ```bash
-uv tool install sibyl-dev
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote
 sibyl init --remote https://sibyl.example.com
-sibyl login
-```
-
-For a Python-only local install, add the daemon package:
-
-```bash
-uv tool install sibyld
-sibyl init --local
-sibyl serve
+sibyl auth login
 ```
 
 ### Docker Self-Host
@@ -231,8 +231,7 @@ The CLI is the power-user interface. Clean output, built for scripting and durab
 workflows.
 
 ```bash
-uv tool install sibyl-dev    # published package
-uv tool install sibyld       # direct daemon CLI package
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
 moon run cli:install         # or install from source
 ```
 

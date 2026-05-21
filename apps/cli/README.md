@@ -8,11 +8,14 @@ external assistants, and scripts. The package is published as `sibyl-dev`; the e
 
 ```bash
 # Install
-uv tool install sibyl-dev     # or: moon run cli:install
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote
+
+# Develop this package
+moon run cli:install-dev
 
 # Configure
 sibyl init --remote https://sibyl.example.com
-sibyl login
+sibyl auth login
 
 # Link to project (scopes all commands)
 sibyl project link <project_id>

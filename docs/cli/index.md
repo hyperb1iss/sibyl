@@ -10,15 +10,14 @@ covers the client.
 ## Installation
 
 ```bash
-# As a tool (recommended)
-uv tool install sibyl-dev
+# User install
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
 
-# As a dependency
-uv add sibyl-dev
+# Remote-only install
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote
 
 # For development
-cd apps/cli
-uv sync
+moon run cli:install-dev
 ```
 
 ## Quick Start

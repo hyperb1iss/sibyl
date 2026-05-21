@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-# One-liner installer from the README: installs uv, the sibyl CLI, and starts Sibyl.
+# One-liner installer from the README: installs the Sibyl CLI and local daemon.
 CLI_INSTALL_COMMAND = (
     "curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh"
 )
-# Alternative for users who already manage Python tooling with uv.
-CLI_INSTALL_COMMAND_ALT = "uv tool install sibyl-dev"
+# Alternative for users who already manage local tools with Homebrew.
+CLI_INSTALL_COMMAND_ALT = "brew install hyperb1iss/tap/sibyl"
 
 
 AGENT_PROMPT_SNIPPET = """## Sibyl - Your Persistent Memory

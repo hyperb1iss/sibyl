@@ -6,10 +6,10 @@ workflow, search, synthesis, and real-time updates.
 ## Quick Reference
 
 ```bash
-# Install published daemon CLI
-uv tool install sibyld
+# Install Sibyl with the published daemon CLI
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
 
-# Start server
+# Start server from the monorepo
 moon run api:serve        # or: uv run sibyld serve
 
 # Start worker (Redis coordination only)
