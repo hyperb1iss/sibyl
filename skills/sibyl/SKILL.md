@@ -553,6 +553,18 @@ sibyl debug query "SELECT entity_type, count() AS count FROM entity GROUP BY ent
 sibyl debug status
 ```
 
+When SurrealDB is burning CPU but API logs are quiet, capture the container while the spike is
+active:
+
+```bash
+tools/dev/surreal-container-snapshot.sh
+tools/dev/surreal-container-snapshot.sh --seconds 10
+```
+
+The official SurrealDB image may not contain a shell. The snapshot script joins the container PID
+namespace with a short-lived toolbox container, samples `/proc/1/task/*`, checks Docker stats,
+probes `/health` and `RETURN 1`, and tails recent Surreal logs without restarting services.
+
 ---
 
 ### Entity History (Bi-Temporal)

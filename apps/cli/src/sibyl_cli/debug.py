@@ -389,6 +389,23 @@ def status(
                         f" [{CORAL}]{metrics.get('replayed', 0)}[/{CORAL}] replayed,"
                         f" [{CORAL}]{metrics.get('discarded', 0)}[/{CORAL}] discarded"
                     )
+                surreal_obs = data.get("surreal_observability", {})
+                if isinstance(surreal_obs, dict) and surreal_obs.get("configured"):
+                    metrics_status = surreal_obs.get("metrics_http_status")
+                    metrics_available = bool(surreal_obs.get("metrics_available"))
+                    metrics_display = (
+                        f"metrics {metrics_status}"
+                        if metrics_status is not None
+                        else "metrics unknown"
+                    )
+                    if metrics_available:
+                        metrics_display = (
+                            f"metrics ok ({surreal_obs.get('metric_count', 0)} series)"
+                        )
+                    console.print(
+                        f"  Surreal:      health {surreal_obs.get('health_http_status', 'unknown')}, "
+                        f"{metrics_display}"
+                    )
                 coordination_error = data.get("coordination_error")
                 if coordination_error:
                     console.print(

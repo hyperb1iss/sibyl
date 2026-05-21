@@ -1975,6 +1975,10 @@ class DevStatusResponse(BaseModel):
     recent_errors: list[dict[str, Any]] = Field(
         default_factory=list, description="Recent error log entries"
     )
+    surreal_observability: dict[str, Any] = Field(
+        default_factory=dict,
+        description="SurrealDB HTTP health and metrics scrape availability",
+    )
 
 
 # =============================================================================

@@ -383,6 +383,20 @@ async def test_dev_status_reports_coordination_backend() -> None:
         patch("sibyl_core.tools.core.get_health", mock_get_health),
         patch("sibyl.api.routes.admin.get_graph_stats_payload", mock_stats),
         patch("sibyl.api.routes.admin.get_coordination_health", mock_coordination),
+        patch(
+            "sibyl.api.routes.admin.get_surreal_observability_status",
+            AsyncMock(
+                return_value={
+                    "configured": True,
+                    "health_http_status": 200,
+                    "metrics_http_status": 404,
+                    "metrics_available": False,
+                    "metric_count": 0,
+                    "metrics_sample": {},
+                    "error": None,
+                }
+            ),
+        ),
         patch("sibyl_core.logging.LogBuffer.get", return_value=mock_buffer),
     ):
         response = await dev_status(org=org)
@@ -393,3 +407,29 @@ async def test_dev_status_reports_coordination_backend() -> None:
     assert response.coordination_status == "unavailable"
     assert response.coordination_durable is False
     assert response.coordination_error == "Local coordination backend is not implemented yet"
+    assert response.surreal_observability["metrics_http_status"] == 404
+
+
+def test_parse_surreal_metric_names_and_sample() -> None:
+    from sibyl.api.routes.admin import (
+        _parse_surreal_metric_names,
+        _surreal_metrics_sample,
+    )
+
+    metric_names = _parse_surreal_metric_names(
+        "# HELP surrealdb_statement_total Statements\n"
+        'surrealdb_statement_total{outcome="ok"} 12\n'
+        "surrealdb_transaction_conflicts_total 2\n"
+        "surrealdb_http_request_duration_seconds_bucket 1"
+    )
+
+    assert metric_names == [
+        "surrealdb_http_request_duration_seconds_bucket",
+        "surrealdb_statement_total",
+        "surrealdb_transaction_conflicts_total",
+    ]
+    sample = _surreal_metrics_sample(metric_names)
+    assert sample["surrealdb_statement_total"] is True
+    assert sample["surrealdb_transaction_conflicts_total"] is True
+    assert sample["surrealdb_http_request_duration_seconds"] is True
+    assert sample["surrealdb_query_duration_seconds"] is False

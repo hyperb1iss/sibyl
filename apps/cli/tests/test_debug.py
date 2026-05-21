@@ -53,6 +53,46 @@ def test_debug_status_includes_pending_write_metrics(
     assert '"attempted": 3' in result.stdout
 
 
+@patch("sibyl_cli.debug.pending_write_status")
+@patch("sibyl_cli.debug.get_client")
+def test_debug_status_displays_surreal_observability(
+    mock_get_client: MagicMock,
+    mock_pending_write_status: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(
+        return_value={
+            "api_healthy": True,
+            "worker_healthy": True,
+            "graph_healthy": True,
+            "queue_healthy": True,
+            "coordination_backend": "local",
+            "coordination_status": "ok",
+            "coordination_durable": True,
+            "uptime_seconds": 60,
+            "entity_count": 10,
+            "queue_depth": 0,
+            "recent_errors": [],
+            "surreal_observability": {
+                "configured": True,
+                "health_http_status": 200,
+                "metrics_http_status": 404,
+                "metrics_available": False,
+                "metric_count": 0,
+            },
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+    mock_pending_write_status.return_value = {"count": 0, "metrics": {}}
+
+    result = CliRunner().invoke(debug.app, ["status"])
+
+    assert result.exit_code == 0
+    assert "Surreal:" in result.stdout
+    assert "health 200" in result.stdout
+    assert "metrics 404" in result.stdout
+
+
 @patch("sibyl_cli.debug.get_client")
 def test_debug_query_explain_prefixes_query_and_formats_plan(
     mock_get_client: MagicMock,

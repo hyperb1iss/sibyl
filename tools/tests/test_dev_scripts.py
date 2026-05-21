@@ -261,3 +261,72 @@ signal_process_tree TERM 10
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == ["-TERM 10", "-TERM 20", "-TERM 30"]
+
+
+def test_surreal_container_snapshot_has_valid_bash_syntax() -> None:
+    bash = which("bash")
+    assert bash is not None
+
+    result = subprocess.run(  # noqa: S603
+        [bash, "-n", "tools/dev/surreal-container-snapshot.sh"],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_surreal_container_snapshot_uses_pid_namespace_toolbox(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+  inspect)
+    printf 'name=/sibyl-surrealdb pid=123 running=true oom=false restarting=false started=now image=surrealdb/surrealdb:v3.0.5\\n'
+    ;;
+  stats)
+    printf 'name=sibyl-surrealdb cpu=101.00%% mem=2GiB / 8GiB net=0B / 0B block=0B / 0B pids=85\\n'
+    ;;
+  logs)
+    printf 'surreal log line\\n'
+    ;;
+  run)
+    printf '%s\\n' "$*"
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    bash = which("bash")
+    assert bash is not None
+
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+    }
+    result = subprocess.run(  # noqa: S603
+        [
+            bash,
+            "tools/dev/surreal-container-snapshot.sh",
+            "--seconds",
+            "1",
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--pid=container:sibyl-surrealdb" in result.stdout
+    assert "-e SAMPLE_SECONDS=1" in result.stdout

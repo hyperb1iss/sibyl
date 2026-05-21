@@ -2,8 +2,10 @@
 
 from time import perf_counter
 from typing import Any
+from urllib.parse import urlunparse
 from uuid import UUID, uuid4
 
+import httpx
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -70,6 +72,83 @@ async def execute_debug_query(
     from sibyl.persistence.graph_runtime import execute_debug_query as service
 
     return await service(cypher, group_id=group_id, **params)
+
+
+def _surreal_http_base_url() -> str | None:
+    from urllib.parse import urlparse
+
+    resolved = settings.resolved_surreal_url
+    parsed = urlparse(resolved)
+    if parsed.scheme in {"ws", "wss", "http", "https"}:
+        scheme = "https" if parsed.scheme in {"wss", "https"} else "http"
+        path = parsed.path.removesuffix("/rpc")
+        return urlunparse((scheme, parsed.netloc, path, "", "", "")).rstrip("/")
+    return None
+
+
+def _parse_surreal_metric_names(body: str) -> list[str]:
+    names: set[str] = set()
+    for line in body.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        metric = line.split(maxsplit=1)[0].split("{", 1)[0]
+        if metric:
+            names.add(metric)
+    return sorted(names)
+
+
+def _surreal_metrics_sample(metric_names: list[str]) -> dict[str, bool]:
+    interesting = (
+        "surrealdb_statement_total",
+        "surrealdb_transaction_conflicts_total",
+        "surrealdb_statement_duration_seconds",
+        "surrealdb_query_duration_seconds",
+        "surrealdb_http_request_duration_seconds",
+        "surrealdb_session_active",
+        "surrealdb_live_query_active",
+    )
+    available = set(metric_names)
+    return {
+        name: name in available or any(metric.startswith(f"{name}_") for metric in available)
+        for name in interesting
+    }
+
+
+async def get_surreal_observability_status() -> dict[str, object]:
+    base_url = _surreal_http_base_url()
+    status: dict[str, object] = {
+        "configured": base_url is not None,
+        "base_url": base_url,
+        "health_http_status": None,
+        "metrics_http_status": None,
+        "metrics_available": False,
+        "metric_count": 0,
+        "metrics_sample": {},
+        "error": None,
+    }
+    if base_url is None:
+        return status
+
+    auth: tuple[str, str] | None = None
+    password = settings.surreal_password.get_secret_value()
+    if settings.surreal_username and password:
+        auth = (settings.surreal_username, password)
+
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            health_response = await client.get(f"{base_url}/health")
+            status["health_http_status"] = health_response.status_code
+
+            metrics_response = await client.get(f"{base_url}/metrics", auth=auth)
+            status["metrics_http_status"] = metrics_response.status_code
+            if metrics_response.status_code == 200:
+                metric_names = _parse_surreal_metric_names(metrics_response.text)
+                status["metrics_available"] = True
+                status["metric_count"] = len(metric_names)
+                status["metrics_sample"] = _surreal_metrics_sample(metric_names)
+    except Exception as exc:
+        status["error"] = f"{type(exc).__name__}: {exc}"
+    return status
 
 
 @router.get(
@@ -610,6 +689,7 @@ async def dev_status(
     buffer = LogBuffer.get()
     error_entries = buffer.tail(n=10, level="error")
     recent_errors = [e.to_dict() for e in error_entries]
+    surreal_observability = await get_surreal_observability_status()
 
     return DevStatusResponse(
         api_healthy=api_healthy,
@@ -624,6 +704,7 @@ async def dev_status(
         entity_count=entity_count,
         queue_depth=queue_depth,
         recent_errors=recent_errors,
+        surreal_observability=surreal_observability,
     )
 
 
