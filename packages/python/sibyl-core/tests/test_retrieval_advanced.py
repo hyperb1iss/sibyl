@@ -71,6 +71,12 @@ def test_query_coverage_keywords_drop_answer_shape_scaffolding() -> None:
     assert keywords == ["rice", "favorite"]
 
 
+def test_query_coverage_keywords_drop_temporal_chatter() -> None:
+    keywords = extract_keywords("How long will I be working in my current role tonight?")
+
+    assert keywords == ["working", "role"]
+
+
 def test_query_coverage_promotes_favorite_fact_over_shape_words() -> None:
     ranked = _rank_query_ids(
         "What type of rice is my favorite?",
@@ -138,6 +144,66 @@ def test_query_coverage_preserves_temporal_top_five_candidates() -> None:
 
     assert "4" in ranked[:5]
     assert "5" not in ranked[:5]
+
+
+def test_query_coverage_uses_temporal_target_with_concept_evidence() -> None:
+    target = datetime(2026, 1, 10, tzinfo=UTC)
+    result = rank_by_query_coverage(
+        "What kitchen appliance did I buy 10 days ago?",
+        [
+            QueryCoverageCandidate(
+                item="phone",
+                stable_id="phone",
+                text="User: My Samsung phone battery has been unreliable.",
+                prior_score=1.0,
+                original_rank=1,
+                timestamp="2026/01/10 09:00",
+            ),
+            QueryCoverageCandidate(
+                item="workshop",
+                stable_id="workshop",
+                text="User: I organized a sustainable living workshop.",
+                prior_score=0.99,
+                original_rank=2,
+                timestamp="2026/01/10 12:00",
+            ),
+            QueryCoverageCandidate(
+                item="shoes",
+                stable_id="shoes",
+                text="User: I bought running shoes for a picnic.",
+                prior_score=0.98,
+                original_rank=3,
+                timestamp="2026/01/10 14:00",
+            ),
+            QueryCoverageCandidate(
+                item="sushi",
+                stable_id="sushi",
+                text="User: I learned about uramaki sushi rolls.",
+                prior_score=0.97,
+                original_rank=4,
+                timestamp="2026/01/10 16:00",
+            ),
+            QueryCoverageCandidate(
+                item="closet",
+                stable_id="closet",
+                text="User: I organized my closet and made a shoe list.",
+                prior_score=0.96,
+                original_rank=5,
+                timestamp="2026/01/10 18:00",
+            ),
+            QueryCoverageCandidate(
+                item="smoker",
+                stable_id="smoker",
+                text="User: I got a smoker today and want BBQ sauce recipes.",
+                prior_score=0.95,
+                original_rank=6,
+                timestamp="2026/01/10 11:00",
+            ),
+        ],
+        temporal_target=target,
+    )
+
+    assert "smoker" in [candidate.stable_id for candidate in result.ranked[:5]]
 
 
 def _rank_query_ids(query: str, texts: list[str]) -> list[str]:

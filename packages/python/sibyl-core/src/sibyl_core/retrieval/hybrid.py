@@ -25,6 +25,7 @@ from sibyl_core.retrieval.query_ranking import (
     rank_by_query_coverage,
 )
 from sibyl_core.retrieval.temporal import (
+    get_entity_timestamp,
     resolve_temporal_reference,
     temporal_boost,
     temporal_proximity_boost,
@@ -107,6 +108,8 @@ def _apply_keyword_boost(
 def _apply_query_coverage_rerank(
     query: str,
     results: list[tuple[Any, float]],
+    *,
+    temporal_target: datetime | None = None,
 ) -> tuple[list[tuple[Any, float]], bool]:
     candidates = [
         QueryCoverageCandidate(
@@ -115,10 +118,11 @@ def _apply_query_coverage_rerank(
             text=_entity_text(entity),
             prior_score=score,
             original_rank=index + 1,
+            timestamp=get_entity_timestamp(entity),
         )
         for index, (entity, score) in enumerate(results)
     ]
-    ranking = rank_by_query_coverage(query, candidates)
+    ranking = rank_by_query_coverage(query, candidates, temporal_target=temporal_target)
     if not ranking.applied:
         return results, False
     return [(ranked.item, ranked.score) for ranked in ranking.ranked], ranking.changed
@@ -580,7 +584,11 @@ async def hybrid_search(
 
     query_coverage_rerank_applied = False
     if config.apply_query_coverage_rerank and merged:
-        merged, query_coverage_rerank_applied = _apply_query_coverage_rerank(query, merged)
+        merged, query_coverage_rerank_applied = _apply_query_coverage_rerank(
+            query,
+            merged,
+            temporal_target=temporal_target,
+        )
 
     # Trim to limit
     final_results = merged[:limit]

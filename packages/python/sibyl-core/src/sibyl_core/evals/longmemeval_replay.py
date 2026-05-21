@@ -22,6 +22,7 @@ from sibyl_core.retrieval.query_ranking import (
     QueryCoverageCandidate,
     rank_by_query_coverage,
 )
+from sibyl_core.retrieval.temporal import parse_temporal_datetime, resolve_temporal_reference
 
 ReplayStrategy = Literal["identity", "heuristic", "coverage", "oracle"]
 
@@ -324,6 +325,10 @@ def rerank_longmemeval_case(
         )
     query = str(case_result.get("question") or "")
     if strategy == "coverage":
+        temporal_target = resolve_temporal_reference(
+            query,
+            parse_temporal_datetime(str(case_result.get("question_date") or "")),
+        )
         ranking = rank_by_query_coverage(
             query,
             [
@@ -333,9 +338,11 @@ def rerank_longmemeval_case(
                     text=candidate.text,
                     prior_score=candidate.score,
                     original_rank=candidate.original_rank,
+                    timestamp=candidate.timestamp,
                 )
                 for candidate in candidates
             ],
+            temporal_target=temporal_target,
         )
         return [ranked.item.session_id for ranked in ranking.ranked]
 

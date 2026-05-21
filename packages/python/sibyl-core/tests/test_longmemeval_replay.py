@@ -140,6 +140,61 @@ def test_coverage_rerank_uses_query_terms_without_answer_oracle() -> None:
     assert reranked.index("answer-session") < 5
 
 
+def test_coverage_rerank_uses_question_date_for_temporal_evidence() -> None:
+    haystack_ids = [
+        "phone-session",
+        "workshop-session",
+        "shoes-session",
+        "sushi-session",
+        "closet-session",
+        "answer-session",
+    ]
+    entry = {
+        "question_id": "q1",
+        "question_type": "temporal-reasoning",
+        "question": "What kitchen appliance did I buy 10 days ago?",
+        "question_date": "2026/01/20 12:00",
+        "answer_session_ids": ["answer-session"],
+        "haystack_session_ids": haystack_ids,
+        "haystack_dates": ["2026/01/10 12:00"] * len(haystack_ids),
+        "haystack_sessions": [
+            [{"role": "user", "content": "My Samsung phone battery has been unreliable."}],
+            [{"role": "user", "content": "I organized a sustainable living workshop."}],
+            [{"role": "user", "content": "I bought running shoes for a picnic."}],
+            [{"role": "user", "content": "I learned about uramaki sushi rolls."}],
+            [{"role": "user", "content": "I organized my closet and made a shoe list."}],
+            [
+                {
+                    "role": "user",
+                    "content": "I got a smoker today and want BBQ sauce recipes.",
+                }
+            ],
+        ],
+    }
+    case = {
+        "case_index": 0,
+        "question_id": "q1",
+        "question_type": "temporal-reasoning",
+        "question": entry["question"],
+        "question_date": entry["question_date"],
+        "answer_session_ids": ["answer-session"],
+        "ranked_session_ids": haystack_ids,
+        "ranked_results": [
+            {"longmemeval_session_id": session_id, "score": 1.0 - (index * 0.01)}
+            for index, session_id in enumerate(haystack_ids)
+        ],
+    }
+
+    reranked = rerank_longmemeval_case(
+        case,
+        entry,
+        strategy="coverage",
+        corpus_text_policy="user-and-assistant-turns-v1",
+    )
+
+    assert reranked.index("answer-session") < 5
+
+
 def test_coverage_rerank_demotes_generic_assistant_advice() -> None:
     haystack_ids = [
         "generic-session",

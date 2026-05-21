@@ -6,7 +6,9 @@ import math
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from itertools import pairwise
+from typing import Any
 
 _KEYWORD_STOPWORDS = {
     "any",
@@ -18,12 +20,14 @@ _KEYWORD_STOPWORDS = {
     "are",
     "back",
     "before",
+    "been",
     "between",
     "can",
     "checking",
     "conversation",
     "conversations",
     "could",
+    "current",
     "did",
     "different",
     "does",
@@ -32,22 +36,32 @@ _KEYWORD_STOPWORDS = {
     "earlier",
     "earliest",
     "during",
+    "day",
+    "days",
     "from",
     "for",
+    "four",
     "going",
     "have",
     "having",
     "how",
     "i'm",
+    "i've",
+    "ive",
     "into",
     "kind",
     "latest",
     "like",
+    "lately",
+    "long",
     "many",
     "mentioned",
     "more",
     "much",
+    "month",
+    "months",
     "need",
+    "one",
     "order",
     "our",
     "past",
@@ -58,6 +72,7 @@ _KEYWORD_STOPWORDS = {
     "referring",
     "remind",
     "should",
+    "significant",
     "some",
     "starting",
     "that",
@@ -66,19 +81,27 @@ _KEYWORD_STOPWORDS = {
     "thinking",
     "there",
     "they",
+    "three",
     "those",
     "this",
+    "tonight",
     "type",
     "types",
+    "two",
     "what",
     "when",
     "where",
     "which",
     "while",
+    "will",
     "with",
     "would",
     "were",
     "was",
+    "week",
+    "weeks",
+    "year",
+    "years",
     "you",
     "your",
 }
@@ -105,9 +128,12 @@ _MEMORY_CONCEPT_WEIGHT = 0.06
 _MEMORY_EVIDENCE_WEIGHT = 0.08
 _EVIDENCE_SET_WINDOW = 5
 _EVIDENCE_SET_MIN_OVERLAP = 0.25
-_EVIDENCE_SET_INSERT_MARGIN = 0.10
+_EVIDENCE_SET_INSERT_MARGIN = 0.14
 _PREFERENCE_MIN_OVERLAP = 0.25
-_PREFERENCE_INSERT_MARGIN = 0.10
+_PREFERENCE_INSERT_MARGIN = 0.12
+_TEMPORAL_EVIDENCE_MIN_SIGNAL = 0.22
+_TEMPORAL_EVIDENCE_INSERT_MARGIN = 0.10
+_TEMPORAL_TARGET_WEIGHT = 0.34
 
 _EVIDENCE_SET_QUERY_PATTERN = re.compile(
     r"\b(how many|how much|total number|number of|count of)\b",
@@ -240,8 +266,14 @@ _CONCEPT_GROUPS = (
         {
             "airfryer",
             "appliance",
+            "basil",
+            "bake",
+            "baked",
+            "baking",
             "blender",
             "cook",
+            "cooking",
+            "dessert",
             "dinner",
             "dish",
             "fresh",
@@ -272,6 +304,37 @@ _CONCEPT_GROUPS = (
             "ordered",
             "purchase",
             "purchased",
+        }
+    ),
+    frozenset(
+        {
+            "business",
+            "buisiness",
+            "client",
+            "contract",
+            "customer",
+            "freelance",
+            "milestone",
+            "signed",
+        }
+    ),
+    frozenset(
+        {
+            "bike",
+            "charity",
+            "completed",
+            "event",
+            "events",
+            "participated",
+            "ride",
+            "run",
+            "running",
+            "soccer",
+            "sport",
+            "sports",
+            "sprint",
+            "tournament",
+            "triathlon",
         }
     ),
     frozenset(
@@ -322,6 +385,7 @@ class QueryCoverageCandidate[T]:
     text: str
     prior_score: float
     original_rank: int
+    timestamp: Any = None
 
 
 @dataclass(frozen=True)
@@ -417,6 +481,8 @@ def _memory_evidence_score(memory_text: str) -> float:
 def rank_by_query_coverage[T](
     query: str,
     candidates: Sequence[QueryCoverageCandidate[T]],
+    *,
+    temporal_target: datetime | None = None,
 ) -> QueryCoverageResult[T]:
     keywords = extract_keywords(query)
     is_preference_query = _is_preference_query(query, set(keywords))
@@ -563,6 +629,16 @@ def rank_by_query_coverage[T](
             memory_segment_overlap,
             memory_concept_overlap,
         )
+        temporal_alignment = _temporal_alignment_score(candidate.timestamp, temporal_target)
+        coverage_signal = max(
+            overlap,
+            idf_overlap,
+            primary_overlap,
+            primary_segment_overlap,
+            concept_overlap,
+            primary_concept_overlap,
+            memory_relevance,
+        )
         memory_multiplier = 0.0 if is_preference_query else 1.0
         score = (
             (_RANK_WEIGHT * rank_score)
@@ -591,6 +667,7 @@ def rank_by_query_coverage[T](
                     )
                 )
             )
+            + (_TEMPORAL_TARGET_WEIGHT * temporal_alignment * coverage_signal)
         )
         if is_preference_query:
             score += _PREFERENCE_EVIDENCE_WEIGHT * _preference_evidence_score(primary_text)
@@ -606,6 +683,7 @@ def rank_by_query_coverage[T](
             or concept_overlap > 0.0
             or memory_overlap > 0.0
             or memory_concept_overlap > 0.0
+            or (temporal_alignment > 0.0 and coverage_signal > 0.0)
         )
         scored.append(
             (
@@ -614,7 +692,7 @@ def rank_by_query_coverage[T](
                     stable_id=candidate.stable_id,
                     score=score,
                     original_rank=candidate.original_rank,
-                    overlap=overlap,
+                    overlap=coverage_signal,
                 ),
                 index,
             )
@@ -631,6 +709,8 @@ def rank_by_query_coverage[T](
         ranked = _stabilize_preference_ranking(scored)
     elif _EVIDENCE_SET_QUERY_PATTERN.search(query.lower()):
         ranked = _stabilize_evidence_set_ranking(scored)
+    elif _is_temporal_instruction_query(query) and temporal_target is not None:
+        ranked = _stabilize_temporal_evidence_ranking(scored)
     elif _is_temporal_instruction_query(query):
         ranked = _rank_preserving_window(scored)
     else:
@@ -765,6 +845,53 @@ def _concept_overlap_score(query_terms: set[str], token_set: set[str]) -> float:
     return matched / relevant
 
 
+def _temporal_alignment_score(value: Any, target: datetime | None) -> float:
+    timestamp = _parse_candidate_datetime(value)
+    if timestamp is None or target is None:
+        return 0.0
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=UTC)
+    if target.tzinfo is None:
+        target = target.replace(tzinfo=UTC)
+
+    distance_days = abs((timestamp - target).total_seconds()) / 86400.0
+    if distance_days <= 1:
+        return 1.0
+    if distance_days <= 3:
+        return 0.85
+    if distance_days <= 7:
+        return 0.65
+    if distance_days <= 14:
+        return 0.35
+    return 0.0
+
+
+def _parse_candidate_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return None
+
+    cleaned = re.sub(r"\s*\([^)]+\)", "", value.strip())
+    iso_value = cleaned.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(iso_value)
+    except ValueError:
+        pass
+
+    for date_format in (
+        "%Y/%m/%d %H:%M",
+        "%Y/%m/%d",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+    ):
+        try:
+            return datetime.strptime(cleaned, date_format).replace(tzinfo=UTC)
+        except ValueError:
+            continue
+    return None
+
+
 def _rank_preserving_window[T](
     scores: list[tuple[QueryCoverageRankedCandidate[T], int]],
 ) -> list[QueryCoverageRankedCandidate[T]]:
@@ -791,6 +918,16 @@ def _stabilize_evidence_set_ranking[T](
         scores,
         min_overlap=_EVIDENCE_SET_MIN_OVERLAP,
         insert_margin=_EVIDENCE_SET_INSERT_MARGIN,
+    )
+
+
+def _stabilize_temporal_evidence_ranking[T](
+    scores: list[tuple[QueryCoverageRankedCandidate[T], int]],
+) -> list[QueryCoverageRankedCandidate[T]]:
+    return _stabilize_top_window_ranking(
+        scores,
+        min_overlap=_TEMPORAL_EVIDENCE_MIN_SIGNAL,
+        insert_margin=_TEMPORAL_EVIDENCE_INSERT_MARGIN,
     )
 
 
