@@ -13,18 +13,24 @@ _KEYWORD_STOPWORDS = {
     "about",
     "also",
     "and",
+    "after",
+    "ago",
     "are",
     "back",
+    "before",
+    "between",
     "can",
     "checking",
     "conversation",
     "conversations",
     "could",
     "did",
+    "different",
     "does",
     "discussed",
     "doing",
     "earlier",
+    "earliest",
     "during",
     "from",
     "for",
@@ -35,13 +41,16 @@ _KEYWORD_STOPWORDS = {
     "i'm",
     "into",
     "kind",
+    "latest",
     "like",
     "many",
     "mentioned",
     "more",
     "much",
     "need",
+    "order",
     "our",
+    "past",
     "please",
     "previous",
     "provided",
@@ -50,6 +59,7 @@ _KEYWORD_STOPWORDS = {
     "remind",
     "should",
     "some",
+    "starting",
     "that",
     "the",
     "think",
@@ -58,6 +68,8 @@ _KEYWORD_STOPWORDS = {
     "they",
     "those",
     "this",
+    "type",
+    "types",
     "what",
     "when",
     "where",
@@ -87,12 +99,23 @@ _PRIMARY_PERSONAL_WEIGHT = 0.04
 _CONCEPT_OVERLAP_WEIGHT = 0.08
 _PRIMARY_CONCEPT_WEIGHT = 0.06
 _PREFERENCE_EVIDENCE_WEIGHT = 0.05
+_MEMORY_SPAN_OVERLAP_WEIGHT = 0.16
+_MEMORY_SPAN_SEGMENT_WEIGHT = 0.14
+_MEMORY_CONCEPT_WEIGHT = 0.06
+_MEMORY_EVIDENCE_WEIGHT = 0.08
 _EVIDENCE_SET_WINDOW = 5
 _EVIDENCE_SET_MIN_OVERLAP = 0.25
-_EVIDENCE_SET_INSERT_MARGIN = 0.08
+_EVIDENCE_SET_INSERT_MARGIN = 0.10
 
 _EVIDENCE_SET_QUERY_PATTERN = re.compile(
     r"\b(how many|how much|total number|number of|count of)\b",
+    re.IGNORECASE,
+)
+_TEMPORAL_INSTRUCTION_QUERY_PATTERN = re.compile(
+    r"\b(?:ago|before|after|between|earliest|latest|first|last|"
+    r"recently|yesterday|today|tomorrow|order|sequence)\b"
+    r"|\bfrom (?:earliest|latest) to (?:latest|earliest)\b",
+    re.IGNORECASE,
 )
 _RECOMMENDATION_QUERY_PATTERN = re.compile(
     r"\b(recommend|suggest|advice|tips?|ideas?|serve|watch|choose|should i)\b",
@@ -151,6 +174,18 @@ _PREFERENCE_EVIDENCE_PATTERNS = (
     re.compile(r"\bi'm (?:fond of|a fan of|into|looking for|trying to find)\b"),
     re.compile(r"\bi tend to\b"),
 )
+_MEMORY_EVIDENCE_PATTERNS = (
+    re.compile(r"\bby the way\b"),
+    re.compile(r"\bi (?:just|recently|finally|already|still|used to)\b"),
+    re.compile(
+        r"\bi(?:'ve| have)? (?:bought|got|ordered|purchased|acquired|"
+        r"invested|started|finished|completed|attended|visited|"
+        r"participated|joined|met|fixed|replaced|made|baked|spent|"
+        r"worked|led|watched|read|booked|adopted|moved|graduated|"
+        r"submitted|became|had|went)\b"
+    ),
+    re.compile(r"\bmy (?:current|new|old|previous|favorite|preferred|usual|go-to)\b"),
+)
 _CONCEPT_GROUPS = (
     frozenset(
         {
@@ -169,17 +204,54 @@ _CONCEPT_GROUPS = (
     ),
     frozenset(
         {
+            "airfryer",
+            "appliance",
+            "blender",
             "cook",
             "dinner",
             "dish",
             "fresh",
+            "fryer",
             "herb",
             "homegrown",
             "ingredient",
+            "kitchen",
             "meal",
             "mint",
+            "mixer",
+            "processor",
             "recipe",
             "serve",
+            "smoker",
+        }
+    ),
+    frozenset(
+        {
+            "acquire",
+            "acquired",
+            "bought",
+            "buy",
+            "got",
+            "invest",
+            "invested",
+            "order",
+            "ordered",
+            "purchase",
+            "purchased",
+        }
+    ),
+    frozenset(
+        {
+            "appointment",
+            "clinic",
+            "dermatologist",
+            "doctor",
+            "physician",
+            "prescription",
+            "specialist",
+            "therapist",
+            "visit",
+            "visited",
         }
     ),
     frozenset(
@@ -290,6 +362,24 @@ def generic_assistant_marker_count(text: str) -> int:
     return sum(1 for pattern in _GENERIC_ASSISTANT_PATTERNS if pattern.search(text.lower()))
 
 
+def _extract_memory_evidence_text(text: str) -> tuple[str, bool]:
+    spans = [
+        span.strip()
+        for span in re.split(r"(?<=[.!?])\s+|\n+", text)
+        if span.strip() and any(pattern.search(span) for pattern in _MEMORY_EVIDENCE_PATTERNS)
+    ]
+    if spans:
+        return " ".join(spans), True
+    return "", False
+
+
+def _memory_evidence_score(memory_text: str) -> float:
+    if not memory_text:
+        return 0.0
+    matches = sum(1 for pattern in _MEMORY_EVIDENCE_PATTERNS if pattern.search(memory_text))
+    return min(1.0, matches / 3.0)
+
+
 def rank_by_query_coverage[T](
     query: str,
     candidates: Sequence[QueryCoverageCandidate[T]],
@@ -319,7 +409,11 @@ def rank_by_query_coverage[T](
             set[str],
             list[str],
             set[str],
+            list[str],
+            set[str],
             str,
+            str,
+            bool,
             bool,
         ]
     ] = []
@@ -328,6 +422,8 @@ def rank_by_query_coverage[T](
         tokens = keyword_tokens_from_text(text)
         primary_text, has_primary_text = _extract_query_focus_text(query, text)
         primary_tokens = keyword_tokens_from_text(primary_text) if has_primary_text else []
+        memory_text, has_memory_text = _extract_memory_evidence_text(primary_text)
+        memory_tokens = keyword_tokens_from_text(memory_text) if has_memory_text else []
         token_rows.append(
             (
                 candidate,
@@ -335,8 +431,12 @@ def rank_by_query_coverage[T](
                 set(tokens),
                 primary_tokens,
                 set(primary_tokens),
+                memory_tokens,
+                set(memory_tokens),
                 primary_text,
+                memory_text,
                 has_primary_text,
+                has_memory_text,
             )
         )
 
@@ -355,8 +455,12 @@ def rank_by_query_coverage[T](
         token_set,
         primary_tokens,
         primary_token_set,
+        memory_tokens,
+        memory_token_set,
         primary_text,
+        memory_text,
         has_primary_text,
+        has_memory_text,
     ) in enumerate(token_rows):
         overlap = len(query_terms & token_set) / len(query_terms)
         density = sum(1 for token in tokens if token in query_terms) / max(
@@ -384,6 +488,20 @@ def rank_by_query_coverage[T](
             if has_primary_text
             else 0.0
         )
+        memory_overlap = (
+            _weighted_overlap(memory_token_set, query_terms, term_weights)
+            if has_memory_text
+            else 0.0
+        )
+        memory_segment_overlap = (
+            _best_weighted_segment_overlap(
+                memory_tokens,
+                query_terms,
+                term_weights,
+            )
+            if has_memory_text
+            else 0.0
+        )
         phrase_score = _phrase_adjacency_score(tokens, keywords)
         if has_primary_text:
             phrase_score = max(phrase_score, _phrase_adjacency_score(primary_tokens, keywords))
@@ -391,10 +509,19 @@ def rank_by_query_coverage[T](
         primary_concept_overlap = (
             _concept_overlap_score(query_terms, primary_token_set) if has_primary_text else 0.0
         )
+        memory_concept_overlap = (
+            _concept_overlap_score(query_terms, memory_token_set) if has_memory_text else 0.0
+        )
         rank_score = 1.0 - ((candidate.original_rank - 1) / rank_span)
         normalized_prior_score = (
             candidate.prior_score / max_prior_score if candidate.prior_score > 0 else 0.0
         )
+        memory_relevance = max(
+            memory_overlap,
+            memory_segment_overlap,
+            memory_concept_overlap,
+        )
+        memory_multiplier = 0.0 if is_preference_query else 1.0
         score = (
             (_RANK_WEIGHT * rank_score)
             + (_PRIOR_WEIGHT * normalized_prior_score)
@@ -409,6 +536,19 @@ def rank_by_query_coverage[T](
             + (_primary_personal_score(primary_text) if has_primary_text else 0.0)
             + (_CONCEPT_OVERLAP_WEIGHT * concept_overlap)
             + (_PRIMARY_CONCEPT_WEIGHT * primary_concept_overlap)
+            + (
+                memory_multiplier
+                * (
+                    (_MEMORY_SPAN_OVERLAP_WEIGHT * memory_overlap)
+                    + (_MEMORY_SPAN_SEGMENT_WEIGHT * memory_segment_overlap)
+                    + (_MEMORY_CONCEPT_WEIGHT * memory_concept_overlap)
+                    + (
+                        _MEMORY_EVIDENCE_WEIGHT
+                        * _memory_evidence_score(memory_text)
+                        * memory_relevance
+                    )
+                )
+            )
         )
         if is_preference_query:
             score += _PREFERENCE_EVIDENCE_WEIGHT * _preference_evidence_score(primary_text)
@@ -422,6 +562,8 @@ def rank_by_query_coverage[T](
             or overlap > 0.0
             or density > 0.0
             or concept_overlap > 0.0
+            or memory_overlap > 0.0
+            or memory_concept_overlap > 0.0
         )
         scored.append(
             (
@@ -443,8 +585,12 @@ def rank_by_query_coverage[T](
             changed=False,
         )
 
-    if _EVIDENCE_SET_QUERY_PATTERN.search(query.lower()):
+    if is_preference_query:
+        ranked = _rank_preserving_window(scored)
+    elif _EVIDENCE_SET_QUERY_PATTERN.search(query.lower()):
         ranked = _stabilize_evidence_set_ranking(scored)
+    elif _is_temporal_instruction_query(query):
+        ranked = _rank_preserving_window(scored)
     else:
         ranked = [
             ranked for ranked, _index in sorted(scored, key=lambda item: (-item[0].score, item[1]))
@@ -557,6 +703,10 @@ def _is_assistant_evidence_query(query: str) -> bool:
     return bool(_ASSISTANT_EVIDENCE_QUERY_PATTERN.search(query))
 
 
+def _is_temporal_instruction_query(query: str) -> bool:
+    return bool(_TEMPORAL_INSTRUCTION_QUERY_PATTERN.search(query))
+
+
 def _concept_overlap_score(query_terms: set[str], token_set: set[str]) -> float:
     if not query_terms or not token_set:
         return 0.0
@@ -571,6 +721,15 @@ def _concept_overlap_score(query_terms: set[str], token_set: set[str]) -> float:
     if relevant == 0:
         return 0.0
     return matched / relevant
+
+
+def _rank_preserving_window[T](
+    scores: list[tuple[QueryCoverageRankedCandidate[T], int]],
+) -> list[QueryCoverageRankedCandidate[T]]:
+    window_size = min(_EVIDENCE_SET_WINDOW, len(scores))
+    selected = sorted(scores[:window_size], key=lambda item: (-item[0].score, item[1]))
+    tail = sorted(scores[window_size:], key=lambda item: (-item[0].score, item[1]))
+    return [ranked for ranked, _index in selected + tail]
 
 
 def _stabilize_evidence_set_ranking[T](

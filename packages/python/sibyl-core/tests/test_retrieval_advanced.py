@@ -34,7 +34,11 @@ from sibyl_core.retrieval.hybrid import (
     simple_hybrid_search,
     vector_search,
 )
-from sibyl_core.retrieval.query_ranking import extract_keywords
+from sibyl_core.retrieval.query_ranking import (
+    QueryCoverageCandidate,
+    extract_keywords,
+    rank_by_query_coverage,
+)
 from sibyl_core.services.native_graph import NativeSurrealGraphClient
 
 # =============================================================================
@@ -59,6 +63,79 @@ def test_query_coverage_keywords_keep_real_singulars() -> None:
     )
 
     assert keywords == ["data", "privacy", "exercise", "used", "resource", "company"]
+
+
+def test_query_coverage_keywords_drop_answer_shape_scaffolding() -> None:
+    keywords = extract_keywords("What type of rice is my favorite?")
+
+    assert keywords == ["rice", "favorite"]
+
+
+def test_query_coverage_promotes_favorite_fact_over_shape_words() -> None:
+    ranked = _rank_query_ids(
+        "What type of rice is my favorite?",
+        [
+            "User: I compared every type of pasta for dinner.",
+            "User: I read about different type categories for grains.",
+            "User: I need a type chart for cooking utensils.",
+            "User: This recipe mentions rice as a side dish.",
+            "User: I asked about rice cooker settings.",
+            "User: My favorite rice is Japanese short grain rice.",
+        ],
+    )
+
+    assert ranked[0] == "5"
+
+
+def test_query_coverage_preserves_preference_top_five_candidates() -> None:
+    ranked = _rank_query_ids(
+        "Can you recommend recent publications or conferences I might find interesting?",
+        [
+            "User: I asked for reading advice about machine learning.",
+            "User: I compared conference travel budgets.",
+            "User: I saved a reminder about journals.",
+            "User: I asked about papers in biology.",
+            "User: Recent advances in medical image analysis are relevant to my work.",
+            "User: Recent publications and conferences might be interesting.",
+        ],
+    )
+
+    assert "4" in ranked[:5]
+    assert "5" not in ranked[:5]
+
+
+def test_query_coverage_preserves_temporal_top_five_candidates() -> None:
+    ranked = _rank_query_ids(
+        "Which event happened first, fixing the fence or trimming the goats' hooves?",
+        [
+            "User: I fixed the fence before the storm.",
+            "User: I logged a farm supply receipt.",
+            "User: I wrote down a pasture maintenance note.",
+            "User: I planned chores around the open house.",
+            "User: I trimmed the goats' hooves two weeks ago.",
+            "User: Which event happened first is hard to infer from unrelated notes.",
+        ],
+    )
+
+    assert "4" in ranked[:5]
+    assert "5" not in ranked[:5]
+
+
+def _rank_query_ids(query: str, texts: list[str]) -> list[str]:
+    result = rank_by_query_coverage(
+        query,
+        [
+            QueryCoverageCandidate(
+                item=str(index),
+                stable_id=str(index),
+                text=text,
+                prior_score=1.0 - (index * 0.01),
+                original_rank=index + 1,
+            )
+            for index, text in enumerate(texts)
+        ],
+    )
+    return [ranked.stable_id for ranked in result.ranked]
 
 
 @dataclass
