@@ -9,18 +9,22 @@ Implements a two-phase retrieval strategy:
 from __future__ import annotations
 
 import asyncio
-import math
-import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from itertools import pairwise
 from typing import Any, TypeVar
 
 import structlog
 
 from sibyl_core.models.entities import Entity
 from sibyl_core.retrieval.fusion import rrf_merge_with_metadata
+from sibyl_core.retrieval.query_ranking import (
+    QueryCoverageCandidate,
+    extract_keywords,
+    extract_primary_text_from_text,
+    generic_assistant_marker_count,
+    rank_by_query_coverage,
+)
 from sibyl_core.retrieval.temporal import (
     resolve_temporal_reference,
     temporal_boost,
@@ -31,88 +35,6 @@ from sibyl_core.utils.log_safety import query_log_fields
 log = structlog.get_logger()
 
 T = TypeVar("T")
-
-_KEYWORD_STOPWORDS = {
-    "about",
-    "also",
-    "and",
-    "are",
-    "could",
-    "did",
-    "does",
-    "doing",
-    "during",
-    "from",
-    "for",
-    "have",
-    "having",
-    "how",
-    "into",
-    "like",
-    "many",
-    "more",
-    "much",
-    "need",
-    "please",
-    "should",
-    "that",
-    "the",
-    "there",
-    "they",
-    "this",
-    "what",
-    "when",
-    "where",
-    "which",
-    "while",
-    "with",
-    "would",
-    "your",
-}
-_QUERY_COVERAGE_RANK_WEIGHT = 0.75
-_QUERY_COVERAGE_PRIOR_WEIGHT = 0.04
-_QUERY_COVERAGE_OVERLAP_WEIGHT = 0.30
-_QUERY_COVERAGE_DENSITY_WEIGHT = 0.08
-_QUERY_COVERAGE_SEGMENT_OVERLAP_WEIGHT = 0.20
-_QUERY_COVERAGE_SEGMENT_WINDOW = 18
-_QUERY_COVERAGE_SEGMENT_STRIDE = 6
-_QUERY_COVERAGE_GENERIC_ASSISTANT_PENALTY = 0.04
-_QUERY_COVERAGE_IDF_OVERLAP_WEIGHT = 0.10
-_QUERY_COVERAGE_IDF_SEGMENT_OVERLAP_WEIGHT = 0.12
-_QUERY_COVERAGE_PRIMARY_OVERLAP_WEIGHT = 0.18
-_QUERY_COVERAGE_PRIMARY_SEGMENT_WEIGHT = 0.20
-_QUERY_COVERAGE_PHRASE_WEIGHT = 0.08
-_QUERY_COVERAGE_PRIMARY_PERSONAL_WEIGHT = 0.04
-_EVIDENCE_SET_QUERY_PATTERN = re.compile(
-    r"\b(how many|how much|total number|number of|count of)\b",
-)
-_EVIDENCE_SET_WINDOW = 6
-_EVIDENCE_SET_MIN_OVERLAP = 0.25
-_EVIDENCE_SET_INSERT_MARGIN = 0.08
-_PREFERENCE_QUERY_TERMS = {
-    "advice",
-    "advic",
-    "choose",
-    "recommend",
-    "recommendation",
-    "serve",
-    "suggest",
-    "suggestion",
-    "tip",
-}
-_GENERIC_ASSISTANT_PATTERNS = (
-    re.compile(r"\bas an ai\b"),
-    re.compile(r"\bi (?:can|cannot|can't) (?:help|assist)\b"),
-    re.compile(r"\bhere are (?:some|a few)\b"),
-)
-_TRANSCRIPT_USER_TURN_PATTERN = re.compile(
-    r"user:\s*(.*?)(?=\s+assistant:|\s+user:|$)",
-    re.IGNORECASE | re.DOTALL,
-)
-_PRIMARY_PERSONAL_PATTERN = re.compile(
-    r"\b(i|i'm|i've|i'd|me|my|mine|we|our)\b",
-    re.IGNORECASE,
-)
 
 
 def _require_group_id(group_id: str | None, operation: str) -> str:
@@ -135,26 +57,7 @@ def _resolve_group_id(entity_manager: Any, group_id: str | None) -> str:
 
 
 def _extract_keywords(query: str) -> list[str]:
-    tokens = re.findall(r"[a-zA-Z0-9][a-zA-Z0-9'-]{2,}", query.lower())
-    keywords: list[str] = []
-    seen: set[str] = set()
-    for token in tokens:
-        token = _normalize_keyword_token(token)
-        if token in _KEYWORD_STOPWORDS or token in seen:
-            continue
-        keywords.append(token)
-        seen.add(token)
-    return keywords
-
-
-def _normalize_keyword_token(token: str) -> str:
-    if len(token) > 4 and token.endswith("ies"):
-        return f"{token[:-3]}y"
-    if len(token) > 4 and token.endswith("es"):
-        return token[:-2]
-    if len(token) > 3 and token.endswith("s"):
-        return token[:-1]
-    return token
+    return extract_keywords(query)
 
 
 def _entity_text(entity: Any) -> str:
@@ -170,119 +73,13 @@ def _entity_text(entity: Any) -> str:
     return " ".join(parts).lower()
 
 
-def _entity_keyword_tokens(entity: Any) -> list[str]:
-    return _keyword_tokens_from_text(_entity_text(entity))
-
-
-def _keyword_tokens_from_text(text: str) -> list[str]:
-    return [
-        _normalize_keyword_token(token)
-        for token in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9'-]{2,}", text)
-    ]
-
-
 def _entity_primary_text(entity: Any) -> str:
-    primary_text, _has_user_turns = _extract_primary_text_from_text(_entity_text(entity))
+    primary_text, _has_user_turns = extract_primary_text_from_text(_entity_text(entity))
     return primary_text
 
 
 def _extract_primary_text_from_text(text: str) -> tuple[str, bool]:
-    user_turns = [match.group(1) for match in _TRANSCRIPT_USER_TURN_PATTERN.finditer(text)]
-    if user_turns:
-        return " ".join(user_turns), True
-    return text, False
-
-
-def _entity_primary_keyword_tokens(entity: Any) -> list[str]:
-    return _keyword_tokens_from_text(_entity_primary_text(entity))
-
-
-def _query_term_weights(
-    token_sets: list[set[str]],
-    query_terms: set[str],
-) -> dict[str, float]:
-    total = max(1, len(token_sets))
-    weights: dict[str, float] = {}
-    for term in query_terms:
-        document_frequency = sum(1 for token_set in token_sets if term in token_set)
-        weights[term] = math.log((total + 1.0) / (document_frequency + 0.5)) + 1.0
-    return weights
-
-
-def _weighted_overlap(
-    token_set: set[str],
-    query_terms: set[str],
-    term_weights: dict[str, float],
-) -> float:
-    total_weight = sum(term_weights.get(term, 1.0) for term in query_terms)
-    if not token_set or not query_terms or total_weight <= 0:
-        return 0.0
-    return sum(term_weights.get(term, 1.0) for term in query_terms & token_set) / total_weight
-
-
-def _best_segment_overlap(tokens: list[str], query_terms: set[str]) -> float:
-    if not tokens or not query_terms:
-        return 0.0
-    if len(tokens) <= _QUERY_COVERAGE_SEGMENT_WINDOW:
-        return len(query_terms & set(tokens)) / len(query_terms)
-
-    best = 0.0
-    last_start = max(0, len(tokens) - _QUERY_COVERAGE_SEGMENT_WINDOW)
-    starts = list(
-        range(
-            0,
-            last_start + 1,
-            _QUERY_COVERAGE_SEGMENT_STRIDE,
-        )
-    )
-    if starts[-1] != last_start:
-        starts.append(last_start)
-    for start in starts:
-        segment = tokens[start : start + _QUERY_COVERAGE_SEGMENT_WINDOW]
-        best = max(best, len(query_terms & set(segment)) / len(query_terms))
-    return best
-
-
-def _best_weighted_segment_overlap(
-    tokens: list[str],
-    query_terms: set[str],
-    term_weights: dict[str, float],
-) -> float:
-    if not tokens or not query_terms:
-        return 0.0
-    if len(tokens) <= _QUERY_COVERAGE_SEGMENT_WINDOW:
-        return _weighted_overlap(set(tokens), query_terms, term_weights)
-
-    best = 0.0
-    last_start = max(0, len(tokens) - _QUERY_COVERAGE_SEGMENT_WINDOW)
-    starts = list(
-        range(
-            0,
-            last_start + 1,
-            _QUERY_COVERAGE_SEGMENT_STRIDE,
-        )
-    )
-    if starts[-1] != last_start:
-        starts.append(last_start)
-    for start in starts:
-        segment = tokens[start : start + _QUERY_COVERAGE_SEGMENT_WINDOW]
-        best = max(best, _weighted_overlap(set(segment), query_terms, term_weights))
-    return best
-
-
-def _phrase_adjacency_score(tokens: list[str], query_terms: list[str]) -> float:
-    if len(tokens) < 2 or len(query_terms) < 2:
-        return 0.0
-
-    query_pairs = list(pairwise(query_terms))
-    token_pairs = set(pairwise(tokens))
-    return sum(1 for pair in query_pairs if pair in token_pairs) / len(query_pairs)
-
-
-def _primary_personal_score(primary_text: str) -> float:
-    if _PRIMARY_PERSONAL_PATTERN.search(primary_text):
-        return _QUERY_COVERAGE_PRIMARY_PERSONAL_WEIGHT
-    return 0.0
+    return extract_primary_text_from_text(text)
 
 
 def _apply_keyword_boost(
@@ -311,149 +108,20 @@ def _apply_query_coverage_rerank(
     query: str,
     results: list[tuple[Any, float]],
 ) -> tuple[list[tuple[Any, float]], bool]:
-    keywords = _extract_keywords(query)
-    if len(keywords) < 2 or len(results) < 2:
-        return results, False
-
-    query_terms = set(keywords)
-    token_rows: list[
-        tuple[Any, float, list[str], set[str], list[str], set[str], str, bool]
-    ] = []
-    for entity, prior_score in results:
-        entity_text = _entity_text(entity)
-        tokens = _keyword_tokens_from_text(entity_text)
-        primary_text, has_primary_text = _extract_primary_text_from_text(entity_text)
-        primary_tokens = _keyword_tokens_from_text(primary_text) if has_primary_text else []
-        token_rows.append(
-            (
-                entity,
-                prior_score,
-                tokens,
-                set(tokens),
-                primary_tokens,
-                set(primary_tokens),
-                primary_text,
-                has_primary_text,
-            )
+    candidates = [
+        QueryCoverageCandidate(
+            item=entity,
+            stable_id=_entity_id(entity),
+            text=_entity_text(entity),
+            prior_score=score,
+            original_rank=index + 1,
         )
-    term_weights = _query_term_weights(
-        [token_set for _entity, _prior, _tokens, token_set, *_rest in token_rows],
-        query_terms,
-    )
-    rank_span = max(1, len(results) - 1)
-    max_prior_score = max((score for _entity, score in results), default=0.0) or 1.0
-    is_preference_query = bool(query_terms & _PREFERENCE_QUERY_TERMS)
-    reranked: list[tuple[Any, float, int, float]] = []
-    has_text_signal = False
-    for index, (
-        entity,
-        prior_score,
-        tokens,
-        token_set,
-        primary_tokens,
-        primary_token_set,
-        primary_text,
-        has_primary_text,
-    ) in enumerate(token_rows):
-        overlap = len(query_terms & token_set) / len(query_terms)
-        density = sum(1 for token in tokens if token in query_terms) / max(
-            1.0,
-            len(tokens) ** 0.5,
-        )
-        segment_overlap = _best_segment_overlap(tokens, query_terms)
-        idf_overlap = _weighted_overlap(token_set, query_terms, term_weights)
-        idf_segment_overlap = _best_weighted_segment_overlap(
-            tokens,
-            query_terms,
-            term_weights,
-        )
-        primary_overlap = (
-            _weighted_overlap(primary_token_set, query_terms, term_weights)
-            if has_primary_text
-            else 0.0
-        )
-        primary_segment_overlap = (
-            _best_weighted_segment_overlap(
-                primary_tokens,
-                query_terms,
-                term_weights,
-            )
-            if has_primary_text
-            else 0.0
-        )
-        phrase_score = _phrase_adjacency_score(tokens, keywords)
-        if has_primary_text:
-            phrase_score = max(phrase_score, _phrase_adjacency_score(primary_tokens, keywords))
-        rank_score = 1.0 - (index / rank_span)
-        normalized_prior_score = prior_score / max_prior_score if prior_score > 0 else 0.0
-        score = (
-            (_QUERY_COVERAGE_RANK_WEIGHT * rank_score)
-            + (_QUERY_COVERAGE_PRIOR_WEIGHT * normalized_prior_score)
-            + (_QUERY_COVERAGE_OVERLAP_WEIGHT * overlap)
-            + (_QUERY_COVERAGE_DENSITY_WEIGHT * density)
-            + (_QUERY_COVERAGE_SEGMENT_OVERLAP_WEIGHT * segment_overlap)
-            + (_QUERY_COVERAGE_IDF_OVERLAP_WEIGHT * idf_overlap)
-            + (_QUERY_COVERAGE_IDF_SEGMENT_OVERLAP_WEIGHT * idf_segment_overlap)
-            + (_QUERY_COVERAGE_PRIMARY_OVERLAP_WEIGHT * primary_overlap)
-            + (_QUERY_COVERAGE_PRIMARY_SEGMENT_WEIGHT * primary_segment_overlap)
-            + (_QUERY_COVERAGE_PHRASE_WEIGHT * phrase_score)
-            + (_primary_personal_score(primary_text) if has_primary_text else 0.0)
-        )
-        if is_preference_query:
-            score -= (
-                _QUERY_COVERAGE_GENERIC_ASSISTANT_PENALTY
-                * _generic_assistant_marker_count(entity)
-                * (1.0 - min(1.0, overlap))
-            )
-        has_text_signal = has_text_signal or overlap > 0.0 or density > 0.0
-        reranked.append((entity, score, index, overlap))
-
-    if not has_text_signal:
-        return results, False
-
-    if _EVIDENCE_SET_QUERY_PATTERN.search(query.lower()):
-        reranked = _stabilize_evidence_set_ranking(reranked)
-    else:
-        reranked.sort(key=lambda item: (-item[1], item[2]))
-    changed = any(
-        entity is not results[index][0]
-        for index, (entity, _score, _rank, _overlap) in enumerate(reranked)
-    )
-    return [(entity, score) for entity, score, _rank, _overlap in reranked], changed
-
-
-def _stabilize_evidence_set_ranking(
-    scores: list[tuple[Any, float, int, float]],
-) -> list[tuple[Any, float, int, float]]:
-    window_size = min(_EVIDENCE_SET_WINDOW, len(scores))
-    selected = list(scores[:window_size])
-    selected_ids = {_entity_id(entity) for entity, _score, _rank, _overlap in selected}
-    ranked_by_coverage = sorted(scores, key=lambda item: (-item[1], item[2]))
-
-    for candidate in ranked_by_coverage:
-        entity, score, _rank, overlap = candidate
-        entity_id = _entity_id(entity)
-        if entity_id in selected_ids or overlap < _EVIDENCE_SET_MIN_OVERLAP:
-            continue
-
-        worst_index, worst = min(
-            enumerate(selected),
-            key=lambda item: (item[1][1], -item[1][2]),
-        )
-        worst_entity, worst_score, _worst_rank, _worst_overlap = worst
-        if score <= worst_score + _EVIDENCE_SET_INSERT_MARGIN:
-            continue
-
-        selected[worst_index] = candidate
-        selected_ids.remove(_entity_id(worst_entity))
-        selected_ids.add(entity_id)
-
-    selected = sorted(selected, key=lambda item: (-item[1], item[2]))
-    return selected + [
-        candidate
-        for candidate in ranked_by_coverage
-        if _entity_id(candidate[0]) not in selected_ids
+        for index, (entity, score) in enumerate(results)
     ]
+    ranking = rank_by_query_coverage(query, candidates)
+    if not ranking.applied:
+        return results, False
+    return [(ranked.item, ranked.score) for ranked in ranking.ranked], ranking.changed
 
 
 @dataclass
@@ -560,8 +228,7 @@ def _entity_id(entity: Any) -> str:
 
 
 def _generic_assistant_marker_count(entity: Any) -> int:
-    text = _entity_text(entity)
-    return sum(1 for pattern in _GENERIC_ASSISTANT_PATTERNS if pattern.search(text))
+    return generic_assistant_marker_count(_entity_text(entity))
 
 
 def _filter_entity_results(

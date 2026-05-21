@@ -1387,6 +1387,49 @@ class TestHybridSearch:
         assert "answer" in [entity.id for entity in result.entities]
         assert result.metadata["query_coverage_rerank_applied"] is True
 
+    @pytest.mark.asyncio
+    async def test_hybrid_search_query_coverage_uses_product_domain_aliases(
+        self,
+    ) -> None:
+        client = MockGraphClientForHybrid()
+        manager = MockEntityManagerForHybrid()
+
+        generic = make_entity_for_test(
+            "generic",
+            description="User: I saved a general app organization note.",
+        )
+        answer = make_entity_for_test(
+            "answer",
+            description=(
+                "User: I keep my portable power bank and wireless charging pad "
+                "in a travel pouch."
+            ),
+        )
+        tail = [
+            make_entity_for_test(f"tail-{index}", description="User: unrelated note.")
+            for index in range(8)
+        ]
+        manager.search_results = [
+            (generic, 1.0),
+            (answer, 0.99),
+            *[(entity, 0.8 - (index * 0.01)) for index, entity in enumerate(tail)],
+        ]
+
+        result = await hybrid_search(
+            "Any tips for better phone battery life?",
+            client,  # type: ignore[arg-type]
+            manager,  # type: ignore[arg-type]
+            limit=5,
+            config=HybridConfig(
+                graph_weight=0,
+                apply_temporal=False,
+                apply_keyword_boost=False,
+            ),
+        )
+
+        assert result.entities[0].id == "answer"
+        assert result.metadata["query_coverage_rerank_applied"] is True
+
     def test_hybrid_search_primary_text_ignores_assistant_turn_answers(self) -> None:
         entity = make_entity_for_test(
             "assistant-answer",
