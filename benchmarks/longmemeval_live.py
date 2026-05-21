@@ -219,6 +219,14 @@ def _graph_embedding_runtime_metadata() -> dict[str, Any]:
     timeout_seconds = (
         float(raw_timeout) if raw_timeout else settings.graph_embedding_timeout_seconds
     )
+    raw_search_timeout = os.environ.get(
+        "SIBYL_GRAPH_SEARCH_EMBEDDING_TIMEOUT_SECONDS", ""
+    ).strip()
+    search_timeout_seconds = (
+        float(raw_search_timeout)
+        if raw_search_timeout
+        else settings.graph_search_embedding_timeout_seconds
+    )
     if provider == "gemini":
         api_key_present = bool(
             os.environ.get("SIBYL_GEMINI_API_KEY")
@@ -242,6 +250,9 @@ def _graph_embedding_runtime_metadata() -> dict[str, Any]:
         "embedding_model": model if api_key_present else "not-applicable",
         "embedding_dimensions": dimensions if api_key_present else 0,
         "embedding_timeout_seconds": timeout_seconds if api_key_present else 0.0,
+        "query_embedding_timeout_seconds": (
+            search_timeout_seconds if api_key_present else 0.0
+        ),
         "embedding_provider_configured": provider,
         "embedding_provider_status": "enabled" if api_key_present else "missing_key",
         "tokenizer_estimate_method": "provider-default" if api_key_present else "not-applicable",

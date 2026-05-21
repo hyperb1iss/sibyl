@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import builtins
 import json
+import time
 from datetime import UTC, datetime
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -96,6 +98,26 @@ class _FailingEmbeddingProvider:
     ) -> list[list[float]]:
         del texts, input_kind
         raise TimeoutError("embedding provider stalled")
+
+
+class _SlowEmbeddingProvider:
+    metadata = NativeEmbeddingMetadata(
+        provider="deterministic",
+        model="slow-unit-test",
+        dimensions=4,
+        cache_namespace="native-graph-test",
+        tokenizer_estimate_method="unit-test",
+    )
+
+    async def embed_texts(
+        self,
+        texts: list[str],
+        *,
+        input_kind: str = "document",
+    ) -> list[list[float]]:
+        del texts, input_kind
+        await asyncio.sleep(10)
+        return [[0.1, 0.2, 0.3, 0.4]]
 
 
 @pytest.mark.asyncio
@@ -374,6 +396,29 @@ async def test_native_entity_manager_bulk_writes_without_embedding_on_provider_f
     assert rows[0]["name_embedding"] is None
     attributes = cast(dict[str, object], rows[0]["attributes"])
     assert "embedding_metadata" not in attributes
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_search_uses_short_query_embedding_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _EmbeddingWriteClient()
+    manager = NativeEntityManager(
+        cast(NativeSurrealGraphClient, client),
+        group_id=client.group_id,
+        embedding_provider=_SlowEmbeddingProvider(),
+    )
+    monkeypatch.setattr(
+        native_graph_module.settings,
+        "graph_search_embedding_timeout_seconds",
+        0.01,
+    )
+
+    started = time.perf_counter()
+    results = await manager.search(query="slow vector query", limit=5)
+
+    assert results == []
+    assert (time.perf_counter() - started) < 1
 
 
 @pytest.mark.asyncio

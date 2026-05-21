@@ -202,6 +202,12 @@ class CoreConfig(BaseSettings):
         le=600.0,
         description="Maximum time to wait for graph embedding provider calls; 0 disables timeout.",
     )
+    graph_search_embedding_timeout_seconds: float = Field(
+        default=5.0,
+        ge=0.0,
+        le=120.0,
+        description="Maximum time to wait for graph search query embeddings; 0 disables timeout.",
+    )
     graph_hnsw_efc: int = Field(
         default=150,
         ge=1,

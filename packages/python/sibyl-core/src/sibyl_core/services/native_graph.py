@@ -363,6 +363,7 @@ class NativeEntityManager:
                 [query],
                 input_kind="query",
                 operation="entity_vector_search",
+                timeout_seconds=settings.graph_search_embedding_timeout_seconds,
             )
             query_embedding = _embedding_vector_from_batch(
                 embeddings,
@@ -2315,8 +2316,13 @@ async def _embed_texts_with_timeout(
     *,
     input_kind: NativeEmbeddingInputKind,
     operation: str,
+    timeout_seconds: float | None = None,
 ) -> list[list[float]]:
-    timeout_seconds = settings.graph_embedding_timeout_seconds
+    timeout_seconds = (
+        settings.graph_embedding_timeout_seconds
+        if timeout_seconds is None
+        else timeout_seconds
+    )
     started = time.perf_counter()
     if timeout_seconds > 0:
         embeddings = await asyncio.wait_for(
@@ -2332,6 +2338,7 @@ async def _embed_texts_with_timeout(
         provider=provider.metadata.provider,
         model=provider.metadata.model,
         items=len(texts),
+        timeout_seconds=timeout_seconds,
         elapsed_ms=round((time.perf_counter() - started) * 1000, 2),
     )
     return embeddings
