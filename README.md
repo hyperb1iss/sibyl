@@ -40,13 +40,13 @@
 
 ## 🔮 Why Sibyl
 
-Sibyl is persistent memory for the coding agents that live in your terminal, the copilots you talk
-to all day, and the shared systems you build with others. One self-hostable knowledge graph, scoped
-by context. Yours to run, yours to keep.
+Sibyl is persistent memory for the coding agents in your terminal, the projects you ship with them,
+and the teams you build alongside. One self-hostable knowledge graph, scoped by context. Yours to
+run, yours to keep.
 
-Most AI sessions start cold. Coding agents forget yesterday's decisions. Voice assistants don't know
-your preferences. Personal copilots lose the thread between conversations. Notes drift, tasks
-scatter, useful context evaporates.
+Most AI sessions start cold. Coding agents forget yesterday's decisions. Notes drift between
+worktrees, tasks scatter across tools, and the context you earned the hard way evaporates the
+moment a session ends.
 
 A durable knowledge graph holds what matters: personal context, project work, shared spaces, source
 documents, decisions, agent state. Each lives in its own scope and gets tied to the others when
