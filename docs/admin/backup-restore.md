@@ -89,6 +89,7 @@ Capture the enterprise evidence bundle from a completed Kubernetes Job with:
 ```bash
 moon run enterprise-readiness-evidence -- \
   --capture-kubernetes-restore-drill sibyl-surrealdb-restore-drill-manual \
+  --kubernetes-context kind-sibyl-enterprise \
   --kubernetes-namespace sibyl \
   --manual-captured-by "$(whoami)"
 ```

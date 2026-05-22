@@ -1853,22 +1853,24 @@ def capture_restore_drill_evidence_from_kubernetes(
     namespace: str,
     job_name: str,
     container: str = "restore-drill",
+    context: str = "",
     captured_by: str,
 ) -> JsonObject:
     namespace = _require_manual_field("namespace", namespace)
     job_name = _require_manual_field("job name", job_name)
     container = _require_manual_field("container", container)
+    context = context.strip()
 
-    log_text = _kubectl_text_output(
-        [
-            "logs",
-            f"job/{job_name}",
-            "--namespace",
-            namespace,
-            "--container",
-            container,
-        ]
-    )
+    kubectl_args = [
+        *([] if not context else ["--context", context]),
+        "logs",
+        f"job/{job_name}",
+        "--namespace",
+        namespace,
+        "--container",
+        container,
+    ]
+    log_text = _kubectl_text_output(kubectl_args)
     receipt = _restore_drill_receipt_from_log(log_text)
 
     source_dir = evidence_dir / "kubernetes_restore_drill"
@@ -3681,6 +3683,7 @@ def _handle_kubernetes_restore_drill_capture(
     namespace: str,
     job_name: str,
     container: str,
+    context: str,
     captured_by: str,
 ) -> int:
     try:
@@ -3689,6 +3692,7 @@ def _handle_kubernetes_restore_drill_capture(
             namespace=namespace,
             job_name=job_name,
             container=container,
+            context=context,
             captured_by=captured_by,
         )
     except EvidenceFailure as exc:
@@ -3759,6 +3763,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--capture-kubernetes-restore-drill")
     parser.add_argument("--kubernetes-namespace", default="default")
     parser.add_argument("--kubernetes-container", default="restore-drill")
+    parser.add_argument("--kubernetes-context", default="")
     parser.add_argument("--capture-manual-evidence")
     parser.add_argument("--manual-artifact", type=Path, action="append", default=[])
     parser.add_argument("--manual-runtime", default="")
@@ -3851,6 +3856,7 @@ def _dispatch_capture_command(args: argparse.Namespace) -> int | None:
             namespace=args.kubernetes_namespace,
             job_name=args.capture_kubernetes_restore_drill,
             container=args.kubernetes_container,
+            context=args.kubernetes_context,
             captured_by=args.manual_captured_by,
         )
     elif args.capture_manual_evidence is not None:

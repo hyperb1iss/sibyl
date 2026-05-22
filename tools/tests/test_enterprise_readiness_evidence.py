@@ -1680,6 +1680,45 @@ def test_capture_restore_drill_evidence_from_kubernetes_logs(
     assert json.loads(source_receipt.read_text(encoding="utf-8"))["runtime"].startswith("kind/")
 
 
+def test_capture_restore_drill_evidence_from_kubernetes_uses_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    payload = _restore_drill_payload()
+    log_text = "\n".join(
+        [
+            evidence.RESTORE_RECEIPT_LOG_BEGIN,
+            json.dumps(payload),
+            evidence.RESTORE_RECEIPT_LOG_END,
+        ]
+    )
+
+    def fake_kubectl_text_output(args: list[str]) -> str:
+        assert args == [
+            "--context",
+            "kind-sibyl-enterprise",
+            "logs",
+            "job/restore-job",
+            "--namespace",
+            "sibyl-restore",
+            "--container",
+            "restore-drill",
+        ]
+        return log_text
+
+    monkeypatch.setattr(evidence, "_kubectl_text_output", fake_kubectl_text_output)
+
+    receipt = evidence.capture_restore_drill_evidence_from_kubernetes(
+        tmp_path / "evidence",
+        namespace="sibyl-restore",
+        job_name="restore-job",
+        context="kind-sibyl-enterprise",
+        captured_by="Nova",
+    )
+
+    assert receipt["status"] == "PASS"
+
+
 def test_capture_restore_drill_evidence_from_kubernetes_requires_log_markers(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1793,12 +1832,14 @@ def test_main_capture_kubernetes_restore_drill(
         namespace: str,
         job_name: str,
         container: str,
+        context: str,
         captured_by: str,
     ) -> dict[str, Any]:
         assert evidence_dir == tmp_path / "evidence"
         assert namespace == "sibyl-restore"
         assert job_name == "restore-job"
         assert container == "restore-drill"
+        assert context == "kind-sibyl-enterprise"
         assert captured_by == "Nova"
         return {
             "schema_version": evidence.SCHEMA_VERSION,
@@ -1820,6 +1861,8 @@ def test_main_capture_kubernetes_restore_drill(
             "restore-job",
             "--kubernetes-namespace",
             "sibyl-restore",
+            "--kubernetes-context",
+            "kind-sibyl-enterprise",
             "--manual-captured-by",
             "Nova",
         ]
