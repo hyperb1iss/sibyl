@@ -77,6 +77,14 @@ def test_query_coverage_keywords_drop_temporal_chatter() -> None:
     assert keywords == ["working", "role"]
 
 
+def test_query_coverage_keywords_strip_quoted_answer_terms() -> None:
+    keywords = extract_keywords(
+        "Which book did I finish reading first, 'The Hate U Give' or 'The Nightingale'?"
+    )
+
+    assert keywords == ["book", "finish", "reading", "first", "hate", "give", "nightingale"]
+
+
 def test_query_coverage_promotes_favorite_fact_over_shape_words() -> None:
     ranked = _rank_query_ids(
         "What type of rice is my favorite?",
@@ -104,6 +112,22 @@ def test_query_coverage_rescues_strong_preference_tail_candidate() -> None:
             "User: I updated calendar reminders.",
             "User: My phone battery lasts longer when I carry a portable power bank "
             "and wireless charging pad.",
+        ],
+    )
+
+    assert "5" in ranked[:5]
+
+
+def test_query_coverage_promotes_phone_accessory_evidence() -> None:
+    ranked = _rank_query_ids(
+        "Can you suggest some useful accessories for my phone?",
+        [
+            "User: I asked for advice about cat chew toys.",
+            "User: I bought gaming accessories for a PS5.",
+            "User: I asked for healthy lunch ideas.",
+            "User: I wanted outfit inspiration for white sneakers.",
+            "User: I compared smart light bulb brands.",
+            "User: I need a new screen protector for my iPhone 13 Pro.",
         ],
     )
 
@@ -253,6 +277,98 @@ def test_query_coverage_promotes_age_arithmetic_evidence_set() -> None:
     )
 
     assert {"2", "3"} <= set(ranked[:5])
+
+
+def test_query_coverage_promotes_personal_sports_event_with_temporal_target() -> None:
+    target = datetime(2023, 6, 17, tzinfo=UTC)
+    result = rank_by_query_coverage(
+        "I mentioned participating in a sports event two weeks ago. What was the event?",
+        [
+            QueryCoverageCandidate(
+                item="social",
+                stable_id="social",
+                text="User: I organized a social event with games.",
+                prior_score=1.0,
+                original_rank=1,
+                timestamp="2023/06/17 20:20",
+            ),
+            QueryCoverageCandidate(
+                item="beach",
+                stable_id="beach",
+                text="User: I planned a family beach trip.",
+                prior_score=0.99,
+                original_rank=2,
+                timestamp="2023/06/17 11:56",
+            ),
+            QueryCoverageCandidate(
+                item="food",
+                stable_id="food",
+                text="User: I planned a food festival booth.",
+                prior_score=0.98,
+                original_rank=3,
+                timestamp="2023/06/17 18:00",
+            ),
+            QueryCoverageCandidate(
+                item="coins",
+                stable_id="coins",
+                text="User: I researched a coin collecting event.",
+                prior_score=0.97,
+                original_rank=4,
+                timestamp="2023/06/17 21:40",
+            ),
+            QueryCoverageCandidate(
+                item="shoes",
+                stable_id="shoes",
+                text="User: I compared running shoe cushioning.",
+                prior_score=0.96,
+                original_rank=5,
+                timestamp="2023/06/17 10:00",
+            ),
+            QueryCoverageCandidate(
+                item="soccer",
+                stable_id="soccer",
+                text="User: I will participate in the company charity soccer tournament today.",
+                prior_score=0.92,
+                original_rank=6,
+                timestamp="2023/06/17 15:20",
+            ),
+        ],
+        temporal_target=target,
+    )
+
+    assert "soccer" in [candidate.stable_id for candidate in result.ranked[:5]]
+
+
+def test_query_coverage_promotes_business_milestone_evidence() -> None:
+    ranked = _rank_query_ids(
+        "What was the significant business milestone I mentioned four weeks ago?",
+        [
+            "User: I organized my task list and project notes.",
+            "User: I read articles about European politics.",
+            "User: I launched my website and created a business plan outline.",
+            "User: I asked about indoor plants.",
+            "User: I signed a contract with my first freelance client today.",
+        ],
+    )
+
+    assert {"2", "4"} <= set(ranked[:5])
+
+
+def test_query_coverage_keeps_specific_social_activity_evidence() -> None:
+    ranked = _rank_query_ids(
+        "Which event happened first, my participation in the #PlankChallenge "
+        "or my post about vegan chili recipe?",
+        [
+            "User: I posted photos from a racing event on Instagram.",
+            "User: I shared a vegan chili recipe using #FoodieAdventures.",
+            "User: I participated in a social media challenge called #PlankChallenge.",
+            "User: I asked for sourdough recipe headings.",
+            "User: I planned vegetarian protein meals.",
+            "User: I watched a new TV show.",
+        ],
+    )
+
+    assert {"1", "2"} <= set(ranked[:5])
 
 
 def _rank_query_ids(query: str, texts: list[str]) -> list[str]:

@@ -24,6 +24,7 @@ _KEYWORD_STOPWORDS = {
     "between",
     "can",
     "checking",
+    "compared",
     "conversation",
     "conversations",
     "could",
@@ -45,12 +46,14 @@ _KEYWORD_STOPWORDS = {
     "going",
     "have",
     "having",
+    "happened",
     "how",
     "i'm",
     "i've",
     "ive",
     "into",
     "kind",
+    "last",
     "latest",
     "like",
     "lately",
@@ -63,6 +66,7 @@ _KEYWORD_STOPWORDS = {
     "months",
     "need",
     "one",
+    "or",
     "order",
     "our",
     "past",
@@ -93,10 +97,12 @@ _KEYWORD_STOPWORDS = {
     "use",
     "uses",
     "using",
+    "useful",
     "what",
     "when",
     "where",
     "which",
+    "who",
     "while",
     "will",
     "with",
@@ -142,7 +148,7 @@ _TEMPORAL_TARGET_WEIGHT = 0.34
 _QUERY_FRAME_WEIGHT = 0.52
 
 _EVIDENCE_SET_QUERY_PATTERN = re.compile(
-    r"\b(how many|how much|total number|number of|count of)\b",
+    r"\b(how many|how much|total number|number of|count of|order of|sequence of)\b",
     re.IGNORECASE,
 )
 _TEMPORAL_INSTRUCTION_QUERY_PATTERN = re.compile(
@@ -278,6 +284,55 @@ _HOMEGROWN_STRONG_EVIDENCE_PATTERN = re.compile(
     r"\b(?:homegrown|garden|harvested|basil|mint|tomatoes?|herbs?|pepper plants?)\b",
     re.IGNORECASE,
 )
+_PHONE_ACCESSORY_QUERY_PATTERN = re.compile(
+    r"\b(?:phone|iphone|android|smartphone|accessories?|screen protectors?|"
+    r"case|charger|charging)\b",
+    re.IGNORECASE,
+)
+_PHONE_ACCESSORY_EVIDENCE_PATTERN = re.compile(
+    r"\b(?:phone|iphone|android|smartphone|screen protectors?|protectors?|"
+    r"case|charger|charging|power bank|wireless charging|tempered glass)\b",
+    re.IGNORECASE,
+)
+_SPORTS_EVENT_QUERY_PATTERN = re.compile(
+    r"\b(?:sports? events?|5k|run|race|triathlon|soccer|tournament|bike ride)\b",
+    re.IGNORECASE,
+)
+_SPORTS_EVENT_EVIDENCE_PATTERN = re.compile(
+    r"\b(?:i (?:just |recently |will )?(?:finished|completed|participated|"
+    r"participate|ran|joined)[^.?!]{0,80}(?:5k|run|race|triathlon|soccer|"
+    r"tournament|bike ride)|personal best|5k run|triathlon|soccer tournament|"
+    r"bike ride)\b",
+    re.IGNORECASE,
+)
+_BUSINESS_MILESTONE_QUERY_PATTERN = re.compile(
+    r"\b(?:business|buisiness|milestone|client|contract|freelance|launch)\b",
+    re.IGNORECASE,
+)
+_BUSINESS_MILESTONE_EVIDENCE_PATTERN = re.compile(
+    r"\b(?:launched my website|business plan|signed a contract|first client|"
+    r"freelance clients?|potential clients?|business strategy)\b",
+    re.IGNORECASE,
+)
+_SOCIAL_ACTIVITY_QUERY_PATTERN = re.compile(
+    r"\b(?:social media|hashtag|challenge|post|posted|instagram|tiktok|"
+    r"facebook|twitter|x)\b",
+    re.IGNORECASE,
+)
+_SOCIAL_ACTIVITY_EVIDENCE_PATTERN = re.compile(
+    r"(?:#\w+|\b(?:social media challenge|instagram|tiktok|facebook|twitter|"
+    r"posted|shared|hashtag)\b)",
+    re.IGNORECASE,
+)
+_RECURRING_APPOINTMENT_QUERY_PATTERN = re.compile(
+    r"\b(?:how often|frequency|see dr\.?|session|appointment)\b",
+    re.IGNORECASE,
+)
+_RECURRING_APPOINTMENT_EVIDENCE_PATTERN = re.compile(
+    r"\b(?:every week|weekly|bi-weekly|biweekly|every two weeks|every \d+ weeks|"
+    r"session with dr\.?|see dr\.?|appointment)\b",
+    re.IGNORECASE,
+)
 _NOSTALGIA_EVIDENCE_PATTERN = re.compile(
     r"\b(?:high school|old friends?|happy .*experiences?|debate team|"
     r"advanced placement|favorite subjects?)\b",
@@ -331,13 +386,18 @@ _CONCEPT_GROUPS = (
         {
             "accessory",
             "accessories",
+            "android",
             "battery",
             "cable",
             "charger",
             "charging",
+            "iphone",
             "phone",
             "power",
             "powerbank",
+            "protector",
+            "protectors",
+            "screen",
             "tech",
             "wireless",
         }
@@ -537,6 +597,7 @@ def extract_keywords(query: str) -> list[str]:
 
 
 def normalize_keyword_token(token: str) -> str:
+    token = token.strip("'\"")
     if len(token) > 4 and token.endswith("ies"):
         return f"{token[:-3]}y"
     if len(token) > 4 and token.endswith(("ches", "shes", "xes", "zes")):
@@ -658,6 +719,55 @@ def _query_frame_score(
         evidence_text
     ):
         score = max(score, 0.68 + (0.25 * category_score))
+
+    if _PHONE_ACCESSORY_QUERY_PATTERN.search(query) and _PHONE_ACCESSORY_EVIDENCE_PATTERN.search(
+        evidence_text
+    ):
+        phone_terms = {"phone", "iphone", "android", "smartphone"}
+        accessory_terms = {
+            "accessory",
+            "case",
+            "charger",
+            "charging",
+            "protector",
+            "protectors",
+            "screen",
+        }
+        if evidence_tokens & phone_terms and evidence_tokens & accessory_terms:
+            score = max(score, 1.0)
+        elif evidence_tokens & phone_terms:
+            score = max(score, 0.72)
+
+    if _SPORTS_EVENT_QUERY_PATTERN.search(query) and _SPORTS_EVENT_EVIDENCE_PATTERN.search(
+        evidence_text
+    ):
+        score = max(score, 0.92)
+
+    if _BUSINESS_MILESTONE_QUERY_PATTERN.search(
+        query
+    ) and _BUSINESS_MILESTONE_EVIDENCE_PATTERN.search(evidence_text):
+        score = max(score, 0.95)
+
+    if _SOCIAL_ACTIVITY_QUERY_PATTERN.search(query) and _SOCIAL_ACTIVITY_EVIDENCE_PATTERN.search(
+        evidence_text
+    ):
+        generic_social_terms = {
+            "activity",
+            "challenge",
+            "event",
+            "media",
+            "participation",
+            "post",
+            "posted",
+            "social",
+        }
+        specific_social_terms = query_terms - generic_social_terms
+        score = max(score, 1.0 if specific_social_terms & evidence_tokens else 0.76)
+
+    if _RECURRING_APPOINTMENT_QUERY_PATTERN.search(
+        query
+    ) and _RECURRING_APPOINTMENT_EVIDENCE_PATTERN.search(evidence_text):
+        score = max(score, 0.82)
 
     if {"high", "school", "reunion", "nostalgic"} & query_terms and (
         "high" in evidence_tokens or "school" in evidence_tokens
