@@ -73,6 +73,18 @@ These commands were run from `/Users/bliss/dev/sibyl`.
 | Docs                   | User/admin docs exist, are linked from VitePress nav, and pass `docs:lint` plus `docs:build`.                                                                                                                                                                                                                                            | Automated proof exists.                                                                                                                                                                                                                                                             |
 | Security review packet | This file is the packet shell with local receipts and explicit missing external evidence. `enterprise-readiness-evidence` validates the final external artifact bundle and rejects stale generated package-lock and rendered Helm receipts.                                                                                              | Partial. Rendered Helm manifests, Claude Code MCP smoke, audit export sample, and package lock diff are captured locally; still needs IdP role-claim evidence, backup drill receipt from a cluster, Cursor/Desktop MCP smoke, and image SBOM/signature receipts from a release run. |
 
+## Current Environment Preflight
+
+These read-only probes were run from `/Users/bliss/dev/sibyl` on 2026-05-22 to identify which
+remaining external receipts can be captured from the current machine.
+
+| Surface             | Command                                                                                                                         | Receipt                                                                                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop MCP clients | `/bin/ls -1 /Applications`; `/bin/ls -1 "$HOME/Applications"`; targeted `find` for Cursor/Claude config directories             | `Codex.app`, `Visual Studio Code.app`, and `Claude Code URL Handler.app` are present; Cursor and Claude Desktop app/configs are absent         |
+| Local Kubernetes    | `kubectl --context orbstack get ns`                                                                                             | expected exit `1`; `127.0.0.1:26443` refused the connection                                                                                    |
+| Remote Kubernetes   | `kubectl config current-context`; `kubectl --context eks-us-west-2-int get ns sibyl restore enterprise`                         | current context is `eks-us-west-2-int`; `sibyl`, `restore`, and `enterprise` namespaces are not present                                        |
+| Release evidence    | `gh run list --repo hyperb1iss/sibyl --workflow publish.yml --limit 1 --json ...`; release-evidence preflight for `25999961892` | latest successful publish run is `25999961892` from `2026-05-17`; preflight fails because security/signing jobs and SBOM artifacts are missing |
+
 ## External Evidence Still Required
 
 The following cannot be proven from this local repository alone:
