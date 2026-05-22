@@ -93,7 +93,7 @@ def test_nightly_regression_uploads_candidate_sha_receipts() -> None:
     assert "backup-restore-gate-receipt-${{ github.sha }}" in workflow
     assert "candidate_sha=${GITHUB_SHA}" in workflow
     assert "run_id=${GITHUB_RUN_ID}" in workflow
-    assert "- cron: \"0 10 * * 1\"" in workflow
+    assert '- cron: "0 10 * * 1"' in workflow
     assert "Run backup restore-to-scratch gate" in workflow
     assert "moon run backup-restore-gate" in workflow
 

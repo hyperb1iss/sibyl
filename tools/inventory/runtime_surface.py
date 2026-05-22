@@ -273,6 +273,11 @@ ARCHITECTURE_LEGACY_TERM_FILES = (
     "docs/architecture/SIBYL_REFLECTION_OS_PLAN.md",
     "docs/architecture/TASKIQ_MIGRATION_PLAN.md",
 )
+ENTERPRISE_LEGACY_TERM_FILES = (
+    "docs/admin/installing.md",
+    "docs/architecture/ENTERPRISE_READINESS_PLAN_2026-05-21.md",
+    "docs/users/sharing-memory.md",
+)
 GUIDE_LEGACY_TERM_FILES = (
     "docs/guide/capturing-knowledge.md",
     "docs/guide/claude-code.md",
@@ -329,14 +334,14 @@ APP_LEGACY_TERM_FILES = (
     "apps/cli/src/sibyl_cli/data/skill-packs/examples.md",
     "apps/cli/src/sibyl_cli/data/skill-packs/migration.md",
 )
-SKILL_SOURCE_LEGACY_TERM_FILES = (
-    "skills/agent-activity-audit/EXAMPLES.md",
-)
+SKILL_SOURCE_LEGACY_TERM_FILES = ("skills/agent-activity-audit/EXAMPLES.md",)
 DEPLOYMENT_CONFIG_LEGACY_TERM_FILES = (
     "apps/api/pyproject.toml",
     "charts/sibyl/Chart.yaml",
     "charts/sibyl/templates/backend-deployment.yaml",
+    "charts/sibyl/templates/bootstrap-job.yaml",
     "charts/sibyl/templates/configmap.yaml",
+    "charts/sibyl/templates/networkpolicy.yaml",
     "charts/sibyl/templates/redis-secret.yaml",
     "charts/sibyl/templates/worker-deployment.yaml",
     "charts/sibyl/values.yaml",
@@ -434,6 +439,11 @@ LEGACY_TERM_ALLOWLIST = (
         ARCHITECTURE_LEGACY_TERM_FILES,
         owner="v0.8 architecture",
         reason="Architecture and release plans preserve migration, benchmark, and compatibility history.",
+    ),
+    *legacy_term_allowlist_records(
+        ENTERPRISE_LEGACY_TERM_FILES,
+        owner="enterprise readiness",
+        reason="Enterprise docs mention legacy services only as migration context or optional coordination.",
     ),
     *legacy_term_allowlist_records(
         GUIDE_LEGACY_TERM_FILES,

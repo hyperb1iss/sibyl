@@ -491,7 +491,7 @@ def test_dependency_inventory_covers_legacy_and_target_stack() -> None:
     assert (
         "apps/api/pyproject.toml",
         "default",
-        "surrealdb>=1.0.8,<3.0",
+        "surrealdb>=2.0.0,<3.0",
         "target",
     ) in dependencies
 

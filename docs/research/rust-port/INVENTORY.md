@@ -12,7 +12,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - Raw SQL query usage files: 0
 - Session-backed storage access files: 0
 - Graphiti import files: 0
-- Retained legacy term files: 88
+- Retained legacy term files: 93
 - Dependency records: 3
 
 ## API Surface
@@ -102,18 +102,21 @@ must carry an owner and reason here.
 | `apps/api/examples/README.md` | `valkey` | 1 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
 | `apps/api/pyproject.toml` | `redis` | 2 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
 | `apps/cli/README.md` | `redis` | 1 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
-| `apps/cli/src/sibyl_cli/data/skill-packs/core.md` | `falkor`, `postgres`, `redis` | 12 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
+| `apps/cli/src/sibyl_cli/data/skill-packs/core.md` | `falkor`, `postgres`, `redis` | 10 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
 | `apps/cli/src/sibyl_cli/data/skill-packs/examples.md` | `redis` | 3 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
 | `apps/cli/src/sibyl_cli/data/skill-packs/migration.md` | `falkor`, `graphiti`, `postgres`, `redis` | 75 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
 | `charts/sibyl/Chart.yaml` | `valkey` | 1 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
 | `charts/sibyl/templates/backend-deployment.yaml` | `redis` | 6 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
+| `charts/sibyl/templates/bootstrap-job.yaml` | `redis` | 6 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
 | `charts/sibyl/templates/configmap.yaml` | `redis` | 13 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
+| `charts/sibyl/templates/networkpolicy.yaml` | `redis` | 6 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
 | `charts/sibyl/templates/redis-secret.yaml` | `redis` | 8 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
 | `charts/sibyl/templates/worker-deployment.yaml` | `redis` | 6 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
-| `charts/sibyl/values.yaml` | `redis`, `valkey` | 17 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
+| `charts/sibyl/values.yaml` | `redis`, `valkey` | 20 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
 | `docker-compose.prod.yml` | `falkor`, `redis`, `valkey` | 20 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
 | `docker-compose.quickstart.yml` | `falkor`, `redis`, `valkey` | 20 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
 | `docker-compose.yml` | `redis`, `valkey` | 11 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
+| `docs/admin/installing.md` | `redis`, `valkey` | 8 | enterprise readiness | Enterprise docs mention legacy services only as migration context or optional coordination. |
 | `docs/api/auth-authorization.md` | `postgres` | 4 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/api/index.md` | `redis` | 1 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/api/mcp-add.md` | `falkor`, `graphiti`, `postgres`, `redis` | 11 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
@@ -122,6 +125,7 @@ must carry an owner and reason here.
 | `docs/api/rest-memory.md` | `postgres` | 1 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/api/rest-projects.md` | `postgres`, `redis` | 5 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/api/rest-tasks.md` | `redis` | 1 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
+| `docs/architecture/ENTERPRISE_READINESS_PLAN_2026-05-21.md` | `graphiti`, `valkey` | 5 | enterprise readiness | Enterprise docs mention legacy services only as migration context or optional coordination. |
 | `docs/architecture/PACKAGING_PLAN_2026-05-19.md` | `falkor`, `postgres`, `redis`, `valkey` | 10 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/PERMISSION_SYSTEM_AUDIT.md` | `falkor`, `postgres` | 23 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/SIBYL_1_0_RC_PLAN.md` | `graphiti`, `redis` | 30 | v1.0 RC evidence freeze | Active RC plan names legacy terms only as blockers, evidence boundaries, and optional coordination risks. |
@@ -167,6 +171,7 @@ must carry an owner and reason here.
 | `docs/guide/working-with-agents.md` | `redis` | 6 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/index.md` | `redis` | 2 | v0.8 docs | Top-level docs mention current Surreal default and historical migration context. |
 | `docs/testing/benchmark-methodology.md` | `falkor`, `graphiti`, `postgres` | 8 | benchmark evidence | Benchmark comparison flow names historical migration rehearsal mode. |
+| `docs/users/sharing-memory.md` | `postgres` | 2 | enterprise readiness | Enterprise docs mention legacy services only as migration context or optional coordination. |
 | `infra/local/README.md` | `redis`, `valkey` | 12 | local Kubernetes/Tilt dev | Local Tilt and Helm dev keep Redis/Valkey as explicit coordination while Surreal owns data. |
 | `infra/local/secrets.yaml.example` | `redis`, `valkey` | 2 | dev env templates | Environment templates keep legacy ports, migration knobs, and optional Redis/Valkey secrets. |
 | `infra/local/sibyl-values.yaml` | `redis`, `valkey` | 4 | local Kubernetes/Tilt dev | Local Tilt and Helm dev keep Redis/Valkey as explicit coordination while Surreal owns data. |
