@@ -272,6 +272,12 @@ class Settings(BaseSettings):
                 )
         return self
 
+    @model_validator(mode="after")
+    def apply_auth_defaults(self) -> "Settings":
+        if "local_auth_enabled" not in self.model_fields_set and self.environment == "development":
+            object.__setattr__(self, "local_auth_enabled", True)
+        return self
+
     jwt_secret: SecretStr = Field(
         default=SecretStr(""),
         description="JWT signing secret (required for auth)",

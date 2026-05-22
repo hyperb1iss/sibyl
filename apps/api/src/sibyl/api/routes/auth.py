@@ -75,7 +75,7 @@ SIGNUP_DISABLED_DETAIL = {
 }
 LOCAL_AUTH_DISABLED_DETAIL = {
     "code": "local_auth_disabled",
-    "message": "Local username/password auth is disabled for this instance.",
+    "message": "Local sign-in is disabled for this instance.",
 }
 BREAK_GLASS_EXPIRED_DETAIL = {
     "code": "break_glass_expired",
@@ -1379,9 +1379,7 @@ async def device_verify_post(request: Request) -> Response:
 
     if action == "login":
         await _require_local_auth_allowed(request)
-        break_glass_reason = _require_break_glass_reason(
-            str(form.get("break_glass_reason") or "")
-        )
+        break_glass_reason = _require_break_glass_reason(str(form.get("break_glass_reason") or ""))
         email = str(form.get("email") or "").strip()
         password = str(form.get("password") or "").strip()
         login = await login_device_browser_user(

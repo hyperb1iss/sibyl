@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
+from sibyl.api.errors import http_exception_payload
 from sibyl.api.routes import auth as auth_routes
 from sibyl_core.auth import AuthContext, AuthOrganization, AuthUser, OrganizationRole
 
@@ -465,6 +466,11 @@ async def test_local_login_respects_enterprise_flag(monkeypatch: pytest.MonkeyPa
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail["code"] == "local_auth_disabled"
+    assert http_exception_payload(exc_info.value, "req_local_auth") == {
+        "error": "local_auth_disabled",
+        "message": "Local sign-in is disabled for this instance.",
+        "request_id": "req_local_auth",
+    }
     login.assert_not_awaited()
 
 

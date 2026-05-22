@@ -136,10 +136,47 @@ def test_settings_mcp_auth_mode_default() -> None:
     assert s.mcp_auth_mode == "auto"
 
 
-def test_settings_oidc_defaults_to_enterprise_contract() -> None:
+def test_settings_auth_defaults_keep_development_login_available() -> None:
     s = Settings(_env_file=None)
 
+    assert s.local_auth_enabled is True
+    assert s.break_glass_enabled is False
+    assert s.oidc.providers == []
+
+
+def test_settings_auth_defaults_keep_production_local_login_disabled() -> None:
+    s = Settings(
+        _env_file=None,
+        environment="production",
+        store="surreal",
+        auth_store="surreal",
+        surreal_url="ws://surrealdb:8000/rpc",
+        surreal_username="sibyl_admin",
+        surreal_password="really_secure_password",
+    )
+
     assert s.local_auth_enabled is False
+    assert s.break_glass_enabled is False
+    assert s.oidc.providers == []
+
+
+def test_settings_explicit_local_auth_override_is_respected() -> None:
+    s = Settings(_env_file=None, local_auth_enabled=False)
+
+    assert s.local_auth_enabled is False
+
+
+def test_settings_oidc_defaults_to_enterprise_contract() -> None:
+    s = Settings(
+        _env_file=None,
+        environment="production",
+        store="surreal",
+        auth_store="surreal",
+        surreal_url="ws://surrealdb:8000/rpc",
+        surreal_username="sibyl_admin",
+        surreal_password="really_secure_password",
+    )
+
     assert s.break_glass_enabled is False
     assert s.break_glass_allowed_ips == []
     assert s.break_glass_expires_at is None

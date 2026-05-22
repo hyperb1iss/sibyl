@@ -285,7 +285,9 @@ def safe_error_payload(
 def http_exception_payload(exc: HTTPException, request_id: str) -> dict[str, object]:
     detail = exc.detail
     if isinstance(detail, dict):
-        raw_error = str(detail.get("error") or _error_code_for_status(exc.status_code))
+        raw_error = str(
+            detail.get("error") or detail.get("code") or _error_code_for_status(exc.status_code)
+        )
         raw_message = str(detail.get("message") or _message_for_status(exc.status_code))
         raw_remediation = detail.get("remediation")
         raw_details = detail.get("details")
