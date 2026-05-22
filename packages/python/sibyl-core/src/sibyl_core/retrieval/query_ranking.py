@@ -121,10 +121,20 @@ _KEYWORD_STOPWORDS = {
     "your",
 }
 _NORMALIZED_TOKEN_ALIASES = {
+    "assembled": "assemble",
+    "assembling": "assemble",
     "engaged": "engagement",
     "engagements": "engagement",
+    "presented": "present",
+    "presenting": "present",
+    "relied": "rely",
+    "relying": "rely",
+    "sold": "sell",
+    "selling": "sell",
     "subscribed": "subscription",
     "subscribing": "subscription",
+    "volunteered": "volunteer",
+    "volunteering": "volunteer",
     "weddings": "wedding",
 }
 _RANK_WEIGHT = 0.95
@@ -152,6 +162,7 @@ _ASSISTANT_ONLY_MEMORY_PENALTY = 1.20
 _EVIDENCE_SET_WINDOW = 5
 _EVIDENCE_SET_MIN_OVERLAP = 0.25
 _EVIDENCE_SET_INSERT_MARGIN = 0.14
+_EVIDENCE_SET_SIGNAL_DOMINANCE_SCORE_MARGIN = 0.25
 _PREFERENCE_MIN_OVERLAP = 0.25
 _PREFERENCE_INSERT_MARGIN = 0.03
 _TEMPORAL_EVIDENCE_MIN_SIGNAL = 0.22
@@ -400,7 +411,8 @@ _RECURRING_APPOINTMENT_QUERY_PATTERN = re.compile(
 )
 _RECURRING_APPOINTMENT_EVIDENCE_PATTERN = re.compile(
     r"\b(?:every week|weekly|bi-weekly|biweekly|every two weeks|every \d+ weeks|"
-    r"session with dr\.?|see dr\.?|appointment)\b",
+    r"twice a week|twice weekly|daily|monthly|yoga classes?|session with dr\.?|"
+    r"see dr\.?|appointment)\b",
     re.IGNORECASE,
 )
 _DOCTOR_VISIT_QUERY_PATTERN = re.compile(
@@ -498,7 +510,8 @@ _MEMORY_EVIDENCE_PATTERNS = (
         r"invested|started|finished|completed|attended|visited|"
         r"participated|joined|met|fixed|replaced|made|baked|spent|"
         r"worked|led|watched|read|booked|adopted|moved|graduated|"
-        r"submitted|became|had|went)\b"
+        r"submitted|became|had|went|assembled|sold|volunteered|"
+        r"presented|donated|subscribed|relied|registered)\b"
     ),
     re.compile(
         r"\bi(?:'m| am) (?:also |currently |already |still |now )?"
@@ -509,7 +522,7 @@ _MEMORY_EVIDENCE_PATTERNS = (
         r"\bi(?:'ve| have) been (?:also |currently |really |still )?"
         r"(?:using|reading|listening|watching|attending|working|baking|"
         r"seeing|visiting|playing|taking|going|getting|loving|keeping|"
-        r"collecting)\b"
+        r"collecting|volunteering|presenting|relying|selling|assembling)\b"
     ),
     re.compile(r"\bmy (?:current|new|old|previous|favorite|preferred|usual|go-to)\b"),
 )
@@ -595,6 +608,68 @@ _CONCEPT_GROUPS = (
     ),
     frozenset(
         {
+            "art",
+            "art-related",
+            "artistic",
+            "auction",
+            "exhibit",
+            "exhibition",
+            "gallery",
+            "lecture",
+            "museum",
+            "present",
+            "tour",
+            "volunteer",
+        }
+    ),
+    frozenset(
+        {
+            "delivery",
+            "doordash",
+            "eat",
+            "food",
+            "grocery",
+            "meal",
+            "pizza",
+            "restaurant",
+            "service",
+            "takeout",
+            "ubereats",
+        }
+    ),
+    frozenset(
+        {
+            "class",
+            "conference",
+            "course",
+            "festival",
+            "lecture",
+            "seminar",
+            "studio",
+            "workshop",
+        }
+    ),
+    frozenset(
+        {
+            "assemble",
+            "bed",
+            "bookshelf",
+            "cabinet",
+            "chair",
+            "couch",
+            "desk",
+            "dresser",
+            "fix",
+            "fixed",
+            "furniture",
+            "mattress",
+            "sell",
+            "sofa",
+            "table",
+        }
+    ),
+    frozenset(
+        {
             "bike",
             "charity",
             "completed",
@@ -653,10 +728,12 @@ _CONCEPT_GROUPS = (
             "clinic",
             "dermatologist",
             "doctor",
+            "meditation",
             "physician",
             "prescription",
             "specialist",
             "therapist",
+            "yoga",
             "visit",
             "visited",
         }
@@ -665,12 +742,17 @@ _CONCEPT_GROUPS = (
         {
             "comedy",
             "documentary",
+            "hulu",
             "movie",
             "netflix",
+            "peacock",
+            "prime",
             "series",
             "show",
             "special",
             "stand-up",
+            "streaming",
+            "subscription",
             "watch",
         }
     ),
@@ -1015,6 +1097,7 @@ def rank_by_query_coverage[T](
     keywords = extract_keywords(query)
     is_preference_query = _is_preference_query(query, set(keywords))
     is_personal_memory_query = _is_personal_memory_query(query)
+    is_evidence_set_query = bool(_EVIDENCE_SET_QUERY_PATTERN.search(query.lower()))
     if is_preference_query:
         focused_keywords = [
             keyword
@@ -1285,7 +1368,7 @@ def rank_by_query_coverage[T](
 
     if is_preference_query:
         ranked = _stabilize_preference_ranking(scored)
-    elif _EVIDENCE_SET_QUERY_PATTERN.search(query.lower()):
+    elif is_evidence_set_query:
         ranked = _stabilize_evidence_set_ranking(scored)
     elif _is_generated_artifact_query(query, query_terms):
         ranked = _stabilize_artifact_evidence_ranking(scored)
@@ -1599,6 +1682,7 @@ def _stabilize_evidence_set_ranking[T](
         scores,
         min_overlap=_EVIDENCE_SET_MIN_OVERLAP,
         insert_margin=_EVIDENCE_SET_INSERT_MARGIN,
+        dominance_score_margin=_EVIDENCE_SET_SIGNAL_DOMINANCE_SCORE_MARGIN,
     )
 
 
@@ -1638,6 +1722,7 @@ def _stabilize_top_window_ranking[T](
     *,
     min_overlap: float,
     insert_margin: float,
+    dominance_score_margin: float | None = None,
 ) -> list[QueryCoverageRankedCandidate[T]]:
     window_size = min(_EVIDENCE_SET_WINDOW, len(scores))
     selected = list(scores[:window_size])
@@ -1660,11 +1745,16 @@ def _stabilize_top_window_ranking[T](
                 key=lambda item: (item[1][0].overlap, item[1][0].score, -item[1][1]),
             )
             worst_ranked, _worst_original_index = worst
-            if (
+            dominance_allowed = (
                 ranked.overlap >= min_overlap
                 and ranked.overlap
                 >= worst_ranked.overlap + _SIGNAL_DOMINANCE_INSERT_MARGIN
-            ) or ranked.score + insert_margin >= worst_ranked.score:
+                and (
+                    dominance_score_margin is None
+                    or ranked.score + dominance_score_margin >= worst_ranked.score
+                )
+            )
+            if dominance_allowed or ranked.score + insert_margin >= worst_ranked.score:
                 selected[worst_index] = candidate
                 selected_ids.remove(worst_ranked.stable_id)
                 selected_ids.add(ranked.stable_id)

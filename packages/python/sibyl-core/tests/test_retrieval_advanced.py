@@ -547,6 +547,110 @@ def test_query_coverage_completes_evidence_sets_over_low_signal_distractors() ->
     assert {"3", "5", "6"} <= set(ranked[:5])
 
 
+def test_query_coverage_promotes_art_event_action_evidence() -> None:
+    ranked = _rank_query_ids(
+        "How many different art-related events did I attend in the past month?",
+        [
+            "User: Can you suggest family-friendly events for kids to attend?",
+            "User: I asked about stretching before museum visits.",
+            "User: I planned a dinner menu after a concert.",
+            "User: I compared local event calendars.",
+            "User: I watched a documentary about galleries.",
+            "User: I volunteered at the museum opening and helped with the gallery tour.",
+            "User: I presented a small print series at a community art exhibition.",
+            "User: I attended a lecture by a textile artist at the downtown gallery.",
+        ],
+    )
+
+    assert "5" in ranked[:5]
+
+
+def test_query_coverage_promotes_food_delivery_action_evidence() -> None:
+    ranked = _rank_query_ids(
+        "How many different types of food delivery services have I used recently?",
+        [
+            "User: I cooked dinner with basil from the garden.",
+            "User: I compared grocery budgets for the week.",
+            "User: I asked for restaurant recommendations downtown.",
+            "User: I made a meal plan for Sunday.",
+            "User: I saved a coupon for kitchen storage.",
+            "User: I ordered pizza delivery after work.",
+            "User: I've been relying on Uber Eats when meetings run late.",
+            "User: I subscribed to a weekly meal service for busy nights.",
+        ],
+    )
+
+    assert "5" in ranked[:5]
+
+
+def test_query_coverage_promotes_food_delivery_reliance_evidence() -> None:
+    ranked = _rank_query_ids(
+        "Which food delivery service have I been using when meetings run late?",
+        [
+            "User: I cooked dinner with basil from the garden.",
+            "User: I compared grocery budgets for the week.",
+            "User: I asked for restaurant recommendations downtown.",
+            "User: I made a meal plan for Sunday.",
+            "User: I saved a coupon for kitchen storage.",
+            "User: I've been relying on Uber Eats when meetings run late.",
+        ],
+    )
+
+    assert ranked[0] == "5"
+
+
+def test_query_coverage_promotes_furniture_action_evidence() -> None:
+    ranked = _rank_query_ids(
+        "How many pieces of furniture did I buy, assemble, sell, or fix?",
+        [
+            "User: I bought new screws for a kitchen drawer.",
+            "User: I read a moving checklist for renters.",
+            "User: I asked about cleaning fabric stains.",
+            "User: I compared home office lighting.",
+            "User: I saved an article about interior design.",
+            "User: I assembled the bookshelf for my living room.",
+            "User: I sold my old couch before rearranging the apartment.",
+            "User: I fixed the wobbly coffee table after dinner.",
+        ],
+    )
+
+    assert {"5", "6"} <= set(ranked[:5])
+
+
+def test_query_coverage_promotes_furniture_fix_evidence() -> None:
+    ranked = _rank_query_ids(
+        "Which piece of furniture did I fix after dinner?",
+        [
+            "User: I bought new screws for a kitchen drawer.",
+            "User: I read a moving checklist for renters.",
+            "User: I asked about cleaning fabric stains.",
+            "User: I compared home office lighting.",
+            "User: I saved an article about interior design.",
+            "User: I assembled the bookshelf for my living room.",
+            "User: I sold my old couch before rearranging the apartment.",
+            "User: I fixed the wobbly coffee table after dinner.",
+        ],
+    )
+
+    assert "7" in ranked[:5]
+
+
+def test_query_coverage_promotes_recurring_yoga_frequency() -> None:
+    ranked = _rank_query_ids(
+        "How often do I attend yoga classes to help with my anxiety?",
+        [
+            "User: I asked about anxiety breathing exercises.",
+            "User: I read about class scheduling software.",
+            "User: I planned weekend errands around the gym.",
+            "User: I compared meditation apps.",
+            "User: I saved an article about sleep routines.",
+            "User: I attend yoga classes twice a week to help with anxiety.",
+        ],
+    )
+
+    assert "5" in ranked[:5]
+
+
 def test_query_coverage_refinement_accepts_top_window_signal_gain() -> None:
     initial = _coverage_result(
         [
