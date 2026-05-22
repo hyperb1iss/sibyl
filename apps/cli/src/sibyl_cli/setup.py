@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 
@@ -268,10 +269,8 @@ def _prune_legacy_hook_files() -> None:
     for legacy in ("user-prompt-submit.py",):
         target = CLAUDE_HOOKS_DIR / legacy
         if target.is_symlink() or target.exists():
-            try:
+            with suppress(OSError):
                 target.unlink()
-            except OSError:
-                pass
 
 
 def configure_claude_hooks() -> bool:
