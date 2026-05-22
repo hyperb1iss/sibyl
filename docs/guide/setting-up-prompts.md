@@ -34,11 +34,11 @@ Your global instructions apply to every project. This is where you establish:
 
 ### Essential Global Setup
 
-Below is the recommended block to paste into your global CLAUDE.md or AGENTS.md. It is also
-the exact content `sibyl local setup` prints to the terminal and that `sibyl doctor --append`
-can install for you automatically. Each section earns its place — the intent-to-verb bridges
-in particular moved agent trigger accuracy from 17% to 88% in the skill-invocation eval, so
-keep them intact even if you customize the framing.
+Below is the recommended block to paste into your global CLAUDE.md or AGENTS.md. It is also the
+exact content `sibyl local setup` prints to the terminal and that `sibyl doctor --append` can
+install for you automatically. Each section earns its place — the intent-to-verb bridges in
+particular moved agent trigger accuracy from 17% to 88% in the skill-invocation eval, so keep them
+intact even if you customize the framing.
 
 ```markdown
 ## Sibyl - Your Persistent Memory
@@ -50,8 +50,8 @@ and learnings. Reach it through the `sibyl` CLI or the Sibyl MCP tools, whicheve
 
 If your client supports skills, invoke the `sibyl` skill immediately at session start. The skill
 points at the version-matched CLI guidance and the current task queue. Without skill support, run
-`sibyl context` to confirm the project link and `sibyl task list --status doing` to see active
-work before anything else.
+`sibyl context` to confirm the project link and `sibyl task list --status doing` to see active work
+before anything else.
 
 ### The memory loop: recall, act, remember, reflect
 
@@ -71,16 +71,19 @@ Recognize these prompt shapes and reach for the verb, not the file system:
 
 - "what am I working on" / "current tasks" -> `sibyl task list --status doing,blocked`
 - "where did I leave off" / "pick up from yesterday" -> `sibyl recall "<goal>"`
-- "have we hit this before" / "what's our pattern for X" -> `sibyl search "<topic>"`
-  first; only `sibyl entity show <id>` after you have an ID from search or recall
+- "have we hit this before" / "what's our pattern for X" -> `sibyl search "<topic>"` first; only
+  `sibyl entity show <id>` after you have an ID from search or recall
 - "remember this" / "write this up" / "save this insight" / "we just learned X" -> `sibyl remember`
-- "consolidate this session" / "wrap up" / "save this session for next time" -> `sibyl reflect "<notes>" --persist`
+- "consolidate this session" / "wrap up" / "save this session for next time" ->
+  `sibyl reflect "<notes>" --persist`
 - "show me the full content" -> `sibyl entity show <id>`
-- "what's the deal with X" / "X was mentioned" / "tell me about Y" -> `sibyl search "<X>"` before answering
-- "complete this task: <learning>" without an explicit task id -> `sibyl task list -q "<topic>"` once, then `sibyl task complete <id> --learnings "..."`
+- "what's the deal with X" / "X was mentioned" / "tell me about Y" -> `sibyl search "<X>"` before
+  answering
+- "complete this task: <learning>" without an explicit task id -> `sibyl task list -q "<topic>"`
+  once, then `sibyl task complete <id> --learnings "..."`
 
-If the natural-language ask sounds like memory work, it is memory work. Don't default to `Write`
-for "write up what we learned"; that's `sibyl remember`. Don't burn turns hunting for an entity by
+If the natural-language ask sounds like memory work, it is memory work. Don't default to `Write` for
+"write up what we learned"; that's `sibyl remember`. Don't burn turns hunting for an entity by
 listing or showing unrelated records; `sibyl search` and `sibyl recall` are how you discover IDs.
 
 ### What to capture
@@ -420,22 +423,22 @@ touch CLAUDE.md
 
 ### Verify Installation
 
-Run `sibyl doctor` from any directory. It reports both the daemon side (config, server health,
-auth, write probe) and the agent side (skill stub installed and canonical, SessionStart hook
-registered, no orphan UserPromptSubmit hook, CLAUDE.md/AGENTS.md contains the recommended
-memory-loop bridges). Each failing check ships with a one-line remediation.
+Run `sibyl doctor` from any directory. It reports both the daemon side (config, server health, auth,
+write probe) and the agent side (skill stub installed and canonical, SessionStart hook registered,
+no orphan UserPromptSubmit hook, CLAUDE.md/AGENTS.md contains the recommended memory-loop bridges).
+Each failing check ships with a one-line remediation.
 
-If the `agent-prompt` check is not green, doctor prints the full recommended snippet so you can
-copy it into your file. If you'd rather have it written for you, point doctor at a target path
-and it inserts the snippet between managed markers that subsequent runs replace in place:
+If the `agent-prompt` check is not green, doctor prints the full recommended snippet so you can copy
+it into your file. If you'd rather have it written for you, point doctor at a target path and it
+inserts the snippet between managed markers that subsequent runs replace in place:
 
 ```bash
 sibyl doctor --append ~/.claude/CLAUDE.md
 ```
 
 The markers are `<!-- sibyl:agent-setup -->` and `<!-- /sibyl:agent-setup -->`. Everything else in
-the file is untouched. You can edit around the markers freely; the next `--append` run only
-rewrites what is between them.
+the file is untouched. You can edit around the markers freely; the next `--append` run only rewrites
+what is between them.
 
 Once doctor is fully green, start a fresh agent session. The agent should:
 
