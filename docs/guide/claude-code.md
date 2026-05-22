@@ -320,11 +320,11 @@ that teaches the agent how to use the knowledge graph effectively.
 
 ### Installing Skills
 
-```bash
-sibyl local setup
-```
+Use the Connect page in the Sibyl web UI for the current MCP config and prompt snippet. The CLI
+helper remains available for advanced local setups, but it should be an explicit choice rather than
+part of install.
 
-This installs the Sibyl skill and hooks for Claude Code, and the skill for Codex.
+The helper installs the Sibyl skill and hooks for Claude Code, and the skill for Codex.
 
 ### Using Skills
 

@@ -3,12 +3,12 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
 #   curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote
-#   curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --docker
+#   curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --daemon
 #
 # This script:
 #   1. Installs uv as bootstrap plumbing when needed
-#   2. Installs the Sibyl CLI and, by default, the local daemon
-#   3. Prints one coherent next step for the chosen install mode
+#   2. Installs the Sibyl CLI
+#   3. Starts the local server + web UI by default
 
 set -eu
 
@@ -37,16 +37,24 @@ usage() {
 Sibyl installer
 
 Usage:
-  install.sh [--local|--remote|--docker] [--version VERSION]
+  install.sh [--server|--remote|--daemon] [--version VERSION] [--no-start] [--no-open]
 
 Modes:
-  --local    Install sibyl + sibyld for an embedded local daemon (default)
-  --remote   Install the sibyl CLI for an existing remote Sibyl server
-  --docker   Install the sibyl CLI for Docker self-host management
+  --server   Install Sibyl, start the local API + web UI, and open the browser (default)
+  --remote   Install only the sibyl CLI for an existing remote Sibyl server
+  --daemon   Install sibyl + sibyld for the embedded daemon without the web UI
+
+Options:
+  --no-start  Install only; print the command to start later
+  --no-open   Do not open the browser after starting the web UI
+  --no-pull   Do not pull Docker images before starting the local server
 
 Environment:
-  SIBYL_INSTALL_MODE      local, remote, or docker
+  SIBYL_INSTALL_MODE      server, remote, or daemon
   SIBYL_INSTALL_VERSION   package version to install, such as 1.0.0rc1
+  SIBYL_INSTALL_START     0 to install without starting
+  SIBYL_INSTALL_OPEN      0 to skip opening the browser
+  SIBYL_INSTALL_PULL      0 to skip pulling Docker images
 EOF
 }
 
@@ -159,55 +167,103 @@ install_sibyld() {
     install_tool "sibyld" "sibyld" "Sibyl local daemon"
 }
 
-# ============================================================================
-# Main
-# ============================================================================
-setup_agent_integration() {
-    info "Setting up agent integration (skills + hooks)..."
-    if sibyl local setup >/dev/null 2>&1; then
-        success "Agent integration configured"
-    else
-        warn "Agent integration setup skipped (run 'sibyl local setup' later)"
+start_local_server() {
+    if [ "$START_AFTER_INSTALL" != "1" ]; then
+        return
+    fi
+
+    check_docker
+
+    info "Starting Sibyl local server..."
+    set -- up
+    if [ "$PULL_IMAGES" = "1" ]; then
+        set -- "$@" --pull
+    fi
+    if [ "$OPEN_BROWSER" != "1" ]; then
+        set -- "$@" --no-browser
+    fi
+
+    if ! sibyl "$@"; then
+        error "Failed to start Sibyl local server."
     fi
 }
 
+start_embedded_daemon() {
+    if [ "$START_AFTER_INSTALL" != "1" ]; then
+        return
+    fi
+
+    info "Initializing local embedded context..."
+    if ! sibyl init --local --force; then
+        error "Failed to initialize the local embedded context."
+    fi
+
+    info "Starting embedded daemon..."
+    if ! sibyl start; then
+        warn "Embedded daemon did not start. It may already be running; run 'sibyl doctor'."
+        return
+    fi
+}
+
+# ============================================================================
+# Main
+# ============================================================================
 print_next_steps() {
     echo
     printf '%s\n' "${GREEN}${BOLD}Installation complete!${RESET}"
     echo
     case "$MODE" in
-        local)
-            printf '%s\n' "${BOLD}Start a local embedded daemon:${RESET}"
-            printf '%s\n' "  sibyl init --local"
-            printf '%s\n' "  sibyl serve"
+        server)
+            if [ "$START_AFTER_INSTALL" = "1" ]; then
+                printf '%s\n' "${BOLD}Sibyl server:${RESET} http://localhost:3337"
+            else
+                printf '%s\n' "${BOLD}Start the local server and web UI:${RESET}"
+                printf '%s\n' "  sibyl up"
+            fi
             ;;
         remote)
             printf '%s\n' "${BOLD}Connect to a remote Sibyl server:${RESET}"
             printf '%s\n' "  sibyl init --remote https://sibyl.example.com"
             printf '%s\n' "  sibyl auth login"
             ;;
-        docker)
-            printf '%s\n' "${BOLD}Create a Docker self-host stack:${RESET}"
-            printf '%s\n' "  sibyl docker init"
-            printf '%s\n' "  sibyl docker up"
+        daemon)
+            if [ "$START_AFTER_INSTALL" = "1" ]; then
+                printf '%s\n' "${BOLD}Embedded daemon:${RESET} http://localhost:3334"
+            else
+                printf '%s\n' "${BOLD}Start the embedded daemon:${RESET}"
+                printf '%s\n' "  sibyl init --local"
+                printf '%s\n' "  sibyl start"
+            fi
             ;;
     esac
 }
 
 parse_args() {
-    MODE="${SIBYL_INSTALL_MODE:-local}"
+    MODE="${SIBYL_INSTALL_MODE:-server}"
     SIBYL_INSTALL_VERSION="${SIBYL_INSTALL_VERSION:-}"
+    START_AFTER_INSTALL="${SIBYL_INSTALL_START:-1}"
+    OPEN_BROWSER="${SIBYL_INSTALL_OPEN:-1}"
+    PULL_IMAGES="${SIBYL_INSTALL_PULL:-1}"
 
     while [ "$#" -gt 0 ]; do
         case "$1" in
-            --local|local)
-                MODE=local
+            --server|server|--local|local|--docker|docker)
+                MODE=server
                 ;;
             --remote|remote|--cli|cli)
                 MODE=remote
                 ;;
-            --docker|docker)
-                MODE=docker
+            --daemon|daemon)
+                MODE=daemon
+                ;;
+            --no-start)
+                START_AFTER_INSTALL=0
+                ;;
+            --no-open|--no-browser)
+                OPEN_BROWSER=0
+                ;;
+            --no-pull)
+                PULL_IMAGES=0
                 ;;
             --version|-v)
                 if [ "$#" -lt 2 ]; then
@@ -240,21 +296,20 @@ main() {
     install_sibyl
 
     case "$MODE" in
-        local)
+        server)
+            start_local_server
+            ;;
+        daemon)
             install_sibyld
+            start_embedded_daemon
             ;;
         remote)
             ;;
-        docker)
-            check_docker
-            ;;
         *)
-            error "Unknown install mode: $MODE (use cli, remote, local, or docker)"
+            error "Unknown install mode: $MODE (use server, remote, or daemon)"
             ;;
     esac
 
-    echo
-    setup_agent_integration
     print_next_steps
 }
 

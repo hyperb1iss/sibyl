@@ -1,21 +1,21 @@
 """Client-agnostic integration content for connecting Sibyl to AI agents.
 
-Single source of truth for the onboarding surfaces. The web setup wizard, the
-dashboard connect panel, and the `sibyl local setup` CLI command all render the
-same install command, MCP client configs, and agent prompt snippet built here,
-so the guidance stays consistent everywhere and is never Claude-specific.
+Single source of truth for the onboarding surfaces. The web setup wizard and
+dashboard connect panel render the same install command, MCP client configs, and
+agent prompt snippet built here, so the guidance stays consistent everywhere and
+is never Claude-specific.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-# One-liner installer from the README: installs the Sibyl CLI and local daemon.
+# One-liner installer from the README: starts the local server and web UI.
 CLI_INSTALL_COMMAND = (
     "curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh"
 )
 # Alternative for users who already manage local tools with Homebrew.
-CLI_INSTALL_COMMAND_ALT = "brew install hyperb1iss/tap/sibyl"
+CLI_INSTALL_COMMAND_ALT = "brew install hyperb1iss/tap/sibyl && sibyl up"
 
 
 AGENT_PROMPT_SNIPPET = """## Sibyl - Your Persistent Memory

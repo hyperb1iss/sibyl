@@ -840,7 +840,7 @@ sibyl task show task_c24fc3228e7c  # Full ID required (17 chars)
 
 ```bash
 sibyl health         # Check connectivity
-sibyl local setup    # First-time assistant setup
+sibyl context        # Confirm project and org context
 sibyl auth status    # Check authentication
 ```
 

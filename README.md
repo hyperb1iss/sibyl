@@ -101,20 +101,17 @@ same way you do. MCP is available for clients that prefer it; the depth lives in
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
-sibyl init --local
-sibyl serve
 ```
 
-The installer puts both `sibyl` and `sibyld` on your PATH. The local context runs an embedded
-SurrealDB store under `~/.sibyl/data/surreal`; use `sibyl start`/`sibyl stop` for a background
-daemon or `sibyl service install` to write a launchd/systemd user service.
+The installer puts `sibyl` on your PATH, starts the local API + web stack, and opens the setup UI
+when it is ready. Use `--remote` for CLI-only installs and `--daemon` for the embedded daemon
+without the web UI.
 
 ### Homebrew
 
 ```bash
 brew install hyperb1iss/tap/sibyl
-sibyl init --local
-sibyl serve
+sibyl up
 ```
 
 ### Remote CLI

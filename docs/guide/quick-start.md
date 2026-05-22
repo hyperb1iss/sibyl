@@ -13,33 +13,20 @@ development, see [Installation](./installation.md). :::
 
 ## Step 1: Install Sibyl
 
-The shell installer puts the CLI and the local daemon on your PATH:
+The shell installer starts the local API + web stack and opens the setup UI:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
 ```
 
-Already use Homebrew?
+Already use Homebrew? Install the package, then start the local UI:
 
 ```bash
 brew install hyperb1iss/tap/sibyl
+sibyl up
 ```
 
-## Step 2: Start Sibyl
-
-For a terminal-first local daemon:
-
-```bash
-sibyl init --local
-sibyl serve
-```
-
-For the full API + web self-host stack:
-
-```bash
-sibyl docker init
-sibyl docker up
-```
+## Step 2: Open Sibyl
 
 | Service   | URL                   |
 | --------- | --------------------- |
@@ -97,13 +84,8 @@ Sibyl earns its keep when your AI agent uses it too. Any agent can reach Sibyl t
 CLI, and MCP-capable agents (Claude Code, Codex, opencode, OpenClaw, and others) can connect to the
 MCP endpoint.
 
-Install the Sibyl skill and hooks for Claude Code and Codex:
-
-```bash
-sibyl local setup
-```
-
-For per-client MCP configuration and the agent prompt snippet, see [Agents & MCP](./claude-code.md).
+Use the Connect page in the web UI for per-client MCP configuration and the agent prompt snippet, or
+see [Agents & MCP](./claude-code.md).
 
 ## Where to go next
 

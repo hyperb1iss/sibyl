@@ -274,7 +274,7 @@ Help future sessions (and other agents) by documenting state:
 ### Agent Isn't Using Sibyl
 
 1. Did you run `/sibyl` at session start?
-2. Are skills and hooks installed? (`sibyl local setup --status`)
+2. Is your agent configured from the Connect page?
 3. Is the server running? (`sibyl health`)
 
 ### No Results from Searches

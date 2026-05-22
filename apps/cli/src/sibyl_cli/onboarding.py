@@ -42,10 +42,7 @@ def show_first_run_message() -> None:
     console.print("  [dim]Get started:[/dim]")
     console.print()
     console.print(
-        f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl local start[/bold {NEON_CYAN}]     [dim]Start local services[/dim]"
-    )
-    console.print(
-        f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl local setup[/bold {NEON_CYAN}]     [dim]Install skills and hooks[/dim]"
+        f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl up[/bold {NEON_CYAN}]             [dim]Start Sibyl[/dim]"
     )
     console.print(
         f'    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl search[/bold {NEON_CYAN}] [white]"query"[/white]  [dim]Search knowledge[/dim]'
@@ -98,7 +95,7 @@ def test_connection(url: str) -> bool:
     console.print(f"  [{ELECTRIC_PURPLE}]◈[/{ELECTRIC_PURPLE}] [bold]Quick Start[/bold]")
     console.print()
     console.print(
-        f"    Run [bold {NEON_CYAN}]sibyl local start[/bold {NEON_CYAN}] to start the server locally,"
+        f"    Run [bold {NEON_CYAN}]sibyl up[/bold {NEON_CYAN}] to start the server locally,"
     )
     console.print("    or connect to an existing server.")
     console.print()
@@ -127,7 +124,7 @@ def test_connection(url: str) -> bool:
                 f"  [{ELECTRIC_YELLOW}]![/{ELECTRIC_YELLOW}] Could not connect to server at {url}"
             )
             console.print(
-                f"    [dim]Run[/dim] [bold {NEON_CYAN}]sibyl local start[/bold {NEON_CYAN}] [dim]to start locally[/dim]"
+                f"    [dim]Run[/dim] [bold {NEON_CYAN}]sibyl up[/bold {NEON_CYAN}] [dim]to start locally[/dim]"
             )
             return False
         except Exception as e:

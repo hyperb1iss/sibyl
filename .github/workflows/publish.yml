@@ -325,11 +325,9 @@ jobs:
 
             ## Install
 
-            **Local daemon**
+            **Local server**
             ```bash
             curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --version ${{ steps.version.outputs.version }}
-            sibyl init --local
-            sibyl serve
             ```
 
             **Remote CLI**
@@ -342,15 +340,12 @@ jobs:
             **Homebrew**
             ```bash
             brew install hyperb1iss/tap/sibyl
-            sibyl init --local
-            sibyl serve
+            sibyl up
             ```
 
-            **Docker**
+            **Headless server**
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --docker --version ${{ steps.version.outputs.version }}
-            sibyl docker init --tag ${{ steps.version.outputs.version }}
-            sibyl docker up --pull
+            curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --version ${{ steps.version.outputs.version }} --no-open
             ```
 
       - name: "► Summary"

@@ -1,16 +1,16 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { ConnectAgentModal } from '@/components/dashboard/connect-agent-modal';
-import { ArrowRight, BookOpen, Check, Network, Search, Xmark } from '@/components/ui/icons';
-import { useOnboardingProgress, useSetupStatus } from '@/lib/hooks';
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { ConnectAgentModal } from "@/components/dashboard/connect-agent-modal";
+import { ArrowRight, BookOpen, Check, Network, Search, Xmark } from "@/components/ui/icons";
+import { useOnboardingProgress, useSetupStatus } from "@/lib/hooks";
 
 /** Minimum entities before automatically hiding the welcome banner */
 const WELCOME_BANNER_ENTITY_THRESHOLD = 10;
 
 /** localStorage key for banner dismissal state */
-const BANNER_DISMISSED_KEY = 'sibyl:welcome-banner-dismissed';
+const BANNER_DISMISSED_KEY = "sibyl:welcome-banner-dismissed";
 
 interface WelcomeBannerProps {
   totalEntities: number;
@@ -30,7 +30,7 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
   // Load dismissal state from localStorage on mount
   useEffect(() => {
     const dismissed = localStorage.getItem(BANNER_DISMISSED_KEY);
-    if (dismissed === 'true') {
+    if (dismissed === "true") {
       setIsDismissed(true);
     }
   }, []);
@@ -42,7 +42,7 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
 
   const handleDismiss = () => {
     setIsDismissed(true);
-    localStorage.setItem(BANNER_DISMISSED_KEY, 'true');
+    localStorage.setItem(BANNER_DISMISSED_KEY, "true");
     onDismiss?.();
   };
 
@@ -77,11 +77,11 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
           </div>
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-sc-fg-primary">
-              {isNewUser ? 'Welcome to Sibyl!' : 'Getting Started'}
+              {isNewUser ? "Welcome to Sibyl!" : "Getting Started"}
             </h2>
             <p className="text-xs sm:text-sm text-sc-fg-muted">
               {isNewUser
-                ? 'Your local memory stack is ready. Capture and search here first, then wire in MCP tools when you want them.'
+                ? "Your local memory stack is ready. Capture and search here first, then wire in MCP tools when you want them."
                 : `You have ${totalEntities} entities. Sibyl stays strongest when the local capture and review loop keeps moving.`}
             </p>
             <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-sc-fg-subtle">
@@ -96,7 +96,7 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
           <ChecklistStep
             step={1}
             title="Connect your agent"
-            description="Optional after local setup: install the CLI or add Sibyl as an MCP server for any agent."
+            description="Optional when you are ready: add Sibyl as an MCP server for any agent."
             color="purple"
             isComplete={checklist.connected_agent}
             action={
@@ -187,10 +187,10 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
           </div>
           <div className="flex items-center gap-1.5">
             <div
-              className={`w-2 h-2 rounded-full ${apisReady ? 'bg-sc-green shadow-[0_0_6px_rgba(80,250,123,0.6)]' : 'bg-sc-fg-subtle'}`}
+              className={`w-2 h-2 rounded-full ${apisReady ? "bg-sc-green shadow-[0_0_6px_rgba(80,250,123,0.6)]" : "bg-sc-fg-subtle"}`}
             />
             <span className="text-sc-fg-muted">
-              {apisReady ? 'API keys configured' : 'API keys need setup'}
+              {apisReady ? "API keys configured" : "API keys need setup"}
             </span>
           </div>
           <Link
@@ -222,14 +222,14 @@ function ChecklistStep({
   step: number;
   title: string;
   description: string;
-  color: 'purple' | 'cyan' | 'coral';
+  color: "purple" | "cyan" | "coral";
   isComplete?: boolean;
   action: React.ReactNode;
 }) {
   const colorClasses = {
-    purple: 'bg-sc-purple/20 text-sc-purple',
-    cyan: 'bg-sc-cyan/20 text-sc-cyan',
-    coral: 'bg-sc-coral/20 text-sc-coral',
+    purple: "bg-sc-purple/20 text-sc-purple",
+    cyan: "bg-sc-cyan/20 text-sc-cyan",
+    coral: "bg-sc-coral/20 text-sc-coral",
   };
 
   return (
@@ -237,13 +237,13 @@ function ChecklistStep({
       <div className="flex items-center gap-2 mb-2">
         <div
           className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-            isComplete ? 'bg-sc-green/20 text-sc-green' : colorClasses[color]
+            isComplete ? "bg-sc-green/20 text-sc-green" : colorClasses[color]
           }`}
         >
           {isComplete ? <Check width={14} height={14} /> : step}
         </div>
         <span
-          className={`text-sm font-medium ${isComplete ? 'text-sc-fg-muted line-through' : 'text-sc-fg-primary'}`}
+          className={`text-sm font-medium ${isComplete ? "text-sc-fg-muted line-through" : "text-sc-fg-primary"}`}
         >
           {title}
         </span>

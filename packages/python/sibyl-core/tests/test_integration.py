@@ -49,7 +49,7 @@ class TestIntegrationContent:
             "prompt_snippet",
         }
         assert content["cli_install"].startswith("curl -fsSL")
-        assert content["cli_install_alt"] == "brew install hyperb1iss/tap/sibyl"
+        assert content["cli_install_alt"] == "brew install hyperb1iss/tap/sibyl && sibyl up"
         assert len(content["mcp_clients"]) == 4
 
     def test_mcp_clients_serialize_to_dicts(self) -> None:

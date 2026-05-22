@@ -6,8 +6,8 @@ workflow, search, synthesis, and real-time updates.
 ## Quick Reference
 
 ```bash
-# Install Sibyl with the published daemon CLI
-curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
+# Install the embedded daemon without the web UI
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --daemon
 
 # Start server from the monorepo
 moon run api:serve        # or: uv run sibyld serve

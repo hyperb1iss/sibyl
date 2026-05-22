@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from typer.testing import CliRunner
 
 from sibyl_cli import config_store
 from sibyl_cli import docker as docker_module
+from sibyl_cli import local as local_module
 from sibyl_cli.main import app
 
 
@@ -72,3 +74,40 @@ def test_docker_init_writes_runtime_files_and_context(
     assert ctx is not None
     assert ctx.name == "docker"
     assert ctx.server_url == "http://localhost:3334"
+
+
+def test_up_starts_local_runtime_without_agent_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    local_dir = tmp_path / "local"
+    monkeypatch.setattr(local_module, "SIBYL_LOCAL_DIR", local_dir)
+    monkeypatch.setattr(local_module, "SIBYL_LOCAL_ENV", local_dir / ".env")
+    monkeypatch.setattr(local_module, "SIBYL_LOCAL_COMPOSE", local_dir / "docker-compose.yml")
+    monkeypatch.setattr(local_module, "check_docker", lambda: True)
+    monkeypatch.setattr(local_module, "check_docker_compose", lambda: True)
+    monkeypatch.setattr(local_module, "is_running", lambda: False)
+    monkeypatch.setattr(local_module, "wait_for_healthy", lambda: True)
+
+    opened_urls: list[str] = []
+    compose_calls: list[list[str]] = []
+    monkeypatch.setattr(local_module.webbrowser, "open", opened_urls.append)
+
+    def fake_run_compose(
+        args: list[str],
+        capture: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        compose_calls.append(args)
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(local_module, "run_compose", fake_run_compose)
+
+    result = CliRunner().invoke(app, ["up", "--pull", "--no-browser"])
+
+    assert result.exit_code == 0
+    assert opened_urls == []
+    assert compose_calls == [["pull", "--quiet"], ["up", "-d"]]
+    assert (local_dir / ".env").exists()
+    assert (local_dir / "docker-compose.yml").exists()
+    assert "sibyl local setup" not in result.output
+    assert "Connect page" in result.output

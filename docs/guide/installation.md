@@ -7,7 +7,7 @@ description: Installing Sibyl and its dependencies
 
 This guide covers the main ways to run Sibyl:
 
-- run the shell installer and start the embedded local daemon
+- run the shell installer and start the local server UI
 - install the Homebrew formula on systems where you already use Homebrew
 - run a self-hosted Docker stack with `sibyl docker ...`
 - work on the monorepo in development mode with `moon run ...`
@@ -34,22 +34,20 @@ curl -fsSL https://moonrepo.dev/install/proto.sh | bash
 
 ## Quick Install
 
-### Local Daemon
+### Local Server
 
-The recommended local install bundles the CLI and daemon:
+The recommended local install starts the API, web UI, and SurrealDB, then opens the setup UI when it
+is ready:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
-sibyl init --local
-sibyl serve
 ```
 
-Homebrew uses the same bundled shape:
+Homebrew installs the CLI and daemon. Start the full local server UI with one command:
 
 ```bash
 brew install hyperb1iss/tap/sibyl
-sibyl init --local
-sibyl serve
+sibyl up
 ```
 
 ### Remote CLI
@@ -64,7 +62,12 @@ sibyl doctor
 ### Docker Self-Host
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --docker
+sibyl up --no-browser
+```
+
+For lower-level compose management:
+
+```bash
 sibyl docker init
 sibyl docker up
 sibyl docker logs
@@ -172,7 +175,13 @@ SIBYL_ANTHROPIC_API_KEY=...        # For LLM operations
 
 ### Local Host Mode
 
-Run the embedded daemon for the active local context:
+The embedded daemon path is available when you want API-only local memory without the web UI:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --daemon
+```
+
+Or run it manually:
 
 ```bash
 sibyl init --local

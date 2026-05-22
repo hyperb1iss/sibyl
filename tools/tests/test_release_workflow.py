@@ -114,13 +114,15 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     assert "[sibyld](https://pypi.org/project/sibyld/" in workflow
 
 
-def test_install_script_defaults_to_bundled_local_story() -> None:
+def test_install_script_defaults_to_server_ui_story() -> None:
     installer = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
 
-    assert 'MODE="${SIBYL_INSTALL_MODE:-local}"' in installer
+    assert 'MODE="${SIBYL_INSTALL_MODE:-server}"' in installer
+    assert "set -- up" in installer
     assert 'install_tool "sibyl-dev" "sibyl" "Sibyl CLI"' in installer
     assert 'install_tool "sibyld" "sibyld" "Sibyl local daemon"' in installer
     assert "--remote|remote|--cli|cli" in installer
+    assert "sibyl local setup" not in installer
     assert "uv tool upgrade" not in installer
 
 

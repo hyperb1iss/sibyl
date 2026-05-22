@@ -54,6 +54,8 @@ from sibyl_cli.host import start as start_cmd
 from sibyl_cli.host import stop as stop_cmd
 from sibyl_cli.id_resolution import resolve_id_prefix, resolve_raw_memory_id_prefix
 from sibyl_cli.local import app as local_app
+from sibyl_cli.local import start as up_cmd
+from sibyl_cli.local import stop as down_cmd
 from sibyl_cli.logs import app as logs_app
 from sibyl_cli.org import app as org_app
 from sibyl_cli.pending import app as pending_writes_app
@@ -128,6 +130,8 @@ app.command("logout")(logout_cmd)
 app.command("serve")(serve_cmd)
 app.command("start")(start_cmd)
 app.command("stop")(stop_cmd)
+app.command("up")(up_cmd)
+app.command("down")(down_cmd)
 app.command("whoami")(whoami_cmd)
 
 

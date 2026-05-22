@@ -111,6 +111,8 @@ Auth, organizations, configuration, and operations.
 | `sibyl version`           | Show version information                          |
 | `sibyl logs`              | View server logs (requires OWNER role)            |
 | `sibyl debug`             | Debug tools for development (requires OWNER role) |
+| `sibyl up`                | Start the local server and web UI                 |
+| `sibyl down`              | Stop the local server and web UI                  |
 | `sibyl serve`             | Start the local embedded daemon                   |
 | `sibyl start`             | Start the local embedded daemon in the background |
 | `sibyl stop`              | Stop the background local daemon                  |

@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@/test/utils';
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen } from "@/test/utils";
 
 const hooks = vi.hoisted(() => ({
   useSetupStatus: vi.fn(),
@@ -10,15 +10,15 @@ const storage = vi.hoisted(() => ({
   setItem: vi.fn(),
 }));
 
-vi.mock('@/lib/hooks', () => hooks);
-vi.mock('@/components/dashboard/connect-agent-modal', () => ({
+vi.mock("@/lib/hooks", () => hooks);
+vi.mock("@/components/dashboard/connect-agent-modal", () => ({
   ConnectAgentModal: () => <div data-testid="connect-agent-modal" />,
 }));
-vi.stubGlobal('localStorage', storage);
+vi.stubGlobal("localStorage", storage);
 
-import { WelcomeBanner } from './welcome-banner';
+import { WelcomeBanner } from "./welcome-banner";
 
-describe('WelcomeBanner', () => {
+describe("WelcomeBanner", () => {
   beforeEach(() => {
     storage.getItem.mockReset();
     storage.setItem.mockReset();
@@ -41,11 +41,11 @@ describe('WelcomeBanner', () => {
     });
   });
 
-  it('frames onboarding as local-first before MCP setup', () => {
+  it("frames onboarding as local-first before MCP setup", () => {
     render(<WelcomeBanner totalEntities={0} />);
 
     expect(screen.getByText(/local-first where possible/i)).toBeInTheDocument();
     expect(screen.getByText(/local stack first/i)).toBeInTheDocument();
-    expect(screen.getByText(/optional after local setup/i)).toBeInTheDocument();
+    expect(screen.getByText(/optional when you are ready/i)).toBeInTheDocument();
   });
 });

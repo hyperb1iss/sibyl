@@ -342,10 +342,11 @@ sibyl stats
 sibyl config show
 ```
 
-### Setup (First Time)
+### Connection
 
 ```bash
-sibyl local setup
+sibyl health
+sibyl context
 ```
 
 ---
