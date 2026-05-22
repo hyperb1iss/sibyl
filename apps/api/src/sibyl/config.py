@@ -62,7 +62,9 @@ class OIDCProviderSettings(BaseModel):
     def is_extra_provider(self) -> bool:
         normalized_name = self.name.strip().lower().replace("_", "-")
         issuer_host = urlsplit(self.issuer).netloc.lower()
-        return normalized_name in _EXTRA_OIDC_PROVIDER_NAMES or issuer_host in _EXTRA_OIDC_ISSUER_HOSTS
+        return (
+            normalized_name in _EXTRA_OIDC_PROVIDER_NAMES or issuer_host in _EXTRA_OIDC_ISSUER_HOSTS
+        )
 
 
 class OIDCSettings(BaseModel):
@@ -166,6 +168,10 @@ class Settings(BaseSettings):
         default=False,
         description="Enable local username/password login outside setup and break-glass flows",
     )
+    break_glass_enabled: bool = Field(
+        default=False,
+        description="Treat local auth as an active break-glass access path",
+    )
     oidc: OIDCSettings = Field(
         default_factory=OIDCSettings,
         description="OpenID Connect provider and session settings",
@@ -229,12 +235,13 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_oidc_settings(self) -> "Settings":
         if not self.oidc.extra_providers_enabled:
-            blocked = [provider.name for provider in self.oidc.providers if provider.is_extra_provider]
+            blocked = [
+                provider.name for provider in self.oidc.providers if provider.is_extra_provider
+            ]
             if blocked:
                 joined = ", ".join(sorted(blocked))
                 raise ValueError(
-                    "OIDC extra providers require oidc.extra_providers_enabled=true: "
-                    f"{joined}"
+                    f"OIDC extra providers require oidc.extra_providers_enabled=true: {joined}"
                 )
         return self
 

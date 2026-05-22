@@ -164,6 +164,40 @@ async def test_admin_audit_exports_json() -> None:
 
 
 @pytest.mark.asyncio
+async def test_admin_audit_exports_enterprise_event_classes() -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    actions = [
+        "auth.oidc.login",
+        "auth.break_glass.login",
+        "auth.api_key.create",
+        "auth.api_key.revoke",
+        "memory.remember",
+        "memory.recall",
+        "org.member.update_role",
+        "project.member.update_role",
+    ]
+    rows = [
+        {
+            "uuid": f"audit-{index}",
+            "organization_id": str(org.id),
+            "user_id": "00000000-0000-0000-0000-000000000222",
+            "action": action,
+            "details": {"resource": f"event:{index}"},
+            "created_at": datetime(2026, 5, 22, 9, 30, tzinfo=UTC),
+        }
+        for index, action in enumerate(actions)
+    ]
+
+    with patch(
+        "sibyl.api.routes.admin.list_audit_events", AsyncMock(return_value=(rows, len(rows)))
+    ):
+        response = await export_admin_audit(org=org, export_format="json", limit=1000)
+
+    payload = json.loads(response.body)
+    assert {event["action"] for event in payload["events"]} == set(actions)
+
+
+@pytest.mark.asyncio
 async def test_admin_audit_route_rejects_member_role() -> None:
     routes = [route for route in admin_routes.router.routes if isinstance(route, APIRoute)]
     route = next(

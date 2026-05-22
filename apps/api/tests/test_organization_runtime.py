@@ -1092,6 +1092,13 @@ async def test_surreal_update_org_member_role_batches_lookup_and_update(
     assert "UPDATE organization_members" in fake_client.calls[1][0]
     assert fake_client.calls[1][1]["uuid"] == str(membership_id)
     audit_log.assert_awaited_once()
+    assert audit_log.await_args.kwargs["action"] == "org.member.update_role"
+    assert audit_log.await_args.kwargs["user_id"] == actor_id
+    assert audit_log.await_args.kwargs["organization_id"] == org_id
+    assert audit_log.await_args.kwargs["details"] == {
+        "target_user_id": str(target_user_id),
+        "role": OrganizationRole.VIEWER.value,
+    }
 
 
 @pytest.mark.asyncio
@@ -2000,7 +2007,8 @@ async def test_surreal_update_project_member_role_uses_batch_update(
         "_get_project_and_user_role",
         AsyncMock(return_value=(project, ProjectRole.OWNER)),
     )
-    monkeypatch.setattr(surreal_organization_runtime, "log_audit_event", AsyncMock())
+    audit_log = AsyncMock()
+    monkeypatch.setattr(surreal_organization_runtime, "log_audit_event", audit_log)
 
     result = await surreal_organization_runtime.update_project_member_role(
         request=_request(),
@@ -2016,6 +2024,15 @@ async def test_surreal_update_project_member_role_uses_batch_update(
     assert any("UPDATE project_members SET role" in query for query in queries)
     assert all("DELETE FROM project_members" not in query for query in queries)
     assert all("CREATE project_members CONTENT $record" not in query for query in queries)
+    audit_log.assert_awaited_once()
+    assert audit_log.await_args.kwargs["action"] == "project.member.update_role"
+    assert audit_log.await_args.kwargs["user_id"] == actor.id
+    assert audit_log.await_args.kwargs["organization_id"] == org_id
+    assert audit_log.await_args.kwargs["details"] == {
+        "project_id": "project_123",
+        "target_user_id": str(target_user_id),
+        "role": ProjectRole.MAINTAINER.value,
+    }
 
 
 @pytest.mark.asyncio

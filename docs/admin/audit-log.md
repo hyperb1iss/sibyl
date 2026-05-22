@@ -24,13 +24,13 @@ as JSON and CSV for incident review or SIEM ingestion.
 
 The audit surface records security and data-governance events such as:
 
-| Event family   | Examples                                                                |
-| -------------- | ----------------------------------------------------------------------- |
-| Authentication | OIDC login, silent refresh, local login, logout, break-glass sign-in    |
-| API keys       | API key create, revoke, and scoped access decisions                     |
-| Memory         | Memory create, recall/context receipts, reflection, promotion, deletion |
-| Access control | Organization role changes, invitations, session revocation              |
-| Operations     | Backup actions, restore drills, settings updates                        |
+| Event family   | Examples                                                                                      |
+| -------------- | --------------------------------------------------------------------------------------------- |
+| Authentication | `auth.oidc.login`, `auth.token.refresh`, `auth.local.login`, `auth.break_glass.login`, logout |
+| API keys       | `auth.api_key.create`, `auth.api_key.revoke`, and scoped access decisions                     |
+| Memory         | `memory.remember`, `memory.recall`, context receipts, reflection, promotion, deletion         |
+| Access control | `org.member.update_role`, `project.member.update_role`, invitations, session revocation       |
+| Operations     | Backup actions, restore drills, settings updates                                              |
 
 Event details should be useful for investigation without exposing secrets. Exported rows should be
 treated as sensitive operational data.

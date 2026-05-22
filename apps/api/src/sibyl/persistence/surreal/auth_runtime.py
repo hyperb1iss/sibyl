@@ -2023,6 +2023,7 @@ async def login_local_user(*, email: str, password: str, request):
             _auth_org_namespace(await _ensure_personal_org_membership_record(client, user)),
             label="organization",
         )
+        break_glass = config_module.settings.break_glass_enabled
         return await _issue_auth_session(
             client,
             user=_require_namespace(
@@ -2043,8 +2044,8 @@ async def login_local_user(*, email: str, password: str, request):
             ),
             organization=organization,
             request=request,
-            action="auth.local.login",
-            details={"email": user.email},
+            action="auth.break_glass.login" if break_glass else "auth.local.login",
+            details={"break_glass": break_glass, "email": user.email},
         )
 
 

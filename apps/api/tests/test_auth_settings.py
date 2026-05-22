@@ -138,6 +138,7 @@ def test_settings_oidc_defaults_to_enterprise_contract() -> None:
     s = Settings(_env_file=None)
 
     assert s.local_auth_enabled is False
+    assert s.break_glass_enabled is False
     assert s.oidc.providers == []
     assert s.oidc.role_claim == "roles"
     assert s.oidc.session_minutes == 60

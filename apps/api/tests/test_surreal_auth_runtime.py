@@ -14,7 +14,7 @@ from sibyl.auth.passwords import hash_password
 from sibyl.auth.primitives import DeviceTokenError
 from sibyl.auth.session_cache import access_session_cache
 from sibyl.persistence.surreal import auth as surreal_auth, auth_runtime as surreal_auth_runtime
-from sibyl_core.auth import AuthSession, ProjectRole
+from sibyl_core.auth import AuthSession, OrganizationRole, ProjectRole
 
 
 class _StaticAuthClientScope:
@@ -924,6 +924,69 @@ async def test_list_memory_audit_events_rejects_non_memory_action(
 
 
 @pytest.mark.asyncio
+async def test_local_login_audits_break_glass_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    org_id = uuid4()
+    user = SimpleNamespace(
+        id=user_id,
+        email="break-glass@example.com",
+        name="Break Glass",
+        avatar_url=None,
+        github_id=None,
+        is_admin=False,
+        bio=None,
+        timezone="UTC",
+        preferences={},
+    )
+    users = SimpleNamespace(authenticate_local=AsyncMock(return_value=user))
+    issued = surreal_auth_runtime.IssuedAuthSession(
+        user=SimpleNamespace(id=user_id),
+        organization=SimpleNamespace(id=org_id),
+        session_id=uuid4(),
+        access_token="access-token",
+        refresh_token="refresh-token",
+        refresh_expires=datetime.now(UTC) + timedelta(days=30),
+    )
+    issue_session = AsyncMock(return_value=issued)
+
+    monkeypatch.setattr(
+        surreal_auth_runtime, "_auth_client_scope", lambda: _StaticAuthClientScope(object())
+    )
+    monkeypatch.setattr(
+        surreal_auth_runtime.SurrealUserRepository,
+        "from_client",
+        lambda client: users,
+    )
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_ensure_personal_org_membership_record",
+        AsyncMock(return_value={"uuid": str(org_id), "slug": "org", "name": "Org", "settings": {}}),
+    )
+    monkeypatch.setattr(surreal_auth_runtime, "_issue_auth_session", issue_session)
+    monkeypatch.setattr(
+        surreal_auth_runtime.config_module.settings,
+        "break_glass_enabled",
+        True,
+    )
+
+    result = await surreal_auth_runtime.login_local_user(
+        email="break-glass@example.com",
+        password="super-secret",
+        request=None,
+    )
+
+    assert result is issued
+    issue_session.assert_awaited_once()
+    assert issue_session.await_args.kwargs["action"] == "auth.break_glass.login"
+    assert issue_session.await_args.kwargs["details"] == {
+        "break_glass": True,
+        "email": "break-glass@example.com",
+    }
+
+
+@pytest.mark.asyncio
 async def test_authenticate_api_key_batches_last_used_and_project_scopes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1087,8 +1150,57 @@ async def test_create_api_key_writes_project_and_memory_space_scopes(
     assert memory_scope_params["record"]["memory_space_id"] == str(memory_space_id)
     audit_query, audit_params = client.calls[5]
     assert audit_query == "CREATE audit_logs CONTENT $record;"
+    assert audit_params["record"]["action"] == "auth.api_key.create"
+    assert audit_params["record"]["user_id"] == str(user_id)
+    assert audit_params["record"]["organization_id"] == str(organization_id)
+    assert "raw" not in str(audit_params["record"]["details"])
     assert audit_params["record"]["details"]["project_scope_count"] == 1
     assert audit_params["record"]["details"]["memory_space_scope_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_revoke_api_key_audits_revoke_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    organization_id = uuid4()
+    actor_user_id = uuid4()
+    api_key_id = uuid4()
+    key_record = {
+        "uuid": str(api_key_id),
+        "organization_id": str(organization_id),
+        "user_id": str(actor_user_id),
+        "name": "CLI",
+        "key_prefix": "sk_live_abcd",
+        "key_salt": "salt",
+        "key_hash": "hash",
+        "scopes": ["mcp"],
+        "expires_at": None,
+        "revoked_at": None,
+        "last_used_at": None,
+    }
+    client = _SequenceAuthClient([key_record, {**key_record, "revoked_at": datetime.now(UTC)}, []])
+
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(client),
+    )
+
+    await surreal_auth_runtime.revoke_api_key_for_user(
+        api_key_id=api_key_id,
+        organization_id=organization_id,
+        actor_user_id=actor_user_id,
+        actor_org_role=OrganizationRole.MEMBER,
+        request=None,
+    )
+
+    assert len(client.calls) == 3
+    audit_query, audit_params = client.calls[2]
+    assert audit_query == "CREATE audit_logs CONTENT $record;"
+    assert audit_params["record"]["action"] == "auth.api_key.revoke"
+    assert audit_params["record"]["user_id"] == str(actor_user_id)
+    assert audit_params["record"]["organization_id"] == str(organization_id)
+    assert audit_params["record"]["details"] == {"api_key_id": str(api_key_id)}
 
 
 @pytest.mark.asyncio
@@ -2634,8 +2746,10 @@ async def test_exchange_device_code_accepts_aware_datetime_rows(
     monkeypatch.setattr(
         surreal_auth_runtime,
         "create_refresh_token",
-        lambda **kwargs: refresh_token_kwargs.update(kwargs)
-        or ("refresh-token", datetime.now(UTC) + timedelta(days=30)),
+        lambda **kwargs: (
+            refresh_token_kwargs.update(kwargs)
+            or ("refresh-token", datetime.now(UTC) + timedelta(days=30))
+        ),
     )
     monkeypatch.setattr(surreal_auth_runtime._SurrealRepository, "select_one", select_one)
     monkeypatch.setattr(surreal_auth_runtime._SurrealRepository, "replace_record", replace_record)
