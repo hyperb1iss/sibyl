@@ -1,25 +1,23 @@
-"""Eval: does the agent invoke the `sibyl` skill when it should?
+"""Eval: does the agent invoke the right `sibyl` verb when it should?
 
 Spawns a Claude Agent SDK session per prompt, watches the tool-use stream,
-and classifies the outcome as:
+extracts every `sibyl <verb>` it sees, and classifies the outcome against
+the prompt's expected_verbs:
 
-    SKILL_LOAD    - explicit Skill(sibyl) tool call OR `sibyl skill get`
-    SIBYL_USE     - other `sibyl <subcommand>` Bash call (recall, search, etc.)
-                    without an explicit skill load
-    NONE          - no sibyl-related tool use at all
+    CORRECT_VERB    - agent used a verb in expected_verbs (trigger only)
+    WRONG_VERB      - agent used sibyl but the wrong verb (trigger only)
+    MISS            - agent didn't use sibyl at all (trigger only)
+    NO_VERB         - agent correctly avoided sibyl (anti-trigger only)
+    FALSE_POSITIVE  - agent used sibyl on a non-trigger prompt
 
-For trigger prompts we want SKILL_LOAD (best) or SIBYL_USE (acceptable).
-For no-trigger prompts we want NONE.
+Strict pass: CORRECT_VERB on trigger, NO_VERB on anti-trigger.
+Lenient pass: CORRECT_VERB or WRONG_VERB on trigger, NO_VERB on anti-trigger.
 
 Usage:
     uv run --with claude-agent-sdk python -m tools.eval.skill_invocation
     uv run --with claude-agent-sdk python -m tools.eval.skill_invocation --json
     uv run --with claude-agent-sdk python -m tools.eval.skill_invocation \\
-        --model claude-sonnet-4-6 --runs 2
-
-Requires ANTHROPIC_API_KEY in env, and a Sibyl install reachable via `sibyl`
-in PATH (the agent will actually shell out, so the local stack must be up
-if you want real recall data — but the eval scores invocation, not results).
+        --category capture-midwork --runs 2
 """
 
 from __future__ import annotations
@@ -30,42 +28,123 @@ import json
 import os
 import shutil
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from tools.eval.prompts import PROMPTS, EvalPrompt
+from tools.eval.prompts import CATEGORIES, PROMPTS, EvalPrompt
 
-Outcome = Literal["SKILL_LOAD", "SIBYL_USE", "NONE"]
+Outcome = Literal[
+    "CORRECT_VERB",
+    "WRONG_VERB",
+    "MISS",
+    "NO_VERB",
+    "FALSE_POSITIVE",
+]
 DEFAULT_MODEL = "claude-opus-4-7"
-# `sibyl skill get` and `sibyl skill list` both qualify as explicit skill loads.
-SKILL_SUBCOMMAND_MIN_TOKENS = 3
+
+# Multi-token sibyl verbs that should be matched as a single unit when the
+# expected_verbs entry has the same shape. Anything not in this set is
+# treated as a single-token verb (e.g. `search`, `recall`, `remember`).
+MULTI_WORD_VERBS: frozenset[str] = frozenset(
+    {
+        "task list",
+        "task show",
+        "task create",
+        "task start",
+        "task block",
+        "task unblock",
+        "task review",
+        "task complete",
+        "task archive",
+        "task update",
+        "task note",
+        "task notes",
+        "entity list",
+        "entity show",
+        "entity create",
+        "entity related",
+        "entity delete",
+        "entity history",
+        "explore related",
+        "explore traverse",
+        "explore dependencies",
+        "project list",
+        "project show",
+        "project link",
+        "project unlink",
+        "project links",
+        "project create",
+        "epic list",
+        "epic create",
+        "epic show",
+        "epic start",
+        "epic complete",
+        "epic archive",
+        "context pack",
+        "config show",
+        "debug status",
+        "debug schema",
+        "debug query",
+        "logs tail",
+        "skill get",
+        "skill list",
+        "skill install",
+        "crawl list",
+        "crawl add",
+        "crawl ingest",
+        "crawl status",
+        "crawl documents",
+        "session bundle",
+    }
+)
 
 
 @dataclass
 class PromptResult:
     prompt: EvalPrompt
     outcome: Outcome
+    verbs_used: list[str] = field(default_factory=list)
     tool_uses: list[str] = field(default_factory=list)
     error: str | None = None
 
     @property
     def pass_strict(self) -> bool:
-        if self.prompt.expected == "trigger":
-            return self.outcome == "SKILL_LOAD"
-        return self.outcome == "NONE"
+        if self.prompt.is_trigger:
+            return self.outcome == "CORRECT_VERB"
+        return self.outcome == "NO_VERB"
 
     @property
     def pass_lenient(self) -> bool:
-        if self.prompt.expected == "trigger":
-            return self.outcome in ("SKILL_LOAD", "SIBYL_USE")
-        return self.outcome == "NONE"
+        if self.prompt.is_trigger:
+            return self.outcome in ("CORRECT_VERB", "WRONG_VERB")
+        return self.outcome == "NO_VERB"
 
 
-def classify_tool_use(tool_uses: list[dict[str, Any]]) -> tuple[Outcome, list[str]]:
-    """Walk tool-use blocks and decide what kind of sibyl engagement happened."""
-    skill_load = False
-    sibyl_use = False
+def extract_sibyl_verb(command: str) -> str | None:
+    """Return the sibyl verb invoked by a bash command, or None.
+
+    Handles both single-word verbs (`sibyl search`) and the multi-word verbs
+    listed in MULTI_WORD_VERBS (`sibyl task list`, `sibyl entity show`).
+    """
+    tokens = command.lstrip().split()
+    if len(tokens) < 2 or tokens[0] != "sibyl":
+        return None
+    if len(tokens) >= 3:
+        two_word = f"{tokens[1]} {tokens[2]}"
+        if two_word in MULTI_WORD_VERBS:
+            return two_word
+    return tokens[1]
+
+
+def classify(
+    prompt: EvalPrompt, tool_uses: list[dict[str, Any]]
+) -> tuple[Outcome, list[str], list[str]]:
+    """Walk the tool-use stream and decide an outcome.
+
+    Returns (outcome, verbs_used, tool_use_summaries).
+    """
+    verbs_used: list[str] = []
     summaries: list[str] = []
 
     for use in tool_uses:
@@ -75,37 +154,33 @@ def classify_tool_use(tool_uses: list[dict[str, Any]]) -> tuple[Outcome, list[st
             target = str(inp.get("skill", ""))
             summaries.append(f"Skill({target})")
             if target == "sibyl":
-                skill_load = True
+                # Skill load itself is not a verb invocation; the agent still
+                # needs to run `sibyl skill get core` or another verb to
+                # actually do the work. Recorded only in summaries.
+                pass
         elif name == "Bash":
             command = str(inp.get("command", ""))
             stripped = command.lstrip()
             if not stripped.startswith("sibyl"):
                 continue
             summaries.append(f"Bash({stripped[:80]})")
-            head = stripped.split()
-            if (
-                len(head) >= SKILL_SUBCOMMAND_MIN_TOKENS
-                and head[0] == "sibyl"
-                and head[1] == "skill"
-            ):
-                skill_load = True
-            else:
-                sibyl_use = True
+            verb = extract_sibyl_verb(stripped)
+            if verb:
+                verbs_used.append(verb)
 
-    if skill_load:
-        return "SKILL_LOAD", summaries
-    if sibyl_use:
-        return "SIBYL_USE", summaries
-    return "NONE", summaries
+    if prompt.is_trigger:
+        if not verbs_used:
+            return "MISS", verbs_used, summaries
+        if any(v in prompt.expected_verbs for v in verbs_used):
+            return "CORRECT_VERB", verbs_used, summaries
+        return "WRONG_VERB", verbs_used, summaries
+    # anti-trigger
+    if not verbs_used:
+        return "NO_VERB", verbs_used, summaries
+    return "FALSE_POSITIVE", verbs_used, summaries
 
 
-async def run_one(
-    prompt: EvalPrompt,
-    *,
-    model: str,
-    max_turns: int,
-    timeout: float,
-) -> PromptResult:
+async def run_one(prompt: EvalPrompt, *, model: str, timeout: float) -> PromptResult:
     """Run a single agent session and capture tool-use intent."""
     try:
         from claude_agent_sdk import (  # type: ignore[import-not-found]
@@ -116,17 +191,17 @@ async def run_one(
     except ImportError as exc:
         return PromptResult(
             prompt=prompt,
-            outcome="NONE",
-            error=f"claude-agent-sdk not installed: {exc}. "
-            f"Re-run with `uv run --with claude-agent-sdk ...`.",
+            outcome="MISS" if prompt.is_trigger else "NO_VERB",
+            error=(
+                f"claude-agent-sdk not installed: {exc}. "
+                f"Re-run with `uv run --with claude-agent-sdk ...`."
+            ),
         )
 
     options = ClaudeAgentOptions(
         model=model,
-        max_turns=max_turns,
+        max_turns=prompt.max_turns,
         setting_sources=["user", "project"],
-        # We don't want the agent to actually mutate state during the eval.
-        # Skill load + read-only Bash is enough signal.
         allowed_tools=["Skill", "Bash", "Read", "Glob", "Grep"],
     )
 
@@ -150,57 +225,89 @@ async def run_one(
     try:
         await asyncio.wait_for(collect(), timeout=timeout)
     except TimeoutError:
+        outcome, verbs, summaries = classify(prompt, tool_uses)
         return PromptResult(
             prompt=prompt,
-            outcome="NONE",
-            tool_uses=[u.get("name", "?") for u in tool_uses],
+            outcome=outcome,
+            verbs_used=verbs,
+            tool_uses=summaries,
             error=f"timed out after {timeout:.0f}s",
         )
     except Exception as exc:
+        outcome, verbs, summaries = classify(prompt, tool_uses)
         return PromptResult(
             prompt=prompt,
-            outcome="NONE",
-            tool_uses=[u.get("name", "?") for u in tool_uses],
+            outcome=outcome,
+            verbs_used=verbs,
+            tool_uses=summaries,
             error=f"{type(exc).__name__}: {exc}",
         )
 
-    outcome, summaries = classify_tool_use(tool_uses)
-    return PromptResult(prompt=prompt, outcome=outcome, tool_uses=summaries)
-
-
-def render_table(results: list[PromptResult]) -> str:
-    rows = []
-    header = f"{'expected':<10}  {'outcome':<11}  {'pass':<6}  prompt"
-    rows.append(header)
-    rows.append("-" * len(header))
-    for r in results:
-        verdict = "STRICT" if r.pass_strict else ("LENIENT" if r.pass_lenient else "FAIL")
-        preview = r.prompt.prompt.replace("\n", " ")[:60]
-        rows.append(f"{r.prompt.expected:<10}  {r.outcome:<11}  {verdict:<6}  {preview}")
-        if r.error:
-            rows.append(f"    error: {r.error}")
-        if r.tool_uses:
-            rows.append(f"    tools: {', '.join(r.tool_uses[:4])}")
-    return "\n".join(rows)
-
-
-def summarize(results: list[PromptResult]) -> dict[str, Any]:
-    by_outcome = Counter(r.outcome for r in results)
-    triggers = [r for r in results if r.prompt.expected == "trigger"]
-    no_triggers = [r for r in results if r.prompt.expected == "no-trigger"]
-    return {
-        "total": len(results),
-        "outcomes": dict(by_outcome),
-        "trigger_strict_pass_rate": _rate(triggers, lambda r: r.pass_strict),
-        "trigger_lenient_pass_rate": _rate(triggers, lambda r: r.pass_lenient),
-        "no_trigger_pass_rate": _rate(no_triggers, lambda r: r.pass_strict),
-    }
+    outcome, verbs, summaries = classify(prompt, tool_uses)
+    return PromptResult(prompt=prompt, outcome=outcome, verbs_used=verbs, tool_uses=summaries)
 
 
 def _rate(items: list[PromptResult], pred) -> float:
     if not items:
         return 0.0
     return round(sum(1 for i in items if pred(i)) / len(items), 3)
+
+
+def per_category(results: list[PromptResult]) -> dict[str, dict[str, Any]]:
+    """Group results by category and compute strict/lenient pass rates."""
+    by_cat: dict[str, list[PromptResult]] = defaultdict(list)
+    for r in results:
+        by_cat[r.prompt.category].append(r)
+    out: dict[str, dict[str, Any]] = {}
+    for cat, rs in by_cat.items():
+        out[cat] = {
+            "count": len(rs),
+            "strict": _rate(rs, lambda r: r.pass_strict),
+            "lenient": _rate(rs, lambda r: r.pass_lenient),
+            "outcomes": dict(Counter(r.outcome for r in rs)),
+        }
+    return out
+
+
+def summarize(results: list[PromptResult]) -> dict[str, Any]:
+    triggers = [r for r in results if r.prompt.is_trigger]
+    anti = [r for r in results if not r.prompt.is_trigger]
+    return {
+        "total": len(results),
+        "outcomes": dict(Counter(r.outcome for r in results)),
+        "trigger_strict": _rate(triggers, lambda r: r.pass_strict),
+        "trigger_lenient": _rate(triggers, lambda r: r.pass_lenient),
+        "anti_trigger": _rate(anti, lambda r: r.pass_strict),
+        "by_category": per_category(results),
+    }
+
+
+def render_table(results: list[PromptResult]) -> str:
+    rows: list[str] = []
+    header = f"{'category':<22}  {'outcome':<14}  {'pass':<7}  prompt"
+    rows.append(header)
+    rows.append("-" * len(header))
+    for r in results:
+        verdict = "STRICT" if r.pass_strict else ("LENIENT" if r.pass_lenient else "FAIL")
+        preview = r.prompt.prompt.replace("\n", " ")[:50]
+        rows.append(f"{r.prompt.category:<22}  {r.outcome:<14}  {verdict:<7}  {preview}")
+        if r.verbs_used:
+            rows.append(f"    verbs: {', '.join(r.verbs_used[:5])}")
+        if r.error:
+            rows.append(f"    error: {r.error}")
+    return "\n".join(rows)
+
+
+def render_category_summary(summary: dict[str, Any]) -> str:
+    rows: list[str] = []
+    header = f"{'category':<22}  {'count':>5}  {'strict':>7}  {'lenient':>8}"
+    rows.append(header)
+    rows.append("-" * len(header))
+    for cat, stats in sorted(summary["by_category"].items()):
+        rows.append(
+            f"{cat:<22}  {stats['count']:>5}  {stats['strict']:>6.0%}  {stats['lenient']:>7.0%}"
+        )
+    return "\n".join(rows)
 
 
 async def main_async(args: argparse.Namespace) -> int:
@@ -211,16 +318,29 @@ async def main_async(args: argparse.Namespace) -> int:
         print("error: ANTHROPIC_API_KEY is not set", file=sys.stderr)
         return 2
 
-    prompts = list(PROMPTS) * args.runs
+    prompts: list[EvalPrompt] = list(PROMPTS)
+    if args.category:
+        prompts = [p for p in prompts if p.category == args.category]
+        if not prompts:
+            print(
+                f"error: no prompts in category '{args.category}'. Known: {', '.join(CATEGORIES)}",
+                file=sys.stderr,
+            )
+            return 2
+
+    prompts = prompts * args.runs
     results: list[PromptResult] = []
     for p in prompts:
-        result = await run_one(p, model=args.model, max_turns=args.max_turns, timeout=args.timeout)
+        result = await run_one(p, model=args.model, timeout=args.timeout)
         results.append(result)
         if not args.json:
             verdict = (
                 "STRICT" if result.pass_strict else ("LENIENT" if result.pass_lenient else "FAIL")
             )
-            print(f"  [{verdict:<7}] {result.outcome:<11} {p.prompt[:60]}", file=sys.stderr)
+            print(
+                f"  [{verdict:<7}] {result.outcome:<14} {p.category:<22} {p.prompt[:50]}",
+                file=sys.stderr,
+            )
 
     summary = summarize(results)
     if args.json:
@@ -229,11 +349,13 @@ async def main_async(args: argparse.Namespace) -> int:
             "results": [
                 {
                     "prompt": r.prompt.prompt,
-                    "expected": r.prompt.expected,
+                    "category": r.prompt.category,
+                    "expected_verbs": list(r.prompt.expected_verbs),
                     "outcome": r.outcome,
+                    "verbs_used": r.verbs_used,
+                    "tool_uses": r.tool_uses,
                     "pass_strict": r.pass_strict,
                     "pass_lenient": r.pass_lenient,
-                    "tool_uses": r.tool_uses,
                     "error": r.error,
                 }
                 for r in results
@@ -244,17 +366,15 @@ async def main_async(args: argparse.Namespace) -> int:
         print()
         print(render_table(results))
         print()
+        print(render_category_summary(summary))
+        print()
         print(
-            f"trigger pass (strict):  {summary['trigger_strict_pass_rate']:.0%}\n"
-            f"trigger pass (lenient): {summary['trigger_lenient_pass_rate']:.0%}\n"
-            f"no-trigger pass:        {summary['no_trigger_pass_rate']:.0%}"
+            f"trigger strict:    {summary['trigger_strict']:.0%}\n"
+            f"trigger lenient:   {summary['trigger_lenient']:.0%}\n"
+            f"anti-trigger:      {summary['anti_trigger']:.0%}"
         )
 
-    # Exit nonzero if either rate drops below the threshold.
-    failed = (
-        summary["trigger_lenient_pass_rate"] < args.threshold
-        or summary["no_trigger_pass_rate"] < args.threshold
-    )
+    failed = summary["trigger_lenient"] < args.threshold or summary["anti_trigger"] < args.threshold
     return 1 if failed else 0
 
 
@@ -266,14 +386,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--model", default=DEFAULT_MODEL, help=f"Anthropic model id (default: {DEFAULT_MODEL})"
     )
     parser.add_argument(
-        "--runs", type=int, default=1, help="Repeat each prompt N times (default: 1)"
+        "--category",
+        default=None,
+        help=f"Run only prompts in this category. One of: {', '.join(CATEGORIES)}",
     )
-    parser.add_argument("--max-turns", type=int, default=4, help="Agent SDK turn cap per prompt")
+    parser.add_argument("--runs", type=int, default=1, help="Repeat each prompt N times")
     parser.add_argument(
-        "--timeout", type=float, default=90.0, help="Per-prompt wall-clock budget (seconds)"
+        "--timeout", type=float, default=120.0, help="Per-prompt wall-clock budget (seconds)"
     )
     parser.add_argument(
-        "--threshold", type=float, default=0.7, help="Min pass rate to exit 0 (default: 0.7)"
+        "--threshold",
+        type=float,
+        default=0.7,
+        help="Min trigger-lenient + anti-trigger rate for exit 0 (default 0.7)",
     )
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of table")
     return parser.parse_args(argv)

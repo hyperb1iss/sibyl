@@ -78,6 +78,7 @@ ignore = [
 "tools/eval/*.py" = [
     "T20",     # print statements (CLI output is the whole point)
     "PLC0415", # lazy `claude_agent_sdk` import so SDK stays optional
+    "PLR2004", # magic numbers (sibyl verb token counts are domain constants)
 ]
 # Skill utility scripts: CLI tools that print to stdout, tolerate malformed JSON
 "skills/*/scripts/*.py" = [
