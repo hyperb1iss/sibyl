@@ -423,7 +423,7 @@ worker:
 ```yaml
 ingress:
   enabled: false
-  className: "kong"
+  className: ""
   annotations: {}
   hosts:
     - host: sibyl.local

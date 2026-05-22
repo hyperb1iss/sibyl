@@ -73,7 +73,7 @@ spec:
             - name: NEXT_PUBLIC_API_URL
               value: {{ .Values.frontend.publicApiUrl | quote }}
             {{- end }}
-            # WebSocket derives URL from window.location when accessed via Kong
+            # WebSocket derives URL from window.location behind shared ingress
             - name: HOSTNAME
               value: "0.0.0.0"
             - name: PORT
