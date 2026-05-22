@@ -61,6 +61,10 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "sibyl.fullname" . }}-config
+            {{- if .Values.backend.existingSecret }}
+            - secretRef:
+                name: {{ .Values.backend.existingSecret }}
+            {{- end }}
           env:
             {{- if .Values.backend.existingSecret }}
             - name: SIBYL_JWT_SECRET

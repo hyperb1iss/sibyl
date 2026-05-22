@@ -1,0 +1,116 @@
+{{- if .Values.bootstrap.enabled -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "sibyl.fullname" . }}-bootstrap
+  labels:
+    {{- include "sibyl.backend.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-weight: "10"
+    {{- with .Values.bootstrap.job.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  backoffLimit: {{ .Values.bootstrap.job.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.bootstrap.job.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "sibyl.backend.labels" . | nindent 8 }}
+      {{- with .Values.bootstrap.job.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "sibyl.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.backend.podSecurityContext | nindent 8 }}
+      containers:
+        - name: bootstrap
+          securityContext:
+            {{- toYaml .Values.backend.securityContext | nindent 12 }}
+          image: {{ include "sibyl.backend.image" . }}
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          command: ["sibyld"]
+          args:
+            - bootstrap
+            - org
+            - --name
+            - {{ .Values.bootstrap.organization.name | quote }}
+            {{- with .Values.bootstrap.organization.slug }}
+            - --slug
+            - {{ . | quote }}
+            {{- end }}
+            {{- if .Values.breakGlass.enabled }}
+            - --owner-email=$(SIBYL_BOOTSTRAP_OWNER_EMAIL)
+            {{- end }}
+            {{- if and .Values.breakGlass.enabled .Values.bootstrap.memorySpace.enabled }}
+            - --memory-space-name
+            - {{ .Values.bootstrap.memorySpace.name | quote }}
+            - --memory-space-scope
+            - {{ .Values.bootstrap.memorySpace.scope | quote }}
+            {{- with .Values.bootstrap.memorySpace.scopeKey }}
+            - --memory-space-scope-key
+            - {{ . | quote }}
+            {{- end }}
+            {{- else }}
+            - --skip-memory-space
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "sibyl.fullname" . }}-config
+            {{- if .Values.backend.existingSecret }}
+            - secretRef:
+                name: {{ .Values.backend.existingSecret }}
+            {{- end }}
+          env:
+            - name: SIBYL_SURREAL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.backend.surreal.existingSecret }}
+                  name: {{ .Values.backend.surreal.existingSecret }}
+                  key: {{ .Values.backend.surreal.secretKey | default "password" }}
+                  {{- else }}
+                  name: {{ include "sibyl.fullname" . }}-surreal
+                  key: password
+                  {{- end }}
+            {{- if eq .Values.coordinationBackend "redis" }}
+            - name: SIBYL_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.backend.redis.existingSecret }}
+                  name: {{ .Values.backend.redis.existingSecret }}
+                  key: {{ .Values.backend.redis.secretKey | default "password" }}
+                  {{- else }}
+                  name: {{ include "sibyl.fullname" . }}-redis
+                  key: password
+                  {{- end }}
+            {{- end }}
+            {{- if .Values.breakGlass.enabled }}
+            - name: SIBYL_BOOTSTRAP_OWNER_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "breakGlass.existingSecret is required when breakGlass.enabled=true" .Values.breakGlass.existingSecret }}
+                  key: {{ .Values.breakGlass.ownerEmailKey | quote }}
+            - name: SIBYL_BOOTSTRAP_OWNER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "breakGlass.existingSecret is required when breakGlass.enabled=true" .Values.breakGlass.existingSecret }}
+                  key: {{ .Values.breakGlass.ownerPasswordKey | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

@@ -14,6 +14,27 @@ global:
 # -- Coordination backend: "auto", "local", or "redis"
 coordinationBackend: "auto"
 
+# -- OpenID Connect configuration passed to SIBYL_OIDC.
+oidc:
+  # -- Corporate OIDC providers. GitHub/Google require extra_providers_enabled=true.
+  providers: []
+  # Example:
+  # providers:
+  #   - name: entra
+  #     issuer: "https://login.microsoftonline.com/<tenant-id>/v2.0"
+  #     client_id: ""
+  #     client_secret_env: "SIBYL_OIDC_ENTRA_CLIENT_SECRET"
+  #     scopes: ["openid", "profile", "email"]
+  #     role_claim_override: ""
+  # -- Global role claim, supports dotted paths such as "resource_access.sibyl.roles".
+  role_claim: "roles"
+  # -- OIDC-backed session lifetime in minutes.
+  session_minutes: 60
+  # -- Enable silent refresh against the IdP.
+  silent_refresh_enabled: true
+  # -- Explicit opt-in for non-corporate providers such as GitHub or Google.
+  extra_providers_enabled: false
+
 # -- Backend configuration
 backend:
   # -- Number of replicas (ignored if autoscaling is enabled)
@@ -400,15 +421,9 @@ worker:
   # -- Affinity rules (overridden by podAntiAffinity if enabled)
   affinity: {}
 
-# -- Ingress configuration (for reference, actual ingress via Kong)
+# -- Ingress configuration.
 ingress:
-  # -- Enable ingress resource creation
-  enabled: false
-  # -- Ingress class name
-  className: "kong"
-  # -- Ingress annotations
-  annotations: {}
-  # -- Ingress hosts
+  # -- Shared route table for classic Ingress and Gateway API HTTPRoute.
   hosts:
     - host: sibyl.local
       paths:
@@ -421,8 +436,93 @@ ingress:
         - path: /
           pathType: Prefix
           service: frontend
-  # -- TLS configuration
-  tls: []
+  classic:
+    # -- Enable networking.k8s.io/v1 Ingress rendering.
+    enabled: false
+    # -- Ingress class name. Empty leaves controller selection to cluster policy.
+    className: ""
+    # -- Ingress annotations.
+    annotations: {}
+    # -- TLS configuration.
+    tls: []
+  gatewayApi:
+    # -- Enable gateway.networking.k8s.io/v1 HTTPRoute rendering.
+    enabled: false
+    # -- HTTPRoute annotations.
+    annotations: {}
+    # -- Parent Gateway references.
+    parentRefs: []
+    # Example:
+    # parentRefs:
+    #   - name: shared-gateway
+    #     namespace: gateway-system
+    #     sectionName: https
+    # -- Optional hostnames override. Defaults to ingress.hosts[*].host.
+    hostnames: []
+
+# -- Kubernetes NetworkPolicy configuration.
+networkPolicy:
+  # -- Enable default-deny plus explicit app allows.
+  enabled: false
+  ingress:
+    # -- Sources allowed to reach frontend/backend services, usually ingress controller pods.
+    from: []
+    # Example:
+    # from:
+    #   - namespaceSelector:
+    #       matchLabels:
+    #         kubernetes.io/metadata.name: ingress-nginx
+  egress:
+    # -- Allow DNS egress for selected Sibyl pods.
+    allowDns: true
+    dnsPorts:
+      - 53
+    # -- Extra egress rules appended to backend/worker policies.
+    extra: []
+  surrealdb:
+    # -- Destination selectors for the SurrealDB service/pods.
+    to: []
+    ports:
+      - 8000
+  redis:
+    # -- Enable Redis/Valkey egress allow rules.
+    enabled: false
+    to: []
+    ports:
+      - 6379
+
+# -- Namespace Pod Security labels.
+podSecurity:
+  # -- Label the release namespace with Pod Security restricted enforce/audit/warn.
+  enforceRestricted: false
+  version: "latest"
+
+# -- Post-install/post-upgrade tenant bootstrap.
+bootstrap:
+  enabled: false
+  organization:
+    name: "Sibyl"
+    slug: ""
+  memorySpace:
+    enabled: true
+    name: "Default memory"
+    scope: "private"
+    scopeKey: ""
+  job:
+    annotations: {}
+    backoffLimit: 3
+    ttlSecondsAfterFinished: 300
+    podAnnotations: {}
+
+# -- Break-glass local owner bootstrap.
+breakGlass:
+  enabled: false
+  # -- Optional source CIDRs for downstream ingress/firewall overlays.
+  allowedIPs: []
+  # -- Existing secret containing owner bootstrap fields.
+  existingSecret: ""
+  ownerEmailKey: "owner-email"
+  ownerPasswordKey: "owner-password"
 
 # -- Service account configuration
 serviceAccount:

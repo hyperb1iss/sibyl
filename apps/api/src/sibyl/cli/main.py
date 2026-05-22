@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 import typer
 
+from sibyl.cli.bootstrap import app as bootstrap_app
 from sibyl.cli.common import (
     ELECTRIC_PURPLE,
     NEON_CYAN,
@@ -50,6 +51,7 @@ app = typer.Typer(
 
 # Register subcommand groups
 app.add_typer(db_app, name="db")
+app.add_typer(bootstrap_app, name="bootstrap")
 app.add_typer(export_app, name="export")
 app.add_typer(generate_app, name="generate")
 app.add_typer(migrate_app, name="migrate")

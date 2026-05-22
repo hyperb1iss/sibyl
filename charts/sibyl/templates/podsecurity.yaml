@@ -1,0 +1,13 @@
+{{- if .Values.podSecurity.enforceRestricted -}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Release.Namespace | quote }}
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: {{ .Values.podSecurity.version | quote }}
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: {{ .Values.podSecurity.version | quote }}
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: {{ .Values.podSecurity.version | quote }}
+{{- end }}

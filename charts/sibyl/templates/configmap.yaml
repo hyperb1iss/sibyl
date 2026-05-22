@@ -1,5 +1,6 @@
 apiVersion: v1
 kind: ConfigMap
+{{- include "sibyl.validateOidcProviders" . }}
 {{- if hasKey .Values "store" }}
 {{- fail "Deprecated value 'store' is no longer supported. Remove it and complete legacy-to-Surreal migration before upgrading." }}
 {{- end }}
@@ -19,6 +20,8 @@ data:
   SIBYL_STORE: "surreal"
   SIBYL_AUTH_STORE: "surreal"
   SIBYL_COORDINATION_BACKEND: {{ .Values.coordinationBackend | quote }}
+  SIBYL_LOCAL_AUTH_ENABLED: {{ .Values.breakGlass.enabled | quote }}
+  SIBYL_OIDC: {{ .Values.oidc | toJson | quote }}
   {{- if eq .Values.coordinationBackend "redis" }}
   SIBYL_REDIS_HOST: {{ .Values.backend.redis.host | quote }}
   SIBYL_REDIS_PORT: {{ .Values.backend.redis.port | quote }}

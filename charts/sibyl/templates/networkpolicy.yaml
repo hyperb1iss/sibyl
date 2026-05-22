@@ -1,0 +1,142 @@
+{{- if .Values.networkPolicy.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sibyl.fullname" . }}-default-deny
+  labels:
+    {{- include "sibyl.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "sibyl.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sibyl.fullname" . }}-frontend-ingress
+  labels:
+    {{- include "sibyl.frontend.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "sibyl.frontend.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  {{- if .Values.networkPolicy.ingress.from }}
+  ingress:
+    - from:
+        {{- toYaml .Values.networkPolicy.ingress.from | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.frontend.service.port }}
+  {{- else }}
+  ingress: []
+  {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sibyl.fullname" . }}-frontend-to-backend
+  labels:
+    {{- include "sibyl.frontend.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "sibyl.frontend.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "sibyl.backend.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.backend.service.port }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sibyl.fullname" . }}-backend-ingress
+  labels:
+    {{- include "sibyl.backend.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "sibyl.backend.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "sibyl.frontend.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.backend.service.port }}
+    {{- if .Values.networkPolicy.ingress.from }}
+    - from:
+        {{- toYaml .Values.networkPolicy.ingress.from | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.backend.service.port }}
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sibyl.fullname" . }}-backend-worker-egress
+  labels:
+    {{- include "sibyl.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "sibyl.selectorLabels" . | nindent 6 }}
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          - backend
+          - worker
+  policyTypes:
+    - Egress
+  egress:
+    {{- if .Values.networkPolicy.egress.allowDns }}
+    - to:
+        - namespaceSelector: {}
+      ports:
+        {{- range .Values.networkPolicy.egress.dnsPorts }}
+        - protocol: UDP
+          port: {{ . }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+    {{- end }}
+    {{- if .Values.networkPolicy.surrealdb.to }}
+    - to:
+        {{- toYaml .Values.networkPolicy.surrealdb.to | nindent 8 }}
+      ports:
+        {{- range .Values.networkPolicy.surrealdb.ports }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+    {{- end }}
+    {{- if and .Values.networkPolicy.redis.enabled .Values.networkPolicy.redis.to }}
+    - to:
+        {{- toYaml .Values.networkPolicy.redis.to | nindent 8 }}
+      ports:
+        {{- range .Values.networkPolicy.redis.ports }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+    {{- end }}
+    {{- with .Values.networkPolicy.egress.extra }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- if and (not .Values.networkPolicy.egress.allowDns) (not .Values.networkPolicy.surrealdb.to) (not (and .Values.networkPolicy.redis.enabled .Values.networkPolicy.redis.to)) (not .Values.networkPolicy.egress.extra) }}
+    []
+    {{- end }}
+{{- end }}

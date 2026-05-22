@@ -1,19 +1,22 @@
-{{- if .Values.ingress.enabled -}}
+{{- if or .Values.ingress.enabled .Values.ingress.classic.enabled -}}
+{{- $className := default .Values.ingress.className .Values.ingress.classic.className -}}
+{{- $annotations := default .Values.ingress.annotations .Values.ingress.classic.annotations -}}
+{{- $tls := default .Values.ingress.tls .Values.ingress.classic.tls -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "sibyl.fullname" . }}
   labels:
     {{- include "sibyl.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
+  {{- with $annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  {{- with .Values.ingress.className }}
+  {{- with $className }}
   ingressClassName: {{ . | quote }}
   {{- end }}
-  {{- with .Values.ingress.tls }}
+  {{- with $tls }}
   tls:
     {{- toYaml . | nindent 4 }}
   {{- end }}

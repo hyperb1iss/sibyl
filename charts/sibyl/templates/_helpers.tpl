@@ -122,3 +122,18 @@ Worker selector labels
 {{ include "sibyl.selectorLabels" . }}
 app.kubernetes.io/component: worker
 {{- end }}
+
+{{/*
+Fail fast when a non-corporate extra provider is configured without the explicit opt-in.
+*/}}
+{{- define "sibyl.validateOidcProviders" -}}
+{{- if not .Values.oidc.extra_providers_enabled -}}
+{{- range $provider := .Values.oidc.providers }}
+{{- $name := lower (default "" $provider.name) -}}
+{{- $issuer := lower (default "" $provider.issuer) -}}
+{{- if or (contains "github" $name) (contains "github.com" $issuer) (contains "google" $name) (contains "accounts.google.com" $issuer) -}}
+{{- fail "oidc.extra_providers_enabled must be true before enabling GitHub or Google OIDC providers" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
