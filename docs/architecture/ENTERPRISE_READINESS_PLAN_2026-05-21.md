@@ -7,8 +7,7 @@
   single-tenant data plane that ships clean. No cloud or deployment specifics — those belong in a
   deployment-overlay doc per organization.
 - **Related:** [`SIBYL_NORTHSTAR.md`](SIBYL_NORTHSTAR.md),
-  [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md),
-  [`POST_GRAPHITI_PLAN_2026-05-19.md`](POST_GRAPHITI_PLAN_2026-05-19.md)
+  [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md), `POST_GRAPHITI_PLAN_2026-05-19.md`
 
 ### Revision history
 

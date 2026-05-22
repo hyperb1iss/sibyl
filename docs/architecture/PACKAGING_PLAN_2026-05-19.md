@@ -2,9 +2,8 @@
 
 **Date:** 2026-05-19 **Status:** Proposal — v3, validated against repo state and package registries
 **Scope:** 1.0 launch readiness. How Sibyl reaches every audience. **Related:**
-[`AUDIT_2026-05-05.md`](AUDIT_2026-05-05.md),
-[`PACKAGING_RESEARCH_2026-05-19.md`](PACKAGING_RESEARCH_2026-05-19.md), `decision_41e6cd8782b2`
-(Shared SurrealDB topology)
+`AUDIT_2026-05-05.md`, `PACKAGING_RESEARCH_2026-05-19.md`, `decision_41e6cd8782b2` (Shared SurrealDB
+topology)
 
 ---
 

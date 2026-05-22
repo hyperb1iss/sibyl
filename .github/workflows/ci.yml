@@ -562,6 +562,8 @@ jobs:
       - name: Run e2e tests
         env:
           SIBYL_E2E_CLI_COMMAND: uv run --project ../cli sibyl
+          SIBYL_E2E_EMAIL: baseline-corpus@sibyl.dev
+          SIBYL_E2E_PASSWORD: baseline-corpus-password-secure-123!
         run: |
           cd apps/e2e
           uv run pytest -v
