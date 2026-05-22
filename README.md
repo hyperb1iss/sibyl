@@ -388,6 +388,41 @@ sibyl/
 See [`docs/guide/why-surreal.md`](docs/guide/why-surreal.md) for the rationale and
 [`docs/guide/storage-modes.md`](docs/guide/storage-modes.md) for the mode matrix.
 
+## 🧪 Benchmarks
+
+Sibyl reaches the LongMemEval-S retrieval ceiling on the live API path with no LLM extraction
+and no LLM reranking.
+
+| Metric           | Value                                      |
+| ---------------- | ------------------------------------------ |
+| `hit@5`          | **100.00%** (500/500)                      |
+| `recall@5`       | **96.67%** (strict multi-answer)           |
+| `recall@10`      | **98.68%**                                 |
+| `ndcg@5`         | 94.21%                                     |
+| Questions        | 500/500                                    |
+| LLM extraction   | disabled                                   |
+| LLM reranking    | none                                       |
+| Embeddings       | OpenAI `text-embedding-3-small`, 1024 dims |
+| Tenant isolation | physical SurrealDB namespace per question  |
+
+The result is measured against the production `/api/search` surface in an ephemeral CI stack, not
+an offline notebook replay. Per-question physical tenant isolation, full artifact and diagnostics
+published.
+
+`hit@5 = 100%` and strict `recall@5 = 96.67%` measure different things and we report both: hit
+asks "did *any* correct session land in the top 5", strict recall asks "did *every* correct
+session land for multi-answer questions". Many LongMemEval-S questions have multiple correct
+answer sessions, which is why these numbers diverge.
+
+A few comparisons that are *not* apples-to-apples are usually shown side by side in this space —
+retrieval recall vs LLM-judged QA accuracy is the most common conflation. See
+[AI Memory Landscape](docs/testing/ai-memory-landscape.md) for the honest field positioning.
+
+- **Headline run:** [GitHub Actions run 26273942749](https://github.com/hyperb1iss/sibyl/actions/runs/26273942749)
+- **Full results doc:** [`docs/testing/longmemeval.md`](docs/testing/longmemeval.md)
+- **Methodology:** [`docs/testing/benchmark-methodology.md`](docs/testing/benchmark-methodology.md)
+- **Architecture:** [`docs/architecture/retrieval-system.md`](docs/architecture/retrieval-system.md)
+
 ## Authentication
 
 ### JWT Sessions (Web UI)
@@ -469,6 +504,13 @@ automatic, but they are not required.
 Sibyl is **self-hosted and open source**. You own your data. It includes a full **task workflow
 system**, not just memory. It has a **web UI** for humans, not just APIs for machines. And it keeps
 knowledge, tasks, and docs connected in one graph instead of scattering them across tools.
+
+On retrieval quality: Sibyl reaches the LongMemEval-S retrieval ceiling
+(500/500 `hit@5`, 96.67% strict `recall@5`, 98.68% `recall@10`) on the live API path with no LLM
+extraction or LLM reranking. Many published "LongMemEval" numbers are end-to-end QA accuracy with
+an LLM judge, which is a different metric than retrieval recall — see
+[`docs/testing/ai-memory-landscape.md`](docs/testing/ai-memory-landscape.md) for honest
+side-by-side positioning.
 
 ### What LLM APIs do I need?
 

@@ -47,6 +47,7 @@ export default defineConfig({
             { text: 'Admins', link: '/admin/installing' },
             { text: 'CLI', link: '/cli/' },
             { text: 'API', link: '/api/' },
+            { text: 'Benchmarks', link: '/testing/' },
             { text: 'Deployment', link: '/deployment/' },
         ],
 
@@ -215,6 +216,46 @@ export default defineConfig({
                     ],
                 },
             ],
+            '/testing/': [
+                { text: 'Overview', link: '/testing/' },
+                {
+                    text: 'Evaluation',
+                    items: [
+                        { text: 'LongMemEval Results', link: '/testing/longmemeval' },
+                        { text: 'AI Memory Landscape', link: '/testing/ai-memory-landscape' },
+                        { text: 'Benchmark Methodology', link: '/testing/benchmark-methodology' },
+                    ],
+                },
+                {
+                    text: 'Architecture',
+                    items: [
+                        {
+                            text: 'Retrieval System',
+                            link: '/architecture/retrieval-system',
+                        },
+                    ],
+                },
+            ],
+            '/architecture/': [
+                {
+                    text: 'Architecture',
+                    items: [
+                        {
+                            text: 'Retrieval System',
+                            link: '/architecture/retrieval-system',
+                        },
+                    ],
+                },
+                {
+                    text: 'Benchmarks',
+                    items: [
+                        { text: 'Overview', link: '/testing/' },
+                        { text: 'LongMemEval Results', link: '/testing/longmemeval' },
+                        { text: 'AI Memory Landscape', link: '/testing/ai-memory-landscape' },
+                        { text: 'Benchmark Methodology', link: '/testing/benchmark-methodology' },
+                    ],
+                },
+            ],
             '/deployment/': [
                 { text: 'Overview', link: '/deployment/' },
                 {
@@ -261,9 +302,17 @@ export default defineConfig({
         },
     },
 
-    // Allow localhost links in docs (they reference local dev services)
+    // Allow localhost links in docs (they reference local dev services).
+    // The architecture/research notes below predate this config; they reference
+    // sibling planning docs and the root CLAUDE.md that VitePress can't resolve
+    // when building under /sibyl/. Narrow ignores keep the build passing without
+    // hiding new dead links elsewhere.
     ignoreDeadLinks: [
         /^http:\/\/localhost/,
         /^\/(Users|home)\//,
+        /ROADMAP_2026/,
+        /(?:^|\/)(?:rust-port|memory-sota)(?:\/|$)/,
+        /CLAUDE(\.md)?$/,
+        /^\.\/\.$/,
     ],
 })

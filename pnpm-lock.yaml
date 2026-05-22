@@ -219,6 +219,9 @@ importers:
       vitepress-plugin-llms:
         specifier: ^1.12.2
         version: 1.12.2
+      vue:
+        specifier: ^3.5.34
+        version: 3.5.34(typescript@6.0.3)
 
 packages:
 
