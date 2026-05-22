@@ -103,6 +103,7 @@ jobs:
       SIBYL_JWT_SECRET: test-secret-for-eval
       SIBYL_STORE: surreal
       SIBYL_AUTH_STORE: surreal
+      SIBYL_PUBLIC_SIGNUPS_ENABLED: "true"
       SIBYL_COORDINATION_BACKEND: local
       SIBYL_SURREAL_URL: ws://localhost:8000/rpc
       SIBYL_SURREAL_USERNAME: sibyl_ci
@@ -268,6 +269,7 @@ jobs:
       SIBYL_JWT_SECRET: test-secret-for-eval
       SIBYL_STORE: surreal
       SIBYL_AUTH_STORE: surreal
+      SIBYL_PUBLIC_SIGNUPS_ENABLED: "true"
       SIBYL_COORDINATION_BACKEND: local
       SIBYL_SURREAL_URL: ws://localhost:8000/rpc
       SIBYL_SURREAL_USERNAME: sibyl_ci
@@ -458,6 +460,7 @@ jobs:
       SIBYL_JWT_SECRET: test-secret-for-eval
       SIBYL_STORE: surreal
       SIBYL_AUTH_STORE: surreal
+      SIBYL_PUBLIC_SIGNUPS_ENABLED: "true"
       SIBYL_COORDINATION_BACKEND: local
       SIBYL_SURREAL_URL: ws://localhost:8000/rpc
       SIBYL_SURREAL_USERNAME: sibyl_ci
