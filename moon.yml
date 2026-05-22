@@ -564,6 +564,15 @@ tasks:
       - benchmarks/results/ai-memory/*.json
       - pyproject.toml
 
+  eval-skill-trigger:
+    command: uv run --with claude-agent-sdk python -m tools.eval.skill_invocation
+    inputs:
+      - tools/eval/**/*.py
+      - skills/sibyl/SKILL.md
+      - apps/cli/src/sibyl_cli/data/skill-packs/core.md
+    options:
+      cache: false
+
   retrieval-mode-history:
     command: uv run python -m tools.inventory.retrieval_mode_history
     inputs:

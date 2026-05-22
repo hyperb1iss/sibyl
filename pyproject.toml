@@ -74,6 +74,11 @@ ignore = [
     "SIM105",  # contextlib.suppress (explicit try-except is clearer here)
     "PLR2004", # magic numbers (thresholds are clear in context)
 ]
+# Skill-invocation eval harness: CLI script with lazy optional-dep import
+"tools/eval/*.py" = [
+    "T20",     # print statements (CLI output is the whole point)
+    "PLC0415", # lazy `claude_agent_sdk` import so SDK stays optional
+]
 # Skill utility scripts: CLI tools that print to stdout, tolerate malformed JSON
 "skills/*/scripts/*.py" = [
     "T20",     # print statements (CLI output is the whole point)
