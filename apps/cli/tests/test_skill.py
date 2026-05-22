@@ -14,8 +14,9 @@ def test_skill_command_prints_canonical_markdown() -> None:
 
     assert result.exit_code == 0
     assert result.stdout == canonical_skill_markdown()
-    assert "discovery stub" in result.stdout
+    assert "version-matched workflow" in result.stdout
     assert "sibyl skill get core" in result.stdout
+    assert "intent -> verb" in result.stdout
 
 
 def test_skill_get_prints_versioned_pack() -> None:
