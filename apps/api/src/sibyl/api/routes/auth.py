@@ -778,7 +778,7 @@ async def github_callback(request: Request) -> Response:
 
 
 @router.post("/local/signup", response_model=None)
-async def local_signup(request: Request):
+async def local_signup(request: Request, response: Response):
     _ = _require_jwt_secret()
     await _require_local_auth_allowed(request)
     data = await _read_auth_payload(request)
@@ -824,20 +824,20 @@ async def local_signup(request: Request):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
 
     redirect = _safe_frontend_redirect(body.redirect or request.query_params.get("redirect"))
-    response: Response
     if has_redirect:
-        response = RedirectResponse(url=redirect, status_code=status.HTTP_302_FOUND)
+        auth_response: Response = RedirectResponse(url=redirect, status_code=status.HTTP_302_FOUND)
     else:
-        response = Response(status_code=status.HTTP_201_CREATED)
+        response.status_code = status.HTTP_201_CREATED
+        auth_response = response
 
     _set_auth_cookies(
-        response,
+        auth_response,
         access_token=access_token,
         refresh_token=refresh_token,
         refresh_expires=refresh_expires,
     )
-    if isinstance(response, RedirectResponse):
-        return response
+    if isinstance(auth_response, RedirectResponse):
+        return auth_response
     return {
         "user": {
             "id": str(issued.user.id),
@@ -853,7 +853,7 @@ async def local_signup(request: Request):
 
 @router.post("/local/login", response_model=None)
 @limiter.limit("5/minute")  # Strict limit to prevent brute force
-async def local_login(request: Request):
+async def local_login(request: Request, response: Response):
     _ = _require_jwt_secret()
     await _require_local_auth_allowed(request)
     data = await _read_auth_payload(request)
@@ -912,20 +912,20 @@ async def local_login(request: Request):
         raise
 
     redirect = _safe_frontend_redirect(body.redirect or request.query_params.get("redirect"))
-    response: Response
     if has_redirect:
-        response = RedirectResponse(url=redirect, status_code=status.HTTP_302_FOUND)
+        auth_response: Response = RedirectResponse(url=redirect, status_code=status.HTTP_302_FOUND)
     else:
-        response = Response(status_code=status.HTTP_200_OK)
+        response.status_code = status.HTTP_200_OK
+        auth_response = response
 
     _set_auth_cookies(
-        response,
+        auth_response,
         access_token=access_token,
         refresh_token=refresh_token,
         refresh_expires=refresh_expires,
     )
-    if isinstance(response, RedirectResponse):
-        return response
+    if isinstance(auth_response, RedirectResponse):
+        return auth_response
     return {
         "user": {
             "id": str(issued.user.id),

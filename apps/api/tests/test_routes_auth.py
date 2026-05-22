@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from inspect import signature
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
 from sibyl.api.errors import http_exception_payload
 from sibyl.api.routes import auth as auth_routes
@@ -44,7 +45,13 @@ class FakeRequest:
 
 async def _call_route(endpoint, /, **kwargs):
     target = getattr(endpoint, "__wrapped__", endpoint)
+    if "response" in signature(target).parameters and "response" not in kwargs:
+        kwargs["response"] = Response()
     return await target(**kwargs)
+
+
+def _set_cookie_headers(response: Response) -> list[str]:
+    return [value.decode() for key, value in response.raw_headers if key.lower() == b"set-cookie"]
 
 
 def _ctx(*, include_org: bool = True) -> AuthContext:
@@ -154,10 +161,15 @@ async def test_local_signup_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(auth_routes, "is_setup_mode", AsyncMock(return_value=True))
     monkeypatch.setattr(auth_routes, "signup_local_user", signup)
 
-    response = await auth_routes.local_signup(request=request)
+    route_response = Response()
+    response = await _call_route(auth_routes.local_signup, request=request, response=route_response)
 
     assert response["user"]["email"] == issued.user.email
     assert response["organization"]["slug"] == issued.organization.slug
+    assert route_response.status_code == 201
+    cookies = _set_cookie_headers(route_response)
+    assert any(auth_routes.ACCESS_TOKEN_COOKIE in cookie for cookie in cookies)
+    assert any(auth_routes.REFRESH_TOKEN_COOKIE in cookie for cookie in cookies)
     signup.assert_awaited_once_with(
         email="nova@example.com",
         password="super-secret",
@@ -187,7 +199,7 @@ async def test_local_signup_rejects_public_signup_when_setup_complete(
     monkeypatch.setattr(auth_routes, "signup_local_user", signup)
 
     with pytest.raises(HTTPException) as exc_info:
-        await auth_routes.local_signup(request=request)
+        await _call_route(auth_routes.local_signup, request=request)
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail["code"] == "signup_disabled"
@@ -231,7 +243,7 @@ async def test_local_signup_accepts_invitation_when_public_signup_disabled(
     monkeypatch.setattr(auth_routes.organization_runtime, "accept_org_invitation", accept)
     monkeypatch.setattr(auth_routes, "signup_local_user", signup)
 
-    response = await auth_routes.local_signup(request=request)
+    response = await _call_route(auth_routes.local_signup, request=request)
 
     validate.assert_awaited_once_with(token="invite-token", email="nova@example.com")
     accept.assert_awaited_once_with(
@@ -270,7 +282,7 @@ async def test_local_signup_validates_invitation_before_setup_signup(
     monkeypatch.setattr(auth_routes, "signup_local_user", signup)
 
     with pytest.raises(HTTPException):
-        await auth_routes.local_signup(request=request)
+        await _call_route(auth_routes.local_signup, request=request)
 
     validate.assert_awaited_once_with(token="bad-token", email="nova@example.com")
     signup.assert_not_awaited()
@@ -307,7 +319,7 @@ async def test_local_signup_with_failed_invitation_deletes_created_user(
     monkeypatch.setattr(auth_routes, "delete_failed_local_signup_user", cleanup)
 
     with pytest.raises(HTTPException):
-        await auth_routes.local_signup(request=request)
+        await _call_route(auth_routes.local_signup, request=request)
 
     cleanup.assert_awaited_once_with(
         user_id=issued.user.id,
@@ -331,9 +343,13 @@ async def test_local_login_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) 
     )
     monkeypatch.setattr(auth_routes, "login_local_user", login)
 
-    response = await _call_route(auth_routes.local_login, request=request)
+    route_response = Response()
+    response = await _call_route(auth_routes.local_login, request=request, response=route_response)
 
     assert response["access_token"] == issued.access_token
+    cookies = _set_cookie_headers(route_response)
+    assert any(auth_routes.ACCESS_TOKEN_COOKIE in cookie for cookie in cookies)
+    assert any(auth_routes.REFRESH_TOKEN_COOKIE in cookie for cookie in cookies)
     login.assert_awaited_once_with(
         email="nova@example.com",
         password="super-secret",
