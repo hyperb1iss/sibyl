@@ -80,6 +80,8 @@ SIBYL_HELM_RENDER_ARGS = (
     "--set",
     "breakGlass.allowedIPs[0]=203.0.113.0/24",
     "--set",
+    "backend.surreal.existingSecret=sibyl-surrealdb-root",
+    "--set",
     "oidc.providers[0].name=entra",
     "--set",
     "oidc.providers[0].issuer=https://login.microsoftonline.com/example/v2.0",
@@ -120,6 +122,23 @@ SURREALDB_RENDER_SNIPPETS = (
     "kind: Role",
     "kind: RoleBinding",
     "app.kubernetes.io/component: restore-drill",
+)
+RENDERED_HELM_RENDER_SPECS: tuple[
+    tuple[str, str, Sequence[str], Sequence[str]],
+    ...,
+] = (
+    (
+        "Sibyl enterprise chart",
+        "sibyl-enterprise.yaml",
+        SIBYL_HELM_RENDER_ARGS,
+        SIBYL_RENDER_SNIPPETS,
+    ),
+    (
+        "SurrealDB enterprise chart",
+        "surrealdb-enterprise.yaml",
+        SURREALDB_HELM_RENDER_ARGS,
+        SURREALDB_RENDER_SNIPPETS,
+    ),
 )
 
 type JsonObject = dict[str, Any]
@@ -644,9 +663,11 @@ def _inspect_generated_artifact_freshness(
     requirement: EvidenceRequirement,
     item: Mapping[str, object],
 ) -> list[str]:
-    if requirement.key != "package_lock_diff":
-        return []
-    return _inspect_package_lock_diff_freshness(evidence_dir=evidence_dir, item=item)
+    if requirement.key == "package_lock_diff":
+        return _inspect_package_lock_diff_freshness(evidence_dir=evidence_dir, item=item)
+    if requirement.key == "rendered_helm_manifests":
+        return _inspect_rendered_helm_freshness(evidence_dir=evidence_dir, item=item)
+    return []
 
 
 def _inspect_package_lock_diff_freshness(
@@ -685,7 +706,8 @@ def _package_lock_artifact_paths(
     for raw_artifact in artifacts:
         if not isinstance(raw_artifact, dict):
             continue
-        artifact_path_value = raw_artifact.get("path")
+        artifact = cast(Mapping[str, object], raw_artifact)
+        artifact_path_value = artifact.get("path")
         if artifact_path_value == "package_lock_diff/receipt.md":
             receipt_path = _safe_artifact_path(evidence_dir, artifact_path_value)
         elif artifact_path_value == "package_lock_diff/package-lock.diff":
@@ -737,6 +759,65 @@ def _package_lock_diff_issues(
 def _receipt_field(receipt_text: str, label: str) -> str | None:
     match = re.search(rf"^- {re.escape(label)}: (.+)$", receipt_text, re.MULTILINE)
     return match.group(1).strip() if match else None
+
+
+def _inspect_rendered_helm_freshness(
+    *,
+    evidence_dir: Path,
+    item: Mapping[str, object],
+) -> list[str]:
+    artifact_paths = _rendered_helm_artifact_paths(evidence_dir=evidence_dir, item=item)
+    if not artifact_paths:
+        return []
+
+    try:
+        expected_manifests = _rendered_helm_expected_manifests()
+    except EvidenceFailure as exc:
+        return [f"rendered Helm artifact cannot be regenerated: {exc}"]
+
+    issues: list[str] = []
+    for _, filename, _, _ in RENDERED_HELM_RENDER_SPECS:
+        artifact_path = artifact_paths.get(filename)
+        if artifact_path is None or not artifact_path.is_file():
+            continue
+        actual_manifest = artifact_path.read_text(encoding="utf-8")
+        if actual_manifest != expected_manifests[filename]:
+            issues.append(f"rendered Helm artifact is stale: rendered_helm_manifests/{filename}")
+    return issues
+
+
+def _rendered_helm_artifact_paths(
+    *,
+    evidence_dir: Path,
+    item: Mapping[str, object],
+) -> dict[str, Path]:
+    artifacts = item.get("artifacts")
+    if not isinstance(artifacts, list):
+        return {}
+
+    canonical_paths = {
+        f"rendered_helm_manifests/{filename}": filename
+        for _, filename, _, _ in RENDERED_HELM_RENDER_SPECS
+    }
+    artifact_paths: dict[str, Path] = {}
+    for raw_artifact in artifacts:
+        if not isinstance(raw_artifact, dict):
+            continue
+        artifact = cast(Mapping[str, object], raw_artifact)
+        artifact_path_value = artifact.get("path")
+        if not isinstance(artifact_path_value, str):
+            continue
+        filename = canonical_paths.get(artifact_path_value)
+        if filename is not None:
+            artifact_paths[filename] = _safe_artifact_path(evidence_dir, artifact_path_value)
+    return artifact_paths
+
+
+def _rendered_helm_expected_manifests() -> dict[str, str]:
+    return {
+        filename: _helm_output(render_args).rstrip() + "\n"
+        for _, filename, render_args, _ in RENDERED_HELM_RENDER_SPECS
+    }
 
 
 def capture_package_lock_diff(
@@ -850,25 +931,11 @@ def capture_rendered_helm_manifests(
         msg = "manifest must include an items object"
         raise EvidenceFailure(msg)
 
-    render_specs = (
-        (
-            "Sibyl enterprise chart",
-            "sibyl-enterprise.yaml",
-            SIBYL_HELM_RENDER_ARGS,
-            SIBYL_RENDER_SNIPPETS,
-        ),
-        (
-            "SurrealDB enterprise chart",
-            "surrealdb-enterprise.yaml",
-            SURREALDB_HELM_RENDER_ARGS,
-            SURREALDB_RENDER_SNIPPETS,
-        ),
-    )
     artifact_dir = evidence_dir / "rendered_helm_manifests"
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
     rendered_artifacts: list[tuple[str, Path, Sequence[str]]] = []
-    for label, filename, render_args, required_snippets in render_specs:
+    for label, filename, render_args, required_snippets in RENDERED_HELM_RENDER_SPECS:
         rendered = _helm_output(render_args)
         missing = [snippet for snippet in required_snippets if snippet not in rendered]
         if missing:

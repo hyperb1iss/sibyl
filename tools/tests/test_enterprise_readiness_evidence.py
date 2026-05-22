@@ -278,6 +278,40 @@ def _package_lock_manifest(
     return _write_manifest(evidence_dir, payload)
 
 
+def _rendered_helm_manifest(
+    evidence_dir: Path,
+    *,
+    sibyl_text: str,
+    surrealdb_text: str,
+) -> Path:
+    payload = _valid_manifest(evidence_dir)
+    artifact_dir = evidence_dir / "rendered_helm_manifests"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    receipt_text = "# rendered_helm_manifests\n"
+    artifacts = {
+        "receipt.md": receipt_text,
+        "sibyl-enterprise.yaml": sibyl_text,
+        "surrealdb-enterprise.yaml": surrealdb_text,
+    }
+
+    for filename, content in artifacts.items():
+        artifact_dir.joinpath(filename).write_text(content, encoding="utf-8")
+
+    payload["items"]["rendered_helm_manifests"] = {
+        "gate": "security-review-packet",
+        "status": "PASS",
+        "description": "Rendered enterprise Helm manifests for Sibyl and SurrealDB are captured.",
+        "artifacts": [
+            {
+                "path": f"rendered_helm_manifests/{filename}",
+                "sha256": hashlib.sha256(content.encode()).hexdigest(),
+            }
+            for filename, content in artifacts.items()
+        ],
+    }
+    return _write_manifest(evidence_dir, payload)
+
+
 def test_inspect_manifest_reports_stale_package_lock_head(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -346,6 +380,64 @@ def test_validate_manifest_rejects_stale_package_lock_diff(
     assert "package_lock_diff package lock diff artifact is stale for base..HEAD" in str(
         exc_info.value
     )
+
+
+def test_inspect_manifest_reports_stale_rendered_helm_manifest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    manifest_path = _rendered_helm_manifest(
+        tmp_path,
+        sibyl_text="stale sibyl\n",
+        surrealdb_text="fresh db\n",
+    )
+
+    def fake_helm_output(args: list[str]) -> str:
+        if args[2] == "charts/sibyl":
+            return "fresh sibyl"
+        if args[2] == "charts/surrealdb":
+            return "fresh db"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(evidence, "_helm_output", fake_helm_output)
+
+    report = evidence.inspect_manifest(manifest_path)
+    helm_item = next(
+        item
+        for item in cast(list[dict[str, Any]], report["items"])
+        if item["key"] == "rendered_helm_manifests"
+    )
+
+    assert helm_item["status"] == "INCOMPLETE"
+    assert helm_item["issues"] == [
+        "rendered Helm artifact is stale: rendered_helm_manifests/sibyl-enterprise.yaml"
+    ]
+
+
+def test_validate_manifest_rejects_stale_rendered_helm_manifest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    manifest_path = _rendered_helm_manifest(
+        tmp_path,
+        sibyl_text="stale sibyl\n",
+        surrealdb_text="fresh db\n",
+    )
+
+    def fake_helm_output(args: list[str]) -> str:
+        if args[2] == "charts/sibyl":
+            return "fresh sibyl"
+        if args[2] == "charts/surrealdb":
+            return "fresh db"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(evidence, "_helm_output", fake_helm_output)
+
+    with pytest.raises(evidence.EvidenceFailure) as exc_info:
+        evidence.validate_manifest(manifest_path)
+
+    assert (
+        "rendered_helm_manifests rendered Helm artifact is stale: "
+        "rendered_helm_manifests/sibyl-enterprise.yaml"
+    ) in str(exc_info.value)
 
 
 def test_validate_manifest_rejects_path_escape(tmp_path: Path) -> None:
