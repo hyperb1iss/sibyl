@@ -3,6 +3,7 @@ name: Nightly Regression
 on:
   schedule:
     - cron: "0 9 * * *"
+    - cron: "0 10 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -314,4 +315,99 @@ jobs:
         with:
           name: live-graph-receipt-${{ github.sha }}
           path: .moon/cache/nightly/live-graph-receipt.txt
+          if-no-files-found: error
+
+  restore-to-scratch:
+    name: Restore To Scratch
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.schedule == '0 10 * * 1' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SIBYL_ENVIRONMENT: production
+      SIBYL_JWT_SECRET: test-secret-for-nightly
+      SIBYL_STORE: surreal
+      SIBYL_AUTH_STORE: surreal
+      SIBYL_COORDINATION_BACKEND: local
+      SIBYL_SURREAL_URL: ws://localhost:8000/rpc
+      SIBYL_SURREAL_USERNAME: sibyl_ci
+      SIBYL_SURREAL_PASSWORD: sibyl_ci_password
+      SIBYL_OPENAI_API_KEY: sk-test-key
+      SIBYL_ANTHROPIC_API_KEY: sk-ant-test-key
+      SIBYL_MOCK_LLM: true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Start SurrealDB
+        uses: ./.github/actions/start-surrealdb
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt-dev
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6
+        with:
+          auto-install: true
+          auto-setup: true
+          cache-version: restore-to-scratch-v1
+
+      - name: Verify toolchain
+        run: |
+          chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
+          chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
+          moon --version
+          proto --version
+          uv --version
+
+      - name: Cache moon outputs
+        uses: actions/cache@v5
+        with:
+          path: .moon/cache
+          key: moon-restore-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          restore-keys: |
+            moon-restore-${{ runner.os }}-
+
+      - name: Cache uv
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/uv
+          key: uv-restore-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-restore-${{ runner.os }}-
+
+      - name: Run backup restore-to-scratch gate
+        run: moon run backup-restore-gate
+
+      - name: Record restore-to-scratch receipt
+        if: always()
+        run: |
+          mkdir -p .moon/cache/nightly
+          {
+            echo "workflow=${GITHUB_WORKFLOW}"
+            echo "job=restore-to-scratch"
+            echo "candidate_sha=${GITHUB_SHA}"
+            echo "ref=${GITHUB_REF_NAME}"
+            echo "run_id=${GITHUB_RUN_ID}"
+            echo "run_attempt=${GITHUB_RUN_ATTEMPT}"
+            echo "event=${GITHUB_EVENT_NAME}"
+            echo "completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > .moon/cache/nightly/restore-to-scratch-receipt.txt
+
+      - name: Upload backup restore receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-restore-gate-receipt-${{ github.sha }}
+          path: .moon/cache/backup-restore-gate/receipt.json
+          if-no-files-found: error
+
+      - name: Upload restore-to-scratch receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restore-to-scratch-receipt-${{ github.sha }}
+          path: .moon/cache/nightly/restore-to-scratch-receipt.txt
           if-no-files-found: error

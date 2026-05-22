@@ -89,8 +89,13 @@ def test_nightly_regression_uploads_candidate_sha_receipts() -> None:
 
     assert "baseline-parity-receipt-${{ github.sha }}" in workflow
     assert "live-graph-receipt-${{ github.sha }}" in workflow
+    assert "restore-to-scratch-receipt-${{ github.sha }}" in workflow
+    assert "backup-restore-gate-receipt-${{ github.sha }}" in workflow
     assert "candidate_sha=${GITHUB_SHA}" in workflow
     assert "run_id=${GITHUB_RUN_ID}" in workflow
+    assert "- cron: \"0 10 * * 1\"" in workflow
+    assert "Run backup restore-to-scratch gate" in workflow
+    assert "moon run backup-restore-gate" in workflow
 
 
 def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
@@ -117,7 +122,15 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
         "install.sh | sh -s -- --remote --version ${{ steps.version.outputs.version }}" in workflow
     )
     assert "paru -S sibyl" in workflow
-    assert "needs: [python, homebrew, aur, docker-merge]" in workflow
+    assert "needs: [python, homebrew, aur, docker-sign]" in workflow
+    assert "docker-security:" in workflow
+    assert "docker-sign:" in workflow
+    assert "aquasecurity/trivy-action@0.36.0" in workflow
+    assert "sigstore/cosign-installer@v4.1.1" in workflow
+    assert "format: cyclonedx" in workflow
+    assert "severity: HIGH,CRITICAL" in workflow
+    assert "cosign sign --yes" in workflow
+    assert "id-token: write" in workflow
     assert "uv tool install sibyld" not in workflow
     assert "[sibyld](https://pypi.org/project/sibyld/" in workflow
     assert "[sibyl](https://aur.archlinux.org/packages/sibyl)" in workflow

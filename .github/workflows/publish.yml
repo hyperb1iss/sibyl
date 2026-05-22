@@ -342,11 +342,120 @@ jobs:
         run: docker buildx imagetools inspect "${REPO}:${VERSION}"
 
   # =========================================================================
+  # Docker: generate SBOMs and fail on high/critical CVEs before signing
+  # =========================================================================
+  docker-security:
+    name: "◆ Docker: Security ${{ matrix.image }}"
+    needs: docker-merge
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      matrix:
+        image: [api, web]
+    steps:
+      - name: "△ Extract version from tag"
+        id: version
+        run: echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+        env:
+          TAG: ${{ inputs.tag }}
+
+      - name: "◇ Login to GHCR"
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "◆ Generate Trivy SBOM"
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          image-ref: >-
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-${{
+            matrix.image }}:${{ steps.version.outputs.version }}
+          format: cyclonedx
+          output: sibyl-${{ matrix.image }}-${{ steps.version.outputs.version }}.cdx.json
+          scanners: vuln
+
+      - name: "► Upload SBOM"
+        uses: actions/upload-artifact@v4
+        with:
+          name: sibyl-${{ matrix.image }}-${{ steps.version.outputs.version }}-sbom
+          path: sibyl-${{ matrix.image }}-${{ steps.version.outputs.version }}.cdx.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: "◆ Trivy CVE gate"
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          image-ref: >-
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-${{
+            matrix.image }}:${{ steps.version.outputs.version }}
+          format: table
+          exit-code: "1"
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+  # =========================================================================
+  # Docker: keyless Sigstore signatures for the scanned multi-arch images
+  # =========================================================================
+  docker-sign:
+    name: "◆ Docker: Sign ${{ matrix.image }}"
+    needs: docker-security
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    strategy:
+      matrix:
+        image: [api, web]
+    steps:
+      - name: "△ Extract version from tag"
+        id: version
+        run: echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+        env:
+          TAG: ${{ inputs.tag }}
+
+      - name: "◇ Setup Cosign"
+        uses: sigstore/cosign-installer@v4.1.1
+
+      - name: "◇ Setup Docker Buildx"
+        uses: docker/setup-buildx-action@v3
+
+      - name: "◇ Login to GHCR"
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "◆ Sign image digest"
+        env:
+          REPO: ${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          digest="$(
+            docker buildx imagetools inspect "${REPO}:${VERSION}" \
+              --format '{{json .Manifest.Digest}}' \
+              | tr -d '"'
+          )"
+          test -n "$digest"
+          cosign sign --yes "${REPO}@${digest}"
+
+  # =========================================================================
   # Release: update GitHub release with install instructions
   # =========================================================================
   release:
     name: "◆ Release: Update"
-    needs: [python, homebrew, aur, docker-merge]
+    needs: [python, homebrew, aur, docker-sign]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
