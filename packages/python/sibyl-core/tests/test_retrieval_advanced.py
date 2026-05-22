@@ -581,6 +581,44 @@ def test_query_coverage_refinement_accepts_top_window_signal_gain() -> None:
     assert should_accept_query_coverage_refinement(initial, refined) is True
 
 
+def test_query_coverage_refinement_accepts_saturated_top_score_gain() -> None:
+    initial = _coverage_result(
+        [
+            ("generic-top", 1.0),
+            ("specific-answer", 1.0),
+            ("related", 1.0),
+            ("weak-a", 0.67),
+            ("weak-b", 0.67),
+        ],
+        scores={
+            "generic-top": 2.10,
+            "specific-answer": 2.18,
+            "related": 1.95,
+            "weak-a": 1.2,
+            "weak-b": 1.1,
+        },
+    )
+    refined = _coverage_result(
+        [
+            ("specific-answer", 1.0),
+            ("generic-top", 1.0),
+            ("related", 1.0),
+            ("weak-a", 0.67),
+            ("weak-b", 0.67),
+        ],
+        changed=True,
+        scores={
+            "specific-answer": 2.18,
+            "generic-top": 2.10,
+            "related": 1.95,
+            "weak-a": 1.2,
+            "weak-b": 1.1,
+        },
+    )
+
+    assert should_accept_query_coverage_refinement(initial, refined) is True
+
+
 def test_query_coverage_refinement_rejects_top_ten_signal_loss() -> None:
     initial = _coverage_result(
         [
@@ -636,13 +674,14 @@ def _coverage_result(
     rows: list[tuple[str, float]],
     *,
     changed: bool = False,
+    scores: dict[str, float] | None = None,
 ) -> QueryCoverageResult[str]:
     return QueryCoverageResult(
         ranked=[
             QueryCoverageRankedCandidate(
                 item=stable_id,
                 stable_id=stable_id,
-                score=1.0 - (index * 0.01),
+                score=(scores or {}).get(stable_id, 1.0 - (index * 0.01)),
                 original_rank=index + 1,
                 overlap=overlap,
             )

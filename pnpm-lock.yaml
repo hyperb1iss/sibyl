@@ -3120,6 +3120,7 @@ packages:
 
   dompurify@3.4.4:
     resolution: {integrity: sha512-r8K7KGKEcztXfA/nfabSYB2hg9tDphORJTdf8xprN/luSLGmNhOBN8dm1/SYjqLLet6YUFEXOcrdTuwryp/Bew==}
+    deprecated: Fixed a security issue introduced in 3.4.4
 
   electron-to-chromium@1.5.356:
     resolution: {integrity: sha512-9NgFd7m5t5MCJ5rUSjJITUXAH9mEGlrlofnMf4YEr+pz6JlP7cWmTAH+JFmbPnaSW8koVTkuW7pacORWAnA5Yw==}

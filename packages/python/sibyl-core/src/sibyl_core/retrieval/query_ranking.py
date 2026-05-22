@@ -164,6 +164,7 @@ _QUERY_COVERAGE_REFINEMENT_WINDOW = 5
 _QUERY_COVERAGE_REFINEMENT_GUARD_WINDOW = 10
 _QUERY_COVERAGE_REFINEMENT_MIN_TOP_GAIN = 0.05
 _QUERY_COVERAGE_REFINEMENT_MAX_GUARD_LOSS = 0.05
+_QUERY_COVERAGE_REFINEMENT_MIN_SCORE_GAIN = 0.05
 _CLUSTER_AFFINITY_WEIGHT = 0.45
 _CLUSTER_AFFINITY_MIN = 0.05
 _CLUSTER_AFFINITY_MAX_ORIGINAL_RANK = 40
@@ -721,6 +722,8 @@ def should_accept_query_coverage_refinement[T](
     if not initial.applied or not refined.applied or not refined.changed:
         return False
 
+    initial_top = initial.ranked[0] if initial.ranked else None
+    refined_top = refined.ranked[0] if refined.ranked else None
     top_gain = _coverage_signal_sum(
         refined.ranked,
         _QUERY_COVERAGE_REFINEMENT_WINDOW,
@@ -729,8 +732,18 @@ def should_accept_query_coverage_refinement[T](
         initial.ranked,
         _QUERY_COVERAGE_REFINEMENT_GUARD_WINDOW,
     ) - _coverage_signal_sum(refined.ranked, _QUERY_COVERAGE_REFINEMENT_GUARD_WINDOW)
+    top_score_gain = (
+        refined_top.score - initial_top.score if initial_top is not None and refined_top else 0.0
+    )
+    top_score_refinement = bool(
+        initial_top is not None
+        and refined_top is not None
+        and refined_top.stable_id != initial_top.stable_id
+        and refined_top.overlap >= initial_top.overlap
+        and top_score_gain >= _QUERY_COVERAGE_REFINEMENT_MIN_SCORE_GAIN
+    )
     return (
-        top_gain >= _QUERY_COVERAGE_REFINEMENT_MIN_TOP_GAIN
+        (top_gain >= _QUERY_COVERAGE_REFINEMENT_MIN_TOP_GAIN or top_score_refinement)
         and guard_loss <= _QUERY_COVERAGE_REFINEMENT_MAX_GUARD_LOSS
     )
 
