@@ -48,7 +48,8 @@ hooks.
 ## Restore Drill
 
 The restore drill imports the latest export into an ephemeral runtime and checks fixture table
-counts:
+counts. It also writes a structured receipt that can be copied from the completed pod or persisted
+with an overlay-mounted volume:
 
 ```yaml
 restoreDrill:
@@ -60,10 +61,28 @@ restoreDrill:
       database: auth
       table: users
       minRows: 1
+  receipt:
+    path: /tmp/restore-drill-receipt.json
 ```
 
-A restore process that has not been rehearsed is not a backup strategy. Keep the weekly drill
-enabled for production and page on failure.
+For the enterprise evidence gate, enable a sampled recall check and have the command write a JSON
+sample to `$SIBYL_RESTORE_RECALL_SAMPLE_PATH`:
+
+```yaml
+restoreDrill:
+  recallCheck:
+    enabled: true
+    command: |
+      results="$(sibyl search "restore drill fixture memory" --json)"
+      count="$(printf '%s\n' "$results" | jq '.results | length')"
+      printf '{"query":"restore drill fixture memory","result_count":%s}\n' "$count" \
+        > "$SIBYL_RESTORE_RECALL_SAMPLE_PATH"
+```
+
+The sampled command can use your deployment's preferred helper image or mounted tools; the only
+contract is that it writes a non-empty `query` and `result_count > 0`. A restore process that has
+not been rehearsed is not a backup strategy. Keep the weekly drill enabled for production and page
+on failure.
 
 ## Manual Restore Shape
 

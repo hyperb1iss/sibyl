@@ -121,6 +121,8 @@ SURREALDB_RENDER_SNIPPETS = (
     "kind: Role",
     "kind: RoleBinding",
     "app.kubernetes.io/component: restore-drill",
+    "SIBYL_RESTORE_RECEIPT_PATH",
+    "restore-drill-receipt.json",
 )
 RENDERED_HELM_RENDER_SPECS: tuple[
     tuple[str, str, Sequence[str], Sequence[str]],

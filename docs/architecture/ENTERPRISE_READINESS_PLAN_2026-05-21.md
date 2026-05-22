@@ -757,7 +757,8 @@ Management API, etc.). Passwords migration from PBKDF2 to Argon2id is tracked se
 - `charts/surrealdb/templates/export-cronjob.yaml` — Daily `surreal export` CronJob with
   configurable destination (blob/object-storage URI in deployment overlay).
 - `charts/surrealdb/templates/restore-drill-cronjob.yaml` — Weekly CI-like Job that imports the
-  latest export to an ephemeral pod, verifies fixture row counts, pages on failure.
+  latest export to an ephemeral pod, verifies fixture row counts, writes a structured restore
+  receipt, supports a deployment-provided sampled recall check, and pages on failure.
 
 **Deferred (the TiKV promotion path):** When a deployment trips the promotion gate, the chart
 switches via `surrealdb.path: tikv://<pd>:2379` + `replicaCount: 2+` + `persistence.enabled: false`,

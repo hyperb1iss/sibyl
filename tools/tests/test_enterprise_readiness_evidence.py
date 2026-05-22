@@ -606,6 +606,15 @@ kind: CronJob
 metadata:
   labels:
     app.kubernetes.io/component: restore-drill
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - env:
+                - name: SIBYL_RESTORE_RECEIPT_PATH
+                  value: /tmp/restore-drill-receipt.json
 ---
 apiVersion: batch/v1
 kind: Job

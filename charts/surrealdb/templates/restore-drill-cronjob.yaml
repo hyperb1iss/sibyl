@@ -1,5 +1,8 @@
 {{- if .Values.restoreDrill.enabled -}}
 {{- include "sibyl-surrealdb.validateDatabases" . -}}
+{{- if and .Values.restoreDrill.recallCheck.enabled (not .Values.restoreDrill.recallCheck.command) -}}
+{{- fail "restoreDrill.recallCheck.command is required when restoreDrill.recallCheck.enabled=true" -}}
+{{- end -}}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -64,6 +67,8 @@ spec:
                     fi
                     sleep 2
                   done
+                  row_counts_json="{"
+                  row_counts_separator=""
                   {{- range .Values.databases }}
                   source_file="$(ls -1t "$SIBYL_RESTORE_SOURCE_PATH"/{{ $.Values.export.filePrefix }}-{{ .namespace }}-{{ .database }}-*.surql 2>/dev/null | head -n 1)"
                   if [ -z "$source_file" ]; then
@@ -92,7 +97,35 @@ spec:
                     echo "fixture {{ .namespace }}/{{ .database }}/{{ .table }} expected >= {{ .minRows }}, got ${row_count:-0}" >&2
                     exit 1
                   fi
+                  row_counts_json="${row_counts_json}${row_counts_separator}\"{{ .namespace }}.{{ .database }}.{{ .table }}\":{\"expected\":${row_count},\"actual\":${row_count}}"
+                  row_counts_separator=","
                   {{- end }}
+                  row_counts_json="${row_counts_json}}"
+                  recall_sample_json='{"query":"restore drill recall check disabled","result_count":0}'
+                  {{- if .Values.restoreDrill.recallCheck.enabled }}
+                  recall_sample_path="$(mktemp)"
+                  export SIBYL_RESTORE_RECALL_SAMPLE_PATH="$recall_sample_path"
+                  {{ .Values.restoreDrill.recallCheck.command | nindent 18 }}
+                  if [ ! -s "$recall_sample_path" ]; then
+                    echo "recall check did not write $recall_sample_path" >&2
+                    exit 1
+                  fi
+                  recall_result_count="$(sed -n 's/.*"result_count":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$recall_sample_path" | head -n 1)"
+                  if [ "${recall_result_count:-0}" -lt 1 ]; then
+                    echo "recall check expected result_count > 0, got ${recall_result_count:-0}" >&2
+                    exit 1
+                  fi
+                  recall_sample_json="$(cat "$recall_sample_path")"
+                  {{- end }}
+                  receipt_dir="$(dirname "$SIBYL_RESTORE_RECEIPT_PATH")"
+                  mkdir -p "$receipt_dir"
+                  printf '{"status":"PASS","runtime":"kubernetes:%s/%s","row_counts":%s,"recall_sample":%s}\n' \
+                    "${POD_NAMESPACE:-default}" \
+                    "{{ include "sibyl-surrealdb.fullname" . }}-restore-drill" \
+                    "$row_counts_json" \
+                    "$recall_sample_json" \
+                    > "$SIBYL_RESTORE_RECEIPT_PATH"
+                  echo "restore drill receipt: $SIBYL_RESTORE_RECEIPT_PATH"
                   kill "$server_pid"
               env:
                 - name: HOME
@@ -107,6 +140,12 @@ spec:
                   value: {{ .Values.restoreDrill.restore.password | quote }}
                 - name: SURREAL_RESTORE_PATH
                   value: {{ .Values.restoreDrill.restore.path | quote }}
+                - name: SIBYL_RESTORE_RECEIPT_PATH
+                  value: {{ .Values.restoreDrill.receipt.path | quote }}
+                - name: POD_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
                 {{- with .Values.restoreDrill.extraEnv }}
                 {{- toYaml . | nindent 16 }}
                 {{- end }}
