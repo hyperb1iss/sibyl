@@ -89,6 +89,41 @@ def test_template_contains_every_required_item(tmp_path: Path) -> None:
     assert payload["schema_version"] == evidence.SCHEMA_VERSION
     assert set(payload["items"]) == {item.key for item in evidence.REQUIRED_EVIDENCE}
     assert all(item["status"] == "TODO" for item in payload["items"].values())
+    for requirement in evidence.REQUIRED_EVIDENCE:
+        receipt = tmp_path / requirement.key / "receipt.md"
+        assert receipt.is_file()
+        assert f"# {requirement.key}" in receipt.read_text(encoding="utf-8")
+        assert requirement.description in receipt.read_text(encoding="utf-8")
+
+
+def test_template_refuses_to_overwrite_existing_manifest(tmp_path: Path) -> None:
+    evidence.write_template(tmp_path)
+
+    with pytest.raises(evidence.EvidenceFailure) as exc_info:
+        evidence.write_template(tmp_path)
+
+    assert "pass --force-template to overwrite" in str(exc_info.value)
+
+
+def test_template_preserves_receipts_without_force(tmp_path: Path) -> None:
+    manifest_path = evidence.write_template(tmp_path)
+    manifest_path.unlink()
+    receipt = tmp_path / "entra_happy_path" / "receipt.md"
+    receipt.write_text("real receipt", encoding="utf-8")
+
+    evidence.write_template(tmp_path)
+
+    assert receipt.read_text(encoding="utf-8") == "real receipt"
+
+
+def test_template_force_regenerates_receipts(tmp_path: Path) -> None:
+    evidence.write_template(tmp_path)
+    receipt = tmp_path / "entra_happy_path" / "receipt.md"
+    receipt.write_text("stale", encoding="utf-8")
+
+    evidence.write_template(tmp_path, force=True)
+
+    assert "Required proof" in receipt.read_text(encoding="utf-8")
 
 
 def test_validate_manifest_passes_with_hashes(tmp_path: Path) -> None:
@@ -165,3 +200,15 @@ def test_root_moon_tasks_expose_enterprise_evidence_gate() -> None:
         "tools/tests/test_enterprise_readiness_evidence.py",
         "-v",
     ]
+
+
+def test_main_refuses_template_overwrite(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    assert evidence.main(["--init-template", str(tmp_path)]) == 0
+
+    exit_code = evidence.main(["--init-template", str(tmp_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "pass --force-template to overwrite" in captured.out

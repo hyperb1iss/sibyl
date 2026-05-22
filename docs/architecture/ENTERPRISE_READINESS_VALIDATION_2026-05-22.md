@@ -36,7 +36,7 @@ These commands were run from `/Users/bliss/dev/sibyl`.
 | Provider-neutral ingress | `helm template default charts/sibyl \| rg -i 'kong\|nginx\|traefik\|alb\|gce'`                                                                                                                                                                                                              | no provider-specific ingress defaults matched                                                               |
 | Audit API focused tests  | `moon run --force api:test -- tests/test_routes_admin.py::test_admin_audit_lists_filtered_events tests/test_routes_admin.py::test_admin_audit_exports_csv tests/test_routes_admin.py::test_admin_audit_exports_json tests/test_routes_admin.py::test_admin_audit_route_rejects_member_role` | `4 passed in 2.43s`                                                                                         |
 | Web audit UI coverage    | `moon run --force web:test`                                                                                                                                                                                                                                                                 | `34 passed` test files, `129 passed` tests                                                                  |
-| External evidence gate   | `moon run enterprise-readiness-evidence-test`                                                                                                                                                                                                                                               | `8 passed in 0.57s`                                                                                         |
+| External evidence gate   | `moon run enterprise-readiness-evidence-test`                                                                                                                                                                                                                                               | `12 passed in 0.64s`                                                                                        |
 | Evidence item listing    | `moon run enterprise-readiness-evidence -- --list`                                                                                                                                                                                                                                          | listed 12 required external evidence items                                                                  |
 | Docs lint                | `moon run docs:lint`                                                                                                                                                                                                                                                                        | `All matched files use Prettier code style!`                                                                |
 | Docs build               | `moon run --force docs:build`                                                                                                                                                                                                                                                               | `build complete`                                                                                            |
@@ -74,8 +74,10 @@ moon run enterprise-readiness-evidence
 
 Use
 `moon run enterprise-readiness-evidence -- --init-template .moon/cache/enterprise-readiness-evidence`
-to create the manifest skeleton. The gate requires every external item to be marked `PASS`, every
-artifact to exist under the evidence directory, and every artifact hash to match the manifest.
+to create the manifest skeleton and per-item `receipt.md` stubs. The template command preserves
+existing evidence files by default; use `--force-template` only when intentionally regenerating the
+bundle. The gate requires every external item to be marked `PASS`, every artifact to exist under the
+evidence directory, and every artifact hash to match the manifest.
 
 Until those artifacts are captured, the code-side implementation is locally validated but the full
 enterprise acceptance gate is not fully closed.

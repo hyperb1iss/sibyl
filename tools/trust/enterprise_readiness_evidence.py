@@ -260,13 +260,48 @@ def build_template_payload() -> JsonObject:
     }
 
 
-def write_template(evidence_dir: Path) -> Path:
+def _receipt_template(requirement: EvidenceRequirement) -> str:
+    return f"""# {requirement.key}
+
+- Gate: {requirement.gate}
+- Status: TODO
+- Required proof: {requirement.description}
+- Captured at:
+- Captured by:
+- Runtime or environment:
+- Commands or manual flow:
+- Observed result:
+- Redactions:
+- Related artifact paths:
+
+Replace this stub with the real receipt before marking the manifest item PASS.
+After capture, update the manifest sha256 for this file:
+
+```bash
+shasum -a 256 {requirement.key}/receipt.md
+```
+"""
+
+
+def write_template(evidence_dir: Path, *, force: bool = False) -> Path:
     evidence_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = evidence_dir / DEFAULT_MANIFEST.name
+    if manifest_path.exists() and not force:
+        msg = f"manifest already exists: {manifest_path}; pass --force-template to overwrite"
+        raise EvidenceFailure(msg)
+
     manifest_path.write_text(
         json.dumps(build_template_payload(), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+    for requirement in REQUIRED_EVIDENCE:
+        receipt_path = evidence_dir / requirement.key / "receipt.md"
+        if receipt_path.exists() and not force:
+            continue
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        receipt_path.write_text(_receipt_template(requirement), encoding="utf-8")
+
     return manifest_path
 
 
@@ -311,6 +346,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--evidence-dir", type=Path)
     parser.add_argument("--receipt", type=Path, default=DEFAULT_RECEIPT)
     parser.add_argument("--init-template", type=Path)
+    parser.add_argument("--force-template", action="store_true")
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args(argv)
 
@@ -319,7 +355,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.init_template is not None:
-        manifest_path = write_template(args.init_template)
+        try:
+            manifest_path = write_template(args.init_template, force=args.force_template)
+        except EvidenceFailure as exc:
+            sys.stdout.write(f"{exc}\n")
+            return 1
         sys.stdout.write(f"wrote template: {manifest_path}\n")
         return 0
 
