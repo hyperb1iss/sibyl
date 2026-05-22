@@ -224,9 +224,10 @@ async def build_auth_context(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
         ) from e
+    organization = getattr(ctx, "organization", None)
     set_llm_budget_context(
         user_id=str(ctx.user.id),
-        organization_id=str(ctx.organization.id) if ctx.organization else None,
+        organization_id=str(organization.id) if organization else None,
     )
     if session is None:
         request.state.auth_context = ctx
