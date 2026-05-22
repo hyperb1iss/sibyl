@@ -1,0 +1,108 @@
+{{- if .Values.export.enabled -}}
+{{- include "sibyl-surrealdb.validateDatabases" . -}}
+{{- if and .Values.export.encryption.enabled (not .Values.export.encryption.command) -}}
+{{- fail "export.encryption.command is required when export.encryption.enabled=true" -}}
+{{- end -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "sibyl-surrealdb.fullname" . }}-export
+  labels:
+    {{- include "sibyl-surrealdb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: export
+spec:
+  schedule: {{ .Values.export.schedule | quote }}
+  concurrencyPolicy: {{ .Values.export.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.export.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.export.failedJobsHistoryLimit }}
+  startingDeadlineSeconds: {{ .Values.export.startingDeadlineSeconds }}
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "sibyl-surrealdb.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: export
+          {{- with .Values.jobDefaults.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: {{ include "sibyl-surrealdb.serviceAccountName" . }}
+          {{- with .Values.global.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.jobDefaults.podSecurityContext | nindent 12 }}
+          containers:
+            - name: export
+              image: {{ include "sibyl-surrealdb.surrealImage" . | quote }}
+              imagePullPolicy: {{ .Values.surrealdb.image.pullPolicy | default "IfNotPresent" }}
+              workingDir: /tmp
+              securityContext:
+                {{- toYaml .Values.jobDefaults.securityContext | nindent 16 }}
+              command:
+                - /bin/sh
+                - -ec
+              args:
+                - |
+                  mkdir -p "$SIBYL_EXPORT_DESTINATION_PATH"
+                  timestamp="$(date -u +%Y%m%d%H%M%S)"
+                  {{- range .Values.databases }}
+                  target="$SIBYL_EXPORT_DESTINATION_PATH/{{ $.Values.export.filePrefix }}-{{ .namespace }}-{{ .database }}-${timestamp}.surql"
+                  surreal export \
+                    --conn "$SURREAL_ENDPOINT" \
+                    --user "$SURREAL_USER" \
+                    --pass "$SURREAL_PASS" \
+                    --auth-level "$SURREAL_AUTH_LEVEL" \
+                    --ns {{ .namespace | quote }} \
+                    --db {{ .database | quote }} \
+                    "$target"
+                  {{- if $.Values.export.encryption.enabled }}
+                  export SIBYL_EXPORT_FILE="$target"
+                  {{ $.Values.export.encryption.command | nindent 18 }}
+                  {{- end }}
+                  {{- end }}
+                  {{- with .Values.export.syncCommand }}
+                  {{ . | nindent 18 }}
+                  {{- end }}
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: SIBYL_EXPORT_DESTINATION_PATH
+                  value: {{ .Values.export.destination.path | quote }}
+                - name: SIBYL_EXPORT_DESTINATION_URI
+                  value: {{ .Values.export.destination.uri | quote }}
+                {{- include "sibyl-surrealdb.surrealEnv" . | nindent 16 }}
+                {{- with .Values.export.extraEnv }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+              {{- with .Values.export.extraEnvFrom }}
+              envFrom:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              resources:
+                {{- toYaml .Values.jobDefaults.resources | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                {{- if .Values.export.workspace.emptyDir }}
+                - name: export-workspace
+                  mountPath: {{ .Values.export.destination.path | quote }}
+                {{- end }}
+                {{- with .Values.export.extraVolumeMounts }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+          volumes:
+            - name: tmp
+              emptyDir: {}
+            {{- if .Values.export.workspace.emptyDir }}
+            - name: export-workspace
+              emptyDir: {}
+            {{- end }}
+            {{- with .Values.export.extraVolumes }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+{{- end }}

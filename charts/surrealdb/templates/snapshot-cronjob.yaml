@@ -1,0 +1,94 @@
+{{- if .Values.snapshot.enabled -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "sibyl-surrealdb.fullname" . }}-snapshot
+  labels:
+    {{- include "sibyl-surrealdb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: snapshot
+spec:
+  schedule: {{ .Values.snapshot.schedule | quote }}
+  concurrencyPolicy: {{ .Values.snapshot.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.snapshot.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.snapshot.failedJobsHistoryLimit }}
+  startingDeadlineSeconds: {{ .Values.snapshot.startingDeadlineSeconds }}
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "sibyl-surrealdb.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: snapshot
+          {{- with .Values.jobDefaults.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: {{ include "sibyl-surrealdb.serviceAccountName" . }}
+          {{- with .Values.global.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.jobDefaults.podSecurityContext | nindent 12 }}
+          containers:
+            - name: snapshot
+              image: "{{ .Values.snapshot.kubectlImage.repository }}:{{ .Values.snapshot.kubectlImage.tag }}"
+              imagePullPolicy: {{ .Values.snapshot.kubectlImage.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.jobDefaults.securityContext | nindent 16 }}
+              command:
+                - /bin/sh
+                - -ec
+              args:
+                - |
+                  sleep "$QUIESCE_DELAY_SECONDS"
+                  snapshot_name="${SNAPSHOT_PREFIX}-$(date -u +%Y%m%d%H%M%S)"
+                  cat <<YAML | kubectl -n "$POD_NAMESPACE" apply -f -
+                  apiVersion: snapshot.storage.k8s.io/v1
+                  kind: VolumeSnapshot
+                  metadata:
+                    name: ${snapshot_name}
+                    labels:
+                      app.kubernetes.io/name: {{ include "sibyl-surrealdb.name" . }}
+                      app.kubernetes.io/instance: {{ .Release.Name }}
+                      app.kubernetes.io/component: snapshot
+                  spec:
+                    {{- with .Values.snapshot.volumeSnapshotClassName }}
+                    volumeSnapshotClassName: {{ . | quote }}
+                    {{- end }}
+                    source:
+                      persistentVolumeClaimName: {{ include "sibyl-surrealdb.sourcePvcName" . | quote }}
+                  YAML
+                  {{- if .Values.snapshot.retention.enabled }}
+                  kubectl -n "$POD_NAMESPACE" get volumesnapshot \
+                    -l "app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/component=snapshot" \
+                    --sort-by=.metadata.creationTimestamp \
+                    -o name \
+                    | awk -v keep="{{ .Values.snapshot.retention.keep }}" \
+                      '{ rows[NR]=$0 } END { for (i=1; i<=NR-keep; i++) print rows[i] }' \
+                    | while read -r old_snapshot; do
+                        if [ -n "$old_snapshot" ]; then
+                          kubectl -n "$POD_NAMESPACE" delete "$old_snapshot"
+                        fi
+                      done
+                  {{- end }}
+              env:
+                - name: POD_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+                - name: SNAPSHOT_PREFIX
+                  value: {{ include "sibyl-surrealdb.fullname" . | quote }}
+                - name: QUIESCE_DELAY_SECONDS
+                  value: {{ .Values.snapshot.quiesceDelaySeconds | quote }}
+              resources:
+                {{- toYaml .Values.jobDefaults.resources | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}
+{{- end }}

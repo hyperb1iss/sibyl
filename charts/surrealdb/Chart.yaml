@@ -1,0 +1,21 @@
+apiVersion: v2
+name: sibyl-surrealdb
+description: Sibyl-owned SurrealDB wrapper with backup and restore operations
+type: application
+version: 1.0.0-rc.1
+appVersion: "3.0.5"
+keywords:
+  - surrealdb
+  - backup
+  - restore
+  - sibyl
+home: https://github.com/hyperb1iss/sibyl
+sources:
+  - https://github.com/hyperb1iss/sibyl
+maintainers:
+  - name: hyperb1iss
+    url: https://github.com/hyperb1iss
+dependencies:
+  - name: surrealdb
+    version: 0.4.0
+    repository: https://helm.surrealdb.com

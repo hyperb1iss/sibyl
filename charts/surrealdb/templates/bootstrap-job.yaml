@@ -1,0 +1,76 @@
+{{- if .Values.bootstrap.enabled -}}
+{{- include "sibyl-surrealdb.validateDatabases" . -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "sibyl-surrealdb.fullname" . }}-strict-bootstrap
+  labels:
+    {{- include "sibyl-surrealdb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: strict-bootstrap
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-weight: "5"
+    {{- with .Values.bootstrap.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  backoffLimit: {{ .Values.bootstrap.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.bootstrap.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "sibyl-surrealdb.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: strict-bootstrap
+      {{- with .Values.jobDefaults.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ include "sibyl-surrealdb.serviceAccountName" . }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.jobDefaults.podSecurityContext | nindent 8 }}
+      containers:
+        - name: strict-bootstrap
+          image: {{ include "sibyl-surrealdb.surrealImage" . | quote }}
+          imagePullPolicy: {{ .Values.surrealdb.image.pullPolicy | default "IfNotPresent" }}
+          workingDir: /tmp
+          securityContext:
+            {{- toYaml .Values.jobDefaults.securityContext | nindent 12 }}
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - |
+              cat > /tmp/bootstrap.surql <<'SQL'
+              {{- range .Values.databases }}
+              USE NS {{ .namespace }};
+              DEFINE DATABASE OVERWRITE {{ .database }} STRICT;
+              {{- end }}
+              SQL
+              surreal sql \
+                --endpoint "$SURREAL_ENDPOINT" \
+                --username "$SURREAL_USER" \
+                --password "$SURREAL_PASS" \
+                --auth-level "$SURREAL_AUTH_LEVEL" \
+                < /tmp/bootstrap.surql
+          env:
+            - name: HOME
+              value: /tmp
+            - name: SURREAL_HIDE_WELCOME
+              value: "true"
+            {{- include "sibyl-surrealdb.surrealEnv" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.jobDefaults.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

@@ -1,0 +1,139 @@
+{{- if .Values.restoreDrill.enabled -}}
+{{- include "sibyl-surrealdb.validateDatabases" . -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "sibyl-surrealdb.fullname" . }}-restore-drill
+  labels:
+    {{- include "sibyl-surrealdb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: restore-drill
+spec:
+  schedule: {{ .Values.restoreDrill.schedule | quote }}
+  concurrencyPolicy: {{ .Values.restoreDrill.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.restoreDrill.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.restoreDrill.failedJobsHistoryLimit }}
+  startingDeadlineSeconds: {{ .Values.restoreDrill.startingDeadlineSeconds }}
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "sibyl-surrealdb.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: restore-drill
+          {{- with .Values.jobDefaults.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: {{ include "sibyl-surrealdb.serviceAccountName" . }}
+          {{- with .Values.global.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.jobDefaults.podSecurityContext | nindent 12 }}
+          containers:
+            - name: restore-drill
+              image: {{ include "sibyl-surrealdb.surrealImage" . | quote }}
+              imagePullPolicy: {{ .Values.surrealdb.image.pullPolicy | default "IfNotPresent" }}
+              workingDir: /tmp
+              securityContext:
+                {{- toYaml .Values.jobDefaults.securityContext | nindent 16 }}
+              command:
+                - /bin/sh
+                - -ec
+              args:
+                - |
+                  notify_failure() {
+                    {{- if .Values.restoreDrill.failureNotification.command }}
+                    {{ .Values.restoreDrill.failureNotification.command | nindent 20 }}
+                    {{- else }}
+                    return 0
+                    {{- end }}
+                  }
+                  trap 'notify_failure' ERR
+                  surreal start \
+                    --user "$SURREAL_RESTORE_USER" \
+                    --pass "$SURREAL_RESTORE_PASS" \
+                    "$SURREAL_RESTORE_PATH" &
+                  server_pid="$!"
+                  for _ in $(seq 1 30); do
+                    if surreal isready --endpoint "$SURREAL_RESTORE_ENDPOINT"; then
+                      break
+                    fi
+                    sleep 2
+                  done
+                  {{- range .Values.databases }}
+                  source_file="$(ls -1t "$SIBYL_RESTORE_SOURCE_PATH"/{{ $.Values.export.filePrefix }}-{{ .namespace }}-{{ .database }}-*.surql 2>/dev/null | head -n 1)"
+                  if [ -z "$source_file" ]; then
+                    echo "missing export for {{ .namespace }}/{{ .database }}" >&2
+                    exit 1
+                  fi
+                  surreal import \
+                    --conn "$SURREAL_RESTORE_ENDPOINT" \
+                    --user "$SURREAL_RESTORE_USER" \
+                    --pass "$SURREAL_RESTORE_PASS" \
+                    --ns {{ .namespace | quote }} \
+                    --db {{ .database | quote }} \
+                    "$source_file"
+                  {{- end }}
+                  {{- range .Values.restoreDrill.fixtureChecks }}
+                  count_result="$(printf 'SELECT count() AS count FROM %s GROUP ALL;\\n' {{ .table | quote }} \
+                    | surreal sql \
+                        --endpoint "$SURREAL_RESTORE_ENDPOINT" \
+                        --username "$SURREAL_RESTORE_USER" \
+                        --password "$SURREAL_RESTORE_PASS" \
+                        --namespace {{ .namespace | quote }} \
+                        --database {{ .database | quote }} \
+                        --json)"
+                  row_count="$(printf '%s\n' "$count_result" | sed -n 's/.*"count":[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' | head -n 1)"
+                  if [ "${row_count:-0}" -lt {{ .minRows }} ]; then
+                    echo "fixture {{ .namespace }}/{{ .database }}/{{ .table }} expected >= {{ .minRows }}, got ${row_count:-0}" >&2
+                    exit 1
+                  fi
+                  {{- end }}
+                  kill "$server_pid"
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: SIBYL_RESTORE_SOURCE_PATH
+                  value: {{ .Values.restoreDrill.source.path | quote }}
+                - name: SURREAL_RESTORE_ENDPOINT
+                  value: {{ .Values.restoreDrill.restore.endpoint | quote }}
+                - name: SURREAL_RESTORE_USER
+                  value: {{ .Values.restoreDrill.restore.username | quote }}
+                - name: SURREAL_RESTORE_PASS
+                  value: {{ .Values.restoreDrill.restore.password | quote }}
+                - name: SURREAL_RESTORE_PATH
+                  value: {{ .Values.restoreDrill.restore.path | quote }}
+                {{- with .Values.restoreDrill.extraEnv }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+              {{- with .Values.restoreDrill.extraEnvFrom }}
+              envFrom:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              resources:
+                {{- toYaml .Values.jobDefaults.resources | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                {{- if .Values.restoreDrill.workspace.emptyDir }}
+                - name: restore-workspace
+                  mountPath: {{ .Values.restoreDrill.source.path | quote }}
+                {{- end }}
+                {{- with .Values.restoreDrill.extraVolumeMounts }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+          volumes:
+            - name: tmp
+              emptyDir: {}
+            {{- if .Values.restoreDrill.workspace.emptyDir }}
+            - name: restore-workspace
+              emptyDir: {}
+            {{- end }}
+            {{- with .Values.restoreDrill.extraVolumes }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+{{- end }}

@@ -1,0 +1,143 @@
+# Sibyl SurrealDB wrapper values.
+# The upstream chart is pinned and configured for a single RocksDB-backed pod.
+
+global:
+  imagePullSecrets: []
+
+surrealdb:
+  replicaCount: 1
+  image:
+    tag: v3.0.5
+  args:
+    - start
+  surrealdb:
+    path: rocksdb:/data/db
+    unauthenticated: false
+  strategy:
+    type: Recreate
+  persistence:
+    enabled: true
+    # Set to a premium block-storage class in deployment values once the
+    # upstream 0.4.0 PVC template is patched or vendored.
+    storageClassName: ""
+    size: 100Gi
+  podExtraEnv:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: ""
+    - name: OTEL_SERVICE_NAME
+      value: sibyl-surrealdb
+
+connection:
+  # Defaults to http://<upstream-surrealdb-service>:8000 when empty.
+  endpoint: ""
+  scheme: http
+  authLevel: root
+  username: root
+  existingSecret: ""
+  usernameKey: username
+  passwordKey: password
+
+databases:
+  - namespace: sibyl_auth
+    database: auth
+  - namespace: sibyl_content
+    database: content
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+rbac:
+  create: true
+
+jobDefaults:
+  podAnnotations: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  resources: {}
+
+bootstrap:
+  enabled: true
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  annotations: {}
+
+snapshot:
+  enabled: false
+  schedule: "0 2 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 900
+  kubectlImage:
+    repository: bitnami/kubectl
+    tag: "1.30.7"
+    pullPolicy: IfNotPresent
+  persistentVolumeClaimName: ""
+  volumeSnapshotClassName: ""
+  quiesceDelaySeconds: 10
+  retention:
+    enabled: true
+    keep: 7
+
+export:
+  enabled: false
+  schedule: "30 2 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 900
+  destination:
+    # Local staging path. Deployment overlays can mount blob/object storage here.
+    path: /backups
+    # Informational URI for overlays that sync to object/blob storage.
+    uri: ""
+  filePrefix: sibyl
+  encryption:
+    enabled: false
+    command: ""
+  syncCommand: ""
+  extraEnv: []
+  extraEnvFrom: []
+  extraVolumeMounts: []
+  extraVolumes: []
+  workspace:
+    emptyDir: true
+
+restoreDrill:
+  enabled: false
+  schedule: "0 4 * * 0"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 900
+  source:
+    path: /backups
+  restore:
+    endpoint: http://127.0.0.1:8000
+    username: drill
+    password: drill
+    path: memory
+  fixtureChecks:
+    - namespace: sibyl_auth
+      database: auth
+      table: users
+      minRows: 1
+  failureNotification:
+    command: ""
+  extraEnv: []
+  extraEnvFrom: []
+  extraVolumeMounts: []
+  extraVolumes: []
+  workspace:
+    emptyDir: true
