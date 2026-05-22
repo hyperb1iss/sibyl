@@ -103,6 +103,8 @@ export const queryKeys = {
   admin: {
     health: ['admin', 'health'] as const,
     stats: ['admin', 'stats'] as const,
+    audit: (params?: Parameters<typeof api.admin.audit.list>[0]) =>
+      ['admin', 'audit', params] as const,
   },
   telemetry: {
     summary: (params?: Parameters<typeof api.telemetry.summary>[0]) =>
@@ -1064,6 +1066,19 @@ export function useStats(initialData?: import('./api').StatsResponse) {
     initialData,
     staleTime: 5 * TIMING.STALE_TIME,
     refetchOnWindowFocus: false,
+  });
+}
+
+export function useAdminAudit(
+  params?: Parameters<typeof api.admin.audit.list>[0],
+  options?: { enabled?: boolean; initialData?: import('./api').AdminAuditListResponse }
+) {
+  return useQuery({
+    queryKey: queryKeys.admin.audit(params),
+    queryFn: () => api.admin.audit.list(params),
+    enabled: options?.enabled ?? true,
+    initialData: options?.initialData,
+    placeholderData: previousData => previousData,
   });
 }
 

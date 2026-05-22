@@ -1,15 +1,23 @@
-"""Admin endpoints for health, stats, backup, and restore."""
+"""Admin endpoints for health, stats, backup, restore, and audit."""
 
+import csv
+import io
+import json
+from datetime import UTC, datetime
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlunparse
 from uuid import UUID, uuid4
 
 import httpx
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse, Response
 
 from sibyl.api.schemas import (
+    AdminAuditEventResponse,
+    AdminAuditListResponse,
     BackfillRequest,
     BackfillResponse,
     BackupDataSchema,
@@ -31,6 +39,7 @@ from sibyl.coordination import get_coordination_health
 from sibyl.persistence.auth_runtime import (
     create_project_record,
     get_project_record_by_graph_id,
+    list_audit_events,
     log_audit_event,
 )
 from sibyl.persistence.content_runtime import (
@@ -39,6 +48,7 @@ from sibyl.persistence.content_runtime import (
     list_crawl_sources,
     save_crawl_source_record,
 )
+from sibyl_core.audit import audit_event_resource
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole
 from sibyl_core.models import CrawlStatus, Entity
 from sibyl_core.models.entities import EntityType
@@ -56,6 +66,68 @@ router = APIRouter(
 # Role sets for different permission levels
 _READ_ROLES = (OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.MEMBER)
 _ADMIN_ROLES = (OrganizationRole.OWNER, OrganizationRole.ADMIN)
+
+
+def _audit_details(row: dict[str, object]) -> dict[str, object]:
+    details = row.get("details")
+    if not isinstance(details, dict):
+        return {}
+    return {str(key): value for key, value in details.items()}
+
+
+def _audit_event_response(row: dict[str, object]) -> AdminAuditEventResponse:
+    return AdminAuditEventResponse(
+        id=str(row.get("uuid") or ""),
+        organization_id=str(row["organization_id"]) if row.get("organization_id") else None,
+        user_id=str(row["user_id"]) if row.get("user_id") else None,
+        action=str(row.get("action") or ""),
+        resource=audit_event_resource(row),
+        ip_address=str(row["ip_address"]) if row.get("ip_address") else None,
+        user_agent=str(row["user_agent"]) if row.get("user_agent") else None,
+        details=_audit_details(row),
+        created_at=row.get("created_at") if isinstance(row.get("created_at"), datetime) else None,
+    )
+
+
+def _audit_filename(extension: str) -> str:
+    timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    return f"sibyl-audit-{timestamp}.{extension}"
+
+
+def _audit_csv_response(events: list[AdminAuditEventResponse]) -> Response:
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "created_at",
+            "action",
+            "user_id",
+            "organization_id",
+            "resource",
+            "ip_address",
+            "user_agent",
+            "details",
+        ],
+    )
+    writer.writeheader()
+    for event in events:
+        writer.writerow(
+            {
+                "created_at": event.created_at.isoformat() if event.created_at else "",
+                "action": event.action,
+                "user_id": event.user_id or "",
+                "organization_id": event.organization_id or "",
+                "resource": event.resource or "",
+                "ip_address": event.ip_address or "",
+                "user_agent": event.user_agent or "",
+                "details": json.dumps(event.details, sort_keys=True, default=str),
+            }
+        )
+    return Response(
+        output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{_audit_filename("csv")}"'},
+    )
 
 
 async def get_graph_stats_payload(group_id: str) -> dict[str, object]:
@@ -245,6 +317,84 @@ async def stats(
         raise HTTPException(
             status_code=500, detail="Failed to retrieve stats. Please try again."
         ) from e
+
+
+@router.get(
+    "/audit",
+    response_model=AdminAuditListResponse,
+    dependencies=[Depends(require_org_role(*_ADMIN_ROLES))],
+)
+async def list_admin_audit(
+    org: AuthOrganization = Depends(get_current_organization),
+    user_id: str | None = Query(default=None, description="Filter by actor user ID"),
+    action: str | None = Query(default=None, description="Filter by audit action"),
+    resource: str | None = Query(default=None, description="Filter by resource label or ID"),
+    start_time: datetime | None = Query(default=None, description="Inclusive start time"),
+    end_time: datetime | None = Query(default=None, description="Inclusive end time"),
+    limit: int = Query(default=50, ge=1, le=200, description="Maximum audit events"),
+    offset: int = Query(default=0, ge=0, description="Pagination offset"),
+) -> AdminAuditListResponse:
+    rows, total = await list_audit_events(
+        organization_id=org.id,
+        user_id=user_id,
+        action=action,
+        resource=resource,
+        start_time=start_time,
+        end_time=end_time,
+        limit=limit,
+        offset=offset,
+    )
+    return AdminAuditListResponse(
+        events=[_audit_event_response(row) for row in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=total > offset + len(rows),
+    )
+
+
+@router.get(
+    "/audit/export",
+    dependencies=[Depends(require_org_role(*_ADMIN_ROLES))],
+)
+async def export_admin_audit(
+    org: AuthOrganization = Depends(get_current_organization),
+    export_format: Literal["csv", "json"] = Query(
+        default="csv",
+        alias="format",
+        description="Export format",
+    ),
+    user_id: str | None = Query(default=None, description="Filter by actor user ID"),
+    action: str | None = Query(default=None, description="Filter by audit action"),
+    resource: str | None = Query(default=None, description="Filter by resource label or ID"),
+    start_time: datetime | None = Query(default=None, description="Inclusive start time"),
+    end_time: datetime | None = Query(default=None, description="Inclusive end time"),
+    limit: int = Query(default=1000, ge=1, le=5000, description="Maximum exported events"),
+) -> Response:
+    rows, total = await list_audit_events(
+        organization_id=org.id,
+        user_id=user_id,
+        action=action,
+        resource=resource,
+        start_time=start_time,
+        end_time=end_time,
+        limit=limit,
+        offset=0,
+    )
+    events = [_audit_event_response(row) for row in rows]
+    payload = AdminAuditListResponse(
+        events=events,
+        total=total,
+        limit=limit,
+        offset=0,
+        has_more=total > len(rows),
+    )
+    if export_format == "csv":
+        return _audit_csv_response(events)
+    return JSONResponse(
+        jsonable_encoder(payload),
+        headers={"Content-Disposition": f'attachment; filename="{_audit_filename("json")}"'},
+    )
 
 
 # === Backup/Restore Endpoints ===

@@ -51,6 +51,7 @@ from sibyl.persistence.surreal.auth import (
     build_surreal_auth_client,
     surreal_auth_client_scope,
 )
+from sibyl_core.audit import audit_event_matches_resource
 from sibyl_core.auth import (
     AuthContext,
     AuthSession,
@@ -2124,6 +2125,93 @@ async def log_audit_event(
         )
 
 
+def _audit_where_clause(
+    *,
+    organization_id: UUID | str,
+    user_id: UUID | str | None,
+    action: str | None,
+    start_time: datetime | None,
+    end_time: datetime | None,
+) -> tuple[str, SurrealRecord]:
+    clauses = ["organization_id = $organization_id"]
+    params: SurrealRecord = {"organization_id": str(organization_id)}
+    if user_id:
+        clauses.append("user_id = $user_id")
+        params["user_id"] = str(user_id)
+    if action:
+        clauses.append("action = $action")
+        params["action"] = action
+    if start_time:
+        clauses.append("created_at >= $start_time")
+        params["start_time"] = start_time
+    if end_time:
+        clauses.append("created_at <= $end_time")
+        params["end_time"] = end_time
+    return " AND ".join(clauses), params
+
+
+def _audit_total(row: SurrealRecord | None) -> int:
+    if row is None:
+        return 0
+    value = row.get("total")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if value is None:
+        return 0
+    try:
+        return int(str(value))
+    except ValueError:
+        return 0
+
+
+async def list_audit_events(
+    *,
+    organization_id: UUID | str,
+    user_id: UUID | str | None = None,
+    action: str | None = None,
+    resource: str | None = None,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[SurrealRecord], int]:
+    bounded_limit = max(1, min(limit, 200))
+    bounded_offset = max(0, offset)
+    where_clause, params = _audit_where_clause(
+        organization_id=organization_id,
+        user_id=user_id,
+        action=action,
+        start_time=start_time,
+        end_time=end_time,
+    )
+
+    if resource:
+        scan_limit = min(max((bounded_limit + bounded_offset + 1) * 5, 200), 5000)
+        query = (
+            f"SELECT * FROM audit_logs WHERE {where_clause} "  # noqa: S608
+            "ORDER BY created_at DESC LIMIT $scan_limit;"
+        )
+        async with _auth_client_scope() as client:
+            repo = _SurrealRepository(client)
+            rows = await repo.select_many(query, **params, scan_limit=scan_limit)
+        filtered = [row for row in rows if audit_event_matches_resource(row, resource)]
+        return filtered[bounded_offset : bounded_offset + bounded_limit], len(filtered)
+
+    scan_limit = bounded_offset + bounded_limit
+    query = (
+        f"SELECT * FROM audit_logs WHERE {where_clause} "  # noqa: S608
+        "ORDER BY created_at DESC LIMIT $scan_limit;"
+    )
+    count_query = f"SELECT count() AS total FROM audit_logs WHERE {where_clause} GROUP ALL;"  # noqa: S608
+    async with _auth_client_scope() as client:
+        repo = _SurrealRepository(client)
+        rows = await repo.select_many(query, **params, scan_limit=scan_limit)
+        count_row = await repo.select_one(count_query, **params)
+    return rows[bounded_offset:], _audit_total(count_row)
+
+
 def _bounded_audit_value(value: object, *, depth: int = 0) -> object:
     if depth >= 3:
         return str(value)[:500]
@@ -3857,6 +3945,7 @@ __all__ = [
     "get_user_by_id",
     "has_owner_membership",
     "list_accessible_project_graph_ids",
+    "list_audit_events",
     "list_api_keys_for_user",
     "list_memory_audit_events",
     "list_memory_space_members",

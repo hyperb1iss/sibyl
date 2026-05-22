@@ -2,22 +2,28 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
 from fastapi import HTTPException
+from fastapi.routing import APIRoute
 
+from sibyl.api.routes import admin as admin_routes
 from sibyl.api.routes.admin import (
     DebugQueryRequest,
     backfill_project_records,
     debug_query,
     dev_status,
+    export_admin_audit,
     health,
+    list_admin_audit,
     stats,
 )
 from sibyl.api.schemas import ProjectRecordBackfillRequest
+from sibyl_core.auth import OrganizationRole
 
 
 @pytest.mark.asyncio
@@ -58,6 +64,92 @@ async def test_stats_uses_graph_stats_payload() -> None:
     assert response.total_entities == 5
     assert response.entity_counts == {"task": 4, "pattern": 1}
     mock_get_stats.assert_awaited_once_with(str(org.id))
+
+
+@pytest.mark.asyncio
+async def test_admin_audit_lists_filtered_events() -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    user_id = "00000000-0000-0000-0000-000000000222"
+    created_at = datetime(2026, 5, 22, 9, 30, tzinfo=UTC)
+    rows = [
+        {
+            "uuid": "audit-1",
+            "organization_id": str(org.id),
+            "user_id": user_id,
+            "action": "api_key.create",
+            "ip_address": "127.0.0.1",
+            "user_agent": "pytest",
+            "details": {"resource": "api_key:abc", "scope": "api:read"},
+            "created_at": created_at,
+        }
+    ]
+    list_events = AsyncMock(return_value=(rows, 7))
+
+    with patch("sibyl.api.routes.admin.list_audit_events", list_events):
+        response = await list_admin_audit(
+            org=org,
+            user_id=user_id,
+            action="api_key.create",
+            resource="api_key:abc",
+            start_time=created_at,
+            end_time=created_at,
+            limit=25,
+            offset=5,
+        )
+
+    assert response.total == 7
+    assert response.has_more is True
+    assert response.events[0].id == "audit-1"
+    assert response.events[0].resource == "api_key:abc"
+    assert response.events[0].details == {"resource": "api_key:abc", "scope": "api:read"}
+    list_events.assert_awaited_once_with(
+        organization_id=org.id,
+        user_id=user_id,
+        action="api_key.create",
+        resource="api_key:abc",
+        start_time=created_at,
+        end_time=created_at,
+        limit=25,
+        offset=5,
+    )
+
+
+@pytest.mark.asyncio
+async def test_admin_audit_exports_csv() -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    rows = [
+        {
+            "uuid": "audit-1",
+            "organization_id": str(org.id),
+            "user_id": "00000000-0000-0000-0000-000000000222",
+            "action": "memory.recall",
+            "details": {"project_id": "sibyl"},
+            "created_at": datetime(2026, 5, 22, 9, 30, tzinfo=UTC),
+        }
+    ]
+
+    with patch("sibyl.api.routes.admin.list_audit_events", AsyncMock(return_value=(rows, 1))):
+        response = await export_admin_audit(org=org, export_format="csv", limit=1000)
+
+    assert response.media_type == "text/csv"
+    assert "attachment; filename=" in response.headers["content-disposition"]
+    assert b"memory.recall" in response.body
+    assert b"sibyl" in response.body
+
+
+@pytest.mark.asyncio
+async def test_admin_audit_route_rejects_member_role() -> None:
+    routes = [route for route in admin_routes.router.routes if isinstance(route, APIRoute)]
+    route = next(
+        route for route in routes if route.path.endswith("/audit") and "GET" in route.methods
+    )
+    dependency = route.dependencies[0].dependency
+
+    with pytest.raises(HTTPException) as exc_info:
+        await dependency(OrganizationRole.MEMBER)
+
+    assert exc_info.value.status_code == 403
+    await dependency(OrganizationRole.ADMIN)
 
 
 @pytest.mark.asyncio

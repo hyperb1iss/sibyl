@@ -6,6 +6,7 @@ import type { IconComponent } from '@/components/ui/icons';
 import {
   Activity,
   Archive,
+  ClipboardCheck,
   Database,
   Eye,
   Flash,
@@ -56,6 +57,12 @@ const ADMIN_NAVIGATION: SettingsNavItem[] = [
     href: '/settings/admin/ai',
     icon: Flash,
     hint: 'Keys, models, embeddings',
+  },
+  {
+    name: 'Audit Log',
+    href: '/settings/admin/audit',
+    icon: ClipboardCheck,
+    hint: 'Security and access events',
   },
   { name: 'Backups', href: '/settings/admin/backups', icon: Archive, hint: 'Scheduled backups' },
   {

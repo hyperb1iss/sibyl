@@ -269,6 +269,30 @@ class MemoryAuditListResponse(BaseModel):
     limit: int
 
 
+class AdminAuditEventResponse(BaseModel):
+    """Organization audit event for admin review."""
+
+    id: str = Field(..., description="Audit event UUID")
+    organization_id: str | None = Field(default=None, description="Organization ID")
+    user_id: str | None = Field(default=None, description="Actor user ID")
+    action: str = Field(..., description="Audit action")
+    resource: str | None = Field(default=None, description="Best-effort resource label")
+    ip_address: str | None = Field(default=None, description="Client IP address")
+    user_agent: str | None = Field(default=None, description="Client user agent")
+    details: dict[str, Any] = Field(default_factory=dict, description="Bounded event details")
+    created_at: datetime | None = Field(default=None, description="Audit event timestamp")
+
+
+class AdminAuditListResponse(BaseModel):
+    """Paginated organization audit event response."""
+
+    events: list[AdminAuditEventResponse]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+
+
 MemorySpaceStateLiteral = Literal["active", "disabled"]
 
 

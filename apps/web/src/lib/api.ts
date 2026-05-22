@@ -238,6 +238,38 @@ export interface MemoryAuditListResponse {
   limit: number;
 }
 
+export interface AdminAuditEvent {
+  id: string;
+  organization_id: string | null;
+  user_id: string | null;
+  action: string;
+  resource: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  details: Record<string, unknown>;
+  created_at: string | null;
+}
+
+export interface AdminAuditListResponse {
+  events: AdminAuditEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+}
+
+export interface AdminAuditParams {
+  user_id?: string;
+  action?: string;
+  resource?: string;
+  start_time?: string;
+  end_time?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export type AdminAuditExportFormat = 'csv' | 'json';
+
 export interface MemorySpaceMember {
   id: string;
   organization_id: string;
@@ -1998,6 +2030,47 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
   return response.json();
 }
 
+async function fetchApiBlob(endpoint: string): Promise<Blob> {
+  const makeRequest = () =>
+    fetch(`${API_BASE}${endpoint}`, {
+      credentials: 'include',
+    });
+
+  const response = await makeRequest();
+  if (!response.ok) {
+    if (response.status === 401 && typeof window !== 'undefined') {
+      if (window.location.pathname !== '/login') {
+        const refreshed = await tryRefreshToken();
+        const retryResponse = await makeRequest();
+        if (retryResponse.ok) return retryResponse.blob();
+        if (retryResponse.status === 401) return redirectToLogin();
+        const error = await retryResponse.text();
+        if (!refreshed) {
+          throw new Error(error || `API error after refresh retry: ${retryResponse.status}`);
+        }
+        throw new Error(error || `API error: ${retryResponse.status}`);
+      }
+    }
+
+    const error = await response.text();
+    throw new Error(error || `API error: ${response.status}`);
+  }
+
+  return response.blob();
+}
+
+function adminAuditSearchParams(params?: AdminAuditParams): URLSearchParams {
+  const searchParams = new URLSearchParams();
+  if (params?.user_id) searchParams.set('user_id', params.user_id);
+  if (params?.action) searchParams.set('action', params.action);
+  if (params?.resource) searchParams.set('resource', params.resource);
+  if (params?.start_time) searchParams.set('start_time', params.start_time);
+  if (params?.end_time) searchParams.set('end_time', params.end_time);
+  if (params?.limit) searchParams.set('limit', params.limit.toString());
+  if (params?.offset) searchParams.set('offset', params.offset.toString());
+  return searchParams;
+}
+
 // Entities
 export const api = {
   // Entity CRUD
@@ -2317,6 +2390,18 @@ export const api = {
   admin: {
     health: () => fetchApi<HealthResponse>('/admin/health'),
     stats: () => fetchApi<StatsResponse>('/admin/stats'),
+    audit: {
+      list: (params?: AdminAuditParams) => {
+        const searchParams = adminAuditSearchParams(params);
+        const query = searchParams.toString();
+        return fetchApi<AdminAuditListResponse>(`/admin/audit${query ? `?${query}` : ''}`);
+      },
+      export: (params: AdminAuditParams & { format: AdminAuditExportFormat }) => {
+        const searchParams = adminAuditSearchParams(params);
+        searchParams.set('format', params.format);
+        return fetchApiBlob(`/admin/audit/export?${searchParams.toString()}`);
+      },
+    },
     backup: () =>
       fetchApi<BackupResponse>('/admin/backup', {
         method: 'POST',
