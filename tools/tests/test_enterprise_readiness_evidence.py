@@ -1017,6 +1017,141 @@ def test_main_capture_entra_smoke_evidence_requires_json(
     assert "Entra smoke receipt must be a JSON file" in captured.out
 
 
+def _mcp_smoke_payload() -> dict[str, Any]:
+    return {
+        "status": "PASS",
+        "runtime": "https://sibyl.example.com/mcp",
+        "clients": {
+            "cursor": {
+                "status": "PASS",
+                "client": "Cursor stable",
+                "auth_method": "scoped API key",
+                "tools_listed": True,
+                "tool_call_succeeded": True,
+                "result": "Cursor listed Sibyl tools and completed memory.recall.",
+            },
+            "claude_code": {
+                "status": "PASS",
+                "client": "Claude Code",
+                "auth_method": "scoped API key",
+                "tools_listed": True,
+                "recall_succeeded": True,
+                "result": "Claude Code listed tools and completed recall.",
+            },
+            "claude_desktop": {
+                "status": "PASS",
+                "client": "Claude Desktop",
+                "auth_method": "scoped API key",
+                "tools_listed": True,
+                "tool_call_succeeded": True,
+                "result": "Claude Desktop listed tools and completed recall.",
+            },
+        },
+    }
+
+
+def _write_mcp_smoke_receipt(path: Path, payload: dict[str, Any]) -> Path:
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_capture_mcp_client_smoke_evidence_updates_manifest(tmp_path: Path) -> None:
+    evidence_dir = tmp_path / "evidence"
+    source = _write_mcp_smoke_receipt(
+        tmp_path / "mcp-smoke.json",
+        _mcp_smoke_payload(),
+    )
+
+    receipt = evidence.capture_mcp_client_smoke_evidence(
+        evidence_dir,
+        source_receipt=source,
+        captured_by="Nova",
+    )
+    manifest_path = Path(str(receipt["manifest"]))
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    cursor_item = payload["items"]["mcp_cursor_auth"]
+    code_item = payload["items"]["mcp_claude_code_auth"]
+    desktop_item = payload["items"]["mcp_claude_desktop_auth"]
+    cursor_receipt = evidence_dir / "mcp_cursor_auth" / "receipt.md"
+
+    assert cursor_item["status"] == "PASS"
+    assert code_item["status"] == "PASS"
+    assert desktop_item["status"] == "PASS"
+    assert cursor_item["artifacts"][1]["path"] == ("mcp_client_smoke/mcp-client-smoke-receipt.json")
+    assert "Cursor listed Sibyl tools" in cursor_receipt.read_text(encoding="utf-8")
+
+
+def test_capture_mcp_client_smoke_evidence_rejects_missing_client(
+    tmp_path: Path,
+) -> None:
+    payload = _mcp_smoke_payload()
+    payload["clients"].pop("claude_desktop")
+    source = _write_mcp_smoke_receipt(tmp_path / "mcp-smoke.json", payload)
+
+    with pytest.raises(evidence.EvidenceFailure) as exc_info:
+        evidence.capture_mcp_client_smoke_evidence(
+            tmp_path / "evidence",
+            source_receipt=source,
+            captured_by="Nova",
+        )
+
+    assert "must include clients.claude_desktop" in str(exc_info.value)
+
+
+def test_capture_mcp_client_smoke_evidence_rejects_unlisted_tools(
+    tmp_path: Path,
+) -> None:
+    payload = _mcp_smoke_payload()
+    payload["clients"]["cursor"]["tools_listed"] = False
+    source = _write_mcp_smoke_receipt(tmp_path / "mcp-smoke.json", payload)
+
+    with pytest.raises(evidence.EvidenceFailure) as exc_info:
+        evidence.capture_mcp_client_smoke_evidence(
+            tmp_path / "evidence",
+            source_receipt=source,
+            captured_by="Nova",
+        )
+
+    assert "cursor must prove tools_listed=true" in str(exc_info.value)
+
+
+def test_capture_mcp_client_smoke_evidence_rejects_missing_tool_call(
+    tmp_path: Path,
+) -> None:
+    payload = _mcp_smoke_payload()
+    payload["clients"]["cursor"]["tool_call_succeeded"] = False
+    source = _write_mcp_smoke_receipt(tmp_path / "mcp-smoke.json", payload)
+
+    with pytest.raises(evidence.EvidenceFailure) as exc_info:
+        evidence.capture_mcp_client_smoke_evidence(
+            tmp_path / "evidence",
+            source_receipt=source,
+            captured_by="Nova",
+        )
+
+    assert "cursor must prove a tool call or recall succeeded" in str(exc_info.value)
+
+
+def test_main_capture_mcp_client_smoke_evidence_requires_json(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    source = tmp_path / "mcp-smoke.txt"
+    source.write_text("not JSON", encoding="utf-8")
+
+    exit_code = evidence.main(
+        [
+            "--evidence-dir",
+            str(tmp_path / "evidence"),
+            "--capture-mcp-client-smoke-evidence",
+            str(source),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "MCP client smoke receipt must be a JSON file" in captured.out
+
+
 def _restore_drill_payload() -> dict[str, Any]:
     return {
         "status": "PASS",
@@ -1154,31 +1289,31 @@ def test_main_capture_restore_drill_evidence_requires_json(
 
 def test_capture_manual_evidence_updates_manifest(tmp_path: Path) -> None:
     evidence_dir = tmp_path / "evidence"
-    source = tmp_path / "cursor-smoke.txt"
-    source.write_text("Cursor MCP authenticated with scoped API key", encoding="utf-8")
+    source = tmp_path / "role-claim-config.txt"
+    source.write_text("Entra App Roles emit a roles claim for Sibyl.Member", encoding="utf-8")
 
     receipt = evidence.capture_manual_evidence(
         evidence_dir,
-        key="mcp_cursor_auth",
+        key="idp_role_claim_evidence",
         source_artifacts=[source],
-        runtime="Cursor stable against https://sibyl.example.com",
-        flow="Configured /mcp with a scoped API key, then opened the MCP tools list.",
-        result="Cursor listed Sibyl tools and completed a recall call.",
+        runtime="Entra admin center",
+        flow="Exported app registration role-claim settings.",
+        result="The config maps Sibyl.Member to the OIDC roles claim.",
         captured_by="Nova",
-        redactions="API key redacted",
+        redactions="Tenant display name redacted",
     )
     manifest_path = Path(str(receipt["manifest"]))
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    item = payload["items"]["mcp_cursor_auth"]
-    captured = evidence_dir / "mcp_cursor_auth" / "cursor-smoke.txt"
-    receipt_file = evidence_dir / "mcp_cursor_auth" / "receipt.md"
+    item = payload["items"]["idp_role_claim_evidence"]
+    captured = evidence_dir / "idp_role_claim_evidence" / "role-claim-config.txt"
+    receipt_file = evidence_dir / "idp_role_claim_evidence" / "receipt.md"
 
     assert item["status"] == "PASS"
-    assert item["artifacts"][0]["path"] == "mcp_cursor_auth/receipt.md"
-    assert item["artifacts"][1]["path"] == "mcp_cursor_auth/cursor-smoke.txt"
+    assert item["artifacts"][0]["path"] == "idp_role_claim_evidence/receipt.md"
+    assert item["artifacts"][1]["path"] == "idp_role_claim_evidence/role-claim-config.txt"
     assert captured.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
-    assert "Runtime or environment: Cursor stable" in receipt_file.read_text(encoding="utf-8")
-    assert "API key redacted" in receipt_file.read_text(encoding="utf-8")
+    assert "Runtime or environment: Entra admin center" in receipt_file.read_text(encoding="utf-8")
+    assert "Tenant display name redacted" in receipt_file.read_text(encoding="utf-8")
 
 
 def test_capture_manual_evidence_rejects_dedicated_capture_item(tmp_path: Path) -> None:
@@ -1203,11 +1338,11 @@ def test_capture_manual_evidence_rejects_missing_artifact(tmp_path: Path) -> Non
     with pytest.raises(evidence.EvidenceFailure) as exc_info:
         evidence.capture_manual_evidence(
             tmp_path / "evidence",
-            key="mcp_claude_code_auth",
+            key="idp_role_claim_evidence",
             source_artifacts=[tmp_path / "missing.txt"],
-            runtime="Claude Code",
-            flow="configured /mcp",
-            result="tools listed",
+            runtime="Entra admin center",
+            flow="exported claim config",
+            result="roles claim configured",
             captured_by="Nova",
         )
 
@@ -1222,13 +1357,13 @@ def test_main_capture_manual_evidence_requires_artifact(
             "--evidence-dir",
             str(tmp_path),
             "--capture-manual-evidence",
-            "mcp_cursor_auth",
+            "idp_role_claim_evidence",
             "--manual-runtime",
-            "Cursor",
+            "Entra admin center",
             "--manual-flow",
-            "configured MCP endpoint",
+            "exported app role config",
             "--manual-result",
-            "tools listed",
+            "roles claim configured",
         ]
     )
     captured = capsys.readouterr()

@@ -45,13 +45,15 @@ AUDIT_EXPORT_CSV_COLUMNS = (
 )
 MANUAL_EVIDENCE_KEYS = frozenset(
     {
-        "mcp_cursor_auth",
-        "mcp_claude_code_auth",
-        "mcp_claude_desktop_auth",
         "idp_role_claim_evidence",
     }
 )
 SIBYL_IDP_ROLES = frozenset({"Sibyl.Member", "Sibyl.Admin", "Sibyl.Owner"})
+MCP_CLIENT_EVIDENCE = {
+    "cursor": ("mcp_cursor_auth", "Cursor"),
+    "claude_code": ("mcp_claude_code_auth", "Claude Code"),
+    "claude_desktop": ("mcp_claude_desktop_auth", "Claude Desktop"),
+}
 SIBYL_HELM_RENDER_ARGS = (
     "template",
     "enterprise",
@@ -1290,6 +1292,76 @@ def capture_entra_smoke_evidence(
     }
 
 
+def capture_mcp_client_smoke_evidence(
+    evidence_dir: Path = DEFAULT_EVIDENCE_DIR,
+    *,
+    source_receipt: Path,
+    captured_by: str,
+) -> JsonObject:
+    captured_by = _require_manual_field("captured by", captured_by)
+    payload = _load_mcp_smoke_payload(source_receipt)
+    summary = _mcp_smoke_summary(payload)
+
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = evidence_dir / DEFAULT_MANIFEST.name
+    if not manifest_path.exists():
+        write_template(evidence_dir)
+    manifest_payload = _load_manifest(manifest_path)
+    items = _manifest_items(manifest_payload)
+
+    smoke_dir = evidence_dir / "mcp_client_smoke"
+    smoke_dir.mkdir(parents=True, exist_ok=True)
+    smoke_artifact = _copy_mcp_smoke_artifact(
+        source_receipt,
+        target_path=smoke_dir / "mcp-client-smoke-receipt.json",
+    )
+
+    captured_items: JsonObject = {}
+    clients = cast(Mapping[str, Mapping[str, object]], summary["clients"])
+    for client_key, (evidence_key, display_name) in MCP_CLIENT_EVIDENCE.items():
+        client_dir = evidence_dir / evidence_key
+        client_dir.mkdir(parents=True, exist_ok=True)
+        receipt_path = client_dir / "receipt.md"
+        receipt_path.write_text(
+            _mcp_client_smoke_receipt(
+                summary=summary,
+                client_key=client_key,
+                display_name=display_name,
+                evidence_key=evidence_key,
+                client_summary=clients[client_key],
+                captured_by=captured_by,
+                artifact_path=smoke_artifact,
+            ),
+            encoding="utf-8",
+        )
+        requirement = _requirement_by_key(evidence_key)
+        _update_manifest_item(
+            items=items,
+            key=evidence_key,
+            gate=requirement.gate,
+            description=requirement.description,
+            artifacts=[
+                _artifact_entry(evidence_dir, receipt_path),
+                _artifact_entry(evidence_dir, smoke_artifact),
+            ],
+            notes="Captured from a structured MCP client smoke-test receipt.",
+        )
+        captured_items[evidence_key] = items[evidence_key]
+
+    manifest_path.write_text(
+        json.dumps(manifest_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "status": "PASS",
+        "captured_at": datetime.now(UTC).isoformat(),
+        "manifest": str(manifest_path),
+        "evidence_dir": str(evidence_dir.resolve()),
+        "items": captured_items,
+    }
+
+
 def capture_restore_drill_evidence(
     evidence_dir: Path = DEFAULT_EVIDENCE_DIR,
     *,
@@ -1668,6 +1740,97 @@ def _entra_string_field(value: object, label: str) -> str:
     raise EvidenceFailure(msg)
 
 
+def _load_mcp_smoke_payload(path: Path) -> JsonObject:
+    if path.suffix.lower() != ".json":
+        msg = "MCP client smoke receipt must be a JSON file"
+        raise EvidenceFailure(msg)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        msg = f"MCP client smoke receipt not found: {path}"
+        raise EvidenceFailure(msg) from exc
+    except json.JSONDecodeError as exc:
+        msg = f"MCP client smoke receipt is not valid JSON: {exc}"
+        raise EvidenceFailure(msg) from exc
+
+    if not isinstance(payload, dict):
+        msg = "MCP client smoke receipt root must be an object"
+        raise EvidenceFailure(msg)
+    return cast(JsonObject, payload)
+
+
+def _mcp_smoke_summary(payload: Mapping[str, object]) -> JsonObject:
+    if payload.get("status") != "PASS":
+        msg = f"MCP client smoke status must be PASS, got {payload.get('status')!r}"
+        raise EvidenceFailure(msg)
+
+    runtime = _mcp_string_field(payload.get("runtime"), "runtime")
+    clients = payload.get("clients")
+    if not isinstance(clients, dict):
+        msg = "MCP client smoke receipt must include clients"
+        raise EvidenceFailure(msg)
+
+    return {
+        "runtime": runtime,
+        "clients": {
+            client_key: _mcp_client_summary(
+                cast(Mapping[str, object], clients).get(client_key),
+                client_key=client_key,
+                display_name=display_name,
+            )
+            for client_key, (_, display_name) in MCP_CLIENT_EVIDENCE.items()
+        },
+    }
+
+
+def _mcp_client_summary(
+    value: object,
+    *,
+    client_key: str,
+    display_name: str,
+) -> JsonObject:
+    if not isinstance(value, dict):
+        msg = f"MCP client smoke receipt must include clients.{client_key}"
+        raise EvidenceFailure(msg)
+    client = cast(Mapping[str, object], value)
+    if client.get("status") != "PASS":
+        msg = f"MCP client {client_key} status must be PASS, got {client.get('status')!r}"
+        raise EvidenceFailure(msg)
+
+    tools_listed = client.get("tools_listed")
+    tool_call_succeeded = client.get("tool_call_succeeded")
+    recall_succeeded = client.get("recall_succeeded")
+    if tools_listed is not True:
+        msg = f"MCP client {client_key} must prove tools_listed=true"
+        raise EvidenceFailure(msg)
+    if tool_call_succeeded is not True and recall_succeeded is not True:
+        msg = f"MCP client {client_key} must prove a tool call or recall succeeded"
+        raise EvidenceFailure(msg)
+
+    return {
+        "client": _mcp_string_field(client.get("client") or display_name, f"{client_key}.client"),
+        "runtime": _mcp_optional_string(client.get("runtime")),
+        "auth_method": _mcp_string_field(client.get("auth_method"), f"{client_key}.auth_method"),
+        "tools_listed": True,
+        "tool_call_succeeded": tool_call_succeeded is True,
+        "recall_succeeded": recall_succeeded is True,
+        "result": _mcp_string_field(client.get("result"), f"{client_key}.result"),
+    }
+
+
+def _mcp_string_field(value: object, label: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    msg = f"MCP client smoke receipt must include {label}"
+    raise EvidenceFailure(msg)
+
+
+def _mcp_optional_string(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
 def _load_restore_drill_payload(path: Path) -> JsonObject:
     if path.suffix.lower() != ".json":
         msg = "restore drill receipt must be a JSON file"
@@ -1984,6 +2147,19 @@ def _copy_entra_smoke_artifact(source_path: Path, *, target_path: Path) -> Path:
     return target_path
 
 
+def _copy_mcp_smoke_artifact(source_path: Path, *, target_path: Path) -> Path:
+    source_path = source_path.expanduser().resolve()
+    if not source_path.is_file():
+        msg = f"MCP client smoke receipt not found: {source_path}"
+        raise EvidenceFailure(msg)
+    if source_path.stat().st_size == 0:
+        msg = f"MCP client smoke receipt is empty: {source_path}"
+        raise EvidenceFailure(msg)
+    if source_path != target_path.resolve():
+        copy2(source_path, target_path)
+    return target_path
+
+
 def _copy_restore_drill_artifact(source_path: Path, *, target_path: Path) -> Path:
     source_path = source_path.expanduser().resolve()
     if not source_path.is_file():
@@ -2210,6 +2386,37 @@ def _entra_missing_role_receipt(
 - Redactions: source receipt may redact user and tenant display names
 - Related artifact paths:
   - entra_oidc_smoke/{artifact_path.name}
+"""
+
+
+def _mcp_client_smoke_receipt(
+    *,
+    summary: Mapping[str, object],
+    client_key: str,
+    display_name: str,
+    evidence_key: str,
+    client_summary: Mapping[str, object],
+    captured_by: str,
+    artifact_path: Path,
+) -> str:
+    runtime = client_summary.get("runtime") or summary["runtime"]
+    return f"""# {evidence_key}
+
+- Gate: mcp
+- Status: PASS
+- Required proof: {display_name} authenticates against Sibyl after the OAuth/Authlib changes.
+- Captured at: {datetime.now(UTC).isoformat()}
+- Captured by: {captured_by}
+- Runtime or environment: {runtime}
+- Client key: {client_key}
+- Auth method: {client_summary["auth_method"]}
+- Observed result: {client_summary["result"]}
+- Tools listed: {client_summary["tools_listed"]}
+- Tool call succeeded: {client_summary["tool_call_succeeded"]}
+- Recall succeeded: {client_summary["recall_succeeded"]}
+- Redactions: source receipt should redact API keys and local tokens
+- Related artifact paths:
+  - mcp_client_smoke/{artifact_path.name}
 """
 
 
@@ -2543,6 +2750,26 @@ def _handle_entra_smoke_capture(
     return 0
 
 
+def _handle_mcp_smoke_capture(
+    evidence_dir: Path | None,
+    *,
+    source_receipt: Path,
+    captured_by: str,
+) -> int:
+    try:
+        receipt = capture_mcp_client_smoke_evidence(
+            DEFAULT_EVIDENCE_DIR if evidence_dir is None else evidence_dir,
+            source_receipt=source_receipt,
+            captured_by=captured_by,
+        )
+    except EvidenceFailure as exc:
+        sys.stdout.write(f"{exc}\n")
+        return 1
+    sys.stdout.write("captured MCP client smoke evidence\n")
+    sys.stdout.write(f"manifest: {receipt['manifest']}\n")
+    return 0
+
+
 def _handle_restore_drill_capture(
     evidence_dir: Path | None,
     *,
@@ -2611,6 +2838,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--audit-export-limit", type=int, default=1000)
     parser.add_argument("--audit-export-token-env", default="SIBYL_ACCESS_TOKEN")
     parser.add_argument("--capture-entra-smoke-evidence", type=Path)
+    parser.add_argument("--capture-mcp-client-smoke-evidence", type=Path)
     parser.add_argument("--capture-restore-drill-evidence", type=Path)
     parser.add_argument("--capture-manual-evidence")
     parser.add_argument("--manual-artifact", type=Path, action="append", default=[])
@@ -2624,20 +2852,22 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-
+def _dispatch_maintenance_command(args: argparse.Namespace) -> int | None:
     if args.list:
         _list_requirements()
-        exit_code = 0
-    elif args.init_template is not None:
-        exit_code = _handle_init_template(args.init_template, force=args.force_template)
-    elif args.sync_hashes:
-        exit_code = _handle_sync_hashes(args.manifest, args.evidence_dir)
-    elif args.status:
-        exit_code = _handle_status(args.manifest, args.evidence_dir)
-    elif args.capture_package_lock_diff is not None:
+        return 0
+    if args.init_template is not None:
+        return _handle_init_template(args.init_template, force=args.force_template)
+    if args.sync_hashes:
+        return _handle_sync_hashes(args.manifest, args.evidence_dir)
+    if args.status:
+        return _handle_status(args.manifest, args.evidence_dir)
+    return None
+
+
+def _dispatch_capture_command(args: argparse.Namespace) -> int | None:
+    exit_code: int | None = None
+    if args.capture_package_lock_diff is not None:
         exit_code = _handle_package_lock_capture(
             args.evidence_dir,
             base_ref=args.capture_package_lock_diff,
@@ -2665,6 +2895,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             source_receipt=args.capture_entra_smoke_evidence,
             captured_by=args.manual_captured_by,
         )
+    elif args.capture_mcp_client_smoke_evidence is not None:
+        exit_code = _handle_mcp_smoke_capture(
+            args.evidence_dir,
+            source_receipt=args.capture_mcp_client_smoke_evidence,
+            captured_by=args.manual_captured_by,
+        )
     elif args.capture_restore_drill_evidence is not None:
         exit_code = _handle_restore_drill_capture(
             args.evidence_dir,
@@ -2682,13 +2918,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             captured_by=args.manual_captured_by,
             redactions=args.manual_redactions,
         )
-    else:
-        exit_code = run_gate(
-            manifest_path=args.manifest,
-            evidence_dir=args.evidence_dir,
-            receipt_path=args.receipt,
-        )
     return exit_code
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    maintenance_exit = _dispatch_maintenance_command(args)
+    if maintenance_exit is not None:
+        return maintenance_exit
+
+    capture_exit = _dispatch_capture_command(args)
+    if capture_exit is not None:
+        return capture_exit
+
+    return run_gate(
+        manifest_path=args.manifest,
+        evidence_dir=args.evidence_dir,
+        receipt_path=args.receipt,
+    )
 
 
 def _print_status_report(report: JsonObject) -> None:
