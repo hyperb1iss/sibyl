@@ -28,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sibyl.persistence.content_common import DocumentChunkRecord
 from sibyl.persistence.content_runtime import get_content_read_session, save_document_chunks
 from sibyl_core.ai.errors import LLMError
-from sibyl_core.ai.llm import Extractor, LLMSurface
+from sibyl_core.ai.llm import Extractor, LLMSurface, llm_budget_context
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 
 if TYPE_CHECKING:
@@ -754,7 +754,8 @@ class GraphIntegrationService:
             (chunk.content, chunk.context, str(chunk.id)) for chunk in chunks
         ]
 
-        extracted = await self.extractor.extract_batch(chunk_data)
+        with llm_budget_context(organization_id=self.organization_id):
+            extracted = await self.extractor.extract_batch(chunk_data)
         stats.entities_extracted = len(extracted)
         stats.chunks_processed = len(chunks)
 

@@ -7,6 +7,12 @@ from typing import Any, Literal, cast
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from sibyl.ai.llm.budget import (
+    DEFAULT_MONTHLY_ORG_TOKENS,
+    DEFAULT_MONTHLY_USER_TOKENS,
+    ORG_BUDGET_SETTING,
+    USER_BUDGET_SETTING,
+)
 from sibyl.ai.llm.config_source import resolve_provider_api_key
 from sibyl.ai.llm.service import invalidate_llm_runtime
 from sibyl.crypto import mask_secret
@@ -63,9 +69,20 @@ class LLMSurfaceSettings(BaseModel):
     cached_at: str | None = None
 
 
+class BudgetValueField(BaseModel):
+    value: int
+    source: ConfigSourceName
+
+
+class LLMBudgetSettings(BaseModel):
+    monthly_user_tokens: BudgetValueField
+    monthly_org_tokens: BudgetValueField
+
+
 class LLMSettingsResponse(BaseModel):
     scope: Literal["instance_wide"] = "instance_wide"
     surfaces: dict[LLMSurface, LLMSurfaceSettings]
+    budgets: LLMBudgetSettings
 
 
 class UpdateLLMSurfaceRequest(BaseModel):
@@ -82,6 +99,16 @@ class UpdateLLMSurfaceResponse(BaseModel):
     warning: str | None = None
 
 
+class UpdateLLMBudgetRequest(BaseModel):
+    monthly_user_tokens: int | None = Field(default=None, gt=0)
+    monthly_org_tokens: int | None = Field(default=None, gt=0)
+
+
+class UpdateLLMBudgetResponse(BaseModel):
+    scope: Literal["instance_wide"] = "instance_wide"
+    budgets: LLMBudgetSettings
+
+
 class RegistryResponse(BaseModel):
     entries: list[ModelEntry]
 
@@ -91,11 +118,15 @@ async def get_llm_settings(request: Request) -> LLMSettingsResponse:
     await require_settings_owner(request)
 
     source = get_config_source()
+    service = get_settings_service()
     surfaces = {
         surface: _surface_settings(await source.resolve(surface))
         for surface in LLMSurface
     }
-    return LLMSettingsResponse(surfaces=surfaces)
+    return LLMSettingsResponse(
+        surfaces=surfaces,
+        budgets=await _budget_settings(service),
+    )
 
 
 @router.put("/llm/{surface}", response_model=UpdateLLMSurfaceResponse)
@@ -122,6 +153,33 @@ async def update_llm_surface(
     await invalidate_llm_runtime(surface)
     updated = await get_config_source().resolve(surface)
     return UpdateLLMSurfaceResponse(surface=_surface_settings(updated), warning=warning)
+
+
+@router.put("/llm-budget", response_model=UpdateLLMBudgetResponse)
+async def update_llm_budget(
+    request: Request,
+    body: UpdateLLMBudgetRequest,
+) -> UpdateLLMBudgetResponse:
+    await require_settings_owner(request)
+
+    service = get_settings_service()
+    field_keys = {
+        "monthly_user_tokens": USER_BUDGET_SETTING,
+        "monthly_org_tokens": ORG_BUDGET_SETTING,
+    }
+    for field in body.model_fields_set:
+        key = field_keys[field]
+        value = getattr(body, field)
+        if value is None:
+            await service.delete(key)
+        else:
+            await service.set(
+                key,
+                str(value),
+                is_secret=False,
+                description=f"LLM budget {field}",
+            )
+    return UpdateLLMBudgetResponse(budgets=await _budget_settings(service))
 
 
 @router.post("/llm/{surface}/test", response_model=SurfaceTestResult)
@@ -208,6 +266,42 @@ def _secret_field(field: ConfigField[Any]) -> SecretConfigField:
         locked_by_env=field.locked_by_env,
         env_var=field.env_var,
         masked=mask_secret(raw_value) if raw_value else None,
+    )
+
+
+async def _budget_settings(service) -> LLMBudgetSettings:
+    return LLMBudgetSettings(
+        monthly_user_tokens=await _budget_value(
+            service,
+            USER_BUDGET_SETTING,
+            default=DEFAULT_MONTHLY_USER_TOKENS,
+        ),
+        monthly_org_tokens=await _budget_value(
+            service,
+            ORG_BUDGET_SETTING,
+            default=DEFAULT_MONTHLY_ORG_TOKENS,
+        ),
+    )
+
+
+async def _budget_value(
+    service,
+    key: str,
+    *,
+    default: int,
+) -> BudgetValueField:
+    raw_value, source = await service.get_with_source(key)
+    if raw_value is None:
+        return BudgetValueField(value=default, source="default")
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f"Invalid LLM budget setting: {key}") from exc
+    if value <= 0:
+        raise HTTPException(status_code=500, detail=f"Invalid LLM budget setting: {key}")
+    return BudgetValueField(
+        value=value,
+        source="db" if source == "database" else "env",
     )
 
 

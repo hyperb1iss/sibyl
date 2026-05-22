@@ -12,6 +12,7 @@ from pydantic_ai.models import ModelSettings
 
 from sibyl_core.ai.clients import get_agent
 from sibyl_core.ai.errors import LLMError, classify_llm_exception
+from sibyl_core.ai.llm.budget import reserve_llm_budget
 from sibyl_core.ai.llm.config import LLMSurface
 from sibyl_core.observability import elapsed_ms, telemetry_registry
 
@@ -39,6 +40,11 @@ class Extractor[T]:
     async def extract(self, prompt: str) -> T:
         started_at = time.perf_counter()
         try:
+            await reserve_llm_budget(
+                surface=self.surface.value,
+                prompt=prompt,
+                output_token_limit=self.max_tokens,
+            )
             agent = await self._get_agent()
             result = await agent.run(
                 prompt,

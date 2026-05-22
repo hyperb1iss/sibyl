@@ -11,6 +11,7 @@ import structlog
 from sibyl.config import settings
 from sibyl.jobs.queue import get_queue
 from sibyl_core.ai.errors import LLMError
+from sibyl_core.ai.llm.budget import llm_budget_context
 from sibyl_core.ai.memory_extraction import (
     build_memory_batch_entity_extraction_prompt,
     memory_batch_entity_extractor,
@@ -192,12 +193,21 @@ async def extract_memory_entities(
     )
     estimated_input_tokens = _estimate_tokens(prompt)
     extractor = memory_batch_entity_extractor(max_tokens=max_tokens)
+    user_id = _first_non_empty(
+        *(source.source.get("principal_id") for source in source_payloads),
+        *(source.source.get("created_by_user_id") for source in source_payloads),
+    )
+    organization_id = _first_non_empty(
+        *(source.source.get("organization_id") for source in source_payloads),
+        group_id,
+    )
 
     errors: list[dict[str, str]] = []
     extractions: list[dict[str, Any]] = []
     extracted_by_source_id: dict[str, list[ExtractedMemoryEntity]] = {}
     extracted_entities = 0
-    results = await extractor.extract_many([prompt], max_concurrent=max_concurrent)
+    with llm_budget_context(user_id=user_id, organization_id=organization_id):
+        results = await extractor.extract_many([prompt], max_concurrent=max_concurrent)
     result = results[0] if results else None
     payloads_by_source_id = {source.source_id: source for source in source_payloads}
     if isinstance(result, LLMError) or result is None:
@@ -379,6 +389,14 @@ async def _project_extracted_entities(
 
 def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
+
+
+def _first_non_empty(*values: object) -> str | None:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return None
 
 
 def _int_value(value: object) -> int:

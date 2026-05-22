@@ -49,6 +49,10 @@ class LLMRateLimitError(LLMError):
     """Raised when a provider rate limit is hit."""
 
 
+class LLMBudgetExceededError(LLMError):
+    """Raised when a local LLM budget would be exceeded."""
+
+
 class LLMProviderError(LLMError):
     """Raised when a provider rejects or fails a request."""
 

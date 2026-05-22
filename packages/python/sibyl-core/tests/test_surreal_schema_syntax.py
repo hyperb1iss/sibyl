@@ -110,6 +110,15 @@ def test_auth_schema_includes_oidc_identity_tables() -> None:
     assert "idx_user_identity_provider_subject" in AUTH_SCHEMA_DEFINITIONS
 
 
+def test_auth_schema_includes_llm_usage_buckets() -> None:
+    assert "llm_usage_buckets" in AUTH_TABLES
+    assert "DEFINE FIELD IF NOT EXISTS bucket_key ON llm_usage_buckets TYPE string" in (
+        AUTH_SCHEMA_DEFINITIONS
+    )
+    assert "idx_llm_usage_buckets_key" in AUTH_SCHEMA_DEFINITIONS
+    assert "idx_llm_usage_buckets_subject" in AUTH_SCHEMA_DEFINITIONS
+
+
 def test_auth_and_content_schema_include_deletion_lifecycle_fields() -> None:
     assert "DEFINE FIELD IF NOT EXISTS deleted_at ON users TYPE option<datetime>" in (
         AUTH_SCHEMA_DEFINITIONS

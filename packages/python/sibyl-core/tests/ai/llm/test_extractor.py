@@ -11,11 +11,31 @@ from pydantic_ai.settings import ModelSettings
 
 from sibyl_core.ai.errors import LLMProviderError, LLMRateLimitError, LLMValidationError
 from sibyl_core.ai.llm import Extractor
+from sibyl_core.ai.llm.budget import LLMBudgetContext, llm_budget_context, set_budget_enforcer
 
 
 class Payload(BaseModel):
     name: str
     score: float
+
+
+class RecordingBudgetEnforcer:
+    def __init__(self) -> None:
+        self.calls: list[tuple[LLMBudgetContext, str, int]] = []
+
+    async def reserve(
+        self,
+        context: LLMBudgetContext,
+        *,
+        surface: str,
+        estimated_tokens: int,
+    ) -> None:
+        self.calls.append((context, surface, estimated_tokens))
+
+
+@pytest.fixture(autouse=True)
+def reset_budget_enforcer() -> None:
+    set_budget_enforcer(None)
 
 
 @pytest.mark.asyncio
@@ -82,6 +102,23 @@ async def test_extractor_applies_max_tokens_model_settings() -> None:
     assert len(captured_settings) == 1
     assert captured_settings[0] is not None
     assert captured_settings[0].get("max_tokens") == 123
+
+
+@pytest.mark.asyncio
+async def test_extractor_reserves_budget_before_provider_call() -> None:
+    enforcer = RecordingBudgetEnforcer()
+    set_budget_enforcer(enforcer)
+    agent = Agent(TestModel(custom_output_args={"name": "Sibyl", "score": 0.9}), output_type=Payload)
+    extractor = Extractor(Payload, agent=agent, max_tokens=10)
+
+    with llm_budget_context(user_id="user-1", organization_id="org-1"):
+        await extractor.extract("abcd")
+
+    assert len(enforcer.calls) == 1
+    context, surface, tokens = enforcer.calls[0]
+    assert context.user_id == "user-1"
+    assert surface == "default"
+    assert tokens == 11
 
 
 async def _invalid_json_response(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:

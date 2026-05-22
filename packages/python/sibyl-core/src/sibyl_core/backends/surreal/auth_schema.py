@@ -32,6 +32,7 @@ EXTENDED_AUTH_TABLES = (
     "team_projects",
     "memory_spaces",
     "memory_space_members",
+    "llm_usage_buckets",
 )
 AUTH_TABLES = (*CORE_AUTH_TABLES, *EXTENDED_AUTH_TABLES)
 
@@ -100,6 +101,27 @@ DEFINE INDEX IF NOT EXISTS idx_user_identity_user ON user_identity FIELDS user_i
 DEFINE INDEX IF NOT EXISTS idx_user_identity_provider_subject
     ON user_identity FIELDS provider_name, subject_key UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_user_identity_email ON user_identity FIELDS email;
+
+DEFINE TABLE IF NOT EXISTS llm_usage_buckets SCHEMAFULL;
+ALTER TABLE IF EXISTS llm_usage_buckets SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS uuid ON llm_usage_buckets TYPE string;
+DEFINE FIELD IF NOT EXISTS bucket_key ON llm_usage_buckets TYPE string;
+DEFINE FIELD IF NOT EXISTS bucket_month ON llm_usage_buckets TYPE string;
+DEFINE FIELD IF NOT EXISTS subject_type ON llm_usage_buckets TYPE string;
+DEFINE FIELD IF NOT EXISTS subject_id ON llm_usage_buckets TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON llm_usage_buckets TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS used_tokens ON llm_usage_buckets TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS created_at ON llm_usage_buckets TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS updated_at ON llm_usage_buckets TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS idx_llm_usage_buckets_uuid
+    ON llm_usage_buckets FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_llm_usage_buckets_key
+    ON llm_usage_buckets FIELDS bucket_key UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_llm_usage_buckets_subject
+    ON llm_usage_buckets FIELDS subject_type, subject_id, bucket_month;
+DEFINE INDEX IF NOT EXISTS idx_llm_usage_buckets_org
+    ON llm_usage_buckets FIELDS organization_id, bucket_month;
 
 DEFINE TABLE IF NOT EXISTS organizations SCHEMAFULL;
 ALTER TABLE IF EXISTS organizations SCHEMAFULL;

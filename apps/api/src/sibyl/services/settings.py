@@ -49,6 +49,8 @@ _SETTING_ENV_VARS: dict[str, list[str]] = {
     "graph_search_embedding_timeout_seconds": [
         "SIBYL_GRAPH_SEARCH_EMBEDDING_TIMEOUT_SECONDS"
     ],
+    "llm.budget.monthly_user_tokens": ["SIBYL_LLM_BUDGET_MONTHLY_USER_TOKENS"],
+    "llm.budget.monthly_org_tokens": ["SIBYL_LLM_BUDGET_MONTHLY_ORG_TOKENS"],
 }
 
 # Settings that should be encrypted

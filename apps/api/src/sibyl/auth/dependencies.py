@@ -21,6 +21,7 @@ from sibyl.persistence.auth_runtime import (
     resolve_auth_context,
     validate_access_session,
 )
+from sibyl_core.ai.llm.budget import set_llm_budget_context
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole
 
 _logger = logging.getLogger(__name__)
@@ -223,6 +224,10 @@ async def build_auth_context(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
         ) from e
+    set_llm_budget_context(
+        user_id=str(ctx.user.id),
+        organization_id=str(ctx.organization.id) if ctx.organization else None,
+    )
     if session is None:
         request.state.auth_context = ctx
     return ctx

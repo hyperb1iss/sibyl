@@ -11,6 +11,7 @@ from pydantic_ai.models import ModelSettings
 
 from sibyl_core.ai.clients import get_agent
 from sibyl_core.ai.errors import LLMError, classify_llm_exception
+from sibyl_core.ai.llm.budget import reserve_llm_budget
 from sibyl_core.ai.llm.config import LLMSurface
 from sibyl_core.observability import elapsed_ms, telemetry_registry
 
@@ -34,6 +35,11 @@ class Generator:
     async def generate(self, prompt: str, *, max_tokens: int | None = None) -> str:
         started_at = time.perf_counter()
         try:
+            await reserve_llm_budget(
+                surface=self.surface.value,
+                prompt=prompt,
+                output_token_limit=max_tokens,
+            )
             agent = await self._get_agent()
             result = await agent.run(
                 prompt,
@@ -61,6 +67,11 @@ class Generator:
     async def stream(self, prompt: str, *, max_tokens: int | None = None) -> AsyncIterator[str]:
         started_at = time.perf_counter()
         try:
+            await reserve_llm_budget(
+                surface=f"{self.surface.value}_stream",
+                prompt=prompt,
+                output_token_limit=max_tokens,
+            )
             agent = await self._get_agent()
             async with agent.run_stream(
                 prompt,

@@ -24,6 +24,33 @@ class FakeConfigSource:
         self.invalidated.append(surface)
 
 
+class FakeSettingsService:
+    def __init__(self, values: dict[str, tuple[str | None, str]] | None = None) -> None:
+        self.values = values or {}
+        self.set_calls: list[tuple[str, str]] = []
+        self.delete_calls: list[str] = []
+
+    async def get_with_source(self, key: str) -> tuple[str | None, str]:
+        return self.values.get(key, (None, "none"))
+
+    async def set(
+        self,
+        key: str,
+        value: str,
+        *,
+        is_secret: bool | None = None,
+        description: str | None = None,
+    ) -> None:
+        del is_secret, description
+        self.set_calls.append((key, value))
+        self.values[key] = (value, "database")
+
+    async def delete(self, key: str) -> bool:
+        self.delete_calls.append(key)
+        self.values[key] = (None, "none")
+        return True
+
+
 def _request() -> Request:
     return Request({"type": "http", "method": "GET", "path": "/settings/ai/llm", "headers": []})
 
@@ -34,6 +61,7 @@ async def test_get_llm_settings_returns_instance_wide_shape(
 ) -> None:
     monkeypatch.setattr(routes, "require_settings_owner", AsyncMock())
     monkeypatch.setattr(routes, "get_config_source", lambda: FakeConfigSource(_resolved()))
+    monkeypatch.setattr(routes, "get_settings_service", FakeSettingsService)
 
     response = await routes.get_llm_settings(_request())
 
@@ -46,6 +74,8 @@ async def test_get_llm_settings_returns_instance_wide_shape(
     }
     assert response.surfaces[LLMSurface.CRAWLER].api_key.configured is True
     assert response.surfaces[LLMSurface.CRAWLER].api_key.masked is not None
+    assert response.budgets.monthly_user_tokens.value == 1_000_000
+    assert response.budgets.monthly_org_tokens.value == 30_000_000
 
 
 @pytest.mark.asyncio
@@ -117,6 +147,30 @@ async def test_llm_surface_test_delegates_to_validation(
 
     assert response is result
     probe.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_llm_budget_writes_db_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = FakeSettingsService()
+    monkeypatch.setattr(routes, "require_settings_owner", AsyncMock())
+    monkeypatch.setattr(routes, "get_settings_service", lambda: service)
+
+    response = await routes.update_llm_budget(
+        _request(),
+        routes.UpdateLLMBudgetRequest(
+            monthly_user_tokens=1234,
+            monthly_org_tokens=5678,
+        ),
+    )
+
+    assert set(service.set_calls) == {
+        ("llm.budget.monthly_user_tokens", "1234"),
+        ("llm.budget.monthly_org_tokens", "5678"),
+    }
+    assert response.budgets.monthly_user_tokens.value == 1234
+    assert response.budgets.monthly_org_tokens.value == 5678
 
 
 @pytest.mark.asyncio
