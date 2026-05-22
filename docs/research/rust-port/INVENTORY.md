@@ -125,7 +125,7 @@ must carry an owner and reason here.
 | `docs/api/rest-memory.md` | `postgres` | 1 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/api/rest-projects.md` | `postgres`, `redis` | 5 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/api/rest-tasks.md` | `redis` | 1 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
-| `docs/architecture/ENTERPRISE_READINESS_PLAN_2026-05-21.md` | `graphiti`, `valkey` | 5 | enterprise readiness | Enterprise docs mention legacy services only as migration context or optional coordination. |
+| `docs/architecture/ENTERPRISE_READINESS_PLAN_2026-05-21.md` | `graphiti`, `valkey` | 4 | enterprise readiness | Enterprise docs mention legacy services only as migration context or optional coordination. |
 | `docs/architecture/PACKAGING_PLAN_2026-05-19.md` | `falkor`, `postgres`, `redis`, `valkey` | 10 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/PERMISSION_SYSTEM_AUDIT.md` | `falkor`, `postgres` | 23 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/SIBYL_1_0_RC_PLAN.md` | `graphiti`, `redis` | 30 | v1.0 RC evidence freeze | Active RC plan names legacy terms only as blockers, evidence boundaries, and optional coordination risks. |
