@@ -67,6 +67,23 @@ def _root_task(task_id: str) -> dict[str, Any]:
     return cast(dict[str, Any], payload["tasks"]["root"][task_id])
 
 
+def _cyclonedx_sbom(image: str) -> str:
+    return json.dumps(
+        {
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.6",
+            "version": 1,
+            "components": [
+                {
+                    "type": "application",
+                    "name": f"sibyl-{image}",
+                    "version": "1.2.3",
+                }
+            ],
+        }
+    )
+
+
 def test_required_evidence_covers_external_acceptance_gates() -> None:
     keys = {requirement.key for requirement in evidence.REQUIRED_EVIDENCE}
 
@@ -806,7 +823,7 @@ def test_capture_github_release_evidence_updates_manifest(
         assert run_id == "12345"
         image = artifact_name.split("-")[1]
         destination.joinpath(f"sibyl-{image}-1.2.3.cdx.json").write_text(
-            "{}",
+            _cyclonedx_sbom(image),
             encoding="utf-8",
         )
 
@@ -828,6 +845,82 @@ def test_capture_github_release_evidence_updates_manifest(
     assert (tmp_path / "image_sbom_receipt" / "sibyl-web-1.2.3.cdx.json").is_file()
     assert (tmp_path / "cosign_signature_receipt" / "sign-api.log").is_file()
     assert (tmp_path / "cosign_signature_receipt" / "sign-web.log").is_file()
+
+
+def test_capture_github_release_evidence_rejects_invalid_sbom(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def fake_gh_json_output(args: list[str]) -> dict[str, Any]:
+        if args[0:2] == ["run", "view"]:
+            return {
+                "conclusion": "success",
+                "createdAt": "2026-05-22T12:00:00Z",
+                "databaseId": 12345,
+                "headBranch": "main",
+                "headSha": "abc123",
+                "name": "Publish",
+                "url": "https://github.example/run/12345",
+                "workflowName": "Publish",
+                "jobs": [
+                    {
+                        "conclusion": "success",
+                        "databaseId": 101,
+                        "name": "◆ Docker: Security api",
+                    },
+                    {
+                        "conclusion": "success",
+                        "databaseId": 102,
+                        "name": "◆ Docker: Security web",
+                    },
+                    {
+                        "conclusion": "success",
+                        "databaseId": 201,
+                        "name": "◆ Docker: Sign api",
+                    },
+                    {
+                        "conclusion": "success",
+                        "databaseId": 202,
+                        "name": "◆ Docker: Sign web",
+                    },
+                ],
+            }
+        if args[0] == "api":
+            return {
+                "artifacts": [
+                    {
+                        "expired": False,
+                        "name": "sibyl-api-1.2.3-sbom",
+                        "size_in_bytes": 123,
+                    },
+                    {
+                        "expired": False,
+                        "name": "sibyl-web-1.2.3-sbom",
+                        "size_in_bytes": 456,
+                    },
+                ]
+            }
+        raise AssertionError(args)
+
+    def fake_download_github_artifact(
+        *,
+        repo: str,
+        run_id: str,
+        artifact_name: str,
+        destination: Path,
+    ) -> None:
+        image = artifact_name.split("-")[1]
+        destination.joinpath(f"sibyl-{image}-1.2.3.cdx.json").write_text(
+            "{}",
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(evidence, "_gh_json_output", fake_gh_json_output)
+    monkeypatch.setattr(evidence, "_download_github_artifact", fake_download_github_artifact)
+
+    with pytest.raises(evidence.EvidenceFailure) as exc_info:
+        evidence.capture_github_release_evidence(tmp_path, run_id="12345")
+
+    assert "SBOM artifact for api must be CycloneDX JSON" in str(exc_info.value)
 
 
 def test_capture_github_release_evidence_rejects_missing_sign_job(

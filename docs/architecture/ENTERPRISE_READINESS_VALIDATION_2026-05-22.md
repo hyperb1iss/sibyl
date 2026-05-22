@@ -137,8 +137,8 @@ receipt can be captured with
 `moon run enterprise-readiness-evidence -- --capture-package-lock-diff <base-ref>`. Release SBOM and
 Cosign receipts can be captured from a qualifying publish workflow with
 `moon run enterprise-readiness-evidence -- --capture-github-release-evidence <run-id>`. That capture
-requires successful Docker security and signing jobs for both `api` and `web`, plus non-expired SBOM
-artifacts. Use
+requires successful Docker security and signing jobs for both `api` and `web`, plus non-expired
+CycloneDX SBOM artifacts. Use
 `moon run enterprise-readiness-evidence -- --preflight-github-release-evidence <run-id>` to inspect
 all release-evidence prerequisites before attempting artifact capture. Operators can skip manual run
 ID lookup with

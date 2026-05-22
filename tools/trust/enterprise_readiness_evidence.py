@@ -226,7 +226,7 @@ REQUIRED_EVIDENCE: tuple[EvidenceRequirement, ...] = (
     EvidenceRequirement(
         key="image_sbom_receipt",
         gate="security-review-packet",
-        description="Release run produced the image SBOM artifact.",
+        description="Release run produced validated CycloneDX image SBOM artifacts.",
     ),
     EvidenceRequirement(
         key="cosign_signature_receipt",
@@ -1105,6 +1105,8 @@ def capture_github_release_evidence(
         if not image_files:
             msg = f"SBOM artifact download produced no files for {image}: {artifact_name}"
             raise EvidenceFailure(msg)
+        for image_file in image_files:
+            _validate_cyclonedx_sbom(image_file, image=image)
         downloaded_sboms.update(image_files)
 
     sign_logs: list[Path] = []
@@ -1146,7 +1148,7 @@ def capture_github_release_evidence(
         items=items,
         key="image_sbom_receipt",
         gate="security-review-packet",
-        description="Release run produced the image SBOM artifact.",
+        description="Release run produced validated CycloneDX image SBOM artifacts.",
         artifacts=[
             _artifact_entry(evidence_dir, sbom_receipt_path),
             *[_artifact_entry(evidence_dir, path) for path in sorted(downloaded_sboms)],
@@ -2630,6 +2632,29 @@ def _require_sbom_artifact(
     return artifact
 
 
+def _validate_cyclonedx_sbom(path: Path, *, image: str) -> None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        msg = f"SBOM artifact for {image} is not valid JSON: {path.name}"
+        raise EvidenceFailure(msg) from exc
+
+    if not isinstance(payload, dict):
+        msg = f"SBOM artifact for {image} must be a JSON object: {path.name}"
+        raise EvidenceFailure(msg)
+    if payload.get("bomFormat") != "CycloneDX":
+        msg = f"SBOM artifact for {image} must be CycloneDX JSON: {path.name}"
+        raise EvidenceFailure(msg)
+    spec_version = payload.get("specVersion")
+    if not isinstance(spec_version, str) or not spec_version.strip():
+        msg = f"SBOM artifact for {image} is missing CycloneDX specVersion: {path.name}"
+        raise EvidenceFailure(msg)
+    components = payload.get("components")
+    if not isinstance(components, list) or not components:
+        msg = f"SBOM artifact for {image} must include a non-empty components list: {path.name}"
+        raise EvidenceFailure(msg)
+
+
 def _sbom_artifact_issue(
     artifacts: Sequence[Mapping[str, object]],
     image: str,
@@ -2874,7 +2899,7 @@ def _github_sbom_receipt(
         "",
         "- Gate: security-review-packet",
         "- Status: PASS",
-        "- Required proof: Release run produced the image SBOM artifact.",
+        "- Required proof: Release run produced validated CycloneDX image SBOM artifacts.",
         f"- Captured at: {datetime.now(UTC).isoformat()}",
         "- Captured by: enterprise_readiness_evidence.py",
         "- Runtime or environment: GitHub Actions publish workflow",
@@ -2884,7 +2909,8 @@ def _github_sbom_receipt(
         f"- Head branch: {run.get('headBranch')}",
         f"- Head sha: {run.get('headSha')}",
         f"- Created at: {run.get('createdAt')}",
-        "- Observed result: SBOM artifacts downloaded after successful Docker security jobs.",
+        "- Observed result: SBOM artifacts downloaded and validated as CycloneDX JSON after "
+        "successful Docker security jobs.",
         "- Security jobs:",
     ]
     for image, job in security_jobs.items():
