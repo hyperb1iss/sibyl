@@ -32,6 +32,9 @@ When break-glass is enabled, `expiresAt` and at least one `allowedIPs` CIDR are 
 denies login if the expiry is more than four hours out, so the emergency window stays bounded even
 if the chart override is left in place.
 
+Every break-glass sign-in must include an incident reason. The web login form, device approval page,
+and `sibyl auth login --break-glass-reason` all send that reason into the audit event.
+
 The CIDR allowlist is an app-level backstop. Keep the same restriction at ingress or firewall level
 when possible, especially if the app only sees proxy addresses.
 
@@ -48,7 +51,7 @@ roster.
 1. Declare the break-glass event in the incident channel.
 2. Restrict access at ingress or firewall level if possible.
 3. Enable the break-glass values with CIDRs and an expiry no more than four hours out.
-4. Sign in with the break-glass owner.
+4. Sign in with the break-glass owner and enter the incident or change record as the reason.
 5. Fix the IdP, OIDC secret, role assignment, or admin membership issue.
 6. Confirm normal OIDC admin login works.
 7. Disable the break-glass override.
@@ -57,6 +60,7 @@ roster.
 
 ## Audit Expectations
 
-Break-glass sign-ins should be visible in the audit log. Treat every use as an incident, even when
-it is planned maintenance. The evidence packet should include who approved the access, when it
-started, when it ended, and what changed.
+Break-glass sign-ins are recorded as `auth.break_glass.login` audit events. The details include the
+actor name, email, incident reason, break-glass start timestamp, and configured expiry. Treat every
+use as an incident, even when it is planned maintenance. The evidence packet should include who
+approved the access, when it started, when it ended, and what changed.

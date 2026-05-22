@@ -24,6 +24,7 @@ def test_top_level_auth_aliases_are_registered() -> None:
 
     assert login.exit_code == 0
     assert "--no-browser" in _plain(login.stdout)
+    assert "--break-glass-reason" in _plain(login.stdout)
     assert logout.exit_code == 0
     assert "--all" in _plain(logout.stdout)
     assert whoami.exit_code == 0
@@ -115,3 +116,44 @@ def test_login_auto_oauth_preserves_access_token_expiry(
             "credential_scope_name": None,
         }
     ]
+
+
+def test_login_auto_passes_break_glass_reason_to_local_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    writes: list[dict[str, object]] = []
+
+    def unavailable(**_kwargs: object) -> dict:
+        raise RuntimeError("unavailable")
+
+    def local_login(**kwargs: object) -> dict:
+        calls.append(kwargs)
+        return {"access_token": "access-token", "refresh_token": "refresh-token"}
+
+    def persist_tokens(**kwargs: object) -> None:
+        writes.append(kwargs)
+
+    monkeypatch.setattr(auth, "_login_via_device_flow", unavailable)
+    monkeypatch.setattr(auth, "_login_via_oauth", unavailable)
+    monkeypatch.setattr(auth, "_login_via_local_password", local_login)
+    monkeypatch.setattr(auth, "_persist_tokens", persist_tokens)
+
+    auth._login_auto(
+        api_url="http://testserver/api",
+        no_browser=False,
+        timeout_seconds=180,
+        email="break-glass@example.com",
+        password="super-secret",
+        break_glass_reason="INC-123 IdP outage",
+    )
+
+    assert calls == [
+        {
+            "api_url": "http://testserver/api",
+            "email": "break-glass@example.com",
+            "password": "super-secret",
+            "break_glass_reason": "INC-123 IdP outage",
+        }
+    ]
+    assert writes[0]["access_token"] == "access-token"

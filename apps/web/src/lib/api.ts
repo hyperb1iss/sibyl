@@ -266,6 +266,7 @@ export interface AuthProvider {
 
 export interface AuthProvidersResponse {
   local_auth_enabled: boolean;
+  break_glass_enabled: boolean;
   providers: AuthProvider[];
 }
 

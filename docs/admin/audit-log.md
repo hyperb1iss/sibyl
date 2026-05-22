@@ -35,6 +35,10 @@ The audit surface records security and data-governance events such as:
 Event details should be useful for investigation without exposing secrets. Exported rows should be
 treated as sensitive operational data.
 
+Break-glass login details include the actor name, email, incident reason, break-glass start
+timestamp, and configured expiry so incident reviewers can tie emergency access back to an approved
+window.
+
 ## Retention
 
 Set retention in the deployment overlay to match your organization's policy. The default operational

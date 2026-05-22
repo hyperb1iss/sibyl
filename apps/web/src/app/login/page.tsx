@@ -15,6 +15,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_credentials: 'Invalid email or password.',
   invalid_invitation: 'Invitation is not valid for this account.',
   local_auth_disabled: 'Use your organization sign-in provider.',
+  break_glass_reason_required: 'Enter an incident reason for break-glass access.',
+  break_glass_reason_too_long: 'Break-glass access reason must be 512 characters or fewer.',
   signup_disabled: 'Account creation requires an invitation.',
 };
 
@@ -80,6 +82,7 @@ function LoginContent() {
 
   const oidcProviders = authProviders?.providers ?? [];
   const localAuthEnabled = authProviders?.local_auth_enabled ?? true;
+  const breakGlassEnabled = authProviders?.break_glass_enabled ?? false;
   const allowSignup =
     localAuthEnabled && Boolean(setupStatus?.public_signups_enabled || inviteToken);
   const errorMessage = error
@@ -206,7 +209,11 @@ function LoginContent() {
                       : 'opacity-0 -translate-x-4 pointer-events-none'
                   }`}
                 >
-                  <SignInForm next={next} inviteToken={inviteToken} />
+                  <SignInForm
+                    next={next}
+                    inviteToken={inviteToken}
+                    breakGlassEnabled={breakGlassEnabled}
+                  />
                 </div>
                 {allowSignup && (
                   <div
@@ -252,7 +259,15 @@ function OIDCProviderList({ providers, next }: { providers: AuthProvider[]; next
   );
 }
 
-function SignInForm({ next, inviteToken }: { next: string | null; inviteToken: string | null }) {
+function SignInForm({
+  next,
+  inviteToken,
+  breakGlassEnabled,
+}: {
+  next: string | null;
+  inviteToken: string | null;
+  breakGlassEnabled: boolean;
+}) {
   return (
     <form action="/api/auth/local/login" method="post" className="h-full relative pb-14">
       <input type="hidden" name="redirect" value={next || '/'} />
@@ -288,6 +303,25 @@ function SignInForm({ next, inviteToken }: { next: string | null; inviteToken: s
             placeholder="Enter your password"
           />
         </div>
+
+        {breakGlassEnabled && (
+          <div className="space-y-1.5">
+            <label
+              className="block text-xs font-medium text-sc-fg-muted"
+              htmlFor="break_glass_reason"
+            >
+              Incident reason
+            </label>
+            <textarea
+              id="break_glass_reason"
+              name="break_glass_reason"
+              required
+              maxLength={512}
+              className={`${inputClasses} min-h-24 resize-y`}
+              placeholder="Incident or change record for this emergency access"
+            />
+          </div>
+        )}
 
         <div className="flex items-center justify-between">
           <label className="flex items-center gap-2 cursor-pointer group">

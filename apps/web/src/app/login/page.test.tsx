@@ -61,7 +61,7 @@ describe('LoginPage', () => {
       isLoading: false,
     } as ReturnType<typeof useSetupStatus>);
     vi.mocked(useAuthProviders).mockReturnValue(
-      authProvidersResult({ local_auth_enabled: true, providers: [] })
+      authProvidersResult({ local_auth_enabled: true, break_glass_enabled: false, providers: [] })
     );
   });
 
@@ -106,6 +106,7 @@ describe('LoginPage', () => {
     vi.mocked(useAuthProviders).mockReturnValue(
       authProvidersResult({
         local_auth_enabled: false,
+        break_glass_enabled: false,
         providers: [{ name: 'entra', label: 'Entra', login_url: '/api/auth/oidc/entra/login' }],
       })
     );
@@ -127,6 +128,7 @@ describe('LoginPage', () => {
     vi.mocked(useAuthProviders).mockReturnValue(
       authProvidersResult({
         local_auth_enabled: false,
+        break_glass_enabled: false,
         providers: [{ name: 'entra', label: 'Entra', login_url: '/api/auth/oidc/entra/login' }],
       })
     );
@@ -137,5 +139,19 @@ describe('LoginPage', () => {
       'href',
       '/api/auth/oidc/entra/login?redirect=%2Fstudio'
     );
+  });
+
+  it('shows an incident reason field for break-glass login', () => {
+    vi.mocked(useAuthProviders).mockReturnValue(
+      authProvidersResult({
+        local_auth_enabled: true,
+        break_glass_enabled: true,
+        providers: [],
+      })
+    );
+
+    render(<LoginPage />);
+
+    expect(screen.getByLabelText('Incident reason')).toHaveAttribute('name', 'break_glass_reason');
   });
 });

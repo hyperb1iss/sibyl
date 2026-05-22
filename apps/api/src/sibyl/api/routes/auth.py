@@ -97,7 +97,16 @@ BREAK_GLASS_IP_DENIED_DETAIL = {
     "code": "break_glass_ip_denied",
     "message": "Break-glass access is not allowed from this source address.",
 }
+BREAK_GLASS_REASON_REQUIRED_DETAIL = {
+    "code": "break_glass_reason_required",
+    "message": "Break-glass access requires an incident reason.",
+}
+BREAK_GLASS_REASON_TOO_LONG_DETAIL = {
+    "code": "break_glass_reason_too_long",
+    "message": "Break-glass access reason must be 512 characters or fewer.",
+}
 BREAK_GLASS_MAX_WINDOW = timedelta(hours=4)
+BREAK_GLASS_REASON_MAX_LENGTH = 512
 
 
 class ApiKeyCreateRequest(BaseModel):
@@ -133,6 +142,7 @@ class OIDCProviderResponse(BaseModel):
 
 class AuthProvidersResponse(BaseModel):
     local_auth_enabled: bool
+    break_glass_enabled: bool = False
     providers: list[OIDCProviderResponse]
 
 
@@ -317,6 +327,7 @@ class LocalLoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=1024)
     redirect: str | None = None
     invite_token: str | None = Field(default=None, min_length=1, max_length=512)
+    break_glass_reason: str | None = None
 
 
 class IssuedOrganization(Protocol):
@@ -447,6 +458,23 @@ def _client_ip_allowed(request: Request, cidrs: list[str]) -> bool:
         if client_ip in network:
             return True
     return False
+
+
+def _require_break_glass_reason(reason: str | None) -> str | None:
+    if not config_module.settings.break_glass_enabled:
+        return None
+    normalized = (reason or "").strip()
+    if not normalized:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=BREAK_GLASS_REASON_REQUIRED_DETAIL,
+        )
+    if len(normalized) > BREAK_GLASS_REASON_MAX_LENGTH:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=BREAK_GLASS_REASON_TOO_LONG_DETAIL,
+        )
+    return normalized
 
 
 def _organization_payload(organization: IssuedOrganization) -> dict[str, str]:
@@ -585,8 +613,14 @@ async def _github_fetch_identity(access_token: str) -> GitHubUserIdentity:
 
 @router.get("/providers", response_model=AuthProvidersResponse)
 async def auth_providers() -> AuthProvidersResponse:
+    setup_mode = await is_setup_mode()
     return AuthProvidersResponse(
-        local_auth_enabled=config_module.settings.local_auth_enabled or await is_setup_mode(),
+        local_auth_enabled=(
+            config_module.settings.local_auth_enabled
+            or config_module.settings.break_glass_enabled
+            or setup_mode
+        ),
+        break_glass_enabled=config_module.settings.break_glass_enabled,
         providers=[
             OIDCProviderResponse(
                 name=provider.name,
@@ -824,6 +858,7 @@ async def local_login(request: Request):
     await _require_local_auth_allowed(request)
     data = await _read_auth_payload(request)
     body = LocalLoginRequest.model_validate(data)
+    break_glass_reason = _require_break_glass_reason(body.break_glass_reason)
     invite_token = _auth_payload_invite_token(body.invite_token)
     has_redirect = _auth_payload_has_redirect(body.redirect, request)
 
@@ -844,6 +879,7 @@ async def local_login(request: Request):
         email=body.email,
         password=body.password,
         request=request,
+        break_glass_reason=break_glass_reason,
     )
     if issued is None:
         if has_redirect:
@@ -1138,7 +1174,7 @@ def _render_device_verify_page(
       font-size: 13px;
       font-weight: 500;
     }
-    input {
+    input, textarea {
       width: 100%;
       padding: 12px 14px;
       border-radius: 10px;
@@ -1148,12 +1184,16 @@ def _render_device_verify_page(
       font-size: 15px;
       transition: border-color 0.2s, box-shadow 0.2s;
     }
-    input:focus {
+    textarea {
+      min-height: 84px;
+      resize: vertical;
+    }
+    input:focus, textarea:focus {
       outline: none;
       border-color: #e135ff;
       box-shadow: 0 0 0 3px rgba(225, 53, 255, 0.15);
     }
-    input::placeholder { color: #505068; }
+    input::placeholder, textarea::placeholder { color: #505068; }
     button {
       margin-top: 20px;
       width: 100%;
@@ -1209,6 +1249,15 @@ def _render_device_verify_page(
         title = "Device Login"
     elif not is_authed:
         # Has code but not logged in: show login form
+        break_glass_reason_field = (
+            """
+          <label>Incident reason</label>
+          <textarea name="break_glass_reason" maxlength="512" required
+            placeholder="Incident or change record for this emergency access"></textarea>
+            """
+            if config_module.settings.break_glass_enabled
+            else ""
+        )
         body_html = f"""
         <form method="post" action="/api/auth/device/verify">
           <input type="hidden" name="action" value="login" />
@@ -1217,6 +1266,7 @@ def _render_device_verify_page(
           <input name="email" type="email" autocomplete="username" required autofocus />
           <label>Password</label>
           <input name="password" type="password" autocomplete="current-password" required />
+          {break_glass_reason_field}
           <button type="submit">Sign in & Continue</button>
         </form>
         """
@@ -1329,12 +1379,16 @@ async def device_verify_post(request: Request) -> Response:
 
     if action == "login":
         await _require_local_auth_allowed(request)
+        break_glass_reason = _require_break_glass_reason(
+            str(form.get("break_glass_reason") or "")
+        )
         email = str(form.get("email") or "").strip()
         password = str(form.get("password") or "").strip()
         login = await login_device_browser_user(
             email=email,
             password=password,
             request=request,
+            break_glass_reason=break_glass_reason,
         )
         if login is None:
             return RedirectResponse(url=verify_url + "&error=invalid_credentials", status_code=302)

@@ -970,20 +970,37 @@ async def test_local_login_audits_break_glass_action(
         "break_glass_enabled",
         True,
     )
+    break_glass_expires_at = datetime.now(UTC) + timedelta(hours=3)
+    monkeypatch.setattr(
+        surreal_auth_runtime.config_module.settings,
+        "break_glass_expires_at",
+        break_glass_expires_at,
+    )
 
     result = await surreal_auth_runtime.login_local_user(
         email="break-glass@example.com",
         password="super-secret",
         request=None,
+        break_glass_reason="INC-123 IdP outage",
     )
 
     assert result is issued
     issue_session.assert_awaited_once()
     assert issue_session.await_args.kwargs["action"] == "auth.break_glass.login"
-    assert issue_session.await_args.kwargs["details"] == {
-        "break_glass": True,
-        "email": "break-glass@example.com",
-    }
+    details = issue_session.await_args.kwargs["details"]
+    assert details["break_glass"] is True
+    assert details["email"] == "break-glass@example.com"
+    assert details["actor_name"] == "Break Glass"
+    assert details["reason"] == "INC-123 IdP outage"
+    assert details["expires_at"] == break_glass_expires_at.isoformat()
+    assert datetime.fromisoformat(details["started_at"]).tzinfo is not None
+
+
+def test_break_glass_audit_details_requires_reason() -> None:
+    user = SimpleNamespace(email="break-glass@example.com", name="Break Glass")
+
+    with pytest.raises(ValueError, match="Break-glass reason is required"):
+        surreal_auth_runtime._break_glass_audit_details(user=user, reason=" ")
 
 
 @pytest.mark.asyncio

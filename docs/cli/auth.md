@@ -41,15 +41,16 @@ sibyl login [url] [options]
 
 ### Options
 
-| Option         | Short | Default | Description                                      |
-| -------------- | ----- | ------- | ------------------------------------------------ |
-| `--server`     | `-s`  | (none)  | Server base URL (alias for the positional URL)   |
-| `--context`    | `-c`  | (none)  | Create or update a named context for this server |
-| `--no-browser` |       | false   | Print the URL instead of opening a browser       |
-| `--timeout`    |       | 180     | Seconds to wait for approval/auth                |
-| `--email`      | `-e`  | (none)  | Email for local login                            |
-| `--password`   | `-p`  | (none)  | Password for local login                         |
-| `--insecure`   | `-k`  | false   | Disable SSL certificate verification             |
+| Option                 | Short | Default | Description                                      |
+| ---------------------- | ----- | ------- | ------------------------------------------------ |
+| `--server`             | `-s`  | (none)  | Server base URL (alias for the positional URL)   |
+| `--context`            | `-c`  | (none)  | Create or update a named context for this server |
+| `--no-browser`         |       | false   | Print the URL instead of opening a browser       |
+| `--timeout`            |       | 180     | Seconds to wait for approval/auth                |
+| `--email`              | `-e`  | (none)  | Email for local login                            |
+| `--password`           | `-p`  | (none)  | Password for local login                         |
+| `--break-glass-reason` |       | (none)  | Incident reason for emergency local login        |
+| `--insecure`           | `-k`  | false   | Disable SSL certificate verification             |
 
 ### Examples
 
@@ -68,6 +69,12 @@ sibyl auth login --no-browser
 
 # Local email/password login
 sibyl auth login -e stef@example.com -p "$SIBYL_PASSWORD"
+
+# Emergency local login during an approved break-glass window
+sibyl auth login \
+  -e owner@example.com \
+  -p "$SIBYL_BREAK_GLASS_PASSWORD" \
+  --break-glass-reason "INC-123 IdP outage"
 ```
 
 ---

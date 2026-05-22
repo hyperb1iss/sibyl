@@ -777,9 +777,12 @@ class SibylClient:
         *,
         email: str,
         password: str,
+        break_glass_reason: str | None = None,
         redirect: str | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"email": email, "password": password}
+        if break_glass_reason is not None:
+            payload["break_glass_reason"] = break_glass_reason
         if redirect is not None:
             payload["redirect"] = redirect
         return await self._request("POST", "/auth/local/login", json=payload)

@@ -394,13 +394,23 @@ def _oauth_pkce_login(
     return access_token, refresh_token, issuer_url, expires_in_int
 
 
-def _local_password_login(*, api_url: str, email: str, password: str) -> dict:
+def _local_password_login(
+    *,
+    api_url: str,
+    email: str,
+    password: str,
+    break_glass_reason: str | None = None,
+) -> dict:
     client = SibylClient(base_url=api_url, auth_token="")
 
     @run_async
     async def _run() -> dict:
         try:
-            return await client.local_login(email=email, password=password)
+            return await client.local_login(
+                email=email,
+                password=password,
+                break_glass_reason=break_glass_reason,
+            )
         finally:
             await client.close()
 
@@ -463,9 +473,20 @@ def _login_via_oauth(
     }
 
 
-def _login_via_local_password(*, api_url: str, email: str, password: str) -> dict:
+def _login_via_local_password(
+    *,
+    api_url: str,
+    email: str,
+    password: str,
+    break_glass_reason: str | None = None,
+) -> dict:
     """Execute local password login. Returns token response dict."""
-    result = _local_password_login(api_url=api_url, email=email, password=password)
+    result = _local_password_login(
+        api_url=api_url,
+        email=email,
+        password=password,
+        break_glass_reason=break_glass_reason,
+    )
     token = str(result.get("access_token", "")).strip()
     if not token:
         raise _OAuthLoginError("Local login response missing access_token", result)
@@ -479,6 +500,7 @@ def _login_auto(
     timeout_seconds: int,
     email: str | None,
     password: str | None,
+    break_glass_reason: str | None = None,
     insecure: bool = False,
     credential_scope_name: str | None = None,
 ) -> None:
@@ -575,7 +597,12 @@ def _login_auto(
         return
 
     try:
-        tok = _login_via_local_password(api_url=api_url, email=email, password=password)
+        tok = _login_via_local_password(
+            api_url=api_url,
+            email=email,
+            password=password,
+            break_glass_reason=break_glass_reason,
+        )
     except SibylClientError as e:
         error(str(e))
         return
@@ -715,6 +742,11 @@ def login_cmd(
     password: str | None = typer.Option(
         None, "--password", "-p", help="Password for local login (method=local)"
     ),
+    break_glass_reason: str | None = typer.Option(
+        None,
+        "--break-glass-reason",
+        help="Incident reason for emergency local login",
+    ),
     insecure: bool = typer.Option(
         False,
         "--insecure",
@@ -741,6 +773,7 @@ def login_cmd(
         timeout_seconds=timeout_seconds,
         email=email,
         password=password,
+        break_glass_reason=break_glass_reason,
         insecure=insecure,
         credential_scope_name=scope,
     )

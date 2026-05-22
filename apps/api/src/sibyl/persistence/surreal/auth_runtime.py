@@ -2013,7 +2013,38 @@ async def delete_failed_local_signup_user(*, user_id: UUID, organization_id: UUI
         )
 
 
-async def login_local_user(*, email: str, password: str, request):
+def _break_glass_audit_details(
+    *,
+    user: object,
+    reason: str | None,
+) -> SurrealRecord:
+    now = datetime.now(UTC)
+    expires_at = config_module.settings.break_glass_expires_at
+    email = str(getattr(user, "email", ""))
+    actor_name = getattr(user, "name", None)
+    normalized_reason = (reason or "").strip()
+    if not normalized_reason:
+        msg = "Break-glass reason is required"
+        raise ValueError(msg)
+    details: SurrealRecord = {
+        "break_glass": True,
+        "email": email,
+        "actor_name": actor_name,
+        "reason": normalized_reason,
+        "started_at": now.isoformat(),
+    }
+    if expires_at is not None:
+        details["expires_at"] = expires_at.isoformat()
+    return details
+
+
+async def login_local_user(
+    *,
+    email: str,
+    password: str,
+    request,
+    break_glass_reason: str | None = None,
+):
     async with _auth_client_scope() as client:
         users = SurrealUserRepository.from_client(client)
         user = await users.authenticate_local(email=email, password=password)
@@ -2024,6 +2055,12 @@ async def login_local_user(*, email: str, password: str, request):
             label="organization",
         )
         break_glass = config_module.settings.break_glass_enabled
+        details: SurrealRecord
+        details = (
+            _break_glass_audit_details(user=user, reason=break_glass_reason)
+            if break_glass
+            else {"break_glass": False, "email": user.email}
+        )
         return await _issue_auth_session(
             client,
             user=_require_namespace(
@@ -2045,7 +2082,7 @@ async def login_local_user(*, email: str, password: str, request):
             organization=organization,
             request=request,
             action="auth.break_glass.login" if break_glass else "auth.local.login",
-            details={"break_glass": break_glass, "email": user.email},
+            details=details,
         )
 
 
@@ -2295,8 +2332,19 @@ def _session_id_from_access_token(token: str) -> UUID | None:
         return None
 
 
-async def login_device_browser_user(*, email: str, password: str, request):
-    issued = await login_local_user(email=email, password=password, request=request)
+async def login_device_browser_user(
+    *,
+    email: str,
+    password: str,
+    request,
+    break_glass_reason: str | None = None,
+):
+    issued = await login_local_user(
+        email=email,
+        password=password,
+        request=request,
+        break_glass_reason=break_glass_reason,
+    )
     if issued is None:
         return None
     return DeviceBrowserLogin(

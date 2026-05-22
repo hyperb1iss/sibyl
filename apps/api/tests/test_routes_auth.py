@@ -93,6 +93,20 @@ def _enable_local_auth(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_auth_providers_exposes_break_glass_local_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(auth_routes.config_module.settings, "local_auth_enabled", False)
+    monkeypatch.setattr(auth_routes.config_module.settings, "break_glass_enabled", True)
+    monkeypatch.setattr(auth_routes, "is_setup_mode", AsyncMock(return_value=False))
+
+    response = await auth_routes.auth_providers()
+
+    assert response.local_auth_enabled is True
+    assert response.break_glass_enabled is True
+
+
+@pytest.mark.asyncio
 async def test_github_callback_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     request = FakeRequest(
         query_params={
@@ -323,6 +337,7 @@ async def test_local_login_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) 
         email="nova@example.com",
         password="super-secret",
         request=request,
+        break_glass_reason=None,
     )
 
 
@@ -626,11 +641,131 @@ async def test_local_login_rejects_break_glass_source_ip(monkeypatch: pytest.Mon
 
 
 @pytest.mark.asyncio
+async def test_local_login_rejects_break_glass_without_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = FakeRequest(
+        json_data={
+            "email": "nova@example.com",
+            "password": "super-secret",
+        }
+    )
+    request.client.host = "203.0.113.10"
+    login = AsyncMock()
+
+    monkeypatch.setattr(
+        auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests"
+    )
+    monkeypatch.setattr(auth_routes.config_module.settings, "local_auth_enabled", False)
+    monkeypatch.setattr(auth_routes.config_module.settings, "break_glass_enabled", True)
+    monkeypatch.setattr(
+        auth_routes.config_module.settings,
+        "break_glass_allowed_ips",
+        ["203.0.113.0/24"],
+    )
+    monkeypatch.setattr(
+        auth_routes.config_module.settings,
+        "break_glass_expires_at",
+        datetime.now(UTC) + timedelta(hours=3),
+    )
+    monkeypatch.setattr(auth_routes, "is_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(auth_routes, "login_local_user", login)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_route(auth_routes.local_login, request=request)
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail["code"] == "break_glass_reason_required"
+    login.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_local_login_rejects_blank_break_glass_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = FakeRequest(
+        json_data={
+            "email": "nova@example.com",
+            "password": "super-secret",
+            "break_glass_reason": " ",
+        }
+    )
+    request.client.host = "203.0.113.10"
+    login = AsyncMock()
+
+    monkeypatch.setattr(
+        auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests"
+    )
+    monkeypatch.setattr(auth_routes.config_module.settings, "local_auth_enabled", False)
+    monkeypatch.setattr(auth_routes.config_module.settings, "break_glass_enabled", True)
+    monkeypatch.setattr(
+        auth_routes.config_module.settings,
+        "break_glass_allowed_ips",
+        ["203.0.113.0/24"],
+    )
+    monkeypatch.setattr(
+        auth_routes.config_module.settings,
+        "break_glass_expires_at",
+        datetime.now(UTC) + timedelta(hours=3),
+    )
+    monkeypatch.setattr(auth_routes, "is_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(auth_routes, "login_local_user", login)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_route(auth_routes.local_login, request=request)
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail["code"] == "break_glass_reason_required"
+    login.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_local_login_rejects_long_break_glass_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = FakeRequest(
+        json_data={
+            "email": "nova@example.com",
+            "password": "super-secret",
+            "break_glass_reason": "x" * 513,
+        }
+    )
+    request.client.host = "203.0.113.10"
+    login = AsyncMock()
+
+    monkeypatch.setattr(
+        auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests"
+    )
+    monkeypatch.setattr(auth_routes.config_module.settings, "local_auth_enabled", False)
+    monkeypatch.setattr(auth_routes.config_module.settings, "break_glass_enabled", True)
+    monkeypatch.setattr(
+        auth_routes.config_module.settings,
+        "break_glass_allowed_ips",
+        ["203.0.113.0/24"],
+    )
+    monkeypatch.setattr(
+        auth_routes.config_module.settings,
+        "break_glass_expires_at",
+        datetime.now(UTC) + timedelta(hours=3),
+    )
+    monkeypatch.setattr(auth_routes, "is_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(auth_routes, "login_local_user", login)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_route(auth_routes.local_login, request=request)
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "break_glass_reason_too_long"
+    login.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_local_login_allows_break_glass_source_ip(monkeypatch: pytest.MonkeyPatch) -> None:
     request = FakeRequest(
         json_data={
             "email": "nova@example.com",
             "password": "super-secret",
+            "break_glass_reason": "INC-123 IdP outage",
         }
     )
     request.client.host = "203.0.113.10"
@@ -662,6 +797,7 @@ async def test_local_login_allows_break_glass_source_ip(monkeypatch: pytest.Monk
         email="nova@example.com",
         password="super-secret",
         request=request,
+        break_glass_reason="INC-123 IdP outage",
     )
 
 
@@ -775,6 +911,58 @@ async def test_device_verify_post_login_uses_runtime_helper(
         email="nova@example.com",
         password="super-secret",
         request=request,
+        break_glass_reason=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_device_verify_post_login_accepts_break_glass_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = FakeRequest(
+        form_data={
+            "action": "login",
+            "user_code": "ABCD-EFGH",
+            "email": "nova@example.com",
+            "password": "super-secret",
+            "break_glass_reason": "INC-123 CLI approval",
+        }
+    )
+    request.client.host = "203.0.113.10"
+    login = AsyncMock(
+        return_value=SimpleNamespace(
+            access_token="access-token",
+            refresh_token="refresh-token",
+            refresh_expires=datetime.now(UTC) + timedelta(days=30),
+        )
+    )
+
+    monkeypatch.setattr(
+        auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests"
+    )
+    monkeypatch.setattr(auth_routes.config_module.settings, "local_auth_enabled", False)
+    monkeypatch.setattr(auth_routes.config_module.settings, "break_glass_enabled", True)
+    monkeypatch.setattr(
+        auth_routes.config_module.settings,
+        "break_glass_allowed_ips",
+        ["203.0.113.0/24"],
+    )
+    monkeypatch.setattr(
+        auth_routes.config_module.settings,
+        "break_glass_expires_at",
+        datetime.now(UTC) + timedelta(hours=3),
+    )
+    monkeypatch.setattr(auth_routes, "is_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(auth_routes, "login_device_browser_user", login)
+
+    response = await _call_route(auth_routes.device_verify_post, request=request)
+
+    assert response.status_code == 302
+    login.assert_awaited_once_with(
+        email="nova@example.com",
+        password="super-secret",
+        request=request,
+        break_glass_reason="INC-123 CLI approval",
     )
 
 
