@@ -74,6 +74,7 @@ def test_required_evidence_covers_external_acceptance_gates() -> None:
         "mcp_claude_desktop_auth",
         "kubernetes_restore_drill",
         "restore_recall_sample",
+        "rendered_helm_manifests",
         "idp_role_claim_evidence",
         "audit_export_sample",
         "image_sbom_receipt",
@@ -157,7 +158,7 @@ def test_inspect_manifest_reports_template_incomplete(tmp_path: Path) -> None:
     report = evidence.inspect_manifest(manifest_path)
 
     assert report["status"] == "INCOMPLETE"
-    assert report["summary"] == {"PASS": 0, "INCOMPLETE": 12}
+    assert report["summary"] == {"PASS": 0, "INCOMPLETE": 13}
     assert report["items"][0]["issues"] == [
         "status is 'TODO', not PASS",
         "artifact hash mismatch: entra_happy_path/receipt.md",
@@ -286,7 +287,7 @@ def test_main_sync_hashes_updates_manifest(
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
 
     assert exit_code == 0
-    assert "synced artifact hashes: 12" in captured.out
+    assert "synced artifact hashes: 13" in captured.out
     assert payload["items"]["entra_happy_path"]["artifacts"][0]["sha256"] != (
         "<fill-after-capture>"
     )
@@ -302,7 +303,7 @@ def test_main_status_reports_incomplete_manifest(
 
     assert exit_code == 1
     assert "Enterprise readiness evidence: INCOMPLETE" in captured.out
-    assert "summary: 0 PASS, 12 INCOMPLETE" in captured.out
+    assert "summary: 0 PASS, 13 INCOMPLETE" in captured.out
 
 
 def test_main_status_reports_valid_manifest(
@@ -315,7 +316,7 @@ def test_main_status_reports_valid_manifest(
 
     assert exit_code == 0
     assert "Enterprise readiness evidence: PASS" in captured.out
-    assert "summary: 12 PASS, 0 INCOMPLETE" in captured.out
+    assert "summary: 13 PASS, 0 INCOMPLETE" in captured.out
 
 
 def test_capture_package_lock_diff_updates_manifest(
@@ -368,3 +369,78 @@ def test_capture_package_lock_diff_rejects_missing_dependencies(
         evidence.capture_package_lock_diff(tmp_path, base_ref="base")
 
     assert "pyjwt, argon2-cffi" in str(exc_info.value)
+
+
+def test_capture_rendered_helm_manifests_updates_manifest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def fake_helm_output(args: list[str]) -> str:
+        if args[2] == "charts/sibyl":
+            return """
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+---
+apiVersion: v1
+kind: Namespace
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+---
+apiVersion: batch/v1
+kind: Job
+"""
+        if args[2] == "charts/surrealdb":
+            return """
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  labels:
+    app.kubernetes.io/component: restore-drill
+---
+apiVersion: batch/v1
+kind: Job
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+"""
+        raise AssertionError(args)
+
+    monkeypatch.setattr(evidence, "_helm_output", fake_helm_output)
+
+    receipt = evidence.capture_rendered_helm_manifests(tmp_path)
+    manifest_path = Path(str(receipt["manifest"]))
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    item = payload["items"]["rendered_helm_manifests"]
+
+    assert item["status"] == "PASS"
+    assert item["artifacts"][0]["path"] == "rendered_helm_manifests/receipt.md"
+    assert item["artifacts"][1]["path"] == "rendered_helm_manifests/sibyl-enterprise.yaml"
+    assert item["artifacts"][2]["path"] == "rendered_helm_manifests/surrealdb-enterprise.yaml"
+    assert (tmp_path / "rendered_helm_manifests" / "sibyl-enterprise.yaml").is_file()
+    assert (tmp_path / "rendered_helm_manifests" / "surrealdb-enterprise.yaml").is_file()
+
+
+def test_capture_rendered_helm_manifests_rejects_missing_kind(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def fake_helm_output(args: list[str]) -> str:
+        if args[2] == "charts/sibyl":
+            return "kind: HTTPRoute\n"
+        if args[2] == "charts/surrealdb":
+            return "kind: CronJob\n"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(evidence, "_helm_output", fake_helm_output)
+
+    with pytest.raises(evidence.EvidenceFailure) as exc_info:
+        evidence.capture_rendered_helm_manifests(tmp_path)
+
+    assert "Sibyl enterprise chart rendered manifest missing required snippets" in str(
+        exc_info.value
+    )

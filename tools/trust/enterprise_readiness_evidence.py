@@ -22,6 +22,72 @@ DEFAULT_RECEIPT = DEFAULT_EVIDENCE_DIR / "receipt.json"
 SCHEMA_VERSION = "enterprise-readiness-evidence/v1"
 PACKAGE_LOCK_DEPENDENCIES = ("authlib", "pyjwt", "argon2-cffi")
 PACKAGE_LOCK_PATHS = ("apps/api/pyproject.toml", "uv.lock")
+SIBYL_HELM_RENDER_ARGS = (
+    "template",
+    "enterprise",
+    "charts/sibyl",
+    "--set",
+    "ingress.gatewayApi.enabled=true",
+    "--set",
+    "ingress.gatewayApi.parentRefs[0].name=shared-gateway",
+    "--set",
+    "ingress.gatewayApi.parentRefs[0].namespace=gateway-system",
+    "--set",
+    "ingress.classic.enabled=true",
+    "--set",
+    "networkPolicy.enabled=true",
+    "--set",
+    "podSecurity.enforceRestricted=true",
+    "--set",
+    "bootstrap.enabled=true",
+    "--set",
+    "breakGlass.enabled=true",
+    "--set",
+    "breakGlass.existingSecret=sibyl-break-glass",
+    "--set",
+    "breakGlass.allowedIPs[0]=203.0.113.0/24",
+    "--set",
+    "oidc.providers[0].name=entra",
+    "--set",
+    "oidc.providers[0].issuer=https://login.microsoftonline.com/example/v2.0",
+    "--set",
+    "oidc.providers[0].client_id=sibyl-client",
+    "--set",
+    "oidc.providers[0].client_secret_env=SIBYL_OIDC_ENTRA_CLIENT_SECRET",
+)
+SURREALDB_HELM_RENDER_ARGS = (
+    "template",
+    "enterprise-db",
+    "charts/surrealdb",
+    "--set",
+    "snapshot.enabled=true",
+    "--set",
+    "export.enabled=true",
+    "--set",
+    "restoreDrill.enabled=true",
+    "--set",
+    "snapshot.persistentVolumeClaimName=surrealdb-data",
+    "--set",
+    "snapshot.volumeSnapshotClassName=csi-snapshots",
+    "--set",
+    "export.destination.path=/backups",
+    "--set",
+    "restoreDrill.source.path=/backups",
+)
+SIBYL_RENDER_SNIPPETS = (
+    "kind: HTTPRoute",
+    "kind: Ingress",
+    "kind: Namespace",
+    "kind: NetworkPolicy",
+    "kind: Job",
+)
+SURREALDB_RENDER_SNIPPETS = (
+    "kind: CronJob",
+    "kind: Job",
+    "kind: Role",
+    "kind: RoleBinding",
+    "app.kubernetes.io/component: restore-drill",
+)
 
 type JsonObject = dict[str, Any]
 
@@ -68,6 +134,11 @@ REQUIRED_EVIDENCE: tuple[EvidenceRequirement, ...] = (
         key="restore_recall_sample",
         gate="data-durability",
         description="The restored Kubernetes runtime returns a sampled recall query.",
+    ),
+    EvidenceRequirement(
+        key="rendered_helm_manifests",
+        gate="security-review-packet",
+        description="Rendered enterprise Helm manifests for Sibyl and SurrealDB are captured.",
     ),
     EvidenceRequirement(
         key="idp_role_claim_evidence",
@@ -162,6 +233,25 @@ def _git_output(args: Sequence[str]) -> str:
     if result.returncode != 0:
         details = result.stderr.strip() or result.stdout.strip()
         msg = f"git {' '.join(args)} failed: {details}"
+        raise EvidenceFailure(msg)
+    return result.stdout.strip()
+
+
+def _helm_output(args: Sequence[str]) -> str:
+    helm = which("helm")
+    if helm is None:
+        msg = "helm executable not found"
+        raise EvidenceFailure(msg)
+    result = subprocess.run(  # noqa: S603
+        [helm, *args],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        details = result.stderr.strip() or result.stdout.strip()
+        msg = f"helm {' '.join(args)} failed: {details}"
         raise EvidenceFailure(msg)
     return result.stdout.strip()
 
@@ -544,6 +634,92 @@ def capture_package_lock_diff(
     }
 
 
+def capture_rendered_helm_manifests(
+    evidence_dir: Path = DEFAULT_EVIDENCE_DIR,
+) -> JsonObject:
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = evidence_dir / DEFAULT_MANIFEST.name
+    if not manifest_path.exists():
+        write_template(evidence_dir)
+    payload = _load_manifest(manifest_path)
+
+    schema_version = payload.get("schema_version")
+    if schema_version != SCHEMA_VERSION:
+        msg = f"schema_version must be {SCHEMA_VERSION!r}, got {schema_version!r}"
+        raise EvidenceFailure(msg)
+
+    items = payload.get("items")
+    if not isinstance(items, dict):
+        msg = "manifest must include an items object"
+        raise EvidenceFailure(msg)
+
+    render_specs = (
+        (
+            "Sibyl enterprise chart",
+            "sibyl-enterprise.yaml",
+            SIBYL_HELM_RENDER_ARGS,
+            SIBYL_RENDER_SNIPPETS,
+        ),
+        (
+            "SurrealDB enterprise chart",
+            "surrealdb-enterprise.yaml",
+            SURREALDB_HELM_RENDER_ARGS,
+            SURREALDB_RENDER_SNIPPETS,
+        ),
+    )
+    artifact_dir = evidence_dir / "rendered_helm_manifests"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    rendered_artifacts: list[tuple[str, Path, Sequence[str]]] = []
+    for label, filename, render_args, required_snippets in render_specs:
+        rendered = _helm_output(render_args)
+        missing = [snippet for snippet in required_snippets if snippet not in rendered]
+        if missing:
+            msg = f"{label} rendered manifest missing required snippets: {', '.join(missing)}"
+            raise EvidenceFailure(msg)
+
+        artifact_path = artifact_dir / filename
+        artifact_path.write_text(rendered.rstrip() + "\n", encoding="utf-8")
+        rendered_artifacts.append((label, artifact_path, render_args))
+
+    receipt_path = artifact_dir / "receipt.md"
+    receipt_path.write_text(
+        _rendered_helm_receipt(rendered_artifacts),
+        encoding="utf-8",
+    )
+
+    items = cast(dict[str, object], items)
+    raw_item = items.get("rendered_helm_manifests")
+    item = cast(JsonObject, raw_item.copy()) if isinstance(raw_item, dict) else {}
+    update_payload: JsonObject = {
+        "gate": "security-review-packet",
+        "status": "PASS",
+        "description": "Rendered enterprise Helm manifests for Sibyl and SurrealDB are captured.",
+        "artifacts": [
+            _artifact_entry(evidence_dir, receipt_path),
+            *[
+                _artifact_entry(evidence_dir, artifact_path)
+                for _, artifact_path, _ in rendered_artifacts
+            ],
+        ],
+        "notes": "Captured from local Helm chart renders.",
+    }
+    item.update(update_payload)
+    items["rendered_helm_manifests"] = item
+    manifest_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "status": "PASS",
+        "captured_at": datetime.now(UTC).isoformat(),
+        "manifest": str(manifest_path),
+        "evidence_dir": str(evidence_dir.resolve()),
+        "item": item,
+    }
+
+
 def _artifact_entry(evidence_dir: Path, artifact_path: Path) -> JsonObject:
     relative_path = artifact_path.relative_to(evidence_dir).as_posix()
     return {
@@ -583,6 +759,34 @@ def _package_lock_receipt(
 - Related artifact paths:
   - package_lock_diff/package-lock.diff
 """
+
+
+def _rendered_helm_receipt(
+    rendered_artifacts: Sequence[tuple[str, Path, Sequence[str]]],
+) -> str:
+    lines = [
+        "# rendered_helm_manifests",
+        "",
+        "- Gate: security-review-packet",
+        "- Status: PASS",
+        "- Required proof: Rendered enterprise Helm manifests for Sibyl and SurrealDB are captured.",
+        f"- Captured at: {datetime.now(UTC).isoformat()}",
+        "- Captured by: enterprise_readiness_evidence.py",
+        "- Runtime or environment: local Helm chart render",
+        "- Commands or manual flow:",
+    ]
+    for label, _, render_args in rendered_artifacts:
+        lines.append(f"  - {label}: `helm {' '.join(render_args)}`")
+    lines.extend(
+        [
+            "- Observed result: rendered manifests captured and required enterprise resources verified.",
+            "- Redactions: none",
+            "- Related artifact paths:",
+        ]
+    )
+    for _, artifact_path, _ in rendered_artifacts:
+        lines.append(f"  - rendered_helm_manifests/{artifact_path.name}")
+    return "\n".join(lines) + "\n"
 
 
 def build_template_payload() -> JsonObject:
@@ -742,6 +946,19 @@ def _handle_package_lock_capture(
     return 0
 
 
+def _handle_rendered_helm_capture(evidence_dir: Path | None) -> int:
+    try:
+        receipt = capture_rendered_helm_manifests(
+            DEFAULT_EVIDENCE_DIR if evidence_dir is None else evidence_dir,
+        )
+    except EvidenceFailure as exc:
+        sys.stdout.write(f"{exc}\n")
+        return 1
+    sys.stdout.write("captured rendered Helm manifest evidence\n")
+    sys.stdout.write(f"manifest: {receipt['manifest']}\n")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
@@ -752,35 +969,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--sync-hashes", action="store_true")
     parser.add_argument("--status", action="store_true")
     parser.add_argument("--capture-package-lock-diff")
+    parser.add_argument("--capture-rendered-helm-manifests", action="store_true")
     parser.add_argument("--head-ref", default="HEAD")
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args(argv)
 
     if args.list:
         _list_requirements()
-        return 0
-
-    if args.init_template is not None:
-        return _handle_init_template(args.init_template, force=args.force_template)
-
-    if args.sync_hashes:
-        return _handle_sync_hashes(args.manifest, args.evidence_dir)
-
-    if args.status:
-        return _handle_status(args.manifest, args.evidence_dir)
-
-    if args.capture_package_lock_diff is not None:
-        return _handle_package_lock_capture(
+        exit_code = 0
+    elif args.init_template is not None:
+        exit_code = _handle_init_template(args.init_template, force=args.force_template)
+    elif args.sync_hashes:
+        exit_code = _handle_sync_hashes(args.manifest, args.evidence_dir)
+    elif args.status:
+        exit_code = _handle_status(args.manifest, args.evidence_dir)
+    elif args.capture_package_lock_diff is not None:
+        exit_code = _handle_package_lock_capture(
             args.evidence_dir,
             base_ref=args.capture_package_lock_diff,
             head_ref=args.head_ref,
         )
-
-    return run_gate(
-        manifest_path=args.manifest,
-        evidence_dir=args.evidence_dir,
-        receipt_path=args.receipt,
-    )
+    elif args.capture_rendered_helm_manifests:
+        exit_code = _handle_rendered_helm_capture(args.evidence_dir)
+    else:
+        exit_code = run_gate(
+            manifest_path=args.manifest,
+            evidence_dir=args.evidence_dir,
+            receipt_path=args.receipt,
+        )
+    return exit_code
 
 
 def _print_status_report(report: JsonObject) -> None:
