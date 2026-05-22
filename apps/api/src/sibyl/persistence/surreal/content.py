@@ -1452,10 +1452,10 @@ async def soft_delete_private_raw_captures_for_user(
     return count
 
 
-async def purge_due_deleted_raw_captures(*, now: datetime | None = None) -> int:
+async def purge_due_deleted_raw_captures(*, now: datetime | None = None) -> list[SurrealRecord]:
     cutoff = now or _utcnow()
     async with surreal_content_client() as client:
-        rows = await _select_many(
+        return await _select_many(
             client,
             """
                 DELETE FROM raw_captures
@@ -1465,7 +1465,6 @@ async def purge_due_deleted_raw_captures(*, now: datetime | None = None) -> int:
             """,
             now=cutoff,
         )
-    return len(rows)
 
 
 async def get_api_idempotency_record(

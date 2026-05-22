@@ -232,7 +232,8 @@ async def test_purge_due_deleted_raw_captures_deletes_due_rows(
 
     purged = await purge_due_deleted_raw_captures(now=now)
 
-    assert purged == 2
+    assert len(purged) == 2
+    assert purged[0]["uuid"]
     query, params = client.calls[0]
     assert "DELETE FROM raw_captures" in query
     assert "purge_after <= $now" in query

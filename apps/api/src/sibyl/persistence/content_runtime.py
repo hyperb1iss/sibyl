@@ -244,7 +244,9 @@ if TYPE_CHECKING:
         ) -> Awaitable[int]: ...
 
     class PurgeDueDeletedRawCaptures(Protocol):
-        def __call__(self, *, now: datetime | None = None) -> Awaitable[int]: ...
+        def __call__(
+            self, *, now: datetime | None = None
+        ) -> Awaitable[list[dict[str, object]]]: ...
 
     class GetApiIdempotencyRecord(Protocol):
         def __call__(
