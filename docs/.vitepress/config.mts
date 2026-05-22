@@ -43,12 +43,37 @@ export default defineConfig({
 
         nav: [
             { text: 'Guide', link: '/guide/' },
+            { text: 'Users', link: '/users/login' },
+            { text: 'Admins', link: '/admin/installing' },
             { text: 'CLI', link: '/cli/' },
             { text: 'API', link: '/api/' },
             { text: 'Deployment', link: '/deployment/' },
         ],
 
         sidebar: {
+            '/users/': [
+                {
+                    text: 'Using Sibyl',
+                    items: [
+                        { text: 'Enterprise Sign-In', link: '/users/login' },
+                        { text: 'CLI Setup', link: '/users/cli-setup' },
+                        { text: 'MCP Setup', link: '/users/mcp-setup' },
+                        { text: 'Sharing Memory', link: '/users/sharing-memory' },
+                    ],
+                },
+            ],
+            '/admin/': [
+                {
+                    text: 'Enterprise Administration',
+                    items: [
+                        { text: 'Installing Sibyl', link: '/admin/installing' },
+                        { text: 'Inviting Users', link: '/admin/inviting-users' },
+                        { text: 'Audit Log', link: '/admin/audit-log' },
+                        { text: 'Backup And Restore', link: '/admin/backup-restore' },
+                        { text: 'Break-Glass Access', link: '/admin/break-glass' },
+                    ],
+                },
+            ],
             '/guide/': [
                 {
                     text: 'Getting Started',

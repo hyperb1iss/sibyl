@@ -57,10 +57,9 @@ One hook fires automatically at session boundaries:
 
 - **SessionStart**: Loads your active tasks and a compact session bundle when you begin a session
 
-Per-prompt context injection lived here for a while as `UserPromptSubmit`, but it
-substituted for skill invocation rather than nudging it, so we removed it. The
-agent is expected to call the `sibyl` skill and `sibyl recall` / `sibyl context pack`
-when it needs working memory.
+Per-prompt context injection lived here for a while as `UserPromptSubmit`, but it substituted for
+skill invocation rather than nudging it, so we removed it. The agent is expected to call the `sibyl`
+skill and `sibyl recall` / `sibyl context pack` when it needs working memory.
 
 ### 3. Web UI
 

@@ -53,12 +53,12 @@ Hooks are the magic that makes Sibyl invisible. They run automatically at specif
 
 ### What about per-prompt injection?
 
-An earlier `UserPromptSubmit` hook ran on every prompt, generated a semantic search query
-with Haiku, and injected a context pack inline. We removed it. The hook gave agents
-just-enough sibyl-shaped context to skip invoking the skill or reaching for the CLI on
-their own, which defeated the point of the skill. Agents now drive recall and capture
-explicitly via `sibyl recall`, `sibyl context pack`, `sibyl remember`, and
-`sibyl reflect`. The SessionStart bundle remains as a one-time wake-up nudge.
+An earlier `UserPromptSubmit` hook ran on every prompt, generated a semantic search query with
+Haiku, and injected a context pack inline. We removed it. The hook gave agents just-enough
+sibyl-shaped context to skip invoking the skill or reaching for the CLI on their own, which defeated
+the point of the skill. Agents now drive recall and capture explicitly via `sibyl recall`,
+`sibyl context pack`, `sibyl remember`, and `sibyl reflect`. The SessionStart bundle remains as a
+one-time wake-up nudge.
 
 ### Installing Hooks
 
