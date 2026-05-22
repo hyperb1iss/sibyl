@@ -359,6 +359,36 @@ async def test_local_login_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.asyncio
+async def test_local_login_keeps_relative_redirect_on_same_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = FakeRequest(
+        form_data={
+            "email": "nova@example.com",
+            "password": "super-secret",
+            "redirect": "/projects",
+        }
+    )
+    issued = _issued_session()
+    login = AsyncMock(return_value=issued)
+
+    monkeypatch.setattr(
+        auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests"
+    )
+    monkeypatch.setattr(auth_routes, "login_local_user", login)
+
+    response = await _call_route(auth_routes.local_login, request=request)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/projects"
+    cookies = [
+        value.decode() for name, value in response.raw_headers if name.lower() == b"set-cookie"
+    ]
+    assert any(auth_routes.ACCESS_TOKEN_COOKIE in cookie for cookie in cookies)
+    assert any(auth_routes.REFRESH_TOKEN_COOKIE in cookie for cookie in cookies)
+
+
+@pytest.mark.asyncio
 async def test_local_login_accepts_invitation_for_existing_user(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

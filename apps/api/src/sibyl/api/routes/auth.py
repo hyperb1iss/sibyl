@@ -225,12 +225,14 @@ def _clear_auth_cookies(response: Response) -> None:
     )
 
 
-def _safe_frontend_redirect(redirect_value: str | None) -> str:
+def _safe_frontend_redirect(redirect_value: str | None, *, prefer_relative: bool = False) -> str:
     target = (redirect_value or "").strip()
     if not target:
         return config_module.settings.frontend_url
 
-    if target.startswith("/"):
+    if target.startswith("/") and not target.startswith("//"):
+        if prefer_relative:
+            return target
         base = config_module.settings.frontend_url
         parsed = urlparse(base)
         origin = f"{parsed.scheme}://{parsed.netloc}"
@@ -823,7 +825,10 @@ async def local_signup(request: Request, response: Response):
             )
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
 
-    redirect = _safe_frontend_redirect(body.redirect or request.query_params.get("redirect"))
+    redirect = _safe_frontend_redirect(
+        body.redirect or request.query_params.get("redirect"),
+        prefer_relative=True,
+    )
     if has_redirect:
         auth_response: Response = RedirectResponse(url=redirect, status_code=status.HTTP_302_FOUND)
     else:
@@ -911,7 +916,10 @@ async def local_login(request: Request, response: Response):
             )
         raise
 
-    redirect = _safe_frontend_redirect(body.redirect or request.query_params.get("redirect"))
+    redirect = _safe_frontend_redirect(
+        body.redirect or request.query_params.get("redirect"),
+        prefer_relative=True,
+    )
     if has_redirect:
         auth_response: Response = RedirectResponse(url=redirect, status_code=status.HTTP_302_FOUND)
     else:
