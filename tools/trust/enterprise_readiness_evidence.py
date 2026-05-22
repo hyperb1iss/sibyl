@@ -1133,6 +1133,78 @@ def capture_github_release_evidence(
     }
 
 
+def preflight_github_release_evidence(
+    *,
+    run_id: str,
+    repo: str = DEFAULT_GITHUB_REPO,
+) -> JsonObject:
+    if not run_id.strip():
+        msg = "GitHub run id is required to preflight release evidence"
+        raise EvidenceFailure(msg)
+
+    run = _gh_json_output(
+        [
+            "run",
+            "view",
+            run_id,
+            "--repo",
+            repo,
+            "--json",
+            "conclusion,createdAt,databaseId,headBranch,headSha,jobs,name,url,workflowName",
+        ]
+    )
+
+    issues: list[str] = []
+    try:
+        _require_publish_run(run, run_id=run_id)
+    except EvidenceFailure as exc:
+        issues.append(str(exc))
+
+    jobs: list[Mapping[str, object]] = []
+    try:
+        jobs = _run_jobs(run)
+    except EvidenceFailure as exc:
+        issues.append(str(exc))
+
+    for image in GITHUB_RELEASE_IMAGES:
+        for job_name in (f"◆ Docker: Security {image}", f"◆ Docker: Sign {image}"):
+            issue = _successful_job_issue(jobs, job_name)
+            if issue is not None:
+                issues.append(issue)
+
+    artifacts: list[Mapping[str, object]] = []
+    try:
+        artifacts_payload = _gh_json_output(
+            ["api", f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100"]
+        )
+        artifacts = _run_artifacts(artifacts_payload)
+    except EvidenceFailure as exc:
+        issues.append(str(exc))
+
+    for image in GITHUB_RELEASE_IMAGES:
+        issue = _sbom_artifact_issue(artifacts, image)
+        if issue is not None:
+            issues.append(issue)
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "status": "PASS" if not issues else "FAIL",
+        "checked_at": datetime.now(UTC).isoformat(),
+        "repo": repo,
+        "run_id": run_id,
+        "run": {
+            "url": run.get("url"),
+            "workflow_name": run.get("workflowName"),
+            "name": run.get("name"),
+            "conclusion": run.get("conclusion"),
+            "head_sha": run.get("headSha"),
+            "head_branch": run.get("headBranch"),
+            "created_at": run.get("createdAt"),
+        },
+        "issues": issues,
+    }
+
+
 def capture_audit_export_sample(
     evidence_dir: Path = DEFAULT_EVIDENCE_DIR,
     *,
@@ -2178,6 +2250,19 @@ def _require_successful_job(
     return job
 
 
+def _successful_job_issue(
+    jobs: Sequence[Mapping[str, object]],
+    name: str,
+) -> str | None:
+    matches = [job for job in jobs if job.get("name") == name]
+    if not matches:
+        return f"GitHub run is missing required job: {name}"
+    conclusion = matches[0].get("conclusion")
+    if conclusion != "success":
+        return f"GitHub job {name} must have conclusion success, got {conclusion!r}"
+    return None
+
+
 def _run_artifacts(payload: Mapping[str, object]) -> list[Mapping[str, object]]:
     artifacts = payload.get("artifacts")
     if not isinstance(artifacts, list):
@@ -2217,6 +2302,17 @@ def _require_sbom_artifact(
         msg = f"GitHub SBOM artifact is empty for {image}: {_artifact_name(artifact)}"
         raise EvidenceFailure(msg)
     return artifact
+
+
+def _sbom_artifact_issue(
+    artifacts: Sequence[Mapping[str, object]],
+    image: str,
+) -> str | None:
+    try:
+        _require_sbom_artifact(artifacts, image)
+    except EvidenceFailure as exc:
+        return str(exc)
+    return None
 
 
 def _artifact_name(artifact: Mapping[str, object]) -> str:
@@ -2941,6 +3037,20 @@ def _handle_github_release_capture(
     return 0
 
 
+def _handle_github_release_preflight(
+    *,
+    run_id: str,
+    repo: str,
+) -> int:
+    try:
+        report = preflight_github_release_evidence(run_id=run_id, repo=repo)
+    except EvidenceFailure as exc:
+        sys.stdout.write(f"{exc}\n")
+        return 1
+    _print_github_release_preflight(report)
+    return 0 if report["status"] == "PASS" else 1
+
+
 def _handle_audit_export_capture(
     evidence_dir: Path | None,
     *,
@@ -3087,6 +3197,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--capture-package-lock-diff")
     parser.add_argument("--capture-rendered-helm-manifests", action="store_true")
     parser.add_argument("--capture-github-release-evidence")
+    parser.add_argument("--preflight-github-release-evidence")
     parser.add_argument("--github-repo", default=DEFAULT_GITHUB_REPO)
     parser.add_argument("--capture-audit-export-sample")
     parser.add_argument("--audit-export-format", choices=AUDIT_EXPORT_FORMATS, default="json")
@@ -3135,6 +3246,11 @@ def _dispatch_capture_command(args: argparse.Namespace) -> int | None:
         exit_code = _handle_github_release_capture(
             args.evidence_dir,
             run_id=args.capture_github_release_evidence,
+            repo=args.github_repo,
+        )
+    elif args.preflight_github_release_evidence is not None:
+        exit_code = _handle_github_release_preflight(
+            run_id=args.preflight_github_release_evidence,
             repo=args.github_repo,
         )
     elif args.capture_audit_export_sample is not None:
@@ -3210,6 +3326,16 @@ def _print_status_report(report: JsonObject) -> None:
         sys.stdout.write(f"{item['key']}: {item['status']}\n")
         for issue in cast(list[str], item["issues"]):
             sys.stdout.write(f"  - {issue}\n")
+
+
+def _print_github_release_preflight(report: JsonObject) -> None:
+    run = cast(Mapping[str, object], report["run"])
+    sys.stdout.write(f"GitHub release evidence preflight: {report['status']}\n")
+    sys.stdout.write(f"run: {report['repo']}#{report['run_id']}\n")
+    if run.get("url"):
+        sys.stdout.write(f"url: {run['url']}\n")
+    for issue in cast(list[str], report["issues"]):
+        sys.stdout.write(f"  - {issue}\n")
 
 
 if __name__ == "__main__":

@@ -796,6 +796,88 @@ def test_capture_github_release_evidence_rejects_missing_sign_job(
     assert "GitHub run is missing required job: ◆ Docker: Sign web" in str(exc_info.value)
 
 
+def test_preflight_github_release_evidence_reports_all_missing_requirements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_gh_json_output(args: list[str]) -> dict[str, Any]:
+        if args[0:2] == ["run", "view"]:
+            return {
+                "conclusion": "success",
+                "createdAt": "2026-05-22T12:00:00Z",
+                "databaseId": 12345,
+                "headBranch": "main",
+                "headSha": "abc123",
+                "name": "Publish",
+                "url": "https://github.example/run/12345",
+                "workflowName": "Publish",
+                "jobs": [
+                    {
+                        "conclusion": "success",
+                        "databaseId": 101,
+                        "name": "◆ Docker: Security api",
+                    },
+                    {
+                        "conclusion": "failure",
+                        "databaseId": 201,
+                        "name": "◆ Docker: Sign api",
+                    },
+                ],
+            }
+        if args[0] == "api":
+            return {
+                "artifacts": [
+                    {
+                        "expired": False,
+                        "name": "sibyl-api-1.2.3-sbom",
+                        "size_in_bytes": 123,
+                    }
+                ]
+            }
+        raise AssertionError(args)
+
+    monkeypatch.setattr(evidence, "_gh_json_output", fake_gh_json_output)
+
+    report = evidence.preflight_github_release_evidence(run_id="12345")
+
+    assert report["status"] == "FAIL"
+    assert report["issues"] == [
+        "GitHub job ◆ Docker: Sign api must have conclusion success, got 'failure'",
+        "GitHub run is missing required job: ◆ Docker: Security web",
+        "GitHub run is missing required job: ◆ Docker: Sign web",
+        "GitHub run is missing required SBOM artifact for web",
+    ]
+
+
+def test_main_preflights_github_release_evidence(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_preflight_github_release_evidence(*, run_id: str, repo: str) -> dict[str, Any]:
+        assert run_id == "12345"
+        assert repo == "hyperb1iss/sibyl"
+        return {
+            "schema_version": evidence.SCHEMA_VERSION,
+            "status": "FAIL",
+            "repo": repo,
+            "run_id": run_id,
+            "run": {"url": "https://github.example/run/12345"},
+            "issues": ["GitHub run is missing required job: ◆ Docker: Sign web"],
+        }
+
+    monkeypatch.setattr(
+        evidence,
+        "preflight_github_release_evidence",
+        fake_preflight_github_release_evidence,
+    )
+
+    exit_code = evidence.main(["--preflight-github-release-evidence", "12345"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "GitHub release evidence preflight: FAIL" in captured.out
+    assert "GitHub run is missing required job: ◆ Docker: Sign web" in captured.out
+
+
 def test_capture_audit_export_sample_updates_manifest(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
