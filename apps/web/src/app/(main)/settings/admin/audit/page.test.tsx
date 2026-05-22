@@ -35,8 +35,8 @@ describe('AdminAuditPage', () => {
   beforeEach(() => {
     apiExport.mockReset();
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:audit');
-    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
     hooks.useAdminAudit.mockReturnValue({
       data: {
         total: 1,

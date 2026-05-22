@@ -230,6 +230,7 @@ tasks:
       - ~:adapter-ingest-gate-test
       - ~:large-corpus-rehearsal-test
       - ~:backup-restore-gate-test
+      - ~:enterprise-readiness-evidence-test
       - ~:release-workflow-test
       - core:check
       - api:check
@@ -261,6 +262,7 @@ tasks:
       - ~:adapter-ingest-gate-test
       - ~:large-corpus-rehearsal-test
       - ~:backup-restore-gate-test
+      - ~:enterprise-readiness-evidence-test
       - ~:release-workflow-test
       - core:test
       - api:test
@@ -907,6 +909,27 @@ tasks:
       - apps/api/moon.yml
       - packages/python/sibyl-core/moon.yml
       - packages/python/sibyl-core/src/**/*.py
+      - pyproject.toml
+      - moon.yml
+
+  enterprise-readiness-evidence:
+    command: uv run python -m tools.trust.enterprise_readiness_evidence
+    inputs:
+      - tools/trust/enterprise_readiness_evidence.py
+      - .moon/cache/enterprise-readiness-evidence/**/*
+      - pyproject.toml
+      - moon.yml
+    outputs:
+      - .moon/cache/enterprise-readiness-evidence/receipt.json
+    options:
+      cache: false
+
+  enterprise-readiness-evidence-test:
+    command: uv run pytest tools/tests/test_enterprise_readiness_evidence.py -v
+    inputs:
+      - tools/trust/enterprise_readiness_evidence.py
+      - tools/tests/conftest.py
+      - tools/tests/test_enterprise_readiness_evidence.py
       - pyproject.toml
       - moon.yml
 
