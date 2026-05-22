@@ -154,8 +154,12 @@ encrypted settings can be read after a restart.
 
 ## First Owner
 
-Use a break-glass owner for initial bootstrap and emergencies, then keep routine access on OIDC
-accounts:
+The default Sibyl install is local-first. The first setup signup creates the owner/admin user. After
+setup completes, account creation is invite-based unless `SIBYL_PUBLIC_SIGNUPS_ENABLED=true` or
+`auth.publicSignupsEnabled=true` is set.
+
+Enterprise SSO installs can opt into OIDC and then disable local password login after the corporate
+provider is working. Break-glass remains an explicit emergency path:
 
 ```yaml
 breakGlass:
@@ -166,8 +170,8 @@ breakGlass:
   existingSecret: sibyl-break-glass
 ```
 
-After the OIDC owner signs in successfully, disable local password login in production values unless
-you are actively running the break-glass path. Set `expiresAt` no more than four hours out for an
-emergency window and keep `allowedIPs` scoped to the operator network. When break-glass is enabled,
-Sibyl denies login if either field is missing, if the expiry has passed, or if the expiry is more
-than four hours out.
+After the OIDC owner signs in successfully, enterprise values may set `auth.localAuthEnabled=false`
+unless you are actively running the break-glass path. Set `expiresAt` no more than four hours out
+for an emergency window and keep `allowedIPs` scoped to the operator network. When break-glass is
+enabled, Sibyl denies login if either field is missing, if the expiry has passed, or if the expiry
+is more than four hours out.

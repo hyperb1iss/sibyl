@@ -89,6 +89,45 @@ CORE_LEGACY_GRAPH_CONTRACT_TESTS = (
     "tests/test_surreal_authentication.py",
     "tests/test_surreal_observability.py",
 )
+
+
+def test_install_surfaces_default_to_local_first_auth() -> None:
+    env_example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+    ansible_defaults = (REPO_ROOT / "infra/ansible/roles/sibyl/defaults/main.yml").read_text(
+        encoding="utf-8"
+    )
+    ansible_env = (REPO_ROOT / "infra/ansible/roles/sibyl/templates/env.j2").read_text(
+        encoding="utf-8"
+    )
+    ansible_compose = (REPO_ROOT / "infra/ansible/roles/sibyl/files/docker-compose.yml").read_text(
+        encoding="utf-8"
+    )
+    helm_values = (REPO_ROOT / "charts/sibyl/values.yaml").read_text(encoding="utf-8")
+
+    assert "SIBYL_LOCAL_AUTH_ENABLED=true" in env_example
+    assert "SIBYL_PUBLIC_SIGNUPS_ENABLED=false" in env_example
+    assert "SIBYL_BREAK_GLASS_ENABLED=false" in env_example
+    assert "SIBYL_MCP_AUTH_MODE=auto" in env_example
+
+    assert "sibyl_local_auth_enabled: true" in ansible_defaults
+    assert "sibyl_public_signups_enabled: false" in ansible_defaults
+    assert "sibyl_break_glass_enabled: false" in ansible_defaults
+    assert 'sibyl_mcp_auth_mode: "auto"' in ansible_defaults
+    assert "SIBYL_LOCAL_AUTH_ENABLED={{ sibyl_local_auth_enabled | lower }}" in ansible_env
+    assert "SIBYL_PUBLIC_SIGNUPS_ENABLED={{ sibyl_public_signups_enabled | lower }}" in ansible_env
+    assert "SIBYL_BREAK_GLASS_ENABLED={{ sibyl_break_glass_enabled | lower }}" in ansible_env
+    assert "SIBYL_LOCAL_AUTH_ENABLED: ${SIBYL_LOCAL_AUTH_ENABLED:-true}" in ansible_compose
+    assert "SIBYL_PUBLIC_SIGNUPS_ENABLED: ${SIBYL_PUBLIC_SIGNUPS_ENABLED:-false}" in ansible_compose
+    assert "SIBYL_BREAK_GLASS_ENABLED: ${SIBYL_BREAK_GLASS_ENABLED:-false}" in ansible_compose
+    assert "SIBYL_MCP_AUTH_MODE: ${SIBYL_MCP_AUTH_MODE:-auto}" in ansible_compose
+
+    assert "localAuthEnabled: true" in helm_values
+    assert "publicSignupsEnabled: false" in helm_values
+    assert "providers: []" in helm_values
+    assert "silent_refresh_enabled: false" in helm_values
+    assert "extra_providers_enabled: false" in helm_values
+
+
 CORE_LEGACY_GRAPH_CONTRACT_MARKED_TESTS = (
     "tests/test_models.py",
     "tests/test_retrieval_advanced.py",

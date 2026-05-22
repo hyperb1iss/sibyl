@@ -8,8 +8,14 @@ sibyl_version: "0.9.0"
 # Public hostname Caddy serves and requests a certificate for.
 sibyl_domain: sibyl.hyperbliss.tech
 
+# Local-first auth defaults. First setup can create the owner/admin user;
+# later account creation stays invite-based unless public signups are enabled.
+sibyl_local_auth_enabled: true
+sibyl_public_signups_enabled: false
+sibyl_break_glass_enabled: false
+
 # MCP bearer-token enforcement: on | auto | off.
-sibyl_mcp_auth_mode: "on"
+sibyl_mcp_auth_mode: "auto"
 
 # SurrealDB root user. The password is a secret with no default.
 sibyl_surreal_username: root
