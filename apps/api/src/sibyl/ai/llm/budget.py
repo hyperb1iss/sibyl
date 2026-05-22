@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from sibyl.locks import entity_lock
 from sibyl.persistence.surreal.auth import surreal_auth_client_scope
 from sibyl.services.settings import SettingsService
 from sibyl_core.ai.errors import LLMBudgetExceededError, LLMConfigError
@@ -45,39 +47,58 @@ class DBLLMBudgetEnforcer:
         if not limits:
             return
 
-        async with surreal_auth_client_scope() as client:
-            buckets = [
-                await _ensure_bucket(client, limit, month=month, now=now)
-                for limit in limits
-            ]
-            for limit, bucket in zip(limits, buckets, strict=True):
-                used_tokens = _int_value(bucket.get("used_tokens"))
-                if used_tokens + estimated_tokens > limit.limit:
-                    raise LLMBudgetExceededError(
-                        f"LLM {limit.subject_type} monthly budget exceeded",
-                        surface=surface,
-                        details={
-                            "subject_type": limit.subject_type,
-                            "subject_id": limit.subject_id,
-                            "monthly_limit": limit.limit,
-                            "used_tokens": used_tokens,
-                            "requested_tokens": estimated_tokens,
-                            "bucket_month": month,
-                        },
-                    )
-
-            for limit, bucket in zip(limits, buckets, strict=True):
-                await client.execute_query(
-                    """
-                        UPDATE llm_usage_buckets
-                        SET used_tokens = $used_tokens,
-                            updated_at = $updated_at
-                        WHERE bucket_key = $bucket_key;
-                    """,
-                    bucket_key=str(bucket["bucket_key"]),
-                    used_tokens=_int_value(bucket.get("used_tokens")) + estimated_tokens,
-                    updated_at=now,
+        async with AsyncExitStack() as locks:
+            for limit in sorted(limits, key=lambda item: item.key):
+                await locks.enter_async_context(entity_lock("auth", f"llm-budget:{limit.key}"))
+            async with surreal_auth_client_scope() as client:
+                await self._reserve_with_locks(
+                    client,
+                    limits=limits,
+                    month=month,
+                    now=now,
+                    surface=surface,
+                    estimated_tokens=estimated_tokens,
                 )
+
+    async def _reserve_with_locks(
+        self,
+        client,
+        *,
+        limits: list[LLMBudgetLimit],
+        month: str,
+        now: datetime,
+        surface: str,
+        estimated_tokens: int,
+    ) -> None:
+        buckets = [await _ensure_bucket(client, limit, month=month, now=now) for limit in limits]
+        for limit, bucket in zip(limits, buckets, strict=True):
+            used_tokens = _int_value(bucket.get("used_tokens"))
+            if used_tokens + estimated_tokens > limit.limit:
+                raise LLMBudgetExceededError(
+                    f"LLM {limit.subject_type} monthly budget exceeded",
+                    surface=surface,
+                    details={
+                        "subject_type": limit.subject_type,
+                        "subject_id": limit.subject_id,
+                        "monthly_limit": limit.limit,
+                        "used_tokens": used_tokens,
+                        "requested_tokens": estimated_tokens,
+                        "bucket_month": month,
+                    },
+                )
+
+        for limit, bucket in zip(limits, buckets, strict=True):
+            await client.execute_query(
+                """
+                    UPDATE llm_usage_buckets
+                    SET used_tokens = $used_tokens,
+                        updated_at = $updated_at
+                    WHERE bucket_key = $bucket_key;
+                """,
+                bucket_key=str(bucket["bucket_key"]),
+                used_tokens=_int_value(bucket.get("used_tokens")) + estimated_tokens,
+                updated_at=now,
+            )
 
     async def _limits(self, context: LLMBudgetContext, *, month: str) -> list[LLMBudgetLimit]:
         limits: list[LLMBudgetLimit] = []
