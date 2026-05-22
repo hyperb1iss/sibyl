@@ -19,7 +19,7 @@ identity provider, real MCP clients, or a Kubernetes cluster.
 | W3 SurrealDB wrapper               | `charts/surrealdb` with pinned chart dependency, RocksDB defaults, bootstrap job, snapshot CronJob, export CronJob, restore-drill CronJob                                                                                                                                                                                                                                               | Helm lint/template and backup gate passing |
 | W4 audit log UI/API                | `/api/admin/audit` and `/api/admin/audit/export` in `apps/api/src/sibyl/api/routes/admin.py`; page at `apps/web/src/app/(main)/settings/admin/audit/page.tsx`; tests for API list, CSV, JSON, member denial, and web UI rendering/export                                                                                                                                                | Automated tests passing                    |
 | W5 docs                            | `docs/users/login.md`, `cli-setup.md`, `mcp-setup.md`, `sharing-memory.md`; `docs/admin/installing.md`, `inviting-users.md`, `audit-log.md`, `backup-restore.md`, `break-glass.md`; VitePress nav links in `docs/.vitepress/config.mts`                                                                                                                                                 | Docs lint and build passing                |
-| W6 hardening                       | Pod Security template, Trivy SBOM/CVE gate and Cosign signing in `.github/workflows/publish.yml`, LLM budget enforcement with per-bucket reservation locks, personal-memory deletion purge with audit receipts, recall concurrency limiter, backup restore-to-scratch workflow                                                                                                          | Automated tests passing                    |
+| W6 hardening                       | Pod Security template, Trivy SBOM/CVE gate and Cosign signing in `.github/workflows/publish.yml`, durable release assets for image SBOM/Cosign receipts, LLM budget enforcement with per-bucket reservation locks, personal-memory deletion purge with audit receipts, recall concurrency limiter, backup restore-to-scratch workflow                                                   | Automated tests passing                    |
 
 ## Automated Receipts
 
@@ -138,7 +138,8 @@ receipt can be captured with
 Cosign receipts can be captured from a qualifying publish workflow with
 `moon run enterprise-readiness-evidence -- --capture-github-release-evidence <run-id>`. That capture
 requires successful Docker security and signing jobs for both `api` and `web`, plus non-expired
-CycloneDX SBOM artifacts and validated Cosign receipt artifacts. Use
+CycloneDX SBOM artifacts and validated Cosign receipt artifacts. New publish runs also attach those
+SBOM and Cosign receipt files to the GitHub Release as durable review assets. Use
 `moon run enterprise-readiness-evidence -- --preflight-github-release-evidence <run-id>` to inspect
 all release-evidence prerequisites before attempting artifact capture. Operators can skip manual run
 ID lookup with

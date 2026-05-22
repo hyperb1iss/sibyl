@@ -130,6 +130,14 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     assert "format: cyclonedx" in workflow
     assert "severity: HIGH,CRITICAL" in workflow
     assert "cosign sign --yes" in workflow
+    assert "Upload Cosign receipt" in workflow
+    assert "Download image evidence" in workflow
+    assert "Prepare release evidence assets" in workflow
+    assert "pattern: sibyl-*-${{ steps.version.outputs.version }}-*" in workflow
+    assert "find release-evidence -type f" in workflow
+    assert "release-assets/*.cdx.json" in workflow
+    assert "release-assets/*-cosign-receipt.json" in workflow
+    assert "fail_on_unmatched_files: true" in workflow
     assert "id-token: write" in workflow
     assert "uv tool install sibyld" not in workflow
     assert "[sibyld](https://pypi.org/project/sibyld/" in workflow
