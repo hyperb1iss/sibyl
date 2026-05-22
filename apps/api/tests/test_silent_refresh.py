@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 
 from sibyl import config as config_module
 from sibyl.api.routes import auth as auth_routes
@@ -127,3 +128,32 @@ async def test_silent_refresh_success_sets_access_cookie_only(
         for header in headers
     )
     assert not any(header.startswith(f"{auth_routes.REFRESH_TOKEN_COOKIE}=") for header in headers)
+
+
+@pytest.mark.asyncio
+async def test_silent_refresh_role_removed_denies_without_minting_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_provider(monkeypatch)
+    provision = AsyncMock()
+    monkeypatch.setattr(
+        auth_routes,
+        "oidc_callback_claims",
+        AsyncMock(
+            side_effect=HTTPException(
+                status_code=403,
+                detail={"code": "oidc_missing_role"},
+            )
+        ),
+    )
+    monkeypatch.setattr(auth_routes, "provision_oidc_user", provision)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_routes.oidc_silent_refresh(
+            request=FakeRequest(query_params={"code": "auth-code"}),
+            provider_name="entra",
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail["code"] == "oidc_missing_role"
+    provision.assert_not_awaited()
