@@ -7,7 +7,7 @@ from typing import Literal
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import structlog
-from pydantic import Field, SecretStr, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from sibyl.runtime_shape import (
@@ -22,6 +22,61 @@ _log = structlog.get_logger()
 
 # Persisted auto-generated JWT key (same pattern as settings.key in crypto.py)
 _JWT_KEY_FILE = Path.home() / ".sibyl" / "jwt.key"
+_EXTRA_OIDC_PROVIDER_NAMES = {"github", "google"}
+_EXTRA_OIDC_ISSUER_HOSTS = {"github.com", "accounts.google.com"}
+
+
+class OIDCProviderSettings(BaseModel):
+    name: str
+    issuer: str
+    client_id: str
+    client_secret_env: str
+    scopes: list[str] = Field(default_factory=lambda: ["openid", "profile", "email"])
+    role_claim_override: str | None = None
+
+    @field_validator("name", "issuer", "client_id", "client_secret_env")
+    @classmethod
+    def strip_required_string(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("OIDC provider fields must not be empty")
+        return stripped
+
+    @field_validator("role_claim_override")
+    @classmethod
+    def strip_optional_string(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("scopes")
+    @classmethod
+    def normalize_scopes(cls, value: list[str]) -> list[str]:
+        scopes = [scope.strip() for scope in value if scope.strip()]
+        if "openid" not in scopes:
+            raise ValueError("OIDC provider scopes must include openid")
+        return scopes
+
+    @property
+    def is_extra_provider(self) -> bool:
+        normalized_name = self.name.strip().lower().replace("_", "-")
+        issuer_host = urlsplit(self.issuer).netloc.lower()
+        return normalized_name in _EXTRA_OIDC_PROVIDER_NAMES or issuer_host in _EXTRA_OIDC_ISSUER_HOSTS
+
+
+class OIDCSettings(BaseModel):
+    providers: list[OIDCProviderSettings] = Field(default_factory=list)
+    role_claim: str = "roles"
+    redirect_uri_base: str = ""
+    session_minutes: int = Field(default=60, ge=5, le=1440)
+    silent_refresh_enabled: bool = True
+    extra_providers_enabled: bool = False
+
+    @field_validator("role_claim", "redirect_uri_base")
+    @classmethod
+    def strip_string(cls, value: str) -> str:
+        return value.strip()
 
 
 def _get_or_create_jwt_secret() -> str:
@@ -107,6 +162,14 @@ class Settings(BaseSettings):
         default=False,
         description="Allow self-serve local account creation after initial setup",
     )
+    local_auth_enabled: bool = Field(
+        default=False,
+        description="Enable local username/password login outside setup and break-glass flows",
+    )
+    oidc: OIDCSettings = Field(
+        default_factory=OIDCSettings,
+        description="OpenID Connect provider and session settings",
+    )
 
     @model_validator(mode="after")
     def validate_security_settings(self) -> "Settings":
@@ -161,6 +224,18 @@ class Settings(BaseSettings):
                         "CRITICAL: Default SurrealDB credentials are forbidden in production. "
                         "Set SIBYL_SURREAL_USERNAME and SIBYL_SURREAL_PASSWORD to secure values."
                     )
+        return self
+
+    @model_validator(mode="after")
+    def validate_oidc_settings(self) -> "Settings":
+        if not self.oidc.extra_providers_enabled:
+            blocked = [provider.name for provider in self.oidc.providers if provider.is_extra_provider]
+            if blocked:
+                joined = ", ".join(sorted(blocked))
+                raise ValueError(
+                    "OIDC extra providers require oidc.extra_providers_enabled=true: "
+                    f"{joined}"
+                )
         return self
 
     jwt_secret: SecretStr = Field(

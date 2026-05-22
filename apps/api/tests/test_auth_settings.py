@@ -3,6 +3,17 @@ import pytest
 from sibyl.config import Settings
 
 
+def _oidc_provider(**overrides) -> dict[str, object]:
+    provider: dict[str, object] = {
+        "name": "entra",
+        "issuer": "https://login.microsoftonline.com/tenant/v2.0",
+        "client_id": "sibyl-client",
+        "client_secret_env": "SIBYL_OIDC_ENTRA_CLIENT_SECRET",
+    }
+    provider.update(overrides)
+    return provider
+
+
 def test_settings_auth_fallbacks(monkeypatch) -> None:
     monkeypatch.setenv("JWT_SECRET", "test-jwt-secret-key-for-api-tests")
     monkeypatch.setenv("GITHUB_CLIENT_ID", "cid")
@@ -121,3 +132,101 @@ def test_settings_server_url_uses_public_url_when_explicit() -> None:
 def test_settings_mcp_auth_mode_default() -> None:
     s = Settings(_env_file=None)
     assert s.mcp_auth_mode == "auto"
+
+
+def test_settings_oidc_defaults_to_enterprise_contract() -> None:
+    s = Settings(_env_file=None)
+
+    assert s.local_auth_enabled is False
+    assert s.oidc.providers == []
+    assert s.oidc.role_claim == "roles"
+    assert s.oidc.session_minutes == 60
+    assert s.oidc.silent_refresh_enabled is True
+    assert s.oidc.extra_providers_enabled is False
+
+
+def test_settings_oidc_accepts_corporate_provider_config() -> None:
+    s = Settings(
+        _env_file=None,
+        oidc={
+            "providers": [
+                _oidc_provider(scopes=["openid", "profile", "email", "groups"]),
+            ],
+            "role_claim": "resource_access.sibyl.roles",
+            "redirect_uri_base": "https://sibyl.example.com/",
+            "session_minutes": 45,
+        },
+    )
+
+    provider = s.oidc.providers[0]
+    assert provider.name == "entra"
+    assert provider.scopes == ["openid", "profile", "email", "groups"]
+    assert provider.role_claim_override is None
+    assert s.oidc.role_claim == "resource_access.sibyl.roles"
+    assert s.oidc.redirect_uri_base == "https://sibyl.example.com/"
+    assert s.oidc.session_minutes == 45
+
+
+def test_settings_oidc_parses_json_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "SIBYL_OIDC",
+        """
+        {
+          "providers": [
+            {
+              "name": "okta",
+              "issuer": "https://example.okta.com/oauth2/default",
+              "client_id": "sibyl-client",
+              "client_secret_env": "SIBYL_OIDC_OKTA_CLIENT_SECRET",
+              "role_claim_override": "groups"
+            }
+          ],
+          "role_claim": "groups"
+        }
+        """,
+    )
+
+    s = Settings(_env_file=None)
+
+    assert s.oidc.providers[0].name == "okta"
+    assert s.oidc.providers[0].scopes == ["openid", "profile", "email"]
+    assert s.oidc.providers[0].role_claim_override == "groups"
+    assert s.oidc.role_claim == "groups"
+
+
+def test_settings_oidc_rejects_extra_provider_by_default() -> None:
+    with pytest.raises(ValueError, match="extra_providers_enabled=true"):
+        Settings(
+            _env_file=None,
+            oidc={
+                "providers": [
+                    _oidc_provider(name="github", issuer="https://github.com/login/oauth"),
+                ],
+            },
+        )
+
+
+def test_settings_oidc_allows_extra_provider_when_explicit() -> None:
+    s = Settings(
+        _env_file=None,
+        oidc={
+            "providers": [
+                _oidc_provider(name="github", issuer="https://github.com/login/oauth"),
+            ],
+            "extra_providers_enabled": True,
+        },
+    )
+
+    assert s.oidc.providers[0].is_extra_provider is True
+
+
+def test_settings_oidc_requires_openid_scope() -> None:
+    with pytest.raises(ValueError, match="scopes must include openid"):
+        Settings(
+            _env_file=None,
+            oidc={
+                "providers": [
+                    _oidc_provider(scopes=["profile", "email"]),
+                ],
+            },
+        )
