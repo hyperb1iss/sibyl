@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
+import io
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
@@ -14,6 +17,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from shutil import which
 from typing import Any, cast
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.request import Request, urlopen
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_EVIDENCE_DIR = REPO_ROOT / ".moon/cache/enterprise-readiness-evidence"
@@ -24,6 +30,18 @@ PACKAGE_LOCK_DEPENDENCIES = ("authlib", "pyjwt", "argon2-cffi")
 PACKAGE_LOCK_PATHS = ("apps/api/pyproject.toml", "uv.lock")
 DEFAULT_GITHUB_REPO = "hyperb1iss/sibyl"
 GITHUB_RELEASE_IMAGES = ("api", "web")
+AUDIT_EXPORT_FORMATS = ("csv", "json")
+AUDIT_EXPORT_MAX_LIMIT = 5000
+AUDIT_EXPORT_CSV_COLUMNS = (
+    "created_at",
+    "action",
+    "user_id",
+    "organization_id",
+    "resource",
+    "ip_address",
+    "user_agent",
+    "details",
+)
 SIBYL_HELM_RENDER_ARGS = (
     "template",
     "enterprise",
@@ -288,6 +306,21 @@ def _gh_json_output(args: Sequence[str]) -> JsonObject:
         msg = f"gh {' '.join(args)} JSON root must be an object"
         raise EvidenceFailure(msg)
     return payload
+
+
+def _http_get_bytes(url: str, headers: Mapping[str, str]) -> bytes:
+    request = Request(url, headers=dict(headers), method="GET")  # noqa: S310
+    try:
+        with urlopen(request, timeout=30) as response:  # noqa: S310
+            return response.read()
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        suffix = f": {detail}" if detail else ""
+        msg = f"audit export request failed with HTTP {exc.code}{suffix}"
+        raise EvidenceFailure(msg) from exc
+    except URLError as exc:
+        msg = f"audit export request failed: {exc.reason}"
+        raise EvidenceFailure(msg) from exc
 
 
 def _require_item(
@@ -898,6 +931,179 @@ def capture_github_release_evidence(
     }
 
 
+def capture_audit_export_sample(
+    evidence_dir: Path = DEFAULT_EVIDENCE_DIR,
+    *,
+    api_url: str,
+    access_token: str,
+    export_format: str = "json",
+    limit: int = 1000,
+) -> JsonObject:
+    if export_format not in AUDIT_EXPORT_FORMATS:
+        msg = f"audit export format must be one of {', '.join(AUDIT_EXPORT_FORMATS)}"
+        raise EvidenceFailure(msg)
+    if not access_token.strip():
+        msg = "audit export access token is required"
+        raise EvidenceFailure(msg)
+    if limit < 1 or limit > AUDIT_EXPORT_MAX_LIMIT:
+        msg = f"audit export limit must be between 1 and {AUDIT_EXPORT_MAX_LIMIT}"
+        raise EvidenceFailure(msg)
+
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = evidence_dir / DEFAULT_MANIFEST.name
+    if not manifest_path.exists():
+        write_template(evidence_dir)
+    payload = _load_manifest(manifest_path)
+    items = _manifest_items(payload)
+
+    endpoint_url = _audit_export_url(
+        api_url,
+        export_format=export_format,
+        limit=limit,
+    )
+    body = _http_get_bytes(
+        endpoint_url,
+        {
+            "Accept": "application/json" if export_format == "json" else "text/csv",
+            "Authorization": f"Bearer {access_token}",
+        },
+    )
+    event_count = _validate_audit_export(body, export_format=export_format)
+
+    artifact_dir = evidence_dir / "audit_export_sample"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    export_path = artifact_dir / f"audit-export.{export_format}"
+    receipt_path = artifact_dir / "receipt.md"
+    export_path.write_bytes(body.rstrip() + b"\n")
+    receipt_path.write_text(
+        _audit_export_receipt(
+            endpoint_url=endpoint_url,
+            export_format=export_format,
+            event_count=event_count,
+            limit=limit,
+        ),
+        encoding="utf-8",
+    )
+
+    _update_manifest_item(
+        items=items,
+        key="audit_export_sample",
+        gate="security-review-packet",
+        description="Admin audit JSON or CSV export sample is captured from the target runtime.",
+        artifacts=[
+            _artifact_entry(evidence_dir, receipt_path),
+            _artifact_entry(evidence_dir, export_path),
+        ],
+        notes="Captured from a live admin audit export endpoint.",
+    )
+    manifest_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "status": "PASS",
+        "captured_at": datetime.now(UTC).isoformat(),
+        "manifest": str(manifest_path),
+        "evidence_dir": str(evidence_dir.resolve()),
+        "item": items["audit_export_sample"],
+    }
+
+
+def _audit_export_url(api_url: str, *, export_format: str, limit: int) -> str:
+    raw_url = api_url.strip()
+    if not raw_url:
+        msg = "audit export API URL is required"
+        raise EvidenceFailure(msg)
+
+    parsed = urlsplit(raw_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        msg = f"audit export API URL must be absolute HTTP(S): {api_url}"
+        raise EvidenceFailure(msg)
+
+    path = parsed.path.rstrip("/")
+    if path.endswith("/api/admin/audit/export"):
+        endpoint_path = path
+    elif path.endswith("/api"):
+        endpoint_path = f"{path}/admin/audit/export"
+    elif path:
+        endpoint_path = f"{path}/api/admin/audit/export"
+    else:
+        endpoint_path = "/api/admin/audit/export"
+
+    query_pairs = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key not in {"format", "limit"}
+    ]
+    query_pairs.extend([("format", export_format), ("limit", str(limit))])
+    return urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            endpoint_path,
+            urlencode(query_pairs),
+            "",
+        )
+    )
+
+
+def _validate_audit_export(body: bytes, *, export_format: str) -> int:
+    if not body.strip():
+        msg = "audit export sample is empty"
+        raise EvidenceFailure(msg)
+    if export_format == "json":
+        return _validate_audit_json_export(body)
+    return _validate_audit_csv_export(body)
+
+
+def _validate_audit_json_export(body: bytes) -> int:
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        msg = f"audit JSON export is not valid JSON: {exc}"
+        raise EvidenceFailure(msg) from exc
+    if not isinstance(payload, dict):
+        msg = "audit JSON export root must be an object"
+        raise EvidenceFailure(msg)
+
+    events = payload.get("events")
+    total = payload.get("total")
+    if not isinstance(events, list):
+        msg = "audit JSON export must include an events list"
+        raise EvidenceFailure(msg)
+    if not isinstance(total, int):
+        msg = "audit JSON export must include an integer total"
+        raise EvidenceFailure(msg)
+    if not events:
+        msg = "audit JSON export must include at least one event"
+        raise EvidenceFailure(msg)
+    first_event = events[0]
+    if not isinstance(first_event, dict) or not first_event.get("action"):
+        msg = "audit JSON export events must include an action"
+        raise EvidenceFailure(msg)
+    return len(events)
+
+
+def _validate_audit_csv_export(body: bytes) -> int:
+    text = body.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+    fieldnames = set(reader.fieldnames or [])
+    missing_columns = [column for column in AUDIT_EXPORT_CSV_COLUMNS if column not in fieldnames]
+    if missing_columns:
+        msg = f"audit CSV export is missing required columns: {', '.join(missing_columns)}"
+        raise EvidenceFailure(msg)
+
+    rows = list(reader)
+    if not rows:
+        msg = "audit CSV export must include at least one event"
+        raise EvidenceFailure(msg)
+    if not rows[0].get("action"):
+        msg = "audit CSV export events must include an action"
+        raise EvidenceFailure(msg)
+    return len(rows)
+
+
 def _manifest_items(payload: JsonObject) -> dict[str, object]:
     schema_version = payload.get("schema_version")
     if schema_version != SCHEMA_VERSION:
@@ -1195,6 +1401,31 @@ def _github_cosign_receipt(
     return "\n".join(lines) + "\n"
 
 
+def _audit_export_receipt(
+    *,
+    endpoint_url: str,
+    export_format: str,
+    event_count: int,
+    limit: int,
+) -> str:
+    return f"""# audit_export_sample
+
+- Gate: security-review-packet
+- Status: PASS
+- Required proof: Admin audit JSON or CSV export sample is captured from the target runtime.
+- Captured at: {datetime.now(UTC).isoformat()}
+- Captured by: enterprise_readiness_evidence.py
+- Runtime or environment: live Sibyl admin audit endpoint
+- Export URL: {endpoint_url}
+- Export format: {export_format}
+- Export limit: {limit}
+- Observed result: audit export sample captured with {event_count} event(s).
+- Redactions: bearer token omitted
+- Related artifact paths:
+  - audit_export_sample/audit-export.{export_format}
+"""
+
+
 def build_template_payload() -> JsonObject:
     return {
         "schema_version": SCHEMA_VERSION,
@@ -1385,6 +1616,30 @@ def _handle_github_release_capture(
     return 0
 
 
+def _handle_audit_export_capture(
+    evidence_dir: Path | None,
+    *,
+    api_url: str,
+    token_env: str,
+    export_format: str,
+    limit: int,
+) -> int:
+    try:
+        receipt = capture_audit_export_sample(
+            DEFAULT_EVIDENCE_DIR if evidence_dir is None else evidence_dir,
+            api_url=api_url,
+            access_token=os.environ.get(token_env, ""),
+            export_format=export_format,
+            limit=limit,
+        )
+    except EvidenceFailure as exc:
+        sys.stdout.write(f"{exc}\n")
+        return 1
+    sys.stdout.write("captured audit export sample evidence\n")
+    sys.stdout.write(f"manifest: {receipt['manifest']}\n")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
@@ -1398,6 +1653,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--capture-rendered-helm-manifests", action="store_true")
     parser.add_argument("--capture-github-release-evidence")
     parser.add_argument("--github-repo", default=DEFAULT_GITHUB_REPO)
+    parser.add_argument("--capture-audit-export-sample")
+    parser.add_argument("--audit-export-format", choices=AUDIT_EXPORT_FORMATS, default="json")
+    parser.add_argument("--audit-export-limit", type=int, default=1000)
+    parser.add_argument("--audit-export-token-env", default="SIBYL_ACCESS_TOKEN")
     parser.add_argument("--head-ref", default="HEAD")
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args(argv)
@@ -1424,6 +1683,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.evidence_dir,
             run_id=args.capture_github_release_evidence,
             repo=args.github_repo,
+        )
+    elif args.capture_audit_export_sample is not None:
+        exit_code = _handle_audit_export_capture(
+            args.evidence_dir,
+            api_url=args.capture_audit_export_sample,
+            token_env=args.audit_export_token_env,
+            export_format=args.audit_export_format,
+            limit=args.audit_export_limit,
         )
     else:
         exit_code = run_gate(

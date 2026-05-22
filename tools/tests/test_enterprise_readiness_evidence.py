@@ -45,6 +45,10 @@ def _write_manifest(evidence_dir: Path, payload: dict[str, Any]) -> Path:
     return manifest_path
 
 
+def _test_access_token() -> str:
+    return "-".join(("secret", "token"))
+
+
 def _root_task(task_id: str) -> dict[str, Any]:
     moon = which("moon")
     assert moon is not None
@@ -575,3 +579,94 @@ def test_capture_github_release_evidence_rejects_missing_sign_job(
         evidence.capture_github_release_evidence(tmp_path, run_id="12345")
 
     assert "GitHub run is missing required job: ◆ Docker: Sign web" in str(exc_info.value)
+
+
+def test_capture_audit_export_sample_updates_manifest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def fake_http_get_bytes(url: str, headers: dict[str, str]) -> bytes:
+        assert url == "https://sibyl.example.com/api/admin/audit/export?format=json&limit=25"
+        assert headers["Authorization"] == "Bearer secret-token"
+        return json.dumps(
+            {
+                "events": [
+                    {
+                        "action": "auth.login",
+                        "created_at": "2026-05-22T12:00:00Z",
+                        "id": "audit-1",
+                    }
+                ],
+                "has_more": False,
+                "limit": 25,
+                "offset": 0,
+                "total": 1,
+            }
+        ).encode()
+
+    monkeypatch.setattr(evidence, "_http_get_bytes", fake_http_get_bytes)
+    access_token = _test_access_token()
+
+    receipt = evidence.capture_audit_export_sample(
+        tmp_path,
+        api_url="https://sibyl.example.com/api",
+        access_token=access_token,
+        export_format="json",
+        limit=25,
+    )
+    manifest_path = Path(str(receipt["manifest"]))
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    item = payload["items"]["audit_export_sample"]
+
+    assert item["status"] == "PASS"
+    assert item["artifacts"][0]["path"] == "audit_export_sample/receipt.md"
+    assert item["artifacts"][1]["path"] == "audit_export_sample/audit-export.json"
+    export = tmp_path / "audit_export_sample" / "audit-export.json"
+    receipt_file = tmp_path / "audit_export_sample" / "receipt.md"
+    assert "auth.login" in export.read_text(encoding="utf-8")
+    assert "secret-token" not in receipt_file.read_text(encoding="utf-8")
+
+
+def test_capture_audit_export_sample_rejects_empty_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        evidence,
+        "_http_get_bytes",
+        lambda url, headers: b'{"events": [], "total": 0, "limit": 1000, "offset": 0}',
+    )
+
+    with pytest.raises(evidence.EvidenceFailure) as exc_info:
+        evidence.capture_audit_export_sample(
+            tmp_path,
+            api_url="https://sibyl.example.com",
+            access_token=_test_access_token(),
+        )
+
+    assert "audit JSON export must include at least one event" in str(exc_info.value)
+
+
+def test_capture_audit_export_sample_accepts_csv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    csv_body = (
+        "created_at,action,user_id,organization_id,resource,ip_address,user_agent,details\n"
+        "2026-05-22T12:00:00Z,memory.recall,user,org,project:sibyl,127.0.0.1,curl,{}\n"
+    )
+    monkeypatch.setattr(
+        evidence,
+        "_http_get_bytes",
+        lambda url, headers: csv_body.encode(),
+    )
+
+    receipt = evidence.capture_audit_export_sample(
+        tmp_path,
+        api_url="https://sibyl.example.com/api/admin/audit/export?resource=project:sibyl",
+        access_token=_test_access_token(),
+        export_format="csv",
+    )
+    manifest_path = Path(str(receipt["manifest"]))
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    item = payload["items"]["audit_export_sample"]
+
+    assert item["status"] == "PASS"
+    assert item["artifacts"][1]["path"] == "audit_export_sample/audit-export.csv"
