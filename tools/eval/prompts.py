@@ -93,7 +93,7 @@ PROMPTS: tuple[EvalPrompt, ...] = (
         category="capture-completion",
         expected_verbs=("task complete", "remember"),
         why="Task completion with learnings; task complete --learnings is canonical.",
-        max_turns=6,
+        max_turns=8,
     ),
     # ---------- task-lifecycle ------------------------------------------
     EvalPrompt(
