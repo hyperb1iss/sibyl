@@ -172,6 +172,7 @@ class RawQueryFunc(Protocol):
 class IssuedAuthSession:
     user: SimpleNamespace
     organization: SimpleNamespace
+    session_id: UUID
     access_token: str
     refresh_token: str
     refresh_expires: datetime
@@ -1161,6 +1162,7 @@ async def _issue_auth_session(
     return IssuedAuthSession(
         user=user,
         organization=organization,
+        session_id=session_id,
         access_token=access_token,
         refresh_token=refresh_token,
         refresh_expires=refresh_expires,
@@ -1598,6 +1600,29 @@ async def signup_local_user(*, email: str, password: str, name: str, request):
             request=request,
             action="auth.local.signup",
             details={"email": user.email},
+        )
+
+
+async def delete_failed_local_signup_user(*, user_id: UUID, organization_id: UUID | None) -> None:
+    async with _auth_client_scope() as client:
+        await client.execute_query(
+            "DELETE FROM user_sessions WHERE user_id = $user_id;",
+            user_id=str(user_id),
+        )
+        if organization_id is not None:
+            await client.execute_query(
+                "DELETE FROM organization_members "
+                "WHERE user_id = $user_id AND organization_id = $organization_id;",
+                user_id=str(user_id),
+                organization_id=str(organization_id),
+            )
+            await client.execute_query(
+                "DELETE FROM organizations WHERE uuid = $organization_id AND is_personal = true;",
+                organization_id=str(organization_id),
+            )
+        await client.execute_query(
+            "DELETE FROM users WHERE uuid = $user_id;",
+            user_id=str(user_id),
         )
 
 
@@ -3821,6 +3846,7 @@ __all__ = [
     "create_project_record",
     "create_session_record",
     "delete_project_record",
+    "delete_failed_local_signup_user",
     "deny_device_authorization",
     "ensure_personal_organization",
     "exchange_device_code",

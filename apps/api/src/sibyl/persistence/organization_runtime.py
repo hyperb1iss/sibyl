@@ -42,7 +42,12 @@ if TYPE_CHECKING:
 
     class AcceptOrgInvitation(Protocol):
         def __call__(
-            self, *, token: str, user: InvitationUser, request: Request
+            self,
+            *,
+            token: str,
+            user: InvitationUser,
+            request: Request,
+            existing_session_id: UUID | None = None,
         ) -> Awaitable[InvitationAcceptance]: ...
 
     class AddOrgMember(Protocol):
@@ -178,6 +183,9 @@ if TYPE_CHECKING:
             role: ProjectRole,
         ) -> Awaitable[ProjectMemberChange]: ...
 
+    class ValidateOrgInvitationForSignup(Protocol):
+        def __call__(self, *, token: str, email: str) -> Awaitable[InvitationRecord]: ...
+
     accept_org_invitation: AcceptOrgInvitation
     add_org_member: AddOrgMember
     add_project_member: AddProjectMember
@@ -197,6 +205,7 @@ if TYPE_CHECKING:
     update_org: UpdateOrg
     update_org_member_role: UpdateOrgMemberRole
     update_project_member_role: UpdateProjectMemberRole
+    validate_org_invitation_for_signup: ValidateOrgInvitationForSignup
 
 _BACKEND_EXPORTS = [
     "accept_org_invitation",
@@ -218,6 +227,7 @@ _BACKEND_EXPORTS = [
     "update_org",
     "update_org_member_role",
     "update_project_member_role",
+    "validate_org_invitation_for_signup",
 ]
 
 _BACKEND_MODULES = ("sibyl.persistence.surreal.organization_runtime",)
@@ -243,6 +253,7 @@ __all__ = [
     "update_org",
     "update_org_member_role",
     "update_project_member_role",
+    "validate_org_invitation_for_signup",
 ]
 
 can_manage_project_members = _can_manage_project_members

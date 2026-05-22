@@ -36,6 +36,7 @@ async def test_get_setup_status_skips_provider_validation(
     assert response.has_users is False
     assert response.has_orgs is False
     assert response.setup_complete is False
+    assert response.public_signups_enabled is False
     assert response.openai_configured is True
     assert response.anthropic_configured is False
     assert response.gemini_configured is True

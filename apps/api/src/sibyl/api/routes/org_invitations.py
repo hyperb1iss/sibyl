@@ -79,6 +79,7 @@ async def list_invitations(
                 "role": invite.role.value,
                 "created_at": invite.created_at,
                 "expires_at": invite.expires_at,
+                "accept_url": invite.accept_url,
             }
             for invite in invites
         ]

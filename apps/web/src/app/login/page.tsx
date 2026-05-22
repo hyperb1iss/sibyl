@@ -8,6 +8,14 @@ import { useSetupStatus } from '@/lib/hooks';
 
 type AuthMode = 'signin' | 'signup';
 
+const ERROR_MESSAGES: Record<string, string> = {
+  account_conflict: 'Could not create that account.',
+  authentication_failed: 'Authentication failed. Please try again.',
+  invalid_credentials: 'Invalid email or password.',
+  invalid_invitation: 'Invitation is not valid for this account.',
+  signup_disabled: 'Account creation requires an invitation.',
+};
+
 /**
  * Validate redirect URL to prevent open redirect attacks.
  * Only allows relative URLs (starting with /).
@@ -41,6 +49,7 @@ function LoginContent() {
   const searchParams = useSearchParams();
   const rawNext = searchParams.get('next');
   const error = searchParams.get('error');
+  const inviteToken = searchParams.get('invite');
   const setupComplete = searchParams.get('setup') === 'complete';
   const next = getSafeRedirect(rawNext);
 
@@ -55,6 +64,23 @@ function LoginContent() {
       router.replace('/setup');
     }
   }, [setupStatus, router]);
+
+  const allowSignup = Boolean(setupStatus?.public_signups_enabled || inviteToken);
+  const errorMessage = error
+    ? (ERROR_MESSAGES[error] ?? 'Something went wrong. Please try again.')
+    : null;
+
+  useEffect(() => {
+    if (inviteToken) {
+      setMode('signup');
+    }
+  }, [inviteToken]);
+
+  useEffect(() => {
+    if (!allowSignup) {
+      setMode('signin');
+    }
+  }, [allowSignup]);
 
   // Show loading while checking setup status
   if (isCheckingSetup || setupStatus?.needs_setup) {
@@ -94,40 +120,46 @@ function LoginContent() {
       <div className="w-full max-w-sm animate-slide-up">
         <div className="bg-sc-bg-elevated rounded-2xl border border-sc-fg-subtle/20 shadow-card-elevated overflow-hidden">
           {/* Tab Switcher */}
-          <div className="flex border-b border-sc-fg-subtle/10">
-            <button
-              type="button"
-              onClick={() => setMode('signin')}
-              className={`flex-1 py-3 text-sm font-medium transition-all duration-200 relative ${
-                mode === 'signin'
-                  ? 'text-sc-fg-primary'
-                  : 'text-sc-fg-muted hover:text-sc-fg-secondary'
-              }`}
-            >
+          {allowSignup ? (
+            <div className="flex border-b border-sc-fg-subtle/10">
+              <button
+                type="button"
+                onClick={() => setMode('signin')}
+                className={`flex-1 py-3 text-sm font-medium transition-all duration-200 relative ${
+                  mode === 'signin'
+                    ? 'text-sc-fg-primary'
+                    : 'text-sc-fg-muted hover:text-sc-fg-secondary'
+                }`}
+              >
+                Sign In
+                <span
+                  className={`absolute bottom-0 left-0 right-0 h-0.5 bg-sc-purple transition-transform duration-300 origin-left ${
+                    mode === 'signin' ? 'scale-x-100' : 'scale-x-0'
+                  }`}
+                />
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('signup')}
+                className={`flex-1 py-3 text-sm font-medium transition-all duration-200 relative ${
+                  mode === 'signup'
+                    ? 'text-sc-fg-primary'
+                    : 'text-sc-fg-muted hover:text-sc-fg-secondary'
+                }`}
+              >
+                Create Account
+                <span
+                  className={`absolute bottom-0 left-0 right-0 h-0.5 bg-sc-purple transition-transform duration-300 origin-right ${
+                    mode === 'signup' ? 'scale-x-100' : 'scale-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          ) : (
+            <div className="border-b border-sc-fg-subtle/10 py-3 text-center text-sm font-medium text-sc-fg-primary">
               Sign In
-              <span
-                className={`absolute bottom-0 left-0 right-0 h-0.5 bg-sc-purple transition-transform duration-300 origin-left ${
-                  mode === 'signin' ? 'scale-x-100' : 'scale-x-0'
-                }`}
-              />
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('signup')}
-              className={`flex-1 py-3 text-sm font-medium transition-all duration-200 relative ${
-                mode === 'signup'
-                  ? 'text-sc-fg-primary'
-                  : 'text-sc-fg-muted hover:text-sc-fg-secondary'
-              }`}
-            >
-              Create Account
-              <span
-                className={`absolute bottom-0 left-0 right-0 h-0.5 bg-sc-purple transition-transform duration-300 origin-right ${
-                  mode === 'signup' ? 'scale-x-100' : 'scale-x-0'
-                }`}
-              />
-            </button>
-          </div>
+            </div>
+          )}
 
           {/* Form Content - Fixed height container to prevent layout shift */}
           <div className="p-6">
@@ -136,9 +168,14 @@ function LoginContent() {
                 Setup complete! Sign in to get started.
               </div>
             )}
-            {error && (
+            {errorMessage && (
               <div className="mb-4 text-sm px-3 py-2 rounded-lg border border-sc-red/30 bg-sc-red/10 text-sc-red animate-shake">
-                {error === 'invalid_credentials' ? 'Invalid email or password.' : error}
+                {errorMessage}
+              </div>
+            )}
+            {inviteToken && !errorMessage && (
+              <div className="mb-4 text-sm px-3 py-2 rounded-lg border border-sc-cyan/30 bg-sc-cyan/10 text-sc-cyan">
+                Invitation ready.
               </div>
             )}
 
@@ -151,17 +188,19 @@ function LoginContent() {
                     : 'opacity-0 -translate-x-4 pointer-events-none'
                 }`}
               >
-                <SignInForm next={next} />
+                <SignInForm next={next} inviteToken={inviteToken} />
               </div>
-              <div
-                className={`absolute inset-0 transition-all duration-300 ${
-                  mode === 'signup'
-                    ? 'opacity-100 translate-x-0 pointer-events-auto'
-                    : 'opacity-0 translate-x-4 pointer-events-none'
-                }`}
-              >
-                <SignUpForm next={next} />
-              </div>
+              {allowSignup && (
+                <div
+                  className={`absolute inset-0 transition-all duration-300 ${
+                    mode === 'signup'
+                      ? 'opacity-100 translate-x-0 pointer-events-auto'
+                      : 'opacity-0 translate-x-4 pointer-events-none'
+                  }`}
+                >
+                  <SignUpForm next={next} inviteToken={inviteToken} />
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -173,10 +212,11 @@ function LoginContent() {
 const inputClasses =
   'w-full px-3 py-2.5 rounded-lg bg-sc-bg-base border border-sc-fg-subtle/20 text-sc-fg-primary placeholder:text-sc-fg-subtle/50 focus:outline-none focus:border-sc-purple/60 focus:ring-2 focus:ring-sc-purple/20 transition-all duration-200';
 
-function SignInForm({ next }: { next: string | null }) {
+function SignInForm({ next, inviteToken }: { next: string | null; inviteToken: string | null }) {
   return (
     <form action="/api/auth/local/login" method="post" className="h-full relative pb-14">
       <input type="hidden" name="redirect" value={next || '/'} />
+      {inviteToken && <input type="hidden" name="invite_token" value={inviteToken} />}
 
       <div className="space-y-4">
         <div className="space-y-1.5">
@@ -240,10 +280,11 @@ function SignInForm({ next }: { next: string | null }) {
   );
 }
 
-function SignUpForm({ next }: { next: string | null }) {
+function SignUpForm({ next, inviteToken }: { next: string | null; inviteToken: string | null }) {
   return (
     <form action="/api/auth/local/signup" method="post" className="h-full relative pb-14">
       <input type="hidden" name="redirect" value={next || '/'} />
+      {inviteToken && <input type="hidden" name="invite_token" value={inviteToken} />}
 
       <div className="space-y-4">
         <div className="space-y-1.5">

@@ -37,6 +37,9 @@ class SetupStatus(BaseModel):
     setup_complete: bool = Field(
         description="True if an owner/admin organization has been initialized"
     )
+    public_signups_enabled: bool = Field(
+        description="True when post-setup self-serve account creation is enabled"
+    )
     openai_configured: bool = Field(description="True if OpenAI API key is set")
     anthropic_configured: bool = Field(description="True if Anthropic API key is set")
     gemini_configured: bool = Field(description="True if Gemini API key is set")
@@ -167,6 +170,7 @@ async def get_setup_status(
         has_users=setup_status.has_users,
         has_orgs=setup_status.has_orgs,
         setup_complete=setup_status.setup_complete,
+        public_signups_enabled=settings.public_signups_enabled,
         openai_configured=openai_configured,
         anthropic_configured=anthropic_configured,
         gemini_configured=gemini_configured,

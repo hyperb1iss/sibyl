@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 from urllib.parse import quote, urlencode, urlparse
 from uuid import UUID
 
@@ -22,9 +23,11 @@ from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import JwtError, verify_refresh_token
 from sibyl.auth.oauth_state import OAuthStateError, issue_state, verify_state
 from sibyl.auth.primitives import DeviceTokenError, normalize_user_code
+from sibyl.persistence import organization_runtime
 from sibyl.persistence.auth_runtime import (
     approve_device_authorization,
     create_api_key_for_user,
+    delete_failed_local_signup_user,
     deny_device_authorization,
     exchange_device_code,
     get_device_request_by_user_code,
@@ -43,6 +46,7 @@ from sibyl.persistence.auth_runtime import (
     start_device_authorization,
     update_auth_user,
 )
+from sibyl.persistence.operations_runtime import is_setup_mode
 from sibyl_core.auth import AuthUser, GitHubUserIdentity
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -54,6 +58,11 @@ GITHUB_API_URL = "https://api.github.com"
 ACCESS_TOKEN_COOKIE = "sibyl_access_token"  # noqa: S105
 REFRESH_TOKEN_COOKIE = "sibyl_refresh_token"  # noqa: S105
 OAUTH_STATE_COOKIE = "sibyl_oauth_state"
+INVALID_INVITATION_DETAIL = "Invitation is not valid for this account"
+SIGNUP_DISABLED_DETAIL = {
+    "code": "signup_disabled",
+    "message": "Public signups are disabled. Ask an admin for an invitation.",
+}
 
 
 class ApiKeyCreateRequest(BaseModel):
@@ -157,14 +166,17 @@ def _safe_frontend_redirect(redirect_value: str | None) -> str:
     return config_module.settings.frontend_url
 
 
-def _frontend_login_url(*, error: str | None = None) -> str:
+def _frontend_login_url(*, error: str | None = None, invite_token: str | None = None) -> str:
     base = config_module.settings.frontend_url
     parsed = urlparse(base)
     origin = f"{parsed.scheme}://{parsed.netloc}"
-    url = origin + "/login"
+    params: dict[str, str] = {}
     if error:
-        url += f"?error={quote(error)}"
-    return url
+        params["error"] = error
+    if invite_token:
+        params["invite"] = invite_token
+    query = f"?{urlencode(params, quote_via=quote)}" if params else ""
+    return origin + "/login" + query
 
 
 async def _read_auth_payload(request: Request) -> dict[str, str]:
@@ -196,12 +208,128 @@ class LocalSignupRequest(BaseModel):
     password: str = Field(..., min_length=8, max_length=1024)
     name: str = Field(..., min_length=1, max_length=255)
     redirect: str | None = None
+    invite_token: str | None = Field(default=None, min_length=1, max_length=512)
 
 
 class LocalLoginRequest(BaseModel):
     email: str = Field(..., min_length=3, max_length=255)
     password: str = Field(..., min_length=1, max_length=1024)
     redirect: str | None = None
+    invite_token: str | None = Field(default=None, min_length=1, max_length=512)
+
+
+class IssuedOrganization(Protocol):
+    id: object
+    slug: object
+    name: object
+
+
+class IssuedUser(Protocol):
+    id: UUID
+    email: object
+    name: object
+
+
+class IssuedSession(Protocol):
+    user: IssuedUser
+    organization: IssuedOrganization
+    session_id: UUID
+    access_token: str
+    refresh_token: str
+    refresh_expires: datetime
+
+
+def _auth_payload_invite_token(body_token: str | None) -> str | None:
+    token = body_token
+    token = (token or "").strip()
+    return token or None
+
+
+def _auth_payload_has_redirect(body_redirect: str | None, request: Request) -> bool:
+    return body_redirect is not None or request.query_params.get("redirect") is not None
+
+
+def _auth_error_code(detail: object) -> str:
+    if isinstance(detail, dict):
+        code = detail.get("code")
+        if code:
+            return str(code)
+    if str(detail) == INVALID_INVITATION_DETAIL:
+        return "invalid_invitation"
+    return "authentication_failed"
+
+
+async def _validate_invitation_for_email(*, token: str | None, email: str) -> None:
+    if token is None:
+        return
+    await organization_runtime.validate_org_invitation_for_signup(
+        token=token,
+        email=email,
+    )
+
+
+async def _require_signup_allowed(
+    *,
+    body: LocalSignupRequest,
+) -> str | None:
+    invite_token = _auth_payload_invite_token(body.invite_token)
+    if invite_token is not None:
+        await _validate_invitation_for_email(token=invite_token, email=body.email)
+        return invite_token
+    if config_module.settings.public_signups_enabled or await is_setup_mode():
+        return None
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=SIGNUP_DISABLED_DETAIL)
+
+
+def _organization_payload(organization: IssuedOrganization) -> dict[str, str]:
+    return {
+        "id": str(organization.id),
+        "slug": str(organization.slug),
+        "name": str(organization.name),
+    }
+
+
+async def _apply_invitation_to_issued_session(
+    *,
+    issued: IssuedSession,
+    invite_token: str | None,
+    request: Request,
+    cleanup_new_user_on_failure: bool = False,
+) -> tuple[str, str, datetime, dict[str, str]]:
+    if invite_token is None:
+        return (
+            issued.access_token,
+            issued.refresh_token,
+            issued.refresh_expires,
+            _organization_payload(issued.organization),
+        )
+
+    try:
+        accepted = await organization_runtime.accept_org_invitation(
+            token=invite_token,
+            user=issued.user,
+            request=request,
+            existing_session_id=issued.session_id,
+        )
+    except HTTPException:
+        if cleanup_new_user_on_failure:
+            await delete_failed_local_signup_user(
+                user_id=issued.user.id,
+                organization_id=UUID(str(issued.organization.id)),
+            )
+        else:
+            await revoke_access_session(issued.access_token)
+        raise
+    return (
+        accepted.access_token,
+        accepted.refresh_token,
+        accepted.refresh_expires,
+        {
+            "id": str(accepted.organization_id),
+            "slug": accepted.organization_slug or "",
+            "name": accepted.organization_name or "",
+        },
+    )
 
 
 class DeviceStartRequest(BaseModel):
@@ -364,34 +492,55 @@ async def local_signup(request: Request):
     _ = _require_jwt_secret()
     data = await _read_auth_payload(request)
     body = LocalSignupRequest.model_validate(data)
+    invite_token = _auth_payload_invite_token(body.invite_token)
+    has_redirect = _auth_payload_has_redirect(body.redirect, request)
 
     try:
+        invite_token = await _require_signup_allowed(body=body)
         issued = await signup_local_user(
             email=body.email,
             password=body.password,
             name=body.name,
             request=request,
         )
-    except ValueError as e:
-        if body.redirect is not None or request.query_params.get("redirect") is not None:
+        access_token, refresh_token, refresh_expires, organization = (
+            await _apply_invitation_to_issued_session(
+                issued=issued,
+                invite_token=invite_token,
+                request=request,
+                cleanup_new_user_on_failure=True,
+            )
+        )
+    except HTTPException as e:
+        if has_redirect:
             return RedirectResponse(
-                url=_frontend_login_url(error=str(e)),
+                url=_frontend_login_url(
+                    error=_auth_error_code(e.detail),
+                    invite_token=invite_token,
+                ),
+                status_code=status.HTTP_302_FOUND,
+            )
+        raise
+    except ValueError as e:
+        if has_redirect:
+            return RedirectResponse(
+                url=_frontend_login_url(error="account_conflict", invite_token=invite_token),
                 status_code=status.HTTP_302_FOUND,
             )
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
 
     redirect = _safe_frontend_redirect(body.redirect or request.query_params.get("redirect"))
     response: Response
-    if body.redirect is not None or request.query_params.get("redirect") is not None:
+    if has_redirect:
         response = RedirectResponse(url=redirect, status_code=status.HTTP_302_FOUND)
     else:
         response = Response(status_code=status.HTTP_201_CREATED)
 
     _set_auth_cookies(
         response,
-        access_token=issued.access_token,
-        refresh_token=issued.refresh_token,
-        refresh_expires=issued.refresh_expires,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        refresh_expires=refresh_expires,
     )
     if isinstance(response, RedirectResponse):
         return response
@@ -401,13 +550,9 @@ async def local_signup(request: Request):
             "email": issued.user.email,
             "name": issued.user.name,
         },
-        "organization": {
-            "id": str(issued.organization.id),
-            "slug": issued.organization.slug,
-            "name": issued.organization.name,
-        },
-        "access_token": issued.access_token,
-        "refresh_token": issued.refresh_token,
+        "organization": organization,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
         "expires_in": config_module.settings.access_token_expire_minutes * 60,
     }
 
@@ -418,6 +563,21 @@ async def local_login(request: Request):
     _ = _require_jwt_secret()
     data = await _read_auth_payload(request)
     body = LocalLoginRequest.model_validate(data)
+    invite_token = _auth_payload_invite_token(body.invite_token)
+    has_redirect = _auth_payload_has_redirect(body.redirect, request)
+
+    try:
+        await _validate_invitation_for_email(token=invite_token, email=body.email)
+    except HTTPException as e:
+        if has_redirect:
+            return RedirectResponse(
+                url=_frontend_login_url(
+                    error=_auth_error_code(e.detail),
+                    invite_token=invite_token,
+                ),
+                status_code=status.HTTP_302_FOUND,
+            )
+        raise
 
     issued = await login_local_user(
         email=body.email,
@@ -425,25 +585,44 @@ async def local_login(request: Request):
         request=request,
     )
     if issued is None:
-        if body.redirect is not None or request.query_params.get("redirect") is not None:
+        if has_redirect:
             return RedirectResponse(
-                url=_frontend_login_url(error="invalid_credentials"),
+                url=_frontend_login_url(error="invalid_credentials", invite_token=invite_token),
                 status_code=status.HTTP_302_FOUND,
             )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
+    try:
+        access_token, refresh_token, refresh_expires, organization = (
+            await _apply_invitation_to_issued_session(
+                issued=issued,
+                invite_token=invite_token,
+                request=request,
+            )
+        )
+    except HTTPException as e:
+        if has_redirect:
+            return RedirectResponse(
+                url=_frontend_login_url(
+                    error=_auth_error_code(e.detail),
+                    invite_token=invite_token,
+                ),
+                status_code=status.HTTP_302_FOUND,
+            )
+        raise
+
     redirect = _safe_frontend_redirect(body.redirect or request.query_params.get("redirect"))
     response: Response
-    if body.redirect is not None or request.query_params.get("redirect") is not None:
+    if has_redirect:
         response = RedirectResponse(url=redirect, status_code=status.HTTP_302_FOUND)
     else:
         response = Response(status_code=status.HTTP_200_OK)
 
     _set_auth_cookies(
         response,
-        access_token=issued.access_token,
-        refresh_token=issued.refresh_token,
-        refresh_expires=issued.refresh_expires,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        refresh_expires=refresh_expires,
     )
     if isinstance(response, RedirectResponse):
         return response
@@ -453,13 +632,9 @@ async def local_login(request: Request):
             "email": issued.user.email,
             "name": issued.user.name,
         },
-        "organization": {
-            "id": str(issued.organization.id),
-            "slug": issued.organization.slug,
-            "name": issued.organization.name,
-        },
-        "access_token": issued.access_token,
-        "refresh_token": issued.refresh_token,
+        "organization": organization,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
         "expires_in": config_module.settings.access_token_expire_minutes * 60,
     }
 

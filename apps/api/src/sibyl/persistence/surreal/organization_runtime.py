@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -36,6 +37,7 @@ from sibyl_core.auth import AuthUser, OrganizationRole, ProjectRole
 log = structlog.get_logger()
 type SurrealRecord = dict[str, object]
 _OWNER_ROLE_DETAIL = "Only organization owners can manage owner roles"
+_INVALID_INVITATION_DETAIL = "Invitation is not valid for this account"
 
 
 def _project_not_found_detail(project_id: str) -> str:
@@ -211,11 +213,16 @@ def _invitation_from_record(
         created_at=_coerce_datetime(record.get("created_at")),
         expires_at=_coerce_datetime(record.get("expires_at")),
     )
-    if include_accept_url:
+    raw_token = record.get("token")
+    if include_accept_url and isinstance(raw_token, str) and raw_token:
         invitation.accept_url = (
-            f"{config_module.settings.server_url}/api/invitations/{record['token']}/accept"
+            f"{config_module.settings.server_url}/api/invitations/{raw_token}/accept"
         )
     return invitation
+
+
+def _hash_invitation_token(token: str) -> str:
+    return hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
 
 
 @asynccontextmanager
@@ -230,6 +237,7 @@ async def _rotate_or_create_org_session(
     request: Request,
     user_id: UUID,
     organization_id: UUID,
+    existing_session_id: UUID | None = None,
 ) -> tuple[str, str, datetime]:
     current = select_access_token(
         authorization=request.headers.get("authorization"),
@@ -240,7 +248,12 @@ async def _rotate_or_create_org_session(
         minutes=config_module.settings.access_token_expire_minutes
     )
     sessions = SurrealSessionRepository.from_client(client)
-    existing = await sessions.get_session_by_token(current) if current else None
+    if existing_session_id is not None:
+        existing = await sessions.get_session_by_id(existing_session_id)
+        if existing is not None and existing.user_id != user_id:
+            existing = None
+    else:
+        existing = await sessions.get_session_by_token(current) if current else None
     session_id = existing.id if existing is not None else uuid4()
     access_token = create_access_token(
         user_id=user_id,
@@ -539,14 +552,14 @@ async def _load_invitation_accept_records(
             RETURN {
                 invitation: (
                     SELECT * FROM organization_invitations
-                    WHERE token = $token
+                    WHERE token_hash = $token_hash OR token = $token
                     LIMIT 1
                 )[0],
                 organization: (
                     SELECT * FROM organizations
                     WHERE uuid IN (
                         SELECT VALUE organization_id FROM organization_invitations
-                        WHERE token = $token
+                        WHERE token_hash = $token_hash OR token = $token
                         LIMIT 1
                     )
                     LIMIT 1
@@ -555,7 +568,7 @@ async def _load_invitation_accept_records(
                     SELECT * FROM organization_members
                     WHERE organization_id IN (
                         SELECT VALUE organization_id FROM organization_invitations
-                        WHERE token = $token
+                        WHERE token_hash = $token_hash OR token = $token
                         LIMIT 1
                     )
                         AND user_id = $user_id
@@ -565,12 +578,12 @@ async def _load_invitation_accept_records(
                     SELECT * FROM organization_members
                     WHERE organization_id IN (
                         SELECT VALUE organization_id FROM organization_invitations
-                        WHERE token = $token
+                        WHERE token_hash = $token_hash OR token = $token
                         LIMIT 1
                     )
                         AND user_id IN (
                             SELECT VALUE created_by_user_id FROM organization_invitations
-                            WHERE token = $token
+                            WHERE token_hash = $token_hash OR token = $token
                             LIMIT 1
                         )
                     LIMIT 1
@@ -578,6 +591,7 @@ async def _load_invitation_accept_records(
             };
         """,
         token=token,
+        token_hash=_hash_invitation_token(token),
         user_id=str(user_id),
     )
     payload = _record_payload(payload)
@@ -587,6 +601,32 @@ async def _load_invitation_accept_records(
         _normalize_record(payload.get("membership")),
         _normalize_record(payload.get("creator_membership")),
     )
+
+
+def _require_usable_invitation(invite: SurrealRecord | None, *, email: str | None) -> None:
+    if invite is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_INVALID_INVITATION_DETAIL,
+        )
+
+    if invite.get("accepted_at") is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_INVALID_INVITATION_DETAIL,
+        )
+    expires_at = _coerce_datetime(invite.get("expires_at"))
+    if expires_at is not None and expires_at < _utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_INVALID_INVITATION_DETAIL,
+        )
+    invited_email = str(invite.get("invited_email") or "").strip().lower()
+    if not invited_email or (email or "").strip().lower() != invited_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_INVALID_INVITATION_DETAIL,
+        )
 
 
 async def list_orgs(*, user_id: UUID) -> list[OrgSummary]:
@@ -1314,10 +1354,47 @@ async def list_org_invitations(
             )
         )
         return [
-            _invitation_from_record(record)
+            _invitation_from_record(record, include_accept_url=False)
             for record in records
             if record.get("accepted_at") is None
         ]
+
+
+async def validate_org_invitation_for_signup(*, token: str, email: str) -> InvitationRecord:
+    async with _auth_client_scope() as client:
+        records = _normalize_records(
+            await client.execute_query(
+                "SELECT * FROM organization_invitations "
+                "WHERE token_hash = $token_hash OR token = $token LIMIT 1;",
+                token=token.strip(),
+                token_hash=_hash_invitation_token(token),
+            )
+        )
+        invite = records[0] if records else None
+        _require_usable_invitation(invite, email=email)
+        assert invite is not None
+        role = OrganizationRole(str(invite.get("invited_role") or OrganizationRole.MEMBER.value))
+        if role is OrganizationRole.OWNER:
+            creator_membership = _normalize_records(
+                await client.execute_query(
+                    "SELECT * FROM organization_members "
+                    "WHERE organization_id = $organization_id "
+                    "AND user_id = $user_id LIMIT 1;",
+                    organization_id=str(invite.get("organization_id") or ""),
+                    user_id=str(invite.get("created_by_user_id") or ""),
+                )
+            )
+            creator_role = OrganizationRole(
+                str(
+                    (creator_membership[0] if creator_membership else {}).get("role")
+                    or OrganizationRole.MEMBER.value
+                )
+            )
+            _enforce_owner_role_boundary(
+                actor_role=creator_role,
+                requested_role=OrganizationRole.OWNER,
+            )
+        return _invitation_from_record(invite, include_accept_url=False)
 
 
 async def create_org_invitation(
@@ -1333,12 +1410,13 @@ async def create_org_invitation(
     _enforce_owner_role_boundary(actor_role=membership.role, requested_role=role)
     async with _auth_client_scope() as client:
         now = _utcnow()
+        raw_token = generate_invite_token()
         record = {
             "uuid": str(uuid4()),
             "organization_id": str(organization.id),
             "invited_email": email.strip().lower(),
             "invited_role": role.value,
-            "token": generate_invite_token(),
+            "token_hash": _hash_invitation_token(raw_token),
             "created_by_user_id": str(actor_id),
             "expires_at": now + timedelta(days=expires_days),
             "accepted_at": None,
@@ -1366,7 +1444,10 @@ async def create_org_invitation(
                 "role": invite["invited_role"],
             },
         )
-        return _invitation_from_record(invite, include_accept_url=True)
+        return _invitation_from_record(
+            {**invite, "token": raw_token},
+            include_accept_url=True,
+        )
 
 
 async def delete_org_invitation(
@@ -1396,6 +1477,7 @@ async def accept_org_invitation(
     token: str,
     user: AuthUser,
     request: Request,
+    existing_session_id: UUID | None = None,
 ) -> InvitationAcceptance:
     async with _auth_client_scope() as client:
         (
@@ -1408,27 +1490,8 @@ async def accept_org_invitation(
             token=token,
             user_id=user.id,
         )
-        if invite is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Invitation not found"
-            )
-
-        if invite.get("accepted_at") is not None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invitation already accepted",
-            )
-        expires_at = _coerce_datetime(invite.get("expires_at"))
-        if expires_at is not None and expires_at < _utcnow():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Invitation expired"
-            )
-        invited_email = str(invite.get("invited_email") or "").strip().lower()
-        if invited_email and (user.email or "").strip().lower() != invited_email:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invitation email does not match current user",
-            )
+        _require_usable_invitation(invite, email=user.email)
+        assert invite is not None
 
         organization_id = _coerce_uuid(
             invite.get("organization_id"),
@@ -1483,6 +1546,7 @@ async def accept_org_invitation(
             request=request,
             user_id=user.id,
             organization_id=organization_id,
+            existing_session_id=existing_session_id,
         )
 
         updated = {
@@ -1512,6 +1576,8 @@ async def accept_org_invitation(
                 written.get("uuid"),
                 field_name="organization_invitations.uuid",
             ),
+            organization_slug=str(organization.get("slug") or ""),
+            organization_name=str(organization.get("name") or ""),
         )
 
 

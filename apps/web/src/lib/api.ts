@@ -807,6 +807,7 @@ export interface SetupStatus {
   has_users: boolean;
   has_orgs: boolean;
   setup_complete: boolean;
+  public_signups_enabled: boolean;
   openai_configured: boolean;
   anthropic_configured: boolean;
   gemini_configured: boolean;
@@ -1162,6 +1163,29 @@ export interface OrgMember {
 
 export interface OrgMembersResponse {
   members: OrgMember[];
+}
+
+export interface OrgInvitation {
+  id: string;
+  email: string;
+  role: string;
+  created_at: string | null;
+  expires_at: string | null;
+  accept_url: string | null;
+}
+
+export interface OrgInvitationsResponse {
+  invitations: OrgInvitation[];
+}
+
+export interface OrgInvitationCreateRequest {
+  email: string;
+  role: string;
+  expires_days?: number;
+}
+
+export interface OrgInvitationCreateResponse {
+  invitation: OrgInvitation;
 }
 
 export type ProjectRole =
@@ -2541,6 +2565,22 @@ export const api = {
         fetchApi<{ success: boolean }>(`/orgs/${encodeURIComponent(slug)}/members/${userId}`, {
           method: 'DELETE',
         }),
+    },
+    invitations: {
+      list: (slug: string) =>
+        fetchApi<OrgInvitationsResponse>(`/orgs/${encodeURIComponent(slug)}/invitations`),
+      create: (slug: string, data: OrgInvitationCreateRequest) =>
+        fetchApi<OrgInvitationCreateResponse>(`/orgs/${encodeURIComponent(slug)}/invitations`, {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+      delete: (slug: string, invitationId: string) =>
+        fetchApi<{ success: boolean }>(
+          `/orgs/${encodeURIComponent(slug)}/invitations/${invitationId}`,
+          {
+            method: 'DELETE',
+          }
+        ),
     },
   },
 

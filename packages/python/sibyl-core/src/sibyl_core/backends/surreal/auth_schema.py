@@ -164,7 +164,9 @@ DEFINE FIELD IF NOT EXISTS uuid ON organization_invitations TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON organization_invitations TYPE string;
 DEFINE FIELD IF NOT EXISTS invited_email ON organization_invitations TYPE string;
 DEFINE FIELD IF NOT EXISTS invited_role ON organization_invitations TYPE string DEFAULT 'member';
-DEFINE FIELD IF NOT EXISTS token ON organization_invitations TYPE string;
+DEFINE FIELD IF NOT EXISTS token ON organization_invitations TYPE option<string>;
+DEFINE FIELD OVERWRITE token ON organization_invitations TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS token_hash ON organization_invitations TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS created_by_user_id ON organization_invitations TYPE string;
 DEFINE FIELD IF NOT EXISTS expires_at ON organization_invitations TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS accepted_at ON organization_invitations TYPE option<datetime>;
@@ -174,8 +176,9 @@ DEFINE FIELD IF NOT EXISTS updated_at ON organization_invitations TYPE datetime 
 
 DEFINE INDEX IF NOT EXISTS idx_organization_invitations_uuid
     ON organization_invitations FIELDS uuid UNIQUE;
-DEFINE INDEX IF NOT EXISTS idx_organization_invitations_token
-    ON organization_invitations FIELDS token UNIQUE;
+REMOVE INDEX IF EXISTS idx_organization_invitations_token ON TABLE organization_invitations;
+DEFINE INDEX IF NOT EXISTS idx_organization_invitations_token_hash
+    ON organization_invitations FIELDS token_hash;
 DEFINE INDEX IF NOT EXISTS idx_organization_invitations_org
     ON organization_invitations FIELDS organization_id;
 DEFINE INDEX IF NOT EXISTS idx_organization_invitations_email

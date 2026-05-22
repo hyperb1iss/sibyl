@@ -103,6 +103,10 @@ class Settings(BaseSettings):
         default=False,
         description="Disable auth enforcement (dev mode only)",
     )
+    public_signups_enabled: bool = Field(
+        default=False,
+        description="Allow self-serve local account creation after initial setup",
+    )
 
     @model_validator(mode="after")
     def validate_security_settings(self) -> "Settings":

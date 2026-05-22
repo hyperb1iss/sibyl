@@ -40,6 +40,7 @@ export const queryKeys = {
     list: ['orgs', 'list'] as const,
     detail: (slug: string) => ['orgs', 'detail', slug] as const,
     members: (slug: string) => ['orgs', 'members', slug] as const,
+    invitations: (slug: string) => ['orgs', 'invitations', slug] as const,
   },
   security: {
     sessions: ['security', 'sessions'] as const,
@@ -368,6 +369,54 @@ export function useRemoveOrgMember() {
       api.orgs.members.remove(slug, userId),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.orgs.members(variables.slug) });
+    },
+  });
+}
+
+export function useOrgInvitations(slug: string, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.orgs.invitations(slug),
+    queryFn: () => api.orgs.invitations.list(slug),
+    enabled: options?.enabled ?? !!slug,
+    retry: false,
+    staleTime: TIMING.STALE_TIME,
+  });
+}
+
+export function useCreateOrgInvitation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      slug,
+      email,
+      role,
+      expiresDays,
+    }: {
+      slug: string;
+      email: string;
+      role: string;
+      expiresDays?: number;
+    }) =>
+      api.orgs.invitations.create(slug, {
+        email,
+        role,
+        expires_days: expiresDays,
+      }),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.orgs.invitations(variables.slug) });
+    },
+  });
+}
+
+export function useDeleteOrgInvitation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ slug, invitationId }: { slug: string; invitationId: string }) =>
+      api.orgs.invitations.delete(slug, invitationId),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.orgs.invitations(variables.slug) });
     },
   });
 }

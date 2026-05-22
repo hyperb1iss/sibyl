@@ -77,6 +77,7 @@ def _issued_session() -> SimpleNamespace:
             slug="sibyl",
             name="Sibyl",
         ),
+        session_id=uuid4(),
         access_token="access-token",
         refresh_token="refresh-token",
         refresh_expires=datetime.now(UTC) + timedelta(days=30),
@@ -123,6 +124,7 @@ async def test_local_signup_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch)
     signup = AsyncMock(return_value=issued)
 
     monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests")
+    monkeypatch.setattr(auth_routes, "is_setup_mode", AsyncMock(return_value=True))
     monkeypatch.setattr(auth_routes, "signup_local_user", signup)
 
     response = await auth_routes.local_signup(request=request)
@@ -134,6 +136,141 @@ async def test_local_signup_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch)
         password="super-secret",
         name="Nova",
         request=request,
+    )
+
+
+@pytest.mark.asyncio
+async def test_local_signup_rejects_public_signup_when_setup_complete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = FakeRequest(
+        json_data={
+            "email": "nova@example.com",
+            "password": "super-secret",
+            "name": "Nova",
+        }
+    )
+    signup = AsyncMock()
+
+    monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests")
+    monkeypatch.setattr(auth_routes, "is_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(auth_routes.config_module.settings, "public_signups_enabled", False)
+    monkeypatch.setattr(auth_routes, "signup_local_user", signup)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_routes.local_signup(request=request)
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail["code"] == "signup_disabled"
+    signup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_local_signup_accepts_invitation_when_public_signup_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = FakeRequest(
+        json_data={
+            "email": "nova@example.com",
+            "password": "super-secret",
+            "name": "Nova",
+            "invite_token": "invite-token",
+        }
+    )
+    issued = _issued_session()
+    accepted = SimpleNamespace(
+        access_token="invited-access-token",
+        refresh_token="invited-refresh-token",
+        refresh_expires=datetime.now(UTC) + timedelta(days=30),
+        organization_id=uuid4(),
+        invitation_id=uuid4(),
+        organization_slug="electric-coven",
+        organization_name="Electric Coven",
+    )
+    validate = AsyncMock()
+    signup = AsyncMock(return_value=issued)
+    accept = AsyncMock(return_value=accepted)
+
+    monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests")
+    monkeypatch.setattr(auth_routes, "is_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(auth_routes.config_module.settings, "public_signups_enabled", False)
+    monkeypatch.setattr(auth_routes.organization_runtime, "validate_org_invitation_for_signup", validate)
+    monkeypatch.setattr(auth_routes.organization_runtime, "accept_org_invitation", accept)
+    monkeypatch.setattr(auth_routes, "signup_local_user", signup)
+
+    response = await auth_routes.local_signup(request=request)
+
+    validate.assert_awaited_once_with(token="invite-token", email="nova@example.com")
+    accept.assert_awaited_once_with(
+        token="invite-token",
+        user=issued.user,
+        request=request,
+        existing_session_id=issued.session_id,
+    )
+    assert response["access_token"] == "invited-access-token"
+    assert response["organization"]["slug"] == "electric-coven"
+
+
+@pytest.mark.asyncio
+async def test_local_signup_validates_invitation_before_setup_signup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = FakeRequest(
+        json_data={
+            "email": "nova@example.com",
+            "password": "super-secret",
+            "name": "Nova",
+            "invite_token": "bad-token",
+        }
+    )
+    validate = AsyncMock(side_effect=HTTPException(status_code=400, detail="Invalid invitation"))
+    signup = AsyncMock()
+
+    monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests")
+    monkeypatch.setattr(auth_routes, "is_setup_mode", AsyncMock(return_value=True))
+    monkeypatch.setattr(auth_routes.config_module.settings, "public_signups_enabled", False)
+    monkeypatch.setattr(auth_routes.organization_runtime, "validate_org_invitation_for_signup", validate)
+    monkeypatch.setattr(auth_routes, "signup_local_user", signup)
+
+    with pytest.raises(HTTPException):
+        await auth_routes.local_signup(request=request)
+
+    validate.assert_awaited_once_with(token="bad-token", email="nova@example.com")
+    signup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_local_signup_with_failed_invitation_deletes_created_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = FakeRequest(
+        json_data={
+            "email": "nova@example.com",
+            "password": "super-secret",
+            "name": "Nova",
+            "invite_token": "invite-token",
+        }
+    )
+    issued = _issued_session()
+    validate = AsyncMock()
+    signup = AsyncMock(return_value=issued)
+    accept = AsyncMock(side_effect=HTTPException(status_code=400, detail="Invalid invitation"))
+    cleanup = AsyncMock()
+
+    monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests")
+    monkeypatch.setattr(auth_routes, "is_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(auth_routes.config_module.settings, "public_signups_enabled", False)
+    monkeypatch.setattr(auth_routes.organization_runtime, "validate_org_invitation_for_signup", validate)
+    monkeypatch.setattr(auth_routes.organization_runtime, "accept_org_invitation", accept)
+    monkeypatch.setattr(auth_routes, "signup_local_user", signup)
+    monkeypatch.setattr(auth_routes, "delete_failed_local_signup_user", cleanup)
+
+    with pytest.raises(HTTPException):
+        await auth_routes.local_signup(request=request)
+
+    cleanup.assert_awaited_once_with(
+        user_id=issued.user.id,
+        organization_id=issued.organization.id,
     )
 
 
@@ -159,6 +296,78 @@ async def test_local_login_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) 
         password="super-secret",
         request=request,
     )
+
+
+@pytest.mark.asyncio
+async def test_local_login_accepts_invitation_for_existing_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = FakeRequest(
+        json_data={
+            "email": "nova@example.com",
+            "password": "super-secret",
+            "invite_token": "invite-token",
+        }
+    )
+    issued = _issued_session()
+    accepted = SimpleNamespace(
+        access_token="team-access-token",
+        refresh_token="team-refresh-token",
+        refresh_expires=datetime.now(UTC) + timedelta(days=30),
+        organization_id=uuid4(),
+        invitation_id=uuid4(),
+        organization_slug="shared-team",
+        organization_name="Shared Team",
+    )
+    login = AsyncMock(return_value=issued)
+    validate = AsyncMock()
+    accept = AsyncMock(return_value=accepted)
+
+    monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests")
+    monkeypatch.setattr(auth_routes, "login_local_user", login)
+    monkeypatch.setattr(auth_routes.organization_runtime, "validate_org_invitation_for_signup", validate)
+    monkeypatch.setattr(auth_routes.organization_runtime, "accept_org_invitation", accept)
+
+    response = await _call_route(auth_routes.local_login, request=request)
+
+    validate.assert_awaited_once_with(token="invite-token", email="nova@example.com")
+    accept.assert_awaited_once_with(
+        token="invite-token",
+        user=issued.user,
+        request=request,
+        existing_session_id=issued.session_id,
+    )
+    assert response["access_token"] == "team-access-token"
+    assert response["organization"]["slug"] == "shared-team"
+
+
+@pytest.mark.asyncio
+async def test_local_login_with_failed_invitation_revokes_issued_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = FakeRequest(
+        json_data={
+            "email": "nova@example.com",
+            "password": "super-secret",
+            "invite_token": "invite-token",
+        }
+    )
+    issued = _issued_session()
+    login = AsyncMock(return_value=issued)
+    validate = AsyncMock()
+    accept = AsyncMock(side_effect=HTTPException(status_code=400, detail="Invalid invitation"))
+    revoke = AsyncMock()
+
+    monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests")
+    monkeypatch.setattr(auth_routes, "login_local_user", login)
+    monkeypatch.setattr(auth_routes, "revoke_access_session", revoke)
+    monkeypatch.setattr(auth_routes.organization_runtime, "validate_org_invitation_for_signup", validate)
+    monkeypatch.setattr(auth_routes.organization_runtime, "accept_org_invitation", accept)
+
+    with pytest.raises(HTTPException):
+        await _call_route(auth_routes.local_login, request=request)
+
+    revoke.assert_awaited_once_with(issued.access_token)
 
 
 @pytest.mark.asyncio

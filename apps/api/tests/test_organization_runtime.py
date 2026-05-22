@@ -1433,6 +1433,7 @@ async def test_surreal_list_org_invitations_filters_accepted_rows(
     assert len(result) == 1
     assert result[0].email == "ember@example.com"
     assert result[0].role == OrganizationRole.ADMIN
+    assert result[0].accept_url is None
 
 
 @pytest.mark.asyncio

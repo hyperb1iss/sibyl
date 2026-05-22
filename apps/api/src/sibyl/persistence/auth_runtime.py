@@ -50,6 +50,7 @@ __all__ += [
     "create_project_record",
     "create_session_record",
     "delete_project_record",
+    "delete_failed_local_signup_user",
     "deny_device_authorization",
     "ensure_personal_organization",
     "exchange_device_code",
@@ -186,6 +187,10 @@ async def login_github_identity(**kwargs: object):
 
 async def signup_local_user(**kwargs: object):
     return await _call_backend_export("signup_local_user", **kwargs)
+
+
+async def delete_failed_local_signup_user(**kwargs: object) -> None:
+    await _call_backend_export("delete_failed_local_signup_user", **kwargs)
 
 
 async def login_local_user(**kwargs: object):

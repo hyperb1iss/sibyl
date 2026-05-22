@@ -4,10 +4,13 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { SettingsPageHeader } from '@/components/settings/primitives';
 import { Button, IconButton } from '@/components/ui/button';
-import { Check, Eye, Settings, Star, Trash, User, Users } from '@/components/ui/icons';
+import { Check, Copy, Eye, Send, Settings, Star, Trash, User, Users } from '@/components/ui/icons';
 import { Spinner } from '@/components/ui/spinner';
 import {
+  useCreateOrgInvitation,
+  useDeleteOrgInvitation,
   useMe,
+  useOrgInvitations,
   useOrgMembers,
   useOrgs,
   useRemoveOrgMember,
@@ -24,6 +27,20 @@ const ROLE_CONFIG = {
 
 const ROLES = ['owner', 'admin', 'member'] as const;
 const NON_OWNER_ROLES = ['admin', 'member'] as const;
+const INVITE_ROLES = ['member', 'admin'] as const;
+
+function inviteSignupUrl(acceptUrl: string | null): string {
+  if (!acceptUrl) return '';
+  const origin = typeof window === 'undefined' ? '' : window.location.origin;
+  try {
+    const url = new URL(acceptUrl, origin || undefined);
+    const match = url.pathname.match(/\/invitations\/([^/]+)\/accept$/);
+    if (!match) return acceptUrl;
+    return `${origin || `${url.protocol}//${url.host}`}/login?invite=${encodeURIComponent(match[1])}`;
+  } catch {
+    return acceptUrl;
+  }
+}
 
 interface OrgMembersCardProps {
   org: {
@@ -39,7 +56,15 @@ interface OrgMembersCardProps {
 
 function OrgMembersCard({ org, currentUserId, isCurrentOrg }: OrgMembersCardProps) {
   const [expanded, setExpanded] = useState(isCurrentOrg);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<(typeof INVITE_ROLES)[number]>('member');
+  const [latestInviteUrl, setLatestInviteUrl] = useState('');
   const { data, isLoading } = useOrgMembers(org.slug, { enabled: expanded });
+  const { data: invitationsData, isLoading: isLoadingInvites } = useOrgInvitations(org.slug, {
+    enabled: expanded && (org.role === 'owner' || org.role === 'admin'),
+  });
+  const createInvitation = useCreateOrgInvitation();
+  const deleteInvitation = useDeleteOrgInvitation();
   const updateRole = useUpdateOrgMemberRole();
   const removeMember = useRemoveOrgMember();
   const switchOrg = useSwitchOrg();
@@ -65,6 +90,44 @@ function OrgMembersCard({ org, currentUserId, isCurrentOrg }: OrgMembersCardProp
       toast.success('Member removed');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to remove member');
+    }
+  };
+
+  const handleInvite = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const email = inviteEmail.trim();
+    if (!email) return;
+    try {
+      const result = await createInvitation.mutateAsync({
+        slug: org.slug,
+        email,
+        role: inviteRole,
+      });
+      const inviteUrl = inviteSignupUrl(result.invitation.accept_url);
+      setLatestInviteUrl(inviteUrl);
+      setInviteEmail('');
+      toast.success('Invitation created');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create invitation');
+    }
+  };
+
+  const handleCopyInvite = async (url: string) => {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success('Invite link copied');
+    } catch {
+      toast.error('Failed to copy invite link');
+    }
+  };
+
+  const handleDeleteInvite = async (invitationId: string) => {
+    try {
+      await deleteInvitation.mutateAsync({ slug: org.slug, invitationId });
+      toast.success('Invitation deleted');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete invitation');
     }
   };
 
@@ -147,6 +210,102 @@ function OrgMembersCard({ org, currentUserId, isCurrentOrg }: OrgMembersCardProp
       {/* Members List */}
       {expanded && (
         <div className="border-t border-sc-fg-subtle/10 p-4">
+          {canManage && (
+            <div className="mb-4 rounded-lg border border-sc-fg-subtle/10 bg-sc-bg-highlight/35 p-3">
+              <form onSubmit={handleInvite} className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={event => setInviteEmail(event.target.value)}
+                  placeholder="teammate@example.com"
+                  className="min-w-0 flex-1 rounded border border-sc-fg-subtle/20 bg-sc-bg-base px-3 py-2 text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle/50 focus:border-sc-purple/60 focus:outline-none focus:ring-2 focus:ring-sc-purple/20"
+                />
+                <select
+                  value={inviteRole}
+                  onChange={event =>
+                    setInviteRole(event.target.value as (typeof INVITE_ROLES)[number])
+                  }
+                  className="rounded border border-sc-fg-subtle/20 bg-sc-bg-base px-3 py-2 text-sm text-sc-fg-secondary"
+                >
+                  {INVITE_ROLES.map(role => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="submit"
+                  size="sm"
+                  icon={<Send width={14} height={14} />}
+                  loading={createInvitation.isPending}
+                  disabled={!inviteEmail.trim()}
+                >
+                  Invite
+                </Button>
+              </form>
+
+              {latestInviteUrl && (
+                <div className="mt-3 flex items-center gap-2">
+                  <input
+                    readOnly
+                    value={latestInviteUrl}
+                    className="min-w-0 flex-1 rounded border border-sc-cyan/20 bg-sc-bg-base px-3 py-2 text-xs text-sc-cyan"
+                  />
+                  <IconButton
+                    icon={<Copy width={14} height={14} />}
+                    label="Copy invite link"
+                    size="sm"
+                    onClick={() => void handleCopyInvite(latestInviteUrl)}
+                  />
+                </div>
+              )}
+
+              {isLoadingInvites ? (
+                <div className="mt-3 flex justify-center">
+                  <Spinner size="sm" />
+                </div>
+              ) : invitationsData?.invitations.length ? (
+                <div className="mt-3 space-y-2 border-t border-sc-fg-subtle/10 pt-3">
+                  {invitationsData.invitations.map(invitation => {
+                    const inviteUrl = inviteSignupUrl(invitation.accept_url);
+                    return (
+                      <div
+                        key={invitation.id}
+                        className="flex items-center gap-2 rounded bg-sc-bg-base/70 px-2 py-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-medium text-sc-fg-secondary">
+                            {invitation.email}
+                          </p>
+                          <p className="text-[11px] capitalize text-sc-fg-subtle">
+                            {invitation.role}
+                          </p>
+                        </div>
+                        {inviteUrl && (
+                          <IconButton
+                            icon={<Copy width={14} height={14} />}
+                            label="Copy invite link"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => void handleCopyInvite(inviteUrl)}
+                          />
+                        )}
+                        <IconButton
+                          icon={<Trash width={14} height={14} />}
+                          label="Delete invitation"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void handleDeleteInvite(invitation.id)}
+                          className="text-sc-red hover:text-sc-red"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          )}
+
           {isLoading ? (
             <div className="flex items-center justify-center py-4">
               <Spinner size="sm" />

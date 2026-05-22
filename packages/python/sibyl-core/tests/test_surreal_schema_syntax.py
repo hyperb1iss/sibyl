@@ -90,6 +90,17 @@ def test_runtime_schemafull_tables_are_altered_after_define() -> None:
         ) in schema
 
 
+def test_auth_invitation_schema_supports_hashed_tokens() -> None:
+    assert "DEFINE FIELD OVERWRITE token ON organization_invitations TYPE option<string>" in (
+        AUTH_SCHEMA_DEFINITIONS
+    )
+    assert "DEFINE FIELD IF NOT EXISTS token_hash ON organization_invitations" in (
+        AUTH_SCHEMA_DEFINITIONS
+    )
+    assert "REMOVE INDEX IF EXISTS idx_organization_invitations_token" in AUTH_SCHEMA_DEFINITIONS
+    assert "idx_organization_invitations_token_hash" in AUTH_SCHEMA_DEFINITIONS
+
+
 def test_fulltext_indexes_render_with_embedded_search_syntax() -> None:
     rendered = render_fulltext_compatible_sql(CONTENT_SCHEMA_DEFINITIONS, url="memory://")
 

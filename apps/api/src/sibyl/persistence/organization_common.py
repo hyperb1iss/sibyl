@@ -60,6 +60,8 @@ class InvitationAcceptance:
     refresh_expires: datetime
     organization_id: UUID
     invitation_id: UUID
+    organization_slug: str | None = None
+    organization_name: str | None = None
 
 
 @dataclass
