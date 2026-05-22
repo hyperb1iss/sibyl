@@ -59,6 +59,24 @@ class AuthUser(BaseModel):
     updated_at: datetime | None = None
 
 
+class UserIdentity(BaseModel):
+    """External identity linked to a Sibyl user."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    provider_name: str
+    issuer: str
+    subject: str
+    subject_key: str
+    user_id: UUID
+    email: str | None = None
+    claims: JSONObject = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime | None = None
+    last_login_at: datetime | None = None
+
+
 class AuthOrganization(BaseModel):
     """Normalized organization record independent of any persistence model."""
 

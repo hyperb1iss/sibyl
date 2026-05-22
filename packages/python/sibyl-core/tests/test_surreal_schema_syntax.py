@@ -101,6 +101,15 @@ def test_auth_invitation_schema_supports_hashed_tokens() -> None:
     assert "idx_organization_invitations_token_hash" in AUTH_SCHEMA_DEFINITIONS
 
 
+def test_auth_schema_includes_oidc_identity_tables() -> None:
+    assert "identity_provider" in AUTH_TABLES
+    assert "user_identity" in AUTH_TABLES
+    assert "DEFINE FIELD IF NOT EXISTS subject_key ON user_identity TYPE string" in (
+        AUTH_SCHEMA_DEFINITIONS
+    )
+    assert "idx_user_identity_provider_subject" in AUTH_SCHEMA_DEFINITIONS
+
+
 def test_fulltext_indexes_render_with_embedded_search_syntax() -> None:
     rendered = render_fulltext_compatible_sql(CONTENT_SCHEMA_DEFINITIONS, url="memory://")
 

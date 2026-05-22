@@ -35,6 +35,7 @@ import { type ConnectionStatus, wsClient } from './websocket';
 export const queryKeys = {
   auth: {
     me: ['auth', 'me'] as const,
+    providers: ['auth', 'providers'] as const,
   },
   orgs: {
     list: ['orgs', 'list'] as const,
@@ -245,6 +246,20 @@ export function useMe(options?: {
   return useQuery({
     queryKey: queryKeys.auth.me,
     queryFn: () => api.auth.me(),
+    enabled: options?.enabled ?? true,
+    retry: false,
+    staleTime: TIMING.STALE_TIME,
+    initialData: options?.initialData,
+  });
+}
+
+export function useAuthProviders(options?: {
+  enabled?: boolean;
+  initialData?: import('./api').AuthProvidersResponse;
+}) {
+  return useQuery({
+    queryKey: queryKeys.auth.providers,
+    queryFn: () => api.auth.providers(),
     enabled: options?.enabled ?? true,
     retry: false,
     staleTime: TIMING.STALE_TIME,

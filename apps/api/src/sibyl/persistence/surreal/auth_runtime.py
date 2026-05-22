@@ -137,6 +137,7 @@ _UPSERT_QUERY_BY_TABLE = {
     "device_authorization_requests": (
         "UPSERT device_authorization_requests CONTENT $record WHERE uuid = $uuid;"
     ),
+    "identity_provider": "UPSERT identity_provider CONTENT $record WHERE uuid = $uuid;",
     "oauth_connections": "UPSERT oauth_connections CONTENT $record WHERE uuid = $uuid;",
     "oauth_client_registrations": (
         "UPSERT oauth_client_registrations CONTENT $record WHERE uuid = $uuid;"
@@ -145,6 +146,7 @@ _UPSERT_QUERY_BY_TABLE = {
     "memory_spaces": "UPSERT memory_spaces CONTENT $record WHERE uuid = $uuid;",
     "memory_space_members": ("UPSERT memory_space_members CONTENT $record WHERE uuid = $uuid;"),
     "projects": "UPSERT projects CONTENT $record WHERE uuid = $uuid;",
+    "user_identity": "UPSERT user_identity CONTENT $record WHERE uuid = $uuid;",
     "user_sessions": "UPSERT user_sessions CONTENT $record WHERE uuid = $uuid;",
     "users": "UPSERT users CONTENT $record WHERE uuid = $uuid;",
 }
@@ -177,6 +179,15 @@ class IssuedAuthSession:
     access_token: str
     refresh_token: str
     refresh_expires: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class IssuedOidcSession:
+    user: SimpleNamespace
+    organization: SimpleNamespace
+    session_id: UUID
+    access_token: str
+    access_expires: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -1170,6 +1181,54 @@ async def _issue_auth_session(
     )
 
 
+async def _issue_oidc_session(
+    client: QueryClient,
+    *,
+    user: SimpleNamespace,
+    organization: SimpleNamespace,
+    request: Request | None,
+    action: str,
+    details: SurrealRecord,
+) -> IssuedOidcSession:
+    session_id = uuid4()
+    expires_in = timedelta(minutes=config_module.settings.oidc.session_minutes)
+    access_token = create_access_token(
+        user_id=user.id,
+        organization_id=organization.id,
+        session_id=session_id,
+        expires_in=expires_in,
+        extra_claims={"amr": ["oidc"], "idp": details.get("provider_name")},
+    )
+    access_expires = _utcnow() + expires_in
+    sessions = SurrealSessionRepository.from_client(client)
+    await sessions.create_session(
+        user_id=user.id,
+        organization_id=organization.id,
+        token=access_token,
+        expires_at=access_expires,
+        session_id=session_id,
+        refresh_token=None,
+        refresh_token_expires_at=None,
+        ip_address=request.client.host if request and request.client else None,
+        user_agent=request.headers.get("user-agent") if request else None,
+    )
+    await _log_audit_event(
+        client,
+        action=action,
+        user_id=user.id,
+        organization_id=organization.id,
+        request=request,
+        details=details,
+    )
+    return IssuedOidcSession(
+        user=user,
+        organization=organization,
+        session_id=session_id,
+        access_token=access_token,
+        access_expires=access_expires,
+    )
+
+
 async def authenticate_api_key(raw_key: str):
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
@@ -1524,6 +1583,312 @@ async def save_oauth_client_registration(
             "oauth_client_registrations",
             uuid=registration_id,
             record=record,
+        )
+
+
+def _normalize_oidc_role(role: object) -> OrganizationRole:
+    value = _role_value(role) or str(role)
+    try:
+        return OrganizationRole(value)
+    except ValueError as exc:
+        msg = f"Unsupported OIDC organization role: {value}"
+        raise ValueError(msg) from exc
+
+
+async def _safe_oidc_email(
+    client: QueryClient,
+    *,
+    email: str | None,
+    user_id: UUID | None,
+) -> str | None:
+    normalized = (email or "").strip().lower()
+    if not normalized:
+        return None
+    repo = _SurrealRepository(client)
+    owner = await repo.select_one(
+        "SELECT uuid FROM users WHERE email = $email LIMIT 1;",
+        email=normalized,
+    )
+    if owner is None:
+        return normalized
+    owner_id = _coerce_uuid(owner.get("uuid"), field_name="user.uuid")
+    return normalized if user_id is not None and owner_id == user_id else None
+
+
+async def _upsert_identity_provider(
+    client: QueryClient,
+    *,
+    provider_name: str,
+    issuer: str,
+    client_id: str | None,
+    scopes: list[str],
+    role_claim: str | None,
+) -> None:
+    repo = _SurrealRepository(client)
+    existing = await repo.select_one(
+        "SELECT * FROM identity_provider WHERE name = $name LIMIT 1;",
+        name=provider_name,
+    )
+    now = _utcnow()
+    provider_id = (
+        _coerce_uuid(existing.get("uuid"), field_name="identity_provider.uuid")
+        if existing is not None
+        else uuid4()
+    )
+    record: SurrealRecord = {
+        "uuid": str(provider_id),
+        "name": provider_name,
+        "issuer": issuer,
+        "client_id": client_id,
+        "scopes": _unique_strings(scopes),
+        "role_claim": role_claim or config_module.settings.oidc.role_claim,
+        "enabled": True,
+        "created_at": existing.get("created_at") if existing is not None else now,
+        "updated_at": now,
+    }
+    await repo.replace_record("identity_provider", uuid=provider_id, record=record)
+
+
+async def _ensure_oidc_organization_membership_record(
+    client: QueryClient,
+    *,
+    user_id: UUID,
+    user_name: str,
+    role: OrganizationRole,
+) -> SurrealRecord:
+    repo = _SurrealRepository(client)
+    now = _utcnow()
+    organization = await repo.select_one(
+        "SELECT * FROM organizations WHERE is_personal = false ORDER BY created_at ASC LIMIT 1;"
+    )
+    if organization is None:
+        create_result = await client.execute_query(
+            "CREATE organizations CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "name": "Sibyl",
+                "slug": "sibyl",
+                "is_personal": False,
+                "settings": {},
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+        error = _query_error(create_result)
+        if error is not None:
+            raise RuntimeError(error)
+        records = _normalize_records(create_result)
+        if not records:
+            msg = "Failed to create OIDC organization"
+            raise RuntimeError(msg)
+        organization = records[0]
+
+    organization_id = _coerce_uuid(organization.get("uuid"), field_name="organization.uuid")
+    membership = await repo.select_one(
+        """
+            SELECT * FROM organization_members
+            WHERE organization_id = $organization_id AND user_id = $user_id
+            LIMIT 1;
+        """,
+        organization_id=str(organization_id),
+        user_id=str(user_id),
+    )
+    if membership is None:
+        result = await client.execute_query(
+            "CREATE organization_members CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "organization_id": str(organization_id),
+                "user_id": str(user_id),
+                "role": role.value,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+    else:
+        result = await client.execute_query(
+            """
+                UPDATE organization_members
+                SET role = $role,
+                    updated_at = $updated_at
+                WHERE uuid = $uuid;
+            """,
+            uuid=str(_coerce_uuid(membership.get("uuid"), field_name="membership.uuid")),
+            role=role.value,
+            updated_at=now,
+        )
+    error = _query_error(result)
+    if error is not None:
+        raise RuntimeError(error)
+    if not _normalize_records(result):
+        msg = f"Failed to write OIDC membership for {user_name or user_id}"
+        raise RuntimeError(msg)
+    return organization
+
+
+async def login_oidc_identity(
+    *,
+    provider_name: str,
+    issuer: str,
+    client_id: str | None = None,
+    scopes: list[str] | None = None,
+    role_claim: str | None = None,
+    subject: str,
+    subject_key: str,
+    email: str | None,
+    name: str,
+    avatar_url: str | None,
+    role: OrganizationRole | str,
+    claims: Mapping[str, object],
+    request: Request,
+    action: str = "auth.oidc.login",
+) -> IssuedOidcSession:
+    provider = provider_name.strip().lower()
+    if not provider or not subject_key.strip():
+        msg = "OIDC provider and subject key are required"
+        raise ValueError(msg)
+    org_role = _normalize_oidc_role(role)
+    now = _utcnow()
+    async with (
+        oauth_identity_lock(provider, subject_key),
+        _auth_client_scope() as client,
+    ):
+        repo = _SurrealRepository(client)
+        await _upsert_identity_provider(
+            client,
+            provider_name=provider,
+            issuer=issuer,
+            client_id=client_id,
+            scopes=scopes or [],
+            role_claim=role_claim,
+        )
+        identity = await repo.select_one(
+            """
+                SELECT * FROM user_identity
+                WHERE provider_name = $provider_name AND subject_key = $subject_key
+                LIMIT 1;
+            """,
+            provider_name=provider,
+            subject_key=subject_key,
+        )
+        user_record: SurrealRecord | None = None
+        user_id: UUID | None = None
+        if identity is not None:
+            user_id = _coerce_uuid(identity.get("user_id"), field_name="user_identity.user_id")
+            user_record = await repo.select_one(
+                "SELECT * FROM users WHERE uuid = $uuid LIMIT 1;",
+                uuid=str(user_id),
+            )
+
+        safe_email = await _safe_oidc_email(client, email=email, user_id=user_id)
+        display_name = name.strip() or safe_email or subject
+        is_admin = org_role in {OrganizationRole.OWNER, OrganizationRole.ADMIN}
+        if user_record is None:
+            user_id = uuid4()
+            create_result = await client.execute_query(
+                "CREATE users CONTENT $record;",
+                record={
+                    "uuid": str(user_id),
+                    "email": safe_email,
+                    "name": display_name,
+                    "avatar_url": avatar_url,
+                    "github_id": None,
+                    "is_admin": is_admin,
+                    "bio": None,
+                    "timezone": "UTC",
+                    "preferences": {},
+                    "password_salt": None,
+                    "password_hash": None,
+                    "password_iterations": None,
+                    "email_verified_at": now if safe_email else None,
+                    "last_login_at": now,
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+            error = _query_error(create_result)
+            if error is not None:
+                raise RuntimeError(error)
+            records = _normalize_records(create_result)
+            if not records:
+                msg = "Failed to create OIDC user"
+                raise RuntimeError(msg)
+            user_record = records[0]
+        else:
+            user_id = _coerce_uuid(user_record.get("uuid"), field_name="user.uuid")
+            update_email = safe_email if safe_email is not None else user_record.get("email")
+            update_result = await client.execute_query(
+                """
+                    UPDATE users
+                    SET email = $email,
+                        name = $name,
+                        avatar_url = $avatar_url,
+                        is_admin = $is_admin,
+                        last_login_at = $last_login_at,
+                        updated_at = $updated_at
+                    WHERE uuid = $uuid;
+                """,
+                uuid=str(user_id),
+                email=update_email,
+                name=display_name,
+                avatar_url=avatar_url,
+                is_admin=is_admin,
+                last_login_at=now,
+                updated_at=now,
+            )
+            error = _query_error(update_result)
+            if error is not None:
+                raise RuntimeError(error)
+            records = _normalize_records(update_result)
+            if not records:
+                msg = "Failed to update OIDC user"
+                raise RuntimeError(msg)
+            user_record = records[0]
+
+        identity_id = (
+            _coerce_uuid(identity.get("uuid"), field_name="user_identity.uuid")
+            if identity is not None
+            else uuid4()
+        )
+        identity_record: SurrealRecord = {
+            "uuid": str(identity_id),
+            "provider_name": provider,
+            "issuer": issuer,
+            "subject": subject,
+            "subject_key": subject_key,
+            "user_id": str(user_id),
+            "email": safe_email,
+            "claims": {str(key): value for key, value in claims.items()},
+            "created_at": identity.get("created_at") if identity is not None else now,
+            "updated_at": now,
+            "last_login_at": now,
+        }
+        await repo.replace_record("user_identity", uuid=identity_id, record=identity_record)
+
+        organization = _require_namespace(
+            _auth_org_namespace(
+                await _ensure_oidc_organization_membership_record(
+                    client,
+                    user_id=user_id,
+                    user_name=display_name,
+                    role=org_role,
+                )
+            ),
+            label="organization",
+        )
+        return await _issue_oidc_session(
+            client,
+            user=_require_namespace(_auth_user_namespace(user_record), label="user"),
+            organization=organization,
+            request=request,
+            action=action,
+            details={
+                "provider_name": provider,
+                "issuer": issuer,
+                "subject_key": subject_key,
+                "role": org_role.value,
+                "email": safe_email,
+            },
         )
 
 
@@ -3913,6 +4278,7 @@ __all__ = [
     "AuthContextResolver",
     "DeviceBrowserLogin",
     "IssuedAuthSession",
+    "IssuedOidcSession",
     "OrganizationMembershipRepository",
     "OrganizationRepository",
     "RefreshRotation",
@@ -3960,6 +4326,7 @@ __all__ = [
     "login_device_browser_user",
     "login_github_identity",
     "login_local_user",
+    "login_oidc_identity",
     "patch_auth_user",
     "remove_oauth_connection",
     "request_password_reset",

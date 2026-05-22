@@ -35,6 +35,7 @@ from sibyl_core.auth.models import (
     OrganizationRole,
     ProjectRole,
     ProjectVisibility,
+    UserIdentity,
 )
 from sibyl_core.auth.passwords import hash_password, verify_password
 
@@ -55,6 +56,7 @@ __all__ = [
     "ProjectRole",
     "ProjectVisibility",
     "SessionRepository",
+    "UserIdentity",
     "UserRepository",
     "authorize_memory_read",
     "authorize_memory_reflect",

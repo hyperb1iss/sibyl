@@ -20,9 +20,18 @@ from sibyl.auth.dependencies import (
     require_org_admin,
 )
 from sibyl.auth.http import select_access_token
+from sibyl.auth.jit import provision_oidc_user
 from sibyl.auth.jwt import JwtError, verify_refresh_token
 from sibyl.auth.oauth_state import OAuthStateError, issue_state, verify_state
+from sibyl.auth.oidc import (
+    enabled_oidc_providers,
+    get_oidc_provider,
+    oidc_authorize_redirect,
+    oidc_callback_claims,
+    oidc_redirect_uri,
+)
 from sibyl.auth.primitives import DeviceTokenError, normalize_user_code
+from sibyl.auth.silent_refresh import is_soft_refresh_error, silent_refresh_bounce
 from sibyl.persistence import organization_runtime
 from sibyl.persistence.auth_runtime import (
     approve_device_authorization,
@@ -63,6 +72,10 @@ SIGNUP_DISABLED_DETAIL = {
     "code": "signup_disabled",
     "message": "Public signups are disabled. Ask an admin for an invitation.",
 }
+LOCAL_AUTH_DISABLED_DETAIL = {
+    "code": "local_auth_disabled",
+    "message": "Local username/password auth is disabled for this instance.",
+}
 
 
 class ApiKeyCreateRequest(BaseModel):
@@ -88,6 +101,17 @@ class MeUpdateRequest(BaseModel):
     avatar_url: str | None = Field(default=None, max_length=2048)
     current_password: str | None = Field(default=None, min_length=1)
     new_password: str | None = Field(default=None, min_length=8)
+
+
+class OIDCProviderResponse(BaseModel):
+    name: str
+    label: str
+    login_url: str
+
+
+class AuthProvidersResponse(BaseModel):
+    local_auth_enabled: bool
+    providers: list[OIDCProviderResponse]
 
 
 def _cookie_secure() -> bool:
@@ -130,6 +154,33 @@ def _set_auth_cookies(
         max_age=max(refresh_max_age, 0),
         domain=config_module.settings.cookie_domain,
         path="/",
+    )
+
+
+def _set_access_cookie(
+    response: Response,
+    *,
+    access_token: str,
+    max_age_seconds: int | None = None,
+) -> None:
+    response.set_cookie(
+        ACCESS_TOKEN_COOKIE,
+        access_token,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+        max_age=max_age_seconds
+        or int(
+            timedelta(minutes=config_module.settings.access_token_expire_minutes).total_seconds()
+        ),
+        domain=config_module.settings.cookie_domain,
+        path="/",
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(
+        REFRESH_TOKEN_COOKIE, domain=config_module.settings.cookie_domain, path="/"
     )
 
 
@@ -177,6 +228,34 @@ def _frontend_login_url(*, error: str | None = None, invite_token: str | None = 
         params["invite"] = invite_token
     query = f"?{urlencode(params, quote_via=quote)}" if params else ""
     return origin + "/login" + query
+
+
+def _request_session(request: Request) -> dict[str, object] | None:
+    try:
+        return request.session
+    except (AssertionError, AttributeError):
+        return None
+
+
+def _oidc_session_key(provider_name: str, suffix: str) -> str:
+    return f"sibyl_oidc:{provider_name}:{suffix}"
+
+
+def _store_oidc_redirect(request: Request, *, provider_name: str) -> None:
+    redirect = request.query_params.get("redirect") or request.query_params.get("next")
+    if not redirect:
+        return
+    session = _request_session(request)
+    if session is not None:
+        session[_oidc_session_key(provider_name, "redirect")] = redirect
+
+
+def _pop_oidc_redirect(request: Request, *, provider_name: str) -> str | None:
+    session = _request_session(request)
+    if session is None:
+        return request.query_params.get("redirect") or request.query_params.get("next")
+    value = session.pop(_oidc_session_key(provider_name, "redirect"), None)
+    return str(value) if value is not None else None
 
 
 async def _read_auth_payload(request: Request) -> dict[str, str]:
@@ -279,6 +358,15 @@ async def _require_signup_allowed(
     if config_module.settings.public_signups_enabled or await is_setup_mode():
         return None
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=SIGNUP_DISABLED_DETAIL)
+
+
+async def _require_local_auth_allowed() -> None:
+    if config_module.settings.local_auth_enabled or await is_setup_mode():
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=LOCAL_AUTH_DISABLED_DETAIL,
+    )
 
 
 def _organization_payload(organization: IssuedOrganization) -> dict[str, str]:
@@ -415,6 +503,21 @@ async def _github_fetch_identity(access_token: str) -> GitHubUserIdentity:
     return GitHubUserIdentity.model_validate(payload)
 
 
+@router.get("/providers", response_model=AuthProvidersResponse)
+async def auth_providers() -> AuthProvidersResponse:
+    return AuthProvidersResponse(
+        local_auth_enabled=config_module.settings.local_auth_enabled or await is_setup_mode(),
+        providers=[
+            OIDCProviderResponse(
+                name=provider.name,
+                label=provider.label,
+                login_url=provider.login_url,
+            )
+            for provider in enabled_oidc_providers()
+        ],
+    )
+
+
 @router.get("/github")
 async def github_login() -> Response:
     jwt_secret = _require_jwt_secret()
@@ -450,6 +553,79 @@ async def github_login() -> Response:
         path="/",
     )
     return response
+
+
+@router.get("/oidc/{provider_name}/login")
+async def oidc_login(request: Request, provider_name: str) -> Response:
+    provider = get_oidc_provider(provider_name)
+    _store_oidc_redirect(request, provider_name=provider.name)
+    return await oidc_authorize_redirect(
+        request,
+        provider=provider,
+        redirect_uri=oidc_redirect_uri(provider, route="callback"),
+    )
+
+
+async def _complete_oidc_request(
+    request: Request,
+    *,
+    provider_name: str,
+    action: str,
+) -> Response:
+    provider = get_oidc_provider(provider_name)
+    error = request.query_params.get("error")
+    if error:
+        if is_soft_refresh_error(error):
+            return silent_refresh_bounce(request, error=error)
+        return RedirectResponse(url=_frontend_login_url(error=error), status_code=302)
+
+    identity = await oidc_callback_claims(request, provider=provider)
+    issued = await provision_oidc_user(identity=identity, request=request, action=action)
+    redirect = _safe_frontend_redirect(_pop_oidc_redirect(request, provider_name=provider.name))
+    response = RedirectResponse(url=redirect, status_code=302)
+    max_age_seconds = int(
+        timedelta(minutes=config_module.settings.oidc.session_minutes).total_seconds()
+    )
+    _set_access_cookie(
+        response,
+        access_token=issued.access_token,
+        max_age_seconds=max_age_seconds,
+    )
+    if request.cookies.get(REFRESH_TOKEN_COOKIE):
+        _clear_refresh_cookie(response)
+    return response
+
+
+@router.get("/oidc/{provider_name}/callback")
+async def oidc_callback(request: Request, provider_name: str) -> Response:
+    return await _complete_oidc_request(
+        request,
+        provider_name=provider_name,
+        action="auth.oidc.login",
+    )
+
+
+@router.get("/oidc/{provider_name}/refresh")
+async def oidc_silent_refresh(request: Request, provider_name: str) -> Response:
+    if not config_module.settings.oidc.silent_refresh_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "oidc_silent_refresh_disabled"},
+        )
+    provider = get_oidc_provider(provider_name)
+    if request.query_params.get("code") or request.query_params.get("error"):
+        return await _complete_oidc_request(
+            request,
+            provider_name=provider.name,
+            action="auth.oidc.refresh",
+        )
+    _store_oidc_redirect(request, provider_name=provider.name)
+    return await oidc_authorize_redirect(
+        request,
+        provider=provider,
+        redirect_uri=oidc_redirect_uri(provider, route="refresh"),
+        prompt="none",
+    )
 
 
 @router.get("/github/callback")
@@ -490,6 +666,7 @@ async def github_callback(request: Request) -> Response:
 @router.post("/local/signup", response_model=None)
 async def local_signup(request: Request):
     _ = _require_jwt_secret()
+    await _require_local_auth_allowed()
     data = await _read_auth_payload(request)
     body = LocalSignupRequest.model_validate(data)
     invite_token = _auth_payload_invite_token(body.invite_token)
@@ -561,6 +738,7 @@ async def local_signup(request: Request):
 @limiter.limit("5/minute")  # Strict limit to prevent brute force
 async def local_login(request: Request):
     _ = _require_jwt_secret()
+    await _require_local_auth_allowed()
     data = await _read_auth_payload(request)
     body = LocalLoginRequest.model_validate(data)
     invite_token = _auth_payload_invite_token(body.invite_token)
@@ -1064,6 +1242,7 @@ async def device_verify_post(request: Request) -> Response:
     verify_url = f"/api/auth/device/verify?user_code={user_code}"
 
     if action == "login":
+        await _require_local_auth_allowed()
         email = str(form.get("email") or "").strip()
         password = str(form.get("password") or "").strip()
         login = await login_device_browser_user(

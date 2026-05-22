@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 
 CORE_AUTH_TABLES = ("users", "organizations", "organization_members")
 EXTENDED_AUTH_TABLES = (
+    "identity_provider",
+    "user_identity",
     "user_sessions",
     "password_reset_tokens",
     "login_history",
@@ -56,6 +58,45 @@ DEFINE FIELD IF NOT EXISTS updated_at ON users TYPE datetime DEFAULT time::now()
 DEFINE INDEX IF NOT EXISTS idx_users_uuid ON users FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_users_email ON users FIELDS email UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_users_github_id ON users FIELDS github_id UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS identity_provider SCHEMAFULL;
+ALTER TABLE IF EXISTS identity_provider SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS uuid ON identity_provider TYPE string;
+DEFINE FIELD IF NOT EXISTS name ON identity_provider TYPE string;
+DEFINE FIELD IF NOT EXISTS issuer ON identity_provider TYPE string;
+DEFINE FIELD IF NOT EXISTS client_id ON identity_provider TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS scopes ON identity_provider TYPE array<string> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS role_claim ON identity_provider TYPE string DEFAULT 'roles';
+DEFINE FIELD IF NOT EXISTS enabled ON identity_provider TYPE bool DEFAULT true;
+DEFINE FIELD IF NOT EXISTS created_at ON identity_provider TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS updated_at ON identity_provider TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS idx_identity_provider_uuid
+    ON identity_provider FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_identity_provider_name
+    ON identity_provider FIELDS name UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_identity_provider_issuer
+    ON identity_provider FIELDS issuer;
+
+DEFINE TABLE IF NOT EXISTS user_identity SCHEMAFULL;
+ALTER TABLE IF EXISTS user_identity SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS uuid ON user_identity TYPE string;
+DEFINE FIELD IF NOT EXISTS provider_name ON user_identity TYPE string;
+DEFINE FIELD IF NOT EXISTS issuer ON user_identity TYPE string;
+DEFINE FIELD IF NOT EXISTS subject ON user_identity TYPE string;
+DEFINE FIELD IF NOT EXISTS subject_key ON user_identity TYPE string;
+DEFINE FIELD IF NOT EXISTS user_id ON user_identity TYPE string;
+DEFINE FIELD IF NOT EXISTS email ON user_identity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS claims ON user_identity TYPE object FLEXIBLE DEFAULT {};
+DEFINE FIELD IF NOT EXISTS created_at ON user_identity TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS updated_at ON user_identity TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS last_login_at ON user_identity TYPE option<datetime>;
+
+DEFINE INDEX IF NOT EXISTS idx_user_identity_uuid ON user_identity FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_user_identity_user ON user_identity FIELDS user_id;
+DEFINE INDEX IF NOT EXISTS idx_user_identity_provider_subject
+    ON user_identity FIELDS provider_name, subject_key UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_user_identity_email ON user_identity FIELDS email;
 
 DEFINE TABLE IF NOT EXISTS organizations SCHEMAFULL;
 ALTER TABLE IF EXISTS organizations SCHEMAFULL;

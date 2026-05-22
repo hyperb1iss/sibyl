@@ -76,6 +76,7 @@ __all__ += [
     "login_device_browser_user",
     "login_github_identity",
     "login_local_user",
+    "login_oidc_identity",
     "patch_auth_user",
     "remove_oauth_connection",
     "request_password_reset",
@@ -196,6 +197,10 @@ async def delete_failed_local_signup_user(**kwargs: object) -> None:
 
 async def login_local_user(**kwargs: object):
     return await _call_backend_export("login_local_user", **kwargs)
+
+
+async def login_oidc_identity(**kwargs: object):
+    return await _call_backend_export("login_oidc_identity", **kwargs)
 
 
 async def start_device_authorization(**kwargs: object):

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useSetupStatus } from '@/lib/hooks';
+import { useAuthProviders, useSetupStatus } from '@/lib/hooks';
 import { render, screen } from '@/test/utils';
 import LoginPage from './page';
 
@@ -30,6 +30,7 @@ vi.mock('next/image', () => ({
 }));
 
 vi.mock('@/lib/hooks', () => ({
+  useAuthProviders: vi.fn(),
   useSetupStatus: vi.fn(),
 }));
 
@@ -47,6 +48,10 @@ const setupStatus = {
   gemini_valid: null,
 };
 
+function authProvidersResult(data: ReturnType<typeof useAuthProviders>['data']) {
+  return { data, isLoading: false } as unknown as ReturnType<typeof useAuthProviders>;
+}
+
 describe('LoginPage', () => {
   beforeEach(() => {
     routerReplace.mockClear();
@@ -55,6 +60,9 @@ describe('LoginPage', () => {
       data: setupStatus,
       isLoading: false,
     } as ReturnType<typeof useSetupStatus>);
+    vi.mocked(useAuthProviders).mockReturnValue(
+      authProvidersResult({ local_auth_enabled: true, providers: [] })
+    );
   });
 
   it('hides account creation when public signups are disabled', () => {
@@ -92,5 +100,42 @@ describe('LoginPage', () => {
     expect(
       container.querySelector('form[action="/api/auth/local/login"] input[name="invite_token"]')
     ).toHaveAttribute('value', 'invite-token');
+  });
+
+  it('hides local forms when local auth is disabled', () => {
+    vi.mocked(useAuthProviders).mockReturnValue(
+      authProvidersResult({
+        local_auth_enabled: false,
+        providers: [{ name: 'entra', label: 'Entra', login_url: '/api/auth/oidc/entra/login' }],
+      })
+    );
+
+    const { container } = render(<LoginPage />);
+
+    expect(screen.getByRole('link', { name: 'Entra' })).toHaveAttribute(
+      'href',
+      '/api/auth/oidc/entra/login'
+    );
+    expect(container.querySelector('form[action="/api/auth/local/login"]')).not.toBeInTheDocument();
+    expect(
+      container.querySelector('form[action="/api/auth/local/signup"]')
+    ).not.toBeInTheDocument();
+  });
+
+  it('preserves safe next redirects on OIDC links', () => {
+    searchParams = new URLSearchParams({ next: '/studio' });
+    vi.mocked(useAuthProviders).mockReturnValue(
+      authProvidersResult({
+        local_auth_enabled: false,
+        providers: [{ name: 'entra', label: 'Entra', login_url: '/api/auth/oidc/entra/login' }],
+      })
+    );
+
+    render(<LoginPage />);
+
+    expect(screen.getByRole('link', { name: 'Entra' })).toHaveAttribute(
+      'href',
+      '/api/auth/oidc/entra/login?redirect=%2Fstudio'
+    );
   });
 });

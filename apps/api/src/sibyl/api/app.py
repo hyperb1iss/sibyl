@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 from starlette.routing import WebSocketRoute
 
 from sibyl.api.errors import (
@@ -135,6 +136,14 @@ def _route_label(request: Request) -> str:
     if isinstance(route_path, str) and route_path:
         return route_path
     return "/unmatched"
+
+
+def _cookie_secure() -> bool:
+    if settings.cookie_secure is not None:
+        return bool(settings.cookie_secure)
+    if settings.environment == "production":
+        return True
+    return settings.server_url.startswith("https://")
 
 
 @asynccontextmanager
@@ -360,6 +369,12 @@ def create_api_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+    )
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.jwt_secret.get_secret_value(),
+        same_site="lax",
+        https_only=_cookie_secure(),
     )
 
     # Auth: decode bearer JWTs (no enforcement by default)

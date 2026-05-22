@@ -4,7 +4,8 @@ import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import { Spinner } from '@/components/ui/spinner';
-import { useSetupStatus } from '@/lib/hooks';
+import type { AuthProvider } from '@/lib/api';
+import { useAuthProviders, useSetupStatus } from '@/lib/hooks';
 
 type AuthMode = 'signin' | 'signup';
 
@@ -13,6 +14,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   authentication_failed: 'Authentication failed. Please try again.',
   invalid_credentials: 'Invalid email or password.',
   invalid_invitation: 'Invitation is not valid for this account.',
+  local_auth_disabled: 'Use your organization sign-in provider.',
   signup_disabled: 'Account creation requires an invitation.',
 };
 
@@ -26,6 +28,14 @@ function getSafeRedirect(url: string | null): string | null {
     return url;
   }
   return null;
+}
+
+function getProviderHref(provider: AuthProvider, next: string | null): string {
+  if (!next) {
+    return provider.login_url;
+  }
+  const params = new URLSearchParams({ redirect: next });
+  return `${provider.login_url}?${params.toString()}`;
 }
 
 export default function LoginPage() {
@@ -57,6 +67,9 @@ function LoginContent() {
 
   // Check if setup is needed (no users exist)
   const { data: setupStatus, isLoading: isCheckingSetup } = useSetupStatus();
+  const { data: authProviders, isLoading: isCheckingProviders } = useAuthProviders({
+    enabled: setupStatus?.needs_setup !== true,
+  });
 
   // Redirect to /setup if this is a fresh install
   useEffect(() => {
@@ -65,7 +78,10 @@ function LoginContent() {
     }
   }, [setupStatus, router]);
 
-  const allowSignup = Boolean(setupStatus?.public_signups_enabled || inviteToken);
+  const oidcProviders = authProviders?.providers ?? [];
+  const localAuthEnabled = authProviders?.local_auth_enabled ?? true;
+  const allowSignup =
+    localAuthEnabled && Boolean(setupStatus?.public_signups_enabled || inviteToken);
   const errorMessage = error
     ? (ERROR_MESSAGES[error] ?? 'Something went wrong. Please try again.')
     : null;
@@ -83,7 +99,7 @@ function LoginContent() {
   }, [allowSignup]);
 
   // Show loading while checking setup status
-  if (isCheckingSetup || setupStatus?.needs_setup) {
+  if (isCheckingSetup || isCheckingProviders || setupStatus?.needs_setup) {
     return (
       <div className="min-h-dvh flex flex-col items-center justify-center px-4 py-12 bg-sc-bg-dark">
         <Spinner size="lg" color="purple" />
@@ -179,29 +195,34 @@ function LoginContent() {
               </div>
             )}
 
-            {/* Fixed height wrapper - sized for 3-field form */}
-            <div className="relative h-[280px]">
-              <div
-                className={`absolute inset-0 transition-all duration-300 ${
-                  mode === 'signin'
-                    ? 'opacity-100 translate-x-0 pointer-events-auto'
-                    : 'opacity-0 -translate-x-4 pointer-events-none'
-                }`}
-              >
-                <SignInForm next={next} inviteToken={inviteToken} />
-              </div>
-              {allowSignup && (
+            {oidcProviders.length > 0 && <OIDCProviderList providers={oidcProviders} next={next} />}
+
+            {localAuthEnabled ? (
+              <div className="relative h-[280px]">
                 <div
                   className={`absolute inset-0 transition-all duration-300 ${
-                    mode === 'signup'
+                    mode === 'signin'
                       ? 'opacity-100 translate-x-0 pointer-events-auto'
-                      : 'opacity-0 translate-x-4 pointer-events-none'
+                      : 'opacity-0 -translate-x-4 pointer-events-none'
                   }`}
                 >
-                  <SignUpForm next={next} inviteToken={inviteToken} />
+                  <SignInForm next={next} inviteToken={inviteToken} />
                 </div>
-              )}
-            </div>
+                {allowSignup && (
+                  <div
+                    className={`absolute inset-0 transition-all duration-300 ${
+                      mode === 'signup'
+                        ? 'opacity-100 translate-x-0 pointer-events-auto'
+                        : 'opacity-0 translate-x-4 pointer-events-none'
+                    }`}
+                  >
+                    <SignUpForm next={next} inviteToken={inviteToken} />
+                  </div>
+                )}
+              </div>
+            ) : oidcProviders.length === 0 ? (
+              <div className="text-sm text-sc-fg-muted">No sign-in providers are configured.</div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -211,6 +232,25 @@ function LoginContent() {
 
 const inputClasses =
   'w-full px-3 py-2.5 rounded-lg bg-sc-bg-base border border-sc-fg-subtle/20 text-sc-fg-primary placeholder:text-sc-fg-subtle/50 focus:outline-none focus:border-sc-purple/60 focus:ring-2 focus:ring-sc-purple/20 transition-all duration-200';
+
+function OIDCProviderList({ providers, next }: { providers: AuthProvider[]; next: string | null }) {
+  return (
+    <div className="mb-5 space-y-2">
+      {providers.map(provider => (
+        <a
+          key={provider.name}
+          href={getProviderHref(provider, next)}
+          className="flex w-full items-center justify-center rounded-lg border border-sc-cyan/30 bg-sc-cyan/10 px-3 py-2.5 text-sm font-medium text-sc-cyan transition-colors hover:border-sc-cyan/60 hover:bg-sc-cyan/15"
+        >
+          {provider.label}
+        </a>
+      ))}
+      <div className="pt-2 text-center text-[11px] uppercase tracking-[0.1em] text-sc-fg-subtle">
+        Organization Sign In
+      </div>
+    </div>
+  );
+}
 
 function SignInForm({ next, inviteToken }: { next: string | null; inviteToken: string | null }) {
   return (

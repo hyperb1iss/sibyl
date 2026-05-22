@@ -84,6 +84,11 @@ def _issued_session() -> SimpleNamespace:
     )
 
 
+@pytest.fixture(autouse=True)
+def _enable_local_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(auth_routes.config_module.settings, "local_auth_enabled", True)
+
+
 @pytest.mark.asyncio
 async def test_github_callback_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     request = FakeRequest(
@@ -388,6 +393,29 @@ async def test_local_login_rejects_invalid_credentials(monkeypatch: pytest.Monke
 
     assert exc_info.value.status_code == 401
     login.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_local_login_respects_enterprise_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    request = FakeRequest(
+        json_data={
+            "email": "nova@example.com",
+            "password": "super-secret",
+        }
+    )
+    login = AsyncMock()
+
+    monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests")
+    monkeypatch.setattr(auth_routes.config_module.settings, "local_auth_enabled", False)
+    monkeypatch.setattr(auth_routes, "is_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(auth_routes, "login_local_user", login)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_route(auth_routes.local_login, request=request)
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail["code"] == "local_auth_disabled"
+    login.assert_not_awaited()
 
 
 @pytest.mark.asyncio

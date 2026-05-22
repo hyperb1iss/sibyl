@@ -258,6 +258,17 @@ export interface AdminAuditListResponse {
   has_more: boolean;
 }
 
+export interface AuthProvider {
+  name: string;
+  label: string;
+  login_url: string;
+}
+
+export interface AuthProvidersResponse {
+  local_auth_enabled: boolean;
+  providers: AuthProvider[];
+}
+
 export interface AdminAuditParams {
   user_id?: string;
   action?: string;
@@ -2501,6 +2512,7 @@ export const api = {
   },
 
   auth: {
+    providers: () => fetchApi<AuthProvidersResponse>('/auth/providers'),
     me: () => fetchApi<AuthMeResponse>('/auth/me'),
     logout: () =>
       fetchApi<void>('/auth/logout', {
