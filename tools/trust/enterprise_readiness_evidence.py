@@ -1290,11 +1290,17 @@ def preflight_current_environment(
     *,
     repo: str = DEFAULT_GITHUB_REPO,
     workflow: str = DEFAULT_GITHUB_WORKFLOW,
+    kubernetes_context: str = "",
 ) -> JsonObject:
+    kubernetes_context = kubernetes_context.strip()
     checks = {
         "source_templates": _preflight_source_templates(evidence_dir),
         "desktop_mcp_clients": _preflight_desktop_mcp_clients(),
-        "local_kubernetes": _preflight_local_kubernetes(),
+        "local_kubernetes": (
+            _preflight_local_kubernetes(contexts=(kubernetes_context,))
+            if kubernetes_context
+            else _preflight_local_kubernetes()
+        ),
         "release_evidence": _preflight_latest_release_evidence(repo=repo, workflow=workflow),
     }
     return {
@@ -3559,12 +3565,14 @@ def _handle_current_environment_preflight(
     *,
     repo: str,
     workflow: str,
+    kubernetes_context: str,
 ) -> int:
     try:
         report = preflight_current_environment(
             DEFAULT_EVIDENCE_DIR if evidence_dir is None else evidence_dir,
             repo=repo,
             workflow=workflow,
+            kubernetes_context=kubernetes_context,
         )
     except EvidenceFailure as exc:
         sys.stdout.write(f"{exc}\n")
@@ -3912,6 +3920,7 @@ def _dispatch_lock_free_command(args: argparse.Namespace) -> int | None:
             args.evidence_dir,
             repo=args.github_repo,
             workflow=args.github_workflow,
+            kubernetes_context=args.kubernetes_context,
         )
     return None
 

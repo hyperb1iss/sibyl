@@ -1115,6 +1115,58 @@ def test_preflight_current_environment_reports_section_failures(
     assert report["checks"]["release_evidence"]["run_id"] == "12345"
 
 
+def test_preflight_current_environment_uses_kubernetes_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_preflight_local_kubernetes(*, contexts: tuple[str, ...]) -> dict[str, Any]:
+        assert contexts == ("kind-sibyl-enterprise",)
+        return {
+            "status": "PASS",
+            "contexts": [{"context": "kind-sibyl-enterprise", "status": "PASS"}],
+            "issues": [],
+        }
+
+    monkeypatch.setattr(
+        evidence,
+        "_preflight_source_templates",
+        lambda evidence_dir: {
+            "status": "PASS",
+            "templates": [],
+            "issues": [],
+        },
+    )
+    monkeypatch.setattr(
+        evidence,
+        "_preflight_desktop_mcp_clients",
+        lambda: {
+            "status": "PASS",
+            "clients": [],
+            "issues": [],
+        },
+    )
+    monkeypatch.setattr(evidence, "_preflight_local_kubernetes", fake_preflight_local_kubernetes)
+    monkeypatch.setattr(
+        evidence,
+        "_preflight_latest_release_evidence",
+        lambda *, repo, workflow: {
+            "status": "PASS",
+            "repo": repo,
+            "workflow": workflow,
+            "run_id": "12345",
+            "run": {},
+            "issues": [],
+        },
+    )
+
+    report = evidence.preflight_current_environment(
+        tmp_path,
+        kubernetes_context="kind-sibyl-enterprise",
+    )
+
+    assert report["status"] == "PASS"
+
+
 def test_preflight_source_templates_reports_missing(tmp_path: Path) -> None:
     report = evidence._preflight_source_templates(tmp_path)
 
@@ -1141,10 +1193,12 @@ def test_main_preflights_current_environment(
         *,
         repo: str,
         workflow: str,
+        kubernetes_context: str,
     ) -> dict[str, Any]:
         assert evidence_dir == tmp_path
         assert repo == "hyperb1iss/sibyl"
         assert workflow == "publish.yml"
+        assert kubernetes_context == "kind-sibyl-enterprise"
         return {
             "schema_version": evidence.SCHEMA_VERSION,
             "status": "FAIL",
@@ -1181,7 +1235,15 @@ def test_main_preflights_current_environment(
         fake_preflight_current_environment,
     )
 
-    exit_code = evidence.main(["--evidence-dir", str(tmp_path), "--preflight-current-environment"])
+    exit_code = evidence.main(
+        [
+            "--evidence-dir",
+            str(tmp_path),
+            "--preflight-current-environment",
+            "--kubernetes-context",
+            "kind-sibyl-enterprise",
+        ]
+    )
     captured = capsys.readouterr()
 
     assert exit_code == 1
