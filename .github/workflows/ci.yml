@@ -446,6 +446,7 @@ jobs:
       SIBYL_JWT_SECRET: test-secret-for-ci
       SIBYL_STORE: surreal
       SIBYL_AUTH_STORE: surreal
+      SIBYL_LOCAL_AUTH_ENABLED: "true"
       SIBYL_COORDINATION_BACKEND: local
       SIBYL_SURREAL_URL: ws://localhost:8000/rpc
       SIBYL_SURREAL_USERNAME: sibyl_ci

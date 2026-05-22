@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from tools.baselines.common import (
@@ -13,6 +14,17 @@ from tools.baselines.common import (
 )
 
 EXPECTED_ERROR_COUNT = 3
+REPO_ROOT = Path(__file__).parents[2]
+
+
+def _workflow_job(workflow: str, job_name: str) -> str:
+    header = f"  {job_name}:"
+    start = workflow.index(header)
+    tail = workflow[start:]
+    next_job = re.search(r"\n  [a-zA-Z0-9_-]+:\n", tail[len(header) :])
+    if next_job is None:
+        return tail
+    return tail[: len(header) + next_job.start()]
 
 
 def test_resolve_pointer_handles_nested_maps_and_lists() -> None:
@@ -158,3 +170,18 @@ def test_write_manifest_omits_auth_without_runtime_token(tmp_path: Path) -> None
     manifest = json.loads(path.read_text(encoding="utf-8"))
 
     assert "auth" not in manifest
+
+
+def test_runtime_baseline_workflows_enable_local_auth_under_production_env() -> None:
+    jobs = {
+        ".github/workflows/ci.yml": ("e2e",),
+        ".github/workflows/eval.yml": ("live-eval",),
+        ".github/workflows/nightly-regression.yml": ("baseline-parity",),
+    }
+
+    for workflow_path, job_names in jobs.items():
+        workflow = (REPO_ROOT / workflow_path).read_text(encoding="utf-8")
+        for job_name in job_names:
+            job = _workflow_job(workflow, job_name)
+            assert "SIBYL_ENVIRONMENT: production" in job
+            assert 'SIBYL_LOCAL_AUTH_ENABLED: "true"' in job

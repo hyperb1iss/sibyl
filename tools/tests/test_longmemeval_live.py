@@ -46,6 +46,8 @@ def test_eval_workflow_full_run_forces_memory_extraction_off() -> None:
     assert "--wait-for-memory-extraction" not in full_job
     assert "Full LongMemEval must run with SIBYL_AUTO_EXTRACT_ENTITIES=false." in full_job
     assert '--metadata auto_extract_entities="${SIBYL_AUTO_EXTRACT_ENTITIES}"' in full_job
+    assert 'SIBYL_LOCAL_AUTH_ENABLED: "true"' in smoke_job
+    assert 'SIBYL_LOCAL_AUTH_ENABLED: "true"' in full_job
 
 
 def _load_live_module() -> ModuleType:

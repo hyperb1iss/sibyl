@@ -167,7 +167,7 @@ class Settings(BaseSettings):
         description="Allow self-serve local account creation after initial setup",
     )
     local_auth_enabled: bool = Field(
-        default=False,
+        default=True,
         description="Enable local username/password login outside setup and break-glass flows",
     )
     break_glass_enabled: bool = Field(
@@ -270,12 +270,6 @@ class Settings(BaseSettings):
                 raise ValueError(
                     f"OIDC extra providers require oidc.extra_providers_enabled=true: {joined}"
                 )
-        return self
-
-    @model_validator(mode="after")
-    def apply_auth_defaults(self) -> "Settings":
-        if "local_auth_enabled" not in self.model_fields_set and self.environment == "development":
-            object.__setattr__(self, "local_auth_enabled", True)
         return self
 
     jwt_secret: SecretStr = Field(

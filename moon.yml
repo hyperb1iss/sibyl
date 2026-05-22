@@ -587,6 +587,7 @@ tasks:
       tools/tests/test_longmemeval_live.py tools/tests/test_longmemeval_replay.py -v
     inputs:
       - tools/**/*.py
+      - .github/workflows/eval.yml
       - benchmarks/longmemeval_bench.py
       - benchmarks/longmemeval_live.py
       - benchmarks/longmemeval_replay.py
@@ -692,6 +693,9 @@ tasks:
     command: uv run pytest tools/tests/test_baselines.py -v
     inputs:
       - tools/**/*.py
+      - .github/workflows/ci.yml
+      - .github/workflows/eval.yml
+      - .github/workflows/nightly-regression.yml
       - pyproject.toml
 
   memory-trust-gate:

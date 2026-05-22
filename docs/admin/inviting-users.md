@@ -58,5 +58,6 @@ boundary.
 
 ## Local Accounts
 
-Production values should set `SIBYL_LOCAL_AUTH_ENABLED=false`. Local username/password accounts
-remain for development and break-glass workflows, but they should not be the normal enterprise path.
+Enterprise SSO values should set `SIBYL_LOCAL_AUTH_ENABLED=false`. Local username/password accounts
+remain the default single-user path and the break-glass path, but they should not be the normal
+enterprise SSO path.

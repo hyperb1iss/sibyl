@@ -23,10 +23,10 @@ breakGlass:
   ownerPasswordKey: owner-password
 ```
 
-Keep production `SIBYL_LOCAL_AUTH_ENABLED=false` for normal operation. Temporarily enable local auth
-only for a documented break-glass window. `breakGlass.enabled=true` sets
-`SIBYL_BREAK_GLASS_ENABLED=true`, and Sibyl denies break-glass login after `breakGlass.expiresAt` or
-from a source address outside `breakGlass.allowedIPs`.
+Enterprise SSO deployments should set `SIBYL_LOCAL_AUTH_ENABLED=false` for normal operation.
+Temporarily enable local auth only for a documented break-glass window. `breakGlass.enabled=true`
+sets `SIBYL_BREAK_GLASS_ENABLED=true`, and Sibyl denies break-glass login after
+`breakGlass.expiresAt` or from a source address outside `breakGlass.allowedIPs`.
 
 When break-glass is enabled, `expiresAt` and at least one `allowedIPs` CIDR are required. Sibyl also
 denies login if the expiry is more than four hours out, so the emergency window stays bounded even
