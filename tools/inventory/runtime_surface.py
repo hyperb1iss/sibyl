@@ -267,6 +267,7 @@ GRAPHITI_COMPATIBILITY_ALLOWLIST: tuple[GraphitiCompatibilityRecord, ...] = ()
 ARCHITECTURE_LEGACY_TERM_FILES = (
     "docs/architecture/PACKAGING_PLAN_2026-05-19.md",
     "docs/architecture/PERMISSION_SYSTEM_AUDIT.md",
+    "docs/architecture/retrieval-system.md",
     "docs/architecture/SIBYL_1_0_ROADMAP.md",
     "docs/architecture/SIBYL_NORTHSTAR.md",
     "docs/architecture/SIBYL_POST_V010_RELEASE_REMAP_SPEC.md",
@@ -409,6 +410,11 @@ LEGACY_TERM_ALLOWLIST = (
         path="docs/testing/benchmark-methodology.md",
         owner="benchmark evidence",
         reason="Benchmark comparison flow names historical migration rehearsal mode.",
+    ),
+    LegacyTermAllowlistRecord(
+        path="docs/testing/ai-memory-landscape.md",
+        owner="benchmark evidence",
+        reason="Competitive landscape docs name Graphiti only as historical comparison context.",
     ),
     LegacyTermAllowlistRecord(
         path="docs/architecture/SIBYL_1_0_RC_PLAN.md",
