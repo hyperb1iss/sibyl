@@ -455,7 +455,7 @@ main() {
     lan_host="$(resolve_lan_host)"
     export SIBYL_SERVER_HOST="${SIBYL_SERVER_HOST:-0.0.0.0}"
     export SIBYL_PUBLIC_URL="${SIBYL_PUBLIC_URL:-http://${lan_host}:${SIBYL_WEB_PORT}}"
-    export SIBYL_SERVER_URL="${SIBYL_SERVER_URL:-http://${lan_host}:${SIBYL_SERVER_PORT}}"
+    export SIBYL_SERVER_URL="${SIBYL_SERVER_URL:-http://localhost:${SIBYL_SERVER_PORT}}"
     export SIBYL_FRONTEND_URL="${SIBYL_FRONTEND_URL:-http://${lan_host}:${SIBYL_WEB_PORT}/}"
     export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-http://${lan_host}:${SIBYL_SERVER_PORT}}"
   else
