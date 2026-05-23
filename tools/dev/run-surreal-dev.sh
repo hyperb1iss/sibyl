@@ -335,6 +335,64 @@ PY
   printf 'localhost\n'
 }
 
+append_unique_csv_value() {
+  local current="${1:-}"
+  local value="${2:-}"
+
+  if [[ -z "$value" ]]; then
+    printf '%s\n' "$current"
+    return
+  fi
+
+  case ",$current," in
+    *",$value,"*)
+      printf '%s\n' "$current"
+      ;;
+    *)
+      if [[ -z "$current" ]]; then
+        printf '%s\n' "$value"
+      else
+        printf '%s,%s\n' "$current" "$value"
+      fi
+      ;;
+  esac
+}
+
+resolve_lan_dev_origins() {
+  local lan_host="${1:-}"
+  local origins="${SIBYL_ALLOWED_DEV_ORIGINS:-}"
+  local candidate=""
+
+  origins="$(append_unique_csv_value "$origins" "$lan_host")"
+  origins="$(append_unique_csv_value "$origins" "${lan_host}:${SIBYL_WEB_PORT}")"
+
+  if command -v hostname >/dev/null 2>&1; then
+    candidate="$(hostname -s 2>/dev/null || true)"
+    origins="$(append_unique_csv_value "$origins" "$candidate")"
+    origins="$(append_unique_csv_value "$origins" "${candidate}:${SIBYL_WEB_PORT}")"
+    if [[ -n "$candidate" ]]; then
+      origins="$(append_unique_csv_value "$origins" "${candidate}.local")"
+      origins="$(append_unique_csv_value "$origins" "${candidate}.local:${SIBYL_WEB_PORT}")"
+    fi
+
+    candidate="$(hostname 2>/dev/null || true)"
+    origins="$(append_unique_csv_value "$origins" "$candidate")"
+    origins="$(append_unique_csv_value "$origins" "${candidate}:${SIBYL_WEB_PORT}")"
+  fi
+
+  if command -v scutil >/dev/null 2>&1; then
+    candidate="$(scutil --get LocalHostName 2>/dev/null || true)"
+    origins="$(append_unique_csv_value "$origins" "$candidate")"
+    origins="$(append_unique_csv_value "$origins" "${candidate}:${SIBYL_WEB_PORT}")"
+    if [[ -n "$candidate" ]]; then
+      origins="$(append_unique_csv_value "$origins" "${candidate}.local")"
+      origins="$(append_unique_csv_value "$origins" "${candidate}.local:${SIBYL_WEB_PORT}")"
+    fi
+  fi
+
+  printf '%s\n' "$origins"
+}
+
 cleanup() {
   local exit_code="${1:-0}"
 
@@ -458,6 +516,7 @@ main() {
     export SIBYL_SERVER_URL="${SIBYL_SERVER_URL:-http://localhost:${SIBYL_SERVER_PORT}}"
     export SIBYL_FRONTEND_URL="${SIBYL_FRONTEND_URL:-http://${lan_host}:${SIBYL_WEB_PORT}/}"
     export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-http://${lan_host}:${SIBYL_SERVER_PORT}}"
+    export SIBYL_ALLOWED_DEV_ORIGINS="$(resolve_lan_dev_origins "$lan_host")"
   else
     export SIBYL_SERVER_HOST="${SIBYL_SERVER_HOST:-127.0.0.1}"
   fi
@@ -557,6 +616,9 @@ main() {
     fi
     if [[ -n "${NEXT_PUBLIC_API_URL:-}" ]]; then
       printf 'NEXT_PUBLIC_API_URL=%s\n' "$NEXT_PUBLIC_API_URL"
+    fi
+    if [[ -n "${SIBYL_ALLOWED_DEV_ORIGINS:-}" ]]; then
+      printf 'SIBYL_ALLOWED_DEV_ORIGINS=%s\n' "$SIBYL_ALLOWED_DEV_ORIGINS"
     fi
     if [[ -n "${SIBYL_SURREAL_URL:-}" ]]; then
       printf 'SIBYL_SURREAL_URL=%s\n' "$SIBYL_SURREAL_URL"
