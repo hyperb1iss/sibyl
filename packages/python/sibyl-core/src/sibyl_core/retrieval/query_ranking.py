@@ -165,6 +165,7 @@ _PRIMARY_PERSONAL_WEIGHT = 0.04
 _CONCEPT_OVERLAP_WEIGHT = 0.08
 _PRIMARY_CONCEPT_WEIGHT = 0.06
 _PREFERENCE_EVIDENCE_WEIGHT = 0.05
+_SALIENT_FACT_WEIGHT = 0.42
 _MEMORY_SPAN_OVERLAP_WEIGHT = 0.16
 _MEMORY_SPAN_SEGMENT_WEIGHT = 0.14
 _MEMORY_CONCEPT_WEIGHT = 0.06
@@ -337,6 +338,14 @@ _PREFERENCE_EVIDENCE_PATTERNS = (
     ),
     re.compile(r"\bmy (?:favorite|preferred|ideal|usual|go-to)\b"),
     re.compile(r"\bi'm (?:fond of|a fan of|into|looking for|trying to find)\b"),
+    re.compile(
+        r"\bi(?:'ve| have) been (?:really |currently |lately |recently )?"
+        r"(?:watching|reading|listening to|playing|using|following)\b"
+    ),
+    re.compile(
+        r"\bi(?:'m| am| work| study| research) (?:working in|working on|"
+        r"researching|studying|specializing in|focused on|in the field)\b"
+    ),
     re.compile(r"\bi tend to\b"),
 )
 _PURCHASE_ACTION_PATTERN = re.compile(
@@ -348,6 +357,39 @@ _BRAND_LOOKUP_QUERY_PATTERN = re.compile(r"\bbrand\b", re.IGNORECASE)
 _BRAND_EVIDENCE_PATTERN = re.compile(
     r"\b(?:using|use|uses|switched to|picked up|from|at|by|brand|made by)\b",
     re.IGNORECASE,
+)
+_NAMED_SERVICE_QUERY_PATTERN = re.compile(
+    r"\b(?:name|which|what)\b[^?]{0,90}\b(?:service|app|platform|tool|provider)\b",
+    re.IGNORECASE,
+)
+_NAMED_SERVICE_EVIDENCE_PATTERN = re.compile(
+    r"\b(?:on|using|use|uses|with|via|through|subscribed to|relying on|"
+    r"listening to|watching)\s+(?:my|the|a|an|their|our)?\s*"
+    r"[a-z][a-z0-9&'.-]{2,}(?:\s+[a-z][a-z0-9&'.-]{2,}){0,3}\b",
+    re.IGNORECASE,
+)
+_NAMED_SERVICE_DOMAIN_GROUPS = (
+    frozenset(
+        {
+            "album",
+            "albums",
+            "audio",
+            "concert",
+            "concerts",
+            "listen",
+            "listening",
+            "media",
+            "music",
+            "podcast",
+            "podcasts",
+            "rock",
+            "song",
+            "songs",
+            "spotify",
+            "stream",
+            "streaming",
+        }
+    ),
 )
 _SIBLING_QUERY_PATTERN = re.compile(r"\b(?:siblings?|brothers?|sisters?)\b", re.IGNORECASE)
 _SIBLING_EVIDENCE_PATTERN = re.compile(
@@ -405,6 +447,16 @@ _BUSINESS_MILESTONE_QUERY_PATTERN = re.compile(
 _BUSINESS_MILESTONE_EVIDENCE_PATTERN = re.compile(
     r"\b(?:launched my website|business plan|signed a contract|first client|"
     r"freelance clients?|potential clients?|business strategy)\b",
+    re.IGNORECASE,
+)
+_LIFE_EVENT_QUERY_PATTERN = re.compile(
+    r"\b(?:life event|relatives?|family|cousins?|siblings?)\b",
+    re.IGNORECASE,
+)
+_LIFE_EVENT_EVIDENCE_PATTERN = re.compile(
+    r"\b(?:i (?:just |recently )?(?:attended|participated in|went to|came back from|"
+    r"got back from)|my|our)[^.?!]{0,120}(?:wedding|engagement party|baby shower|"
+    r"graduation|birthday party|anniversary|funeral|memorial|ceremony|reunion)\b",
     re.IGNORECASE,
 )
 _SOCIAL_ACTIVITY_QUERY_PATTERN = re.compile(
@@ -993,6 +1045,64 @@ def _query_frame_score(
     return min(score, 1.0)
 
 
+def _salient_fact_score(
+    query: str,
+    query_terms: set[str],
+    *,
+    evidence_tokens: set[str],
+    evidence_text: str,
+    is_preference_query: bool,
+) -> float:
+    if not evidence_text:
+        return 0.0
+
+    score = 0.0
+    specific_query_terms = query_terms - {
+        "app",
+        "brand",
+        "name",
+        "platform",
+        "provider",
+        "service",
+        "tool",
+        "use",
+        "used",
+        "using",
+    }
+    named_service_domain_match = any(
+        query_terms & group and evidence_tokens & group
+        for group in _NAMED_SERVICE_DOMAIN_GROUPS
+    )
+    if (
+        _NAMED_SERVICE_QUERY_PATTERN.search(query)
+        and (specific_query_terms & evidence_tokens or named_service_domain_match)
+        and _NAMED_SERVICE_EVIDENCE_PATTERN.search(evidence_text)
+    ):
+        score = max(score, 0.96)
+
+    if is_preference_query and _preference_evidence_score(evidence_text) > 0.0:
+        lexical_match = _weighted_overlap(evidence_tokens, query_terms, {}) > 0.0
+        concept_match = _concept_overlap_score(query_terms, evidence_tokens) > 0.0
+        if lexical_match or concept_match:
+            score = max(score, 0.86)
+        elif re.search(r"\bi(?:'m| am) working in the field\b", evidence_text, re.IGNORECASE):
+            score = max(score, 0.82)
+
+    if _LIFE_EVENT_QUERY_PATTERN.search(query) and _LIFE_EVENT_EVIDENCE_PATTERN.search(
+        evidence_text
+    ):
+        score = max(score, 0.92)
+
+    category_score = _category_alias_score(query_terms, evidence_tokens)
+    if _PURCHASE_ACTION_PATTERN.search(query) and _PURCHASE_ACTION_PATTERN.search(evidence_text):
+        if category_score > 0.0:
+            score = max(score, 0.96)
+        elif _action_evidence_score(query, evidence_tokens) > 0.0:
+            score = max(score, 0.72)
+
+    return min(score, 1.0)
+
+
 def _action_evidence_score(query: str, evidence_tokens: set[str]) -> float:
     query_tokens = set(keyword_tokens_from_text(query))
     query_action_groups = [
@@ -1217,6 +1327,15 @@ def rank_by_query_coverage[T](
             primary_text=primary_text,
             memory_text=memory_text,
         )
+        salient_fact_signal = _salient_fact_score(
+            query,
+            query_terms,
+            evidence_tokens=token_set | primary_token_set | memory_token_set,
+            evidence_text=" ".join(
+                part for part in (memory_text, primary_text) if part
+            ),
+            is_preference_query=is_preference_query,
+        )
         preference_signal = (
             _preference_evidence_score(primary_text)
             if is_preference_query and has_primary_text
@@ -1241,6 +1360,7 @@ def rank_by_query_coverage[T](
             primary_concept_overlap,
             memory_relevance,
             query_frame_score,
+            salient_fact_signal,
             preference_signal,
         )
         memory_multiplier = 0.0 if is_preference_query else 1.0
@@ -1259,6 +1379,7 @@ def rank_by_query_coverage[T](
             + (_CONCEPT_OVERLAP_WEIGHT * concept_overlap)
             + (_PRIMARY_CONCEPT_WEIGHT * primary_concept_overlap)
             + (_QUERY_FRAME_WEIGHT * query_frame_score)
+            + (_SALIENT_FACT_WEIGHT * salient_fact_signal)
             + (
                 memory_multiplier
                 * (
@@ -1305,6 +1426,7 @@ def rank_by_query_coverage[T](
             or memory_overlap > 0.0
             or memory_concept_overlap > 0.0
             or query_frame_score > 0.0
+            or salient_fact_signal > 0.0
             or preference_signal > 0.0
             or (temporal_alignment > 0.0 and coverage_signal > 0.0)
         )

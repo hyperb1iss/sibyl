@@ -241,6 +241,74 @@ def test_query_coverage_uses_temporal_target_with_concept_evidence() -> None:
     assert "smoker" in [candidate.stable_id for candidate in result.ranked[:5]]
 
 
+def test_query_coverage_lifts_salient_purchase_over_same_day_distractors() -> None:
+    target = datetime(2026, 1, 10, tzinfo=UTC)
+    result = rank_by_query_coverage(
+        "What kitchen appliance did I buy 10 days ago?",
+        [
+            QueryCoverageCandidate(
+                item="workshop",
+                stable_id="workshop",
+                text="User: I organized a workshop on sustainable living today.",
+                prior_score=1.0,
+                original_rank=1,
+                timestamp="2026/01/10 15:00",
+            ),
+            QueryCoverageCandidate(
+                item="sushi",
+                stable_id="sushi",
+                text="User: I researched unique sushi creations today.",
+                prior_score=0.99,
+                original_rank=2,
+                timestamp="2026/01/10 19:00",
+            ),
+            QueryCoverageCandidate(
+                item="shoes",
+                stable_id="shoes",
+                text="User: I bought new running shoes today.",
+                prior_score=0.98,
+                original_rank=3,
+                timestamp="2026/01/10 09:00",
+            ),
+            QueryCoverageCandidate(
+                item="phone",
+                stable_id="phone",
+                text="User: My Samsung phone battery has been unreliable today.",
+                prior_score=0.97,
+                original_rank=4,
+                timestamp="2026/01/10 12:00",
+            ),
+            QueryCoverageCandidate(
+                item="closet",
+                stable_id="closet",
+                text="User: I organized my closet and made a shoe list today.",
+                prior_score=0.96,
+                original_rank=5,
+                timestamp="2026/01/10 18:00",
+            ),
+            QueryCoverageCandidate(
+                item="crafting",
+                stable_id="crafting",
+                text="User: I planned my next crafting project today.",
+                prior_score=0.95,
+                original_rank=6,
+                timestamp="2026/01/10 20:00",
+            ),
+            QueryCoverageCandidate(
+                item="smoker",
+                stable_id="smoker",
+                text="User: I got a smoker today and want BBQ sauce recipes.",
+                prior_score=0.94,
+                original_rank=7,
+                timestamp="2026/01/10 11:00",
+            ),
+        ],
+        temporal_target=target,
+    )
+
+    assert "smoker" in [candidate.stable_id for candidate in result.ranked[:5]]
+
+
 def test_query_coverage_promotes_brand_lookup_evidence() -> None:
     ranked = _rank_query_ids(
         "What brand of shampoo do I currently use?",
@@ -597,6 +665,73 @@ def test_query_coverage_promotes_reliance_evidence() -> None:
     )
 
     assert ranked[0] == "5"
+
+
+def test_query_coverage_promotes_named_service_usage_memory() -> None:
+    ranked = _rank_query_ids(
+        "What is the name of the music streaming service I have been using lately?",
+        [
+            "User: I compared airline services and liked the in-flight entertainment.",
+            "User: I tracked entertainment purchases and concert tickets.",
+            "User: I asked for eBook sales advice and online platform tips.",
+            "User: I shopped for personalized birthday gifts with friends.",
+            "User: I wanted upcoming concert listings for local pop shows.",
+            "User: I asked for concert recommendations. User: I've been listening "
+            "to indie rock songs a lot on Spotify lately.",
+        ],
+    )
+
+    assert "5" in ranked[:5]
+
+
+def test_query_coverage_promotes_domain_profile_for_open_recommendations() -> None:
+    ranked = _rank_query_ids(
+        "Can you recommend recent publications or conferences I might find interesting?",
+        [
+            "User: I wrote a statement of purpose about science fiction and AI.",
+            "User: I asked about generic implications for Baptist churches.",
+            "User: I saved an old computational neuroscience application draft.",
+            "User: I attended a social media workshop for online engagement.",
+            "User: I asked for a CV for a PHP engineering role.",
+            "User: Can you give me recent advancements in deep learning for "
+            "medical image analysis? I am working in the field.",
+        ],
+    )
+
+    assert "5" in ranked[:5]
+
+
+def test_query_coverage_promotes_recent_media_taste_for_recommendations() -> None:
+    ranked = _rank_query_ids(
+        "Any documentary recommendations for tonight?",
+        [
+            "User: I loved a book and asked for similar recommendations.",
+            "User: I bought PS5 accessories and asked for headset recommendations.",
+            "User: I joined travel groups and asked for restaurant ideas.",
+            "User: I asked for board game recommendations.",
+            "User: I wanted brunch cafe recommendations.",
+            "User: I've been watching a lot of documentaries lately, especially "
+            "nature and true-crime series on Netflix.",
+        ],
+    )
+
+    assert "5" in ranked[:5]
+
+
+def test_query_coverage_promotes_relative_life_event_memory() -> None:
+    ranked = _rank_query_ids(
+        "What was the life event of one of my relatives that I participated in?",
+        [
+            "User: I researched Korean culture and my family roots.",
+            "User: I planned a baby gift for my friend.",
+            "User: I read about cultural festivals and theater closures.",
+            "User: I asked for career planning exercises.",
+            "User: I started planning my own wedding for next year.",
+            "User: I just came back from my cousin Michael's engagement party.",
+        ],
+    )
+
+    assert "5" in ranked[:5]
 
 
 def test_query_coverage_promotes_object_action_evidence() -> None:
