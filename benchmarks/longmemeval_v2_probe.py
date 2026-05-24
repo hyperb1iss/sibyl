@@ -31,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Stream trajectories.jsonl and validate selected haystack ids.",
     )
     parser.add_argument("--json", action="store_true", help="Print machine-readable summary")
+    parser.add_argument("--output", help="Optional path to write the JSON summary")
     args = parser.parse_args(argv)
 
     data_root = Path(args.data_root)
@@ -66,8 +67,14 @@ def main(argv: list[str] | None = None) -> int:
         ),
     }
 
+    summary_json = json.dumps(summary, indent=2, sort_keys=True)
+    if args.output:
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(summary_json + "\n", encoding="utf-8")
+
     if args.json:
-        print(json.dumps(summary, indent=2, sort_keys=True))
+        print(summary_json)
     else:
         _print_summary(summary)
     return _exit_code(summary)

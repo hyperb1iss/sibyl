@@ -1,0 +1,119 @@
+name: LongMemEval V2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/longmemeval-v2.yml"
+      - "benchmarks/longmemeval_v2_probe.py"
+      - "packages/python/sibyl-core/src/sibyl_core/evals/**"
+      - "packages/python/sibyl-core/tests/test_longmemeval_v2.py"
+      - "tools/tests/test_longmemeval_v2_probe.py"
+      - "moon.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/longmemeval-v2.yml"
+      - "benchmarks/longmemeval_v2_probe.py"
+      - "packages/python/sibyl-core/src/sibyl_core/evals/**"
+      - "packages/python/sibyl-core/tests/test_longmemeval_v2.py"
+      - "tools/tests/test_longmemeval_v2_probe.py"
+      - "moon.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: Probe ${{ matrix.tier }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        tier: [small, medium]
+    env:
+      DATA_ROOT: .moon/cache/benchmarks/longmemeval-v2
+      HF_BASE: https://huggingface.co/datasets/xiaowu0162/longmemeval-v2/resolve/main
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt-dev
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6
+        with:
+          auto-install: true
+          auto-setup: true
+          cache-version: longmemeval-v2-v1
+
+      - name: Cache moon outputs
+        uses: actions/cache@v5
+        with:
+          path: .moon/cache
+          key: moon-longmemeval-v2-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          restore-keys: |
+            moon-longmemeval-v2-${{ runner.os }}-
+
+      - name: Cache uv
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/uv
+          key: uv-longmemeval-v2-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-longmemeval-v2-${{ runner.os }}-
+
+      - name: Fetch LongMemEval-V2 metadata
+        run: |
+          set -euo pipefail
+          mkdir -p "$DATA_ROOT/haystacks" ".moon/cache/evals"
+          curl -L --retry 3 --retry-delay 5 \
+            "$HF_BASE/checksums.sha256?download=true" \
+            -o "$DATA_ROOT/checksums.sha256"
+          curl -L --retry 3 --retry-delay 5 \
+            "$HF_BASE/questions.jsonl?download=true" \
+            -o "$DATA_ROOT/questions.jsonl"
+          curl -L --retry 3 --retry-delay 5 \
+            "$HF_BASE/SCHEMA.md?download=true" \
+            -o "$DATA_ROOT/SCHEMA.md"
+          curl -L --retry 3 --retry-delay 5 \
+            "$HF_BASE/haystacks/lme_v2_${{ matrix.tier }}.json?download=true" \
+            -o "$DATA_ROOT/haystacks/lme_v2_${{ matrix.tier }}.json"
+          (
+            cd "$DATA_ROOT"
+            grep -E '  (questions.jsonl|SCHEMA.md|haystacks/lme_v2_${{ matrix.tier }}\.json)$' \
+              checksums.sha256 | sha256sum -c -
+          )
+
+      - name: Run LongMemEval-V2 probe
+        run: |
+          moon run bench-longmemeval-v2-probe -- \
+            "$DATA_ROOT" \
+            --tier "${{ matrix.tier }}" \
+            --json \
+            --output ".moon/cache/evals/longmemeval_v2_${{ matrix.tier }}_probe.json"
+
+      - name: Upload LongMemEval-V2 probe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: longmemeval-v2-${{ matrix.tier }}-probe-${{ github.sha }}
+          path: .moon/cache/evals/longmemeval_v2_${{ matrix.tier }}_probe.json
+          if-no-files-found: error

@@ -599,6 +599,7 @@ tasks:
     inputs:
       - tools/**/*.py
       - .github/workflows/eval.yml
+      - .github/workflows/longmemeval-v2.yml
       - benchmarks/longmemeval_bench.py
       - benchmarks/longmemeval_live.py
       - benchmarks/longmemeval_replay.py

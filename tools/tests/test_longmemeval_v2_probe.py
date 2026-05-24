@@ -37,6 +37,22 @@ def test_longmemeval_v2_probe_prints_json_summary(
     assert "trajectory_count" not in payload
 
 
+def test_longmemeval_v2_probe_writes_json_summary(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    module = _load_probe_module()
+    output_path = tmp_path / "summary.json"
+    _write_dataset(tmp_path)
+
+    assert module.main([str(tmp_path), "--limit", "1", "--output", str(output_path)]) == 0
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "sibyl-longmemeval-v2-probe-v1"
+    assert payload["question_count"] == 1
+    assert "LongMemEval-V2 probe" in capsys.readouterr().out
+
+
 def test_longmemeval_v2_probe_validates_selected_trajectories(
     tmp_path: Path,
     capsys,
@@ -85,6 +101,19 @@ def test_longmemeval_v2_probe_fails_on_missing_trajectory(
     payload = json.loads(capsys.readouterr().out)
     assert payload["trajectory_count"] == 1
     assert payload["missing_trajectory_count"] == 1
+
+
+def test_longmemeval_v2_workflow_runs_metadata_only_probe() -> None:
+    workflow = (
+        Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "matrix:" in workflow
+    assert "tier: [small, medium]" in workflow
+    assert "trajectories.jsonl" not in workflow
+    assert "SIBYL_OPENAI_API_KEY" not in workflow
+    assert "moon run bench-longmemeval-v2-probe" in workflow
+    assert "sha256sum -c -" in workflow
 
 
 def _write_dataset(
