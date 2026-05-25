@@ -51,7 +51,7 @@
     "react-dom": "19.2.6",
     "react-force-graph-2d": "^1.29.1",
     "react-markdown": "^10.1.0",
-    "react-resizable-panels": "^4.11.1",
+    "react-resizable-panels": "^4.11.2",
     "recharts": "^3.8.1",
     "remark-gfm": "^4.0.1",
     "server-only": "^0.0.1",
