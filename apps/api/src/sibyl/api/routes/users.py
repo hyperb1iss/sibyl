@@ -385,6 +385,12 @@ async def delete_current_user(
     auth: AuthContext = Depends(get_auth_context),
 ) -> UserDeletionResponse:
     """Schedule current user deletion and personal-memory purge."""
+    if auth.api_key_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account deletion requires a user session",
+        )
+
     try:
         result = await request_user_deletion(
             user_id=auth.user.id,

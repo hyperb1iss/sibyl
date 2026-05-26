@@ -24,6 +24,7 @@ def _auth() -> SimpleNamespace:
             preferences={},
         ),
         organization=None,
+        api_key_id=None,
     )
 
 
@@ -268,3 +269,21 @@ async def test_delete_current_user_schedules_deletion(
     assert response.private_memories_scheduled == 3
     assert response.api_keys_revoked == 1
     assert response.sessions_revoked == 2
+
+
+@pytest.mark.asyncio
+async def test_delete_current_user_rejects_api_key_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    auth = _auth()
+    auth.api_key_id = str(uuid4())
+    request_deletion = AsyncMock()
+    request = SimpleNamespace(headers={}, cookies={})
+    monkeypatch.setattr(user_routes, "request_user_deletion", request_deletion)
+
+    with pytest.raises(user_routes.HTTPException) as exc_info:
+        await user_routes.delete_current_user(request=request, auth=auth)
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Account deletion requires a user session"
+    request_deletion.assert_not_awaited()
