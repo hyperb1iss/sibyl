@@ -35,6 +35,9 @@ services:
     ports:
       - "3334:3334"
     environment:
+      # Runtime environment and auth hardening
+      SIBYL_ENVIRONMENT: ${SIBYL_ENVIRONMENT:-production}
+      SIBYL_LOCAL_AUTH_ENABLED: ${SIBYL_LOCAL_AUTH_ENABLED:-false}
       # Store selection — fully Surreal by default
       SIBYL_STORE: ${SIBYL_STORE:-surreal}
       SIBYL_AUTH_STORE: ${SIBYL_AUTH_STORE:-surreal}
@@ -103,6 +106,8 @@ services:
       redis:
         condition: service_started
     environment:
+      SIBYL_ENVIRONMENT: ${SIBYL_ENVIRONMENT:-production}
+      SIBYL_LOCAL_AUTH_ENABLED: ${SIBYL_LOCAL_AUTH_ENABLED:-false}
       SIBYL_STORE: ${SIBYL_STORE:-surreal}
       SIBYL_AUTH_STORE: ${SIBYL_AUTH_STORE:-surreal}
       SIBYL_COORDINATION_BACKEND: ${SIBYL_COORDINATION_BACKEND:-redis}
