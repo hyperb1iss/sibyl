@@ -656,6 +656,56 @@ class TestListEntitiesRoute:
         ]
         assert response.total == 3
 
+
+    @pytest.mark.asyncio
+    async def test_untyped_entity_list_hides_private_memory_projection_from_other_user(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        manager = MagicMock()
+        manager._surreal_entity_node_ops.return_value = object()
+        manager.list_by_type = AsyncMock()
+        manager.list_all = AsyncMock(
+            return_value=[
+                _entity("task-visible", project_id="project-visible", name="Visible"),
+                SimpleNamespace(
+                    id="private-projection",
+                    entity_type=EntityType.PERSON,
+                    name="Private Projection",
+                    description="sensitive",
+                    content="",
+                    metadata={"memory_scope": "private", "scope_key": "someone-else"},
+                    languages=[],
+                    tags=[],
+                ),
+            ]
+        )
+        runtime = SimpleNamespace(entity_manager=manager)
+
+        with (
+            patch(
+                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch(
+                "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"project-visible"}),
+            ),
+        ):
+            response = await list_entities(
+                org=org,
+                ctx=_ctx(),
+                entity_type=None,
+                language=None,
+                category=None,
+                search=None,
+                project_ids=None,
+                page=1,
+                page_size=50,
+                sort_by=SortField.UPDATED_AT,
+                sort_order=SortOrder.DESC,
+            )
+
+        assert [entity.id for entity in response.entities] == ["task-visible"]
+
     @pytest.mark.asyncio
     async def test_entity_list_rejects_inaccessible_project_filter(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
