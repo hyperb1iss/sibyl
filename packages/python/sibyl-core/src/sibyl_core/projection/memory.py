@@ -259,6 +259,9 @@ async def project_memory_entities(
         if source.entity_type not in PROJECTABLE_ENTITY_TYPES:
             skipped += 1
             continue
+        if not _projection_allowed(source):
+            skipped += 1
+            continue
         projected_source = source.model_copy(update={"id": source_id})
         extracted = extract_projected_memory_entities(
             projected_source,
@@ -569,6 +572,8 @@ def _projected_entity(
         "source_entity_type": source.entity_type.value,
         **_inherited_scope_metadata(source),
     }
+    if metadata.get("memory_scope") == "project" and metadata.get("scope_key"):
+        metadata["project_id"] = metadata["scope_key"]
     return Entity(
         id=entity_id,
         entity_type=candidate.entity_type,
@@ -635,6 +640,12 @@ def _inherited_scope_metadata(source: Entity) -> dict[str, object]:
         for key in _SCOPE_METADATA_KEYS
         if key in metadata and metadata[key] is not None
     }
+
+
+def _projection_allowed(source: Entity) -> bool:
+    metadata = dict(source.metadata or {})
+    memory_scope = str(metadata.get("memory_scope") or "org").strip().lower()
+    return memory_scope not in {"private", "delegated"}
 
 
 def _projection_identity_scope(source: Entity) -> str:

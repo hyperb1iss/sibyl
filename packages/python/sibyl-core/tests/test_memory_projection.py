@@ -231,3 +231,32 @@ async def test_project_extracted_memory_entities_materializes_llm_mentions() -> 
     assert relationships[0].metadata["fact"].endswith(
         "SurrealDB: SurrealDB 3.0 RRF helped retrieval."
     )
+
+
+@pytest.mark.asyncio
+async def test_project_memory_entities_skips_private_scope() -> None:
+    source = _session(
+        "My private notes mention Samsung TV purchase details.",
+        metadata={"memory_scope": "private", "principal_id": "user-1"},
+    )
+    entity_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda entities, **_: [entity.id for entity in entities]
+        )
+    )
+    relationship_manager = SimpleNamespace(create_bulk=AsyncMock(return_value=(1, 0)))
+
+    result = await project_memory_entity(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        source=source,
+        group_id="org-123",
+        generate_embeddings=False,
+    )
+
+    assert result.skipped is True
+    assert result.extracted == 0
+    assert result.projected_entities == 0
+    assert result.relationships == 0
+    entity_manager.create_direct_bulk.assert_not_awaited()
+    relationship_manager.create_bulk.assert_not_awaited()
