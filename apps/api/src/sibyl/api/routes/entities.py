@@ -368,6 +368,28 @@ def _entity_visible_to_projects(entity: Any, accessible_projects: set[str]) -> b
     return project_id is None or project_id in accessible_projects
 
 
+def _entity_visible_to_reader(
+    entity: Any,
+    *,
+    reader_user_id: str | None,
+    accessible_projects: set[str],
+) -> bool:
+    metadata = getattr(entity, "metadata", None) or {}
+    memory_scope = str(metadata.get("memory_scope") or "").strip().lower()
+
+    if memory_scope == "project":
+        project_id = str(metadata.get("scope_key") or metadata.get("project_id") or "").strip()
+        return bool(project_id and project_id in accessible_projects)
+
+    if memory_scope == "private":
+        owner = str(metadata.get("principal_id") or "").strip()
+        if not owner:
+            owner = str(getattr(entity, "created_by_user_id", None) or "").strip()
+        return bool(owner and reader_user_id and owner == reader_user_id)
+
+    return True
+
+
 async def _accessible_project_ids_for_read(ctx: AuthContext) -> set[str]:
     accessible_projects = await list_accessible_project_graph_ids(ctx)
     return {str(project_id) for project_id in accessible_projects or set()}
@@ -415,6 +437,13 @@ async def _require_entity_read_access(ctx: AuthContext, entity: Any) -> set[str]
     accessible_projects = await _accessible_project_ids_for_read(ctx)
     if project_id is not None:
         accessible_projects.add(project_id)
+    reader_user_id = str(getattr(getattr(ctx, "user", None), "id", None) or "") or None
+    if not _entity_visible_to_reader(
+        entity,
+        reader_user_id=reader_user_id,
+        accessible_projects=accessible_projects,
+    ):
+        raise HTTPException(status_code=404, detail="Entity not found")
     return accessible_projects
 
 
@@ -476,6 +505,8 @@ def _entity_matches_list_filters(
     project_ids: list[str] | None,
     real_project_ids: list[str],
     has_unassigned: bool,
+    reader_user_id: str | None,
+    accessible_projects: set[str],
     language: str | None,
     category: str | None,
     search: str | None,
@@ -488,6 +519,13 @@ def _entity_matches_list_filters(
         project_ids=project_ids,
         real_project_ids=real_project_ids,
         has_unassigned=has_unassigned,
+    ):
+        return False
+
+    if not _entity_visible_to_reader(
+        entity,
+        reader_user_id=reader_user_id,
+        accessible_projects=accessible_projects,
     ):
         return False
 
@@ -544,6 +582,8 @@ async def _list_entities_bounded(
     real_project_ids: list[str],
     has_unassigned: bool,
     single_project_id: str | None,
+    reader_user_id: str | None,
+    accessible_projects: set[str],
 ) -> tuple[list[Any], int, bool]:
     start = (page - 1) * page_size
     target = start + page_size + 1
@@ -580,6 +620,8 @@ async def _list_entities_bounded(
                 project_ids=project_ids,
                 real_project_ids=real_project_ids,
                 has_unassigned=has_unassigned,
+                reader_user_id=reader_user_id,
+                accessible_projects=accessible_projects,
                 language=None,
                 category=None,
                 search=None,
@@ -917,10 +959,16 @@ async def list_entities(
             page=page,
         )
 
+        reader_user_id = str(getattr(getattr(ctx, "user", None), "id", None) or "") or None
         project_ids, real_project_ids, has_unassigned = await _resolve_entity_list_project_filter(
             ctx=ctx,
             project_ids=project_ids,
         )
+        # Visibility check only consults accessible_projects for project-scoped
+        # entities. real_project_ids is either the user-verified filter set or
+        # the user's full accessible set, both of which are the correct frame
+        # for "can this user see this project-scoped projection."
+        accessible_projects = set(real_project_ids)
         runtime = await get_entity_graph_runtime(group_id)
         entity_manager = runtime.entity_manager
 
@@ -952,6 +1000,8 @@ async def list_entities(
                 real_project_ids=real_project_ids,
                 has_unassigned=bool(has_unassigned),
                 single_project_id=single_project_id,
+                reader_user_id=reader_user_id,
+                accessible_projects=accessible_projects,
             )
         else:
             if entity_type:
@@ -971,6 +1021,8 @@ async def list_entities(
                     project_ids=project_ids,
                     real_project_ids=real_project_ids,
                     has_unassigned=bool(has_unassigned),
+                    reader_user_id=reader_user_id,
+                    accessible_projects=accessible_projects,
                     language=language,
                     category=category,
                     search=search,
