@@ -430,7 +430,7 @@ jobs:
         run: moon run api:test-cov cli:test-cov core:test-cov web:test-cov
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: apps/api/coverage.xml,apps/cli/coverage.xml,packages/python/sibyl-core/coverage.xml,apps/web/coverage.xml
           fail_ci_if_error: false
