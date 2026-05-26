@@ -271,6 +271,50 @@ def test_build_native_context_retrieval_plan_keeps_all_accessible_projects_when_
     assert plan.accessible_projects == frozenset({"project_123", "project_456"})
 
 
+def test_build_native_context_retrieval_plan_scopes_agent_diary_to_accessible_projects() -> None:
+    plan = build_native_context_retrieval_plan(
+        query="unscoped agent diary",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["session", "episode", "note"]},
+        principal_id="user-123",
+        project=None,
+        accessible_projects={"project_123", "project_456"},
+        agent_id="nova",
+    )
+
+    diary_scopes = [
+        scope
+        for scope in plan.scopes
+        if scope.memory_scope is MemoryScope.PRIVATE and scope.agent_id == "nova"
+    ]
+    assert {scope.project_id for scope in diary_scopes} == {"project_123", "project_456"}
+
+
+def test_candidate_from_raw_memory_uses_top_level_project_id_when_metadata_missing() -> None:
+    candidate = native_module._candidate_from_raw_memory(
+        RawMemory(
+            id="raw-1",
+            organization_id="org-123",
+            source_id="agent-diary",
+            principal_id="user-123",
+            project_id="project_999",
+            title="Diary memory",
+            raw_content="secret",
+            memory_scope=MemoryScope.PRIVATE,
+            metadata={"agent_id": "nova"},
+        ),
+        scope=native_module.NativeScopeSpec(
+            memory_scope=MemoryScope.PRIVATE,
+            principal_id="user-123",
+            scope_key=None,
+            policy_reason="agent_diary_private_read_allowed",
+        ),
+    )
+
+    assert candidate.project_id == "project_999"
+
+
 def test_candidate_allowed_denies_private_candidate_without_private_grant() -> None:
     plan = build_native_context_retrieval_plan(
         query="private memory",

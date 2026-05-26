@@ -460,19 +460,36 @@ def _scope_decisions(
             )
         )
     if agent_id:
-        decisions.append(
-            (
-                authorize_memory_read(
-                    principal_id=principal_id,
-                    memory_scope=MemoryScope.PRIVATE,
-                    project_id=project,
-                    agent_id=agent_id,
-                    accessible_projects=accessible_projects,
-                ),
-                project,
-                agent_id,
+        diary_projects = (project,) if project else tuple(accessible_projects or ())
+        if diary_projects:
+            for diary_project in diary_projects:
+                decisions.append(
+                    (
+                        authorize_memory_read(
+                            principal_id=principal_id,
+                            memory_scope=MemoryScope.PRIVATE,
+                            project_id=diary_project,
+                            agent_id=agent_id,
+                            accessible_projects=accessible_projects,
+                        ),
+                        diary_project,
+                        agent_id,
+                    )
+                )
+        else:
+            decisions.append(
+                (
+                    authorize_memory_read(
+                        principal_id=principal_id,
+                        memory_scope=MemoryScope.PRIVATE,
+                        project_id=None,
+                        agent_id=agent_id,
+                        accessible_projects=accessible_projects,
+                    ),
+                    None,
+                    agent_id,
+                )
             )
-        )
     return decisions
 
 
@@ -1397,7 +1414,7 @@ def _candidate_from_raw_memory(
     scope: NativeScopeSpec,
 ) -> NativeRetrievalCandidate:
     source = memory.source_id or memory.capture_surface
-    project_id = memory.metadata.get("project_id") or (
+    project_id = memory.metadata.get("project_id") or memory.project_id or (
         memory.scope_key if memory.memory_scope is MemoryScope.PROJECT else None
     )
     metadata = {
