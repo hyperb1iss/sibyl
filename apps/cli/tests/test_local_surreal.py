@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -61,6 +62,10 @@ def test_local_env_file_contains_surreal_credentials(
 
     env = env_path.read_text()
     assert "SIBYL_SURREAL_USERNAME=root" in env
-    assert "SIBYL_SURREAL_PASSWORD=sibyl_local" in env
+    password_match = re.search(r"^SIBYL_SURREAL_PASSWORD=(\S+)$", env, re.MULTILINE)
+    assert password_match is not None
+    password = password_match.group(1)
+    assert password != "sibyl_local", "must not regress to the static default"
+    assert len(password) >= 24, "token_urlsafe(24) yields ~32 chars of entropy"
     assert "SIBYL_POSTGRES_PASSWORD" not in env
     assert "SIBYL_FALKORDB_PASSWORD" not in env

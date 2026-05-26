@@ -76,7 +76,7 @@ COMPOSE_CONFIG = {
         "api": {
             "image": f"ghcr.io/hyperb1iss/sibyl-api:{DEFAULT_IMAGE_TAG}",
             "container_name": "sibyl-api",
-            "ports": ["3334:3334"],
+            "ports": ["127.0.0.1:3334:3334"],
             "depends_on": {
                 "surrealdb": {"condition": "service_healthy"},
             },
@@ -135,7 +135,7 @@ COMPOSE_CONFIG = {
         "web": {
             "image": f"ghcr.io/hyperb1iss/sibyl-web:{DEFAULT_IMAGE_TAG}",
             "container_name": "sibyl-web",
-            "ports": ["3337:3337"],
+            "ports": ["127.0.0.1:3337:3337"],
             "depends_on": {
                 "api": {"condition": "service_healthy"},
             },
@@ -165,7 +165,7 @@ COMPOSE_CONFIG = {
                 "${SIBYL_SURREAL_PASSWORD:-sibyl_local}",
                 "rocksdb:///data/sibyl.db",
             ],
-            "ports": ["8000:8000"],
+            "ports": ["127.0.0.1:8000:8000"],
             "volumes": ["sibyl_surreal:/data"],
             "healthcheck": {
                 "test": ["CMD", "/surreal", "is-ready", "--conn", "http://localhost:8000"],
@@ -270,7 +270,7 @@ SIBYL_JWT_SECRET={jwt_secret}
 
 # SurrealDB
 SIBYL_SURREAL_USERNAME=root
-SIBYL_SURREAL_PASSWORD=sibyl_local
+SIBYL_SURREAL_PASSWORD={secrets.token_urlsafe(24)}
 """
     with open(SIBYL_LOCAL_ENV, "w") as f:
         f.write(env_content)
