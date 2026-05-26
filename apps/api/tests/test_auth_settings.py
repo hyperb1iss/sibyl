@@ -144,7 +144,7 @@ def test_settings_auth_defaults_keep_development_login_available() -> None:
     assert s.oidc.providers == []
 
 
-def test_settings_auth_defaults_keep_production_local_login_available() -> None:
+def test_settings_auth_defaults_disable_production_local_login() -> None:
     s = Settings(
         _env_file=None,
         environment="production",
@@ -155,7 +155,7 @@ def test_settings_auth_defaults_keep_production_local_login_available() -> None:
         surreal_password="really_secure_password",
     )
 
-    assert s.local_auth_enabled is True
+    assert s.local_auth_enabled is False
     assert s.public_signups_enabled is False
     assert s.break_glass_enabled is False
     assert s.oidc.providers == []
@@ -193,7 +193,7 @@ def test_settings_enterprise_auth_features_are_opt_in() -> None:
         surreal_password="really_secure_password",
     )
 
-    assert s.local_auth_enabled is True
+    assert s.local_auth_enabled is False
     assert s.public_signups_enabled is False
     assert s.break_glass_enabled is False
     assert s.break_glass_allowed_ips == []
