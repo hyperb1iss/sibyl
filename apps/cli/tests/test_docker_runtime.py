@@ -31,6 +31,9 @@ def test_docker_compose_defaults_to_single_host_runtime() -> None:
     assert services["api"]["environment"]["SIBYL_COORDINATION_BACKEND"] == "local"
     assert services["api"]["image"] == "ghcr.io/hyperb1iss/sibyl-api:1.0.0-rc.1"
     assert services["web"]["image"] == "ghcr.io/hyperb1iss/sibyl-web:1.0.0-rc.1"
+    assert services["api"]["ports"] == ["127.0.0.1:3334:3334"]
+    assert services["web"]["ports"] == ["127.0.0.1:3337:3337"]
+    assert services["surrealdb"]["ports"] == ["127.0.0.1:8000:8000"]
 
 
 def test_docker_compose_can_opt_into_worker_runtime() -> None:

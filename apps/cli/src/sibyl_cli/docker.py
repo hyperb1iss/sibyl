@@ -45,7 +45,7 @@ def compose_config(
         "api": {
             "image": api_image,
             "container_name": "sibyl-api",
-            "ports": [f"{api_port}:3334"],
+            "ports": [f"127.0.0.1:{api_port}:3334"],
             "depends_on": {"surrealdb": {"condition": "service_healthy"}},
             "environment": {
                 "SIBYL_STORE": "surreal",
@@ -65,7 +65,7 @@ def compose_config(
         "web": {
             "image": f"ghcr.io/hyperb1iss/sibyl-web:{image_tag}",
             "container_name": "sibyl-web",
-            "ports": [f"{web_port}:3337"],
+            "ports": [f"127.0.0.1:{web_port}:3337"],
             "depends_on": {"api": {"condition": "service_started"}},
             "environment": {
                 "SIBYL_API_URL": "http://api:3334/api",
@@ -87,7 +87,7 @@ def compose_config(
                 "${SIBYL_SURREAL_PASSWORD}",
                 "rocksdb:///data/sibyl.db",
             ],
-            "ports": [f"{surreal_port}:8000"],
+            "ports": [f"127.0.0.1:{surreal_port}:8000"],
             "volumes": ["sibyl_surreal:/data"],
             "healthcheck": {
                 "test": ["CMD", "/surreal", "is-ready", "--conn", "http://localhost:8000"],
