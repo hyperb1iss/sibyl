@@ -167,7 +167,7 @@ class Settings(BaseSettings):
         description="Allow self-serve local account creation after initial setup",
     )
     local_auth_enabled: bool = Field(
-        default=True,
+        default=False,
         description="Enable local username/password login outside setup and break-glass flows",
     )
     break_glass_enabled: bool = Field(
@@ -209,6 +209,8 @@ class Settings(BaseSettings):
         """Prevent insecure settings in production."""
         if "auth_store" not in self.model_fields_set:
             object.__setattr__(self, "auth_store", default_auth_store(store=self.store))
+        if "local_auth_enabled" not in self.model_fields_set and self.environment == "development":
+            object.__setattr__(self, "local_auth_enabled", True)
         if self.environment == "production":
             if self.disable_auth:
                 raise ValueError(
@@ -474,6 +476,8 @@ class Settings(BaseSettings):
         """Fall back to non-prefixed env vars for API keys."""
         if "auth_store" not in self.model_fields_set:
             object.__setattr__(self, "auth_store", default_auth_store(store=self.store))
+        if "local_auth_enabled" not in self.model_fields_set and self.environment == "development":
+            object.__setattr__(self, "local_auth_enabled", True)
 
         # Anthropic: check ANTHROPIC_API_KEY if SIBYL_ANTHROPIC_API_KEY not set
         if not self.anthropic_api_key.get_secret_value():
