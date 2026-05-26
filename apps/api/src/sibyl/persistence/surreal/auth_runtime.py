@@ -1690,74 +1690,35 @@ async def _ensure_oidc_organization_membership_record(
     *,
     user_id: UUID,
     user_name: str,
-    role: OrganizationRole,
 ) -> SurrealRecord:
     repo = _SurrealRepository(client)
-    now = _utcnow()
-    organization = await repo.select_one(
-        "SELECT * FROM organizations WHERE is_personal = false ORDER BY created_at ASC LIMIT 1;"
-    )
-    if organization is None:
-        create_result = await client.execute_query(
-            "CREATE organizations CONTENT $record;",
-            record={
-                "uuid": str(uuid4()),
-                "name": "Sibyl",
-                "slug": "sibyl",
-                "is_personal": False,
-                "settings": {},
-                "created_at": now,
-                "updated_at": now,
-            },
-        )
-        error = _query_error(create_result)
-        if error is not None:
-            raise RuntimeError(error)
-        records = _normalize_records(create_result)
-        if not records:
-            msg = "Failed to create OIDC organization"
-            raise RuntimeError(msg)
-        organization = records[0]
-
-    organization_id = _coerce_uuid(organization.get("uuid"), field_name="organization.uuid")
+    # SECURITY: OIDC JIT provisioning must never auto-join global organizations.
+    # Require an existing membership and keep the existing role assignment.
     membership = await repo.select_one(
         """
-            SELECT * FROM organization_members
-            WHERE organization_id = $organization_id AND user_id = $user_id
+            SELECT om.*
+            FROM organization_members om
+            WHERE om.user_id = $user_id
+              AND om.organization_id IN (
+                  SELECT VALUE uuid FROM organizations WHERE is_personal = false
+              )
+            ORDER BY om.created_at ASC
             LIMIT 1;
         """,
-        organization_id=str(organization_id),
         user_id=str(user_id),
     )
     if membership is None:
-        result = await client.execute_query(
-            "CREATE organization_members CONTENT $record;",
-            record={
-                "uuid": str(uuid4()),
-                "organization_id": str(organization_id),
-                "user_id": str(user_id),
-                "role": role.value,
-                "created_at": now,
-                "updated_at": now,
-            },
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "oidc_membership_required", "message": "OIDC membership required"},
         )
-    else:
-        result = await client.execute_query(
-            """
-                UPDATE organization_members
-                SET role = $role,
-                    updated_at = $updated_at
-                WHERE uuid = $uuid;
-            """,
-            uuid=str(_coerce_uuid(membership.get("uuid"), field_name="membership.uuid")),
-            role=role.value,
-            updated_at=now,
-        )
-    error = _query_error(result)
-    if error is not None:
-        raise RuntimeError(error)
-    if not _normalize_records(result):
-        msg = f"Failed to write OIDC membership for {user_name or user_id}"
+    organization_id = _coerce_uuid(membership.get("organization_id"), field_name="organization_id")
+    organization = await repo.select_one(
+        "SELECT * FROM organizations WHERE uuid = $uuid LIMIT 1;",
+        uuid=str(organization_id),
+    )
+    if organization is None:
+        msg = f"Failed to resolve OIDC organization for {user_name or user_id}"
         raise RuntimeError(msg)
     return organization
 
@@ -1821,7 +1782,7 @@ async def login_oidc_identity(
 
         safe_email = await _safe_oidc_email(client, email=email, user_id=user_id)
         display_name = name.strip() or safe_email or subject
-        is_admin = org_role in {OrganizationRole.OWNER, OrganizationRole.ADMIN}
+        is_admin = bool(user_record and user_record.get("is_admin"))
         if user_record is None:
             user_id = uuid4()
             create_result = await client.execute_query(
@@ -1910,7 +1871,6 @@ async def login_oidc_identity(
                     client,
                     user_id=user_id,
                     user_name=display_name,
-                    role=org_role,
                 )
             ),
             label="organization",
