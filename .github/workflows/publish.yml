@@ -371,7 +371,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: "◆ Generate Trivy SBOM"
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: >-
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-${{
@@ -389,7 +389,7 @@ jobs:
           retention-days: 90
 
       - name: "◆ Trivy CVE gate"
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: >-
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-${{
