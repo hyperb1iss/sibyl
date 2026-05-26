@@ -304,6 +304,7 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
           body: ${{ steps.release_notes.outputs.content }}
+          prerelease: ${{ steps.version.outputs.is_prerelease == 'true' }}
 
       - name: "◇ Trigger publish"
         if: ${{ !inputs.dry_run }}
