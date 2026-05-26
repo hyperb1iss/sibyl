@@ -168,6 +168,7 @@ def serve(
 
 
 def _configure_embedded_environment(data_dir: Path | None = None) -> Path:
+    from sibyl.config import reload_settings_from_env
     from sibyl.embedded import default_embedded_data_dir
 
     resolved_data_dir = data_dir or Path(
@@ -179,6 +180,7 @@ def _configure_embedded_environment(data_dir: Path | None = None) -> Path:
     os.environ.setdefault("SIBYL_COORDINATION_BACKEND", "local")
     os.environ.setdefault("SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER", "1")
     os.environ.setdefault("SIBYL_SURREAL_URL", f"surrealkv://{resolved_data_dir}")
+    reload_settings_from_env()
     return resolved_data_dir
 
 

@@ -557,3 +557,10 @@ class Settings(BaseSettings):
 
 # Global settings instance
 settings = Settings()
+
+
+def reload_settings_from_env() -> Settings:
+    """Reload the global settings instance from current environment variables."""
+    refreshed = Settings()
+    settings.__dict__.update(refreshed.__dict__)
+    return settings

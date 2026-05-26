@@ -97,6 +97,16 @@ def test_configure_embedded_environment(monkeypatch, tmp_path) -> None:
     assert os.environ["SIBYL_SURREAL_URL"] == f"surrealkv://{data_dir}"
 
 
+def test_configure_embedded_environment_refreshes_global_settings(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("SIBYL_SURREAL_URL", raising=False)
+    monkeypatch.setattr("sibyl.config.settings.surreal_url", "")
+
+    data_dir = cli_main._configure_embedded_environment(tmp_path / "surreal")
+
+    assert os.environ["SIBYL_SURREAL_URL"] == f"surrealkv://{data_dir}"
+    assert f"surrealkv://{data_dir}" == import_module("sibyl.config").settings.resolved_surreal_url
+
+
 def test_setup_surreal_services_skips_redis_for_local_coordination(monkeypatch) -> None:
     checked: list[tuple[str, int]] = []
 
