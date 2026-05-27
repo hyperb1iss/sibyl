@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 from collections.abc import Sequence
 from typing import Any
+from weakref import WeakKeyDictionary
 
 from pydantic_ai import Agent
 from pydantic_ai.output import PromptedOutput
@@ -14,9 +15,15 @@ from sibyl_core.ai.llm.config import LLMConfig, LLMSurface, resolve_llm_config
 from sibyl_core.ai.providers import build_model
 
 AgentOutputType = Any
-AgentCacheKey = tuple[int, str, str, str, tuple[str, ...], int | None]
+AgentCacheKey = tuple[str, str, str, tuple[str, ...], int | None]
 
-_agent_cache: dict[AgentCacheKey, Agent[Any, Any]] = {}
+# Per-loop cache. The outer WeakKeyDictionary drops a loop's bucket when the
+# loop is garbage-collected, which matters because CPython will happily reuse
+# a closed loop's id() for the next event loop and we'd otherwise return the
+# stale Agent bound to the dead loop's resources.
+_agent_cache: WeakKeyDictionary[
+    asyncio.AbstractEventLoop, dict[AgentCacheKey, Agent[Any, Any]]
+] = WeakKeyDictionary()
 
 
 async def get_agent(
@@ -34,8 +41,7 @@ async def get_agent(
 
     loop = asyncio.get_running_loop()
     normalized_prompt = _normalize_system_prompt(system_prompt)
-    key = (
-        id(loop),
+    key: AgentCacheKey = (
         surface.value,
         _config_fingerprint(config),
         _output_type_key(output_type),
@@ -43,14 +49,15 @@ async def get_agent(
         output_retries,
     )
 
-    if key not in _agent_cache:
-        _agent_cache[key] = Agent(
+    loop_bucket = _agent_cache.setdefault(loop, {})
+    if key not in loop_bucket:
+        loop_bucket[key] = Agent(
             model=build_model(config),
             output_type=_provider_output_type(config, output_type),
             instructions=normalized_prompt,
             output_retries=output_retries,
         )
-    return _agent_cache[key]
+    return loop_bucket[key]
 
 
 def invalidate_agent_cache(surface: LLMSurface | None = None) -> None:
@@ -58,13 +65,14 @@ def invalidate_agent_cache(surface: LLMSurface | None = None) -> None:
         _agent_cache.clear()
         return
 
-    for key in list(_agent_cache):
-        if key[1] == surface.value:
-            del _agent_cache[key]
+    for loop_bucket in _agent_cache.values():
+        for key in list(loop_bucket):
+            if key[0] == surface.value:
+                del loop_bucket[key]
 
 
 def agent_cache_size() -> int:
-    return len(_agent_cache)
+    return sum(len(bucket) for bucket in _agent_cache.values())
 
 
 def _normalize_system_prompt(system_prompt: str | Sequence[str] | None) -> tuple[str, ...]:
