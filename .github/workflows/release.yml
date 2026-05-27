@@ -99,6 +99,9 @@ jobs:
       - name: "◇ Install Node dependencies"
         run: cd apps/web && pnpm install --frozen-lockfile
 
+      - name: "◇ Sync Python workspace"
+        run: uv sync --locked --all-packages
+
       - name: "△ Determine version"
         id: version
         run: |
