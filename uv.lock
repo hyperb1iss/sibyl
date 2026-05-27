@@ -3172,7 +3172,7 @@ requires-dist = [
     { name = "rich", specifier = ">=13.0" },
     { name = "sibyl-core", extras = ["crawler", "embeddings", "graph", "graphrag", "llm"], editable = "packages/python/sibyl-core" },
     { name = "slowapi", specifier = ">=0.1.9" },
-    { name = "starlette", specifier = ">=1.1.0" },
+    { name = "starlette", specifier = ">=0.41.0" },
     { name = "surrealdb", specifier = ">=2.0.0,<3.0" },
     { name = "tomli-w", specifier = ">=1.2.0" },
     { name = "typer", specifier = ">=0.20.0" },
