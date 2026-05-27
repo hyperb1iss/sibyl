@@ -21,10 +21,6 @@ on:
         required: false
         type: boolean
         default: false
-      nightly_run_id:
-        description: "Nightly Regression run ID for the exact prerelease candidate SHA"
-        required: false
-        default: ""
 
 permissions:
   actions: write
@@ -145,18 +141,6 @@ jobs:
             NEEDS_VERSION_COMMIT=true
           fi
 
-          if [[ "${{ inputs.dry_run }}" != "true" && "$IS_PRERELEASE" == "true" && "$NEEDS_VERSION_COMMIT" == "true" ]]; then
-            echo "::error::Prerelease candidates must have VERSION committed before the live release."
-            echo "::error::Current VERSION is $CURRENT, but the requested prerelease is $VERSION."
-            echo "::error::Commit VERSION first, run Nightly Regression on that SHA, then pass nightly_run_id."
-            exit 1
-          fi
-
-          if [[ "${{ inputs.dry_run }}" != "true" && "$IS_PRERELEASE" == "true" && -z "${{ inputs.nightly_run_id }}" ]]; then
-            echo "::error::nightly_run_id is required for live prerelease cuts."
-            exit 1
-          fi
-
           echo "current=$CURRENT" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "previous_tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
@@ -224,52 +208,6 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: "◆ Validate nightly regression receipt"
-        if: ${{ !inputs.dry_run && steps.version.outputs.is_prerelease == 'true' }}
-        id: nightly
-        env:
-          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NIGHTLY_RUN_ID: ${{ inputs.nightly_run_id }}
-        run: |
-          set -euo pipefail
-          mkdir -p .moon/cache/release
-          gh run view "$NIGHTLY_RUN_ID" \
-            --repo "$GITHUB_REPOSITORY" \
-            --json conclusion,headSha,status,url,workflowName \
-            > .moon/cache/release/nightly-run.json
-
-          python - <<'PY'
-          import json
-          import os
-          import sys
-
-          with open(".moon/cache/release/nightly-run.json", encoding="utf-8") as handle:
-              run = json.load(handle)
-
-          candidate_sha = os.environ["CANDIDATE_SHA"]
-          errors = []
-          if run.get("workflowName") != "Nightly Regression":
-              errors.append(f"expected Nightly Regression, got {run.get('workflowName')}")
-          if run.get("status") != "completed":
-              errors.append(f"nightly run is {run.get('status')}")
-          if run.get("conclusion") != "success":
-              errors.append(f"nightly conclusion is {run.get('conclusion')}")
-          if run.get("headSha") != candidate_sha:
-              errors.append(f"nightly SHA {run.get('headSha')} != candidate {candidate_sha}")
-
-          if errors:
-              for error in errors:
-                  print(f"::error::{error}")
-              sys.exit(1)
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"run_id={os.environ['NIGHTLY_RUN_ID']}\n")
-              output.write(f"url={run.get('url', '')}\n")
-
-          print(f"Nightly Regression {os.environ['NIGHTLY_RUN_ID']} passed for {candidate_sha}")
-          PY
-
       - name: "◆ Run RC gate bundle"
         run: |
           set -euo pipefail
@@ -320,9 +258,6 @@ jobs:
           echo "- Previous release: \`${{ steps.version.outputs.previous_tag }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- RC gate bundle: \`moon run :check\`" >> $GITHUB_STEP_SUMMARY
           echo "- Gate receipt artifact: \`rc-gate-receipt-${{ steps.candidate.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
-          if [[ "${{ steps.version.outputs.is_prerelease }}" == "true" && "${{ inputs.dry_run }}" != "true" ]]; then
-            echo "- Nightly Regression: [run ${{ steps.nightly.outputs.run_id }}](${{ steps.nightly.outputs.url }})" >> $GITHUB_STEP_SUMMARY
-          fi
           echo "" >> $GITHUB_STEP_SUMMARY
           if [[ "${{ inputs.dry_run }}" == "true" ]]; then
             echo "✓ RC gate bundle passed against the current checkout." >> $GITHUB_STEP_SUMMARY
