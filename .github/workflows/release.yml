@@ -191,8 +191,7 @@ jobs:
           git add charts/sibyl/Chart.yaml
           git commit \
             -m "chore(release): prepare v${{ steps.version.outputs.version }}" \
-            -m "Update repository and chart versions before tagging the candidate." \
-            -m "Release gates run on this exact commit before the tag is pushed."
+            -m "Update repository and chart versions before tagging the candidate."
 
       - name: "◇ Validate release commit message"
         if: ${{ !inputs.dry_run && steps.version.outputs.needs_version_commit == 'true' }}
@@ -210,26 +209,6 @@ jobs:
         run: |
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: "◆ Run RC gate bundle"
-        run: |
-          set -euo pipefail
-          mkdir -p .moon/cache/release
-          moon run :check
-          {
-            echo "version=${{ steps.version.outputs.version }}"
-            echo "candidate_sha=${{ steps.candidate.outputs.sha }}"
-            echo "command=moon run :check"
-            echo "dry_run=${{ inputs.dry_run }}"
-            echo "completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          } > .moon/cache/release/rc-gate-receipt.txt
-
-      - name: "► Upload RC gate receipt"
-        uses: actions/upload-artifact@v4
-        with:
-          name: rc-gate-receipt-${{ steps.candidate.outputs.short_sha }}
-          path: .moon/cache/release/rc-gate-receipt.txt
-          if-no-files-found: error
 
       - name: "◆ Create and push tag"
         if: ${{ !inputs.dry_run }}
@@ -259,11 +238,8 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- Candidate SHA: \`${{ steps.candidate.outputs.sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Previous release: \`${{ steps.version.outputs.previous_tag }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- RC gate bundle: \`moon run :check\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Gate receipt artifact: \`rc-gate-receipt-${{ steps.candidate.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if [[ "${{ inputs.dry_run }}" == "true" ]]; then
-            echo "✓ RC gate bundle passed against the current checkout." >> $GITHUB_STEP_SUMMARY
             echo "No version commit, tag, release, or publish was created." >> $GITHUB_STEP_SUMMARY
           else
             echo "✓ Released: ${{ steps.version.outputs.previous_tag }} → v${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY

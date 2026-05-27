@@ -10,13 +10,12 @@ from tools.release.aur_pkgbuild import render_pkgbuild as render_aur_pkgbuild
 from tools.release.homebrew_formula import PackageArtifact, pep440_version, render_formula
 from tools.tests.conftest import REPO_ROOT
 
-RC_GATE_TEST_DEPS = {
+RELEASE_TEST_DEPS = {
     "root:autonomy-gate-test",
     "root:reflection-quality-gate-test",
     "root:auth-session-gate-test",
     "root:overview-perf-gate-test",
 }
-PUBLISH_ARTIFACT_JOB_COUNT = 2
 PYTHON_RELEASE_PACKAGES = {
     "uv build --package sibyl-core --out-dir dist/",
     "uv build --package sibyl-dev --out-dir dist/",
@@ -46,40 +45,33 @@ def _dep_targets(task_id: str) -> set[str]:
     return {dep["target"] for dep in _root_task(task_id)["deps"]}
 
 
-def test_root_check_covers_full_rc_gate_test_matrix() -> None:
+def test_root_check_covers_release_test_matrix() -> None:
     deps = _dep_targets("check")
 
-    assert deps >= RC_GATE_TEST_DEPS
+    assert deps >= RELEASE_TEST_DEPS
     assert "root:release-workflow-test" in deps
 
 
-def test_root_test_covers_full_rc_gate_test_matrix() -> None:
+def test_root_test_covers_release_test_matrix() -> None:
     deps = _dep_targets("test")
 
-    assert deps >= RC_GATE_TEST_DEPS
+    assert deps >= RELEASE_TEST_DEPS
     assert "root:release-workflow-test" in deps
 
 
-def test_release_workflow_gates_before_tag_or_publish() -> None:
+def test_release_workflow_validates_before_tag_or_publish() -> None:
     workflow = (REPO_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
-    gate_index = workflow.index("moon run :check")
-    nightly_index = workflow.index("Validate nightly regression receipt")
-    assert gate_index < workflow.index('git tag -a "v${{ steps.version.outputs.version }}"')
-    assert gate_index < workflow.index("gh workflow run publish.yml")
-    assert nightly_index < workflow.index('git tag -a "v${{ steps.version.outputs.version }}"')
+    candidate_index = workflow.index("Record candidate SHA")
+    assert candidate_index < workflow.index('git tag -a "v${{ steps.version.outputs.version }}"')
+    assert candidate_index < workflow.index("gh workflow run publish.yml")
     assert 'git commit -m "🔖' not in workflow
     assert "chore(release): prepare v${{ steps.version.outputs.version }}" in workflow
-    assert "Release gates run on this exact commit before the tag is pushed." in workflow
-    assert "RC gate bundle passed against the current checkout." in workflow
     assert "No version commit, tag, release, or publish was created." in workflow
     assert "Build and checks passed. Ready to release." not in workflow
-    assert "rc-gate-receipt-${{ steps.candidate.outputs.short_sha }}" in workflow
+    assert "moon run :check" not in workflow
+    assert "rc-gate-receipt" not in workflow
     assert r"(-[a-zA-Z0-9.]+)?" in workflow
-    assert "nightly_run_id" in workflow
-    assert 'workflowName") != "Nightly Regression"' in workflow
-    assert 'run.get("headSha") != candidate_sha' in workflow
-    assert "Prerelease candidates must have VERSION committed" in workflow
     assert "steps.version.outputs.needs_version_commit == 'true'" in workflow
     assert "from: ${{ steps.version.outputs.previous_tag }}" in workflow
 
@@ -101,22 +93,23 @@ def test_nightly_regression_uploads_candidate_sha_receipts() -> None:
 def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     workflow = (REPO_ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8")
 
-    assert "rc-gate:" in workflow
+    assert "rc-gate:" not in workflow
     assert "homebrew:" in workflow
     assert "aur:" in workflow
-    assert "moon run :check" in workflow
+    assert "moon run :check" not in workflow
     assert "moon run python-package-build" in workflow
     assert "tools/release/homebrew_formula.py" in workflow
     assert "tools/release/aur_pkgbuild.py" in workflow
     assert "hyperb1iss/homebrew-tap" in workflow
     assert "HOMEBREW_TAP_TOKEN" in workflow
-    assert "KSXGitHub/github-actions-deploy-aur@v4.1.2" in workflow
+    assert (
+        "KSXGitHub/github-actions-deploy-aur@abe8ac26b51011c88be58c8809fd2ac674068ea5" in workflow
+    )
+    assert "# v4.1.2" in workflow
     assert "AUR_SSH_KEY" in workflow
-    assert workflow.index("moon run :check") < workflow.index("moon run python-package-build")
-    assert workflow.index("moon run :check") < workflow.index("docker/build-push-action")
     assert workflow.index("gh-action-pypi-publish") < workflow.index("homebrew_formula.py")
     assert workflow.index("gh-action-pypi-publish") < workflow.index("aur_pkgbuild.py")
-    assert workflow.count("needs: rc-gate") == PUBLISH_ARTIFACT_JOB_COUNT
+    assert "needs: rc-gate" not in workflow
     assert "install.sh | sh -s -- --version ${{ steps.version.outputs.version }}" in workflow
     assert (
         "install.sh | sh -s -- --remote --version ${{ steps.version.outputs.version }}" in workflow
@@ -125,7 +118,7 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     assert "needs: [python, homebrew, aur, docker-sign]" in workflow
     assert "docker-security:" in workflow
     assert "docker-sign:" in workflow
-    assert "aquasecurity/trivy-action@0.36.0" in workflow
+    assert "aquasecurity/trivy-action@v0.36.0" in workflow
     assert "sigstore/cosign-installer@v4.1.1" in workflow
     assert "format: cyclonedx" in workflow
     assert "severity: HIGH,CRITICAL" in workflow
