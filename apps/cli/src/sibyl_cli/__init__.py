@@ -21,11 +21,7 @@ Subcommand groups:
 Server commands (serve, db, generate, etc.) are in the sibyl-server package.
 """
 
-import os
 from importlib.metadata import version as pkg_version
-
-# Disable Graphiti telemetry
-os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
 
 
 def __getattr__(name: str) -> object:

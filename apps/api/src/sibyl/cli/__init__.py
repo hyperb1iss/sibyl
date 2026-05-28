@@ -10,11 +10,6 @@ This module provides the server-side CLI for operators:
 For client commands (task, search, add, etc.), use the `sibyl` CLI.
 """
 
-import os
-
-# Disable Graphiti telemetry before any imports
-os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
-
 from sibyl.cli.main import app, main
 
 __all__ = ["app", "main"]

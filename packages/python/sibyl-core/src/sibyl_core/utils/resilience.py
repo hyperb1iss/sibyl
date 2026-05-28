@@ -72,15 +72,6 @@ SEARCH_RETRY = RetryConfig(
     retryable_exceptions=(ConnectionError, TimeoutError, RedisTimeoutError),
 )
 
-# Configuration for compatibility add_episode calls. These can take 60-90s and
-# should be retried with longer delays on transient failures.
-GRAPHITI_RETRY = RetryConfig(
-    max_attempts=2,  # Only 2 attempts - each can be 60-90s
-    base_delay=5.0,  # Wait 5s before retry
-    max_delay=15.0,  # Max 15s wait
-    retryable_exceptions=(ConnectionError, TimeoutError, OSError, RedisTimeoutError),
-)
-
 
 def calculate_delay(attempt: int, config: RetryConfig) -> float:
     """Calculate delay for a given attempt with exponential backoff.

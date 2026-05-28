@@ -6,10 +6,6 @@ Hosts both MCP protocol at /mcp and REST API at /api/*.
 import contextlib
 import os
 import secrets
-
-# Disable Graphiti telemetry before any imports
-os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
-
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
