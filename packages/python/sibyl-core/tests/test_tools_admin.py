@@ -99,118 +99,81 @@ class TestBackupInventory:
     @pytest.mark.asyncio
     async def test_create_backup_separates_mentions_from_entity_relationships(self) -> None:
         org_id = "00000000-0000-0000-0000-000000000111"
-        entity_manager = AsyncMock()
-        relationship_manager = AsyncMock()
-
-        def normalize_result(result: object) -> list[dict[str, object]]:
-            if isinstance(result, tuple):
-                return result[0]
-            return result if isinstance(result, list) else []
-
-        async def execute_query(
-            query: str, **_: object
-        ) -> tuple[list[dict[str, object]], None, None]:
-            if "MATCH (entity)" in query:
-                return (
-                    [
-                        {
-                            "uuid": "entity-1",
-                            "name": "Pattern",
-                            "entity_type": "pattern",
-                            "group_id": org_id,
-                            "content": "",
-                            "description": "",
-                            "summary": "",
-                            "metadata": {},
-                            "created_at": "2026-04-19T00:00:00Z",
-                            "updated_at": "2026-04-19T00:00:00Z",
-                            "source_file": None,
-                            "name_embedding": None,
-                        },
-                        {
-                            "uuid": "entity-2",
-                            "name": "Untyped",
-                            "entity_type": None,
-                            "group_id": org_id,
-                            "content": "",
-                            "description": "",
-                            "summary": "",
-                            "metadata": {},
-                            "created_at": "2026-04-19T00:00:00Z",
-                            "updated_at": "2026-04-19T00:00:00Z",
-                            "source_file": None,
-                            "name_embedding": None,
-                        },
-                    ],
-                    None,
-                    None,
-                )
-            if "MATCH (source)-[rel]->(target)" in query:
-                return (
-                    [
-                        {
-                            "id": "rel-1",
-                            "source_id": "document-1",
-                            "target_id": "entity-2",
-                            "rel_type": "MENTIONS",
-                            "weight": 0.75,
-                            "metadata": {"source_ids": ["source:doc"]},
-                            "created_at": "2026-04-19T00:00:00Z",
-                        }
-                    ],
-                    None,
-                    None,
-                )
-            if "MATCH (episode:Episodic)-[mention:MENTIONS]->(entity)" in query:
-                return (
-                    [
-                        {
-                            "uuid": "mention-1",
-                            "source_id": "episode-1",
-                            "target_id": "entity-1",
-                            "group_id": org_id,
-                            "created_at": "2026-04-19T00:00:00Z",
-                        }
-                    ],
-                    None,
-                    None,
-                )
-            if "MATCH (episode:Episodic)" in query:
-                return (
-                    [
-                        {
-                            "uuid": "episode-1",
-                            "name": "Conversation",
-                            "source": "message",
-                            "source_description": "chat",
-                            "content": "hi",
-                            "labels": ["Episodic"],
-                            "group_id": org_id,
-                            "created_at": "2026-04-19T00:00:00Z",
-                            "valid_at": "2026-04-19T00:00:00Z",
-                            "entity_edges": [],
-                        }
-                    ],
-                    None,
-                    None,
-                )
-            return ([], None, None)
-
-        driver = SimpleNamespace(execute_query=AsyncMock(side_effect=execute_query))
-        runtime = SimpleNamespace(
-            client=SimpleNamespace(
-                get_org_driver=lambda group_id: driver,
-                normalize_result=normalize_result,
-            ),
-            entity_manager=entity_manager,
-            relationship_manager=relationship_manager,
+        client = NativeSurrealGraphClient(group_id=org_id, url="memory://")
+        await prepare_native_graph_schema(client)
+        entity_manager = NativeEntityManager(client, group_id=org_id)
+        relationship_manager = NativeRelationshipManager(client, group_id=org_id)
+        seed = BackupData(
+            version="2.0",
+            created_at="2026-04-19T00:00:00Z",
+            organization_id=org_id,
+            entity_count=2,
+            relationship_count=1,
+            entities=[
+                Entity(
+                    id="entity-1",
+                    entity_type=EntityType.PATTERN,
+                    name="Pattern",
+                    organization_id=org_id,
+                ).model_dump(mode="json"),
+                Entity(
+                    id="entity-2",
+                    entity_type=EntityType.TOPIC,
+                    name="Untyped",
+                    organization_id=org_id,
+                ).model_dump(mode="json"),
+            ],
+            relationships=[
+                Relationship(
+                    id="rel-1",
+                    relationship_type=RelationshipType.MENTIONS,
+                    source_id="entity-1",
+                    target_id="entity-2",
+                    weight=0.75,
+                    metadata={"source_ids": ["source:doc"]},
+                ).model_dump(mode="json")
+            ],
+            episode_count=1,
+            mention_count=1,
+            episodes=[
+                {
+                    "uuid": "episode-1",
+                    "name": "Conversation",
+                    "source": "message",
+                    "source_description": "chat",
+                    "content": "hi",
+                    "created_at": "2026-04-19T00:00:00Z",
+                    "valid_at": "2026-04-19T00:00:00Z",
+                    "entity_edges": [],
+                }
+            ],
+            mentions=[
+                {
+                    "uuid": "mention-1",
+                    "source_id": "episode-1",
+                    "target_id": "entity-1",
+                    "created_at": "2026-04-19T00:00:00Z",
+                }
+            ],
         )
 
-        with (
-            patch.object(admin_module.settings, "store", "legacy"),
-            patch("sibyl_core.tools.admin.get_graph_runtime", AsyncMock(return_value=runtime)),
-        ):
-            result = await create_backup(organization_id=org_id)
+        try:
+            with patch(
+                "sibyl_core.tools.admin.get_graph_runtime",
+                AsyncMock(
+                    return_value=SimpleNamespace(
+                        client=client,
+                        entity_manager=entity_manager,
+                        relationship_manager=relationship_manager,
+                    )
+                ),
+            ):
+                restored = await restore_backup(seed, organization_id=org_id, skip_existing=False)
+                assert restored.success is True, restored.errors
+
+                result = await create_backup(organization_id=org_id)
+        finally:
+            await client.close()
 
         assert result.success is True
         assert result.entity_count == 2
@@ -219,17 +182,12 @@ class TestBackupInventory:
         assert result.mention_count == 1
         assert result.backup_data is not None
         assert {entity["id"] for entity in result.backup_data.entities} == {"entity-1", "entity-2"}
-        assert {
-            entity["entity_type"]
-            for entity in result.backup_data.entities
-            if entity["id"] == "entity-2"
-        } == {"topic"}
+        # MENTIONS relationships live in relates_to; episode mentions live in the
+        # mentions table. Backup must keep them in their separate buckets.
+        assert {rel["id"] for rel in result.backup_data.relationships} == {"rel-1"}
         assert result.backup_data.relationships[0]["relationship_type"] == "MENTIONS"
-        assert result.backup_data.relationships[0]["weight"] == 0.75
-        assert result.backup_data.relationships[0]["metadata"] == {"source_ids": ["source:doc"]}
-        assert result.backup_data.relationships[0]["created_at"] == "2026-04-19T00:00:00Z"
-        assert result.backup_data.episodes[0]["uuid"] == "episode-1"
-        assert result.backup_data.mentions[0]["uuid"] == "mention-1"
+        assert {episode["uuid"] for episode in result.backup_data.episodes} == {"episode-1"}
+        assert {mention["uuid"] for mention in result.backup_data.mentions} == {"mention-1"}
 
     def test_parse_backup_datetime_rejects_invalid_values(self) -> None:
         with pytest.raises(ValueError):

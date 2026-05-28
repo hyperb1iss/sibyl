@@ -71,11 +71,6 @@ def _build_entity_metadata(entity: Any) -> dict[str, Any]:
     return {**entity.metadata, **{k: v for k, v in extra.items() if v is not None}}
 
 
-def _is_surreal_driver(driver: Any) -> bool:
-    driver_class = driver.__class__
-    return driver_class.__module__.startswith("sibyl_core.backends.surreal")
-
-
 def _generate_id(prefix: str, *parts: str) -> str:
     """Generate a deterministic entity ID."""
     combined = ":".join(str(p)[:100] for p in parts)
@@ -386,7 +381,7 @@ async def get_project_tags(runtime_or_client: Any, project_id: str) -> list[str]
     """Fetch all unique tags from a project's existing tasks.
 
     Args:
-        runtime_or_client: Legacy graph runtime or graph client instance
+        runtime_or_client: Native graph runtime with an entity manager
         project_id: Project ID to get tags from
 
     Returns:
@@ -396,76 +391,17 @@ async def get_project_tags(runtime_or_client: Any, project_id: str) -> list[str]
         all_tags: set[str] = set()
         state = getattr(runtime_or_client, "__dict__", {})
         entity_manager = state.get("entity_manager") if isinstance(state, dict) else None
-        if entity_manager is not None and callable(getattr(entity_manager, "list_by_type", None)):
-            tasks = await entity_manager.list_by_type(
-                EntityType.TASK,
-                project_id=project_id,
-                limit=1000,
-                include_archived=True,
-            )
-            rows = [_get_field(task, "tags", []) for task in tasks]
-        else:
-            client = (
-                state.get("client", runtime_or_client)
-                if isinstance(state, dict)
-                else runtime_or_client
-            )
-            driver = getattr(client, "driver", None)
-            if driver is not None and _is_surreal_driver(driver):
-                group_id = getattr(driver, "group_id", None)
-                if not group_id:
-                    return []
+        if entity_manager is None or not callable(getattr(entity_manager, "list_by_type", None)):
+            return []
 
-                result = await driver.execute_query(
-                    """
-                    SELECT tags, attributes
-                    FROM entity
-                    WHERE group_id = $group_id
-                      AND entity_type = 'task'
-                      AND project_id = $project_id
-                    LIMIT 1000;
-                    """,
-                    group_id=group_id,
-                    project_id=project_id,
-                )
-                normalized_rows = client.normalize_result(result)
-                rows = []
-                for row in normalized_rows:
-                    if not isinstance(row, dict):
-                        continue
-                    rows.append(row.get("tags"))
-                    attributes = row.get("attributes")
-                    if isinstance(attributes, dict):
-                        rows.append(attributes.get("tags"))
-                all_tags.update(
-                    t.lower()
-                    for tags in rows
-                    if isinstance(tags, list)
-                    for t in tags
-                    if isinstance(t, str)
-                )
-                return sorted(all_tags)
+        tasks = await entity_manager.list_by_type(
+            EntityType.TASK,
+            project_id=project_id,
+            limit=1000,
+            include_archived=True,
+        )
 
-            query = """
-                MATCH (n)
-                WHERE (n:Episodic OR n:Entity)
-                  AND n.entity_type = 'task'
-                  AND n.project_id = $project_id
-                  AND n.tags IS NOT NULL
-                RETURN DISTINCT n.tags as tags
-                """
-
-            result = await client.driver.execute_query(
-                query,
-                project_id=project_id,
-            )
-            normalized_rows = client.normalize_result(result)
-            rows = [
-                row[0] if isinstance(row, list | tuple) else row.get("tags")
-                for row in normalized_rows
-            ]
-
-        for tags in rows:
+        for tags in (_get_field(task, "tags", []) for task in tasks):
             if isinstance(tags, list):
                 all_tags.update(t.lower() for t in tags if isinstance(t, str))
             elif isinstance(tags, str):

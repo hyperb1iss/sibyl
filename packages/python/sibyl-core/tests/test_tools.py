@@ -287,63 +287,6 @@ class TestGetProjectTags:
             include_archived=True,
         )
 
-    @pytest.mark.asyncio
-    async def test_falls_back_to_client_queries(self) -> None:
-        """Project tag lookup keeps the legacy client fallback when no runtime is present."""
-        client = MagicMock()
-        client.driver.execute_query = AsyncMock(
-            return_value=([[["backend"]], ['["api", "ops"]']], None, None)
-        )
-        client.normalize_result.return_value = [[["backend"]], ['["api", "ops"]']]
-
-        tags = await get_project_tags(client, "project-123")
-
-        assert tags == ["api", "backend", "ops"]
-        client.driver.execute_query.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_falls_back_to_surreal_client_queries(self) -> None:
-        """Project tag lookup avoids the unscoped base Surreal driver fallback."""
-
-        class FakeSurrealDriver:
-            __module__ = "sibyl_core.backends.surreal.driver"
-
-            def __init__(self) -> None:
-                self.execute_query = AsyncMock(return_value=[{"tags": ["backend", "api"]}])
-
-        client = MagicMock()
-        client.driver = FakeSurrealDriver()
-
-        tags = await get_project_tags(client, "project-123")
-
-        assert tags == []
-        client.driver.execute_query.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_uses_scoped_surreal_client_queries(self) -> None:
-        """Project tag lookup uses native SurrealQL when the driver is org-scoped."""
-
-        class FakeSurrealDriver:
-            __module__ = "sibyl_core.backends.surreal.driver"
-
-            def __init__(self) -> None:
-                self.group_id = "org-123"
-                self.execute_query = AsyncMock(
-                    return_value=[
-                        {"tags": ["Backend", "API"], "attributes": {"tags": ["ops"]}},
-                        {"tags": None, "attributes": {"tags": ["api", "Urgent"]}},
-                    ]
-                )
-
-        client = MagicMock()
-        client.driver = FakeSurrealDriver()
-        client.normalize_result.side_effect = lambda result: result
-
-        tags = await get_project_tags(client, "project-123")
-
-        assert tags == ["api", "backend", "ops", "urgent"]
-        client.driver.execute_query.assert_awaited_once()
-
     def test_build_metadata_with_status_enum(self) -> None:
         """Serializes status enum to string."""
         entity = MockEntity(
