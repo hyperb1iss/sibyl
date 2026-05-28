@@ -155,7 +155,8 @@ sibyl session bundle
 
 ```bash
 # One-line setup (installs proto, moon, toolchain, dependencies)
-./setup-dev.sh
+./setup-dev.sh            # macOS / Linux
+pwsh -File .\setup-dev.ps1  # Windows (PowerShell 7+)
 
 # Or manually:
 curl -fsSL https://moonrepo.dev/install/proto.sh | bash
@@ -584,7 +585,8 @@ We welcome contributions. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ```bash
 # Fork, clone, then:
-./setup-dev.sh
+./setup-dev.sh              # macOS / Linux
+pwsh -File .\setup-dev.ps1  # Windows (PowerShell 7+)
 moon run dev
 
 # Make changes, then:

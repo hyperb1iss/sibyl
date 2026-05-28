@@ -81,7 +81,8 @@ git clone https://github.com/hyperb1iss/sibyl.git
 cd sibyl
 
 # Bootstrap toolchain and dependencies
-./setup-dev.sh
+./setup-dev.sh              # macOS / Linux
+pwsh -File .\setup-dev.ps1  # Windows (PowerShell 7+)
 ```
 
 Or manually:
