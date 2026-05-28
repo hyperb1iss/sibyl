@@ -23,7 +23,7 @@ LIGHT_IMPORT_MODULES = [
     "sibyl_core.ai.llm.config",
     "sibyl_core.embeddings",
     "sibyl_core.embeddings.gemini",
-    "sibyl_core.embeddings.native",
+    "sibyl_core.embeddings.providers",
     "sibyl_core.models.entities",
     "sibyl_core.session_bundle",
 ]

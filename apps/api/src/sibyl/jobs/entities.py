@@ -12,7 +12,7 @@ from sibyl.api.event_types import WSEvent
 from sibyl.persistence.auth_runtime import log_memory_audit_event
 from sibyl_core.auth import MemoryPolicyContext, OrganizationRole, authorize_memory_write
 from sibyl_core.auth.memory_policy import MemoryPolicyAction, MemoryPolicyDecision
-from sibyl_core.embeddings.native import configured_native_embedding_provider
+from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.projection import project_memory_entities, project_memory_entity
 from sibyl_core.services.graph import get_surreal_graph_runtime
 from sibyl_core.services.surreal_content import MemoryScope
@@ -312,7 +312,7 @@ async def create_entity(  # noqa: PLR0915
     try:
         runtime = await get_surreal_graph_runtime(
             group_id,
-            embedding_provider=configured_native_embedding_provider(),
+            embedding_provider=configured_embedding_provider(),
         )
         entity_manager = runtime.entity_manager
 
@@ -587,7 +587,7 @@ async def project_memory_batch(
     sources = [Entity.model_validate(source_data) for source_data in sources_data]
     runtime = await get_surreal_graph_runtime(
         group_id,
-        embedding_provider=configured_native_embedding_provider(),
+        embedding_provider=configured_embedding_provider(),
     )
     projection = await project_memory_entities(
         entity_manager=runtime.entity_manager,

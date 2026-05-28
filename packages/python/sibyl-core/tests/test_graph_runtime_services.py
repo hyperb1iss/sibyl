@@ -33,7 +33,7 @@ async def test_get_graph_runtime_binds_native_store_managers() -> None:
             AsyncMock(return_value=native_runtime),
         ) as get_runtime,
         patch(
-            "sibyl_core.services.graph_runtime.configured_native_embedding_provider",
+            "sibyl_core.services.graph_runtime.configured_embedding_provider",
             MagicMock(return_value=None),
         ),
     ):

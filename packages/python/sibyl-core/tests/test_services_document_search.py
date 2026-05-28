@@ -34,7 +34,7 @@ async def test_document_embedding_uses_core_native_provider(
     monkeypatch.setenv("SIBYL_GEMINI_API_KEY", "gemini-key")
     monkeypatch.setattr(
         document_search_service,
-        "create_native_embedding_provider",
+        "create_embedding_provider",
         fake_provider_factory,
     )
 

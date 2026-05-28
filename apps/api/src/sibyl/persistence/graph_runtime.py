@@ -9,7 +9,7 @@ from typing import Any, Self
 
 import structlog
 
-from sibyl_core.embeddings.native import configured_native_embedding_provider
+from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.services import KnowledgeReadService, KnowledgeWriteService
@@ -43,7 +43,7 @@ log = structlog.get_logger()
 async def _get_graph_runtime(group_id: str) -> GraphRuntime:
     return await get_surreal_graph_runtime(
         group_id,
-        embedding_provider=configured_native_embedding_provider(),
+        embedding_provider=configured_embedding_provider(),
     )
 
 

@@ -20,7 +20,7 @@ from sibyl_core.auth.memory_policy import (
 )
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
 from sibyl_core.config import core_config
-from sibyl_core.embeddings.native import NativeEmbeddingMetadata, NativeEmbeddingProvider
+from sibyl_core.embeddings.providers import EmbeddingMetadata, EmbeddingProvider
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.services.graph import get_surreal_graph_runtime, normalize_records
 from sibyl_core.services.surreal_content import (
@@ -295,7 +295,7 @@ async def native_context_search(
     facet: ContextFacet | None = None,
     limit: int = 10,
     include_content: bool = True,
-    embedding_provider: NativeEmbeddingProvider | None = None,
+    embedding_provider: EmbeddingProvider | None = None,
     raw_memory_recall_fn: RawMemoryRecallFn = recall_raw_memory,
 ) -> SearchResponse:
     """Search context-pack candidates through native SurrealDB paths."""
@@ -839,7 +839,7 @@ async def _vector_candidate_sources(
     client: Any,
     plan: NativeRetrievalPlan,
     search_filter: NativeSearchFilter,
-    embedding_provider: NativeEmbeddingProvider | None,
+    embedding_provider: EmbeddingProvider | None,
 ) -> list[list[NativeRetrievalCandidate]]:
     if embedding_provider is None:
         return [
@@ -933,7 +933,7 @@ async def _node_vector_candidates(
     plan: NativeRetrievalPlan,
     search_filter: NativeSearchFilter,
     query_embedding: Sequence[float],
-    embedding_metadata: NativeEmbeddingMetadata,
+    embedding_metadata: EmbeddingMetadata,
     limit: int,
 ) -> list[NativeRetrievalCandidate]:
     if limit <= 0:
@@ -982,7 +982,7 @@ async def _edge_vector_candidates(
     plan: NativeRetrievalPlan,
     search_filter: NativeSearchFilter,
     query_embedding: Sequence[float],
-    embedding_metadata: NativeEmbeddingMetadata,
+    embedding_metadata: EmbeddingMetadata,
     limit: int,
 ) -> list[NativeRetrievalCandidate]:
     if limit <= 0:
@@ -1317,7 +1317,7 @@ def _candidate_from_node_record(
     *,
     signal: NativeRetrievalSignal,
     score: float,
-    embedding_metadata: NativeEmbeddingMetadata | None = None,
+    embedding_metadata: EmbeddingMetadata | None = None,
 ) -> NativeRetrievalCandidate:
     attributes = _record_attributes(row)
     entity_type = _entity_type_for_record(row, attributes)
@@ -1385,7 +1385,7 @@ def _candidate_from_edge_record(
     *,
     signal: NativeRetrievalSignal,
     score: float,
-    embedding_metadata: NativeEmbeddingMetadata | None = None,
+    embedding_metadata: EmbeddingMetadata | None = None,
 ) -> NativeRetrievalCandidate:
     attributes = _record_attributes(row)
     source = _string_value(attributes.get("source_id") or row.get("uuid"))

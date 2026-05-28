@@ -8,7 +8,7 @@ from typing import Any
 import structlog
 
 from sibyl_core.auth.memory_policy import memory_scope_policy_key
-from sibyl_core.embeddings.native import configured_native_embedding_provider
+from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.models.entities import EntityType
 from sibyl_core.retrieval import HybridConfig, hybrid_search, temporal_boost
 from sibyl_core.retrieval.fusion import rrf_merge
@@ -35,7 +35,7 @@ async def get_graph_runtime(group_id: str):
     from sibyl_core.services.graph import get_surreal_graph_runtime
 
     kwargs = {
-        "embedding_provider": configured_native_embedding_provider(),
+        "embedding_provider": configured_embedding_provider(),
         "ensure_schema": False,
     }
     try:

@@ -5,7 +5,7 @@ from typing import Any
 
 import structlog
 
-from sibyl_core.embeddings.native import configured_native_embedding_provider
+from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.models.entities import (
     Entity,
     EntityType,
@@ -61,7 +61,7 @@ DIRECT_ENTITY_TYPES = {
 async def get_graph_runtime(group_id: str):
     return await get_surreal_graph_runtime(
         group_id,
-        embedding_provider=configured_native_embedding_provider(),
+        embedding_provider=configured_embedding_provider(),
     )
 
 

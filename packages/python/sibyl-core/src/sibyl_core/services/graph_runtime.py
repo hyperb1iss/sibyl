@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from sibyl_core.embeddings.native import configured_native_embedding_provider
+from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services.graph import (
     EntityManager,
@@ -75,7 +75,7 @@ async def get_graph_client(group_id: str = "default") -> SurrealGraphClient:
 async def get_graph_runtime(group_id: str) -> ActiveGraphRuntime:
     """Bind the native graph managers for a single organization."""
 
-    embedding_provider = configured_native_embedding_provider()
+    embedding_provider = configured_embedding_provider()
     if embedding_provider is None:
         runtime = await get_surreal_graph_runtime(str(group_id))
     else:

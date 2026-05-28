@@ -10,10 +10,10 @@ from uuid import UUID
 import structlog
 
 from sibyl_core.config import settings
-from sibyl_core.embeddings.native import (
-    NativeEmbeddingProvider,
-    NativeEmbeddingProviderName,
-    create_native_embedding_provider,
+from sibyl_core.embeddings.providers import (
+    EmbeddingProvider,
+    EmbeddingProviderName,
+    create_embedding_provider,
 )
 from sibyl_core.retrieval.dedup import cosine_similarity
 from sibyl_core.services.surreal_content import (
@@ -33,8 +33,8 @@ DOCUMENT_LEXICAL_WEIGHT = 0.3
 DOCUMENT_EMBEDDING_TIMEOUT_SECONDS = 2.0
 DOCUMENT_EMBEDDING_CACHE_SIZE = 1000
 
-_document_embedding_provider: NativeEmbeddingProvider | None = None
-_document_embedding_fingerprint: tuple[NativeEmbeddingProviderName, str, int, str] | None = None
+_document_embedding_provider: EmbeddingProvider | None = None
+_document_embedding_fingerprint: tuple[EmbeddingProviderName, str, int, str] | None = None
 
 
 def reset_document_embedding_provider_cache() -> None:
@@ -51,7 +51,7 @@ async def _embed_text(text: str) -> list[float]:
     return [float(value) for value in embeddings[0]]
 
 
-def _get_document_embedding_provider() -> NativeEmbeddingProvider:
+def _get_document_embedding_provider() -> EmbeddingProvider:
     global _document_embedding_fingerprint, _document_embedding_provider
     provider_name = _document_embedding_provider_name()
     model = _document_embedding_model(provider_name)
@@ -59,7 +59,7 @@ def _get_document_embedding_provider() -> NativeEmbeddingProvider:
     api_key = _document_embedding_api_key(provider_name)
     fingerprint = (provider_name, model, dimensions, _secret_fingerprint(api_key))
     if _document_embedding_provider is None or fingerprint != _document_embedding_fingerprint:
-        _document_embedding_provider = create_native_embedding_provider(
+        _document_embedding_provider = create_embedding_provider(
             provider=provider_name,
             model=model,
             dimensions=dimensions,
@@ -72,7 +72,7 @@ def _get_document_embedding_provider() -> NativeEmbeddingProvider:
     return _document_embedding_provider
 
 
-def _document_embedding_provider_name() -> NativeEmbeddingProviderName:
+def _document_embedding_provider_name() -> EmbeddingProviderName:
     raw_provider = os.getenv("SIBYL_EMBEDDING_PROVIDER") or settings.embedding_provider
     if raw_provider == "openai":
         return "openai"
@@ -81,7 +81,7 @@ def _document_embedding_provider_name() -> NativeEmbeddingProviderName:
     raise ValueError(f"Unsupported embedding provider: {raw_provider}")
 
 
-def _document_embedding_model(provider: NativeEmbeddingProviderName) -> str:
+def _document_embedding_model(provider: EmbeddingProviderName) -> str:
     env_model = os.getenv("SIBYL_EMBEDDING_MODEL")
     if env_model:
         return env_model
@@ -97,7 +97,7 @@ def _document_embedding_dimensions() -> int:
     return settings.embedding_dimensions
 
 
-def _document_embedding_api_key(provider: NativeEmbeddingProviderName) -> str | None:
+def _document_embedding_api_key(provider: EmbeddingProviderName) -> str | None:
     if provider == "gemini":
         return (
             os.getenv("SIBYL_GEMINI_API_KEY", "")

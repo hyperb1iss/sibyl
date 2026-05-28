@@ -12,9 +12,9 @@ import pytest
 
 import sibyl_core.services.graph as graph_module
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
-from sibyl_core.embeddings.native import (
-    DeterministicNativeEmbeddingProvider,
-    NativeEmbeddingMetadata,
+from sibyl_core.embeddings.providers import (
+    DeterministicEmbeddingProvider,
+    EmbeddingMetadata,
 )
 from sibyl_core.models.entities import Entity, EntityType, Procedure, Relationship, RelationshipType
 from sibyl_core.retrieval.dedup import EntityDeduplicator
@@ -241,9 +241,9 @@ class _CappedRelatedBatchClient:
         return []
 
 
-def _deterministic_provider() -> DeterministicNativeEmbeddingProvider:
-    return DeterministicNativeEmbeddingProvider(
-        NativeEmbeddingMetadata(
+def _deterministic_provider() -> DeterministicEmbeddingProvider:
+    return DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
             provider="deterministic",
             model="unit-test",
             dimensions=4,
@@ -254,7 +254,7 @@ def _deterministic_provider() -> DeterministicNativeEmbeddingProvider:
 
 
 class _FailingEmbeddingProvider:
-    metadata = NativeEmbeddingMetadata(
+    metadata = EmbeddingMetadata(
         provider="deterministic",
         model="failing-unit-test",
         dimensions=4,
@@ -273,7 +273,7 @@ class _FailingEmbeddingProvider:
 
 
 class _SlowEmbeddingProvider:
-    metadata = NativeEmbeddingMetadata(
+    metadata = EmbeddingMetadata(
         provider="deterministic",
         model="slow-unit-test",
         dimensions=4,
@@ -378,8 +378,8 @@ class _TransientEntityWriteClient:
 
 def test_native_embedding_dimension_validation_requires_schema_match() -> None:
     _validate_native_embedding_dimensions(
-        DeterministicNativeEmbeddingProvider(
-            NativeEmbeddingMetadata(
+        DeterministicEmbeddingProvider(
+            EmbeddingMetadata(
                 provider="deterministic",
                 model="unit-test",
                 dimensions=EMBEDDING_DIM,
@@ -390,8 +390,8 @@ def test_native_embedding_dimension_validation_requires_schema_match() -> None:
     )
     with pytest.raises(ValueError, match="must match Surreal graph schema"):
         _validate_native_embedding_dimensions(
-            DeterministicNativeEmbeddingProvider(
-                NativeEmbeddingMetadata(
+            DeterministicEmbeddingProvider(
+                EmbeddingMetadata(
                     provider="deterministic",
                     model="unit-test",
                     dimensions=EMBEDDING_DIM + 1,

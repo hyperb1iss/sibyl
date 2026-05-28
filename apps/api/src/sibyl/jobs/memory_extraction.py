@@ -16,7 +16,7 @@ from sibyl_core.ai.memory_extraction import (
     build_memory_batch_entity_extraction_prompt,
     memory_batch_entity_extractor,
 )
-from sibyl_core.embeddings.native import configured_native_embedding_provider
+from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.models.entities import Entity
 from sibyl_core.models.memory_extraction import (
     ExtractedMemoryEntity,
@@ -355,7 +355,7 @@ async def _project_extracted_entities(
         sources = [Entity.model_validate(source.source) for source in source_payloads]
         runtime = await get_surreal_graph_runtime(
             group_id,
-            embedding_provider=configured_native_embedding_provider(),
+            embedding_provider=configured_embedding_provider(),
         )
         projection = await project_extracted_memory_entities(
             entity_manager=runtime.entity_manager,

@@ -4,51 +4,51 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS = {
-    "CachedNativeEmbeddingProvider": (
-        "sibyl_core.embeddings.native",
-        "CachedNativeEmbeddingProvider",
+    "CachedEmbeddingProvider": (
+        "sibyl_core.embeddings.providers",
+        "CachedEmbeddingProvider",
     ),
-    "DeterministicNativeEmbeddingProvider": (
-        "sibyl_core.embeddings.native",
-        "DeterministicNativeEmbeddingProvider",
+    "DeterministicEmbeddingProvider": (
+        "sibyl_core.embeddings.providers",
+        "DeterministicEmbeddingProvider",
     ),
     "GeminiInputKind": ("sibyl_core.embeddings.gemini", "GeminiInputKind"),
-    "GeminiNativeEmbeddingProvider": (
-        "sibyl_core.embeddings.native",
-        "GeminiNativeEmbeddingProvider",
+    "GeminiEmbeddingProvider": (
+        "sibyl_core.embeddings.providers",
+        "GeminiEmbeddingProvider",
     ),
-    "NativeEmbeddingInputKind": ("sibyl_core.embeddings.native", "NativeEmbeddingInputKind"),
-    "NativeEmbeddingMetadata": ("sibyl_core.embeddings.native", "NativeEmbeddingMetadata"),
-    "NativeEmbeddingProvider": ("sibyl_core.embeddings.native", "NativeEmbeddingProvider"),
-    "NativeEmbeddingProviderName": (
-        "sibyl_core.embeddings.native",
-        "NativeEmbeddingProviderName",
+    "EmbeddingInputKind": ("sibyl_core.embeddings.providers", "EmbeddingInputKind"),
+    "EmbeddingMetadata": ("sibyl_core.embeddings.providers", "EmbeddingMetadata"),
+    "EmbeddingProvider": ("sibyl_core.embeddings.providers", "EmbeddingProvider"),
+    "EmbeddingProviderName": (
+        "sibyl_core.embeddings.providers",
+        "EmbeddingProviderName",
     ),
-    "OpenAINativeEmbeddingProvider": (
-        "sibyl_core.embeddings.native",
-        "OpenAINativeEmbeddingProvider",
+    "OpenAIEmbeddingProvider": (
+        "sibyl_core.embeddings.providers",
+        "OpenAIEmbeddingProvider",
     ),
     "build_gemini_contents": ("sibyl_core.embeddings.gemini", "build_gemini_contents"),
-    "create_native_embedding_provider": (
-        "sibyl_core.embeddings.native",
-        "create_native_embedding_provider",
+    "create_embedding_provider": (
+        "sibyl_core.embeddings.providers",
+        "create_embedding_provider",
     ),
     "format_gemini_embedding_text": (
         "sibyl_core.embeddings.gemini",
         "format_gemini_embedding_text",
     ),
     "is_gemini_embedding_2": ("sibyl_core.embeddings.gemini", "is_gemini_embedding_2"),
-    "native_embedding_cache_key": (
-        "sibyl_core.embeddings.native",
-        "native_embedding_cache_key",
+    "embedding_cache_key": (
+        "sibyl_core.embeddings.providers",
+        "embedding_cache_key",
     ),
-    "native_entity_embedding_text": (
-        "sibyl_core.embeddings.native",
-        "native_entity_embedding_text",
+    "entity_embedding_text": (
+        "sibyl_core.embeddings.providers",
+        "entity_embedding_text",
     ),
-    "native_relationship_embedding_text": (
-        "sibyl_core.embeddings.native",
-        "native_relationship_embedding_text",
+    "relationship_embedding_text": (
+        "sibyl_core.embeddings.providers",
+        "relationship_embedding_text",
     ),
 }
 

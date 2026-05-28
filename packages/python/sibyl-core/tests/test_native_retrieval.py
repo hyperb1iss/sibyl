@@ -4,9 +4,9 @@ import pytest
 
 import sibyl_core.retrieval.native as native_module
 from sibyl_core.auth.memory_policy import memory_scope_policy_key
-from sibyl_core.embeddings.native import (
-    DeterministicNativeEmbeddingProvider,
-    NativeEmbeddingMetadata,
+from sibyl_core.embeddings.providers import (
+    DeterministicEmbeddingProvider,
+    EmbeddingMetadata,
 )
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.retrieval.native import (
@@ -816,14 +816,14 @@ async def test_surreal_rrf_backend_falls_back_to_python_rrf_on_error() -> None:
 
 @pytest.mark.asyncio
 async def test_deterministic_native_embedding_provider_batches_stably() -> None:
-    metadata = NativeEmbeddingMetadata(
+    metadata = EmbeddingMetadata(
         provider="deterministic",
         model="unit-test",
         dimensions=4,
         cache_namespace="retrieval-test",
         tokenizer_estimate_method="utf8-byte-length",
     )
-    provider = DeterministicNativeEmbeddingProvider(metadata)
+    provider = DeterministicEmbeddingProvider(metadata)
 
     first, second = await provider.embed_texts(["alpha", "alpha"], input_kind="query")
 
@@ -938,8 +938,8 @@ async def test_native_context_search_pushes_facet_types_into_graph_queries(
         accessible_projects={"project_123"},
         limit=12,
     )
-    provider = DeterministicNativeEmbeddingProvider(
-        NativeEmbeddingMetadata(
+    provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
             provider="deterministic",
             model="unit-test",
             dimensions=4,
@@ -1082,8 +1082,8 @@ async def test_vector_candidate_sources_use_native_embedding_contract() -> None:
         project="project_123",
         accessible_projects={"project_123"},
     )
-    provider = DeterministicNativeEmbeddingProvider(
-        NativeEmbeddingMetadata(
+    provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
             provider="deterministic",
             model="unit-test",
             dimensions=4,
@@ -1130,8 +1130,8 @@ async def test_vector_candidate_sources_use_configured_knn_effort(
         project="project_123",
         accessible_projects={"project_123"},
     )
-    provider = DeterministicNativeEmbeddingProvider(
-        NativeEmbeddingMetadata(
+    provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
             provider="deterministic",
             model="unit-test",
             dimensions=4,

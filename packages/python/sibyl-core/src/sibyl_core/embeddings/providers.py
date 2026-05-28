@@ -25,9 +25,9 @@ from sibyl_core.models.entities import Entity, Relationship
 
 log = structlog.get_logger()
 
-type NativeEmbeddingInputKind = Literal["query", "document"]
-type NativeEmbeddingProviderName = Literal["openai", "gemini"]
-type _ConfiguredProviderCacheKey = tuple[NativeEmbeddingProviderName, str, int, str]
+type EmbeddingInputKind = Literal["query", "document"]
+type EmbeddingProviderName = Literal["openai", "gemini"]
+type _ConfiguredProviderCacheKey = tuple[EmbeddingProviderName, str, int, str]
 
 _OPENAI_EMBEDDING_INPUT_MAX_TOKENS = 6000
 _OPENAI_EMBEDDING_REQUEST_MAX_TOKENS = 240_000
@@ -37,13 +37,13 @@ _OPENAI_EMBEDDING_EMPTY_TEXT = "[empty]"
 _OPENAI_EMBEDDING_TRUNCATION_MARKER = "\n...[truncated for embedding]...\n"
 _configured_provider_cache: weakref.WeakKeyDictionary[
     asyncio.AbstractEventLoop,
-    dict[_ConfiguredProviderCacheKey, NativeEmbeddingProvider],
+    dict[_ConfiguredProviderCacheKey, EmbeddingProvider],
 ] = weakref.WeakKeyDictionary()
 _configured_provider_lock = threading.Lock()
 
 
 @dataclass(frozen=True, slots=True)
-class NativeEmbeddingMetadata:
+class EmbeddingMetadata:
     provider: str
     model: str
     dimensions: int
@@ -57,21 +57,21 @@ class NativeEmbeddingMetadata:
         return asdict(self)
 
 
-class NativeEmbeddingProvider(Protocol):
+class EmbeddingProvider(Protocol):
     @property
-    def metadata(self) -> NativeEmbeddingMetadata: ...
+    def metadata(self) -> EmbeddingMetadata: ...
 
     async def embed_texts(
         self,
         texts: Sequence[str],
         *,
-        input_kind: NativeEmbeddingInputKind = "document",
+        input_kind: EmbeddingInputKind = "document",
     ) -> list[list[float]]: ...
 
 
-class DeterministicNativeEmbeddingProvider:
-    def __init__(self, metadata: NativeEmbeddingMetadata | None = None) -> None:
-        self._metadata = metadata or NativeEmbeddingMetadata(
+class DeterministicEmbeddingProvider:
+    def __init__(self, metadata: EmbeddingMetadata | None = None) -> None:
+        self._metadata = metadata or EmbeddingMetadata(
             provider="deterministic",
             model="sha256-v1",
             dimensions=8,
@@ -82,14 +82,14 @@ class DeterministicNativeEmbeddingProvider:
             raise ValueError("embedding dimensions must be positive")
 
     @property
-    def metadata(self) -> NativeEmbeddingMetadata:
+    def metadata(self) -> EmbeddingMetadata:
         return self._metadata
 
     async def embed_texts(
         self,
         texts: Sequence[str],
         *,
-        input_kind: NativeEmbeddingInputKind = "document",
+        input_kind: EmbeddingInputKind = "document",
     ) -> list[list[float]]:
         return [
             _deterministic_vector(text, input_kind=input_kind, metadata=self.metadata)
@@ -97,11 +97,11 @@ class DeterministicNativeEmbeddingProvider:
         ]
 
 
-class OpenAINativeEmbeddingProvider:
+class OpenAIEmbeddingProvider:
     def __init__(
         self,
         *,
-        metadata: NativeEmbeddingMetadata,
+        metadata: EmbeddingMetadata,
         api_key: str | None = None,
         client: Any | None = None,
     ) -> None:
@@ -113,14 +113,14 @@ class OpenAINativeEmbeddingProvider:
         self._client = client
 
     @property
-    def metadata(self) -> NativeEmbeddingMetadata:
+    def metadata(self) -> EmbeddingMetadata:
         return self._metadata
 
     async def embed_texts(
         self,
         texts: Sequence[str],
         *,
-        input_kind: NativeEmbeddingInputKind = "document",
+        input_kind: EmbeddingInputKind = "document",
     ) -> list[list[float]]:
         del input_kind
         if not texts:
@@ -142,11 +142,11 @@ class OpenAINativeEmbeddingProvider:
         return embeddings
 
 
-class GeminiNativeEmbeddingProvider:
+class GeminiEmbeddingProvider:
     def __init__(
         self,
         *,
-        metadata: NativeEmbeddingMetadata,
+        metadata: EmbeddingMetadata,
         api_key: str | None = None,
         client: Any | None = None,
     ) -> None:
@@ -158,14 +158,14 @@ class GeminiNativeEmbeddingProvider:
         self._client = client
 
     @property
-    def metadata(self) -> NativeEmbeddingMetadata:
+    def metadata(self) -> EmbeddingMetadata:
         return self._metadata
 
     async def embed_texts(
         self,
         texts: Sequence[str],
         *,
-        input_kind: NativeEmbeddingInputKind = "document",
+        input_kind: EmbeddingInputKind = "document",
     ) -> list[list[float]]:
         if not texts:
             return []
@@ -195,10 +195,10 @@ class GeminiNativeEmbeddingProvider:
         return embeddings
 
 
-class CachedNativeEmbeddingProvider:
+class CachedEmbeddingProvider:
     def __init__(
         self,
-        provider: NativeEmbeddingProvider,
+        provider: EmbeddingProvider,
         *,
         max_size: int = 1000,
         stats: dict[str, int] | None = None,
@@ -211,14 +211,14 @@ class CachedNativeEmbeddingProvider:
         self._stats = stats
 
     @property
-    def metadata(self) -> NativeEmbeddingMetadata:
+    def metadata(self) -> EmbeddingMetadata:
         return self._provider.metadata
 
     async def embed_texts(
         self,
         texts: Sequence[str],
         *,
-        input_kind: NativeEmbeddingInputKind = "document",
+        input_kind: EmbeddingInputKind = "document",
     ) -> list[list[float]]:
         results: list[list[float] | None] = [None] * len(texts)
         missing: list[tuple[int, str, str, asyncio.Future[list[float]]]] = []
@@ -226,7 +226,7 @@ class CachedNativeEmbeddingProvider:
 
         async with self._lock:
             for index, text in enumerate(texts):
-                cache_key = native_embedding_cache_key(
+                cache_key = embedding_cache_key(
                     self.metadata,
                     text,
                     input_kind=input_kind,
@@ -304,9 +304,9 @@ class CachedNativeEmbeddingProvider:
         self._cache.clear()
 
 
-def create_native_embedding_provider(
+def create_embedding_provider(
     *,
-    provider: NativeEmbeddingProviderName,
+    provider: EmbeddingProviderName,
     model: str,
     dimensions: int,
     cache_namespace: str,
@@ -314,8 +314,8 @@ def create_native_embedding_provider(
     client: Any | None = None,
     max_cache_size: int = 1000,
     tokenizer_estimate_method: str = "provider-default",
-) -> NativeEmbeddingProvider:
-    metadata = NativeEmbeddingMetadata(
+) -> EmbeddingProvider:
+    metadata = EmbeddingMetadata(
         provider=provider,
         model=model,
         dimensions=dimensions,
@@ -323,16 +323,16 @@ def create_native_embedding_provider(
         tokenizer_estimate_method=tokenizer_estimate_method,
     )
     if provider == "gemini":
-        return CachedNativeEmbeddingProvider(
-            GeminiNativeEmbeddingProvider(
+        return CachedEmbeddingProvider(
+            GeminiEmbeddingProvider(
                 metadata=metadata,
                 api_key=api_key,
                 client=client,
             ),
             max_size=max_cache_size,
         )
-    return CachedNativeEmbeddingProvider(
-        OpenAINativeEmbeddingProvider(
+    return CachedEmbeddingProvider(
+        OpenAIEmbeddingProvider(
             metadata=metadata,
             api_key=api_key,
             client=client,
@@ -341,15 +341,15 @@ def create_native_embedding_provider(
     )
 
 
-def configured_native_embedding_provider() -> NativeEmbeddingProvider | None:
+def configured_embedding_provider() -> EmbeddingProvider | None:
     from sibyl_core.config import settings
 
     dimensions_raw = os.getenv("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", "").strip()
     dimensions = int(dimensions_raw) if dimensions_raw else settings.graph_embedding_dimensions
 
     if os.getenv("SIBYL_MOCK_LLM", "").strip().lower() in {"1", "true", "yes", "on"}:
-        return DeterministicNativeEmbeddingProvider(
-            NativeEmbeddingMetadata(
+        return DeterministicEmbeddingProvider(
+            EmbeddingMetadata(
                 provider="deterministic",
                 model="mock-llm-v1",
                 dimensions=dimensions,
@@ -389,7 +389,7 @@ def configured_native_embedding_provider() -> NativeEmbeddingProvider | None:
         log.info("graph_embeddings_disabled", provider=provider, reason="missing_key")
         return None
 
-    provider_name = cast(NativeEmbeddingProviderName, provider)
+    provider_name = cast(EmbeddingProviderName, provider)
     cache_entry = _configured_provider_cache_entry(
         provider=provider_name,
         model=model,
@@ -397,7 +397,7 @@ def configured_native_embedding_provider() -> NativeEmbeddingProvider | None:
         api_key=api_key,
     )
     if cache_entry is None:
-        return create_native_embedding_provider(
+        return create_embedding_provider(
             provider=provider_name,
             model=model,
             dimensions=dimensions,
@@ -412,7 +412,7 @@ def configured_native_embedding_provider() -> NativeEmbeddingProvider | None:
         cached = loop_cache.get(cache_key)
         if cached is not None:
             return cached
-        created = create_native_embedding_provider(
+        created = create_embedding_provider(
             provider=provider_name,
             model=model,
             dimensions=dimensions,
@@ -426,7 +426,7 @@ def configured_native_embedding_provider() -> NativeEmbeddingProvider | None:
 
 def _configured_provider_cache_entry(
     *,
-    provider: NativeEmbeddingProviderName,
+    provider: EmbeddingProviderName,
     model: str,
     dimensions: int,
     api_key: str,
@@ -522,11 +522,11 @@ def _openai_embedding_batches(
     return batches
 
 
-def native_embedding_cache_key(
-    metadata: NativeEmbeddingMetadata,
+def embedding_cache_key(
+    metadata: EmbeddingMetadata,
     text: str,
     *,
-    input_kind: NativeEmbeddingInputKind,
+    input_kind: EmbeddingInputKind,
 ) -> str:
     kind_bucket = input_kind if metadata.input_kind_sensitive else "shared"
     payload = "\x1f".join(
@@ -546,7 +546,7 @@ def native_embedding_cache_key(
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def native_entity_embedding_text(entity: Entity) -> str:
+def entity_embedding_text(entity: Entity) -> str:
     parts = [
         entity.entity_type.value,
         entity.name,
@@ -557,7 +557,7 @@ def native_entity_embedding_text(entity: Entity) -> str:
     return "\n".join(part for part in parts if part)
 
 
-def native_relationship_embedding_text(relationship: Relationship) -> str:
+def relationship_embedding_text(relationship: Relationship) -> str:
     fact = relationship.metadata.get("fact")
     if isinstance(fact, str) and fact.strip():
         return fact.strip()
@@ -571,8 +571,8 @@ def native_relationship_embedding_text(relationship: Relationship) -> str:
 def _deterministic_vector(
     text: str,
     *,
-    input_kind: NativeEmbeddingInputKind,
-    metadata: NativeEmbeddingMetadata,
+    input_kind: EmbeddingInputKind,
+    metadata: EmbeddingMetadata,
 ) -> list[float]:
     seed = (
         f"{metadata.cache_namespace}:{metadata.provider}:{metadata.model}:"
@@ -612,17 +612,17 @@ def _set_future_exception(
 
 
 __all__ = [
-    "CachedNativeEmbeddingProvider",
-    "DeterministicNativeEmbeddingProvider",
-    "GeminiNativeEmbeddingProvider",
-    "NativeEmbeddingInputKind",
-    "NativeEmbeddingMetadata",
-    "NativeEmbeddingProvider",
-    "NativeEmbeddingProviderName",
-    "OpenAINativeEmbeddingProvider",
-    "configured_native_embedding_provider",
-    "create_native_embedding_provider",
-    "native_embedding_cache_key",
-    "native_entity_embedding_text",
-    "native_relationship_embedding_text",
+    "CachedEmbeddingProvider",
+    "DeterministicEmbeddingProvider",
+    "EmbeddingInputKind",
+    "EmbeddingMetadata",
+    "EmbeddingProvider",
+    "EmbeddingProviderName",
+    "GeminiEmbeddingProvider",
+    "OpenAIEmbeddingProvider",
+    "configured_embedding_provider",
+    "create_embedding_provider",
+    "embedding_cache_key",
+    "entity_embedding_text",
+    "relationship_embedding_text",
 ]

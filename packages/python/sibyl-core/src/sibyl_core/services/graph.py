@@ -22,11 +22,11 @@ from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, bootstrap_schema
 from sibyl_core.config import settings
-from sibyl_core.embeddings.native import (
-    NativeEmbeddingInputKind,
-    NativeEmbeddingProvider,
-    native_entity_embedding_text,
-    native_relationship_embedding_text,
+from sibyl_core.embeddings.providers import (
+    EmbeddingInputKind,
+    EmbeddingProvider,
+    entity_embedding_text,
+    relationship_embedding_text,
 )
 from sibyl_core.models.entities import (
     Entity,
@@ -129,7 +129,7 @@ class EntityManager:
         client: SurrealGraphClient,
         *,
         group_id: str,
-        embedding_provider: NativeEmbeddingProvider | None = None,
+        embedding_provider: EmbeddingProvider | None = None,
     ) -> None:
         self._client = client
         self._group_id = group_id
@@ -956,7 +956,7 @@ class RelationshipManager:
         client: SurrealGraphClient,
         *,
         group_id: str,
-        embedding_provider: NativeEmbeddingProvider | None = None,
+        embedding_provider: EmbeddingProvider | None = None,
     ) -> None:
         self._client = client
         self._group_id = group_id
@@ -1475,7 +1475,7 @@ class RelationshipManager:
 async def get_surreal_graph_runtime(
     group_id: str,
     *,
-    embedding_provider: NativeEmbeddingProvider | None = None,
+    embedding_provider: EmbeddingProvider | None = None,
     ensure_schema: bool = True,
 ) -> GraphRuntime:
     client = await get_surreal_graph_client(group_id)
@@ -1498,7 +1498,7 @@ async def get_surreal_graph_runtime(
 
 
 def _validate_native_embedding_dimensions(
-    embedding_provider: NativeEmbeddingProvider | None,
+    embedding_provider: EmbeddingProvider | None,
 ) -> None:
     if embedding_provider is None:
         return
@@ -2247,13 +2247,13 @@ async def _select_one(
 
 async def _entity_with_native_embedding(
     entity: Entity,
-    provider: NativeEmbeddingProvider | None,
+    provider: EmbeddingProvider | None,
 ) -> Entity:
     if provider is None or entity.embedding:
         return entity
     embeddings = await _embed_texts_for_write(
         provider,
-        [native_entity_embedding_text(entity)],
+        [entity_embedding_text(entity)],
         operation="entity_create",
     )
     if embeddings is None:
@@ -2268,7 +2268,7 @@ async def _entity_with_native_embedding(
 
 async def _entities_with_native_embeddings(
     entities: Sequence[Entity],
-    provider: NativeEmbeddingProvider | None,
+    provider: EmbeddingProvider | None,
     *,
     batch_size: int,
 ) -> list[Entity]:
@@ -2287,7 +2287,7 @@ async def _entities_with_native_embeddings(
         batch_indexes = pending_indexes[start : start + max(int(batch_size), 1)]
         embeddings = await _embed_texts_for_write(
             provider,
-            [native_entity_embedding_text(updated_entities[index]) for index in batch_indexes],
+            [entity_embedding_text(updated_entities[index]) for index in batch_indexes],
             operation="entity_bulk_create",
         )
         if embeddings is None:
@@ -2313,14 +2313,14 @@ async def _entities_with_native_embeddings(
 
 async def _relationship_with_native_embedding(
     relationship: Relationship,
-    provider: NativeEmbeddingProvider | None,
+    provider: EmbeddingProvider | None,
 ) -> Relationship:
     metadata = dict(relationship.metadata or {})
     if provider is None or _metadata_float_list(metadata.get("fact_embedding")):
         return relationship
     embeddings = await _embed_texts_for_write(
         provider,
-        [native_relationship_embedding_text(relationship)],
+        [relationship_embedding_text(relationship)],
         operation="relationship_create",
     )
     if embeddings is None:
@@ -2334,7 +2334,7 @@ async def _relationship_with_native_embedding(
 
 
 async def _embed_texts_for_write(
-    provider: NativeEmbeddingProvider,
+    provider: EmbeddingProvider,
     texts: Sequence[str],
     *,
     operation: str,
@@ -2362,10 +2362,10 @@ async def _embed_texts_for_write(
 
 
 async def _embed_texts_with_timeout(
-    provider: NativeEmbeddingProvider,
+    provider: EmbeddingProvider,
     texts: Sequence[str],
     *,
-    input_kind: NativeEmbeddingInputKind,
+    input_kind: EmbeddingInputKind,
     operation: str,
     timeout_seconds: float | None = None,
 ) -> list[list[float]]:
