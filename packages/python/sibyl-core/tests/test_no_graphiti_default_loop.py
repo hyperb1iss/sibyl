@@ -73,7 +73,7 @@ async def main():
         prepare_graph_schema,
     )
     import sibyl_core.retrieval.native as native_retrieval
-    import sibyl_core.services.native_memory as native_memory
+    import sibyl_core.services.memory as memory_module
     import sibyl_core.tools.add as add_module
     import sibyl_core.tools.context as context_module
     import sibyl_core.tools.core as core_module
@@ -114,7 +114,7 @@ async def main():
     health_module.get_graph_runtime = runtime_factory
     manage_module.get_graph_runtime = runtime_factory
     native_retrieval.get_surreal_graph_runtime = runtime_factory
-    native_memory.get_surreal_graph_runtime = runtime_factory
+    memory_module.get_surreal_graph_runtime = runtime_factory
     search_module.get_graph_runtime = runtime_factory
     temporal_module.get_graph_runtime = runtime_factory
     consolidation_module._get_graph_runtime = runtime_factory

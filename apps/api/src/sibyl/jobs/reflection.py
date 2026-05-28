@@ -15,15 +15,15 @@ from sibyl.persistence.auth_runtime import (
     resolve_accessible_project_graph_ids,
 )
 from sibyl_core.models.reflection import ReflectionPack
+from sibyl_core.services.memory import (
+    ReflectionPromotionResult,
+    preview_reflection_candidate_promotion,
+    promote_reflection_candidate_review,
+)
 from sibyl_core.services.memory_autonomy import (
     ReflectionAutonomyOutcome,
     ReflectionAutonomyPolicy,
     decide_reflection_candidate_autonomy,
-)
-from sibyl_core.services.native_memory import (
-    NativeReflectionPromotionResult,
-    preview_reflection_candidate_promotion,
-    promote_reflection_candidate_review,
 )
 from sibyl_core.services.surreal_content import (
     MemoryScope,
@@ -337,7 +337,7 @@ async def _drain_dream_candidate(
         policy=policy,
         dry_run=dry_run,
     )
-    promotion: NativeReflectionPromotionResult | None = None
+    promotion: ReflectionPromotionResult | None = None
     if decision.should_promote:
         promotion = await promote_reflection_candidate_review(
             candidate_id=candidate.id,

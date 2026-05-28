@@ -46,13 +46,13 @@ from sibyl.auth.api_key_common import api_key_memory_scope_key
 from sibyl.jobs import source_imports
 from sibyl.services.recall_limits import RecallConcurrencyLimitExceededError
 from sibyl_core.auth import OrganizationRole, ProjectRole
-from sibyl_core.services.native_memory import (
-    NativeMemoryAccessPreview,
-    NativeMemoryCorrectionPreview,
-    NativeMemoryCorrectionResult,
-    NativeMemorySharePreview,
-    NativeReflectionPromotionPreview,
-    NativeReflectionPromotionResult,
+from sibyl_core.services.memory import (
+    MemoryAccessPreview,
+    MemoryCorrectionPreview,
+    MemoryCorrectionResult,
+    MemorySharePreview,
+    ReflectionPromotionPreview,
+    ReflectionPromotionResult,
 )
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 
@@ -1004,7 +1004,7 @@ async def test_preview_memory_space_member_access_audits_agent_visibility() -> N
         memory_scope="project",
         scope_key="project_alpha",
     )
-    result = NativeMemoryAccessPreview(
+    result = MemoryAccessPreview(
         allowed=True,
         reason="access_preview_allowed",
         target_principal_type="agent",
@@ -1457,7 +1457,7 @@ async def test_inspect_memory_source_returns_404_for_missing_source() -> None:
 async def test_preview_memory_correction_audits_lifecycle_action() -> None:
     org = _org()
     memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
-    preview = NativeMemoryCorrectionPreview(
+    preview = MemoryCorrectionPreview(
         allowed=True,
         source_id="memory-1",
         action="hide",
@@ -1534,7 +1534,7 @@ async def test_apply_memory_correction_returns_updated_review_state() -> None:
             ],
         },
     )
-    preview = NativeMemoryCorrectionPreview(
+    preview = MemoryCorrectionPreview(
         allowed=True,
         source_id="memory-1",
         action="hide",
@@ -1548,7 +1548,7 @@ async def test_apply_memory_correction_returns_updated_review_state() -> None:
         audit_action="memory.correction.hide",
         metadata={"policy_reasons": ["private_principal_bound"]},
     )
-    result = NativeMemoryCorrectionResult(applied=True, preview=preview, updated_memory=updated)
+    result = MemoryCorrectionResult(applied=True, preview=preview, updated_memory=updated)
 
     with (
         patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
@@ -1592,7 +1592,7 @@ async def test_preview_memory_share_returns_disabled_contract_and_audit() -> Non
     org = _org()
     ctx = _ctx()
     http_request = _http_request()
-    result = NativeMemorySharePreview(
+    result = MemorySharePreview(
         allowed=False,
         reason="scope_not_enabled",
         target_scope=MemoryScope.ORGANIZATION,
@@ -1712,7 +1712,7 @@ async def test_preview_reflection_promotion_verifies_project_target() -> None:
     org = _org()
     ctx = _ctx()
     http_request = _http_request()
-    result = NativeReflectionPromotionPreview(
+    result = ReflectionPromotionPreview(
         allowed=True,
         candidate_id="candidate-1",
         reason="promotion_preview_allowed",
@@ -1812,7 +1812,7 @@ async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> Non
     org = _org()
     ctx = _ctx()
     http_request = _http_request()
-    preview = NativeReflectionPromotionPreview(
+    preview = ReflectionPromotionPreview(
         allowed=True,
         candidate_id="candidate-1",
         reason="promotion_preview_allowed",
@@ -1829,7 +1829,7 @@ async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> Non
             "source_count": 1,
         },
     )
-    promotion = NativeReflectionPromotionResult(
+    promotion = ReflectionPromotionResult(
         success=True,
         candidate_id="candidate-1",
         promoted_id="decision_123",
@@ -1935,7 +1935,7 @@ async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> Non
 
 @pytest.mark.asyncio
 async def test_auto_review_reflection_candidate_dry_run_does_not_promote() -> None:
-    preview = NativeReflectionPromotionPreview(
+    preview = ReflectionPromotionPreview(
         allowed=True,
         candidate_id="candidate-1",
         reason="promotion_preview_allowed",
@@ -1986,7 +1986,7 @@ async def test_auto_review_reflection_candidate_dry_run_does_not_promote() -> No
 
 @pytest.mark.asyncio
 async def test_auto_review_reflection_candidate_routes_exceptions() -> None:
-    preview = NativeReflectionPromotionPreview(
+    preview = ReflectionPromotionPreview(
         allowed=False,
         candidate_id="candidate-1",
         reason="unverified_membership",
@@ -2036,7 +2036,7 @@ async def test_auto_review_reflection_candidate_routes_exceptions() -> None:
 
 @pytest.mark.asyncio
 async def test_drain_reflection_review_dry_run_summarizes_pending_candidates() -> None:
-    safe_preview = NativeReflectionPromotionPreview(
+    safe_preview = ReflectionPromotionPreview(
         allowed=True,
         candidate_id="candidate-safe",
         reason="promotion_preview_allowed",
@@ -2046,7 +2046,7 @@ async def test_drain_reflection_review_dry_run_summarizes_pending_candidates() -
         raw_source_ids=["source-safe"],
         metadata={"reflection_confidence": 0.92},
     )
-    exception_preview = NativeReflectionPromotionPreview(
+    exception_preview = ReflectionPromotionPreview(
         allowed=False,
         candidate_id="candidate-exception",
         reason="unverified_membership",
@@ -2174,7 +2174,7 @@ async def test_drain_reflection_review_skips_inaccessible_candidate_scope() -> N
 
 @pytest.mark.asyncio
 async def test_drain_reflection_review_archives_terminal_exceptions() -> None:
-    preview = NativeReflectionPromotionPreview(
+    preview = ReflectionPromotionPreview(
         allowed=True,
         candidate_id="candidate-duplicate",
         reason="promotion_preview_allowed",
@@ -2248,7 +2248,7 @@ async def test_promote_reflection_candidate_verifies_project_target() -> None:
     org = _org()
     ctx = _ctx()
     http_request = _http_request()
-    result = NativeReflectionPromotionResult(
+    result = ReflectionPromotionResult(
         success=True,
         candidate_id="candidate-1",
         promoted_id="decision_123",
@@ -2335,7 +2335,7 @@ async def test_promote_reflection_candidate_verifies_project_target() -> None:
 @pytest.mark.asyncio
 async def test_promote_reflection_candidate_returns_policy_denial() -> None:
     org = _org()
-    result = NativeReflectionPromotionResult(
+    result = ReflectionPromotionResult(
         success=False,
         candidate_id="candidate-1",
         promoted_id=None,
@@ -2390,7 +2390,7 @@ async def test_promote_reflection_candidate_returns_policy_denial() -> None:
 
 @pytest.mark.asyncio
 async def test_promote_reflection_candidate_returns_404_for_missing_candidate() -> None:
-    result = NativeReflectionPromotionResult(
+    result = ReflectionPromotionResult(
         success=False,
         candidate_id="missing",
         promoted_id=None,

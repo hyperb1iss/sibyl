@@ -43,19 +43,19 @@ from sibyl_core.tools.helpers import _generate_id
 from sibyl_core.tools.responses import AddResponse
 
 
-class NativeWriteMode(StrEnum):
+class WriteMode(StrEnum):
     DISABLED = "disabled"
     ENABLED = "enabled"
 
 
 @dataclass(frozen=True, slots=True)
-class NativeReflectionWriteResult:
+class ReflectionWriteResult:
     response: AddResponse
     metadata: dict[str, Any]
 
 
 @dataclass(frozen=True, slots=True)
-class NativeReflectionPromotionResult:
+class ReflectionPromotionResult:
     success: bool
     candidate_id: str
     promoted_id: str | None
@@ -69,7 +69,7 @@ class NativeReflectionPromotionResult:
 
 
 @dataclass(frozen=True, slots=True)
-class NativeReflectionPromotionPreview:
+class ReflectionPromotionPreview:
     allowed: bool
     candidate_id: str
     reason: str
@@ -82,7 +82,7 @@ class NativeReflectionPromotionPreview:
 
 
 @dataclass(frozen=True, slots=True)
-class NativeMemorySharePreview:
+class MemorySharePreview:
     allowed: bool
     reason: str
     target_scope: MemoryScope | None
@@ -98,7 +98,7 @@ class NativeMemorySharePreview:
 
 
 @dataclass(frozen=True, slots=True)
-class NativeMemoryAccessPreview:
+class MemoryAccessPreview:
     allowed: bool
     reason: str
     target_principal_type: str
@@ -114,7 +114,7 @@ class NativeMemoryAccessPreview:
 
 
 @dataclass(frozen=True, slots=True)
-class NativeMemoryCorrectionPreview:
+class MemoryCorrectionPreview:
     allowed: bool
     source_id: str
     action: str
@@ -131,14 +131,14 @@ class NativeMemoryCorrectionPreview:
 
 
 @dataclass(frozen=True, slots=True)
-class NativeMemoryCorrectionResult:
+class MemoryCorrectionResult:
     applied: bool
-    preview: NativeMemoryCorrectionPreview
+    preview: MemoryCorrectionPreview
     updated_memory: RawMemory | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class _NativeReflectionPromotionPlan:
+class _ReflectionPromotionPlan:
     candidate_memory: RawMemory
     promotion_candidate: ReflectionCandidate
     target_scope: MemoryScope
@@ -185,29 +185,29 @@ _SCOPE_RANK: dict[MemoryScope, int] = {
 }
 
 
-def coerce_native_write_mode(value: str | NativeWriteMode | None) -> NativeWriteMode:
-    if isinstance(value, NativeWriteMode):
+def coerce_write_mode(value: str | WriteMode | None) -> WriteMode:
+    if isinstance(value, WriteMode):
         return value
     if value is None or not value.strip():
-        return NativeWriteMode.ENABLED
+        return WriteMode.ENABLED
     normalized = value.strip().lower()
     if normalized in {"enabled", "enable", "true", "1", "yes", "on"}:
-        return NativeWriteMode.ENABLED
+        return WriteMode.ENABLED
     if normalized in {"disabled", "disable", "false", "0", "no", "off"}:
-        return NativeWriteMode.DISABLED
-    return NativeWriteMode.DISABLED
+        return WriteMode.DISABLED
+    return WriteMode.DISABLED
 
 
-def native_write_mode_from_env(environ: Mapping[str, str] | None = None) -> NativeWriteMode:
+def write_mode_from_env(environ: Mapping[str, str] | None = None) -> WriteMode:
     source = os.environ if environ is None else environ
-    return coerce_native_write_mode(source.get("SIBYL_NATIVE_WRITE"))
+    return coerce_write_mode(source.get("SIBYL_NATIVE_WRITE"))
 
 
-def native_reflection_write_enabled(environ: Mapping[str, str] | None = None) -> bool:
-    return native_write_mode_from_env(environ) is NativeWriteMode.ENABLED
+def reflection_write_enabled(environ: Mapping[str, str] | None = None) -> bool:
+    return write_mode_from_env(environ) is WriteMode.ENABLED
 
 
-async def persist_reflection_source_native(
+async def persist_reflection_source(
     *,
     title: str,
     content: str,
@@ -219,7 +219,7 @@ async def persist_reflection_source_native(
     accessible_projects: Iterable[str] | None = None,
     memory_scope: MemoryScope | str | None = None,
     scope_key: str | None = None,
-) -> NativeReflectionWriteResult:
+) -> ReflectionWriteResult:
     candidate = ReflectionCandidate(
         kind=EntityType.SESSION.value,
         title=title,
@@ -229,7 +229,7 @@ async def persist_reflection_source_native(
         tags=["reflection", EntityType.SESSION.value],
         metadata={"reflection_source": True},
     )
-    return await persist_reflection_candidate_native(
+    return await persist_reflection_candidate(
         candidate=candidate,
         organization_id=organization_id,
         principal_id=principal_id,
@@ -243,7 +243,7 @@ async def persist_reflection_source_native(
     )
 
 
-async def persist_reflection_candidate_native(
+async def persist_reflection_candidate(
     *,
     candidate: ReflectionCandidate,
     organization_id: str,
@@ -256,7 +256,7 @@ async def persist_reflection_candidate_native(
     memory_scope: MemoryScope | str | None = None,
     scope_key: str | None = None,
     link_source_entity: bool = True,
-) -> NativeReflectionWriteResult:
+) -> ReflectionWriteResult:
     scope = _resolve_memory_scope(memory_scope, project)
     resolved_scope_key = _resolve_scope_key(scope, scope_key, project)
     policy_decisions = _authorize_reflection_write(
@@ -267,7 +267,7 @@ async def persist_reflection_candidate_native(
     )
     policy_metadata = _policy_metadata(policy_decisions)
     if any(not decision.allowed for decision in policy_decisions):
-        return NativeReflectionWriteResult(
+        return ReflectionWriteResult(
             response=AddResponse(
                 success=False,
                 id=None,
@@ -323,7 +323,7 @@ async def persist_reflection_candidate_native(
     if relationships:
         await runtime.relationship_manager.create_bulk(relationships)
 
-    return NativeReflectionWriteResult(
+    return ReflectionWriteResult(
         response=AddResponse(
             success=True,
             id=created_id,
@@ -332,7 +332,7 @@ async def persist_reflection_candidate_native(
         ),
         metadata={
             **policy_metadata,
-            "native_write_mode": NativeWriteMode.ENABLED.value,
+            "native_write_mode": WriteMode.ENABLED.value,
             "native_write_path": "reflection_promotion",
             "native_relationship_count": len(relationships),
             "raw_source_ids": source_ids,
@@ -352,7 +352,7 @@ async def promote_reflection_candidate_review(
     project: str | None = None,
     related_to: Sequence[str] | None = None,
     accessible_projects: Iterable[str] | None = None,
-) -> NativeReflectionPromotionResult:
+) -> ReflectionPromotionResult:
     plan = await _resolve_reflection_promotion_plan(
         candidate_id=candidate_id,
         organization_id=organization_id,
@@ -363,10 +363,10 @@ async def promote_reflection_candidate_review(
         project=project,
         accessible_projects=accessible_projects,
     )
-    if isinstance(plan, NativeReflectionPromotionResult):
+    if isinstance(plan, ReflectionPromotionResult):
         return plan
 
-    native_result = await persist_reflection_candidate_native(
+    native_result = await persist_reflection_candidate(
         candidate=plan.promotion_candidate,
         organization_id=organization_id,
         principal_id=principal_id,
@@ -380,7 +380,7 @@ async def promote_reflection_candidate_review(
         link_source_entity=False,
     )
     if not native_result.response.success:
-        return NativeReflectionPromotionResult(
+        return ReflectionPromotionResult(
             success=False,
             candidate_id=plan.candidate_memory.id,
             promoted_id=None,
@@ -419,7 +419,7 @@ async def promote_reflection_candidate_review(
     )
     await save_raw_memory(updated)
 
-    return NativeReflectionPromotionResult(
+    return ReflectionPromotionResult(
         success=True,
         candidate_id=plan.candidate_memory.id,
         promoted_id=native_result.response.id,
@@ -442,7 +442,7 @@ async def preview_reflection_candidate_promotion(
     domain: str | None = None,
     project: str | None = None,
     accessible_projects: Iterable[str] | None = None,
-) -> NativeReflectionPromotionPreview:
+) -> ReflectionPromotionPreview:
     plan = await _resolve_reflection_promotion_plan(
         candidate_id=candidate_id,
         organization_id=organization_id,
@@ -453,7 +453,7 @@ async def preview_reflection_candidate_promotion(
         project=project,
         accessible_projects=accessible_projects,
     )
-    if isinstance(plan, NativeReflectionPromotionResult):
+    if isinstance(plan, ReflectionPromotionResult):
         return _promotion_preview_from_denial(plan)
 
     policy_decisions = _authorize_reflection_write(
@@ -470,7 +470,7 @@ async def preview_reflection_candidate_promotion(
         "target_project": plan.target_project,
     }
     allowed = all(decision.allowed for decision in policy_decisions)
-    return NativeReflectionPromotionPreview(
+    return ReflectionPromotionPreview(
         allowed=allowed,
         candidate_id=plan.candidate_memory.id,
         reason="promotion_preview_allowed" if allowed else _policy_denial_reason(metadata),
@@ -493,7 +493,7 @@ async def preview_memory_share(
     recipient_organization_id: str | None = None,
     accessible_projects: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
-) -> NativeMemorySharePreview:
+) -> MemorySharePreview:
     requested_source_ids = [str(source_id) for source_id in source_ids]
     normalized_target = _coerce_promotion_scope(target_scope)
     target_decision = _authorize_share_target(
@@ -565,7 +565,7 @@ async def preview_memory_share(
         "target_policy_reason": target_decision.reason,
         "visible_count": len(visible_source_ids),
     }
-    return NativeMemorySharePreview(
+    return MemorySharePreview(
         allowed=False,
         reason=reason,
         target_scope=normalized_target,
@@ -630,7 +630,7 @@ async def preview_memory_access(
     target_principal_id: str,
     memory_spaces: Sequence[Mapping[str, object] | object],
     limit: int = 50,
-) -> NativeMemoryAccessPreview:
+) -> MemoryAccessPreview:
     normalized_target_type = target_principal_type.strip().lower() or "user"
     visible_source_ids: list[str] = []
     denied_source_ids: list[str] = []
@@ -751,7 +751,7 @@ async def preview_memory_access(
         "target_principal_type": normalized_target_type,
         "visible_count": len(visible_source_ids),
     }
-    return NativeMemoryAccessPreview(
+    return MemoryAccessPreview(
         allowed=allowed,
         reason=(
             "access_preview_allowed"
@@ -814,8 +814,8 @@ def _correction_preview_denied(
     target_review_state: str = "",
     policy_decisions: Sequence[MemoryPolicyDecision] = (),
     metadata: dict[str, Any] | None = None,
-) -> NativeMemoryCorrectionPreview:
-    return NativeMemoryCorrectionPreview(
+) -> MemoryCorrectionPreview:
+    return MemoryCorrectionPreview(
         allowed=False,
         source_id=source_id,
         action=action,
@@ -890,7 +890,7 @@ async def preview_memory_correction(
     accessible_delegations: Iterable[str] | None = None,
     replacement_source_id: str | None = None,
     duplicate_of_source_id: str | None = None,
-) -> NativeMemoryCorrectionPreview:
+) -> MemoryCorrectionPreview:
     normalized_action = action.strip().lower()
     target_review_state = _CORRECTION_TARGET_STATES.get(normalized_action)
     if target_review_state is None:
@@ -1009,7 +1009,7 @@ async def preview_memory_correction(
         "replacement_source_id": canonical_replacement_source_id,
         "requested_source_id": source_id,
     }
-    return NativeMemoryCorrectionPreview(
+    return MemoryCorrectionPreview(
         allowed=True,
         source_id=memory.id,
         action=normalized_action,
@@ -1029,7 +1029,7 @@ async def preview_memory_correction(
 def _correction_metadata(
     *,
     memory: RawMemory,
-    preview: NativeMemoryCorrectionPreview,
+    preview: MemoryCorrectionPreview,
     reason: str | None,
     replacement_source_id: str | None,
     duplicate_of_source_id: str | None,
@@ -1134,7 +1134,7 @@ async def apply_memory_correction(
     accessible_delegations: Iterable[str] | None = None,
     replacement_source_id: str | None = None,
     duplicate_of_source_id: str | None = None,
-) -> NativeMemoryCorrectionResult:
+) -> MemoryCorrectionResult:
     preview = await preview_memory_correction(
         organization_id=organization_id,
         source_id=source_id,
@@ -1147,7 +1147,7 @@ async def apply_memory_correction(
         duplicate_of_source_id=duplicate_of_source_id,
     )
     if not preview.allowed:
-        return NativeMemoryCorrectionResult(applied=False, preview=preview)
+        return MemoryCorrectionResult(applied=False, preview=preview)
 
     memory = await _load_correction_memory(organization_id=organization_id, source_id=source_id)
     if memory is None:
@@ -1157,7 +1157,7 @@ async def apply_memory_correction(
             reason="memory_source_not_found",
             target_review_state=preview.target_review_state,
         )
-        return NativeMemoryCorrectionResult(applied=False, preview=denied)
+        return MemoryCorrectionResult(applied=False, preview=denied)
     preview_metadata = preview.metadata or {}
     canonical_replacement_source_id = (
         _metadata_str(preview_metadata, "replacement_source_id") or replacement_source_id
@@ -1177,7 +1177,7 @@ async def apply_memory_correction(
         ),
     )
     saved = await save_raw_memory(updated)
-    return NativeMemoryCorrectionResult(applied=True, preview=preview, updated_memory=saved)
+    return MemoryCorrectionResult(applied=True, preview=preview, updated_memory=saved)
 
 
 async def _resolve_reflection_promotion_plan(
@@ -1190,7 +1190,7 @@ async def _resolve_reflection_promotion_plan(
     domain: str | None = None,
     project: str | None = None,
     accessible_projects: Iterable[str] | None = None,
-) -> _NativeReflectionPromotionPlan | NativeReflectionPromotionResult:
+) -> _ReflectionPromotionPlan | ReflectionPromotionResult:
     candidate_memory = await get_raw_memory(
         organization_id=organization_id,
         memory_id=candidate_id,
@@ -1309,7 +1309,7 @@ async def _resolve_reflection_promotion_plan(
             "project_id",
         )
     )
-    return _NativeReflectionPromotionPlan(
+    return _ReflectionPromotionPlan(
         candidate_memory=candidate_memory,
         promotion_candidate=promotion_candidate,
         target_scope=target_scope,
@@ -1366,7 +1366,7 @@ def _authorize_reflection_write(
 
 def _policy_metadata(decisions: Sequence[MemoryPolicyDecision]) -> dict[str, Any]:
     return {
-        "native_write_mode": NativeWriteMode.ENABLED.value,
+        "native_write_mode": WriteMode.ENABLED.value,
         "memory_scope": decisions[0].memory_scope.value,
         "scope_key": decisions[0].scope_key,
         "policy_allowed": all(decision.allowed for decision in decisions),
@@ -1431,11 +1431,11 @@ def _promotion_denied(
     raw_source_ids: list[str],
     metadata: dict[str, Any] | None = None,
     policy_decisions: Sequence[MemoryPolicyDecision] = (),
-) -> NativeReflectionPromotionResult:
+) -> ReflectionPromotionResult:
     payload = {"policy_reasons": [reason], "policy_allowed": False}
     if metadata:
         payload.update(metadata)
-    return NativeReflectionPromotionResult(
+    return ReflectionPromotionResult(
         success=False,
         candidate_id=candidate_id,
         promoted_id=None,
@@ -1450,9 +1450,9 @@ def _promotion_denied(
 
 
 def _promotion_preview_from_denial(
-    result: NativeReflectionPromotionResult,
-) -> NativeReflectionPromotionPreview:
-    return NativeReflectionPromotionPreview(
+    result: ReflectionPromotionResult,
+) -> ReflectionPromotionPreview:
+    return ReflectionPromotionPreview(
         allowed=False,
         candidate_id=result.candidate_id,
         reason=result.reason,
@@ -1691,7 +1691,7 @@ def _principal_denial(
     candidate_id: str,
     principal_id: str | None,
     raw_source_ids: list[str],
-) -> NativeReflectionPromotionResult | None:
+) -> ReflectionPromotionResult | None:
     if not principal_id:
         return _promotion_denied(
             candidate_id=candidate_id,
@@ -1721,7 +1721,7 @@ def _source_scope_denial(
     principal_id: str | None,
     raw_source_ids: list[str],
     accessible_projects: Iterable[str] | None,
-) -> NativeReflectionPromotionResult | None:
+) -> ReflectionPromotionResult | None:
     for memory in memories:
         read_decision = authorize_memory_read(
             principal_id=principal_id,
@@ -1982,23 +1982,23 @@ def _relationship(
 
 
 __all__ = [
-    "NativeMemoryAccessPreview",
-    "NativeMemoryCorrectionPreview",
-    "NativeMemoryCorrectionResult",
-    "NativeMemorySharePreview",
-    "NativeReflectionPromotionPreview",
-    "NativeReflectionPromotionResult",
-    "NativeReflectionWriteResult",
-    "NativeWriteMode",
+    "MemoryAccessPreview",
+    "MemoryCorrectionPreview",
+    "MemoryCorrectionResult",
+    "MemorySharePreview",
+    "ReflectionPromotionPreview",
+    "ReflectionPromotionResult",
+    "ReflectionWriteResult",
+    "WriteMode",
     "apply_memory_correction",
-    "coerce_native_write_mode",
-    "native_reflection_write_enabled",
-    "native_write_mode_from_env",
-    "persist_reflection_candidate_native",
-    "persist_reflection_source_native",
+    "coerce_write_mode",
+    "persist_reflection_candidate",
+    "persist_reflection_source",
     "preview_memory_access",
     "preview_memory_correction",
     "preview_memory_share",
     "preview_reflection_candidate_promotion",
     "promote_reflection_candidate_review",
+    "reflection_write_enabled",
+    "write_mode_from_env",
 ]

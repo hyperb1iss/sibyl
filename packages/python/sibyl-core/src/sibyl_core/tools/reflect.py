@@ -133,7 +133,7 @@ async def reflect_memory(
             )
 
     source_id: str | None = existing_source_id
-    use_native_write = persist and _native_reflection_write_enabled()
+    use_native_write = persist and _reflection_write_enabled()
     if persist and persist_source and source_id is None:
         if persist_review:
             source = await _persist_reflection_source_review(
@@ -150,7 +150,7 @@ async def reflect_memory(
                 policy_metadata=persist_policy_metadata,
             )
         elif use_native_write:
-            source = await _persist_reflection_source_native(
+            source = await _persist_reflection_source(
                 title=source_title,
                 content=content,
                 organization_id=str(organization_id),
@@ -269,7 +269,7 @@ async def reflect_memory(
             )
             continue
         if use_native_write:
-            native_result = await _persist_reflection_candidate_native(
+            native_result = await _persist_reflection_candidate(
                 candidate=replace(candidate, metadata=metadata),
                 organization_id=str(organization_id),
                 principal_id=principal_id,
@@ -371,10 +371,10 @@ __all__ = [
 ]
 
 
-def _native_reflection_write_enabled() -> bool:
-    from sibyl_core.services.native_memory import native_reflection_write_enabled
+def _reflection_write_enabled() -> bool:
+    from sibyl_core.services.memory import reflection_write_enabled
 
-    return native_reflection_write_enabled()
+    return reflection_write_enabled()
 
 
 def _resolve_reflection_scope(
@@ -512,10 +512,10 @@ async def _persist_reflection_source_review(**kwargs: Any) -> AddResponse:
     )
 
 
-async def _persist_reflection_source_native(**kwargs: Any) -> AddResponse:
-    from sibyl_core.services.native_memory import persist_reflection_source_native
+async def _persist_reflection_source(**kwargs: Any) -> AddResponse:
+    from sibyl_core.services.memory import persist_reflection_source
 
-    result = await persist_reflection_source_native(**kwargs)
+    result = await persist_reflection_source(**kwargs)
     return result.response
 
 
@@ -525,7 +525,7 @@ async def _persist_reflection_candidate_review(**kwargs: Any):
     return await remember_reflection_candidate_review(**kwargs)
 
 
-async def _persist_reflection_candidate_native(**kwargs: Any):
-    from sibyl_core.services.native_memory import persist_reflection_candidate_native
+async def _persist_reflection_candidate(**kwargs: Any):
+    from sibyl_core.services.memory import persist_reflection_candidate
 
-    return await persist_reflection_candidate_native(**kwargs)
+    return await persist_reflection_candidate(**kwargs)

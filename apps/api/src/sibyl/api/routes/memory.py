@@ -78,25 +78,25 @@ from sibyl_core.models.reflection import (
     reflection_findings_from_metadata,
 )
 from sibyl_core.observability import elapsed_ms, telemetry_registry
-from sibyl_core.services.memory_autonomy import (
-    ReflectionAutonomyDecision,
-    ReflectionAutonomyOutcome,
-    ReflectionAutonomyPolicy,
-    decide_reflection_candidate_autonomy,
-)
-from sibyl_core.services.native_memory import (
-    NativeMemoryAccessPreview,
-    NativeMemoryCorrectionPreview,
-    NativeMemoryCorrectionResult,
-    NativeMemorySharePreview,
-    NativeReflectionPromotionPreview,
-    NativeReflectionPromotionResult,
+from sibyl_core.services.memory import (
+    MemoryAccessPreview,
+    MemoryCorrectionPreview,
+    MemoryCorrectionResult,
+    MemorySharePreview,
+    ReflectionPromotionPreview,
+    ReflectionPromotionResult,
     apply_memory_correction,
     preview_memory_access,
     preview_memory_correction,
     preview_memory_share,
     preview_reflection_candidate_promotion,
     promote_reflection_candidate_review,
+)
+from sibyl_core.services.memory_autonomy import (
+    ReflectionAutonomyDecision,
+    ReflectionAutonomyOutcome,
+    ReflectionAutonomyPolicy,
+    decide_reflection_candidate_autonomy,
 )
 from sibyl_core.services.surreal_content import (
     AGENT_DIARY_CAPTURE_SURFACE,
@@ -487,7 +487,7 @@ def _memory_space_response(
     )
 
 
-def _promotion_response(result: NativeReflectionPromotionResult) -> ReflectionPromotionResponse:
+def _promotion_response(result: ReflectionPromotionResult) -> ReflectionPromotionResponse:
     metadata = dict(result.metadata or {})
     return ReflectionPromotionResponse(
         success=result.success,
@@ -504,7 +504,7 @@ def _promotion_response(result: NativeReflectionPromotionResult) -> ReflectionPr
 
 
 def _promotion_preview_response(
-    result: NativeReflectionPromotionPreview,
+    result: ReflectionPromotionPreview,
 ) -> ReflectionPromotionPreviewResponse:
     metadata = dict(result.metadata or {})
     source_count = metadata.get("source_count")
@@ -536,8 +536,8 @@ def _promotion_preview_response(
 def _autonomy_response(
     *,
     decision: ReflectionAutonomyDecision,
-    preview: NativeReflectionPromotionPreview,
-    promotion: NativeReflectionPromotionResult | None = None,
+    preview: ReflectionPromotionPreview,
+    promotion: ReflectionPromotionResult | None = None,
 ) -> ReflectionAutonomyResponse:
     promotion_response = _promotion_response(promotion) if promotion is not None else None
     promoted_id = promotion.promoted_id if promotion and promotion.success else None
@@ -705,7 +705,7 @@ async def _archive_reflection_exception_candidate(
     return updated
 
 
-def _share_preview_response(result: NativeMemorySharePreview) -> MemorySharePreviewResponse:
+def _share_preview_response(result: MemorySharePreview) -> MemorySharePreviewResponse:
     metadata = dict(result.metadata or {})
     return MemorySharePreviewResponse(
         allowed=result.allowed,
@@ -734,7 +734,7 @@ def _share_preview_response(result: NativeMemorySharePreview) -> MemorySharePrev
     )
 
 
-def _access_preview_response(result: NativeMemoryAccessPreview) -> MemorySpaceAccessPreviewResponse:
+def _access_preview_response(result: MemoryAccessPreview) -> MemorySpaceAccessPreviewResponse:
     metadata = dict(result.metadata or {})
     return MemorySpaceAccessPreviewResponse(
         allowed=result.allowed,
@@ -754,7 +754,7 @@ def _access_preview_response(result: NativeMemoryAccessPreview) -> MemorySpaceAc
 
 
 def _correction_response(
-    preview: NativeMemoryCorrectionPreview,
+    preview: MemoryCorrectionPreview,
     *,
     applied: bool = False,
     updated_memory: RawMemory | None = None,
@@ -795,7 +795,7 @@ def _correction_response(
     )
 
 
-def _correction_result_response(result: NativeMemoryCorrectionResult) -> MemoryCorrectionResponse:
+def _correction_result_response(result: MemoryCorrectionResult) -> MemoryCorrectionResponse:
     return _correction_response(
         result.preview,
         applied=result.applied,
@@ -1240,7 +1240,7 @@ def _validate_memory_audit_action(action: str | None) -> None:
         raise HTTPException(status_code=400, detail="invalid_memory_audit_action")
 
 
-def _promotion_policy_allowed(result: NativeReflectionPromotionResult) -> bool | None:
+def _promotion_policy_allowed(result: ReflectionPromotionResult) -> bool | None:
     metadata = dict(result.metadata or {})
     raw_allowed = metadata.get("policy_allowed")
     if isinstance(raw_allowed, bool):
@@ -2200,7 +2200,7 @@ async def _auto_review_reflection_candidate(
         policy=ReflectionAutonomyPolicy(confidence_threshold=confidence_threshold),
         dry_run=request.dry_run,
     )
-    promotion: NativeReflectionPromotionResult | None = None
+    promotion: ReflectionPromotionResult | None = None
     if decision.should_promote:
         promotion = await promote_reflection_candidate_review(
             candidate_id=request.candidate_id,

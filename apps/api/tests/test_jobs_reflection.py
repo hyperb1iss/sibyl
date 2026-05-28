@@ -8,9 +8,9 @@ import pytest
 
 from sibyl.jobs.reflection import run_reflection_dream_cycle
 from sibyl_core.models.reflection import ReflectionPack
-from sibyl_core.services.native_memory import (
-    NativeReflectionPromotionPreview,
-    NativeReflectionPromotionResult,
+from sibyl_core.services.memory import (
+    ReflectionPromotionPreview,
+    ReflectionPromotionResult,
 )
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 
@@ -60,8 +60,8 @@ def _preview(
     *,
     candidate_id: str = "candidate-1",
     metadata: dict[str, object] | None = None,
-) -> NativeReflectionPromotionPreview:
-    return NativeReflectionPromotionPreview(
+) -> ReflectionPromotionPreview:
+    return ReflectionPromotionPreview(
         allowed=True,
         candidate_id=candidate_id,
         reason="promotion_preview_allowed",
@@ -73,8 +73,8 @@ def _preview(
     )
 
 
-def _promotion(candidate_id: str = "candidate-1") -> NativeReflectionPromotionResult:
-    return NativeReflectionPromotionResult(
+def _promotion(candidate_id: str = "candidate-1") -> ReflectionPromotionResult:
+    return ReflectionPromotionResult(
         success=True,
         candidate_id=candidate_id,
         promoted_id="promoted-1",

@@ -9,19 +9,19 @@ from sibyl_core.models.reflection import (
     memory_lifecycle_from_metadata,
     reflection_findings_from_metadata,
 )
-from sibyl_core.services import native_memory
-from sibyl_core.services.native_memory import (
-    NativeReflectionWriteResult,
-    NativeWriteMode,
+from sibyl_core.services import memory as memory_module
+from sibyl_core.services.memory import (
+    ReflectionWriteResult,
+    WriteMode,
     apply_memory_correction,
-    coerce_native_write_mode,
-    native_reflection_write_enabled,
-    native_write_mode_from_env,
+    coerce_write_mode,
     preview_memory_access,
     preview_memory_correction,
     preview_memory_share,
     preview_reflection_candidate_promotion,
     promote_reflection_candidate_review,
+    reflection_write_enabled,
+    write_mode_from_env,
 )
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 from sibyl_core.tools.responses import AddResponse
@@ -60,23 +60,23 @@ def _raw_review_candidate(**overrides: object) -> RawMemory:
 
 
 def test_native_write_mode_defaults_enabled() -> None:
-    assert coerce_native_write_mode(None) is NativeWriteMode.ENABLED
-    assert coerce_native_write_mode("") is NativeWriteMode.ENABLED
-    assert native_write_mode_from_env({}) is NativeWriteMode.ENABLED
-    assert native_reflection_write_enabled({}) is True
+    assert coerce_write_mode(None) is WriteMode.ENABLED
+    assert coerce_write_mode("") is WriteMode.ENABLED
+    assert write_mode_from_env({}) is WriteMode.ENABLED
+    assert reflection_write_enabled({}) is True
 
 
 def test_native_write_mode_accepts_enabled_values() -> None:
-    assert coerce_native_write_mode("enabled") is NativeWriteMode.ENABLED
-    assert coerce_native_write_mode("true") is NativeWriteMode.ENABLED
-    assert native_write_mode_from_env({"SIBYL_NATIVE_WRITE": "1"}) is NativeWriteMode.ENABLED
+    assert coerce_write_mode("enabled") is WriteMode.ENABLED
+    assert coerce_write_mode("true") is WriteMode.ENABLED
+    assert write_mode_from_env({"SIBYL_NATIVE_WRITE": "1"}) is WriteMode.ENABLED
 
 
 def test_native_write_mode_accepts_disabled_values() -> None:
-    assert coerce_native_write_mode("disabled") is NativeWriteMode.DISABLED
-    assert coerce_native_write_mode("false") is NativeWriteMode.DISABLED
-    assert native_write_mode_from_env({"SIBYL_NATIVE_WRITE": "0"}) is NativeWriteMode.DISABLED
-    assert native_reflection_write_enabled({"SIBYL_NATIVE_WRITE": "off"}) is False
+    assert coerce_write_mode("disabled") is WriteMode.DISABLED
+    assert coerce_write_mode("false") is WriteMode.DISABLED
+    assert write_mode_from_env({"SIBYL_NATIVE_WRITE": "0"}) is WriteMode.DISABLED
+    assert reflection_write_enabled({"SIBYL_NATIVE_WRITE": "off"}) is False
 
 
 @pytest.mark.asyncio
@@ -92,14 +92,14 @@ async def test_preview_review_candidate_returns_policy_grounded_target(
     )
     source = _raw_review_candidate(id="source-1")
     monkeypatch.setattr(
-        native_memory,
+        memory_module,
         "get_raw_memory",
         AsyncMock(side_effect=[candidate, source]),
     )
     persist = AsyncMock()
     save = AsyncMock()
-    monkeypatch.setattr(native_memory, "persist_reflection_candidate_native", persist)
-    monkeypatch.setattr(native_memory, "save_raw_memory", save)
+    monkeypatch.setattr(memory_module, "persist_reflection_candidate", persist)
+    monkeypatch.setattr(memory_module, "save_raw_memory", save)
 
     result = await preview_reflection_candidate_promotion(
         candidate_id="candidate-1",
@@ -133,11 +133,11 @@ async def test_preview_review_candidate_returns_policy_grounded_target(
 async def test_preview_review_candidate_returns_missing_without_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(native_memory, "get_raw_memory", AsyncMock(return_value=None))
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=None))
     persist = AsyncMock()
     save = AsyncMock()
-    monkeypatch.setattr(native_memory, "persist_reflection_candidate_native", persist)
-    monkeypatch.setattr(native_memory, "save_raw_memory", save)
+    monkeypatch.setattr(memory_module, "persist_reflection_candidate", persist)
+    monkeypatch.setattr(memory_module, "save_raw_memory", save)
 
     result = await preview_reflection_candidate_promotion(
         candidate_id="candidate-1",
@@ -159,9 +159,9 @@ async def test_share_preview_denies_organization_target_without_writing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = _raw_review_candidate(id="source-1")
-    monkeypatch.setattr(native_memory, "get_raw_memory", AsyncMock(return_value=source))
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=source))
     save = AsyncMock()
-    monkeypatch.setattr(native_memory, "save_raw_memory", save)
+    monkeypatch.setattr(memory_module, "save_raw_memory", save)
 
     result = await preview_memory_share(
         source_ids=["source-1"],
@@ -192,12 +192,12 @@ async def test_share_preview_redacts_unreadable_and_missing_sources(
 ) -> None:
     source = _raw_review_candidate(id="source-1", principal_id="other-user")
     monkeypatch.setattr(
-        native_memory,
+        memory_module,
         "get_raw_memory",
         AsyncMock(side_effect=[source, None]),
     )
     save = AsyncMock()
-    monkeypatch.setattr(native_memory, "save_raw_memory", save)
+    monkeypatch.setattr(memory_module, "save_raw_memory", save)
 
     result = await preview_memory_share(
         source_ids=["source-1", "missing-1"],
@@ -239,7 +239,7 @@ async def test_access_preview_uses_selected_project_space_as_membership(
         principal_id="user-2",
     )
     list_memories = AsyncMock(return_value=[raw_memory])
-    monkeypatch.setattr(native_memory, "list_raw_memories_for_scope", list_memories)
+    monkeypatch.setattr(memory_module, "list_raw_memories_for_scope", list_memories)
 
     result = await preview_memory_access(
         organization_id="org-1",
@@ -279,7 +279,7 @@ async def test_access_preview_denies_disabled_space_without_listing_sources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     list_memories = AsyncMock()
-    monkeypatch.setattr(native_memory, "list_raw_memories_for_scope", list_memories)
+    monkeypatch.setattr(memory_module, "list_raw_memories_for_scope", list_memories)
 
     result = await preview_memory_access(
         organization_id="org-1",
@@ -319,7 +319,7 @@ async def test_access_preview_keeps_denials_after_source_limit(
         principal_id="user-2",
     )
     list_memories = AsyncMock(return_value=[raw_memory])
-    monkeypatch.setattr(native_memory, "list_raw_memories_for_scope", list_memories)
+    monkeypatch.setattr(memory_module, "list_raw_memories_for_scope", list_memories)
 
     result = await preview_memory_access(
         organization_id="org-1",
@@ -375,7 +375,7 @@ async def test_access_preview_counts_lifecycle_hidden_sources(
         principal_id="user-2",
     )
     list_memories = AsyncMock(return_value=[hidden_memory, visible_memory])
-    monkeypatch.setattr(native_memory, "list_raw_memories_for_scope", list_memories)
+    monkeypatch.setattr(memory_module, "list_raw_memories_for_scope", list_memories)
 
     result = await preview_memory_access(
         organization_id="org-1",
@@ -408,8 +408,8 @@ async def test_memory_correction_preview_requires_supersede_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     memory = _raw_review_candidate(id="source-1")
-    monkeypatch.setattr(native_memory, "get_raw_memory", AsyncMock(return_value=memory))
-    monkeypatch.setattr(native_memory, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
 
     result = await preview_memory_correction(
         organization_id="org-1",
@@ -433,9 +433,9 @@ async def test_apply_memory_correction_marks_hidden_and_preserves_history(
         metadata={"correction_history": [{"action": "mark_stale"}]},
     )
     save_raw_memory = AsyncMock(side_effect=lambda updated: updated)
-    monkeypatch.setattr(native_memory, "get_raw_memory", AsyncMock(return_value=memory))
-    monkeypatch.setattr(native_memory, "get_raw_memory_by_source_id", AsyncMock())
-    monkeypatch.setattr(native_memory, "save_raw_memory", save_raw_memory)
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(memory_module, "save_raw_memory", save_raw_memory)
 
     result = await apply_memory_correction(
         organization_id="org-1",
@@ -474,12 +474,12 @@ async def test_memory_correction_preview_canonicalizes_supersede_reference(
     memory = _raw_review_candidate(id="source-1")
     replacement = _raw_review_candidate(id="replacement-1", source_id="external:replacement")
     monkeypatch.setattr(
-        native_memory,
+        memory_module,
         "get_raw_memory",
         AsyncMock(side_effect=[memory, None]),
     )
     monkeypatch.setattr(
-        native_memory,
+        memory_module,
         "get_raw_memory_by_source_id",
         AsyncMock(return_value=replacement),
     )
@@ -503,11 +503,11 @@ async def test_memory_correction_preview_rejects_self_reference(
 ) -> None:
     memory = _raw_review_candidate(id="source-1")
     monkeypatch.setattr(
-        native_memory,
+        memory_module,
         "get_raw_memory",
         AsyncMock(side_effect=[memory, memory]),
     )
-    monkeypatch.setattr(native_memory, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
 
     result = await preview_memory_correction(
         organization_id="org-1",
@@ -537,9 +537,9 @@ async def test_apply_memory_correction_restore_preserves_prior_review_state(
         },
     )
     save_raw_memory = AsyncMock(side_effect=lambda updated: updated)
-    monkeypatch.setattr(native_memory, "get_raw_memory", AsyncMock(return_value=memory))
-    monkeypatch.setattr(native_memory, "get_raw_memory_by_source_id", AsyncMock())
-    monkeypatch.setattr(native_memory, "save_raw_memory", save_raw_memory)
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(memory_module, "save_raw_memory", save_raw_memory)
 
     result = await apply_memory_correction(
         organization_id="org-1",
@@ -574,9 +574,9 @@ async def test_share_preview_allows_visible_project_sources(
         memory_scope=MemoryScope.PROJECT,
         scope_key="project_123",
     )
-    monkeypatch.setattr(native_memory, "get_raw_memory", AsyncMock(return_value=source))
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=source))
     save = AsyncMock()
-    monkeypatch.setattr(native_memory, "save_raw_memory", save)
+    monkeypatch.setattr(memory_module, "save_raw_memory", save)
 
     result = await preview_memory_share(
         source_ids=["source-1"],
@@ -611,9 +611,9 @@ async def test_share_preview_cross_org_remains_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = _raw_review_candidate(id="source-1")
-    monkeypatch.setattr(native_memory, "get_raw_memory", AsyncMock(return_value=source))
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=source))
     save = AsyncMock()
-    monkeypatch.setattr(native_memory, "save_raw_memory", save)
+    monkeypatch.setattr(memory_module, "save_raw_memory", save)
 
     result = await preview_memory_share(
         source_ids=["source-1"],
@@ -642,14 +642,14 @@ async def test_preview_review_candidate_denies_unverified_project_target(
     candidate = _raw_review_candidate()
     source = _raw_review_candidate(id="source-1")
     monkeypatch.setattr(
-        native_memory,
+        memory_module,
         "get_raw_memory",
         AsyncMock(side_effect=[candidate, source]),
     )
     persist = AsyncMock()
     save = AsyncMock()
-    monkeypatch.setattr(native_memory, "persist_reflection_candidate_native", persist)
-    monkeypatch.setattr(native_memory, "save_raw_memory", save)
+    monkeypatch.setattr(memory_module, "persist_reflection_candidate", persist)
+    monkeypatch.setattr(memory_module, "save_raw_memory", save)
 
     result = await preview_reflection_candidate_promotion(
         candidate_id="candidate-1",
@@ -679,12 +679,12 @@ async def test_promote_review_candidate_requires_explicit_target(
 ) -> None:
     candidate = _raw_review_candidate()
     monkeypatch.setattr(
-        native_memory,
+        memory_module,
         "get_raw_memory",
         AsyncMock(side_effect=[candidate, _raw_review_candidate(id="source-1")]),
     )
     persist = AsyncMock()
-    monkeypatch.setattr(native_memory, "persist_reflection_candidate_native", persist)
+    monkeypatch.setattr(memory_module, "persist_reflection_candidate", persist)
 
     result = await promote_reflection_candidate_review(
         candidate_id="candidate-1",
@@ -709,12 +709,12 @@ async def test_promote_review_candidate_denies_mixed_scope_without_target(
         scope_key="project_123",
     )
     monkeypatch.setattr(
-        native_memory,
+        memory_module,
         "get_raw_memory",
         AsyncMock(side_effect=[candidate, source]),
     )
     persist = AsyncMock()
-    monkeypatch.setattr(native_memory, "persist_reflection_candidate_native", persist)
+    monkeypatch.setattr(memory_module, "persist_reflection_candidate", persist)
 
     result = await promote_reflection_candidate_review(
         candidate_id="candidate-1",
@@ -740,12 +740,12 @@ async def test_promote_review_candidate_requires_broadest_mixed_scope_target(
         scope_key="project_123",
     )
     monkeypatch.setattr(
-        native_memory,
+        memory_module,
         "get_raw_memory",
         AsyncMock(side_effect=[candidate, source]),
     )
     persist = AsyncMock()
-    monkeypatch.setattr(native_memory, "persist_reflection_candidate_native", persist)
+    monkeypatch.setattr(memory_module, "persist_reflection_candidate", persist)
 
     result = await promote_reflection_candidate_review(
         candidate_id="candidate-1",
@@ -771,12 +771,12 @@ async def test_promote_review_candidate_denies_inaccessible_source_scope(
     )
     source = _raw_review_candidate(id="source-1", principal_id="attacker-user")
     monkeypatch.setattr(
-        native_memory,
+        memory_module,
         "get_raw_memory",
         AsyncMock(side_effect=[candidate, source]),
     )
     persist = AsyncMock()
-    monkeypatch.setattr(native_memory, "persist_reflection_candidate_native", persist)
+    monkeypatch.setattr(memory_module, "persist_reflection_candidate", persist)
 
     result = await promote_reflection_candidate_review(
         candidate_id="candidate-1",
@@ -813,7 +813,7 @@ async def test_promote_review_candidate_persists_native_record_and_marks_promote
         assert kwargs["source_id"] == "source-1"
         assert kwargs["accessible_projects"] == {"project_123"}
         assert kwargs["candidate"].metadata["review_capture_id"] == "candidate-1"
-        return NativeReflectionWriteResult(
+        return ReflectionWriteResult(
             response=AddResponse(
                 success=True,
                 id="decision_123",
@@ -835,12 +835,12 @@ async def test_promote_review_candidate_persists_native_record_and_marks_promote
         return memory
 
     monkeypatch.setattr(
-        native_memory,
+        memory_module,
         "get_raw_memory",
         AsyncMock(side_effect=[candidate, source]),
     )
-    monkeypatch.setattr(native_memory, "persist_reflection_candidate_native", fake_persist)
-    monkeypatch.setattr(native_memory, "save_raw_memory", fake_save)
+    monkeypatch.setattr(memory_module, "persist_reflection_candidate", fake_persist)
+    monkeypatch.setattr(memory_module, "save_raw_memory", fake_save)
 
     result = await promote_reflection_candidate_review(
         candidate_id="candidate-1",
