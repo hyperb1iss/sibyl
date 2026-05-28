@@ -236,69 +236,6 @@ async def _list_all_relationships(
     return relationships
 
 
-def _relationship_dedupe_key(
-    relationship: Relationship,
-) -> tuple[str, str, str]:
-    return (
-        relationship.source_id,
-        relationship.relationship_type.value,
-        relationship.target_id,
-    )
-
-
-def _merge_relationships(
-    primary: list[Relationship],
-    secondary: list[Relationship],
-) -> list[Relationship]:
-    merged: dict[tuple[str, str, str], Relationship] = {
-        _relationship_dedupe_key(relationship): relationship for relationship in primary
-    }
-    for relationship in secondary:
-        merged.setdefault(_relationship_dedupe_key(relationship), relationship)
-    return list(merged.values())
-
-
-async def _list_surreal_episodic_relationships(
-    client: Any,
-    organization_id: str,
-    entity_by_id: dict[str, Entity],
-) -> list[Relationship]:
-    if getattr(client, "_store", None) != "surreal":
-        return []
-
-    try:
-        driver = client.get_org_driver(organization_id)
-        edge_ops = getattr(driver, "episodic_edge_ops", None)
-        if edge_ops is None:
-            return []
-
-        edges = await edge_ops.get_by_group_ids(driver, [organization_id])
-        relationships: list[Relationship] = []
-        for edge in edges:
-            if (
-                edge.source_node_uuid not in entity_by_id
-                or edge.target_node_uuid not in entity_by_id
-            ):
-                continue
-            relationships.append(
-                Relationship(
-                    id=edge.uuid,
-                    source_id=edge.source_node_uuid,
-                    target_id=edge.target_node_uuid,
-                    relationship_type=RelationshipType.MENTIONS,
-                    created_at=edge.created_at,
-                )
-            )
-        return relationships
-    except Exception as exc:
-        log.warning(
-            "list_surreal_episodic_relationships_failed",
-            org_id=organization_id,
-            error=str(exc),
-        )
-        return []
-
-
 async def _get_graph_snapshot(
     client: Any,
     organization_id: str,
@@ -371,12 +308,6 @@ async def _load_graph_snapshot(
         ),
     )
     entity_by_id = _entity_index(entities)
-    episodic_relationships = await _list_surreal_episodic_relationships(
-        client,
-        organization_id,
-        entity_by_id,
-    )
-    relationships = _merge_relationships(relationships, episodic_relationships)
     snapshot = GraphSnapshot(
         entities=entities,
         relationships=relationships,
@@ -391,7 +322,6 @@ async def _load_graph_snapshot(
         org_id=organization_id,
         entity_count=len(entities),
         relationship_count=len(relationships),
-        episodic_relationship_count=len(episodic_relationships),
         max_entities=max_entities,
         max_relationships=max_relationships,
     )

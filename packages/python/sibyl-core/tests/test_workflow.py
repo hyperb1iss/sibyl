@@ -1,16 +1,14 @@
 """Tests for task workflow state machine and estimation."""
 
-import builtins
 import json
 from dataclasses import dataclass, field
-from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
 from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError
-from sibyl_core.models.entities import Entity, EntityType, RelationshipType
+from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.tasks import (
     Task,
     TaskComplexity,
@@ -677,7 +675,7 @@ class TestWorkflowEngine:
         assert RelationshipType.REFERENCES in relationship_types
 
     @pytest.mark.asyncio
-    async def test_create_learning_episode_uses_episode_mentions(
+    async def test_create_learning_episode_creates_native_relationships(
         self,
         workflow_engine: TaskWorkflowEngine,
         mock_entity_manager: MockEntityManager,
@@ -697,9 +695,6 @@ class TestWorkflowEngine:
                 )
             ]
         )
-        save_episode_mention = AsyncMock(return_value=True)
-        workflow_engine._save_episode_mention = save_episode_mention  # type: ignore[method-assign]
-
         episode_id = await workflow_engine._create_learning_episode(task)
 
         assert episode_id == "episode_task_episode"
@@ -707,96 +702,15 @@ class TestWorkflowEngine:
             "episode_task_episode"
         ]
         assert mock_entity_manager.create_calls == []
-        assert len(mock_relationship_manager.relationships) == 1
-        save_episode_mention.assert_any_await(
-            episode_id="episode_task_episode",
-            target_id="task_episode",
-            link_id="rel_episode_task_episode",
-        )
-        save_episode_mention.assert_any_await(
-            episode_id="episode_task_episode",
-            target_id="pattern_surreal",
-            link_id="rel_inherit_episode_task_episode_pattern_surreal",
-        )
-
-    @pytest.mark.asyncio
-    async def test_surreal_like_driver_saves_episode_mentions(
-        self,
-        mock_entity_manager: MockEntityManager,
-        mock_relationship_manager: MockRelationshipManager,
-    ) -> None:
-        driver = SimpleNamespace(
-            episodic_edge_ops=object(),
-            execute_query=AsyncMock(
-                side_effect=[
-                    [{"id": "episode:episode_task_episode"}],
-                    [{"id": "entity:task_episode"}],
-                    [],
-                ]
-            ),
-        )
-        graph_client = SimpleNamespace(get_org_driver=lambda group_id: driver)
-        workflow_engine = TaskWorkflowEngine(
-            entity_manager=mock_entity_manager,  # type: ignore[arg-type]
-            relationship_manager=mock_relationship_manager,  # type: ignore[arg-type]
-            graph_client=graph_client,  # type: ignore[arg-type]
-            organization_id="org_test123",
-        )
-
-        original_import = builtins.__import__
-        blocked_import = "graphiti" + "_core"
-
-        def guarded_import(
-            name: str,
-            globals: dict[str, Any] | None = None,
-            locals: dict[str, Any] | None = None,
-            fromlist: tuple[str, ...] = (),
-            level: int = 0,
-        ) -> Any:
-            if name == blocked_import or name.startswith(f"{blocked_import}."):
-                raise AssertionError(f"Graphiti import forbidden: {name}")
-            return original_import(name, globals, locals, fromlist, level)
-
-        builtins.__import__ = guarded_import
-        try:
-            assert await workflow_engine._save_episode_mention(
-                episode_id="episode_task_episode",
-                target_id="task_episode",
-                link_id="rel_episode_task_episode",
-            )
-        finally:
-            builtins.__import__ = original_import
-
-        assert driver.execute_query.await_count == 3
-        save_query = driver.execute_query.await_args_list[2].args[0]
-        save_params = driver.execute_query.await_args_list[2].kwargs
-        assert "RELATE $src->$rel->$tgt" in save_query
-        assert save_params["uuid"] == "rel_episode_task_episode"
-        assert save_params["group_id"] == "org_test123"
-        assert save_params["src"] == "episode:episode_task_episode"
-        assert save_params["tgt"] == "entity:task_episode"
-
-    @pytest.mark.asyncio
-    async def test_create_learning_episode_skips_missing_surreal_mention_endpoint(
-        self,
-        workflow_engine: TaskWorkflowEngine,
-        mock_relationship_manager: MockRelationshipManager,
-    ) -> None:
-        task = make_task(
-            task_id="task_episode",
-            title="Capture learning",
-            status=TaskStatus.DONE,
-            learnings="Keep the learning even when the link target is gone.",
-        )
-        save_episode_mention = AsyncMock(side_effect=ValueError("target entity not found"))
-        workflow_engine._save_episode_mention = save_episode_mention  # type: ignore[method-assign]
-        workflow_engine._surreal_driver = MagicMock(return_value=object())  # type: ignore[method-assign]
-
-        episode_id = await workflow_engine._create_learning_episode(task)
-
-        assert episode_id == "episode_task_episode"
-        assert len(mock_relationship_manager.relationships) == 0
-        save_episode_mention.assert_awaited_once()
+        created_ids = {
+            rel.id
+            for rel in mock_relationship_manager.relationships
+            if isinstance(rel, Relationship)
+        }
+        assert created_ids == {
+            "rel_episode_task_episode",
+            "rel_inherit_episode_task_episode_pattern_surreal",
+        }
 
     @pytest.mark.asyncio
     async def test_archive_task_sets_archived_status(

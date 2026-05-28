@@ -38,7 +38,6 @@ from sibyl_core.storage import (
 )
 
 log = structlog.get_logger()
-_MISSING = object()
 
 
 async def _get_graph_runtime(group_id: str) -> NativeGraphRuntime:
@@ -224,98 +223,12 @@ async def _surreal_rows_or_empty(
 
 
 def _surreal_driver_for(driver: Any) -> Any | None:
-    if isinstance(driver, NativeSurrealGraphClient):
-        return driver
-
-    if _has_declared_surreal_ops(driver):
-        return driver
-
-    if _is_surreal_driver_instance(driver):
-        return driver
-
-    return None
-
-
-def _is_surreal_driver_instance(driver: object) -> bool:
-    try:
-        from sibyl_core.backends.surreal import SurrealDriver
-    except ImportError:
-        return False
-
-    return isinstance(driver, SurrealDriver)
-
-
-def _declared_driver_attr(driver: object, attr: str) -> object | None:
-    try:
-        attrs = vars(driver)
-    except TypeError:
-        return None
-
-    value = attrs.get(attr, _MISSING)
-    return None if value is _MISSING else value
-
-
-def _has_declared_surreal_ops(driver: object) -> bool:
-    if not callable(getattr(driver, "execute_query", None)):
-        return False
-    return any(
-        _declared_driver_attr(driver, attr) is not None
-        for attr in ("graph_ops", "entity_node_ops", "entity_edge_ops", "episodic_edge_ops")
-    )
-
-
-def _surreal_entity_node_ops_for(driver: Any) -> Any | None:
-    surreal_driver = _surreal_driver_for(driver)
-    if surreal_driver is None:
-        return None
-    declared = _declared_driver_attr(surreal_driver, "entity_node_ops")
-    if declared is not None:
-        return declared
-    return (
-        getattr(surreal_driver, "entity_node_ops", None)
-        if _is_surreal_driver_instance(surreal_driver)
-        else None
-    )
+    return driver if isinstance(driver, NativeSurrealGraphClient) else None
 
 
 def _assert_legacy_graph_query_allowed(driver: Any, operation: str) -> None:
     if _surreal_driver_for(driver) is not None:
         raise RuntimeError(f"SurrealDB {operation} requires native graph operations")
-
-
-async def _list_surreal_entity_nodes(
-    driver: Any,
-    group_id: str,
-    *,
-    page_size: int = 1000,
-) -> list[Any]:
-    ops = _surreal_entity_node_ops_for(driver)
-    if ops is None:
-        return []
-
-    nodes: list[Any] = []
-    uuid_cursor: str | None = None
-    seen_cursors: set[str] = set()
-
-    while True:
-        batch = await ops.get_by_group_ids(
-            driver,
-            [group_id],
-            limit=page_size,
-            uuid_cursor=uuid_cursor,
-        )
-        if not batch:
-            break
-        nodes.extend(batch)
-        if len(batch) < page_size:
-            break
-        next_cursor = getattr(batch[-1], "uuid", None)
-        if not isinstance(next_cursor, str) or next_cursor in seen_cursors:
-            break
-        seen_cursors.add(next_cursor)
-        uuid_cursor = next_cursor
-
-    return nodes
 
 
 class GraphEntityStore(EntityStore):

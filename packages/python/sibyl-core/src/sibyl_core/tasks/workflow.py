@@ -3,7 +3,7 @@
 import json
 import re
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
 import structlog
 
@@ -13,26 +13,6 @@ from sibyl_core.models.tasks import EpicStatus, Task, TaskStatus
 from sibyl_core.tasks.distillation import build_learning_episode, build_learning_procedure
 
 log = structlog.get_logger()
-_MISSING = object()
-
-
-def _declared_driver_attr(driver: object, attr: str) -> object | None:
-    try:
-        attrs = vars(driver)
-    except TypeError:
-        return None
-
-    value = attrs.get(attr, _MISSING)
-    return None if value is _MISSING else value
-
-
-def _first_record_id(result: object) -> object | None:
-    if not isinstance(result, list) or not result:
-        return None
-    first = result[0]
-    if not isinstance(first, dict):
-        return None
-    return cast("dict[str, object]", first).get("id")
 
 
 def _metadata_mapping(value: object) -> dict[str, Any] | None:
@@ -119,77 +99,6 @@ class TaskWorkflowEngine:
         self._graph_client = graph_client
         self._organization_id = organization_id
 
-    def _surreal_driver(self) -> Any | None:
-        get_org_driver = getattr(self._graph_client, "get_org_driver", None)
-        if not callable(get_org_driver):
-            return None
-        driver = get_org_driver(self._organization_id)
-        if _declared_driver_attr(driver, "episodic_edge_ops") is not None:
-            return driver
-
-        try:
-            from sibyl_core.backends.surreal import SurrealDriver
-        except ImportError:
-            return None
-
-        return driver if isinstance(driver, SurrealDriver) else None
-
-    async def _save_episode_mention(
-        self,
-        *,
-        episode_id: str,
-        target_id: str,
-        link_id: str,
-    ) -> bool:
-        driver = self._surreal_driver()
-        if driver is None:
-            return False
-
-        source_record_id = _first_record_id(
-            await driver.execute_query(
-                "SELECT id FROM episode WHERE uuid = $uuid LIMIT 1;",
-                uuid=episode_id,
-            )
-        )
-        target_record_id = _first_record_id(
-            await driver.execute_query(
-                "SELECT id FROM entity WHERE uuid = $uuid LIMIT 1;",
-                uuid=target_id,
-            )
-        )
-        if source_record_id is None or target_record_id is None:
-            msg = (
-                f"Cannot save mentions edge {link_id!r}: source episode "
-                f"{episode_id!r} or target entity {target_id!r} not found"
-            )
-            raise ValueError(msg)
-
-        from surrealdb import RecordID
-
-        await driver.execute_query(
-            """DELETE FROM mentions WHERE uuid = $uuid AND (in != $src OR out != $tgt);
-LET $updated = (UPDATE mentions SET
-    in = $src,
-    out = $tgt,
-    uuid = $uuid,
-    group_id = $group_id,
-    created_at = $created_at
-    WHERE uuid = $uuid RETURN id);
-IF array::len($updated) = 0 THEN
-    RELATE $src->$rel->$tgt SET
-        uuid = $uuid,
-        group_id = $group_id,
-        created_at = $created_at;
-END;""",
-            rel=RecordID("mentions", link_id),
-            src=source_record_id,
-            tgt=target_record_id,
-            uuid=link_id,
-            group_id=self._organization_id,
-            created_at=datetime.now(UTC),
-        )
-        return True
-
     async def _create_learning_artifact_link(
         self,
         *,
@@ -197,28 +106,8 @@ END;""",
         target_id: str,
         relationship_type: RelationshipType,
         link_id: str,
-        source_is_episode: bool = False,
         metadata: dict[str, Any] | None = None,
     ) -> str:
-        if source_is_episode:
-            try:
-                if await self._save_episode_mention(
-                    episode_id=source_id,
-                    target_id=target_id,
-                    link_id=link_id,
-                ):
-                    return link_id
-            except ValueError as exc:
-                if self._surreal_driver() is not None:
-                    log.warning(
-                        "Learning artifact episode mention skipped",
-                        error=str(exc),
-                        episode_id=source_id,
-                        target_id=target_id,
-                    )
-                    return link_id
-                raise
-
         return await self._relationship_manager.create(
             Relationship(
                 id=link_id,
@@ -608,10 +497,9 @@ END;""",
             target_id=task.id,
             relationship_type=RelationshipType.DERIVED_FROM,
             link_id=f"rel_episode_{task.id}",
-            source_is_episode=True,
         )
 
-        await self._inherit_task_knowledge(episode_id, task.id, source_is_episode=True)
+        await self._inherit_task_knowledge(episode_id, task.id)
 
         log.info("Learning episode created", episode_id=episode_id, task_id=task.id)
         return episode_id
@@ -671,8 +559,6 @@ END;""",
         self,
         source_id: str,
         task_id: str,
-        *,
-        source_is_episode: bool = False,
     ) -> None:
         task_relationships = await self._relationship_manager.get_for_entity(
             task_id,
@@ -689,7 +575,6 @@ END;""",
                 target_id=rel.target_id,
                 relationship_type=RelationshipType.REFERENCES,
                 link_id=f"rel_inherit_{source_id}_{rel.target_id}",
-                source_is_episode=source_is_episode,
                 metadata={"inherited_from_task": task_id},
             )
 
