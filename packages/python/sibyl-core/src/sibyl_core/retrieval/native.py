@@ -1044,17 +1044,21 @@ async def _graph_expansion_candidates(
     seed_candidates: Sequence[NativeRetrievalCandidate],
     limit: int,
 ) -> list[NativeRetrievalCandidate]:
-    seed_uuids = [
+    entity_seed_uuids = [
         candidate.id
         for candidate in seed_candidates
-        if candidate.type not in {"claim", "relationship", "raw_memory"}
+        if candidate.type not in {"claim", "relationship", "raw_memory", "episode"}
     ][:limit]
-    if not seed_uuids:
+    episode_seed_uuids = [
+        candidate.id for candidate in seed_candidates if candidate.type == "episode"
+    ][:limit]
+    if not entity_seed_uuids and not episode_seed_uuids:
         return []
 
     rows = await _node_bfs_records(
         client=client,
-        origin_uuids=seed_uuids,
+        origin_uuids=entity_seed_uuids,
+        episode_origin_uuids=episode_seed_uuids,
         search_filter=search_filter,
         group_id=plan.organization_id,
         max_depth=plan.graph_expansion_depth,
@@ -1150,37 +1154,45 @@ async def _node_bfs_records(
     *,
     client: Any,
     origin_uuids: Sequence[str],
+    episode_origin_uuids: Sequence[str] = (),
     search_filter: NativeSearchFilter,
     group_id: str,
     max_depth: int,
     limit: int,
 ) -> list[dict[str, object]]:
-    if not origin_uuids or max_depth < 1:
+    if (not origin_uuids and not episode_origin_uuids) or max_depth < 1:
         return []
 
     discovered: list[str] = []
     seen_discovered: set[str] = set()
     visited_entities = set(origin_uuids)
     entity_frontier = _dedupe_strings(origin_uuids)
-    episode_frontier = _dedupe_strings(origin_uuids)
+    episode_frontier = _dedupe_strings(episode_origin_uuids)
 
     for depth in range(1, max_depth + 1):
         next_entities: list[str] = []
+        remaining = max(int(limit) - len(discovered), 0)
+        if remaining <= 0:
+            break
         if depth == 1:
             next_entities.extend(
                 await _mentioned_entity_uuids(
                     client=client,
                     episode_uuids=episode_frontier,
                     group_id=group_id,
+                    limit=remaining,
                 )
             )
-        next_entities.extend(
-            await _relation_target_uuids(
-                client=client,
-                source_uuids=entity_frontier,
-                group_id=group_id,
+            remaining = max(int(limit) - len(discovered) - len(next_entities), 0)
+        if remaining > 0:
+            next_entities.extend(
+                await _relation_target_uuids(
+                    client=client,
+                    source_uuids=entity_frontier,
+                    group_id=group_id,
+                    limit=remaining,
+                )
             )
-        )
 
         for uuid in _dedupe_strings(next_entities):
             if uuid in seen_discovered:
@@ -1217,6 +1229,7 @@ async def _mentioned_entity_uuids(
     client: Any,
     episode_uuids: Sequence[str],
     group_id: str,
+    limit: int,
 ) -> list[str]:
     if not episode_uuids:
         return []
@@ -1227,10 +1240,12 @@ async def _mentioned_entity_uuids(
             FROM mentions
             WHERE in.uuid IN $episode_uuids
               AND group_id = $group_id
-              AND out.group_id = $group_id;
+              AND out.group_id = $group_id
+            LIMIT $limit;
             """,
             episode_uuids=list(episode_uuids),
             group_id=group_id,
+            limit=max(int(limit), 1),
         )
     )
     return _dedupe_strings(_record_uuids(rows))
@@ -1241,6 +1256,7 @@ async def _relation_target_uuids(
     client: Any,
     source_uuids: Sequence[str],
     group_id: str,
+    limit: int,
 ) -> list[str]:
     if not source_uuids:
         return []
@@ -1251,10 +1267,12 @@ async def _relation_target_uuids(
             FROM relates_to
             WHERE in.uuid IN $source_uuids
               AND group_id = $group_id
-              AND out.group_id = $group_id;
+              AND out.group_id = $group_id
+            LIMIT $limit;
             """,
             source_uuids=list(source_uuids),
             group_id=group_id,
+            limit=max(int(limit), 1),
         )
     )
     return _dedupe_strings(_record_uuids(rows))

@@ -705,6 +705,59 @@ def _facet_for_search_types(types: Sequence[str] | None) -> ContextFacet | None:
     return None
 
 
+def _types_for_facets(facets: Sequence[ContextFacet]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for facet in facets:
+        for entity_type in FACET_TYPES[facet]:
+            normalized = entity_type.lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            ordered.append(entity_type)
+    return ordered
+
+
+def _sections_from_response(
+    response: SearchResponse,
+    *,
+    facets: Sequence[ContextFacet],
+) -> list[ContextSection]:
+    grouped: dict[ContextFacet, list[ContextItem]] = {facet: [] for facet in facets}
+    for result in response.results:
+        if _is_synthetic_relationship_result(result):
+            continue
+        facet = _facet_for_type(result.type or "", list(facets))
+        grouped[facet].append(_item_from_result(result, facet))
+
+    return [
+        ContextSection(facet=facet, title=FACET_TITLES[facet], items=items)
+        for facet in facets
+        if (items := grouped[facet])
+    ]
+
+
+async def _compile_native_sections(
+    *,
+    native_plan: Any,
+    facets: Sequence[ContextFacet],
+    limit: int,
+    per_facet_limit: int,
+    raw_memory_recall_fn: RawMemoryRecallFn,
+) -> list[ContextSection]:
+    search_limit = min(50, max(limit, per_facet_limit * len(facets)))
+    response = await native_context_search(
+        plan=native_plan,
+        types=_types_for_facets(facets),
+        facet=ContextFacet.RECENT_MEMORY if ContextFacet.RECENT_MEMORY in facets else None,
+        limit=search_limit,
+        include_content=True,
+        embedding_provider=configured_native_embedding_provider(),
+        raw_memory_recall_fn=raw_memory_recall_fn,
+    )
+    return _sections_from_response(response, facets=facets)
+
+
 def _compare_safe_response(
     response: SearchResponse,
     *,
@@ -864,36 +917,55 @@ async def compile_context(
             )
         return native_response
 
-    facet_section_tasks = [
-        _compile_facet_section(
-            query=query,
-            facet=facet,
-            domain=domain,
-            project=project,
-            accessible_projects=accessible_projects,
-            organization_id=organization_id,
-            limit=per_facet_limit,
-            search_fn=selected_search_fn,
-        )
-        for facet in facets
-    ]
-    facet_sections = await asyncio.gather(*facet_section_tasks, return_exceptions=True)
-
     sections: list[ContextSection] = []
-    for facet, facet_section in zip(facets, facet_sections, strict=True):
-        if isinstance(facet_section, BaseException):
-            log.warning(
-                "context_facet_search_failed",
-                facet=facet.value,
-                error_type=type(facet_section).__name__,
+    native_failed = False
+    if normalized_retrieval_mode is NativeRetrievalMode.NATIVE:
+        try:
+            sections = await _compile_native_sections(
+                native_plan=native_plan,
+                facets=facets,
+                limit=limit,
+                per_facet_limit=per_facet_limit,
+                raw_memory_recall_fn=raw_memory_recall_fn,
             )
-            continue
-        items = list(facet_section.items) if facet_section is not None else []
-        if items:
-            sections.append(ContextSection(facet=facet, title=FACET_TITLES[facet], items=items))
+        except Exception as exc:
+            native_failed = True
+            log.warning(
+                "context_native_search_failed",
+                error_type=type(exc).__name__,
+            )
+    else:
+        facet_section_tasks = [
+            _compile_facet_section(
+                query=query,
+                facet=facet,
+                domain=domain,
+                project=project,
+                accessible_projects=accessible_projects,
+                organization_id=organization_id,
+                limit=per_facet_limit,
+                search_fn=selected_search_fn,
+            )
+            for facet in facets
+        ]
+        facet_sections = await asyncio.gather(*facet_section_tasks, return_exceptions=True)
+
+        for facet, facet_section in zip(facets, facet_sections, strict=True):
+            if isinstance(facet_section, BaseException):
+                log.warning(
+                    "context_facet_search_failed",
+                    facet=facet.value,
+                    error_type=type(facet_section).__name__,
+                )
+                continue
+            items = list(facet_section.items) if facet_section is not None else []
+            if items:
+                sections.append(ContextSection(facet=facet, title=FACET_TITLES[facet], items=items))
 
     sections = _dedupe_sections(sections, limit)
-    if not sections:
+    if not sections and (
+        normalized_retrieval_mode is not NativeRetrievalMode.NATIVE or native_failed
+    ):
         sections = _dedupe_sections(
             await _compile_fallback_sections(
                 query=query,
@@ -903,7 +975,7 @@ async def compile_context(
                 accessible_projects=accessible_projects,
                 organization_id=organization_id,
                 limit=limit,
-                search_fn=selected_search_fn,
+                search_fn=search_fn if native_failed else selected_search_fn,
             ),
             limit,
         )

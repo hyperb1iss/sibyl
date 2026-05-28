@@ -890,6 +890,40 @@ class _FacetSearchClient:
         return []
 
 
+class _GraphExpansionClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        if "FROM mentions" in query:
+            return [{"uuid": "mentioned-node"}]
+        if "FROM relates_to" in query:
+            return [{"uuid": "related-node"}]
+        if "FROM entity" in query:
+            return [
+                {
+                    "uuid": "related-node",
+                    "name": "Related Task",
+                    "entity_type": "task",
+                    "content": "nearby task context",
+                    "project_id": "project_123",
+                    "attributes": {},
+                    "created_at": None,
+                },
+                {
+                    "uuid": "mentioned-node",
+                    "name": "Mentioned Task",
+                    "entity_type": "task",
+                    "content": "episode-mentioned task context",
+                    "project_id": "project_123",
+                    "attributes": {},
+                    "created_at": None,
+                },
+            ]
+        return []
+
+
 @pytest.mark.asyncio
 async def test_native_context_search_pushes_facet_types_into_graph_queries(
     monkeypatch: pytest.MonkeyPatch,
@@ -945,6 +979,96 @@ async def test_native_context_search_pushes_facet_types_into_graph_queries(
     assert all(params["limit"] == 3 for _, params in client.calls)
     assert any("entity_type IN $node_types" in query for query, _ in client.calls)
     assert any("name_embedding <|3, 40|> $query_embedding" in query for query, _ in client.calls)
+
+
+@pytest.mark.asyncio
+async def test_graph_expansion_skips_mentions_for_entity_seeds_and_limits_edges() -> None:
+    plan = build_native_context_retrieval_plan(
+        query="active task followup",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project="project_123",
+        accessible_projects={"project_123"},
+        limit=12,
+    )
+    client = _GraphExpansionClient()
+
+    candidates = await native_module._graph_expansion_candidates(
+        client=client,
+        plan=plan,
+        search_filter=native_module.NativeSearchFilter(
+            node_types=("task",),
+            project_ids=("project_123",),
+        ),
+        seed_candidates=[
+            NativeRetrievalCandidate(
+                id="task-seed",
+                type="task",
+                name="Seed Task",
+                content="seed",
+                score=1.0,
+                source=None,
+                metadata={},
+                project_id="project_123",
+            )
+        ],
+        limit=2,
+    )
+
+    assert [candidate.id for candidate in candidates] == ["related-node"]
+    assert all("FROM mentions" not in query for query, _ in client.calls)
+    relation_calls = [
+        (query, params) for query, params in client.calls if "FROM relates_to" in query
+    ]
+    assert relation_calls
+    assert relation_calls[0][1]["limit"] == 2
+    assert "LIMIT $limit" in relation_calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_graph_expansion_uses_mentions_for_episode_seeds_with_limit() -> None:
+    plan = build_native_context_retrieval_plan(
+        query="recent episode followup",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["episode"]},
+        principal_id="user-123",
+        project="project_123",
+        accessible_projects={"project_123"},
+        limit=12,
+    )
+    client = _GraphExpansionClient()
+
+    candidates = await native_module._graph_expansion_candidates(
+        client=client,
+        plan=plan,
+        search_filter=native_module.NativeSearchFilter(
+            node_types=("task",),
+            project_ids=("project_123",),
+        ),
+        seed_candidates=[
+            NativeRetrievalCandidate(
+                id="episode-seed",
+                type="episode",
+                name="Seed Episode",
+                content="seed",
+                score=1.0,
+                source=None,
+                metadata={},
+                project_id="project_123",
+            )
+        ],
+        limit=2,
+    )
+
+    assert [candidate.id for candidate in candidates] == ["mentioned-node"]
+    mention_calls = [(query, params) for query, params in client.calls if "FROM mentions" in query]
+    assert mention_calls
+    assert mention_calls[0][1]["episode_uuids"] == ["episode-seed"]
+    assert mention_calls[0][1]["limit"] == 2
+    assert "LIMIT $limit" in mention_calls[0][0]
 
 
 @pytest.mark.asyncio

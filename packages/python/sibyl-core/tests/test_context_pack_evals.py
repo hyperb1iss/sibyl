@@ -62,7 +62,20 @@ def _facet_native_search(responses: dict[ContextFacet, list[SearchResult]]):
 
     async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
         facet = kwargs.get("facet")
-        items = responses.get(facet, []) if facet is not None else []
+        requested_types = {str(value).lower() for value in kwargs.get("types") or []}
+        facet_types = set(context_module.FACET_TYPES.get(facet, [])) if facet is not None else set()
+        if not facet_types or requested_types - facet_types:
+            items = [
+                item
+                for response_facet, results in responses.items()
+                if not requested_types
+                or requested_types.intersection(
+                    {value.lower() for value in context_module.FACET_TYPES[response_facet]}
+                )
+                for item in results
+            ]
+        else:
+            items = responses.get(facet, []) if facet is not None else []
         return SearchResponse(
             results=items,
             total=len(items),

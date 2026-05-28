@@ -68,7 +68,20 @@ def _facet_native_search(
         if calls is not None:
             calls.append(kwargs)
         facet = kwargs.get("facet")
-        items = responses.get(facet, []) if facet is not None else []
+        requested_types = {str(value).lower() for value in kwargs.get("types") or []}
+        facet_types = set(FACET_TYPES.get(facet, [])) if facet is not None else set()
+        if not facet_types or requested_types - facet_types:
+            items = [
+                item
+                for response_facet, results in responses.items()
+                if not requested_types
+                or requested_types.intersection(
+                    {value.lower() for value in FACET_TYPES[response_facet]}
+                )
+                for item in results
+            ]
+        else:
+            items = responses.get(facet, []) if facet is not None else []
         return SearchResponse(
             results=items,
             total=len(items),
@@ -77,6 +90,11 @@ def _facet_native_search(
         )
 
     return fake_native_context_search
+
+
+def _types_include(kwargs: dict[str, Any], facet: ContextFacet) -> bool:
+    requested = {str(value).lower() for value in kwargs.get("types") or []}
+    return not requested or bool(requested.intersection(FACET_TYPES[facet]))
 
 
 @pytest.mark.asyncio
@@ -119,8 +137,9 @@ async def test_compile_context_groups_build_context_by_agent_facets(
         ContextFacet.RECENT_MEMORY,
     ]
     assert pack.total_items == 7
-    assert all(call["plan"].organization_id == "org-123" for call in calls)
-    assert all(call["plan"].project == "sibyl" for call in calls)
+    assert len(calls) == 1
+    assert calls[0]["plan"].organization_id == "org-123"
+    assert calls[0]["plan"].project == "sibyl"
 
 
 @pytest.mark.asyncio
@@ -131,7 +150,7 @@ async def test_compile_context_supports_review_intent(
     responses = {
         ContextFacet.VERIFICATION: [_result("claim-1", "claim", "Verify behavior")],
         ContextFacet.DECISIONS: [_result("decision-1", "decision", "Use full fidelity")],
-        ContextFacet.CONSTRAINTS: [_result("rule-1", "rule", "Preserve quality")],
+        ContextFacet.CONSTRAINTS: [_result("guide-1", "guide", "Preserve quality")],
         ContextFacet.GOTCHAS: [_result("error-1", "error_pattern", "Avoid shortcuts")],
         ContextFacet.ARTIFACTS: [_result("artifact-1", "artifact", "Audit doc")],
         ContextFacet.ACTIVE_WORK: [_result("task-1", "task", "Review task")],
@@ -159,33 +178,30 @@ async def test_compile_context_supports_review_intent(
         ContextFacet.ACTIVE_WORK,
         ContextFacet.RECENT_MEMORY,
     ]
-    assert [call["types"] for call in calls] == [
-        FACET_TYPES[ContextFacet.VERIFICATION],
-        FACET_TYPES[ContextFacet.DECISIONS],
-        FACET_TYPES[ContextFacet.CONSTRAINTS],
-        FACET_TYPES[ContextFacet.GOTCHAS],
-        FACET_TYPES[ContextFacet.ARTIFACTS],
-        FACET_TYPES[ContextFacet.ACTIVE_WORK],
-        FACET_TYPES[ContextFacet.RECENT_MEMORY],
-    ]
+    assert len(calls) == 1
+    assert calls[0]["types"] == context_module._types_for_facets(
+        [
+            ContextFacet.VERIFICATION,
+            ContextFacet.DECISIONS,
+            ContextFacet.CONSTRAINTS,
+            ContextFacet.GOTCHAS,
+            ContextFacet.ARTIFACTS,
+            ContextFacet.ACTIVE_WORK,
+            ContextFacet.RECENT_MEMORY,
+        ]
+    )
 
 
 @pytest.mark.asyncio
-async def test_compile_context_runs_facet_searches_concurrently(
+async def test_compile_context_batches_native_facet_searches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    active_calls = 0
-    max_active_calls = 0
+    calls: list[dict[str, Any]] = []
 
     async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
-        nonlocal active_calls, max_active_calls
-        active_calls += 1
-        max_active_calls = max(max_active_calls, active_calls)
-        try:
-            await asyncio.sleep(0.01)
-            return SearchResponse(results=[], total=0, query=kwargs["plan"].query, filters={})
-        finally:
-            active_calls -= 1
+        calls.append(kwargs)
+        await asyncio.sleep(0.01)
+        return SearchResponse(results=[], total=0, query=kwargs["plan"].query, filters={})
 
     monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
 
@@ -196,7 +212,35 @@ async def test_compile_context_runs_facet_searches_concurrently(
     )
 
     assert pack.total_items == 0
-    assert max_active_calls > 1
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_compile_context_falls_back_when_batched_native_search_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_native_context_search(**_kwargs: Any) -> SearchResponse:
+        raise RuntimeError("native search unavailable")
+
+    async def fallback_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(
+            results=[_result("decision-1", "decision", "Fallback decision")],
+            total=1,
+            query=kwargs["query"],
+            filters={},
+        )
+
+    monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
+
+    pack = await compile_context(
+        "resilient native context",
+        intent="build",
+        organization_id="org-123",
+        search_fn=fallback_search,
+    )
+
+    assert pack.total_items == 1
+    assert pack.items[0].id == "decision-1"
 
 
 @pytest.mark.asyncio
@@ -206,6 +250,9 @@ async def test_compile_context_keeps_successful_facets_when_one_fails(
     warnings: list[dict[str, str]] = []
 
     class FakeLog:
+        def info(self, _event: str, **_kwargs: str) -> None:
+            pass
+
         def warning(self, _event: str, **kwargs: str) -> None:
             warnings.append(kwargs)
 
@@ -226,10 +273,15 @@ async def test_compile_context_keeps_successful_facets_when_one_fails(
 
     monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
 
+    async def fallback_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
     pack = await compile_context(
         "resilient context facets",
         intent="build",
         organization_id="org-123",
+        search_fn=fallback_search,
+        retrieval_mode="compare",
     )
 
     assert pack.total_items == 1
@@ -245,7 +297,7 @@ async def test_compile_context_defaults_to_native_retrieval_mode(
 
     async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
         native_calls.append(kwargs)
-        if kwargs["facet"] is not ContextFacet.DECISIONS:
+        if not _types_include(kwargs, ContextFacet.DECISIONS):
             return SearchResponse(results=[], total=0, query=kwargs["plan"].query, filters={})
         return SearchResponse(
             results=[
@@ -298,7 +350,7 @@ async def test_compile_context_scopes_related_items_to_api_key_grants(
     related_calls: list[dict[str, Any]] = []
 
     async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
-        if kwargs["facet"] is not ContextFacet.DECISIONS:
+        if not _types_include(kwargs, ContextFacet.DECISIONS):
             return SearchResponse(results=[], total=0, query=kwargs["plan"].query, filters={})
         return SearchResponse(
             results=[_result("decision-1", "decision", "Granted decision")],
@@ -411,16 +463,19 @@ async def test_compile_context_wake_layer_caps_items_and_skips_related(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     related_calls: list[str] = []
-
-    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
-        facet = kwargs.get("facet")
-        prefix = facet.value if facet is not None else "memory"
-        return SearchResponse(
-            results=[_result(f"{prefix}-{index}", "note", f"Memory {index}") for index in range(2)],
-            total=2,
-            query=kwargs["plan"].query,
-            filters={},
-        )
+    responses = {
+        facet: [
+            _result(f"{facet.value}-{index}", FACET_TYPES[facet][0], f"Memory {index}")
+            for index in range(2)
+        ]
+        for facet in [
+            ContextFacet.RECENT_MEMORY,
+            ContextFacet.ACTIVE_WORK,
+            ContextFacet.DECISIONS,
+            ContextFacet.GOTCHAS,
+            ContextFacet.PROCEDURES,
+        ]
+    }
 
     async def fake_related(**kwargs: Any) -> list[ContextRelatedItem]:
         related_calls.append(kwargs["entity_id"])
@@ -434,7 +489,7 @@ async def test_compile_context_wake_layer_caps_items_and_skips_related(
             )
         ]
 
-    monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
+    monkeypatch.setattr(context_module, "native_context_search", _facet_native_search(responses))
 
     pack = await compile_context(
         "wake up the coding session",
@@ -475,12 +530,17 @@ async def test_compile_context_keeps_graph_context_when_a_facet_fails(
 
     monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
 
+    async def fallback_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
     pack = await compile_context(
         "graph context resilience",
         intent="build",
         principal_id="user-123",
         organization_id="org-123",
         limit=1,
+        search_fn=fallback_search,
+        retrieval_mode="compare",
     )
 
     assert pack.total_items == 1
@@ -599,6 +659,7 @@ async def test_compile_context_falls_back_to_broad_search_when_facets_miss(
         project="project_123",
         accessible_projects={"project_123"},
         organization_id="org-123",
+        retrieval_mode="compare",
     )
 
     assert pack.total_items == 1
@@ -614,7 +675,7 @@ async def test_compile_context_can_attach_one_hop_related_items(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
-        if kwargs.get("facet") is not ContextFacet.DECISIONS:
+        if not _types_include(kwargs, ContextFacet.DECISIONS):
             return SearchResponse(results=[], total=0, query=kwargs["plan"].query, filters={})
         return SearchResponse(
             results=[_result("decision-1", "decision", "Use context packs")],
@@ -660,7 +721,7 @@ async def test_compile_context_batches_default_related_items(
     from types import SimpleNamespace
 
     async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
-        if kwargs.get("facet") is not ContextFacet.DECISIONS:
+        if not _types_include(kwargs, ContextFacet.DECISIONS):
             return SearchResponse(results=[], total=0, query=kwargs["plan"].query, filters={})
         return SearchResponse(
             results=[
@@ -717,7 +778,7 @@ async def test_compile_context_filters_related_project_entities_by_own_id(
     from types import SimpleNamespace
 
     async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
-        if kwargs.get("facet") is not ContextFacet.DECISIONS:
+        if not _types_include(kwargs, ContextFacet.DECISIONS):
             return SearchResponse(results=[], total=0, query=kwargs["plan"].query, filters={})
         return SearchResponse(
             results=[_result("decision-1", "decision", "Use context packs")],
@@ -1011,7 +1072,7 @@ async def test_context_pack_to_markdown_renders_injection_shape(
 
 async def async_compile_context_for_serialization(monkeypatch: pytest.MonkeyPatch):
     async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
-        if kwargs.get("facet") is not ContextFacet.ACTIVE_WORK:
+        if not _types_include(kwargs, ContextFacet.ACTIVE_WORK):
             return SearchResponse(results=[], total=0, query=kwargs["plan"].query, filters={})
         return SearchResponse(
             results=[
