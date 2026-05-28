@@ -1186,45 +1186,91 @@ class NativeRelationshipManager:
         type_values: Sequence[str],
         limit: int,
     ) -> list[SurrealRecord]:
+        outgoing_rows = await self._get_indexed_related_edge_direction_rows(
+            seed_ids,
+            endpoint_field="source_id",
+            endpoint_alias="source_uuid",
+            type_clause=type_clause,
+            type_values=type_values,
+            limit=limit,
+        )
+        incoming_rows = await self._get_indexed_related_edge_direction_rows(
+            seed_ids,
+            endpoint_field="target_id",
+            endpoint_alias="target_uuid",
+            type_clause=type_clause,
+            type_values=type_values,
+            limit=limit,
+        )
+
         rows: list[SurrealRecord] = []
-        for seed_id in seed_ids:
-            rows.extend(
-                normalize_records(
-                    await self._client.execute_query(
-                        """
-                        SELECT id AS record_id,
-                               uuid,
-                               name,
-                               fact,
-                               group_id,
-                               episodes,
-                               attributes,
-                               created_at,
-                               expired_at,
-                               valid_at,
-                               invalid_at,
-                               source_id AS source_uuid,
-                               target_id AS target_uuid
-                        FROM relates_to
-                        WHERE group_id = $group_id
-                          AND source_id = $entity_id
-                        """
-                        + type_clause
-                        + """
-                        ORDER BY created_at DESC, uuid DESC
-                        LIMIT $limit;
-                        """,
-                        group_id=self._group_id,
-                        entity_id=seed_id,
-                        relationship_types=type_values,
-                        limit=limit,
-                    )
-                )
+        seen: set[str] = set()
+        for row in [*outgoing_rows, *incoming_rows]:
+            key = str(row.get("uuid") or row.get("record_id") or id(row))
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(row)
+        return rows
+
+    async def _get_indexed_related_edge_direction_rows(
+        self,
+        seed_ids: Sequence[str],
+        *,
+        endpoint_field: str,
+        endpoint_alias: str,
+        type_clause: str,
+        type_values: Sequence[str],
+        limit: int,
+    ) -> list[SurrealRecord]:
+        batch_limit = min(max(limit * len(seed_ids), limit), 5000)
+        rows = normalize_records(
+            await self._client.execute_query(
+                f"""
+                SELECT id AS record_id,
+                       uuid,
+                       name,
+                       fact,
+                       group_id,
+                       episodes,
+                       attributes,
+                       created_at,
+                       expired_at,
+                       valid_at,
+                       invalid_at,
+                       source_id AS source_uuid,
+                       target_id AS target_uuid
+                FROM relates_to
+                WHERE group_id = $group_id
+                  AND {endpoint_field} IN $entity_ids
+                """
+                + type_clause
+                + """
+                ORDER BY created_at DESC, uuid DESC
+                LIMIT $limit;
+                """,
+                group_id=self._group_id,
+                entity_ids=list(seed_ids),
+                relationship_types=type_values,
+                limit=batch_limit,
             )
+        )
+        if len(rows) < batch_limit:
+            return rows
+
+        counts: dict[str, int] = {}
+        for row in rows:
+            endpoint_id = row.get(endpoint_alias)
+            if isinstance(endpoint_id, str):
+                counts[endpoint_id] = counts.get(endpoint_id, 0) + 1
+
+        for seed_id in seed_ids:
+            if counts.get(seed_id, 0) >= limit:
+                continue
             rows.extend(
                 normalize_records(
                     await self._client.execute_query(
-                        """
+                        f"""
                         SELECT id AS record_id,
                                uuid,
                                name,
@@ -1240,7 +1286,7 @@ class NativeRelationshipManager:
                                target_id AS target_uuid
                         FROM relates_to
                         WHERE group_id = $group_id
-                          AND target_id = $entity_id
+                          AND {endpoint_field} = $entity_id
                         """
                         + type_clause
                         + """

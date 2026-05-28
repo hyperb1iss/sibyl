@@ -69,6 +69,178 @@ class _EmbeddingWriteClient:
         return []
 
 
+class _RelatedBatchClient:
+    group_id = "org-native"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        now = datetime.now(UTC)
+        if "FROM relates_to" in query and "source_id IN $entity_ids" in query:
+            return [
+                {
+                    "record_id": "relates_to:rel_seed_a_target_a",
+                    "uuid": "rel_seed_a_target_a",
+                    "name": "RELATED_TO",
+                    "fact": "seed-a points at target-a",
+                    "group_id": self.group_id,
+                    "episodes": [],
+                    "attributes": {},
+                    "created_at": now,
+                    "expired_at": None,
+                    "valid_at": now,
+                    "invalid_at": None,
+                    "source_uuid": "seed-a",
+                    "target_uuid": "target-a",
+                },
+                {
+                    "record_id": "relates_to:rel_seed_a_seed_b",
+                    "uuid": "rel_seed_a_seed_b",
+                    "name": "RELATED_TO",
+                    "fact": "seed-a points at seed-b",
+                    "group_id": self.group_id,
+                    "episodes": [],
+                    "attributes": {},
+                    "created_at": now,
+                    "expired_at": None,
+                    "valid_at": now,
+                    "invalid_at": None,
+                    "source_uuid": "seed-a",
+                    "target_uuid": "seed-b",
+                },
+            ]
+        if "FROM relates_to" in query and "target_id IN $entity_ids" in query:
+            return [
+                {
+                    "record_id": "relates_to:rel_source_a_seed_a",
+                    "uuid": "rel_source_a_seed_a",
+                    "name": "RELATED_TO",
+                    "fact": "source-a points at seed-a",
+                    "group_id": self.group_id,
+                    "episodes": [],
+                    "attributes": {},
+                    "created_at": now,
+                    "expired_at": None,
+                    "valid_at": now,
+                    "invalid_at": None,
+                    "source_uuid": "source-a",
+                    "target_uuid": "seed-a",
+                },
+                {
+                    "record_id": "relates_to:rel_seed_a_seed_b",
+                    "uuid": "rel_seed_a_seed_b",
+                    "name": "RELATED_TO",
+                    "fact": "seed-a points at seed-b",
+                    "group_id": self.group_id,
+                    "episodes": [],
+                    "attributes": {},
+                    "created_at": now,
+                    "expired_at": None,
+                    "valid_at": now,
+                    "invalid_at": None,
+                    "source_uuid": "seed-a",
+                    "target_uuid": "seed-b",
+                },
+            ]
+        if "FROM entity" in query:
+            entity_ids = cast("list[str]", params["entity_ids"])
+            return [
+                {
+                    "record_id": f"entity:{entity_id}",
+                    "uuid": entity_id,
+                    "name": entity_id.title(),
+                    "entity_type": "topic",
+                    "summary": "",
+                    "group_id": self.group_id,
+                    "attributes": {},
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for entity_id in entity_ids
+            ]
+        return []
+
+
+def _related_edge_row(
+    *,
+    uuid: str,
+    source_id: str,
+    target_id: str,
+    group_id: str,
+    created_at: datetime,
+) -> dict[str, object]:
+    return {
+        "record_id": f"relates_to:{uuid}",
+        "uuid": uuid,
+        "name": "RELATED_TO",
+        "fact": f"{source_id} points at {target_id}",
+        "group_id": group_id,
+        "episodes": [],
+        "attributes": {},
+        "created_at": created_at,
+        "expired_at": None,
+        "valid_at": created_at,
+        "invalid_at": None,
+        "source_uuid": source_id,
+        "target_uuid": target_id,
+    }
+
+
+class _CappedRelatedBatchClient:
+    group_id = "org-native"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        now = datetime.now(UTC)
+        if "FROM relates_to" in query and "source_id IN $entity_ids" in query:
+            return [
+                _related_edge_row(
+                    uuid=f"rel_seed_a_target_{index}",
+                    source_id="seed-a",
+                    target_id=f"target-{index}",
+                    group_id=self.group_id,
+                    created_at=now,
+                )
+                for index in range(cast("int", params["limit"]))
+            ]
+        if "FROM relates_to" in query and "target_id IN $entity_ids" in query:
+            return []
+        if "FROM relates_to" in query and "source_id = $entity_id" in query:
+            if params["entity_id"] != "seed-b":
+                return []
+            return [
+                _related_edge_row(
+                    uuid="rel_seed_b_target_b",
+                    source_id="seed-b",
+                    target_id="target-b",
+                    group_id=self.group_id,
+                    created_at=now,
+                )
+            ]
+        if "FROM entity" in query:
+            entity_ids = cast("list[str]", params["entity_ids"])
+            return [
+                {
+                    "record_id": f"entity:{entity_id}",
+                    "uuid": entity_id,
+                    "name": entity_id.title(),
+                    "entity_type": "topic",
+                    "summary": "",
+                    "group_id": self.group_id,
+                    "attributes": {},
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for entity_id in entity_ids
+            ]
+        return []
+
+
 def _deterministic_provider() -> DeterministicNativeEmbeddingProvider:
     return DeterministicNativeEmbeddingProvider(
         NativeEmbeddingMetadata(
@@ -991,6 +1163,63 @@ async def test_native_relationship_manager_batches_related_entity_lookup() -> No
         }
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_native_relationship_batch_uses_indexed_set_reads() -> None:
+    client = _RelatedBatchClient()
+    relationship_manager = NativeRelationshipManager(
+        cast("NativeSurrealGraphClient", client),
+        group_id=client.group_id,
+    )
+
+    related = await relationship_manager.get_related_entities_batch(
+        ["seed-a", "seed-b"],
+        limit_per_entity=3,
+    )
+
+    relates_queries = [call for call in client.calls if "FROM relates_to" in call[0]]
+    entity_queries = [call for call in client.calls if "FROM entity" in call[0]]
+    assert len(relates_queries) == 2
+    assert len(entity_queries) == 1
+    assert all("IN $entity_ids" in query for query, _ in relates_queries)
+    assert all("$entity_id" not in params for _, params in relates_queries)
+    assert [params["limit"] for _, params in relates_queries] == [6, 6]
+
+    assert [entity.id for entity, _ in related["seed-a"]] == [
+        "target-a",
+        "seed-b",
+        "source-a",
+    ]
+    assert [entity.id for entity, _ in related["seed-b"]] == ["seed-a"]
+    assert [relationship.id for _, relationship in related["seed-b"]] == ["rel_seed_a_seed_b"]
+
+
+@pytest.mark.asyncio
+async def test_native_relationship_batch_tops_up_underfilled_seeds_when_capped() -> None:
+    client = _CappedRelatedBatchClient()
+    relationship_manager = NativeRelationshipManager(
+        cast("NativeSurrealGraphClient", client),
+        group_id=client.group_id,
+    )
+
+    related = await relationship_manager.get_related_entities_batch(
+        ["seed-a", "seed-b"],
+        limit_per_entity=2,
+    )
+
+    relates_queries = [call for call in client.calls if "FROM relates_to" in call[0]]
+    assert len(relates_queries) == 3
+    assert any("source_id IN $entity_ids" in query for query, _ in relates_queries)
+    assert any("target_id IN $entity_ids" in query for query, _ in relates_queries)
+    top_up_calls = [
+        params for query, params in relates_queries if "source_id = $entity_id" in query
+    ]
+    assert top_up_calls == [
+        {"group_id": client.group_id, "entity_id": "seed-b", "relationship_types": [], "limit": 2}
+    ]
+    assert [entity.id for entity, _ in related["seed-a"]] == ["target-0", "target-1"]
+    assert [entity.id for entity, _ in related["seed-b"]] == ["target-b"]
 
 
 @pytest.mark.asyncio
