@@ -18,7 +18,6 @@ import typer
 from sibyl.cli.common import console, error, info, run_async, success, warn
 from sibyl.config import settings
 from sibyl.persistence.auth_archive import (
-    AUTH_ARCHIVE_TABLES,
     export_auth_archive_payload,
     restore_auth_archive_payload,
 )
@@ -30,7 +29,6 @@ from sibyl_core.migrate.archive import (
     AUTH_FILENAME,
     CONTENT_FILENAME,
     GRAPH_FILENAME,
-    POSTGRES_FILENAME,
     auth_payload_from_archive,
     build_manifest,
     content_payload_from_archive,
@@ -56,8 +54,6 @@ DEFAULT_REHEARSAL_PASSWORD = "baseline-corpus-password-secure-123!"  # noqa: S10
 DEFAULT_AUTH_FLOW_PASSWORD = "auth-flow-password-secure-123!"  # noqa: S105
 DEFAULT_AUTH_FLOW_EMAIL_OUTBOX = Path(".moon/cache/auth-flow-email-outbox.jsonl")
 DEFAULT_CUTOVER_BENCH_LABEL = "cutover-acceptance"
-_AUTH_READ_ONLY_FUNCTION = "sibyl_reject_auth_rbac_write"
-_AUTH_READ_ONLY_TRIGGER = "sibyl_auth_rbac_read_only"
 DEFAULT_CLOUD_ENV_PATH = Path(".env.sibyl-cloud")
 
 
@@ -67,19 +63,12 @@ async def verify_graph_archive(*args: Any, **kwargs: Any) -> Any:
     return await _verify_graph_archive(*args, **kwargs)
 
 
-class AuthReadOnlyMode(StrEnum):
-    freeze = "freeze"
-    unfreeze = "unfreeze"
-
-
 class ArchiveSourceType(StrEnum):
     surreal_archive = "surreal-archive"
-    legacy_archive = "legacy-archive"
 
 
 class ArchiveTargetMode(StrEnum):
     surreal = "surreal"
-    postgres_rehearsal = "postgres-rehearsal"
 
 
 class CloudCoordinationBackend(StrEnum):
@@ -240,155 +229,6 @@ def _print_verify_summary(result: object) -> None:
         raise typer.Exit(code=1)
 
 
-def _get_pg_env() -> dict[str, str]:
-    """Build environment for retained archive rehearsal pg tools."""
-    import os
-
-    env = os.environ.copy()
-    env["PGPASSWORD"] = settings.postgres_password.get_secret_value()
-    return env
-
-
-def _get_pg_connection_args() -> list[str]:
-    """Build psql connection args for retained archive rehearsal."""
-    return [
-        "-h",
-        settings.postgres_host,
-        "-p",
-        str(settings.postgres_port),
-        "-U",
-        settings.postgres_user,
-        "-d",
-        settings.postgres_db,
-    ]
-
-
-def _find_pg_tool(tool: str) -> str:
-    """Find PostgreSQL client tools for explicit archive rehearsal."""
-    for path in (
-        f"/opt/homebrew/opt/libpq/bin/{tool}",
-        f"/opt/homebrew/opt/postgresql@18/bin/{tool}",
-        f"/opt/homebrew/opt/postgresql@17/bin/{tool}",
-        f"/opt/homebrew/opt/postgresql@16/bin/{tool}",
-        f"/usr/local/opt/libpq/bin/{tool}",
-        f"/usr/local/opt/postgresql@18/bin/{tool}",
-        f"/usr/local/opt/postgresql@17/bin/{tool}",
-        f"/usr/local/opt/postgresql@16/bin/{tool}",
-    ):
-        if Path(path).exists():
-            return path
-    return shutil.which(tool) or tool
-
-
-def _restore_pg_sql(sql_content: str, clean: bool) -> None:
-    """Restore a retained postgres.sql payload during explicit rehearsal."""
-    if clean:
-        drop_sql = """
-DO $$ DECLARE
-    r RECORD;
-BEGIN
-    FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
-        EXECUTE 'DROP TABLE IF EXISTS ' || quote_ident(r.tablename) || ' CASCADE';
-    END LOOP;
-    FOR r IN (SELECT typname FROM pg_type t JOIN pg_namespace n ON t.typnamespace = n.oid
-              WHERE n.nspname = 'public' AND t.typtype = 'e') LOOP
-        EXECUTE 'DROP TYPE IF EXISTS ' || quote_ident(r.typname) || ' CASCADE';
-    END LOOP;
-END $$;
-DROP TABLE IF EXISTS alembic_version CASCADE;
-
-"""
-        sql_content = drop_sql + sql_content
-
-    cmd = [_find_pg_tool("psql"), *_get_pg_connection_args(), "--quiet", "--set", "ON_ERROR_STOP=1"]
-    result = subprocess.run(  # noqa: S603 - trusted psql command
-        cmd,
-        env=_get_pg_env(),
-        input=sql_content,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        error(f"PostgreSQL archive restore failed: {result.stderr}")
-        raise typer.Exit(code=1)
-
-    success("PostgreSQL archive restored")
-
-
-def _quote_pg_ident(identifier: str) -> str:
-    return '"' + identifier.replace('"', '""') + '"'
-
-
-def _build_auth_readonly_sql(mode: AuthReadOnlyMode) -> str:
-    statements = ["BEGIN;"]
-    quoted_function = _quote_pg_ident(_AUTH_READ_ONLY_FUNCTION)
-    quoted_trigger = _quote_pg_ident(_AUTH_READ_ONLY_TRIGGER)
-
-    if mode is AuthReadOnlyMode.freeze:
-        statements.extend(
-            [
-                f"CREATE OR REPLACE FUNCTION {quoted_function}()",
-                "RETURNS trigger",
-                "LANGUAGE plpgsql",
-                "AS $$",
-                "BEGIN",
-                "    RAISE EXCEPTION",
-                "        'Sibyl legacy auth/RBAC tables are read-only after SurrealDB cutover'",
-                "        USING ERRCODE = '25006';",
-                "END;",
-                "$$;",
-            ]
-        )
-
-    for table in AUTH_ARCHIVE_TABLES:
-        quoted_table = _quote_pg_ident(table)
-        statements.append(f"DROP TRIGGER IF EXISTS {quoted_trigger} ON {quoted_table};")
-        if mode is AuthReadOnlyMode.freeze:
-            statements.extend(
-                [
-                    f"CREATE TRIGGER {quoted_trigger}",
-                    f"BEFORE INSERT OR UPDATE OR DELETE OR TRUNCATE ON {quoted_table}",
-                    f"FOR EACH STATEMENT EXECUTE FUNCTION {quoted_function}();",
-                ]
-            )
-
-    if mode is AuthReadOnlyMode.unfreeze:
-        statements.append(f"DROP FUNCTION IF EXISTS {quoted_function}();")
-
-    statements.append("COMMIT;")
-    return "\n".join(statements) + "\n"
-
-
-def _apply_auth_readonly_sql(sql_content: str) -> None:
-    cmd = [_find_pg_tool("psql"), *_get_pg_connection_args(), "--quiet", "--set", "ON_ERROR_STOP=1"]
-    result = subprocess.run(  # noqa: S603 - trusted psql command
-        cmd,
-        env=_get_pg_env(),
-        input=sql_content,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        error(f"Legacy auth/RBAC read-only SQL failed: {result.stderr}")
-        raise typer.Exit(code=1)
-
-
-def _warn_if_database_dump_payload_skipped(*, archive: object, restore_database_dump: bool) -> None:
-    if restore_database_dump:
-        return
-    archive_files = getattr(archive, "files", {})
-    if POSTGRES_FILENAME not in archive_files:
-        return
-    warn(
-        "Archive includes the database dump sidecar (postgres.sql), but database dump restore is disabled"
-    )
-    info(
-        "Pass --restore-database-dump when you want the database dump restored before graph import"
-    )
-
-
 def _warn_if_auth_payload_skipped(*, archive: object, restore_auth: bool) -> None:
     archive_files = getattr(archive, "files", {})
     if AUTH_FILENAME not in archive_files:
@@ -410,9 +250,6 @@ def _warn_if_content_payload_skipped(*, archive: object, restore_content: bool) 
         warn("Archive includes content.json, but content restore is disabled")
         info("Pass --restore-content when you want the Surreal content snapshot imported")
         return
-    if settings.store != "surreal":
-        warn("Archive includes content.json, but SIBYL_STORE is not surreal")
-        info("The active runtime is not using Surreal; content.json will be skipped")
 
 
 def _payload_decision(*, present: bool, enabled: bool, blocked: bool = False) -> str:
@@ -428,8 +265,8 @@ def _payload_decision(*, present: bool, enabled: bool, blocked: bool = False) ->
 def _unsupported_payload_names(archive: object) -> list[str]:
     manifest = getattr(archive, "manifest", None)
     files = getattr(manifest, "files", {}) if manifest is not None else {}
-    supported_kinds = {"auth", "content", "database_dump", "graph"}
-    supported_names = {AUTH_FILENAME, CONTENT_FILENAME, GRAPH_FILENAME, POSTGRES_FILENAME}
+    supported_kinds = {"auth", "content", "graph"}
+    supported_names = {AUTH_FILENAME, CONTENT_FILENAME, GRAPH_FILENAME}
     unsupported: list[str] = []
     for name, file_manifest in files.items():
         kind = getattr(file_manifest, "kind", "other")
@@ -443,7 +280,6 @@ def _print_archive_restore_review(
     archive: object,
     source_type: ArchiveSourceType,
     target_mode: ArchiveTargetMode,
-    restore_database_dump: bool,
     restore_graph: bool,
     restore_auth: bool,
     restore_content: bool,
@@ -478,34 +314,9 @@ def _print_archive_restore_review(
             blocked=settings.store != "surreal",
         )
     )
-    info(
-        "  postgres.sql: "
-        + _payload_decision(
-            present=POSTGRES_FILENAME in archive_files,
-            enabled=restore_database_dump,
-        )
-    )
     unsupported = _unsupported_payload_names(archive)
     if unsupported:
         warn("Unsupported archive payloads will be ignored: " + ", ".join(unsupported))
-
-
-def _require_database_dump_restore_policy(
-    *,
-    restore_database_dump: bool,
-    source_type: ArchiveSourceType,
-    target_mode: ArchiveTargetMode,
-) -> None:
-    if not restore_database_dump:
-        return
-    if source_type is not ArchiveSourceType.legacy_archive:
-        error("Restoring postgres.sql requires --source-type legacy-archive")
-        info("postgres.sql is a historical migration payload, not a default restore path")
-        raise typer.Exit(code=1)
-    if target_mode is not ArchiveTargetMode.postgres_rehearsal:
-        error("Restoring postgres.sql requires --target-mode postgres-rehearsal")
-        info("This prevents accidental writes to ambient PostgreSQL services")
-        raise typer.Exit(code=1)
 
 
 async def _replay_baseline(
@@ -680,8 +491,6 @@ def _print_cutover_plan(
 
 def _print_writes_remain_frozen_notice() -> None:
     warn("Writes remain frozen. Rollback is still supported at this point.")
-    info("Freeze legacy auth/RBAC writes before reopening:")
-    typer.echo("  moon run auth-readonly -- --mode freeze --apply --yes")
     info(
         "Rerun with --reopen-writes --acknowledge-no-instant-rollback "
         "after final operator sign-off."
@@ -1346,14 +1155,6 @@ def import_archive(
         bool,
         typer.Option("--clean", help="Clear the target graph before import"),
     ] = False,
-    restore_database_dump: Annotated[
-        bool,
-        typer.Option(
-            "--restore-database-dump",
-            "--restore-postgres",
-            help="Restore the database dump sidecar (postgres.sql) before graph import",
-        ),
-    ] = False,
     restore_graph: Annotated[
         bool,
         typer.Option("--restore-graph/--skip-graph", help="Restore graph payload"),
@@ -1378,29 +1179,15 @@ def import_archive(
         _resolve_org_id(org_id, archive.manifest.organization_id) if restore_graph else ""
     )
 
-    _require_database_dump_restore_policy(
-        restore_database_dump=restore_database_dump,
-        source_type=source_type,
-        target_mode=target_mode,
-    )
-    if restore_database_dump and POSTGRES_FILENAME not in archive.files:
-        error("Archive does not contain the database dump sidecar (postgres.sql)")
-        raise typer.Exit(code=1)
-
     if restore_graph and GRAPH_FILENAME not in archive.files:
         error("Archive does not contain graph.json")
         raise typer.Exit(code=1)
-    _warn_if_database_dump_payload_skipped(
-        archive=archive,
-        restore_database_dump=restore_database_dump,
-    )
     _warn_if_auth_payload_skipped(archive=archive, restore_auth=restore_auth)
     _warn_if_content_payload_skipped(archive=archive, restore_content=restore_content)
     _print_archive_restore_review(
         archive=archive,
         source_type=source_type,
         target_mode=target_mode,
-        restore_database_dump=restore_database_dump,
         restore_graph=restore_graph,
         restore_auth=restore_auth,
         restore_content=restore_content,
@@ -1415,10 +1202,6 @@ def import_archive(
         if not typer.confirm("Continue?"):
             info("Cancelled")
             return
-
-    if restore_database_dump:
-        info("Restoring database dump sidecar...")
-        _restore_pg_sql(archive.files[POSTGRES_FILENAME].decode("utf-8"), clean)
 
     _bootstrap_surreal_runtimes(clean=clean)
 
@@ -1590,49 +1373,6 @@ def auth_flow_compare(
     _auth_flow_compare()
 
 
-@app.command("auth-readonly")
-def auth_readonly(
-    mode: Annotated[
-        AuthReadOnlyMode,
-        typer.Option(
-            "--mode",
-            help="Generate SQL to freeze or unfreeze legacy auth/RBAC writes",
-        ),
-    ] = AuthReadOnlyMode.freeze,
-    output: Annotated[
-        Path | None,
-        typer.Option("--output", "-o", help="Write SQL to a file instead of stdout"),
-    ] = None,
-    apply_sql: Annotated[
-        bool,
-        typer.Option("--apply", help="Apply the SQL to the configured PostgreSQL database"),
-    ] = False,
-    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
-) -> None:
-    """Generate or apply the legacy auth/RBAC read-only guard."""
-    sql_content = _build_auth_readonly_sql(mode)
-
-    if output is not None:
-        output.write_text(sql_content, encoding="utf-8")
-        success(f"Auth/RBAC {mode.value} SQL written to {output}")
-    else:
-        typer.echo(sql_content, nl=False)
-
-    if not apply_sql:
-        if output is not None:
-            info("Rerun with --apply during the cutover write-freeze when ready.")
-        return
-
-    if not yes:
-        warn("This changes write behavior on the configured PostgreSQL database.")
-        if not typer.confirm("Continue?"):
-            info("Cancelled")
-            return
-
-    _apply_auth_readonly_sql(sql_content)
-    success(f"Legacy auth/RBAC {mode.value} guard applied")
-
-
 @app.command("rehearse")
 def rehearse_archive(
     source: Annotated[Path, typer.Argument(help="Archive .tar.gz or directory to rehearse")],
@@ -1657,14 +1397,6 @@ def rehearse_archive(
         bool,
         typer.Option("--clean", help="Clear the target graph before import"),
     ] = True,
-    restore_database_dump: Annotated[
-        bool,
-        typer.Option(
-            "--restore-database-dump",
-            "--restore-postgres",
-            help="Restore the database dump sidecar (postgres.sql) before graph import",
-        ),
-    ] = False,
     restore_auth: Annotated[
         bool,
         typer.Option(
@@ -1739,28 +1471,15 @@ def rehearse_archive(
     archive = _load_valid_archive(source)
     effective_org_id = _resolve_org_id(org_id, archive.manifest.organization_id)
 
-    _require_database_dump_restore_policy(
-        restore_database_dump=restore_database_dump,
-        source_type=source_type,
-        target_mode=target_mode,
-    )
-    if restore_database_dump and POSTGRES_FILENAME not in archive.files:
-        error("Archive does not contain the database dump sidecar (postgres.sql)")
-        raise typer.Exit(code=1)
     if GRAPH_FILENAME not in archive.files:
         error("Archive does not contain graph.json")
         raise typer.Exit(code=1)
-    _warn_if_database_dump_payload_skipped(
-        archive=archive,
-        restore_database_dump=restore_database_dump,
-    )
     _warn_if_auth_payload_skipped(archive=archive, restore_auth=restore_auth)
     _warn_if_content_payload_skipped(archive=archive, restore_content=restore_content)
     _print_archive_restore_review(
         archive=archive,
         source_type=source_type,
         target_mode=target_mode,
-        restore_database_dump=restore_database_dump,
         restore_graph=True,
         restore_auth=restore_auth,
         restore_content=restore_content,
@@ -1778,10 +1497,6 @@ def rehearse_archive(
         if not typer.confirm("Continue?"):
             info("Cancelled")
             return
-
-    if restore_database_dump:
-        info("Restoring database dump sidecar...")
-        _restore_pg_sql(archive.files[POSTGRES_FILENAME].decode("utf-8"), clean)
 
     _bootstrap_surreal_runtimes(clean=clean)
 
@@ -1872,14 +1587,6 @@ def cutover_archive(
         bool,
         typer.Option("--clean", help="Clear the target graph before import"),
     ] = True,
-    restore_database_dump: Annotated[
-        bool,
-        typer.Option(
-            "--restore-database-dump",
-            "--restore-postgres",
-            help="Restore the database dump sidecar (postgres.sql) before graph import",
-        ),
-    ] = False,
     restore_auth: Annotated[
         bool,
         typer.Option(
@@ -1986,28 +1693,15 @@ def cutover_archive(
     archive = _load_valid_archive(source)
     effective_org_id = _resolve_org_id(org_id, archive.manifest.organization_id)
 
-    _require_database_dump_restore_policy(
-        restore_database_dump=restore_database_dump,
-        source_type=source_type,
-        target_mode=target_mode,
-    )
-    if restore_database_dump and POSTGRES_FILENAME not in archive.files:
-        error("Archive does not contain the database dump sidecar (postgres.sql)")
-        raise typer.Exit(code=1)
     if GRAPH_FILENAME not in archive.files:
         error("Archive does not contain graph.json")
         raise typer.Exit(code=1)
-    _warn_if_database_dump_payload_skipped(
-        archive=archive,
-        restore_database_dump=restore_database_dump,
-    )
     _warn_if_auth_payload_skipped(archive=archive, restore_auth=restore_auth)
     _warn_if_content_payload_skipped(archive=archive, restore_content=restore_content)
     _print_archive_restore_review(
         archive=archive,
         source_type=source_type,
         target_mode=target_mode,
-        restore_database_dump=restore_database_dump,
         restore_graph=True,
         restore_auth=restore_auth,
         restore_content=restore_content,
@@ -2040,10 +1734,6 @@ def cutover_archive(
         if not typer.confirm("Continue?"):
             info("Cancelled")
             return
-
-    if restore_database_dump:
-        info("Restoring database dump sidecar...")
-        _restore_pg_sql(archive.files[POSTGRES_FILENAME].decode("utf-8"), clean)
 
     _bootstrap_surreal_runtimes(clean=clean)
 

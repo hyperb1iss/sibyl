@@ -15,7 +15,6 @@ from sibyl_core.migrate.archive import (
     AUTH_FILENAME,
     CONTENT_FILENAME,
     GRAPH_FILENAME,
-    POSTGRES_FILENAME,
     build_manifest,
     graph_payload_from_archive,
     load_archive,
@@ -24,13 +23,7 @@ from sibyl_core.migrate.archive import (
 
 runner = CliRunner()
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
-LEGACY_ARCHIVE_FLAGS = ["--source-type", "legacy-archive", "--target-mode", "surreal"]
-LEGACY_POSTGRES_REHEARSAL_FLAGS = [
-    "--source-type",
-    "legacy-archive",
-    "--target-mode",
-    "postgres-rehearsal",
-]
+ARCHIVE_FLAGS = ["--source-type", "surreal-archive", "--target-mode", "surreal"]
 
 
 def _strip_ansi(text: str) -> str:
@@ -146,11 +139,9 @@ def _write_full_archive(
                 "relationships": [],
             }
         ).encode("utf-8"),
-        POSTGRES_FILENAME: b"select 1;\n",
     }
     file_metadata: dict[str, dict[str, object]] = {
         GRAPH_FILENAME: {"kind": "graph", "entity_count": 1, "relationship_count": 0},
-        POSTGRES_FILENAME: {"kind": "database_dump"},
     }
     if include_auth:
         auth_payload = _auth_payload()
@@ -362,7 +353,6 @@ def test_migrate_export_writes_graph_and_runtime_archive(tmp_path: Path) -> None
     loaded = load_archive(archive_path)
     assert AUTH_FILENAME in loaded.files
     assert CONTENT_FILENAME in loaded.files
-    assert POSTGRES_FILENAME not in loaded.files
     assert GRAPH_FILENAME in loaded.files
 
 
@@ -432,78 +422,6 @@ def test_migrate_export_requires_org_id_when_multiple_orgs_exist(tmp_path: Path)
     assert "Rerun the export with --org-id ORG_UUID" in result.output
     assert "--org-id" in result.output
     assert "ORG_UUID" in result.output
-    assert not archive_path.exists()
-
-
-def test_migrate_export_suppresses_postgres_dump(
-    tmp_path: Path,
-) -> None:
-    archive_path = tmp_path / "migration.tar.gz"
-    graph_payload = {
-        "version": "2.0",
-        "created_at": "2026-04-19T20:00:00+00:00",
-        "organization_id": "org-123",
-        "entity_count": 1,
-        "relationship_count": 0,
-        "entities": [{"id": "entity-1"}],
-        "relationships": [],
-    }
-
-    with (
-        patch.object(migrate_cli.settings, "store", "surreal"),
-        patch.object(migrate_cli.settings, "auth_store", "surreal"),
-        patch(
-            "sibyl.cli.migrate._load_graph_export",
-            return_value=(graph_payload, json.dumps(graph_payload).encode("utf-8")),
-        ),
-        patch(
-            "sibyl.cli.migrate._load_runtime_exports",
-            return_value=(
-                (_auth_payload(), json.dumps(_auth_payload()).encode("utf-8")),
-                (_content_payload(), json.dumps(_content_payload()).encode("utf-8")),
-            ),
-        ),
-    ):
-        result = runner.invoke(
-            migrate_cli.app,
-            [
-                "export",
-                "--org-id",
-                "org-123",
-                "--output",
-                str(archive_path),
-            ],
-        )
-
-    assert result.exit_code == 0
-    loaded = load_archive(archive_path)
-    assert POSTGRES_FILENAME not in loaded.files
-    assert AUTH_FILENAME in loaded.files
-    assert CONTENT_FILENAME in loaded.files
-    assert GRAPH_FILENAME in loaded.files
-
-
-def test_migrate_export_errors_when_only_unsupported_postgres_payload_selected(
-    tmp_path: Path,
-) -> None:
-    archive_path = tmp_path / "migration.tar.gz"
-
-    with patch.object(migrate_cli.settings, "store", "surreal"):
-        result = runner.invoke(
-            migrate_cli.app,
-            [
-                "export",
-                "--output",
-                str(archive_path),
-                "--include-database-dump",
-                "--skip-graph",
-                "--skip-auth",
-                "--skip-content",
-            ],
-        )
-
-    assert result.exit_code == 1
-    assert "Select at least one supported payload" in result.output
     assert not archive_path.exists()
 
 
@@ -602,37 +520,10 @@ def test_migrate_import_uses_archive_org_id(tmp_path: Path) -> None:
     with patch("sibyl.cli.migrate._restore_graph_payload", return_value=True) as restore_graph:
         result = runner.invoke(
             migrate_cli.app,
-            ["import", str(archive_path), *LEGACY_ARCHIVE_FLAGS, "--yes"],
+            ["import", str(archive_path), *ARCHIVE_FLAGS, "--yes"],
         )
 
     assert result.exit_code == 0
-    payload, org_id = restore_graph.call_args.args[:2]
-    assert payload["organization_id"] == "org-xyz"
-    assert org_id == "org-xyz"
-    assert restore_graph.call_args.kwargs == {"clean": False}
-
-
-def test_migrate_import_restores_postgres_and_graph(tmp_path: Path) -> None:
-    archive_path = tmp_path / "migration.tar.gz"
-    _write_full_archive(archive_path, org_id="org-xyz")
-
-    with (
-        patch("sibyl.cli.migrate._restore_pg_sql") as restore_pg,
-        patch("sibyl.cli.migrate._restore_graph_payload", return_value=True) as restore_graph,
-    ):
-        result = runner.invoke(
-            migrate_cli.app,
-            [
-                "import",
-                str(archive_path),
-                "--yes",
-                "--restore-database-dump",
-                *LEGACY_POSTGRES_REHEARSAL_FLAGS,
-            ],
-        )
-
-    assert result.exit_code == 0
-    restore_pg.assert_called_once_with("select 1;\n", False)
     payload, org_id = restore_graph.call_args.args[:2]
     assert payload["organization_id"] == "org-xyz"
     assert org_id == "org-xyz"
@@ -651,7 +542,7 @@ def test_migrate_import_requires_explicit_source_type_and_target_mode(tmp_path: 
                 "import",
                 str(archive_path),
                 "--source-type",
-                "legacy-archive",
+                "surreal-archive",
                 "--yes",
             ],
         )
@@ -683,7 +574,7 @@ def test_migrate_rehearse_and_cutover_require_explicit_policy_flags(tmp_path: Pa
                 command,
                 str(archive_path),
                 "--source-type",
-                "legacy-archive",
+                "surreal-archive",
                 *extra_args,
             ],
         )
@@ -694,138 +585,11 @@ def test_migrate_rehearse_and_cutover_require_explicit_policy_flags(tmp_path: Pa
         assert "--target-mode" in _strip_ansi(missing_target.output)
 
 
-def test_migrate_import_requires_explicit_postgres_restore_policy(tmp_path: Path) -> None:
-    archive_path = tmp_path / "migration.tar.gz"
-    _write_full_archive(archive_path)
-
-    missing_flags = runner.invoke(
-        migrate_cli.app,
-        ["import", str(archive_path), "--yes", "--restore-database-dump"],
-    )
-    invalid_source = runner.invoke(
-        migrate_cli.app,
-        [
-            "import",
-            str(archive_path),
-            "--yes",
-            "--restore-database-dump",
-            "--source-type",
-            "surreal-archive",
-            "--target-mode",
-            "postgres-rehearsal",
-        ],
-    )
-    missing_target = runner.invoke(
-        migrate_cli.app,
-        [
-            "import",
-            str(archive_path),
-            "--yes",
-            "--restore-database-dump",
-            "--source-type",
-            "legacy-archive",
-            "--target-mode",
-            "surreal",
-        ],
-    )
-
-    assert missing_flags.exit_code != 0
-    assert "--source-type" in _strip_ansi(missing_flags.output)
-    assert invalid_source.exit_code == 1
-    assert "--source-type legacy-archive" in invalid_source.output
-    assert "historical migration payload" in invalid_source.output
-    assert missing_target.exit_code == 1
-    assert "--target-mode postgres-rehearsal" in missing_target.output
-    assert "ambient PostgreSQL services" in missing_target.output
-
-
-def test_migrate_rehearse_and_cutover_require_postgres_restore_policy(
-    tmp_path: Path,
-) -> None:
-    archive_path = tmp_path / "migration.tar.gz"
-    _write_full_archive(archive_path)
-
-    command_args = [
-        ("rehearse", []),
-        ("cutover", []),
-    ]
-
-    with patch.object(migrate_cli.settings, "store", "surreal"):
-        for command, extra_args in command_args:
-            invalid_source = runner.invoke(
-                migrate_cli.app,
-                [
-                    command,
-                    str(archive_path),
-                    "--restore-database-dump",
-                    "--source-type",
-                    "surreal-archive",
-                    "--target-mode",
-                    "postgres-rehearsal",
-                    *extra_args,
-                ],
-            )
-            missing_target = runner.invoke(
-                migrate_cli.app,
-                [
-                    command,
-                    str(archive_path),
-                    "--restore-database-dump",
-                    "--source-type",
-                    "legacy-archive",
-                    "--target-mode",
-                    "surreal",
-                    *extra_args,
-                ],
-            )
-
-            assert invalid_source.exit_code == 1
-            assert "--source-type legacy-archive" in invalid_source.output
-            assert "historical migration payload" in invalid_source.output
-            assert missing_target.exit_code == 1
-            assert "--target-mode postgres-rehearsal" in missing_target.output
-            assert "ambient PostgreSQL services" in missing_target.output
-
-
-def test_migrate_commands_report_policy_before_missing_postgres_payload(
-    tmp_path: Path,
-) -> None:
-    archive_path = tmp_path / "migration.tar.gz"
-    _write_graph_archive(archive_path)
-
-    command_args = [
-        ("import", []),
-        ("rehearse", []),
-        ("cutover", []),
-    ]
-
-    with patch.object(migrate_cli.settings, "store", "surreal"):
-        for command, extra_args in command_args:
-            result = runner.invoke(
-                migrate_cli.app,
-                [
-                    command,
-                    str(archive_path),
-                    "--restore-database-dump",
-                    "--source-type",
-                    "surreal-archive",
-                    "--target-mode",
-                    "postgres-rehearsal",
-                    *extra_args,
-                ],
-            )
-
-            assert result.exit_code == 1
-            assert "--source-type legacy-archive" in result.output
-            assert "Archive does not contain" not in result.output
-
-
 def test_migrate_import_dry_run_reports_restore_review_without_writes(tmp_path: Path) -> None:
     archive_path = tmp_path / "migration.tar.gz"
     _write_full_archive(archive_path, include_auth=True, include_content=True)
 
     with (
-        patch("sibyl.cli.migrate._restore_pg_sql") as restore_pg,
         patch("sibyl.cli.migrate._restore_graph_payload", return_value=True) as restore_graph,
         patch("sibyl.cli.migrate._restore_auth_payload", return_value=True) as restore_auth,
         patch("sibyl.cli.migrate._restore_content_payload", return_value=True) as restore_content,
@@ -836,17 +600,15 @@ def test_migrate_import_dry_run_reports_restore_review_without_writes(tmp_path: 
                 "import",
                 str(archive_path),
                 "--dry-run",
-                *LEGACY_ARCHIVE_FLAGS,
+                *ARCHIVE_FLAGS,
             ],
         )
 
     assert result.exit_code == 0
     assert "Archive restore review:" in result.output
-    assert "declared source type: legacy-archive" in result.output
+    assert "declared source type: surreal-archive" in result.output
     assert "target mode: surreal" in result.output
-    assert "postgres.sql: ignored" in result.output
     assert "Archive import dry run complete" in result.output
-    restore_pg.assert_not_called()
     restore_graph.assert_not_called()
     restore_auth.assert_not_called()
     restore_content.assert_not_called()
@@ -880,27 +642,12 @@ def test_migrate_import_dry_run_reports_unsupported_payloads(tmp_path: Path) -> 
 
     result = runner.invoke(
         migrate_cli.app,
-        ["import", str(archive_path), *LEGACY_ARCHIVE_FLAGS, "--dry-run"],
+        ["import", str(archive_path), *ARCHIVE_FLAGS, "--dry-run"],
     )
 
     assert result.exit_code == 0
     assert "Unsupported archive payloads will be ignored" in result.output
     assert "old-falkor-export.json" in result.output
-
-
-def test_migrate_import_warns_when_postgres_payload_is_skipped(tmp_path: Path) -> None:
-    archive_path = tmp_path / "migration.tar.gz"
-    _write_full_archive(archive_path)
-
-    with patch("sibyl.cli.migrate._restore_graph_payload", return_value=True):
-        result = runner.invoke(
-            migrate_cli.app,
-            ["import", str(archive_path), *LEGACY_ARCHIVE_FLAGS, "--yes"],
-        )
-
-    assert result.exit_code == 0
-    assert "database dump sidecar" in result.output
-    assert "restore is disabled" in result.output
 
 
 def test_migrate_import_warns_when_auth_payload_restore_is_disabled(tmp_path: Path) -> None:
@@ -913,7 +660,7 @@ def test_migrate_import_warns_when_auth_payload_restore_is_disabled(tmp_path: Pa
     ):
         result = runner.invoke(
             migrate_cli.app,
-            ["import", str(archive_path), *LEGACY_ARCHIVE_FLAGS, "--yes", "--skip-auth"],
+            ["import", str(archive_path), *ARCHIVE_FLAGS, "--yes", "--skip-auth"],
         )
 
     assert result.exit_code == 0
@@ -931,32 +678,13 @@ def test_migrate_import_restores_auth_when_surreal_auth_store_is_enabled(tmp_pat
     ):
         result = runner.invoke(
             migrate_cli.app,
-            ["import", str(archive_path), *LEGACY_ARCHIVE_FLAGS, "--yes"],
+            ["import", str(archive_path), *ARCHIVE_FLAGS, "--yes"],
         )
 
     assert result.exit_code == 0
     payload = restore_auth.call_args.args[0]
     assert payload["row_counts"]["users"] == 1
     assert restore_auth.call_args.kwargs == {"clean": False}
-
-
-def test_migrate_import_warns_when_content_payload_is_skipped_in_legacy_store(
-    tmp_path: Path,
-) -> None:
-    archive_path = tmp_path / "migration.tar.gz"
-    _write_full_archive(archive_path, include_content=True)
-
-    with (
-        patch.object(migrate_cli.settings, "store", "legacy"),
-        patch("sibyl.cli.migrate._restore_graph_payload", return_value=True),
-    ):
-        result = runner.invoke(
-            migrate_cli.app,
-            ["import", str(archive_path), *LEGACY_ARCHIVE_FLAGS, "--yes"],
-        )
-
-    assert result.exit_code == 0
-    assert "Archive includes content.json, but SIBYL_STORE is not surreal" in result.output
 
 
 def test_migrate_import_restores_content_when_surreal_store_is_enabled(tmp_path: Path) -> None:
@@ -970,38 +698,13 @@ def test_migrate_import_restores_content_when_surreal_store_is_enabled(tmp_path:
     ):
         result = runner.invoke(
             migrate_cli.app,
-            ["import", str(archive_path), *LEGACY_ARCHIVE_FLAGS, "--yes"],
+            ["import", str(archive_path), *ARCHIVE_FLAGS, "--yes"],
         )
 
     assert result.exit_code == 0
     payload = restore_content.call_args.args[0]
     assert payload["row_counts"]["document_chunks"] == 1
     assert restore_content.call_args.kwargs == {"clean": False}
-
-
-def test_migrate_check_accepts_backup_all_directory_layout(tmp_path: Path) -> None:
-    backup_dir = tmp_path / "backup-all"
-    backup_dir.mkdir()
-    (backup_dir / "20260420_120000_sibyl_pg.sql").write_text("select 1;\n", encoding="utf-8")
-    (backup_dir / "20260420_120000_sibyl_graph.json").write_text(
-        json.dumps(
-            {
-                "version": "2.0",
-                "created_at": "2026-04-19T20:00:00+00:00",
-                "organization_id": "org-123",
-                "entity_count": 1,
-                "relationship_count": 0,
-                "entities": [{"id": "entity-1"}],
-                "relationships": [],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    result = runner.invoke(migrate_cli.app, ["check", str(backup_dir)])
-
-    assert result.exit_code == 0
-    assert "Archive validation passed" in result.output
 
 
 def test_migrate_verify_uses_runtime_verifier(tmp_path: Path) -> None:
@@ -1134,37 +837,6 @@ def test_migrate_auth_flow_compare_allows_same_base_url_for_debug() -> None:
     auth_flow_compare.assert_awaited_once()
 
 
-def test_migrate_auth_readonly_prints_freeze_sql() -> None:
-    result = runner.invoke(migrate_cli.app, ["auth-readonly"])
-
-    assert result.exit_code == 0
-    assert 'CREATE OR REPLACE FUNCTION "sibyl_reject_auth_rbac_write"()' in result.output
-    assert 'CREATE TRIGGER "sibyl_auth_rbac_read_only"' in result.output
-    assert "BEFORE INSERT OR UPDATE OR DELETE OR TRUNCATE" in result.output
-    assert result.output.rstrip().endswith("COMMIT;")
-
-
-def test_migrate_auth_readonly_sql_covers_all_auth_tables() -> None:
-    sql = migrate_cli._build_auth_readonly_sql(migrate_cli.AuthReadOnlyMode.freeze)
-
-    for table in migrate_cli.AUTH_ARCHIVE_TABLES:
-        assert f'ON "{table}"' in sql
-
-
-def test_migrate_auth_readonly_apply_runs_unfreeze_sql() -> None:
-    with patch("sibyl.cli.migrate._apply_auth_readonly_sql") as apply_auth_readonly_sql:
-        result = runner.invoke(
-            migrate_cli.app,
-            ["auth-readonly", "--mode", "unfreeze", "--apply", "--yes"],
-        )
-
-    assert result.exit_code == 0
-    apply_auth_readonly_sql.assert_called_once()
-    sql = apply_auth_readonly_sql.call_args.args[0]
-    assert 'DROP TRIGGER IF EXISTS "sibyl_auth_rbac_read_only"' in sql
-    assert 'DROP FUNCTION IF EXISTS "sibyl_reject_auth_rbac_write"();' in sql
-
-
 def test_migrate_rehearse_runs_verify_and_baseline(tmp_path: Path) -> None:
     archive_path = tmp_path / "migration.tar.gz"
     manifest_path = tmp_path / "runtime-manifest.json"
@@ -1196,7 +868,7 @@ def test_migrate_rehearse_runs_verify_and_baseline(tmp_path: Path) -> None:
             [
                 "rehearse",
                 str(archive_path),
-                *LEGACY_ARCHIVE_FLAGS,
+                *ARCHIVE_FLAGS,
                 "--yes",
                 "--manifest-path",
                 str(manifest_path),
@@ -1230,7 +902,7 @@ def test_migrate_rehearse_passes_auth_flow_options(tmp_path: Path) -> None:
             [
                 "rehearse",
                 str(archive_path),
-                *LEGACY_ARCHIVE_FLAGS,
+                *ARCHIVE_FLAGS,
                 "--yes",
                 "--skip-baseline",
                 "--base-url",
@@ -1263,7 +935,7 @@ def test_migrate_cutover_requires_surreal_store(tmp_path: Path) -> None:
             [
                 "cutover",
                 str(archive_path),
-                *LEGACY_ARCHIVE_FLAGS,
+                *ARCHIVE_FLAGS,
                 "--dry-run",
                 "--skip-baseline",
             ],
@@ -1286,7 +958,7 @@ def test_migrate_cutover_ignores_removed_postgres_auth_store(tmp_path: Path) -> 
             [
                 "cutover",
                 str(archive_path),
-                *LEGACY_ARCHIVE_FLAGS,
+                *ARCHIVE_FLAGS,
                 "--dry-run",
                 "--skip-baseline",
             ],
@@ -1306,7 +978,7 @@ def test_migrate_cutover_dry_run_prints_plan(tmp_path: Path) -> None:
             [
                 "cutover",
                 str(archive_path),
-                *LEGACY_ARCHIVE_FLAGS,
+                *ARCHIVE_FLAGS,
                 "--dry-run",
                 "--skip-baseline",
                 "--run-bench-live-smoke",
@@ -1335,7 +1007,7 @@ def test_migrate_cutover_requires_write_freeze_confirmation(tmp_path: Path) -> N
             [
                 "cutover",
                 str(archive_path),
-                *LEGACY_ARCHIVE_FLAGS,
+                *ARCHIVE_FLAGS,
                 "--yes",
                 "--skip-baseline",
             ],
@@ -1367,7 +1039,7 @@ def test_migrate_cutover_leaves_writes_frozen_until_explicit_reopen(tmp_path: Pa
             [
                 "cutover",
                 str(archive_path),
-                *LEGACY_ARCHIVE_FLAGS,
+                *ARCHIVE_FLAGS,
                 "--yes",
                 "--write-freeze-confirmed",
                 "--manifest-path",
@@ -1378,7 +1050,6 @@ def test_migrate_cutover_leaves_writes_frozen_until_explicit_reopen(tmp_path: Pa
     assert result.exit_code == 0
     assert "Acceptance suite passed while writes remain frozen" in result.output
     assert "Rollback is still supported at this point" in result.output
-    assert "moon run auth-readonly -- --mode freeze --apply --yes" in result.output
     auth_flow.assert_awaited_once_with(
         base_url=migrate_cli.DEFAULT_REHEARSAL_BASE_URL,
         auth_flow_email="",
@@ -1409,7 +1080,7 @@ def test_migrate_cutover_requires_ack_before_reopen(tmp_path: Path) -> None:
             [
                 "cutover",
                 str(archive_path),
-                *LEGACY_ARCHIVE_FLAGS,
+                *ARCHIVE_FLAGS,
                 "--yes",
                 "--write-freeze-confirmed",
                 "--manifest-path",
@@ -1445,7 +1116,7 @@ def test_migrate_cutover_reopen_prints_rollback_boundary(tmp_path: Path) -> None
             [
                 "cutover",
                 str(archive_path),
-                *LEGACY_ARCHIVE_FLAGS,
+                *ARCHIVE_FLAGS,
                 "--yes",
                 "--write-freeze-confirmed",
                 "--manifest-path",

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import tarfile
 from pathlib import Path
 
 import pytest
@@ -10,9 +9,7 @@ from sibyl_core.migrate.archive import (
     AUTH_FILENAME,
     CONTENT_FILENAME,
     GRAPH_FILENAME,
-    LEGACY_METADATA_FILENAME,
     MANIFEST_FILENAME,
-    POSTGRES_FILENAME,
     auth_payload_from_archive,
     build_manifest,
     content_payload_from_archive,
@@ -109,7 +106,6 @@ def test_archive_round_trip_preserves_manifest_and_payloads(tmp_path: Path) -> N
         AUTH_FILENAME: _auth_bytes(),
         CONTENT_FILENAME: _content_bytes(),
         GRAPH_FILENAME: _graph_bytes(),
-        POSTGRES_FILENAME: b"select 1;\n",
     }
     manifest = build_manifest(
         organization_id="org-123",
@@ -119,7 +115,6 @@ def test_archive_round_trip_preserves_manifest_and_payloads(tmp_path: Path) -> N
             AUTH_FILENAME: {"kind": "auth", "table_count": 2, "total_rows": 1},
             CONTENT_FILENAME: {"kind": "content", "table_count": 7, "total_rows": 3},
             GRAPH_FILENAME: {"kind": "graph", "entity_count": 2, "relationship_count": 1},
-            POSTGRES_FILENAME: {"kind": "database_dump"},
         },
     )
     archive_path = tmp_path / "migration.tar.gz"
@@ -394,51 +389,6 @@ def test_effective_graph_counts_normalize_duplicate_edges() -> None:
         "episode_count": 1,
         "mention_count": 2,
     }
-
-
-def test_load_archive_supports_legacy_backup_metadata(tmp_path: Path) -> None:
-    archive_path = tmp_path / "legacy.tar.gz"
-    graph_bytes = _graph_bytes()
-    graph_sha = __import__("hashlib").sha256(graph_bytes).hexdigest()
-    metadata = {
-        "version": "2.0",
-        "created_at": "2026-04-19T20:30:00+00:00",
-        "organization_id": "org-123",
-        "files": {GRAPH_FILENAME: graph_sha},
-    }
-
-    legacy_dir = tmp_path / "legacy"
-    legacy_dir.mkdir()
-    (legacy_dir / LEGACY_METADATA_FILENAME).write_text(json.dumps(metadata), encoding="utf-8")
-    (legacy_dir / GRAPH_FILENAME).write_bytes(graph_bytes)
-    with tarfile.open(archive_path, "w:gz") as tar:
-        tar.add(legacy_dir / LEGACY_METADATA_FILENAME, arcname=LEGACY_METADATA_FILENAME)
-        tar.add(legacy_dir / GRAPH_FILENAME, arcname=GRAPH_FILENAME)
-
-    loaded = load_archive(archive_path)
-
-    assert validate_archive(loaded) == []
-    assert loaded.manifest.organization_id == "org-123"
-    assert loaded.manifest.source_store == "legacy"
-
-
-def test_load_archive_supports_backup_all_directory_layout(tmp_path: Path) -> None:
-    backup_dir = tmp_path / "backup-all"
-    backup_dir.mkdir()
-    (backup_dir / "20260420_120000_sibyl_pg.sql").write_text("select 1;\n", encoding="utf-8")
-    (backup_dir / "20260420_120000_sibyl_graph.json").write_bytes(_graph_bytes())
-
-    loaded = load_archive(backup_dir)
-
-    assert validate_archive(loaded) == []
-    assert sorted(loaded.files) == [GRAPH_FILENAME, POSTGRES_FILENAME]
-    assert loaded.manifest.organization_id == "org-123"
-    assert loaded.manifest.source_store == "legacy"
-    assert loaded.manifest.metadata["legacy_layout"] == "backup_payloads"
-    assert (
-        loaded.manifest.files[GRAPH_FILENAME].metadata["original_path"]
-        == "20260420_120000_sibyl_graph.json"
-    )
 
 
 @pytest.mark.asyncio
