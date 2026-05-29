@@ -492,11 +492,6 @@ def _api_idempotency_record(record: ApiIdempotencyRecord) -> SurrealRecord:
     }
 
 
-def _page[T](items: Sequence[T], *, limit: int, offset: int) -> tuple[list[T], int]:
-    total = len(items)
-    return list(items[offset : offset + limit]), total
-
-
 def _rrf_score(rank: int, *, k: float = 60.0) -> float:
     return 1.0 / (k + rank)
 
@@ -597,6 +592,11 @@ async def _select_one(
     return rows[0] if rows else None
 
 
+async def _select_scalar_count(client: SurrealContentClient, query: str, **params: object) -> int:
+    row = await _select_one(client, query, **params)
+    return _coerce_int(row.get("total")) if row is not None else 0
+
+
 async def _replace_record(
     client: SurrealContentClient,
     table: str,
@@ -639,6 +639,42 @@ async def _load_sources_for_org(
     )
     sources = [_source_from_record(row) for row in rows]
     return sorted(sources, key=lambda source: _sort_key(source.created_at), reverse=True)
+
+
+def _scalar_values(result: object) -> list[object]:
+    """Flatten a ``SELECT VALUE`` result to its scalar list.
+
+    ``normalize_records`` only keeps dict rows, so a ``VALUE`` projection
+    (which yields bare scalars) must be unwrapped from the statement envelope
+    directly.
+    """
+    payload: object = result
+    if isinstance(payload, dict):
+        mapping = cast("Mapping[str, object]", payload)
+        if "result" in mapping:
+            payload = mapping["result"]
+    if isinstance(payload, list) and len(payload) == 1 and isinstance(payload[0], dict):
+        inner = cast("Mapping[str, object]", payload[0])
+        if "result" in inner and ("status" in inner or "time" in inner):
+            payload = inner["result"]
+    if isinstance(payload, list):
+        return [item for item in payload if not isinstance(item, dict)]
+    return []
+
+
+async def _org_source_ids(
+    client: SurrealContentClient,
+    *,
+    organization_id: UUID | str,
+) -> list[str]:
+    # A ``SELECT VALUE`` projection yields a list of bare scalar strings;
+    # ``query_error`` would misread any such string as an error, and the
+    # driver already raises on a genuine SurrealDB error for a non-raw query.
+    result = await client.execute_query(
+        "SELECT VALUE uuid FROM crawl_sources WHERE organization_id = $organization_id;",
+        organization_id=str(organization_id),
+    )
+    return [str(value) for value in _scalar_values(result)]
 
 
 async def _load_all_sources(client: SurrealContentClient) -> list[CrawlSource]:
@@ -883,13 +919,26 @@ async def list_crawled_documents_for_org(
     offset: int,
 ) -> tuple[list[CrawledDocument], int]:
     async with surreal_content_client() as client:
-        sources = await _load_sources_for_org(client, organization_id=organization_id)
-        documents = await _load_documents_for_source_ids(
-            client, [str(source.id) for source in sources]
+        source_ids = await _org_source_ids(client, organization_id=organization_id)
+        if not source_ids:
+            return [], 0
+
+        total = await _select_scalar_count(
+            client,
+            "SELECT count() AS total FROM crawled_documents "
+            "WHERE source_id INSIDE $source_ids GROUP ALL;",
+            source_ids=source_ids,
+        )
+        rows = await _select_many(
+            client,
+            "SELECT * FROM crawled_documents WHERE source_id INSIDE $source_ids "
+            "ORDER BY crawled_at DESC, uuid DESC START $offset LIMIT $limit;",
+            source_ids=source_ids,
+            offset=max(offset, 0),
+            limit=max(limit, 0),
         )
 
-    documents = sorted(documents, key=lambda doc: _sort_key(doc.crawled_at), reverse=True)
-    return _page(documents, limit=limit, offset=offset)
+    return [_document_from_record(row) for row in rows], total
 
 
 async def list_crawl_sources(
@@ -1027,6 +1076,54 @@ async def list_document_chunks(
     return sorted(chunks, key=lambda chunk: chunk.chunk_index)
 
 
+def _source_document_filter_clause(
+    *,
+    source_id: UUID,
+    has_code: bool | None,
+    is_index: bool | None,
+) -> tuple[str, dict[str, object]]:
+    clauses = ["source_id = $source_id"]
+    params: dict[str, object] = {"source_id": str(source_id)}
+    if has_code is not None:
+        clauses.append("has_code = $has_code")
+        params["has_code"] = has_code
+    if is_index is not None:
+        clauses.append("is_index = $is_index")
+        params["is_index"] = is_index
+    return " AND ".join(clauses), params
+
+
+async def _page_source_documents(
+    *,
+    source_id: UUID,
+    limit: int,
+    offset: int,
+    has_code: bool | None,
+    is_index: bool | None,
+    order_by: str,
+) -> tuple[list[CrawledDocument], int]:
+    where_clause, params = _source_document_filter_clause(
+        source_id=source_id,
+        has_code=has_code,
+        is_index=is_index,
+    )
+    async with surreal_content_client() as client:
+        total = await _select_scalar_count(
+            client,
+            f"SELECT count() AS total FROM crawled_documents WHERE {where_clause} GROUP ALL;",  # noqa: S608
+            **params,
+        )
+        rows = await _select_many(
+            client,
+            f"SELECT * FROM crawled_documents WHERE {where_clause} "  # noqa: S608
+            f"ORDER BY {order_by} START $offset LIMIT $limit;",
+            offset=max(offset, 0),
+            limit=max(limit, 0),
+            **params,
+        )
+    return [_document_from_record(row) for row in rows], total
+
+
 async def list_source_documents_page(
     _session: object,
     *,
@@ -1036,19 +1133,14 @@ async def list_source_documents_page(
     has_code: bool | None = None,
     is_index: bool | None = None,
 ) -> tuple[list[CrawledDocument], int]:
-    async with surreal_content_client() as client:
-        rows = await _select_many(
-            client,
-            "SELECT * FROM crawled_documents WHERE source_id = $source_id;",
-            source_id=str(source_id),
-        )
-    documents = [_document_from_record(row) for row in rows]
-    if has_code is not None:
-        documents = [doc for doc in documents if doc.has_code is has_code]
-    if is_index is not None:
-        documents = [doc for doc in documents if doc.is_index is is_index]
-    documents = sorted(documents, key=lambda doc: _sort_key(doc.crawled_at), reverse=True)
-    return _page(documents, limit=limit, offset=offset)
+    return await _page_source_documents(
+        source_id=source_id,
+        limit=limit,
+        offset=offset,
+        has_code=has_code,
+        is_index=is_index,
+        order_by="crawled_at DESC, uuid DESC",
+    )
 
 
 async def list_rag_source_documents_page(
@@ -1060,19 +1152,14 @@ async def list_rag_source_documents_page(
     has_code: bool | None = None,
     is_index: bool | None = None,
 ) -> tuple[list[CrawledDocument], int]:
-    async with surreal_content_client() as client:
-        rows = await _select_many(
-            client,
-            "SELECT * FROM crawled_documents WHERE source_id = $source_id;",
-            source_id=str(source_id),
-        )
-    documents = [_document_from_record(row) for row in rows]
-    if has_code is not None:
-        documents = [doc for doc in documents if doc.has_code is has_code]
-    if is_index is not None:
-        documents = [doc for doc in documents if doc.is_index is is_index]
-    documents = sorted(documents, key=lambda doc: (_coerce_str(doc.title).lower(), str(doc.id)))
-    return _page(documents, limit=limit, offset=offset)
+    return await _page_source_documents(
+        source_id=source_id,
+        limit=limit,
+        offset=offset,
+        has_code=has_code,
+        is_index=is_index,
+        order_by="title COLLATE ASC, uuid ASC",
+    )
 
 
 async def list_source_chunks(
@@ -1206,6 +1293,30 @@ async def count_remaining_unlinked_chunks(
     return sum(1 for chunk in chunks if not chunk.has_entities)
 
 
+def _raw_capture_filter_clause(
+    *,
+    organization_id: UUID,
+    entity_type: str | None,
+    capture_surface: str | None,
+    review_state: str | None,
+) -> tuple[str, dict[str, object]]:
+    clauses = ["organization_id = $organization_id"]
+    params: dict[str, object] = {"organization_id": str(organization_id)}
+    if entity_type:
+        clauses.append("entity_type = $entity_type")
+        params["entity_type"] = entity_type
+    if capture_surface:
+        clauses.append("(capture_surface ?? '') = $capture_surface")
+        params["capture_surface"] = capture_surface
+    if review_state:
+        # The top-level review_state column mirrors metadata.review_state on
+        # every write and defaults to 'pending', so a 'pending' filter also
+        # matches captures whose metadata never set the key.
+        clauses.append("(review_state ?? 'pending') = $review_state")
+        params["review_state"] = review_state
+    return " AND ".join(clauses), params
+
+
 async def list_raw_captures(
     _session: object,
     *,
@@ -1216,36 +1327,24 @@ async def list_raw_captures(
     limit: int,
     offset: int,
 ) -> tuple[list[RawCaptureRecord], bool]:
+    where_clause, params = _raw_capture_filter_clause(
+        organization_id=organization_id,
+        entity_type=entity_type,
+        capture_surface=capture_surface,
+        review_state=review_state,
+    )
     async with surreal_content_client() as client:
         rows = await _select_many(
             client,
-            "SELECT * FROM raw_captures WHERE organization_id = $organization_id;",
-            organization_id=str(organization_id),
+            f"SELECT * FROM raw_captures WHERE {where_clause} "  # noqa: S608
+            "ORDER BY created_at DESC, uuid DESC START $offset LIMIT $lookahead;",
+            offset=max(offset, 0),
+            lookahead=max(limit, 0) + 1,
+            **params,
         )
 
     captures = [_raw_capture_from_record(row) for row in rows]
-    if entity_type:
-        captures = [capture for capture in captures if capture.entity_type == entity_type]
-    if capture_surface:
-        captures = [
-            capture for capture in captures if (capture.capture_surface or "") == capture_surface
-        ]
-    if review_state:
-        if review_state == "pending":
-            captures = [
-                capture
-                for capture in captures
-                if str(capture.metadata.get("review_state") or "pending") == "pending"
-            ]
-        else:
-            captures = [
-                capture
-                for capture in captures
-                if str(capture.metadata.get("review_state") or "") == review_state
-            ]
-    captures = sorted(captures, key=lambda capture: _sort_key(capture.created_at), reverse=True)
-    paged = captures[offset : offset + limit + 1]
-    return paged[:limit], len(paged) > limit
+    return captures[:limit], len(captures) > limit
 
 
 async def get_raw_capture(

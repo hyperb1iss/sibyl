@@ -50,8 +50,12 @@ async def _execute_query(query: str, **params: object) -> list[dict[str, object]
     return _normalize_records(result)
 
 
-def _sort_key(value: datetime | None) -> datetime:
-    return value or datetime.min.replace(tzinfo=None)
+async def _count_query(query: str, **params: object) -> int:
+    rows = await _execute_query(query, **params)
+    if not rows:
+        return 0
+    value = rows[0].get("total")
+    return int(value) if isinstance(value, int | float) else 0
 
 
 def _database_dump_supported() -> bool:
@@ -305,13 +309,19 @@ async def attach_backup_job(record_id: UUID, job_id: str) -> BackupRecord:
 
 
 async def list_backups(org_id: UUID, *, limit: int, offset: int) -> BackupListResult:
-    rows = await _execute_query(
-        "SELECT * FROM backups WHERE organization_id = $organization_id;",
+    total = await _count_query(
+        "SELECT count() AS total FROM backups WHERE organization_id = $organization_id GROUP ALL;",
         organization_id=str(org_id),
     )
+    rows = await _execute_query(
+        "SELECT * FROM backups WHERE organization_id = $organization_id "
+        "ORDER BY created_at DESC, uuid DESC START $offset LIMIT $limit;",
+        organization_id=str(org_id),
+        offset=max(offset, 0),
+        limit=max(limit, 0),
+    )
     backups = [_backup_from_record(row) for row in rows]
-    backups.sort(key=lambda backup: _sort_key(backup.created_at), reverse=True)
-    return BackupListResult(backups=backups[offset : offset + limit], total=len(backups))
+    return BackupListResult(backups=backups, total=total)
 
 
 async def get_backup(org_id: UUID, backup_id: str) -> BackupRecord:
