@@ -31,6 +31,25 @@
   --entity-topic: var(--sc-magenta);
   --entity-episode: var(--sc-green);
   --entity-knowledge-source: var(--sc-fg-muted);
+  --sc-orange: oklch(78% 0.16 60);
+  --sc-fg-secondary: oklch(80% 0.02 280);
+  --sc-on-accent: oklch(100% 0 0);
+  --entity-task: var(--sc-purple);
+  --entity-project: var(--sc-cyan);
+  --entity-epic: var(--sc-orange);
+  --entity-guide: var(--sc-orange);
+  --entity-procedure: var(--sc-cyan);
+  --entity-slash-command: var(--sc-cyan);
+  --entity-file: var(--sc-cyan);
+  --entity-config-file: var(--sc-yellow);
+  --entity-milestone: var(--sc-yellow);
+  --entity-document: var(--sc-yellow);
+  --entity-team: var(--sc-coral);
+  --entity-source: var(--sc-coral);
+  --entity-error-pattern: var(--sc-red);
+  --entity-function: var(--sc-magenta);
+  --entity-concept: var(--sc-fg-muted);
+  --entity-note: var(--sc-fg-muted);
 }
 
 /* -----------------------------------------------------------------------------
@@ -71,6 +90,29 @@
   --entity-topic: var(--sc-magenta);
   --entity-episode: var(--sc-green);
   --entity-knowledge-source: var(--sc-fg-muted);
+
+  /* Extended palette */
+  --sc-orange: oklch(78% 0.16 60);
+  --sc-fg-secondary: oklch(80% 0.02 280);
+  --sc-on-accent: oklch(100% 0 0);
+
+  /* Entity type colors - extended */
+  --entity-task: var(--sc-purple);
+  --entity-project: var(--sc-cyan);
+  --entity-epic: var(--sc-orange);
+  --entity-guide: var(--sc-orange);
+  --entity-procedure: var(--sc-cyan);
+  --entity-slash-command: var(--sc-cyan);
+  --entity-file: var(--sc-cyan);
+  --entity-config-file: var(--sc-yellow);
+  --entity-milestone: var(--sc-yellow);
+  --entity-document: var(--sc-yellow);
+  --entity-team: var(--sc-coral);
+  --entity-source: var(--sc-coral);
+  --entity-error-pattern: var(--sc-red);
+  --entity-function: var(--sc-magenta);
+  --entity-concept: var(--sc-fg-muted);
+  --entity-note: var(--sc-fg-muted);
 }
 
 /* -----------------------------------------------------------------------------
@@ -116,6 +158,29 @@
   --entity-topic: var(--sc-magenta);
   --entity-episode: var(--sc-green);
   --entity-knowledge-source: var(--sc-fg-muted);
+
+  /* Extended palette - tuned for light backgrounds */
+  --sc-orange: oklch(52% 0.16 55);
+  --sc-fg-secondary: oklch(32% 0.035 290);
+  --sc-on-accent: oklch(100% 0 0);
+
+  /* Entity type colors - extended (references adapt to dawn palette) */
+  --entity-task: var(--sc-purple);
+  --entity-project: var(--sc-cyan);
+  --entity-epic: var(--sc-orange);
+  --entity-guide: var(--sc-orange);
+  --entity-procedure: var(--sc-cyan);
+  --entity-slash-command: var(--sc-cyan);
+  --entity-file: var(--sc-cyan);
+  --entity-config-file: var(--sc-yellow);
+  --entity-milestone: var(--sc-yellow);
+  --entity-document: var(--sc-yellow);
+  --entity-team: var(--sc-coral);
+  --entity-source: var(--sc-coral);
+  --entity-error-pattern: var(--sc-red);
+  --entity-function: var(--sc-magenta);
+  --entity-concept: var(--sc-fg-muted);
+  --entity-note: var(--sc-fg-muted);
 }
 
 @theme inline {
@@ -135,6 +200,7 @@
   --color-sc-yellow: var(--sc-yellow);
   --color-sc-green: var(--sc-green);
   --color-sc-red: var(--sc-red);
+  --color-sc-orange: var(--sc-orange);
 
   --color-sc-bg-base: var(--sc-bg-base);
   --color-sc-bg-dark: var(--sc-bg-dark);
@@ -143,8 +209,36 @@
   --color-sc-bg-surface: var(--sc-bg-surface);
 
   --color-sc-fg-primary: var(--sc-fg-primary);
+  --color-sc-fg-secondary: var(--sc-fg-secondary);
   --color-sc-fg-muted: var(--sc-fg-muted);
   --color-sc-fg-subtle: var(--sc-fg-subtle);
+  --color-sc-on-accent: var(--sc-on-accent);
+
+  /* Entity type colors for Tailwind (bg-entity-*, text-entity-*, border-entity-*) */
+  --color-entity-pattern: var(--entity-pattern);
+  --color-entity-rule: var(--entity-rule);
+  --color-entity-template: var(--entity-template);
+  --color-entity-tool: var(--entity-tool);
+  --color-entity-language: var(--entity-language);
+  --color-entity-topic: var(--entity-topic);
+  --color-entity-episode: var(--entity-episode);
+  --color-entity-knowledge-source: var(--entity-knowledge-source);
+  --color-entity-task: var(--entity-task);
+  --color-entity-project: var(--entity-project);
+  --color-entity-epic: var(--entity-epic);
+  --color-entity-guide: var(--entity-guide);
+  --color-entity-procedure: var(--entity-procedure);
+  --color-entity-slash-command: var(--entity-slash-command);
+  --color-entity-file: var(--entity-file);
+  --color-entity-config-file: var(--entity-config-file);
+  --color-entity-milestone: var(--entity-milestone);
+  --color-entity-document: var(--entity-document);
+  --color-entity-team: var(--entity-team);
+  --color-entity-source: var(--entity-source);
+  --color-entity-error-pattern: var(--entity-error-pattern);
+  --color-entity-function: var(--entity-function);
+  --color-entity-concept: var(--entity-concept);
+  --color-entity-note: var(--entity-note);
 }
 
 /* =============================================================================
