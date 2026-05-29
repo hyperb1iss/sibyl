@@ -120,8 +120,6 @@ def test_setup_surreal_services_skips_redis_for_local_coordination(monkeypatch) 
         resolved_surreal_url="ws://127.0.0.1:8000/rpc",
         auth_store="surreal",
         resolved_coordination_backend="local",
-        postgres_host="127.0.0.1",
-        postgres_port=5433,
         redis_host="127.0.0.1",
         redis_port=6381,
     )
@@ -143,8 +141,6 @@ def test_setup_surreal_services_ignores_removed_postgres_auth(monkeypatch) -> No
         resolved_surreal_url="ws://127.0.0.1:8000/rpc",
         auth_store="postgres",
         resolved_coordination_backend="local",
-        postgres_host="127.0.0.1",
-        postgres_port=5433,
         redis_host="127.0.0.1",
         redis_port=6381,
     )
@@ -166,8 +162,6 @@ def test_setup_surreal_services_checks_redis_when_configured(monkeypatch) -> Non
         resolved_surreal_url="ws://127.0.0.1:8000/rpc",
         auth_store="surreal",
         resolved_coordination_backend="redis",
-        postgres_host="127.0.0.1",
-        postgres_port=5433,
         redis_host="127.0.0.1",
         redis_port=6381,
     )
@@ -178,10 +172,10 @@ def test_setup_surreal_services_checks_redis_when_configured(monkeypatch) -> Non
 
 def test_setup_runtime_services_checks_legacy_store_through_surreal_stack(monkeypatch) -> None:
     check_surreal = MagicMock(return_value=True)
-    check_relational = MagicMock(return_value=True)
+    check_coordination = MagicMock(return_value=True)
 
     monkeypatch.setattr(cli_main, "_check_surreal_services", check_surreal)
-    monkeypatch.setattr(cli_main, "_check_relational_sidecar_services", check_relational)
+    monkeypatch.setattr(cli_main, "_check_coordination_services", check_coordination)
 
     runtime_settings = SimpleNamespace(
         store="legacy",
@@ -191,15 +185,15 @@ def test_setup_runtime_services_checks_legacy_store_through_surreal_stack(monkey
 
     assert cli_main._check_runtime_services(runtime_settings) is True
     check_surreal.assert_called_once_with(runtime_settings)
-    check_relational.assert_not_called()
+    check_coordination.assert_not_called()
 
 
 def test_setup_runtime_services_defaults_missing_store_to_surreal(monkeypatch) -> None:
     check_surreal = MagicMock(return_value=True)
-    check_relational = MagicMock(return_value=True)
+    check_coordination = MagicMock(return_value=True)
 
     monkeypatch.setattr(cli_main, "_check_surreal_services", check_surreal)
-    monkeypatch.setattr(cli_main, "_check_relational_sidecar_services", check_relational)
+    monkeypatch.setattr(cli_main, "_check_coordination_services", check_coordination)
 
     runtime_settings = SimpleNamespace(
         auth_store="surreal",
@@ -208,17 +202,17 @@ def test_setup_runtime_services_defaults_missing_store_to_surreal(monkeypatch) -
 
     assert cli_main._check_runtime_services(runtime_settings) is True
     check_surreal.assert_called_once_with(runtime_settings)
-    check_relational.assert_not_called()
+    check_coordination.assert_not_called()
 
 
 def test_setup_runtime_services_checks_surreal_stack_for_mixed_legacy_mode(
     monkeypatch,
 ) -> None:
     check_surreal = MagicMock(return_value=True)
-    check_relational = MagicMock(return_value=True)
+    check_coordination = MagicMock(return_value=True)
 
     monkeypatch.setattr(cli_main, "_check_surreal_services", check_surreal)
-    monkeypatch.setattr(cli_main, "_check_relational_sidecar_services", check_relational)
+    monkeypatch.setattr(cli_main, "_check_coordination_services", check_coordination)
 
     runtime_settings = SimpleNamespace(
         store="legacy",
@@ -228,4 +222,4 @@ def test_setup_runtime_services_checks_surreal_stack_for_mixed_legacy_mode(
 
     assert cli_main._check_runtime_services(runtime_settings) is True
     check_surreal.assert_called_once_with(runtime_settings)
-    check_relational.assert_not_called()
+    check_coordination.assert_not_called()

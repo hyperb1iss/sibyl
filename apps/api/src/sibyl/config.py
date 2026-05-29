@@ -15,7 +15,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sibyl.runtime_shape import (
     default_auth_store,
     fully_surreal_runtime,
-    requires_relational_support,
     resolve_coordination_backend,
     uses_relational_auth,
 )
@@ -426,10 +425,6 @@ class Settings(BaseSettings):
         description="Log SurrealDB queries at warning level when elapsed time exceeds this threshold.",
     )
 
-    # PostgreSQL host/port retained for the migration-rehearsal doctor checks
-    postgres_host: str = Field(default="localhost", description="PostgreSQL host")
-    postgres_port: int = Field(default=5433, description="PostgreSQL port")
-
     # LLM Provider configuration
     llm_provider: Literal["openai", "anthropic"] = Field(
         default="anthropic",
@@ -670,11 +665,6 @@ class Settings(BaseSettings):
     def uses_relational_auth(self) -> bool:
         """Whether auth/session persistence still depends on PostgreSQL."""
         return uses_relational_auth(auth_store=self.auth_store)
-
-    @property
-    def requires_relational_support(self) -> bool:
-        """Whether startup/runtime helpers still need relational services online."""
-        return requires_relational_support(store=self.store, auth_store=self.auth_store)
 
     @property
     def resolved_coordination_backend(self) -> Literal["local", "redis"]:

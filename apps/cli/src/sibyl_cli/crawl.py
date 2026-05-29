@@ -259,14 +259,6 @@ def health(
             # Table output
             console.print(f"\n[{ELECTRIC_PURPLE}]Crawl System Health[/{ELECTRIC_PURPLE}]\n")
 
-            # Check PostgreSQL
-            if response.get("postgres_healthy"):
-                pg_version = response.get("postgres_version") or "unknown"
-                success(f"PostgreSQL: {pg_version[:30]}...")
-                info(f"  pgvector: {response.get('pgvector_version', 'unknown')}")
-            else:
-                error(f"PostgreSQL: {response.get('error', 'Unhealthy')}")
-
             # Check Crawl4AI
             if response.get("crawl4ai_available"):
                 success("Crawl4AI: Ready")

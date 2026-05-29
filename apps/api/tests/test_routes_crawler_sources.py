@@ -13,7 +13,6 @@ import pytest
 from fastapi import HTTPException
 
 from sibyl.api.event_types import WSEvent
-from sibyl.api.routes import crawler as crawler_module
 from sibyl.api.routes.crawler import create_source, get_health, list_sources
 from sibyl.api.schemas import CrawlSourceCreate
 from sibyl.crawler.service import SourceAlreadyExistsError
@@ -44,22 +43,10 @@ class TestCrawlSourceRoutes:
     async def test_get_health_skips_relational_probe_in_fully_surreal_mode(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        check_relational_backend_health = AsyncMock(
-            side_effect=AssertionError("relational probe should stay off")
-        )
-
-        monkeypatch.setattr(crawler_module.settings, "store", "surreal")
-        monkeypatch.setattr(crawler_module.settings, "auth_store", "surreal")
-        monkeypatch.setattr(
-            crawler_module,
-            "check_relational_backend_health",
-            check_relational_backend_health,
-        )
         monkeypatch.setitem(sys.modules, "crawl4ai", SimpleNamespace(AsyncWebCrawler=object))
 
         response = await get_health()
 
-        check_relational_backend_health.assert_not_awaited()
         assert response.relational_backend_enabled is False
         assert response.relational_backend_healthy is True
         assert response.relational_backend_version is None

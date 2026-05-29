@@ -35,7 +35,6 @@ from sibyl.cli.generate import app as generate_app
 from sibyl.cli.migrate import app as migrate_app
 from sibyl.cli.up_cmd import down, status as up_status, up
 from sibyl.runtime_shape import (
-    requires_object_relational_support,
     requires_object_surreal_support,
     resolve_object_coordination_backend,
     resolve_object_store,
@@ -359,23 +358,13 @@ def _check_surreal_services(settings: Any) -> bool:
     else:
         info(f"SurrealDB configured via {surreal_url}")
 
-    return _check_relational_sidecar_services(settings) and all_good
+    return _check_coordination_services(settings) and all_good
 
 
-def _check_relational_sidecar_services(settings: Any) -> bool:
+def _check_coordination_services(settings: Any) -> bool:
     from sibyl.cli.common import error, success
 
     all_good = True
-
-    if requires_object_relational_support(
-        settings, default_store=resolve_object_store(settings, default="surreal")
-    ):
-        if _tcp_service_running(settings.postgres_host, settings.postgres_port):
-            success(f"PostgreSQL running on {settings.postgres_host}:{settings.postgres_port}")
-        else:
-            error(f"PostgreSQL not running on {settings.postgres_host}:{settings.postgres_port}")
-            console.print(f"  [{NEON_CYAN}]Start with: docker compose up -d[/{NEON_CYAN}]")
-            all_good = False
 
     if resolve_object_coordination_backend(settings) == "redis":
         redis_host = settings.redis_host or "127.0.0.1"
@@ -396,10 +385,6 @@ def _check_runtime_services(settings: Any) -> bool:
 
     if requires_object_surreal_support(settings, default_store=store):
         all_good = _check_surreal_services(settings) and all_good
-    elif requires_object_relational_support(settings, default_store=store) or (
-        resolve_object_coordination_backend(settings, default_store=store) == "redis"
-    ):
-        all_good = _check_relational_sidecar_services(settings) and all_good
 
     return all_good
 

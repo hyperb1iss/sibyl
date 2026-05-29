@@ -59,7 +59,6 @@ from sibyl.persistence.content_common import (
     CrawlSourceRecord,
 )
 from sibyl.persistence.content_runtime import (
-    check_relational_backend_health,
     count_remaining_unlinked_chunks,
     create_crawl_source_record,
     delete_crawl_source_record,
@@ -284,17 +283,6 @@ async def get_stats(
 @router.get("/health", response_model=CrawlHealthResponse)
 async def get_health() -> CrawlHealthResponse:
     """Check crawler system health."""
-    relational_backend_enabled = settings.requires_relational_support
-
-    if not relational_backend_enabled:
-        relational_health = {
-            "status": "disabled",
-            "postgres_version": None,
-            "pgvector_version": None,
-        }
-    else:
-        relational_health = await check_relational_backend_health()
-
     # Check Crawl4AI availability
     crawl4ai_available = False
     try:
@@ -305,12 +293,12 @@ async def get_health() -> CrawlHealthResponse:
         pass
 
     return CrawlHealthResponse(
-        relational_backend_enabled=relational_backend_enabled,
-        relational_backend_healthy=relational_health["status"] in {"healthy", "disabled"},
-        relational_backend_version=relational_health.get("postgres_version"),
-        vector_extension_version=relational_health.get("pgvector_version"),
+        relational_backend_enabled=False,
+        relational_backend_healthy=True,
+        relational_backend_version=None,
+        vector_extension_version=None,
         crawl4ai_available=crawl4ai_available,
-        error=None if relational_health["status"] == "disabled" else relational_health.get("error"),
+        error=None,
     )
 
 
