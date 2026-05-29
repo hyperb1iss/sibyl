@@ -210,7 +210,7 @@ function EpicsPageContent() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-sc-fg-primary flex items-center gap-2">
-            <span className="text-[#ffb86c]">◈</span>
+            <span className="text-sc-orange">◈</span>
             Epics
           </h1>
           <p className="text-sm text-sc-fg-muted mt-1">

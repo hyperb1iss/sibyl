@@ -32,9 +32,9 @@ const PRIORITY_STYLES: Record<
   },
   medium: {
     bg: 'bg-sc-bg-base',
-    border: 'border-[#ffb86c]/20 hover:border-[#ffb86c]/40',
-    accent: 'bg-[#ffb86c]',
-    badge: 'bg-[#ffb86c]/20 text-[#ffb86c] border-[#ffb86c]/30',
+    border: 'border-sc-orange/20 hover:border-sc-orange/40',
+    accent: 'bg-sc-orange',
+    badge: 'bg-sc-orange/20 text-sc-orange border-sc-orange/30',
   },
   low: {
     bg: 'bg-sc-bg-base',
@@ -176,7 +176,7 @@ export const EpicCard = memo(function EpicCard({
             )}
 
             {/* Epic indicator */}
-            <span className="text-[10px] text-[#ffb86c] font-medium">Epic</span>
+            <span className="text-[10px] text-sc-orange font-medium">Epic</span>
           </div>
 
           {/* Status indicator */}
@@ -225,7 +225,7 @@ export const EpicCard = memo(function EpicCard({
             <div className="h-1.5 bg-sc-bg-elevated rounded-full overflow-hidden">
               <div
                 className={`h-full transition-all duration-300 ${
-                  progressPercent === 100 ? 'bg-sc-green' : 'bg-[#ffb86c]'
+                  progressPercent === 100 ? 'bg-sc-green' : 'bg-sc-orange'
                 }`}
                 style={{ width: `${progressPercent}%` }}
               />

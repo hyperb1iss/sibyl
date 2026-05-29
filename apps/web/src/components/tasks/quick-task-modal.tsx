@@ -227,7 +227,7 @@ export function QuickTaskModal({
             {filteredEpics.length > 0 && (
               <div className="flex-1">
                 <label htmlFor="quick-task-epic" className="block text-xs text-sc-fg-subtle mb-1">
-                  <span className="text-[#ffb86c]">◈</span> Epic
+                  <span className="text-sc-orange">◈</span> Epic
                 </label>
                 <select
                   id="quick-task-epic"

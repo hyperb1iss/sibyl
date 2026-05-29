@@ -99,12 +99,12 @@ export default function EpicDetailPage({ params }: EpicDetailPageProps) {
           ${isBlocked ? 'border-sc-red/40 bg-gradient-to-br from-sc-red/10 via-sc-bg-base to-sc-bg-base' : ''}
           ${isInProgress ? 'border-sc-purple/40 bg-gradient-to-br from-sc-purple/10 via-sc-bg-base to-sc-bg-base' : ''}
           ${isCompleted ? 'border-sc-green/40 bg-gradient-to-br from-sc-green/10 via-sc-bg-base to-sc-bg-base' : ''}
-          ${!isBlocked && !isInProgress && !isCompleted ? 'border-[#ffb86c]/30 bg-sc-bg-base' : ''}
+          ${!isBlocked && !isInProgress && !isCompleted ? 'border-sc-orange/30 bg-sc-bg-base' : ''}
         `}
       >
         {/* Priority accent bar */}
         <div
-          className={`absolute left-0 top-0 bottom-0 w-1 ${priorityConfig?.bgClass ?? 'bg-[#ffb86c]'}`}
+          className={`absolute left-0 top-0 bottom-0 w-1 ${priorityConfig?.bgClass ?? 'bg-sc-orange'}`}
         />
 
         <div className="pl-5 pr-4 py-4">
@@ -140,14 +140,14 @@ export default function EpicDetailPage({ params }: EpicDetailPageProps) {
           <div className="flex items-center gap-2 mb-3 flex-wrap">
             {/* Priority */}
             <span
-              className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded border ${priorityConfig?.bgClass ?? 'bg-[#ffb86c]/20'} ${priorityConfig?.textClass ?? 'text-[#ffb86c]'} border-current/30`}
+              className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded border ${priorityConfig?.bgClass ?? 'bg-sc-orange/20'} ${priorityConfig?.textClass ?? 'text-sc-orange'} border-current/30`}
             >
               {priority === 'critical' && <Zap width={12} height={12} className="animate-pulse" />}
               {priorityConfig?.label ?? priority}
             </span>
 
             {/* Epic badge */}
-            <span className="text-xs px-2 py-0.5 rounded bg-[#ffb86c]/20 text-[#ffb86c] border border-[#ffb86c]/30 font-medium">
+            <span className="text-xs px-2 py-0.5 rounded bg-sc-orange/20 text-sc-orange border border-sc-orange/30 font-medium">
               Epic
             </span>
 
@@ -190,7 +190,7 @@ export default function EpicDetailPage({ params }: EpicDetailPageProps) {
               </div>
               <div className="h-2 bg-sc-bg-elevated rounded-full overflow-hidden">
                 <div
-                  className={`h-full transition-all duration-300 ${progressPercent === 100 ? 'bg-sc-green' : 'bg-[#ffb86c]'}`}
+                  className={`h-full transition-all duration-300 ${progressPercent === 100 ? 'bg-sc-green' : 'bg-sc-orange'}`}
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
@@ -210,7 +210,7 @@ export default function EpicDetailPage({ params }: EpicDetailPageProps) {
       {/* Tasks Section */}
       <div className="space-y-3">
         <h2 className="text-lg font-medium text-sc-fg-primary flex items-center gap-2">
-          <Layers width={18} height={18} className="text-[#ffb86c]" />
+          <Layers width={18} height={18} className="text-sc-orange" />
           Tasks
           <span className="text-sm text-sc-fg-muted font-normal">({totalTasks})</span>
         </h2>
