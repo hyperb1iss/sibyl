@@ -994,15 +994,16 @@ is migrate existing users, verify the cutover, and let the old stack disappear.
 
 ### W14. Work-Item Hierarchy Unification
 
-Collapse the Epic entity into the task tree: a task with children is an epic. Today Epic is a sibling
-entity (`class Epic(Entity)`, `entity_type=epic`) that carries no scoping of its own — only a
-parallel `EpicStatus` enum and a duplicated REST/MCP workflow that has already drifted (audit H8).
+Collapse the Epic entity into the task tree: a task with children is an epic. Today Epic is a
+sibling entity (`class Epic(Entity)`, `entity_type=epic`) that carries no scoping of its own — only
+a parallel `EpicStatus` enum and a duplicated REST/MCP workflow that has already drifted (audit H8).
 Projects remain the tenancy/RBAC root; everything below a project becomes one recursive task.
 
 - `parent_task_id` + subtask support added to Task; `epic_id` aliased, then retired
 - one status state machine, with container status derived from children (no separate `EpicStatus`)
 - one polymorphic work-item workflow shared by REST and MCP (deletes the H8 duplication by deletion)
-- existing Epic records migrated to tasks-with-children; `sibyl epic *` becomes sugar or is deprecated
+- existing Epic records migrated to tasks-with-children; `sibyl epic *` becomes sugar or is
+  deprecated
 - projects stay separate; revisit only if the task-tree root should carry RBAC directly
 - tracked in roadmap epic `epic_b913e99a537b`; staged for reversibility (carries a data migration)
 

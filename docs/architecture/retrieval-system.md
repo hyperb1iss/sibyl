@@ -110,8 +110,8 @@ called by both `hybrid_search` and `context_search`.
 
 ### Candidate sources
 
-The native search plan models each candidate source as a `RetrievalSignal`. The current
-production set:
+The native search plan models each candidate source as a `RetrievalSignal`. The current production
+set:
 
 | Signal             | Backend                           | What it captures                          |
 | ------------------ | --------------------------------- | ----------------------------------------- |
