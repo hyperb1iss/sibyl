@@ -80,6 +80,48 @@ INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     tags = $input.tags,
     name_embedding = $input.name_embedding;
 """
+_RELATIONSHIP_BULK_UPSERT_QUERY = """
+FOR $row IN $rows {
+    LET $src = $row.src;
+    LET $tgt = $row.tgt;
+    LET $rel = type::thing("relates_to", $row.uuid);
+    DELETE FROM relates_to WHERE uuid = $row.uuid AND (in != $src OR out != $tgt);
+    LET $updated = (UPDATE relates_to SET
+        in = $src,
+        out = $tgt,
+        uuid = $row.uuid,
+        name = $row.name,
+        fact = $row.fact,
+        fact_embedding = $row.fact_embedding,
+        group_id = $row.group_id,
+        source_id = $row.source_id,
+        target_id = $row.target_id,
+        episodes = $row.episodes ?? [],
+        attributes = $row.attributes ?? {},
+        created_at = $row.created_at,
+        expired_at = $row.expired_at,
+        valid_at = $row.valid_at,
+        invalid_at = $row.invalid_at
+    WHERE uuid = $row.uuid RETURN id);
+    IF array::len($updated) = 0 THEN
+        RELATE $src->relates_to->$tgt SET
+            id = $rel,
+            uuid = $row.uuid,
+            name = $row.name,
+            fact = $row.fact,
+            fact_embedding = $row.fact_embedding,
+            group_id = $row.group_id,
+            source_id = $row.source_id,
+            target_id = $row.target_id,
+            episodes = $row.episodes ?? [],
+            attributes = $row.attributes ?? {},
+            created_at = $row.created_at,
+            expired_at = $row.expired_at,
+            valid_at = $row.valid_at,
+            invalid_at = $row.invalid_at
+    END;
+};
+"""
 log = structlog.get_logger()
 
 
@@ -963,15 +1005,43 @@ class RelationshipManager:
         self._embedding_provider = embedding_provider
 
     async def create_bulk(self, relationships: Sequence[Relationship]) -> tuple[int, int]:
-        created = 0
-        failed = 0
-        for relationship in relationships:
-            try:
-                await self.create(relationship)
-                created += 1
-            except Exception:
-                failed += 1
-        return created, failed
+        prepared = list(relationships)
+        if not prepared:
+            return 0, 0
+        try:
+            created_ids = await self.create_direct_bulk(prepared, generate_embeddings=True)
+        except Exception:
+            return 0, len(prepared)
+        created = len(created_ids)
+        return created, len(prepared) - created
+
+    async def create_direct_bulk(
+        self,
+        relationships: Sequence[Relationship],
+        *,
+        generate_embeddings: bool = False,
+        embedding_batch_size: int = 64,
+        write_batch_size: int = 128,
+    ) -> list[str]:
+        prepared = list(relationships)
+        if not prepared:
+            return []
+        if generate_embeddings:
+            prepared = await _relationships_with_native_embeddings(
+                prepared,
+                self._embedding_provider,
+                batch_size=embedding_batch_size,
+            )
+
+        created_ids: list[str] = []
+        batch_size = max(int(write_batch_size), 1)
+        for index in range(0, len(prepared), batch_size):
+            batch = prepared[index : index + batch_size]
+            written = await _replace_relationships_bulk(
+                self._client, batch, group_id=self._group_id
+            )
+            created_ids.extend(written)
+        return created_ids
 
     async def create(self, relationship: Relationship) -> str:
         relationship = await _relationship_with_native_embedding(
@@ -2333,6 +2403,51 @@ async def _relationship_with_native_embedding(
     return relationship.model_copy(update={"metadata": metadata})
 
 
+async def _relationships_with_native_embeddings(
+    relationships: Sequence[Relationship],
+    provider: EmbeddingProvider | None,
+    *,
+    batch_size: int,
+) -> list[Relationship]:
+    if provider is None:
+        return list(relationships)
+
+    updated = list(relationships)
+    pending_indexes = [
+        index
+        for index, relationship in enumerate(updated)
+        if not _metadata_float_list(dict(relationship.metadata or {}).get("fact_embedding"))
+    ]
+    if not pending_indexes:
+        return updated
+
+    dimensions = provider.metadata.dimensions
+    for start in range(0, len(pending_indexes), max(int(batch_size), 1)):
+        batch_indexes = pending_indexes[start : start + max(int(batch_size), 1)]
+        embeddings = await _embed_texts_for_write(
+            provider,
+            [relationship_embedding_text(updated[index]) for index in batch_indexes],
+            operation="relationship_bulk_create",
+        )
+        if embeddings is None:
+            continue
+        if len(embeddings) != len(batch_indexes):
+            raise ValueError(
+                "embedding provider returned "
+                f"{len(embeddings)} vectors for {len(batch_indexes)} relationships"
+            )
+        for index, embedding_values in zip(batch_indexes, embeddings, strict=True):
+            relationship = updated[index]
+            metadata = dict(relationship.metadata or {})
+            metadata["fact_embedding"] = _embedding_vector_from_batch(
+                [embedding_values], dimensions
+            )
+            metadata["embedding_metadata"] = provider.metadata.to_dict()
+            updated[index] = relationship.model_copy(update={"metadata": metadata})
+
+    return updated
+
+
 async def _embed_texts_for_write(
     provider: EmbeddingProvider,
     texts: Sequence[str],
@@ -2604,6 +2719,77 @@ async def _record_id(client: SurrealGraphClient, uuid: str) -> object | None:
         uuid=uuid,
     )
     return row.get("record_id") if row else None
+
+
+async def _record_ids(
+    client: SurrealGraphClient,
+    uuids: Sequence[str],
+    *,
+    group_id: str,
+) -> dict[str, object]:
+    unique = list(dict.fromkeys(uuid for uuid in uuids if uuid))
+    if not unique:
+        return {}
+    rows = normalize_records(
+        await client.execute_query(
+            """
+            SELECT uuid, id AS record_id
+            FROM entity
+            WHERE group_id = $group_id AND uuid IN $uuids;
+            """,
+            group_id=group_id,
+            uuids=unique,
+        )
+    )
+    resolved: dict[str, object] = {}
+    for row in rows:
+        uuid = row.get("uuid")
+        record_id = row.get("record_id")
+        if isinstance(uuid, str) and record_id is not None:
+            resolved[uuid] = record_id
+    return resolved
+
+
+async def _replace_relationships_bulk(
+    client: SurrealGraphClient,
+    relationships: Sequence[Relationship],
+    *,
+    group_id: str,
+) -> list[str]:
+    if not relationships:
+        return []
+    endpoint_uuids = [
+        endpoint
+        for relationship in relationships
+        for endpoint in (relationship.source_id, relationship.target_id)
+    ]
+    record_ids = await _record_ids(client, endpoint_uuids, group_id=group_id)
+
+    rows: list[SurrealRecord] = []
+    written_ids: list[str] = []
+    for relationship in relationships:
+        src = record_ids.get(relationship.source_id)
+        tgt = record_ids.get(relationship.target_id)
+        if src is None or tgt is None:
+            continue
+        payload = _relationship_record(relationship, group_id=group_id)
+        payload["src"] = src
+        payload["tgt"] = tgt
+        rows.append(payload)
+        written_ids.append(relationship.id)
+
+    if not rows:
+        return []
+
+    try:
+        await client.execute_query(_RELATIONSHIP_BULK_UPSERT_QUERY, rows=rows)
+    except Exception as exc:
+        if not _is_transient_connection_error(exc):
+            raise
+        _prepared_groups.discard(client.group_id)
+        await prepare_graph_schema(client)
+        await client.execute_query(_RELATIONSHIP_BULK_UPSERT_QUERY, rows=rows)
+    return written_ids
 
 
 def _relationship_record(relationship: Relationship, *, group_id: str) -> SurrealRecord:

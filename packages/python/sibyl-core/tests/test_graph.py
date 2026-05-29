@@ -1143,6 +1143,124 @@ async def test_native_relationship_manager_batches_related_entity_lookup() -> No
         await client.close()
 
 
+class _RelationshipBulkWriteClient:
+    group_id = "org-native"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        if "AS record_id" in query and "FROM entity" in query:
+            uuids = cast("list[str]", params["uuids"])
+            return [{"uuid": uuid, "record_id": f"entity:{uuid}"} for uuid in uuids]
+        return []
+
+
+@pytest.mark.asyncio
+async def test_native_relationship_bulk_writes_in_one_surreal_query() -> None:
+    client = _RelationshipBulkWriteClient()
+    provider = _deterministic_provider()
+    manager = RelationshipManager(
+        cast("SurrealGraphClient", client),
+        group_id=client.group_id,
+        embedding_provider=provider,
+    )
+
+    relationships = [
+        Relationship(
+            id=f"rel_bulk_{index}",
+            source_id=f"source_{index}",
+            target_id=f"target_{index}",
+            relationship_type=RelationshipType.RELATED_TO,
+        )
+        for index in range(5)
+    ]
+
+    created_ids = await manager.create_direct_bulk(relationships, generate_embeddings=True)
+
+    assert created_ids == [relationship.id for relationship in relationships]
+
+    write_calls = [call for call in client.calls if "FOR $row IN $rows" in call[0]]
+    endpoint_lookups = [
+        call for call in client.calls if "AS record_id" in call[0] and "FROM entity" in call[0]
+    ]
+    assert len(write_calls) == 1
+    assert len(endpoint_lookups) == 1
+
+    _, write_params = write_calls[0]
+    rows = cast("list[dict[str, object]]", write_params["rows"])
+    assert len(rows) == len(relationships)
+    assert all(row["group_id"] == client.group_id for row in rows)
+    assert {str(row["uuid"]) for row in rows} == {relationship.id for relationship in relationships}
+    for row in rows:
+        assert len(cast("list[float]", row["fact_embedding"])) == 4
+        attributes = cast("dict[str, object]", row["attributes"])
+        assert attributes["embedding_metadata"] == provider.metadata.to_dict()
+        assert "fact_embedding" not in attributes
+
+
+@pytest.mark.asyncio
+async def test_native_relationship_bulk_skips_edges_with_missing_endpoints() -> None:
+    client = SurrealGraphClient(group_id="org-native-bulk-rel", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        entity_manager = EntityManager(client, group_id=client.group_id)
+        relationship_manager = RelationshipManager(client, group_id=client.group_id)
+
+        for entity_id in ("alpha", "beta", "gamma"):
+            await entity_manager.create_direct(
+                Entity(
+                    id=entity_id,
+                    entity_type=EntityType.TOPIC,
+                    name=entity_id.title(),
+                    organization_id=client.group_id,
+                )
+            )
+
+        created_ids = await relationship_manager.create_direct_bulk(
+            [
+                Relationship(
+                    id="rel_alpha_beta",
+                    source_id="alpha",
+                    target_id="beta",
+                    relationship_type=RelationshipType.RELATED_TO,
+                ),
+                Relationship(
+                    id="rel_alpha_gamma",
+                    source_id="alpha",
+                    target_id="gamma",
+                    relationship_type=RelationshipType.RELATED_TO,
+                ),
+                Relationship(
+                    id="rel_dangling",
+                    source_id="alpha",
+                    target_id="missing_entity",
+                    relationship_type=RelationshipType.RELATED_TO,
+                ),
+            ]
+        )
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT uuid, source_id, target_id, in.uuid AS in_uuid, out.uuid AS out_uuid
+                FROM relates_to
+                WHERE group_id = $group_id
+                ORDER BY uuid ASC;
+                """,
+                group_id=client.group_id,
+            )
+        )
+    finally:
+        await client.close()
+
+    assert created_ids == ["rel_alpha_beta", "rel_alpha_gamma"]
+    assert [row["uuid"] for row in rows] == ["rel_alpha_beta", "rel_alpha_gamma"]
+    assert all(row["in_uuid"] == "alpha" for row in rows)
+    assert {row["out_uuid"] for row in rows} == {"beta", "gamma"}
+
+
 @pytest.mark.asyncio
 async def test_native_relationship_batch_uses_indexed_set_reads() -> None:
     client = _RelatedBatchClient()
