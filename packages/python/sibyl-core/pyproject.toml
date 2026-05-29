@@ -77,6 +77,15 @@ dev = [
     "pytest-asyncio",
     "pytest-cov>=7.0.0",
     "ruff",
+    # Test-only mirrors of the runtime extras the suite exercises directly:
+    # the graph backend, the numeric stack, and the pydantic-ai client layer.
+    # They stay optional for the published package (graph/llm extras) but the
+    # test env must install them or the graph/eval/ai modules fail collection.
+    # Heavy extras (sentence-transformers, crawl4ai) are left out on purpose;
+    # their tests importorskip so CI stays fast.
+    "surrealdb>=2.0.0,<3.0",
+    "numpy>=2.4.1",
+    "pydantic-ai-slim[anthropic,google,openai]>=1.99.0,<2",
 ]
 
 [project.urls]

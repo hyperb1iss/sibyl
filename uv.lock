@@ -3375,10 +3375,13 @@ runtime = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "numpy" },
+    { name = "pydantic-ai-slim", extra = ["anthropic", "google", "openai"] },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "surrealdb" },
 ]
 
 [package.metadata]
@@ -3408,10 +3411,13 @@ provides-extras = ["crawler", "embeddings", "graph", "graphrag", "llm", "reranki
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "numpy", specifier = ">=2.4.1" },
+    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], specifier = ">=1.99.0,<2" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "ruff" },
+    { name = "surrealdb", specifier = ">=2.0.0,<3.0" },
 ]
 
 [[package]]
