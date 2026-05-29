@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 import structlog
@@ -11,11 +12,15 @@ from sibyl_core.backends.surreal.schema_helpers import execute_schema_statement,
 from sibyl_core.backends.surreal.schema_version import (
     GRAPH_SCHEMA_CURRENT_VERSION,
     SCHEMA_VERSION_TABLE,
+    ConcurrentIndexDefinition,
     SchemaMigration,
     _validate_identifier,
     apply_schema_migrations,
     ensure_schema_version_table,
+    get_schema_embedding_dimension,
     get_schema_version,
+    rebuild_index_concurrently,
+    record_schema_version,
 )
 from sibyl_core.config import core_config
 
@@ -322,6 +327,125 @@ GRAPH_SCHEMA_MIGRATIONS = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class EmbeddingVectorField:
+    """A vector field whose dimension is baked into both its type and its HNSW index."""
+
+    table: str
+    field: str
+    index: str
+
+    def field_redefinition(self, dimension: int) -> str:
+        return (
+            f"DEFINE FIELD OVERWRITE {self.field} ON {self.table} "
+            f"TYPE option<array<float, {dimension}>>;"
+        )
+
+    def clear_statement(self) -> str:
+        return f"UPDATE {self.table} SET {self.field} = NONE WHERE {self.field} != NONE;"
+
+    def index_definition(self, dimension: int) -> ConcurrentIndexDefinition:
+        return ConcurrentIndexDefinition(
+            name=self.index,
+            table=self.table,
+            definition=(
+                f"DEFINE INDEX {self.index} ON {self.table} FIELDS {self.field} "
+                f"HNSW DIMENSION {dimension} DIST COSINE TYPE F32 EFC {HNSW_EFC} M {HNSW_M}"
+            ),
+        )
+
+
+EMBEDDING_VECTOR_FIELDS = (
+    EmbeddingVectorField(table="entity", field="name_embedding", index="idx_entity_embedding"),
+    EmbeddingVectorField(
+        table="community", field="name_embedding", index="idx_community_embedding"
+    ),
+    EmbeddingVectorField(
+        table="relates_to", field="fact_embedding", index="idx_relates_fact_embedding"
+    ),
+)
+
+
+async def rebuild_embedding_indexes_for_dimension(
+    driver: SchemaDriver,
+    *,
+    dimension: int,
+) -> None:
+    """Resize every HNSW vector field/index to ``dimension`` and record the new size.
+
+    Old-dimension vectors violate the resized ``array<float, N>`` field constraint, so each
+    field is cleared before its type is redefined; embeddings regenerate on the next write
+    (write-time dimension validation keeps only correctly-sized vectors from then on).
+    """
+    if not driver.group_id:
+        msg = "rebuild_embedding_indexes_for_dimension requires driver.clone(group_id) first"
+        raise ValueError(msg)
+
+    for vector_field in EMBEDDING_VECTOR_FIELDS:
+        await execute_schema_statement(
+            driver.execute_query,
+            vector_field.clear_statement(),
+            scope="graph_embedding_dimension_rebuild",
+            group_id=driver.group_id,
+        )
+        await execute_schema_statement(
+            driver.execute_query,
+            vector_field.field_redefinition(dimension),
+            scope="graph_embedding_dimension_rebuild",
+            group_id=driver.group_id,
+        )
+        await rebuild_index_concurrently(
+            driver.execute_query,
+            vector_field.index_definition(dimension),
+        )
+
+    await record_schema_version(
+        driver.execute_query,
+        version=GRAPH_SCHEMA_CURRENT_VERSION,
+        migrations=list(GRAPH_SCHEMA_MIGRATIONS),
+        embedding_dimension=dimension,
+    )
+    logger.info(
+        "surreal_schema_embedding_dimension_rebuilt",
+        group_id=driver.group_id,
+        embedding_dimension=dimension,
+    )
+
+
+def _store_supports_concurrent_rebuild(url: str) -> bool:
+    return not url.startswith(("memory://", "surrealkv://"))
+
+
+async def _reconcile_embedding_dimension(driver: SchemaDriver) -> None:
+    recorded = await get_schema_embedding_dimension(driver.execute_query)
+    if recorded is None:
+        await record_schema_version(
+            driver.execute_query,
+            version=GRAPH_SCHEMA_CURRENT_VERSION,
+            migrations=list(GRAPH_SCHEMA_MIGRATIONS),
+            embedding_dimension=EMBEDDING_DIM,
+        )
+        return
+    if recorded == EMBEDDING_DIM:
+        return
+    if not _store_supports_concurrent_rebuild(driver._url):
+        logger.warning(
+            "surreal_schema_embedding_dimension_rebuild_skipped",
+            group_id=driver.group_id,
+            recorded_dimension=recorded,
+            configured_dimension=EMBEDDING_DIM,
+            reason="embedded_store",
+        )
+        return
+    logger.warning(
+        "surreal_schema_embedding_dimension_drift",
+        group_id=driver.group_id,
+        recorded_dimension=recorded,
+        configured_dimension=EMBEDDING_DIM,
+    )
+    await rebuild_embedding_indexes_for_dimension(driver, dimension=EMBEDDING_DIM)
+
+
 def _is_relation_cleanup_statement(statement: str) -> bool:
     normalized = statement.lstrip().lower()
     return any(
@@ -359,6 +483,7 @@ async def bootstrap_schema(
         current_version = await get_schema_version(driver.execute_query)
         if current_version >= GRAPH_SCHEMA_CURRENT_VERSION:
             if not force:
+                await _reconcile_embedding_dimension(driver)
                 return
         elif current_version > 0 and not force:
             await apply_schema_migrations(
@@ -366,6 +491,7 @@ async def bootstrap_schema(
                 GRAPH_SCHEMA_MIGRATIONS,
                 group_id=driver.group_id,
             )
+            await _reconcile_embedding_dimension(driver)
             return
 
     compatible_blocks = (
@@ -385,6 +511,7 @@ async def bootstrap_schema(
         GRAPH_SCHEMA_MIGRATIONS,
         group_id=driver.group_id,
     )
+    await _reconcile_embedding_dimension(driver)
 
 
 async def _execute_graph_schema_block(
@@ -437,12 +564,15 @@ __all__ = [
     "ANALYZER_DEFINITIONS",
     "EDGE_DEFINITIONS",
     "EMBEDDING_DIM",
+    "EMBEDDING_VECTOR_FIELDS",
     "GRAPH_EDGES",
     "GRAPH_SCHEMA_MIGRATIONS",
     "GRAPH_TABLES",
     "NODE_DEFINITIONS",
     "RELATION_EDGE_CLEANUP_DEFINITIONS",
+    "EmbeddingVectorField",
     "bootstrap_schema",
     "drop_all_indexes",
+    "rebuild_embedding_indexes_for_dimension",
     "render_fulltext_compatible_sql",
 ]

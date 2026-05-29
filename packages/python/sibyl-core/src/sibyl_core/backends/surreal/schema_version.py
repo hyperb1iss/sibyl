@@ -20,6 +20,7 @@ DEFINE TABLE IF NOT EXISTS schema_version SCHEMAFULL;
 ALTER TABLE IF EXISTS schema_version SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS name ON schema_version TYPE string;
 DEFINE FIELD IF NOT EXISTS version ON schema_version TYPE int;
+DEFINE FIELD IF NOT EXISTS embedding_dimension ON schema_version TYPE option<int>;
 DEFINE FIELD IF NOT EXISTS migrations ON schema_version TYPE array<object> DEFAULT [];
 DEFINE FIELD IF NOT EXISTS migrations.*.version ON schema_version TYPE int;
 DEFINE FIELD IF NOT EXISTS migrations.*.name ON schema_version TYPE string;
@@ -93,6 +94,7 @@ async def record_schema_version(
     version: int,
     migrations: Sequence[SchemaMigration],
     name: str = GRAPH_SCHEMA_NAME,
+    embedding_dimension: int | None = None,
 ) -> None:
     migration_payload = [
         {"version": migration.version, "name": migration.name} for migration in migrations
@@ -102,14 +104,32 @@ async def record_schema_version(
         UPSERT schema_version:graph SET
             name = $name,
             version = $version,
+            embedding_dimension = $embedding_dimension ?? embedding_dimension,
             migrations = $migrations,
             created_at = created_at ?? time::now(),
             updated_at = time::now();
         """,
         name=name,
         version=version,
+        embedding_dimension=embedding_dimension,
         migrations=migration_payload,
     )
+
+
+async def get_schema_embedding_dimension(
+    execute_query: SurrealExecute,
+    *,
+    name: str = GRAPH_SCHEMA_NAME,
+) -> int | None:
+    result = await execute_query(
+        "SELECT embedding_dimension FROM schema_version WHERE name = $name LIMIT 1;",
+        name=name,
+    )
+    first = _first_record(result)
+    if first is None:
+        return None
+    raw_dimension = first.get("embedding_dimension")
+    return int(raw_dimension) if isinstance(raw_dimension, int | float | str) else None
 
 
 async def apply_schema_migrations(
@@ -248,6 +268,7 @@ __all__ = [
     "apply_schema_migrations",
     "ensure_schema_version_table",
     "get_index_build_status",
+    "get_schema_embedding_dimension",
     "get_schema_version",
     "rebuild_index_concurrently",
     "record_schema_version",
