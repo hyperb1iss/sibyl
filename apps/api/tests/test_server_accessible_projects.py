@@ -15,6 +15,7 @@ from sibyl.server import (
     _get_accessible_projects,
     _get_mcp_context,
     _manage_mcp_action,
+    _manage_workflow_transition,
     _reflect_mcp_memory,
     _remember_mcp_memory,
     _require_owner_mcp_context,
@@ -722,13 +723,31 @@ async def test_add_mcp_entity_denies_missing_actor_with_policy_reason() -> None:
 
 
 @pytest.mark.asyncio
-async def test_manage_mcp_action_scopes_task_metadata() -> None:
+async def test_manage_mcp_complete_task_routes_through_workflow_service() -> None:
+    """H8 regression guard: an MCP complete_task now goes through the shared
+    workflow service (lock + broadcast + project-activity) and enqueues the
+    learning jobs, instead of the old broadcast-less core manage() body."""
+    from sibyl.services.work_item_workflow import WorkItemAction, WorkItemTransition
+    from sibyl_core.models.entities import EntityType
+
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
-    manage = AsyncMock(return_value={"success": True, "action": "complete_task"})
+    manage = AsyncMock()
     entity_manager = SimpleNamespace(
         get=AsyncMock(return_value=SimpleNamespace(project_id="project-a", metadata={}))
     )
     runtime = SimpleNamespace(entity_manager=entity_manager)
+    transition_result = WorkItemTransition(
+        action=WorkItemAction.COMPLETE_TASK,
+        item_id="task-1",
+        entity_type=EntityType.TASK,
+        status="done",
+        name="Ship it",
+        fields={"learnings": "MCP task learning needs policy context."},
+        task_data={"id": "task-1", "title": "Ship it"},
+    )
+    transition = AsyncMock(return_value=transition_result)
+    episode_enqueue = AsyncMock(return_value="episode-job")
+    procedure_enqueue = AsyncMock(return_value="procedure-job")
     data = {"learnings": "MCP task learning needs policy context."}
 
     with (
@@ -738,6 +757,9 @@ async def test_manage_mcp_action_scopes_task_metadata() -> None:
             "sibyl_core.services.graph.get_surreal_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
+        patch("sibyl.services.work_item_workflow.transition_work_item", transition),
+        patch("sibyl.jobs.queue.enqueue_create_learning_episode", episode_enqueue),
+        patch("sibyl.jobs.queue.enqueue_create_learning_procedure", procedure_enqueue),
         patch("sibyl_core.tools.manage.manage", manage),
     ):
         result = await _manage_mcp_action(
@@ -746,36 +768,77 @@ async def test_manage_mcp_action_scopes_task_metadata() -> None:
             data=data,
         )
 
-    assert data == {"learnings": "MCP task learning needs policy context."}
-    assert result == {
-        "success": True,
-        "action": "complete_task",
-        "policy_reason": "same_scope_write_allowed",
+    # The work-item service owns the lock + broadcast + project-activity, so the
+    # old core manage() transition body is never reached on this path.
+    manage.assert_not_awaited()
+    transition.assert_awaited_once()
+    assert transition.await_args.args[0] == ctx.org_id
+    assert transition.await_args.args[1] == "task-1"
+    assert transition.await_args.args[2] == WorkItemAction.COMPLETE_TASK
+
+    # Learning jobs are enqueued with the policy context the authz step resolved.
+    expected_policy = {
+        "actor_user_id": ctx.user_id,
+        "organization_id": ctx.org_id,
+        "organization_role": None,
+        "accessible_projects": ["project-a"],
+        "accessible_delegations": None,
+        "delegated_authority": None,
+        "agent_id": None,
+        "project_id": "project-a",
+        "memory_space": "project",
+        "scope_key": "project-a",
+        "source_surface": "mcp_manage",
     }
-    entity_manager.get.assert_awaited_once_with("task-1")
-    manage.assert_awaited_once_with(
-        action="complete_task",
-        entity_id="task-1",
-        data={
-            "learnings": "MCP task learning needs policy context.",
-            "organization_id": ctx.org_id,
-            "user_id": ctx.user_id,
-            "_memory_policy_context": {
-                "actor_user_id": ctx.user_id,
-                "organization_id": ctx.org_id,
-                "organization_role": None,
-                "accessible_projects": ["project-a"],
-                "accessible_delegations": None,
-                "delegated_authority": None,
-                "agent_id": None,
-                "project_id": "project-a",
-                "memory_space": "project",
-                "scope_key": "project-a",
-                "source_surface": "mcp_manage",
-            },
-        },
-        organization_id=ctx.org_id,
+    episode_enqueue.assert_awaited_once_with(
+        {"id": "task-1", "title": "Ship it"}, ctx.org_id, policy_context=expected_policy
     )
+    procedure_enqueue.assert_awaited_once_with(
+        {"id": "task-1", "title": "Ship it"}, ctx.org_id, policy_context=expected_policy
+    )
+
+    assert result["success"] is True
+    assert result["action"] == "complete_task"
+    assert result["policy_reason"] == "same_scope_write_allowed"
+    assert result["data"]["status"] == "done"
+    assert result["data"]["learning_episode_job_id"] == "episode-job"
+    assert result["data"]["learning_procedure_job_id"] == "procedure-job"
+    # Deprecation pointer is preserved for MCP clients.
+    assert result["data"]["deprecation"]["use_instead"] == "POST /tasks/{id}/complete"
+
+
+@pytest.mark.asyncio
+async def test_manage_workflow_transition_errors_return_structured_response() -> None:
+    """H8 parity on the failure path: a missing or locked work item over the MCP
+    transition path returns a structured success=False, not a raw exception (the
+    old core manage() wrapped everything in except Exception; the unified path
+    must keep that contract)."""
+    from sibyl.locks import LockAcquisitionError
+    from sibyl.services.work_item_workflow import WorkItemAction
+
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+
+    async def _run(exc: Exception) -> dict:
+        with patch(
+            "sibyl.services.work_item_workflow.transition_work_item",
+            AsyncMock(side_effect=exc),
+        ):
+            return await _manage_workflow_transition(
+                ctx=ctx,
+                action="start_task",
+                work_item_action=WorkItemAction.START_TASK,
+                entity_id="task-404",
+                data={},
+                policy_decision=None,
+            )
+
+    missing = await _run(KeyError("task-404"))
+    assert missing["success"] is False
+    assert "not found" in missing["message"].lower()
+
+    locked = await _run(LockAcquisitionError("task-404", ctx.org_id))
+    assert locked["success"] is False
+    assert "locked" in locked["message"].lower()
 
 
 @pytest.mark.asyncio

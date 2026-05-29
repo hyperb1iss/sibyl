@@ -28,6 +28,7 @@ from sibyl.services.recall_limits import (
     RecallConcurrencyLimitExceededError,
     recall_concurrency_slot,
 )
+from sibyl.services.work_item_workflow import WorkItemAction
 from sibyl_core.auth.context import MemoryPolicyContext
 from sibyl_core.auth.memory_policy import (
     MemoryPolicyAction,
@@ -927,6 +928,157 @@ async def _authorize_mcp_manage_action(
     )
 
 
+# MCP transition action -> the unified work-item action. Routing these through
+# the shared apps/api workflow service is what gives the MCP path the entity
+# lock, WebSocket broadcast, and project-activity bump that REST already had and
+# the old core manage() body silently skipped (audit H8).
+_MCP_WORKFLOW_TRANSITIONS: dict[str, WorkItemAction] = {
+    "start_task": WorkItemAction.START_TASK,
+    "block_task": WorkItemAction.BLOCK_TASK,
+    "unblock_task": WorkItemAction.UNBLOCK_TASK,
+    "submit_review": WorkItemAction.SUBMIT_REVIEW,
+    "complete_task": WorkItemAction.COMPLETE_TASK,
+    "archive_task": WorkItemAction.ARCHIVE_TASK,
+    "start_epic": WorkItemAction.START_EPIC,
+    "complete_epic": WorkItemAction.COMPLETE_EPIC,
+    "archive_epic": WorkItemAction.ARCHIVE_EPIC,
+}
+
+
+def _mcp_transition_message(action: str, *, learnings: str | None, reason: str | None) -> str:
+    """Mirror core manage()'s per-action success message for MCP clients."""
+    if action == "start_task":
+        return "Task started"
+    if action == "block_task":
+        return f"Task blocked: {reason or 'No reason provided'}"
+    if action == "unblock_task":
+        return "Task unblocked, resuming work"
+    if action == "submit_review":
+        return "Task submitted for review"
+    if action == "complete_task":
+        return "Task completed" + (" with learnings captured" if learnings else "")
+    if action == "archive_task":
+        return "Task archived"
+    if action == "start_epic":
+        return "Epic started"
+    if action == "complete_epic":
+        return "Epic completed" + (" with learnings captured" if learnings else "")
+    # archive_epic
+    return "Epic archived" + (f": {reason}" if reason else "")
+
+
+async def _manage_workflow_transition(
+    *,
+    ctx: McpContext,
+    action: str,
+    work_item_action: WorkItemAction,
+    entity_id: str | None,
+    data: dict[str, Any],
+    policy_decision: MemoryPolicyDecision | None,
+) -> dict[str, Any]:
+    """Run an MCP task/epic transition through the shared workflow service.
+
+    The lock, broadcast, and project-activity bump come from the service by
+    construction. The response is shaped like core manage()'s ManageResponse so
+    MCP clients see no change, including the deprecation pointer.
+    """
+    from sibyl.locks import LockAcquisitionError
+    from sibyl.services.work_item_workflow import EPIC_TRANSITIONS, transition_work_item
+    from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError
+    from sibyl_core.tools.manage import _deprecation_notice
+
+    def _response(
+        *,
+        success: bool,
+        message: str,
+        action_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "success": success,
+            "action": action,
+            "entity_id": entity_id,
+            "message": message,
+            "data": action_data or {},
+        }
+        deprecation = _deprecation_notice(action)
+        if deprecation is not None:
+            payload["data"].setdefault("deprecation", deprecation)
+        if policy_decision is not None:
+            payload["policy_reason"] = policy_decision.reason
+        return payload
+
+    if not entity_id:
+        suffix = "epic actions" if work_item_action in EPIC_TRANSITIONS else "task actions"
+        return _response(success=False, message=f"entity_id required for {suffix}")
+
+    entity: Any | None = None
+    if work_item_action in EPIC_TRANSITIONS:
+        from sibyl_core.models.entities import EntityType
+        from sibyl_core.services.graph import get_surreal_graph_runtime
+
+        runtime = await get_surreal_graph_runtime(ctx.org_id)
+        try:
+            entity = await runtime.entity_manager.get(entity_id)
+        except EntityNotFoundError:
+            entity = None
+        if not entity:
+            return _response(success=False, message=f"Epic not found: {entity_id}")
+        if entity.entity_type != EntityType.EPIC:
+            return _response(success=False, message=f"Entity is not an epic: {entity_id}")
+
+    learnings = data.get("learnings") if action in {"complete_task", "complete_epic"} else None
+    reason = data.get("reason") if action in {"block_task", "archive_epic"} else None
+
+    try:
+        result = await transition_work_item(
+            ctx.org_id,
+            entity_id,
+            work_item_action,
+            payload=data,
+            entity=entity,
+        )
+    except InvalidTransitionError as exc:
+        return _response(success=False, message=str(exc), action_data=exc.details)
+    except LockAcquisitionError:
+        return _response(
+            success=False,
+            message=f"{entity_id} is locked by another writer; retry shortly",
+        )
+    except (EntityNotFoundError, KeyError):
+        return _response(success=False, message=f"Work item not found: {entity_id}")
+
+    # complete_task with learnings enqueues the same background learning jobs the
+    # REST surface does, using the policy context the authz step resolved.
+    response_data = dict(result.response_data)
+    if (
+        action == "complete_task"
+        and learnings
+        and policy_decision is not None
+        and policy_decision.policy_context is not None
+    ):
+        from sibyl.jobs.entities import serialize_memory_policy_context
+        from sibyl.jobs.queue import (
+            enqueue_create_learning_episode,
+            enqueue_create_learning_procedure,
+        )
+
+        policy_payload = serialize_memory_policy_context(policy_decision.policy_context)
+        episode_job_id = await enqueue_create_learning_episode(
+            result.task_data, ctx.org_id, policy_context=policy_payload
+        )
+        procedure_job_id = await enqueue_create_learning_procedure(
+            result.task_data, ctx.org_id, policy_context=policy_payload
+        )
+        response_data["learning_episode_job_id"] = episode_job_id
+        response_data["learning_procedure_job_id"] = procedure_job_id
+
+    return _response(
+        success=True,
+        message=_mcp_transition_message(action, learnings=learnings, reason=reason),
+        action_data=response_data,
+    )
+
+
 async def _manage_mcp_action(
     *,
     action: str,
@@ -948,16 +1100,21 @@ async def _manage_mcp_action(
     full_data["organization_id"] = ctx.org_id
     if ctx.user_id:
         full_data["user_id"] = ctx.user_id
-    if (
-        action.lower().strip() == "complete_task"
-        and full_data.get("learnings")
-        and policy_decision is not None
-        and policy_decision.policy_context is not None
-    ):
-        from sibyl.jobs.entities import serialize_memory_policy_context
 
-        full_data["_memory_policy_context"] = serialize_memory_policy_context(
-            policy_decision.policy_context
+    # Task/epic transitions route through the shared workflow service so the MCP
+    # path gains locking, broadcasting, and project-activity by construction.
+    # Everything else (update_task, add_note, crawl, analysis, ...) stays on the
+    # core manage() dispatcher unchanged.
+    normalized_action = action.lower().strip()
+    work_item_action = _MCP_WORKFLOW_TRANSITIONS.get(normalized_action)
+    if work_item_action is not None:
+        return await _manage_workflow_transition(
+            ctx=ctx,
+            action=normalized_action,
+            work_item_action=work_item_action,
+            entity_id=entity_id,
+            data=full_data,
+            policy_decision=policy_decision,
         )
 
     result = await manage(

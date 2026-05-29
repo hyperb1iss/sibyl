@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
@@ -22,7 +21,9 @@ from sibyl.api.routes.tasks import (
     list_notes,
 )
 from sibyl.persistence.content_common import ApiIdempotencyRecord
+from sibyl.services.work_item_workflow import WorkItemAction, WorkItemTransition
 from sibyl_core.auth import MemoryPolicyContext, OrganizationRole, ProjectRole
+from sibyl_core.models.entities import EntityType
 
 
 def _request(*, idempotency_key: str | None = None) -> MagicMock:
@@ -254,27 +255,19 @@ class TestCompleteTaskRoute:
             ),
         )
         request = CompleteTaskRequest(actual_hours=2.5, learnings="Capture the pattern")
-        completed_task = SimpleNamespace(
-            id="task-123",
+        transition_result = WorkItemTransition(
+            action=WorkItemAction.COMPLETE_TASK,
+            item_id="task-123",
+            entity_type=EntityType.TASK,
+            status="done",
             name="Ship the thing",
-            status=SimpleNamespace(value="done"),
-            model_dump=MagicMock(return_value={"id": "task-123", "title": "Ship the thing"}),
+            fields={"learnings": "Capture the pattern"},
+            task_data={"id": "task-123", "title": "Ship the thing"},
         )
-        runtime = SimpleNamespace(
-            client=object(),
-            entity_manager=MagicMock(),
-            relationship_manager=MagicMock(),
-        )
-        workflow = SimpleNamespace(
-            complete_task=AsyncMock(return_value=completed_task),
-        )
+        transition = AsyncMock(return_value=transition_result)
         episode_enqueue = AsyncMock(return_value="learning_episode:task-123")
         procedure_enqueue = AsyncMock(return_value="learning_procedure:task-123")
         save_record = AsyncMock(side_effect=lambda _session, *, record: record)
-
-        @asynccontextmanager
-        async def locked_entity(*_args, **_kwargs):
-            yield object()
 
         with (
             patch(
@@ -285,9 +278,7 @@ class TestCompleteTaskRoute:
                 "sibyl.api.routes.tasks.list_accessible_project_graph_ids",
                 AsyncMock(return_value={"proj-1", "proj-2"}),
             ),
-            patch("sibyl.api.routes.tasks.entity_lock", locked_entity),
-            patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock(return_value=runtime)),
-            patch("sibyl.api.routes.tasks.TaskWorkflowEngine", return_value=workflow),
+            patch("sibyl.api.routes.tasks.transition_work_item", transition),
             patch("sibyl.jobs.queue.enqueue_create_learning_episode", episode_enqueue),
             patch("sibyl.jobs.queue.enqueue_create_learning_procedure", procedure_enqueue),
             patch(
@@ -298,7 +289,6 @@ class TestCompleteTaskRoute:
                 "sibyl.api.idempotency.content_runtime.save_api_idempotency_record",
                 save_record,
             ),
-            patch("sibyl.api.routes.tasks.broadcast_event", AsyncMock()),
         ):
             response = await complete_task(
                 "task-123",
@@ -308,8 +298,11 @@ class TestCompleteTaskRoute:
                 request=request,
             )
 
-        workflow.complete_task.assert_awaited_once_with(
-            "task-123", 2.5, "Capture the pattern", create_episode=False
+        transition.assert_awaited_once_with(
+            str(org.id),
+            "task-123",
+            WorkItemAction.COMPLETE_TASK,
+            payload={"actual_hours": 2.5, "learnings": "Capture the pattern"},
         )
         auth.to_memory_policy_context.assert_called_once_with(
             memory_space="project",

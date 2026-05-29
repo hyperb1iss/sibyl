@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, call, patch
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
@@ -14,6 +14,19 @@ from sibyl.api.routes.epics import (
     start_epic,
     update_epic,
 )
+from sibyl.services.work_item_workflow import WorkItemAction, WorkItemTransition
+from sibyl_core.models.entities import EntityType
+
+
+def _transition(action: WorkItemAction, status: str, **fields: object) -> WorkItemTransition:
+    return WorkItemTransition(
+        action=action,
+        item_id="epic-1",
+        entity_type=EntityType.EPIC,
+        status=status,
+        name="Epic Nova",
+        fields=fields,
+    )
 
 
 def _org() -> SimpleNamespace:
@@ -34,39 +47,37 @@ def _epic() -> SimpleNamespace:
 
 class TestEpicRoutes:
     @pytest.mark.asyncio
-    async def test_start_epic_routes_updates_through_graph_runtime(self) -> None:
+    async def test_start_epic_routes_through_workflow_service(self) -> None:
         epic = _epic()
-        update_entity = AsyncMock()
-        broadcast = AsyncMock()
+        transition = AsyncMock(return_value=_transition(WorkItemAction.START_EPIC, "in_progress"))
 
         with (
             patch("sibyl.api.routes.epics._verify_epic_access", AsyncMock(return_value=epic)),
-            patch("sibyl.api.routes.epics.update_graph_entity", update_entity),
-            patch("sibyl.api.routes.epics.broadcast_event", broadcast),
+            patch("sibyl.api.routes.epics.transition_work_item", transition),
         ):
             response = await start_epic("epic-1", org=_org(), ctx=_ctx())
 
         assert response.action == "start_epic"
         assert response.data["status"] == "in_progress"
-        assert update_entity.await_args_list[0] == call(
+        transition.assert_awaited_once_with(
             str(_org().id),
             "epic-1",
-            {"status": "in_progress"},
+            WorkItemAction.START_EPIC,
+            entity=epic,
         )
-        project_touch = update_entity.await_args_list[1]
-        assert project_touch.args[:2] == (str(_org().id), "project-9")
-        assert "last_activity_at" in project_touch.args[2]
-        broadcast.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_complete_epic_captures_learnings_via_graph_update(self) -> None:
+    async def test_complete_epic_captures_learnings_via_workflow_service(self) -> None:
         epic = _epic()
-        update_entity = AsyncMock()
+        transition = AsyncMock(
+            return_value=_transition(
+                WorkItemAction.COMPLETE_EPIC, "completed", learnings="Keep the seam thin"
+            )
+        )
 
         with (
             patch("sibyl.api.routes.epics._verify_epic_access", AsyncMock(return_value=epic)),
-            patch("sibyl.api.routes.epics.update_graph_entity", update_entity),
-            patch("sibyl.api.routes.epics.broadcast_event", AsyncMock()),
+            patch("sibyl.api.routes.epics.transition_work_item", transition),
         ):
             response = await complete_epic(
                 "epic-1",
@@ -76,12 +87,15 @@ class TestEpicRoutes:
             )
 
         assert response.action == "complete_epic"
+        assert response.data["status"] == "completed"
         assert response.data["learnings"] == "Keep the seam thin"
-        first_update = update_entity.await_args_list[0]
-        assert first_update.args[:2] == (str(_org().id), "epic-1")
-        assert first_update.args[2]["status"] == "completed"
-        assert first_update.args[2]["learnings"] == "Keep the seam thin"
-        assert "completed_date" in first_update.args[2]
+        transition.assert_awaited_once_with(
+            str(_org().id),
+            "epic-1",
+            WorkItemAction.COMPLETE_EPIC,
+            payload={"learnings": "Keep the seam thin"},
+            entity=epic,
+        )
 
     @pytest.mark.asyncio
     async def test_update_epic_rejects_empty_updates_before_graph_write(self) -> None:

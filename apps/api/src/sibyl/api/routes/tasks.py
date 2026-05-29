@@ -26,9 +26,9 @@ from sibyl.auth.dependencies import (
 from sibyl.jobs.entities import serialize_memory_policy_context
 from sibyl.locks import entity_lock
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
+from sibyl.services.work_item_workflow import WorkItemAction, transition_work_item
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole, ProjectRole
 from sibyl_core.models.tasks import AuthorType, Note, TaskComplexity, TaskPriority, TaskStatus
-from sibyl_core.tasks.workflow import TaskWorkflowEngine
 from sibyl_core.tools.helpers import _project_id_for_policy
 
 log = structlog.get_logger()
@@ -389,17 +389,6 @@ async def _maybe_start_epic(
     return True
 
 
-async def _get_task_workflow_runtime(group_id: str) -> tuple[Any, TaskWorkflowEngine]:
-    runtime = await get_task_graph_runtime(group_id)
-    workflow = TaskWorkflowEngine(
-        runtime.entity_manager,
-        runtime.relationship_manager,
-        runtime.client,
-        group_id,
-    )
-    return runtime, workflow
-
-
 @router.post("/{task_id}/start", response_model=TaskActionResponse)
 @handle_workflow_errors("start_task")
 async def start_task(
@@ -411,22 +400,12 @@ async def start_task(
     """Start working on a task (moves to 'doing' status)."""
     await _verify_task_access(task_id, org, auth)
 
-    group_id = str(org.id)
-
-    async with entity_lock(group_id, task_id, blocking=True) as lock_token:
-        if not lock_token:
-            raise HTTPException(status_code=409, detail="Task is locked by another process")
-
-        _, workflow = await _get_task_workflow_runtime(group_id)
-
-        assignee = request.assignee if request else None
-        task = await workflow.start_task(task_id, assignee or "system")
-
-    await _broadcast_task_update(
+    assignee = request.assignee if request else None
+    result = await transition_work_item(
+        str(org.id),
         task_id,
-        "start_task",
-        {"status": task.status.value, "branch_name": task.branch_name, "name": task.name},
-        org_id=group_id,
+        WorkItemAction.START_TASK,
+        payload={"assignee": assignee or "system"},
     )
 
     return TaskActionResponse(
@@ -434,7 +413,7 @@ async def start_task(
         action="start_task",
         task_id=task_id,
         message="Task started",
-        data={"status": task.status.value, "branch_name": task.branch_name},
+        data=result.response_data,
     )
 
 
@@ -449,21 +428,11 @@ async def block_task(
     """Mark a task as blocked with a reason."""
     await _verify_task_access(task_id, org, auth)
 
-    group_id = str(org.id)
-
-    async with entity_lock(group_id, task_id, blocking=True) as lock_token:
-        if not lock_token:
-            raise HTTPException(status_code=409, detail="Task is locked by another process")
-
-        _, workflow = await _get_task_workflow_runtime(group_id)
-
-        task = await workflow.block_task(task_id, request.reason)
-
-    await _broadcast_task_update(
+    result = await transition_work_item(
+        str(org.id),
         task_id,
-        "block_task",
-        {"status": task.status.value, "blocker": request.reason, "name": task.name},
-        org_id=group_id,
+        WorkItemAction.BLOCK_TASK,
+        payload={"reason": request.reason},
     )
 
     return TaskActionResponse(
@@ -471,7 +440,7 @@ async def block_task(
         action="block_task",
         task_id=task_id,
         message=f"Task blocked: {request.reason}",
-        data={"status": task.status.value, "reason": request.reason},
+        data=result.response_data,
     )
 
 
@@ -485,21 +454,10 @@ async def unblock_task(
     """Resume a blocked task (moves back to 'doing')."""
     await _verify_task_access(task_id, org, auth)
 
-    group_id = str(org.id)
-
-    async with entity_lock(group_id, task_id, blocking=True) as lock_token:
-        if not lock_token:
-            raise HTTPException(status_code=409, detail="Task is locked by another process")
-
-        _, workflow = await _get_task_workflow_runtime(group_id)
-
-        task = await workflow.unblock_task(task_id)
-
-    await _broadcast_task_update(
+    result = await transition_work_item(
+        str(org.id),
         task_id,
-        "unblock_task",
-        {"status": task.status.value, "name": task.name},
-        org_id=group_id,
+        WorkItemAction.UNBLOCK_TASK,
     )
 
     return TaskActionResponse(
@@ -507,7 +465,7 @@ async def unblock_task(
         action="unblock_task",
         task_id=task_id,
         message="Task unblocked, resuming work",
-        data={"status": task.status.value},
+        data=result.response_data,
     )
 
 
@@ -522,23 +480,13 @@ async def submit_review(
     """Submit a task for review."""
     await _verify_task_access(task_id, org, auth)
 
-    group_id = str(org.id)
-
-    async with entity_lock(group_id, task_id, blocking=True) as lock_token:
-        if not lock_token:
-            raise HTTPException(status_code=409, detail="Task is locked by another process")
-
-        _, workflow = await _get_task_workflow_runtime(group_id)
-
-        pr_url = request.pr_url if request else None
-        commit_shas = request.commit_shas if request else []
-        task = await workflow.submit_for_review(task_id, commit_shas, pr_url)
-
-    await _broadcast_task_update(
+    pr_url = request.pr_url if request else None
+    commit_shas = request.commit_shas if request else []
+    result = await transition_work_item(
+        str(org.id),
         task_id,
-        "submit_review",
-        {"status": task.status.value, "pr_url": task.pr_url, "name": task.name},
-        org_id=group_id,
+        WorkItemAction.SUBMIT_REVIEW,
+        payload={"pr_url": pr_url, "commit_shas": commit_shas},
     )
 
     return TaskActionResponse(
@@ -546,7 +494,7 @@ async def submit_review(
         action="submit_review",
         task_id=task_id,
         message="Task submitted for review",
-        data={"status": task.status.value, "pr_url": task.pr_url},
+        data=result.response_data,
     )
 
 
@@ -602,23 +550,19 @@ async def complete_task(
 
     group_id = str(org.id)
 
-    async with entity_lock(group_id, task_id, blocking=True) as lock_token:
-        if not lock_token:
-            raise HTTPException(status_code=409, detail="Task is locked by another process")
+    actual_hours = request.actual_hours if request else None
+    learnings = request.learnings if request else None
 
-        _, workflow = await _get_task_workflow_runtime(group_id)
-
-        actual_hours = request.actual_hours if request else None
-        learnings = request.learnings if request else None
-
-        # Skip sync episode creation - we'll enqueue it as a background job
-        task = await workflow.complete_task(
-            task_id, actual_hours, learnings or "", create_episode=False
-        )
+    result = await transition_work_item(
+        group_id,
+        task_id,
+        WorkItemAction.COMPLETE_TASK,
+        payload={"actual_hours": actual_hours, "learnings": learnings},
+    )
 
     # Enqueue learning episode creation as background job (fast response)
     if learnings:
-        task_data = task.model_dump(mode="json")
+        task_data = result.task_data
         await asyncio.gather(
             enqueue_create_learning_episode(
                 task_data,
@@ -632,19 +576,12 @@ async def complete_task(
             ),
         )
 
-    await _broadcast_task_update(
-        task_id,
-        "complete_task",
-        {"status": task.status.value, "learnings": learnings, "name": task.name},
-        org_id=group_id,
-    )
-
     response = TaskActionResponse(
         success=True,
         action="complete_task",
         task_id=task_id,
         message="Task completed" + (" with learnings captured" if learnings else ""),
-        data={"status": task.status.value, "learnings": learnings},
+        data=result.response_data,
     )
     await save_idempotent_response(
         http_request,
@@ -671,22 +608,12 @@ async def archive_task(
     """Archive a task (terminal state)."""
     await _verify_task_access(task_id, org, auth)
 
-    group_id = str(org.id)
-
-    async with entity_lock(group_id, task_id, blocking=True) as lock_token:
-        if not lock_token:
-            raise HTTPException(status_code=409, detail="Task is locked by another process")
-
-        _, workflow = await _get_task_workflow_runtime(group_id)
-
-        reason = request.reason if request else ""
-        task = await workflow.archive_task(task_id, reason)
-
-    await _broadcast_task_update(
+    reason = request.reason if request else ""
+    result = await transition_work_item(
+        str(org.id),
         task_id,
-        "archive_task",
-        {"status": task.status.value, "name": task.name},
-        org_id=group_id,
+        WorkItemAction.ARCHIVE_TASK,
+        payload={"reason": reason},
     )
 
     return TaskActionResponse(
@@ -694,7 +621,7 @@ async def archive_task(
         action="archive_task",
         task_id=task_id,
         message="Task archived",
-        data={"status": task.status.value},
+        data=result.response_data,
     )
 
 

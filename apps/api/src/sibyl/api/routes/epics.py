@@ -16,6 +16,7 @@ from sibyl.api.websocket import broadcast_event
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.persistence.auth_runtime import verify_entity_project_access
+from sibyl.services.work_item_workflow import WorkItemAction, transition_work_item
 from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService
@@ -182,15 +183,11 @@ async def start_epic(
     # Verify project access (contributor role required to start work)
     epic = await _verify_epic_access(epic_id, org, ctx, ProjectRole.CONTRIBUTOR)
 
-    group_id = str(org.id)
-    await update_graph_entity(group_id, epic_id, {"status": "in_progress"})
-    await _update_project_activity(group_id, epic)
-
-    await _broadcast_epic_update(
+    result = await transition_work_item(
+        str(org.id),
         epic_id,
-        "start_epic",
-        {"status": "in_progress", "name": epic.name},
-        org_id=group_id,
+        WorkItemAction.START_EPIC,
+        entity=epic,
     )
 
     return EpicActionResponse(
@@ -198,7 +195,7 @@ async def start_epic(
         action="start_epic",
         epic_id=epic_id,
         message="Epic started",
-        data={"status": "in_progress"},
+        data=result.response_data,
     )
 
 
@@ -214,23 +211,13 @@ async def complete_epic(
     # Verify project access (maintainer role required to complete)
     epic = await _verify_epic_access(epic_id, org, ctx, ProjectRole.MAINTAINER)
 
-    group_id = str(org.id)
     learnings = request.learnings if request else None
-    updates = {
-        "status": "completed",
-        "completed_date": datetime.now(UTC).isoformat(),
-    }
-    if learnings:
-        updates["learnings"] = learnings
-
-    await update_graph_entity(group_id, epic_id, updates)
-    await _update_project_activity(group_id, epic)
-
-    await _broadcast_epic_update(
+    result = await transition_work_item(
+        str(org.id),
         epic_id,
-        "complete_epic",
-        {"status": "completed", "learnings": learnings or "", "name": epic.name},
-        org_id=group_id,
+        WorkItemAction.COMPLETE_EPIC,
+        payload={"learnings": learnings},
+        entity=epic,
     )
 
     return EpicActionResponse(
@@ -238,7 +225,7 @@ async def complete_epic(
         action="complete_epic",
         epic_id=epic_id,
         message="Epic completed" + (" with learnings captured" if learnings else ""),
-        data={"status": "completed", "learnings": learnings or ""},
+        data=result.response_data,
     )
 
 
@@ -254,16 +241,12 @@ async def archive_epic(
     # Verify project access (maintainer role required to archive)
     epic = await _verify_epic_access(epic_id, org, ctx, ProjectRole.MAINTAINER)
 
-    group_id = str(org.id)
     reason = request.reason if request else None
-    await update_graph_entity(group_id, epic_id, {"status": "archived"})
-    await _update_project_activity(group_id, epic)
-
-    await _broadcast_epic_update(
+    result = await transition_work_item(
+        str(org.id),
         epic_id,
-        "archive_epic",
-        {"status": "archived", "name": epic.name},
-        org_id=group_id,
+        WorkItemAction.ARCHIVE_EPIC,
+        entity=epic,
     )
 
     return EpicActionResponse(
@@ -271,7 +254,7 @@ async def archive_epic(
         action="archive_epic",
         epic_id=epic_id,
         message="Epic archived" + (f": {reason}" if reason else ""),
-        data={"status": "archived"},
+        data=result.response_data,
     )
 
 

@@ -3,13 +3,19 @@
 The fourth tool: manage() handles operations that modify state.
 Includes task workflow, source operations, and analysis actions.
 
+Layering note (audit H8): the task/epic transition bodies here are the pure
+domain path — they delegate the status state machine to ``TaskWorkflowEngine``
+and apply epic status writes directly, with no entity lock, WebSocket
+broadcast, or project-activity side effects. The live MCP server does not call
+these transition bodies directly; ``apps/api`` intercepts transition actions and
+routes them through its shared ``work_item_workflow`` service, so the served MCP
+path gains locking, broadcasting, and project-activity by construction, exactly
+like REST. These bodies remain for direct/programmatic callers and tests.
+
 Task and epic workflow actions are soft-deprecated in favor of the RESTful
-``/tasks/{id}/*`` and ``/epics/{id}/*`` endpoints, which carry entity locking,
-idempotency, WebSocket broadcasts, and project-activity tracking that this MCP
-path does not. They keep working for MCP clients but emit a structured
-deprecation signal (see ``DEPRECATED_ACTION_REPLACEMENTS`` and
-``_deprecation_notice``). Source and analysis actions have no REST equivalent
-and are not deprecated.
+``/tasks/{id}/*`` and ``/epics/{id}/*`` endpoints (see
+``DEPRECATED_ACTION_REPLACEMENTS`` and ``_deprecation_notice``). Source and
+analysis actions have no REST equivalent and are not deprecated.
 """
 
 from collections.abc import Callable
@@ -374,8 +380,9 @@ def _deprecation_notice(action: str) -> dict[str, str] | None:
         "deprecated_action": action,
         "use_instead": replacement,
         "reason": (
-            "REST endpoints add entity locking, idempotency, and WebSocket "
-            "broadcasts that the MCP manage() path skips."
+            "REST endpoints expose task/epic transitions with idempotency keys "
+            "and explicit per-action routes; prefer them over the manage() "
+            "grab-bag for lifecycle changes."
         ),
     }
 

@@ -20,6 +20,7 @@ from typing import ParamSpec, TypeVar
 import structlog
 from fastapi import HTTPException
 
+from sibyl.coordination.locks import LockAcquisitionError
 from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError
 
 log = structlog.get_logger()
@@ -37,6 +38,7 @@ def handle_workflow_errors(
     Translates workflow exceptions to appropriate HTTP responses:
     - EntityNotFoundError → 404 Not Found
     - InvalidTransitionError → 400 Bad Request
+    - LockAcquisitionError → 409 Conflict (entity locked by another writer)
     - Other exceptions → 500 with logging
 
     Args:
@@ -67,6 +69,12 @@ def handle_workflow_errors(
 
             except InvalidTransitionError as e:
                 raise HTTPException(status_code=400, detail=str(e)) from e
+
+            except LockAcquisitionError as e:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Work item is locked by another process. Please retry.",
+                ) from e
 
             except HTTPException:
                 raise
