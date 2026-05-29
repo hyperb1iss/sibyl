@@ -23,6 +23,8 @@ from sibyl_core.config import core_config
 from sibyl_core.embeddings.providers import EmbeddingMetadata, EmbeddingProvider
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.retrieval.fusion import rrf_merge
+from sibyl_core.retrieval.query_ranking import rank_items_by_query_coverage
+from sibyl_core.retrieval.temporal import get_entity_timestamp
 from sibyl_core.services.graph import get_surreal_graph_runtime, normalize_records
 from sibyl_core.services.surreal_content import (
     MemoryScope,
@@ -387,10 +389,12 @@ async def context_search(
         limit=limit,
         fusion_backend=fusion_backend,
     )
-    # Context packs keep the DB-shaped fused order (RRF plus the in-DB
-    # demotions and boosts). Query-coverage reranking is hybrid-only: applying
-    # it here demoted recent-memory recall (e.g. agent diaries) below the pack
-    # cutoff, which the live context-pack eval caught.
+    if search_plan.query.strip():
+        fused = _apply_query_coverage_to_fused(
+            search_plan.query,
+            fused,
+            temporal_target=None,
+        )
     results = [
         _search_result_from_candidate(
             candidate,
@@ -1913,6 +1917,38 @@ def _rank_fused_candidates(
         ranked.append((candidate, boosted, fusion_metadata))
     ranked.sort(key=lambda item: item[1], reverse=True)
     return ranked[:limit]
+
+
+def _candidate_query_text(candidate: RetrievalCandidate) -> str:
+    parts = [part for part in (candidate.name, candidate.content) if part]
+    return " ".join(parts).lower()
+
+
+def _apply_query_coverage_to_fused(
+    query: str,
+    fused: list[tuple[RetrievalCandidate, float, dict[str, Any]]],
+    *,
+    temporal_target: datetime | None,
+) -> list[tuple[RetrievalCandidate, float, dict[str, Any]]]:
+    """Re-rank fused context candidates through the shared query-coverage core.
+
+    The native plan already produces a strong base order from RRF plus the
+    in-DB-shaped demotions and boosts; that order is the prior the shared
+    ranker refines, so context packs rank by the same scorer ``/api/search``
+    uses while keeping the efficient DB-native candidate fetch upstream.
+    """
+    metadata_by_id = {
+        id(candidate): fusion_metadata for candidate, _score, fusion_metadata in fused
+    }
+    reranked, _applied, _refined = rank_items_by_query_coverage(
+        query,
+        [(candidate, score) for candidate, score, _fusion_metadata in fused],
+        text_fn=_candidate_query_text,
+        id_fn=lambda candidate: candidate.id,
+        timestamp_fn=lambda candidate: candidate.created_at or get_entity_timestamp(candidate),
+        temporal_target=temporal_target,
+    )
+    return [(candidate, score, metadata_by_id[id(candidate)]) for candidate, score in reranked]
 
 
 def _vector_only_demote_multiplier(

@@ -1467,18 +1467,97 @@ def _fused_entry(
     return (candidate, score, {"sources": [], "ranks": {}, "original_scores": {}})
 
 
-def test_hybrid_routes_through_shared_query_coverage_core() -> None:
-    """hybrid_search ranks through the shared coverage core.
-
-    context_search deliberately does not: context packs keep the DB-shaped
-    fused order, since query-coverage reranking demoted recent-memory recall
-    below the pack cutoff (caught by the live context-pack eval).
-    """
+def test_context_search_and_hybrid_share_one_query_coverage_core() -> None:
+    """Both retrieval surfaces route final ranking through the same function."""
 
     assert (
         hybrid_module.rank_items_by_query_coverage
         is query_ranking_module.rank_items_by_query_coverage
     )
+    assert (
+        search_module.rank_items_by_query_coverage
+        is query_ranking_module.rank_items_by_query_coverage
+    )
+
+
+def test_context_query_coverage_reranks_through_shared_core(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """context_search's post-fusion pass calls the shared coverage ranker."""
+
+    calls: list[str] = []
+    real = query_ranking_module.rank_items_by_query_coverage
+
+    def spy(query, items, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(query)
+        return real(query, items, **kwargs)
+
+    monkeypatch.setattr(search_module, "rank_items_by_query_coverage", spy)
+
+    strong = RetrievalCandidate(
+        id="strong",
+        type="session",
+        name="Homegrown tomato basil dinner",
+        content="User: my homegrown tomato and basil dinner recipe was a hit.",
+        score=1.0,
+        source=None,
+        metadata={},
+    )
+    weak = RetrievalCandidate(
+        id="weak",
+        type="session",
+        name="Unrelated",
+        content="User: we talked about the weather forecast yesterday.",
+        score=1.0,
+        source=None,
+        metadata={},
+    )
+    fused = [_fused_entry(weak, 0.9), _fused_entry(strong, 0.8)]
+
+    reranked = search_module._apply_query_coverage_to_fused(
+        "what homegrown tomato basil dinner recipe did I make",
+        fused,
+        temporal_target=None,
+    )
+
+    assert calls == ["what homegrown tomato basil dinner recipe did I make"]
+    assert reranked[0][0].id == "strong"
+    # Fusion metadata is preserved through the rerank for each candidate.
+    assert {candidate.id for candidate, _score, _meta in reranked} == {"strong", "weak"}
+
+
+def test_context_query_coverage_preserves_base_order_for_thin_query() -> None:
+    """A query the coverage core cannot act on leaves the fused order intact."""
+
+    first = RetrievalCandidate(
+        id="first",
+        type="session",
+        name="First",
+        content="A grounded lexical session hit.",
+        score=1.0,
+        source=None,
+        metadata={},
+    )
+    second = RetrievalCandidate(
+        id="second",
+        type="session",
+        name="Second",
+        content="Another grounded session hit.",
+        score=1.0,
+        source=None,
+        metadata={},
+    )
+    fused = [_fused_entry(first, 0.9), _fused_entry(second, 0.8)]
+
+    # Single-keyword query: rank_by_query_coverage does not apply, so the
+    # shared core returns the prior order unchanged.
+    reranked = search_module._apply_query_coverage_to_fused(
+        "coffee",
+        fused,
+        temporal_target=None,
+    )
+
+    assert [candidate.id for candidate, _score, _meta in reranked] == ["first", "second"]
 
 
 def test_scope_decisions_includes_project_less_agent_diary_scope() -> None:
