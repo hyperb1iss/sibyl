@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Folder, Settings, User, Users } from '@/components/ui/icons';
+import { api } from '@/lib/api';
 import { useMe, useOrgs, useSwitchOrg } from '@/lib/hooks';
 
 export function UserMenu() {
@@ -42,7 +43,7 @@ export function UserMenu() {
 
   const handleSignOut = useCallback(async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      await api.auth.logout();
       router.push('/login');
       router.refresh();
     } catch {

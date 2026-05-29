@@ -5,38 +5,8 @@ import { useCallback, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { EditableText } from '@/components/editable';
 import { Calendar, Check, EditPencil, Link, Upload, User, X } from '@/components/ui/icons';
+import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/hooks';
-
-interface UserProfile {
-  id: string;
-  email: string | null;
-  name: string | null;
-  bio: string | null;
-  timezone: string | null;
-  avatar_url: string | null;
-  email_verified_at: string | null;
-  created_at: string;
-}
-
-async function fetchProfile(): Promise<UserProfile> {
-  const response = await fetch('/api/users/me/profile');
-  if (!response.ok) {
-    throw new Error('Failed to fetch profile');
-  }
-  return response.json();
-}
-
-async function updateProfile(data: Partial<UserProfile>): Promise<UserProfile> {
-  const response = await fetch('/api/users/me/profile', {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  if (!response.ok) {
-    throw new Error('Failed to update profile');
-  }
-  return response.json();
-}
 
 // Common timezone options
 const TIMEZONE_OPTIONS = [
@@ -303,11 +273,11 @@ export default function ProfilePage() {
     error,
   } = useQuery({
     queryKey: ['user', 'profile'],
-    queryFn: fetchProfile,
+    queryFn: api.profile.get,
   });
 
   const updateMutation = useMutation({
-    mutationFn: updateProfile,
+    mutationFn: api.profile.update,
     onSuccess: data => {
       queryClient.setQueryData(['user', 'profile'], data);
       // Also invalidate auth.me so the nav avatar updates

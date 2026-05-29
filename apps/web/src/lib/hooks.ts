@@ -1668,11 +1668,7 @@ export function useSyncSource() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (id: string) => {
-      const res = await fetch(`/api/sources/${id}/sync`, { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to sync source');
-      return res.json();
-    },
+    mutationFn: (id: string) => api.sources.sync(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.sources.all });
     },
@@ -1701,11 +1697,7 @@ export function useCancelCrawl() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (id: string) => {
-      const res = await fetch(`/api/sources/${id}/cancel`, { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to cancel crawl');
-      return res.json();
-    },
+    mutationFn: (id: string) => api.sources.cancelCrawl(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.sources.all });
     },

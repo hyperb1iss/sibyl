@@ -1346,6 +1346,18 @@ export interface PreferencesResponse {
   preferences: UserPreferences;
 }
 
+// User Profile (editable account fields)
+export interface UserProfile {
+  id: string;
+  email: string | null;
+  name: string | null;
+  bio: string | null;
+  timezone: string | null;
+  avatar_url: string | null;
+  email_verified_at: string | null;
+  created_at: string;
+}
+
 // =============================================================================
 // Task Types
 // =============================================================================
@@ -2485,6 +2497,16 @@ export const api = {
       }),
   },
 
+  // User Profile
+  profile: {
+    get: () => fetchApi<UserProfile>('/users/me/profile'),
+    update: (data: Partial<UserProfile>) =>
+      fetchApi<UserProfile>('/users/me/profile', {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+  },
+
   session: {
     bundle: (params?: {
       query?: string;
@@ -2821,6 +2843,18 @@ export const api = {
           max_depth: options?.maxDepth ?? 3,
           generate_embeddings: true,
         }),
+      }),
+
+    // Re-crawl an existing source to pick up changes
+    sync: (id: string) =>
+      fetchApi<{ source_id: string; status: string; message: string }>(`/sources/${id}/sync`, {
+        method: 'POST',
+      }),
+
+    // Cancel an in-flight crawl
+    cancelCrawl: (id: string) =>
+      fetchApi<{ source_id: string; status: string; message: string }>(`/sources/${id}/cancel`, {
+        method: 'POST',
       }),
 
     // Get crawl status
