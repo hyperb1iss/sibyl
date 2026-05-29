@@ -1792,3 +1792,74 @@ async def test_graph_writes_entities_and_relationships() -> None:
         assert await relationship_manager.get_for_entity("dedup_remove", direction="both") == []
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_native_parent_task_id_round_trips_and_lists_subtasks() -> None:
+    client = SurrealGraphClient(group_id="org-native-subtasks", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        entity_manager = EntityManager(client, group_id=client.group_id)
+
+        await entity_manager.create_direct(
+            Entity(
+                id="parent_task",
+                entity_type=EntityType.TASK,
+                name="Parent work item",
+                description="A task that acts as an epic",
+                organization_id="org-native-subtasks",
+                metadata={"project_id": "project_native", "status": "doing"},
+            )
+        )
+        for child_id, status in (("child_one", "todo"), ("child_two", "done")):
+            await entity_manager.create_direct(
+                Entity(
+                    id=child_id,
+                    entity_type=EntityType.TASK,
+                    name=f"Subtask {child_id}",
+                    description="Child of parent_task",
+                    organization_id="org-native-subtasks",
+                    metadata={
+                        "project_id": "project_native",
+                        "parent_task_id": "parent_task",
+                        "epic_id": "epic_legacy",
+                        "status": status,
+                    },
+                )
+            )
+        await entity_manager.create_direct(
+            Entity(
+                id="orphan_task",
+                entity_type=EntityType.TASK,
+                name="Unrelated task",
+                description="Has no parent task",
+                organization_id="org-native-subtasks",
+                metadata={"project_id": "project_native", "status": "todo"},
+            )
+        )
+
+        # parent_task_id survives the promoted-column round trip.
+        fetched_child = await entity_manager.get("child_one")
+        assert fetched_child.metadata["parent_task_id"] == "parent_task"
+        assert fetched_child.metadata["epic_id"] == "epic_legacy"
+
+        subtasks = await entity_manager.list_subtasks("parent_task")
+        assert {entity.id for entity in subtasks} == {"child_one", "child_two"}
+
+        # Status filter still composes; orphan is excluded from child listings.
+        todo_children = await entity_manager.list_subtasks("parent_task", status="todo")
+        assert [entity.id for entity in todo_children] == ["child_one"]
+
+        # epic_id filtering is unchanged: both children remain reachable by their epic.
+        epic_tasks = await entity_manager.list_by_type(
+            EntityType.TASK,
+            epic_id="epic_legacy",
+            include_archived=True,
+        )
+        assert {entity.id for entity in epic_tasks} == {"child_one", "child_two"}
+
+        # The parent itself (no parent_task_id) is not its own child.
+        assert "parent_task" not in {entity.id for entity in subtasks}
+        assert "orphan_task" not in {entity.id for entity in subtasks}
+    finally:
+        await client.close()

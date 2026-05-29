@@ -52,6 +52,27 @@ class TestTaskModel:
         assert task.tags == ["backend", "security"]
         assert task.assignees == ["alice", "bob"]
 
+    def test_task_parent_task_id_defaults_none_and_coexists_with_epic(self) -> None:
+        """parent_task_id is optional and independent from epic_id."""
+        minimal = Task(id="task_min", name="Minimal", title="Minimal")
+        assert minimal.parent_task_id is None
+        assert minimal.epic_id is None
+
+        linked = Task(
+            id="task_child",
+            name="Child task",
+            title="Child task",
+            epic_id="epic_legacy",
+            parent_task_id="task_parent",
+        )
+        assert linked.parent_task_id == "task_parent"
+        assert linked.epic_id == "epic_legacy"
+
+        dumped = linked.model_dump()
+        assert dumped["parent_task_id"] == "task_parent"
+        assert dumped["epic_id"] == "epic_legacy"
+        assert Task.model_validate(dumped).parent_task_id == "task_parent"
+
     def test_task_status_enum_values(self) -> None:
         """TaskStatus enum has expected values."""
         assert TaskStatus.BACKLOG.value == "backlog"

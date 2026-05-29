@@ -61,6 +61,11 @@ class Task(Entity):
     # TODO: Make this required after migration completes across all deployments.
     project_id: str | None = Field(default=None, description="Parent project UUID (optional)")
     epic_id: str | None = Field(default=None, description="Parent epic UUID (optional)")
+    # Forward-looking replacement for epic_id: a task with children IS an epic. Both
+    # fields coexist during the work-item unification; epic_id stays fully functional.
+    parent_task_id: str | None = Field(
+        default=None, description="Parent work item UUID (the task this is a subtask of)"
+    )
     feature: str | None = Field(default=None, description="Feature area (lightweight grouping)")
     sprint: str | None = Field(default=None, description="Sprint/milestone")
 

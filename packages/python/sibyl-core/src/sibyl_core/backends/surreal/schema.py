@@ -79,6 +79,7 @@ DEFINE FIELD IF NOT EXISTS created_at ON entity TYPE datetime DEFAULT time::now(
 DEFINE FIELD IF NOT EXISTS updated_at ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS project_id ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS epic_id ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS parent_task_id ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS task_id ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS status ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS priority ON entity TYPE option<string>;
@@ -93,6 +94,7 @@ DEFINE INDEX IF NOT EXISTS idx_entity_type ON entity FIELDS entity_type;
 DEFINE INDEX IF NOT EXISTS idx_entity_labels ON entity FIELDS labels;
 DEFINE INDEX IF NOT EXISTS idx_entity_project ON entity FIELDS project_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_epic ON entity FIELDS epic_id;
+DEFINE INDEX IF NOT EXISTS idx_entity_parent_task ON entity FIELDS parent_task_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_task ON entity FIELDS task_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_status ON entity FIELDS status;
 DEFINE INDEX IF NOT EXISTS idx_entity_priority ON entity FIELDS priority;
@@ -100,6 +102,7 @@ DEFINE INDEX IF NOT EXISTS idx_entity_group_updated ON entity FIELDS group_id, u
 DEFINE INDEX IF NOT EXISTS idx_entity_group_type_updated ON entity FIELDS group_id, entity_type, updated_at, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_entity_group_type_project_updated ON entity FIELDS group_id, entity_type, project_id, updated_at, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_entity_group_type_epic_updated ON entity FIELDS group_id, entity_type, epic_id, updated_at, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_entity_group_type_parent_task_updated ON entity FIELDS group_id, entity_type, parent_task_id, updated_at, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_entity_group_type_status_updated ON entity FIELDS group_id, entity_type, status, updated_at, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_entity_group_type_epic_status ON entity FIELDS group_id, entity_type, epic_id, status;
 DEFINE INDEX IF NOT EXISTS idx_entity_group_type_project_status ON entity FIELDS group_id, entity_type, project_id, status;

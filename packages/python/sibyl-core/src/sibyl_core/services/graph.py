@@ -72,6 +72,7 @@ INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     updated_at = $input.updated_at,
     project_id = $input.project_id,
     epic_id = $input.epic_id,
+    parent_task_id = $input.parent_task_id,
     task_id = $input.task_id,
     status = $input.status,
     priority = $input.priority,
@@ -534,6 +535,23 @@ class EntityManager:
         progress = await self._epic_progress_map({epic_id})
         return progress[epic_id]
 
+    async def list_subtasks(
+        self,
+        parent_task_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+        include_archived: bool = True,
+    ) -> list[Entity]:
+        """List the child tasks of a parent task (a task with children is an epic)."""
+        return await self.list_by_type(
+            EntityType.TASK,
+            parent_task_id=parent_task_id,
+            status=status,
+            limit=limit,
+            include_archived=include_archived,
+        )
+
     async def get_project_summary(
         self,
         project_id: str,
@@ -657,6 +675,7 @@ class EntityManager:
         project_id: str | None = None,
         epic_id: str | None = None,
         no_epic: bool = False,
+        parent_task_id: str | None = None,
         status: str | None = None,
         priority: str | None = None,
         complexity: str | None = None,
@@ -678,6 +697,7 @@ class EntityManager:
                 project_id is not None,
                 epic_id is not None,
                 no_epic,
+                parent_task_id is not None,
                 bool(status_values),
                 bool(priority_values),
                 bool(complexity_values),
@@ -709,6 +729,9 @@ class EntityManager:
             query_params["epic_id"] = epic_id
         if no_epic:
             where_clauses.append(_surreal_indexed_field_missing("epic_id"))
+        if parent_task_id is not None:
+            where_clauses.append(_surreal_indexed_field_equals_or_missing("parent_task_id"))
+            query_params["parent_task_id"] = parent_task_id
         if status_values:
             where_clauses.append(_surreal_indexed_field_in_or_missing("status", "status_values"))
             query_params["status_values"] = status_values
@@ -763,6 +786,7 @@ class EntityManager:
                     project_id=project_id,
                     epic_id=epic_id,
                     no_epic=no_epic,
+                    parent_task_id=parent_task_id,
                     status_values=status_values,
                     priority_values=priority_values,
                     complexity_values=complexity_values,
@@ -1657,6 +1681,7 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
     for key in (
         "project_id",
         "epic_id",
+        "parent_task_id",
         "task_id",
         "status",
         "priority",
@@ -1839,6 +1864,7 @@ def _entity_to_task(entity: Entity) -> Task:
         task_order=_int_value(meta.get("task_order")),
         project_id=_optional_text(meta.get("project_id")),
         epic_id=_optional_text(meta.get("epic_id")),
+        parent_task_id=_optional_text(meta.get("parent_task_id")),
         feature=_optional_text(meta.get("feature")),
         sprint=_optional_text(meta.get("sprint")),
         assignees=_metadata_str_list(meta.get("assignees")) or [],
@@ -2000,6 +2026,7 @@ def _entity_matches_list_filters(
     project_id: str | None,
     epic_id: str | None,
     no_epic: bool,
+    parent_task_id: str | None = None,
     status_values: Sequence[str],
     priority_values: Sequence[str],
     complexity_values: Sequence[str],
@@ -2013,6 +2040,8 @@ def _entity_matches_list_filters(
     if epic_id and entity_epic_id != epic_id:
         return False
     if no_epic and entity_epic_id:
+        return False
+    if parent_task_id and _metadata_scalar(entity, "parent_task_id") != parent_task_id:
         return False
     entity_status = _metadata_scalar(entity, "status")
     if status_values and str(entity_status or "").lower() not in status_values:
@@ -2588,6 +2617,7 @@ async def _execute_replace_entity_query(
             updated_at = $updated_at,
             project_id = $project_id,
             epic_id = $epic_id,
+            parent_task_id = $parent_task_id,
             task_id = $task_id,
             status = $status,
             priority = $priority,
@@ -2615,6 +2645,7 @@ def _entity_record(entity: Entity, *, group_id: str) -> SurrealRecord:
     created_at = entity.created_at or now
     project_id = _metadata_str(metadata, "project_id")
     epic_id = _metadata_str(metadata, "epic_id")
+    parent_task_id = _metadata_str(metadata, "parent_task_id")
     task_id = _metadata_str(metadata, "task_id")
     status = _metadata_str(metadata, "status")
     priority = _metadata_str(metadata, "priority")
@@ -2644,6 +2675,7 @@ def _entity_record(entity: Entity, *, group_id: str) -> SurrealRecord:
         "updated_at": updated_at,
         "project_id": project_id,
         "epic_id": epic_id,
+        "parent_task_id": parent_task_id,
         "task_id": task_id,
         "status": status,
         "priority": priority,

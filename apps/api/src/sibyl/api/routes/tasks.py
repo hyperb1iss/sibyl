@@ -141,6 +141,7 @@ class UpdateTaskRequest(BaseModel):
     description: str | None = None
     assignees: list[str] | None = None
     epic_id: str | None = None
+    parent_task_id: str | None = None
     feature: str | None = None
     tags: list[str] | None = None
     technologies: list[str] | None = None
@@ -159,6 +160,7 @@ class CreateTaskRequest(BaseModel):
     status: TaskStatus = TaskStatus.TODO
     assignees: list[str] = []
     epic_id: str | None = None
+    parent_task_id: str | None = None
     feature: str | None = None
     tags: list[str] = []
     technologies: list[str] = []
@@ -221,6 +223,7 @@ async def create_task(
         complexity=TaskComplexity(request.complexity),
         project_id=request.project_id,
         epic_id=request.epic_id,
+        parent_task_id=request.parent_task_id,
         assignees=request.assignees,
         feature=request.feature,
         tags=request.tags,
@@ -706,6 +709,7 @@ def _build_update_data(request: UpdateTaskRequest, user_id: str) -> dict[str, An
         "description": "description",
         "assignees": "assignees",
         "epic_id": "epic_id",
+        "parent_task_id": "parent_task_id",
         "feature": "feature",
         "complexity": "complexity",
         "tags": "tags",

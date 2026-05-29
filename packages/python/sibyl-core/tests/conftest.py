@@ -380,6 +380,7 @@ class MockEntityManager:
         project_id: str | None = None,
         epic_id: str | None = None,
         no_epic: bool = False,
+        parent_task_id: str | None = None,
         status: str | None = None,
         priority: str | None = None,
         complexity: str | None = None,
@@ -410,6 +411,8 @@ class MockEntityManager:
             if epic_id and metadata.get("epic_id") != epic_id:
                 continue
             if no_epic and metadata.get("epic_id"):
+                continue
+            if parent_task_id and metadata.get("parent_task_id") != parent_task_id:
                 continue
             if status:
                 status_list = [s.strip().lower() for s in status.split(",")]
@@ -444,6 +447,23 @@ class MockEntityManager:
     ) -> list[Entity]:
         """Get tasks belonging to an epic."""
         return await self.list_by_type(EntityType.TASK, epic_id=epic_id, status=status, limit=limit)
+
+    async def list_subtasks(
+        self,
+        parent_task_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+        include_archived: bool = True,
+    ) -> list[Entity]:
+        """Get the child tasks of a parent task."""
+        return await self.list_by_type(
+            EntityType.TASK,
+            parent_task_id=parent_task_id,
+            status=status,
+            limit=limit,
+            include_archived=include_archived,
+        )
 
     async def get_epic_progress(self, epic_id: str) -> dict[str, Any]:
         """Get progress statistics for an epic."""
