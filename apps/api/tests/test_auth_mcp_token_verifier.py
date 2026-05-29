@@ -141,3 +141,21 @@ async def test_mcp_token_verifier_rejects_api_key_without_mcp_scope() -> None:
         access = await SibylMcpTokenVerifier().verify_token("sk_live_test")
         assert access is None
     authenticate.assert_awaited_once_with("sk_live_test")
+
+
+@pytest.mark.asyncio
+async def test_mcp_token_verifier_rejects_api_key_with_empty_scopes() -> None:
+    auth = ApiKeyAuth(
+        api_key_id=uuid4(),
+        user_id=uuid4(),
+        organization_id=uuid4(),
+        scopes=[],
+    )
+
+    with patch(
+        "sibyl.auth.mcp_auth.authenticate_api_key",
+        AsyncMock(return_value=auth),
+    ) as authenticate:
+        access = await SibylMcpTokenVerifier().verify_token("sk_live_test")
+        assert access is None
+    authenticate.assert_awaited_once_with("sk_live_test")

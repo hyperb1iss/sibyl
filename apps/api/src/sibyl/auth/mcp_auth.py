@@ -39,8 +39,8 @@ class SibylMcpTokenVerifier:
             auth = await authenticate_api_key(token)
             if auth is None:
                 return None
-            scopes = list(auth.scopes or []) or ["mcp"]
-            if scopes and "mcp" not in scopes:
+            scopes = [scope for scope in (auth.scopes or []) if isinstance(scope, str)]
+            if "mcp" not in scopes:
                 return None
             return AccessToken(
                 token=token,
