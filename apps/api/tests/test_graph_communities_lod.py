@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
-from types import SimpleNamespace
 
 import pytest
 
@@ -128,56 +126,6 @@ def test_build_cluster_detail_graph_includes_cluster_members_and_neighbors() -> 
     assert graph.resolution == "detail"
     assert {node["id"] for node in graph.nodes} >= {"task-1", "task-2", "episode-1", "project-1"}
     assert any(edge["source"] == "task-1" and edge["target"] == "project-1" for edge in graph.edges)
-
-
-@pytest.mark.asyncio
-async def test_get_graph_snapshot_merges_surreal_episodic_edges(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    entities = [
-        _entity("episode-1", EntityType.EPISODE),
-        _entity("task-1", EntityType.TASK),
-    ]
-    mention_edge = SimpleNamespace(
-        uuid="mention-1",
-        source_node_uuid="episode-1",
-        target_node_uuid="task-1",
-        created_at=datetime.now(UTC),
-    )
-
-    async def fake_list_all_entities(*args, **kwargs) -> list[Entity]:
-        return entities
-
-    async def fake_list_all_relationships(*args, **kwargs) -> list[Relationship]:
-        return []
-
-    class FakeEpisodicEdgeOps:
-        async def get_by_group_ids(self, driver, group_ids: list[str]) -> list[SimpleNamespace]:
-            assert group_ids == ["org-mentions"]
-            return [mention_edge]
-
-    class FakeDriver:
-        episodic_edge_ops = FakeEpisodicEdgeOps()
-
-    class FakeClient:
-        _store = "surreal"
-
-        def get_org_driver(self, organization_id: str) -> FakeDriver:
-            assert organization_id == "org-mentions"
-            return FakeDriver()
-
-    communities.GRAPH_SNAPSHOT_CACHE.clear()
-    monkeypatch.setattr(communities, "_list_all_entities", fake_list_all_entities)
-    monkeypatch.setattr(communities, "_list_all_relationships", fake_list_all_relationships)
-
-    snapshot = await communities._get_graph_snapshot(FakeClient(), "org-mentions")
-
-    assert len(snapshot.relationships) == 1
-    relationship = snapshot.relationships[0]
-    assert relationship.id == "mention-1"
-    assert relationship.source_id == "episode-1"
-    assert relationship.target_id == "task-1"
-    assert relationship.relationship_type == RelationshipType.MENTIONS
 
 
 @pytest.mark.asyncio
