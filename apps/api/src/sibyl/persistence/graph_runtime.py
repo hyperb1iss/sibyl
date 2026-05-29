@@ -1161,22 +1161,29 @@ async def delete_graph_data(group_id: str) -> None:
     runtime = await _get_graph_runtime(group_id)
     driver = runtime.client
     if _surreal_driver_for(driver) is not None:
+        from sibyl_core.backends.surreal.records import raise_on_error
         from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
 
+        # A failure here must propagate, not silently fall through to the
+        # per-table loop: degrading from an atomic clear to a non-atomic sweep
+        # on error is how a half-deleted graph used to slip through unnoticed.
         graph_ops = getattr(driver, "graph_ops", None)
         if graph_ops is not None:
-            try:
-                await graph_ops.clear_data(driver, group_ids=[group_id])
-                return
-            except Exception as exc:
-                log.warning(
-                    "surreal_graph_clear_data_failed",
-                    group_id=group_id,
-                    error=str(exc),
-                )
-        for table in (*GRAPH_EDGES, *GRAPH_TABLES):
-            query = f"DELETE FROM {table} WHERE group_id = $group_id;"  # noqa: S608
-            await driver.execute_query(query, group_id=group_id)
+            await graph_ops.clear_data(driver, group_ids=[group_id])
+            return
+
+        # Table names are fixed module constants; the only runtime value
+        # ($group_id) stays parameter-bound. One transaction keeps the
+        # namespace-scoped clear atomic.
+        statements = "\n".join(
+            f"DELETE FROM {table} WHERE group_id = $group_id;"  # noqa: S608
+            for table in (*GRAPH_EDGES, *GRAPH_TABLES)
+        )
+        result = await driver.execute_query_raw(
+            f"BEGIN TRANSACTION;\n{statements}\nCOMMIT TRANSACTION;",
+            group_id=group_id,
+        )
+        raise_on_error(result, query="delete_graph_data")
         return
 
     raise RuntimeError("Supported graph runtime requires native Surreal graph operations")

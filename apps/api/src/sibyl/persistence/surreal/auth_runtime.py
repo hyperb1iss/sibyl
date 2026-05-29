@@ -1893,25 +1893,23 @@ async def signup_local_user(*, email: str, password: str, name: str, request):
 
 
 async def delete_failed_local_signup_user(*, user_id: UUID, organization_id: UUID | None) -> None:
-    async with _auth_client_scope() as client:
-        await client.execute_query(
-            "DELETE FROM user_sessions WHERE user_id = $user_id;",
-            user_id=str(user_id),
+    statements = ["DELETE FROM user_sessions WHERE user_id = $user_id;"]
+    if organization_id is not None:
+        statements.append(
+            "DELETE FROM organization_members "
+            "WHERE user_id = $user_id AND organization_id = $organization_id;"
         )
-        if organization_id is not None:
-            await client.execute_query(
-                "DELETE FROM organization_members "
-                "WHERE user_id = $user_id AND organization_id = $organization_id;",
-                user_id=str(user_id),
-                organization_id=str(organization_id),
-            )
-            await client.execute_query(
-                "DELETE FROM organizations WHERE uuid = $organization_id AND is_personal = true;",
-                organization_id=str(organization_id),
-            )
-        await client.execute_query(
-            "DELETE FROM users WHERE uuid = $user_id;",
+        statements.append(
+            "DELETE FROM organizations WHERE uuid = $organization_id AND is_personal = true;"
+        )
+    statements.append("DELETE FROM users WHERE uuid = $user_id;")
+    body = "\n".join(statements)
+    async with _auth_client_scope() as client:
+        await _execute_raw_statement_records(
+            client,
+            f"BEGIN TRANSACTION;\n{body}\nCOMMIT TRANSACTION;",
             user_id=str(user_id),
+            organization_id=str(organization_id) if organization_id is not None else None,
         )
 
 
@@ -3103,10 +3101,12 @@ async def delete_project_record(
         await _execute_raw_statement_records(
             client,
             """
+                BEGIN TRANSACTION;
                 DELETE FROM api_key_project_scopes WHERE project_id = $project_id;
                 DELETE FROM team_projects WHERE project_id = $project_id;
                 DELETE FROM project_members WHERE project_id = $project_id;
                 DELETE FROM projects WHERE uuid = $uuid AND organization_id = $organization_id;
+                COMMIT TRANSACTION;
             """,
             project_id=project_uuid,
             uuid=project_uuid,

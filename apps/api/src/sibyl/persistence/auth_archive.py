@@ -13,6 +13,7 @@ from sibyl_core.backends.surreal import bootstrap_auth_schema
 from sibyl_core.backends.surreal.records import (
     normalize_records as _normalize_records,
     query_error as _query_error,
+    raise_on_error as _raise_on_error,
 )
 
 AUTH_ARCHIVE_VERSION = "1.0"
@@ -262,8 +263,13 @@ async def restore_auth_archive_payload(
     try:
         await bootstrap_auth_schema(client, reset=clean)
         if clean:
-            for table in AUTH_ARCHIVE_TABLES:
-                await client.execute_query(_DELETE_TABLE_ROWS[table])
+            # Wipe every auth table in one transaction so a clean restore never
+            # leaves the namespace half-purged if a delete fails partway.
+            wipe_sql = "\n".join(_DELETE_TABLE_ROWS[table] for table in AUTH_ARCHIVE_TABLES)
+            wipe_result = await client.execute_query_raw(
+                f"BEGIN TRANSACTION;\n{wipe_sql}\nCOMMIT TRANSACTION;",
+            )
+            _raise_on_error(wipe_result, query="restore_auth_archive_payload:clean")
 
         for table in AUTH_ARCHIVE_TABLES:
             rows = tables.get(table)

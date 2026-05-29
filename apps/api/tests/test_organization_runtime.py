@@ -149,21 +149,21 @@ async def test_surreal_delete_org_auth_children_batches_dependent_deletes() -> N
         organization_id=org_id,
     )
 
-    delete_calls = [(query, params) for query, params in calls if query.startswith("DELETE")]
-    assert delete_calls == [
-        (
-            "DELETE FROM team_members WHERE team_id IN $team_ids;",
-            {"team_ids": [str(team_id) for team_id in team_ids]},
-        ),
-        (
-            "DELETE FROM api_key_project_scopes WHERE api_key_id IN $api_key_ids;",
-            {"api_key_ids": [str(api_key_id) for api_key_id in api_key_ids]},
-        ),
-        (
-            "DELETE FROM api_key_memory_space_scopes WHERE api_key_id IN $api_key_ids;",
-            {"api_key_ids": [str(api_key_id) for api_key_id in api_key_ids]},
-        ),
-    ]
+    write_calls = [(query, params) for query, params in calls if "DELETE" in query]
+    assert write_calls[0] == (
+        "DELETE FROM team_members WHERE team_id IN $team_ids;",
+        {"team_ids": [str(team_id) for team_id in team_ids]},
+    )
+    # The two api_key scope deletes share one transaction so they cannot half-apply.
+    api_key_query, api_key_params = write_calls[1]
+    assert "BEGIN TRANSACTION;" in api_key_query
+    assert "COMMIT TRANSACTION;" in api_key_query
+    assert "DELETE FROM api_key_project_scopes WHERE api_key_id IN $api_key_ids;" in api_key_query
+    assert (
+        "DELETE FROM api_key_memory_space_scopes WHERE api_key_id IN $api_key_ids;" in api_key_query
+    )
+    assert api_key_params == {"api_key_ids": [str(api_key_id) for api_key_id in api_key_ids]}
+    assert len(write_calls) == 2
 
 
 @pytest.mark.asyncio
@@ -251,10 +251,20 @@ async def test_surreal_delete_org_batches_authorization_and_deletes_directly(
     assert "FROM organizations" in lookup_query
     assert "FROM organization_members" in lookup_query
     assert lookup_params == {"slug": "electric-coven", "user_id": str(user_id)}
-    assert fake_client.calls[-1] == (
+    # The organizations row is deleted first so a mid-sweep failure cannot leave
+    # a surviving org record whose children are already gone.
+    assert fake_client.calls[1] == (
         "DELETE FROM organizations WHERE uuid = $organization_id;",
         {"organization_id": str(org_id)},
     )
+    auth_sweep_query, auth_sweep_params = fake_client.calls[-1]
+    assert "BEGIN TRANSACTION;" in auth_sweep_query
+    assert "COMMIT TRANSACTION;" in auth_sweep_query
+    assert "DELETE FROM organization_members WHERE organization_id = $organization_id;" in (
+        auth_sweep_query
+    )
+    assert "DELETE FROM projects WHERE organization_id = $organization_id;" in auth_sweep_query
+    assert auth_sweep_params == {"organization_id": str(org_id)}
     delete_auth_children.assert_awaited_once_with(fake_client, organization_id=org_id)
     delete_crawl_source.assert_awaited_once_with(
         None,

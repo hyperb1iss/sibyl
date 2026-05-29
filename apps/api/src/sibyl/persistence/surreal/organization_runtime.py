@@ -39,6 +39,7 @@ from sibyl_core.backends.surreal.records import (
     normalize_record as _normalize_record,
     normalize_records as _normalize_records,
     query_error as _query_error,
+    raise_on_error as _raise_on_error,
     utcnow as _utcnow,
 )
 
@@ -92,6 +93,23 @@ def _record_payload(value: object) -> SurrealRecord:
 def _is_uniqueness_error(error: str) -> bool:
     lowered = error.lower()
     return "unique" in lowered or "already contains" in lowered
+
+
+async def _execute_checked(client: QueryClient, query: str, **params: object) -> object:
+    """Run a write and raise if SurrealDB reports an error on any statement.
+
+    Multi-statement transactions are sent through ``execute_query_raw`` when the
+    client exposes it: the normal query path can collapse a multi-statement
+    response, hiding a per-statement ``status == "ERR"`` that ``query_error``
+    needs to see so a rolled-back transaction is never read as success.
+    """
+    raw_candidate = getattr(client, "execute_query_raw", None)
+    if callable(raw_candidate):
+        result = await raw_candidate(query, **params)
+    else:
+        result = await client.execute_query(query, **params)
+    _raise_on_error(result, query=query)
+    return result
 
 
 async def _list_user_records_by_id(
@@ -891,7 +909,8 @@ async def _delete_org_auth_child_records(client, *, organization_id: UUID) -> No
 
     team_ids = [str(team["uuid"]) for team in team_rows if team.get("uuid") is not None]
     if team_ids:
-        await client.execute_query(
+        await _execute_checked(
+            client,
             "DELETE FROM team_members WHERE team_id IN $team_ids;",
             team_ids=team_ids,
         )
@@ -900,12 +919,14 @@ async def _delete_org_auth_child_records(client, *, organization_id: UUID) -> No
         str(api_key["uuid"]) for api_key in api_key_rows if api_key.get("uuid") is not None
     ]
     if api_key_ids:
-        await client.execute_query(
-            "DELETE FROM api_key_project_scopes WHERE api_key_id IN $api_key_ids;",
-            api_key_ids=api_key_ids,
-        )
-        await client.execute_query(
-            "DELETE FROM api_key_memory_space_scopes WHERE api_key_id IN $api_key_ids;",
+        await _execute_checked(
+            client,
+            """
+                BEGIN TRANSACTION;
+                DELETE FROM api_key_project_scopes WHERE api_key_id IN $api_key_ids;
+                DELETE FROM api_key_memory_space_scopes WHERE api_key_id IN $api_key_ids;
+                COMMIT TRANSACTION;
+            """,
             api_key_ids=api_key_ids,
         )
 
@@ -942,20 +963,37 @@ async def delete_org(*, request: Request, slug: str, user_id: UUID) -> None:
             details={"slug": organization_slug, "name": organization_name},
         )
 
+        # delete_org spans namespaces (the auth/content/graph child stores plus
+        # this global organizations row), so it cannot be one atomic
+        # transaction. Remove the organizations row first to isolate the org
+        # immediately, then sweep each child namespace idempotently — re-running
+        # after a mid-sweep failure is safe and converges.
+        await _execute_checked(
+            client,
+            "DELETE FROM organizations WHERE uuid = $organization_id;",
+            organization_id=str(organization_id),
+        )
+
         await _delete_org_auth_child_records(client, organization_id=organization_id)
 
-        for query in (
-            "DELETE FROM team_projects WHERE organization_id = $organization_id;",
-            "DELETE FROM project_members WHERE organization_id = $organization_id;",
-            "DELETE FROM projects WHERE organization_id = $organization_id;",
-            "DELETE FROM organization_invitations WHERE organization_id = $organization_id;",
-            "DELETE FROM organization_members WHERE organization_id = $organization_id;",
-            "DELETE FROM teams WHERE organization_id = $organization_id;",
-            "DELETE FROM api_keys WHERE organization_id = $organization_id;",
-            "DELETE FROM user_sessions WHERE organization_id = $organization_id;",
-            "DELETE FROM device_authorization_requests WHERE organization_id = $organization_id;",
-        ):
-            await client.execute_query(query, organization_id=str(organization_id))
+        await _execute_checked(
+            client,
+            """
+                BEGIN TRANSACTION;
+                DELETE FROM team_projects WHERE organization_id = $organization_id;
+                DELETE FROM project_members WHERE organization_id = $organization_id;
+                DELETE FROM projects WHERE organization_id = $organization_id;
+                DELETE FROM organization_invitations WHERE organization_id = $organization_id;
+                DELETE FROM organization_members WHERE organization_id = $organization_id;
+                DELETE FROM teams WHERE organization_id = $organization_id;
+                DELETE FROM api_keys WHERE organization_id = $organization_id;
+                DELETE FROM user_sessions WHERE organization_id = $organization_id;
+                DELETE FROM device_authorization_requests
+                    WHERE organization_id = $organization_id;
+                COMMIT TRANSACTION;
+            """,
+            organization_id=str(organization_id),
+        )
 
         from sibyl.persistence.surreal.content import (
             delete_crawl_source_record,
@@ -976,19 +1014,19 @@ async def delete_org(*, request: Request, slug: str, user_id: UUID) -> None:
                     organization_id=organization_id,
                 )
 
-            for query in (
-                "DELETE FROM raw_captures WHERE organization_id = $organization_id;",
-                "DELETE FROM backups WHERE organization_id = $organization_id;",
-                "DELETE FROM backup_settings WHERE organization_id = $organization_id;",
-            ):
-                await content_client.execute_query(query, organization_id=str(organization_id))
+            await _execute_checked(
+                content_client,
+                """
+                    BEGIN TRANSACTION;
+                    DELETE FROM raw_captures WHERE organization_id = $organization_id;
+                    DELETE FROM backups WHERE organization_id = $organization_id;
+                    DELETE FROM backup_settings WHERE organization_id = $organization_id;
+                    COMMIT TRANSACTION;
+                """,
+                organization_id=str(organization_id),
+            )
 
         await delete_graph_data(str(organization_id))
-
-        await client.execute_query(
-            "DELETE FROM organizations WHERE uuid = $organization_id;",
-            organization_id=str(organization_id),
-        )
 
 
 async def list_org_members(*, slug: str, actor_id: UUID) -> list[dict[str, object]]:

@@ -13,6 +13,7 @@ from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_
 from sibyl_core.backends.surreal.records import (
     normalize_records as _normalize_records,
     query_error as _query_error,
+    raise_on_error as _raise_on_error,
 )
 
 CONTENT_ARCHIVE_VERSION = "1.0"
@@ -346,18 +347,23 @@ async def restore_content_archive_payload(
                     record["embedding"] = _deserialize_vector(record.get("embedding"))
                 record[spec.target_identity_field] = identity
 
+                # Delete+create must be atomic: a create that fails after the
+                # delete would otherwise drop the existing row on a restore, the
+                # worst outcome on the DR path. The transaction rolls the delete
+                # back so the prior row survives a failed replace.
+                restore_row_sql = (
+                    f"BEGIN TRANSACTION;\n"
+                    f"{spec.delete_by_identity_sql}\n"
+                    f"{spec.create_sql}\n"
+                    f"COMMIT TRANSACTION;"
+                )
                 try:
-                    delete_result = await client.execute_query(
-                        spec.delete_by_identity_sql,
+                    result = await client.execute_query_raw(
+                        restore_row_sql,
                         identity=identity,
+                        record=record,
                     )
-                    delete_error = _query_error(delete_result)
-                    if delete_error is not None:
-                        raise RuntimeError(delete_error)
-                    create_result = await client.execute_query(spec.create_sql, record=record)
-                    create_error = _query_error(create_result)
-                    if create_error is not None:
-                        raise RuntimeError(create_error)
+                    _raise_on_error(result, query=restore_row_sql)
                     rows_restored += 1
                 except Exception as exc:
                     errors.append(f"{spec.name}:{identity}: {exc}")
