@@ -11,6 +11,7 @@ from dataclasses import asdict
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 
+from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.schemas import (
     ExploreRequest,
     ExploreResponse,
@@ -258,6 +259,7 @@ async def explore(
 
 
 @router.post("/temporal", response_model=TemporalResponse)
+@handle_workflow_errors("temporal_query", id_param="entity_id")
 async def temporal_query(
     request: TemporalRequest,
     org: AuthOrganization = Depends(get_current_organization),
@@ -277,52 +279,43 @@ async def temporal_query(
     - "How has knowledge about X evolved?" -> mode=timeline
     - "What facts have been superseded?" -> mode=conflicts
     """
-    try:
-        from sibyl_core.tools.temporal import temporal_query as core_temporal_query
+    from sibyl_core.tools.temporal import temporal_query as core_temporal_query
 
-        group_id = str(org.id)
+    group_id = str(org.id)
 
-        result = await core_temporal_query(
-            mode=request.mode,
-            entity_id=request.entity_id,
-            as_of=request.as_of,
-            include_expired=request.include_expired,
-            limit=request.limit,
-            organization_id=group_id,
+    result = await core_temporal_query(
+        mode=request.mode,
+        entity_id=request.entity_id,
+        as_of=request.as_of,
+        include_expired=request.include_expired,
+        limit=request.limit,
+        organization_id=group_id,
+    )
+
+    # Convert dataclass edges to schema objects
+    edges_list = [
+        TemporalEdgeSchema(
+            id=edge.id,
+            name=edge.name,
+            source_id=edge.source_id,
+            source_name=edge.source_name,
+            target_id=edge.target_id,
+            target_name=edge.target_name,
+            created_at=edge.created_at.isoformat() if edge.created_at else None,
+            expired_at=edge.expired_at.isoformat() if edge.expired_at else None,
+            valid_at=edge.valid_at.isoformat() if edge.valid_at else None,
+            invalid_at=edge.invalid_at.isoformat() if edge.invalid_at else None,
+            fact=edge.fact,
+            is_current=edge.is_current,
         )
+        for edge in result.edges
+    ]
 
-        # Convert dataclass edges to schema objects
-        edges_list = [
-            TemporalEdgeSchema(
-                id=edge.id,
-                name=edge.name,
-                source_id=edge.source_id,
-                source_name=edge.source_name,
-                target_id=edge.target_id,
-                target_name=edge.target_name,
-                created_at=edge.created_at.isoformat() if edge.created_at else None,
-                expired_at=edge.expired_at.isoformat() if edge.expired_at else None,
-                valid_at=edge.valid_at.isoformat() if edge.valid_at else None,
-                invalid_at=edge.invalid_at.isoformat() if edge.invalid_at else None,
-                fact=edge.fact,
-                is_current=edge.is_current,
-            )
-            for edge in result.edges
-        ]
-
-        return TemporalResponse(
-            mode=result.mode,
-            entity_id=result.entity_id,
-            edges=edges_list,
-            total=result.total,
-            as_of=result.as_of.isoformat() if result.as_of else None,
-            message=result.message,
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("temporal_query_failed", mode=request.mode, error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Temporal query failed. Please try again."
-        ) from e
+    return TemporalResponse(
+        mode=result.mode,
+        entity_id=result.entity_id,
+        edges=edges_list,
+        total=result.total,
+        as_of=result.as_of.isoformat() if result.as_of else None,
+        message=result.message,
+    )

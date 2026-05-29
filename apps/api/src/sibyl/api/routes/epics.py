@@ -10,6 +10,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.event_types import WSEvent
 from sibyl.api.websocket import broadcast_event
 from sibyl.auth.context import AuthContext
@@ -171,45 +172,38 @@ async def _update_project_activity(group_id: str, epic: Any) -> None:
 
 
 @router.post("/{epic_id}/start", response_model=EpicActionResponse)
+@handle_workflow_errors("start_epic", id_param="epic_id")
 async def start_epic(
     epic_id: str,
     org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
 ) -> EpicActionResponse:
     """Start working on an epic (moves to 'in_progress' status)."""
-    try:
-        # Verify project access (contributor role required to start work)
-        epic = await _verify_epic_access(epic_id, org, ctx, ProjectRole.CONTRIBUTOR)
+    # Verify project access (contributor role required to start work)
+    epic = await _verify_epic_access(epic_id, org, ctx, ProjectRole.CONTRIBUTOR)
 
-        group_id = str(org.id)
-        await update_graph_entity(group_id, epic_id, {"status": "in_progress"})
-        await _update_project_activity(group_id, epic)
+    group_id = str(org.id)
+    await update_graph_entity(group_id, epic_id, {"status": "in_progress"})
+    await _update_project_activity(group_id, epic)
 
-        await _broadcast_epic_update(
-            epic_id,
-            "start_epic",
-            {"status": "in_progress", "name": epic.name},
-            org_id=group_id,
-        )
+    await _broadcast_epic_update(
+        epic_id,
+        "start_epic",
+        {"status": "in_progress", "name": epic.name},
+        org_id=group_id,
+    )
 
-        return EpicActionResponse(
-            success=True,
-            action="start_epic",
-            epic_id=epic_id,
-            message="Epic started",
-            data={"status": "in_progress"},
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("start_epic_failed", epic_id=epic_id, error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to start epic. Please try again."
-        ) from e
+    return EpicActionResponse(
+        success=True,
+        action="start_epic",
+        epic_id=epic_id,
+        message="Epic started",
+        data={"status": "in_progress"},
+    )
 
 
 @router.post("/{epic_id}/complete", response_model=EpicActionResponse)
+@handle_workflow_errors("complete_epic", id_param="epic_id")
 async def complete_epic(
     epic_id: str,
     org: AuthOrganization = Depends(get_current_organization),
@@ -217,47 +211,39 @@ async def complete_epic(
     request: CompleteEpicRequest | None = None,
 ) -> EpicActionResponse:
     """Complete an epic with optional learnings."""
-    try:
-        # Verify project access (maintainer role required to complete)
-        epic = await _verify_epic_access(epic_id, org, ctx, ProjectRole.MAINTAINER)
+    # Verify project access (maintainer role required to complete)
+    epic = await _verify_epic_access(epic_id, org, ctx, ProjectRole.MAINTAINER)
 
-        group_id = str(org.id)
-        learnings = request.learnings if request else None
-        updates = {
-            "status": "completed",
-            "completed_date": datetime.now(UTC).isoformat(),
-        }
-        if learnings:
-            updates["learnings"] = learnings
+    group_id = str(org.id)
+    learnings = request.learnings if request else None
+    updates = {
+        "status": "completed",
+        "completed_date": datetime.now(UTC).isoformat(),
+    }
+    if learnings:
+        updates["learnings"] = learnings
 
-        await update_graph_entity(group_id, epic_id, updates)
-        await _update_project_activity(group_id, epic)
+    await update_graph_entity(group_id, epic_id, updates)
+    await _update_project_activity(group_id, epic)
 
-        await _broadcast_epic_update(
-            epic_id,
-            "complete_epic",
-            {"status": "completed", "learnings": learnings or "", "name": epic.name},
-            org_id=group_id,
-        )
+    await _broadcast_epic_update(
+        epic_id,
+        "complete_epic",
+        {"status": "completed", "learnings": learnings or "", "name": epic.name},
+        org_id=group_id,
+    )
 
-        return EpicActionResponse(
-            success=True,
-            action="complete_epic",
-            epic_id=epic_id,
-            message="Epic completed" + (" with learnings captured" if learnings else ""),
-            data={"status": "completed", "learnings": learnings or ""},
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("complete_epic_failed", epic_id=epic_id, error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to complete epic. Please try again."
-        ) from e
+    return EpicActionResponse(
+        success=True,
+        action="complete_epic",
+        epic_id=epic_id,
+        message="Epic completed" + (" with learnings captured" if learnings else ""),
+        data={"status": "completed", "learnings": learnings or ""},
+    )
 
 
 @router.post("/{epic_id}/archive", response_model=EpicActionResponse)
+@handle_workflow_errors("archive_epic", id_param="epic_id")
 async def archive_epic(
     epic_id: str,
     org: AuthOrganization = Depends(get_current_organization),
@@ -265,40 +251,32 @@ async def archive_epic(
     request: ArchiveEpicRequest | None = None,
 ) -> EpicActionResponse:
     """Archive an epic."""
-    try:
-        # Verify project access (maintainer role required to archive)
-        epic = await _verify_epic_access(epic_id, org, ctx, ProjectRole.MAINTAINER)
+    # Verify project access (maintainer role required to archive)
+    epic = await _verify_epic_access(epic_id, org, ctx, ProjectRole.MAINTAINER)
 
-        group_id = str(org.id)
-        reason = request.reason if request else None
-        await update_graph_entity(group_id, epic_id, {"status": "archived"})
-        await _update_project_activity(group_id, epic)
+    group_id = str(org.id)
+    reason = request.reason if request else None
+    await update_graph_entity(group_id, epic_id, {"status": "archived"})
+    await _update_project_activity(group_id, epic)
 
-        await _broadcast_epic_update(
-            epic_id,
-            "archive_epic",
-            {"status": "archived", "name": epic.name},
-            org_id=group_id,
-        )
+    await _broadcast_epic_update(
+        epic_id,
+        "archive_epic",
+        {"status": "archived", "name": epic.name},
+        org_id=group_id,
+    )
 
-        return EpicActionResponse(
-            success=True,
-            action="archive_epic",
-            epic_id=epic_id,
-            message="Epic archived" + (f": {reason}" if reason else ""),
-            data={"status": "archived"},
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("archive_epic_failed", epic_id=epic_id, error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to archive epic. Please try again."
-        ) from e
+    return EpicActionResponse(
+        success=True,
+        action="archive_epic",
+        epic_id=epic_id,
+        message="Epic archived" + (f": {reason}" if reason else ""),
+        data={"status": "archived"},
+    )
 
 
 @router.patch("/{epic_id}", response_model=EpicActionResponse)
+@handle_workflow_errors("update_epic", id_param="epic_id")
 async def update_epic(
     epic_id: str,
     request: UpdateEpicRequest,
@@ -306,52 +284,43 @@ async def update_epic(
     ctx: AuthContext = Depends(get_auth_context),
 ) -> EpicActionResponse:
     """Update epic fields."""
-    try:
-        # Verify project access (contributor role required to update)
-        epic = await _verify_epic_access(epic_id, org, ctx, ProjectRole.CONTRIBUTOR)
+    # Verify project access (contributor role required to update)
+    epic = await _verify_epic_access(epic_id, org, ctx, ProjectRole.CONTRIBUTOR)
 
-        group_id = str(org.id)
-        # Build update dict from request
-        updates = {}
-        if request.status is not None:
-            updates["status"] = request.status
-        if request.priority is not None:
-            updates["priority"] = request.priority
-        if request.title is not None:
-            updates["title"] = request.title
-            updates["name"] = request.title  # Keep name in sync
-        if request.description is not None:
-            updates["description"] = request.description
-        if request.assignees is not None:
-            updates["assignees"] = request.assignees
-        if request.tags is not None:
-            updates["tags"] = request.tags
+    group_id = str(org.id)
+    # Build update dict from request
+    updates = {}
+    if request.status is not None:
+        updates["status"] = request.status
+    if request.priority is not None:
+        updates["priority"] = request.priority
+    if request.title is not None:
+        updates["title"] = request.title
+        updates["name"] = request.title  # Keep name in sync
+    if request.description is not None:
+        updates["description"] = request.description
+    if request.assignees is not None:
+        updates["assignees"] = request.assignees
+    if request.tags is not None:
+        updates["tags"] = request.tags
 
-        if not updates:
-            raise HTTPException(status_code=400, detail="No fields to update")
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
 
-        await update_graph_entity(group_id, epic_id, updates)
-        await _update_project_activity(group_id, epic)
+    await update_graph_entity(group_id, epic_id, updates)
+    await _update_project_activity(group_id, epic)
 
-        await _broadcast_epic_update(
-            epic_id,
-            "update_epic",
-            {"updates": list(updates.keys()), "name": epic.name},
-            org_id=group_id,
-        )
+    await _broadcast_epic_update(
+        epic_id,
+        "update_epic",
+        {"updates": list(updates.keys()), "name": epic.name},
+        org_id=group_id,
+    )
 
-        return EpicActionResponse(
-            success=True,
-            action="update_epic",
-            epic_id=epic_id,
-            message=f"Epic updated: {', '.join(updates.keys())}",
-            data=updates,
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("update_epic_failed", epic_id=epic_id, error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to update epic. Please try again."
-        ) from e
+    return EpicActionResponse(
+        success=True,
+        action="update_epic",
+        epic_id=epic_id,
+        message=f"Epic updated: {', '.join(updates.keys())}",
+        data=updates,
+    )

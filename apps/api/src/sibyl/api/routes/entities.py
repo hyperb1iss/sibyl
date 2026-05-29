@@ -12,6 +12,7 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.dependencies import get_knowledge_read_service
 from sibyl.api.errors import constraint_violation, sanitize_error_text
 from sibyl.api.event_types import WSEvent
@@ -808,6 +809,7 @@ async def _fetch_related_entity_summaries(
 
 
 @router.get("/captures", response_model=RawCaptureListResponse)
+@handle_workflow_errors("list_raw_captures")
 async def list_raw_captures(
     org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
@@ -819,41 +821,36 @@ async def list_raw_captures(
     offset: int = Query(default=0, ge=0, description="Results to skip"),
 ) -> RawCaptureListResponse:
     """List archived raw quick captures for the current organization."""
-    try:
-        accessible_projects = await _accessible_project_ids_for_read(ctx)
-        captures, has_more = await content_runtime.list_raw_captures(
-            session,
-            organization_id=org.id,
-            entity_type=entity_type,
-            capture_surface=capture_surface,
-            review_state=review_state,
-            limit=limit,
-            offset=offset,
+    accessible_projects = await _accessible_project_ids_for_read(ctx)
+    captures, has_more = await content_runtime.list_raw_captures(
+        session,
+        organization_id=org.id,
+        entity_type=entity_type,
+        capture_surface=capture_surface,
+        review_state=review_state,
+        limit=limit,
+        offset=offset,
+    )
+    captures = [
+        capture
+        for capture in captures
+        if _raw_capture_visible_to_reader(
+            capture,
+            reader_user_id=getattr(ctx, "user_id", None),
+            accessible_projects=accessible_projects,
         )
-        captures = [
-            capture
-            for capture in captures
-            if _raw_capture_visible_to_reader(
-                capture,
-                reader_user_id=getattr(ctx, "user_id", None),
-                accessible_projects=accessible_projects,
-            )
-        ]
+    ]
 
-        return RawCaptureListResponse(
-            captures=[_serialize_raw_capture_summary(capture) for capture in captures],
-            limit=limit,
-            offset=offset,
-            has_more=has_more,
-        )
-    except Exception as e:
-        log.exception("list_raw_captures_failed", error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to list raw captures. Please try again."
-        ) from e
+    return RawCaptureListResponse(
+        captures=[_serialize_raw_capture_summary(capture) for capture in captures],
+        limit=limit,
+        offset=offset,
+        has_more=has_more,
+    )
 
 
 @router.get("/captures/{capture_id}", response_model=RawCaptureResponse)
+@handle_workflow_errors("get_raw_capture", id_param="capture_id")
 async def get_raw_capture(
     capture_id: UUID,
     org: AuthOrganization = Depends(get_current_organization),
@@ -861,28 +858,20 @@ async def get_raw_capture(
     session: Any = Depends(get_content_read_session_dependency),
 ) -> RawCaptureResponse:
     """Get a single archived raw quick capture."""
-    try:
-        accessible_projects = await _accessible_project_ids_for_read(ctx)
-        capture = await content_runtime.get_raw_capture(
-            session,
-            organization_id=org.id,
-            capture_id=capture_id,
-        )
-        if not capture or not _raw_capture_visible_to_reader(
-            capture,
-            reader_user_id=getattr(ctx, "user_id", None),
-            accessible_projects=accessible_projects,
-        ):
-            raise HTTPException(status_code=404, detail=f"Raw capture not found: {capture_id}")
+    accessible_projects = await _accessible_project_ids_for_read(ctx)
+    capture = await content_runtime.get_raw_capture(
+        session,
+        organization_id=org.id,
+        capture_id=capture_id,
+    )
+    if not capture or not _raw_capture_visible_to_reader(
+        capture,
+        reader_user_id=getattr(ctx, "user_id", None),
+        accessible_projects=accessible_projects,
+    ):
+        raise HTTPException(status_code=404, detail=f"Raw capture not found: {capture_id}")
 
-        return _serialize_raw_capture(capture)
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("get_raw_capture_failed", capture_id=str(capture_id), error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to get raw capture. Please try again."
-        ) from e
+    return _serialize_raw_capture(capture)
 
 
 @router.patch(
@@ -890,6 +879,7 @@ async def get_raw_capture(
     response_model=RawCaptureResponse,
     dependencies=[Depends(require_org_role(*_WRITE_ROLES))],
 )
+@handle_workflow_errors("update_raw_capture_review_state", id_param="capture_id")
 async def update_raw_capture_review_state(
     capture_id: UUID,
     update: RawCaptureReviewUpdate,
@@ -898,41 +888,32 @@ async def update_raw_capture_review_state(
     session: Any = Depends(get_content_read_session_dependency),
 ) -> RawCaptureResponse:
     """Update review-state metadata for a raw capture."""
-    try:
-        accessible_projects = await _accessible_project_ids_for_read(ctx)
-        existing = await content_runtime.get_raw_capture(
-            session,
-            organization_id=org.id,
-            capture_id=capture_id,
-        )
-        if not existing or not _raw_capture_visible_to_reader(
-            existing,
-            reader_user_id=getattr(ctx, "user_id", None),
-            accessible_projects=accessible_projects,
-        ):
-            raise HTTPException(status_code=404, detail=f"Raw capture not found: {capture_id}")
+    accessible_projects = await _accessible_project_ids_for_read(ctx)
+    existing = await content_runtime.get_raw_capture(
+        session,
+        organization_id=org.id,
+        capture_id=capture_id,
+    )
+    if not existing or not _raw_capture_visible_to_reader(
+        existing,
+        reader_user_id=getattr(ctx, "user_id", None),
+        accessible_projects=accessible_projects,
+    ):
+        raise HTTPException(status_code=404, detail=f"Raw capture not found: {capture_id}")
 
-        capture = await content_runtime.update_raw_capture_review_state(
-            session,
-            organization_id=org.id,
-            capture_id=capture_id,
-            review_state=update.review_state,
-        )
-        if not capture:
-            raise HTTPException(status_code=404, detail=f"Raw capture not found: {capture_id}")
-        return _serialize_raw_capture(capture)
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception(
-            "update_raw_capture_review_state_failed", capture_id=str(capture_id), error=str(e)
-        )
-        raise HTTPException(
-            status_code=500, detail="Failed to update raw capture review state. Please try again."
-        ) from e
+    capture = await content_runtime.update_raw_capture_review_state(
+        session,
+        organization_id=org.id,
+        capture_id=capture_id,
+        review_state=update.review_state,
+    )
+    if not capture:
+        raise HTTPException(status_code=404, detail=f"Raw capture not found: {capture_id}")
+    return _serialize_raw_capture(capture)
 
 
 @router.get("", response_model=EntityListResponse)
+@handle_workflow_errors("list_entities")
 async def list_entities(
     org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
@@ -950,143 +931,135 @@ async def list_entities(
     sort_order: SortOrder = Query(default=SortOrder.DESC, description="Sort direction"),
 ) -> EntityListResponse:
     """List entities with optional filters and pagination."""
-    try:
-        group_id = str(org.id)
-        log.debug(
-            "Listing entities with filters",
-            entity_type=entity_type,
-            project_ids=project_ids,
-            page=page,
-        )
+    group_id = str(org.id)
+    log.debug(
+        "Listing entities with filters",
+        entity_type=entity_type,
+        project_ids=project_ids,
+        page=page,
+    )
 
-        reader_user_id = str(getattr(getattr(ctx, "user", None), "id", None) or "") or None
-        project_ids, real_project_ids, has_unassigned = await _resolve_entity_list_project_filter(
-            ctx=ctx,
-            project_ids=project_ids,
-        )
-        # Visibility check only consults accessible_projects for project-scoped
-        # entities. real_project_ids is either the user-verified filter set or
-        # the user's full accessible set, both of which are the correct frame
-        # for "can this user see this project-scoped projection."
-        accessible_projects = set(real_project_ids)
-        runtime = await get_entity_graph_runtime(group_id)
-        entity_manager = runtime.entity_manager
+    reader_user_id = str(getattr(getattr(ctx, "user", None), "id", None) or "") or None
+    project_ids, real_project_ids, has_unassigned = await _resolve_entity_list_project_filter(
+        ctx=ctx,
+        project_ids=project_ids,
+    )
+    # Visibility check only consults accessible_projects for project-scoped
+    # entities. real_project_ids is either the user-verified filter set or
+    # the user's full accessible set, both of which are the correct frame
+    # for "can this user see this project-scoped projection."
+    accessible_projects = set(real_project_ids)
+    runtime = await get_entity_graph_runtime(group_id)
+    entity_manager = runtime.entity_manager
 
-        # Get entities - single query for all types, or filtered by type
-        unassigned_marker = "__unassigned__"
-        unique_real_project_ids = list(dict.fromkeys(real_project_ids))
-        single_project_id = (
-            unique_real_project_ids[0]
-            if len(unique_real_project_ids) == 1
-            and unassigned_marker not in (project_ids or [])
-            and entity_type != EntityType.PROJECT
-            else None
-        )
+    # Get entities - single query for all types, or filtered by type
+    unassigned_marker = "__unassigned__"
+    unique_real_project_ids = list(dict.fromkeys(real_project_ids))
+    single_project_id = (
+        unique_real_project_ids[0]
+        if len(unique_real_project_ids) == 1
+        and unassigned_marker not in (project_ids or [])
+        and entity_type != EntityType.PROJECT
+        else None
+    )
 
-        if _can_use_bounded_entity_list(
+    if _can_use_bounded_entity_list(
+        entity_manager,
+        language=language,
+        category=category,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    ):
+        page_entities, total, has_more = await _list_entities_bounded(
             entity_manager,
-            language=language,
-            category=category,
-            search=search,
-            sort_by=sort_by,
-            sort_order=sort_order,
-        ):
-            page_entities, total, has_more = await _list_entities_bounded(
+            entity_type=entity_type,
+            page=page,
+            page_size=page_size,
+            project_ids=project_ids,
+            real_project_ids=real_project_ids,
+            has_unassigned=bool(has_unassigned),
+            single_project_id=single_project_id,
+            reader_user_id=reader_user_id,
+            accessible_projects=accessible_projects,
+        )
+    else:
+        if entity_type:
+            all_entities = await _list_entities_by_type_paginated(
                 entity_manager,
-                entity_type=entity_type,
-                page=page,
-                page_size=page_size,
+                entity_type,
+                project_id=single_project_id,
+            )
+        else:
+            all_entities = await _list_all_entities_paginated(entity_manager)
+
+        filtered = [
+            entity
+            for entity in all_entities
+            if _entity_matches_list_filters(
+                entity,
                 project_ids=project_ids,
                 real_project_ids=real_project_ids,
                 has_unassigned=bool(has_unassigned),
-                single_project_id=single_project_id,
                 reader_user_id=reader_user_id,
                 accessible_projects=accessible_projects,
+                language=language,
+                category=category,
+                search=search,
             )
-        else:
-            if entity_type:
-                all_entities = await _list_entities_by_type_paginated(
-                    entity_manager,
-                    entity_type,
-                    project_id=single_project_id,
-                )
-            else:
-                all_entities = await _list_all_entities_paginated(entity_manager)
-
-            filtered = [
-                entity
-                for entity in all_entities
-                if _entity_matches_list_filters(
-                    entity,
-                    project_ids=project_ids,
-                    real_project_ids=real_project_ids,
-                    has_unassigned=bool(has_unassigned),
-                    reader_user_id=reader_user_id,
-                    accessible_projects=accessible_projects,
-                    language=language,
-                    category=category,
-                    search=search,
-                )
-            ]
-
-            def get_sort_key(e: Any) -> Any:
-                if sort_by == SortField.NAME:
-                    return (getattr(e, "name", "") or "").lower()
-                if sort_by == SortField.CREATED_AT:
-                    return getattr(e, "created_at", None) or datetime.min.replace(tzinfo=UTC)
-                if sort_by == SortField.UPDATED_AT:
-                    return getattr(e, "updated_at", None) or datetime.min.replace(tzinfo=UTC)
-                if sort_by == SortField.ENTITY_TYPE:
-                    return getattr(e, "entity_type", "") or ""
-                return ""
-
-            filtered.sort(key=get_sort_key, reverse=(sort_order == SortOrder.DESC))
-
-            total = len(filtered)
-            start = (page - 1) * page_size
-            end = start + page_size
-            page_entities = filtered[start:end]
-            has_more = end < total
-
-        # Convert to response models
-        response_entities = [
-            EntityResponse(
-                id=entity.id,
-                entity_type=entity.entity_type,
-                name=entity.name,
-                description=entity.description or "",
-                content=LIST_RESPONSE_CONTENT,
-                category=getattr(entity, "category", None) or entity.metadata.get("category"),
-                languages=getattr(entity, "languages", None)
-                or entity.metadata.get("languages", [])
-                or [],
-                tags=getattr(entity, "tags", None) or entity.metadata.get("tags", []) or [],
-                metadata=getattr(entity, "metadata", {}) or {},
-                source_file=getattr(entity, "source_file", None),
-                created_at=getattr(entity, "created_at", None),
-                updated_at=getattr(entity, "updated_at", None),
-            )
-            for entity in page_entities
         ]
 
-        return EntityListResponse(
-            entities=response_entities,
-            total=total,
-            page=page,
-            page_size=page_size,
-            has_more=has_more,
-        )
+        def get_sort_key(e: Any) -> Any:
+            if sort_by == SortField.NAME:
+                return (getattr(e, "name", "") or "").lower()
+            if sort_by == SortField.CREATED_AT:
+                return getattr(e, "created_at", None) or datetime.min.replace(tzinfo=UTC)
+            if sort_by == SortField.UPDATED_AT:
+                return getattr(e, "updated_at", None) or datetime.min.replace(tzinfo=UTC)
+            if sort_by == SortField.ENTITY_TYPE:
+                return getattr(e, "entity_type", "") or ""
+            return ""
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("list_entities_failed", error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to list entities. Please try again."
-        ) from e
+        filtered.sort(key=get_sort_key, reverse=(sort_order == SortOrder.DESC))
+
+        total = len(filtered)
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_entities = filtered[start:end]
+        has_more = end < total
+
+    # Convert to response models
+    response_entities = [
+        EntityResponse(
+            id=entity.id,
+            entity_type=entity.entity_type,
+            name=entity.name,
+            description=entity.description or "",
+            content=LIST_RESPONSE_CONTENT,
+            category=getattr(entity, "category", None) or entity.metadata.get("category"),
+            languages=getattr(entity, "languages", None)
+            or entity.metadata.get("languages", [])
+            or [],
+            tags=getattr(entity, "tags", None) or entity.metadata.get("tags", []) or [],
+            metadata=getattr(entity, "metadata", {}) or {},
+            source_file=getattr(entity, "source_file", None),
+            created_at=getattr(entity, "created_at", None),
+            updated_at=getattr(entity, "updated_at", None),
+        )
+        for entity in page_entities
+    ]
+
+    return EntityListResponse(
+        entities=response_entities,
+        total=total,
+        page=page,
+        page_size=page_size,
+        has_more=has_more,
+    )
 
 
 @router.get("/{entity_id}", response_model=EntityResponse)
+@handle_workflow_errors("get_entity", id_param="entity_id")
 async def get_entity(
     entity_id: str,
     org: AuthOrganization = Depends(get_current_organization),
@@ -1115,101 +1088,19 @@ async def get_entity(
 
     Always includes up to 5 related entities from the knowledge graph.
     """
-    try:
-        if not include_summary:
-            entity = await service.get_entity(entity_id)
-            if entity is not None:
-                accessible_projects = await _require_entity_read_access(ctx, entity)
-                metadata = dict(getattr(entity, "metadata", {}) or {})
-                related = None
-                if related_limit > 0:
-                    runtime = await get_entity_graph_runtime(str(org.id))
-                    related = await _fetch_related_entity_summaries(
-                        runtime.relationship_manager,
-                        entity_id=entity_id,
-                        accessible_projects=accessible_projects,
-                        limit=related_limit,
-                    )
-
-                return EntityResponse(
-                    id=entity.id,
-                    entity_type=entity.entity_type,
-                    name=entity.name,
-                    description=entity.description or "",
-                    content=(entity.content or "")[:50000],
-                    category=getattr(entity, "category", None) or entity.metadata.get("category"),
-                    languages=getattr(entity, "languages", None)
-                    or entity.metadata.get("languages", [])
-                    or [],
-                    tags=getattr(entity, "tags", None) or entity.metadata.get("tags", []) or [],
-                    metadata=metadata,
-                    source_file=getattr(entity, "source_file", None),
-                    created_at=getattr(entity, "created_at", None),
-                    updated_at=getattr(entity, "updated_at", None),
-                    related=related,
-                )
-
-        if include_summary and related_limit == 0:
-            entity = await service.get_entity(entity_id)
-            if entity is not None:
-                accessible_projects = await _require_entity_read_access(ctx, entity)
-                metadata = dict(getattr(entity, "metadata", {}) or {})
-                if entity.entity_type in {EntityType.PROJECT, EntityType.EPIC}:
-                    runtime = await get_entity_graph_runtime(str(org.id))
-                    metadata, _ = await _enrich_entity_with_related(
-                        entity,
-                        entity_id,
-                        runtime.entity_manager,
-                        runtime.relationship_manager,
-                        preloaded_related=None,
-                        accessible_projects=accessible_projects,
-                        related_limit=0,
-                    )
-
-                return EntityResponse(
-                    id=entity.id,
-                    entity_type=entity.entity_type,
-                    name=entity.name,
-                    description=entity.description or "",
-                    content=(entity.content or "")[:50000],
-                    category=getattr(entity, "category", None) or entity.metadata.get("category"),
-                    languages=getattr(entity, "languages", None)
-                    or entity.metadata.get("languages", [])
-                    or [],
-                    tags=getattr(entity, "tags", None) or entity.metadata.get("tags", []) or [],
-                    metadata=metadata,
-                    source_file=getattr(entity, "source_file", None),
-                    created_at=getattr(entity, "created_at", None),
-                    updated_at=getattr(entity, "updated_at", None),
-                    related=None,
-                )
-
-        graph_bundle = await service.get_entity_bundle(entity_id)
-        if graph_bundle is not None:
-            entity = graph_bundle.entity
+    if not include_summary:
+        entity = await service.get_entity(entity_id)
+        if entity is not None:
             accessible_projects = await _require_entity_read_access(ctx, entity)
             metadata = dict(getattr(entity, "metadata", {}) or {})
-            related = _summarize_related_entities(
-                entity_id,
-                related_entities=graph_bundle.related_entities,
-                relationships=graph_bundle.relationships,
-                accessible_projects=accessible_projects,
-                limit=related_limit,
-            )
-
-            if entity.entity_type in {EntityType.PROJECT, EntityType.EPIC}:
+            related = None
+            if related_limit > 0:
                 runtime = await get_entity_graph_runtime(str(org.id))
-
-                # Enrich with project and epic summaries via the current manager until
-                # those read models move behind the seam.
-                metadata, related = await _enrich_entity_with_related(
-                    entity,
-                    entity_id,
-                    runtime.entity_manager,
+                related = await _fetch_related_entity_summaries(
                     runtime.relationship_manager,
-                    preloaded_related=related,
+                    entity_id=entity_id,
                     accessible_projects=accessible_projects,
-                    related_limit=related_limit,
+                    limit=related_limit,
                 )
 
             return EntityResponse(
@@ -1230,55 +1121,128 @@ async def get_entity(
                 related=related,
             )
 
-        if not _should_fallback_to_document_entity(entity_id):
-            raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
-
-        log.debug("Entity not in graph, checking document chunks", entity_id=entity_id)
-
-        async with get_content_read_session() as session:
-            record = await content_runtime.resolve_document_entity(
-                session,
-                organization_id=org.id,
-                entity_id=entity_id,
-            )
-
-            if not record:
-                raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
-
-            heading_desc = " > ".join(record.heading_path) if record.heading_path else ""
+    if include_summary and related_limit == 0:
+        entity = await service.get_entity(entity_id)
+        if entity is not None:
+            accessible_projects = await _require_entity_read_access(ctx, entity)
+            metadata = dict(getattr(entity, "metadata", {}) or {})
+            if entity.entity_type in {EntityType.PROJECT, EntityType.EPIC}:
+                runtime = await get_entity_graph_runtime(str(org.id))
+                metadata, _ = await _enrich_entity_with_related(
+                    entity,
+                    entity_id,
+                    runtime.entity_manager,
+                    runtime.relationship_manager,
+                    preloaded_related=None,
+                    accessible_projects=accessible_projects,
+                    related_limit=0,
+                )
 
             return EntityResponse(
-                id=str(record.chunk_id),
-                entity_type=EntityType.DOCUMENT,
-                name=record.document_title or record.source_name,
-                description=heading_desc,
-                content=record.content[:50000],
-                category=record.chunk_type.value if record.chunk_type else None,
-                languages=[record.language] if record.language else [],
-                tags=[],
-                metadata={
-                    "source_id": str(record.source_id),
-                    "source_name": record.source_name,
-                    "source_url": record.source_url,
-                    "document_id": str(record.document_id),
-                    "document_url": record.document_url,
-                    "chunk_index": record.chunk_index,
-                    "chunk_type": record.chunk_type.value if record.chunk_type else None,
-                    "heading_path": list(record.heading_path),
-                    "result_origin": "document",
-                },
-                source_file=record.document_url,
-                created_at=record.created_at,
-                updated_at=record.updated_at,
+                id=entity.id,
+                entity_type=entity.entity_type,
+                name=entity.name,
+                description=entity.description or "",
+                content=(entity.content or "")[:50000],
+                category=getattr(entity, "category", None) or entity.metadata.get("category"),
+                languages=getattr(entity, "languages", None)
+                or entity.metadata.get("languages", [])
+                or [],
+                tags=getattr(entity, "tags", None) or entity.metadata.get("tags", []) or [],
+                metadata=metadata,
+                source_file=getattr(entity, "source_file", None),
+                created_at=getattr(entity, "created_at", None),
+                updated_at=getattr(entity, "updated_at", None),
+                related=None,
             )
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("get_entity_failed", entity_id=entity_id, error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to get entity. Please try again."
-        ) from e
+    graph_bundle = await service.get_entity_bundle(entity_id)
+    if graph_bundle is not None:
+        entity = graph_bundle.entity
+        accessible_projects = await _require_entity_read_access(ctx, entity)
+        metadata = dict(getattr(entity, "metadata", {}) or {})
+        related = _summarize_related_entities(
+            entity_id,
+            related_entities=graph_bundle.related_entities,
+            relationships=graph_bundle.relationships,
+            accessible_projects=accessible_projects,
+            limit=related_limit,
+        )
+
+        if entity.entity_type in {EntityType.PROJECT, EntityType.EPIC}:
+            runtime = await get_entity_graph_runtime(str(org.id))
+
+            # Enrich with project and epic summaries via the current manager until
+            # those read models move behind the seam.
+            metadata, related = await _enrich_entity_with_related(
+                entity,
+                entity_id,
+                runtime.entity_manager,
+                runtime.relationship_manager,
+                preloaded_related=related,
+                accessible_projects=accessible_projects,
+                related_limit=related_limit,
+            )
+
+        return EntityResponse(
+            id=entity.id,
+            entity_type=entity.entity_type,
+            name=entity.name,
+            description=entity.description or "",
+            content=(entity.content or "")[:50000],
+            category=getattr(entity, "category", None) or entity.metadata.get("category"),
+            languages=getattr(entity, "languages", None)
+            or entity.metadata.get("languages", [])
+            or [],
+            tags=getattr(entity, "tags", None) or entity.metadata.get("tags", []) or [],
+            metadata=metadata,
+            source_file=getattr(entity, "source_file", None),
+            created_at=getattr(entity, "created_at", None),
+            updated_at=getattr(entity, "updated_at", None),
+            related=related,
+        )
+
+    if not _should_fallback_to_document_entity(entity_id):
+        raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
+
+    log.debug("Entity not in graph, checking document chunks", entity_id=entity_id)
+
+    async with get_content_read_session() as session:
+        record = await content_runtime.resolve_document_entity(
+            session,
+            organization_id=org.id,
+            entity_id=entity_id,
+        )
+
+        if not record:
+            raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
+
+        heading_desc = " > ".join(record.heading_path) if record.heading_path else ""
+
+        return EntityResponse(
+            id=str(record.chunk_id),
+            entity_type=EntityType.DOCUMENT,
+            name=record.document_title or record.source_name,
+            description=heading_desc,
+            content=record.content[:50000],
+            category=record.chunk_type.value if record.chunk_type else None,
+            languages=[record.language] if record.language else [],
+            tags=[],
+            metadata={
+                "source_id": str(record.source_id),
+                "source_name": record.source_name,
+                "source_url": record.source_url,
+                "document_id": str(record.document_id),
+                "document_url": record.document_url,
+                "chunk_index": record.chunk_index,
+                "chunk_type": record.chunk_type.value if record.chunk_type else None,
+                "heading_path": list(record.heading_path),
+                "result_origin": "document",
+            },
+            source_file=record.document_url,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+        )
 
 
 # =============================================================================
@@ -1458,6 +1422,7 @@ async def create_entities_bulk(
     status_code=201,
     dependencies=[Depends(require_org_role(*_WRITE_ROLES))],
 )
+@handle_workflow_errors("create_entity")
 async def create_entity(
     request: Request,
     entity: EntityCreate,
@@ -1475,145 +1440,111 @@ async def create_entity(
     Set sync=true to wait for creation to complete (useful for tasks that need
     immediate workflow operations like start/complete).
     """
-    try:
-        from sibyl_core.tools.core import add
+    from sibyl_core.tools.core import add
 
-        group_id = str(org.id)
+    group_id = str(org.id)
 
-        # Extract task-specific fields from metadata if present
-        project = entity.metadata.get("project_id") if entity.metadata else None
-        epic = entity.metadata.get("epic_id") if entity.metadata else None
-        priority = entity.metadata.get("priority") if entity.metadata else None
-        assignees = entity.metadata.get("assignees") if entity.metadata else None
-        technologies = entity.metadata.get("technologies") if entity.metadata else None
-        depends_on = entity.metadata.get("depends_on") if entity.metadata else None
-        if project:
-            await verify_entity_project_access(
-                content_session,
-                ctx,
-                project,
-                required_role=ProjectRole.CONTRIBUTOR,
-                require_existing_project=True,
-            )
-        runtime = await get_entity_graph_runtime(group_id)
-        await _validate_related_to_targets_for_write(
-            ctx=ctx,
-            entity_manager=runtime.entity_manager,
-            related_to=entity.related_to,
+    # Extract task-specific fields from metadata if present
+    project = entity.metadata.get("project_id") if entity.metadata else None
+    epic = entity.metadata.get("epic_id") if entity.metadata else None
+    priority = entity.metadata.get("priority") if entity.metadata else None
+    assignees = entity.metadata.get("assignees") if entity.metadata else None
+    technologies = entity.metadata.get("technologies") if entity.metadata else None
+    depends_on = entity.metadata.get("depends_on") if entity.metadata else None
+    if project:
+        await verify_entity_project_access(
+            content_session,
+            ctx,
+            project,
+            required_role=ProjectRole.CONTRIBUTOR,
+            require_existing_project=True,
         )
+    runtime = await get_entity_graph_runtime(group_id)
+    await _validate_related_to_targets_for_write(
+        ctx=ctx,
+        entity_manager=runtime.entity_manager,
+        related_to=entity.related_to,
+    )
 
-        # Use description as content fallback (frontend sends description, add() needs content)
-        content = entity.content or entity.description or entity.name
-        request_metadata: dict[str, object] = dict(entity.metadata or {})
-        idempotency_payload = {
-            "body": entity.model_dump(mode="json"),
-            "query": {"sync": sync},
-        }
+    # Use description as content fallback (frontend sends description, add() needs content)
+    content = entity.content or entity.description or entity.name
+    request_metadata: dict[str, object] = dict(entity.metadata or {})
+    idempotency_payload = {
+        "body": entity.model_dump(mode="json"),
+        "query": {"sync": sync},
+    }
 
-        if ctx.user is not None:
-            replayed = await replay_idempotent_response(
-                request,
-                organization_id=org.id,
-                principal_id=str(ctx.user.id),
-                method="POST",
-                path="/entities",
-                payload=idempotency_payload,
-                response_model=EntityResponse,
-                content_session=content_session,
+    if ctx.user is not None:
+        replayed = await replay_idempotent_response(
+            request,
+            organization_id=org.id,
+            principal_id=str(ctx.user.id),
+            method="POST",
+            path="/entities",
+            payload=idempotency_payload,
+            response_model=EntityResponse,
+            content_session=content_session,
+        )
+        if replayed is not None:
+            return replayed
+
+    merged_metadata: dict[str, Any] = {**request_metadata, "organization_id": group_id}
+
+    # Projects are always sync (foundational - tasks depend on them existing)
+    # Other entities can be async unless caller explicitly requests sync
+    is_sync = entity.entity_type.value == "project" or sync
+
+    result = await add(
+        title=entity.name,
+        content=content,
+        entity_type=entity.entity_type.value,
+        category=entity.category,
+        languages=entity.languages,
+        tags=entity.tags,
+        related_to=entity.related_to,
+        metadata=merged_metadata,
+        # Task-specific fields
+        project=project,
+        epic=epic,
+        priority=priority,
+        assignees=assignees,
+        technologies=technologies,
+        depends_on=depends_on,
+        # Sync for projects, async for everything else
+        sync=is_sync,
+        skip_conflicts=entity.skip_conflicts,
+    )
+
+    if not result.success or not result.id:
+        message = sanitize_error_text(str(result.message or "Entity creation failed"))
+        if "duplicate" in message.lower() or "already exists" in message.lower():
+            raise constraint_violation(
+                "duplicate entity name in scope",
+                remediation="Use a different title or update the existing entity.",
+                details={
+                    "field": "name",
+                    "entity_type": entity.entity_type.value,
+                },
             )
-            if replayed is not None:
-                return replayed
+        raise HTTPException(status_code=400, detail=message)
 
-        merged_metadata: dict[str, Any] = {**request_metadata, "organization_id": group_id}
-
-        # Projects are always sync (foundational - tasks depend on them existing)
-        # Other entities can be async unless caller explicitly requests sync
-        is_sync = entity.entity_type.value == "project" or sync
-
-        result = await add(
-            title=entity.name,
-            content=content,
+    if request_metadata.get("capture_mode") in {"quick", "remember"}:
+        raw_capture_metadata = _sanitize_raw_capture_metadata(request_metadata)
+        await _archive_raw_capture(
+            content_session,
+            organization_id=org.id,
+            user_id=ctx.user.id if ctx.user else None,
+            entity_id=result.id,
+            entity_name=entity.name,
+            entity_content=content,
             entity_type=entity.entity_type.value,
-            category=entity.category,
-            languages=entity.languages,
-            tags=entity.tags,
-            related_to=entity.related_to,
-            metadata=merged_metadata,
-            # Task-specific fields
-            project=project,
-            epic=epic,
-            priority=priority,
-            assignees=assignees,
-            technologies=technologies,
-            depends_on=depends_on,
-            # Sync for projects, async for everything else
-            sync=is_sync,
-            skip_conflicts=entity.skip_conflicts,
+            tags=list(entity.tags or []),
+            metadata=raw_capture_metadata,
         )
 
-        if not result.success or not result.id:
-            message = sanitize_error_text(str(result.message or "Entity creation failed"))
-            if "duplicate" in message.lower() or "already exists" in message.lower():
-                raise constraint_violation(
-                    "duplicate entity name in scope",
-                    remediation="Use a different title or update the existing entity.",
-                    details={
-                        "field": "name",
-                        "entity_type": entity.entity_type.value,
-                    },
-                )
-            raise HTTPException(status_code=400, detail=message)
-
-        if request_metadata.get("capture_mode") in {"quick", "remember"}:
-            raw_capture_metadata = _sanitize_raw_capture_metadata(request_metadata)
-            await _archive_raw_capture(
-                content_session,
-                organization_id=org.id,
-                user_id=ctx.user.id if ctx.user else None,
-                entity_id=result.id,
-                entity_name=entity.name,
-                entity_content=content,
-                entity_type=entity.entity_type.value,
-                tags=list(entity.tags or []),
-                metadata=raw_capture_metadata,
-            )
-
-        # For async creation, return immediately with pending response.
-        # Entity creation continues in the native background job path.
-        if not is_sync:
-            response = EntityResponse(
-                id=result.id,
-                entity_type=entity.entity_type,
-                name=entity.name,
-                description=entity.description or "",
-                content=content,
-                category=entity.category,
-                languages=entity.languages or [],
-                tags=entity.tags or [],
-                metadata=merged_metadata,
-                source_file=None,
-                created_at=None,
-                updated_at=None,
-            )
-            # Broadcast pending creation event
-            await broadcast_event(
-                WSEvent.ENTITY_PENDING, response.model_dump(mode="json"), org_id=str(org.id)
-            )
-            if ctx.user is not None:
-                await save_idempotent_response(
-                    request,
-                    organization_id=org.id,
-                    principal_id=str(ctx.user.id),
-                    method="POST",
-                    path="/entities",
-                    payload=idempotency_payload,
-                    response=response,
-                    status_code=201,
-                    content_session=content_session,
-                )
-            return response
-
-        response_timestamp = getattr(result, "timestamp", None) or datetime.now(UTC)
+    # For async creation, return immediately with pending response.
+    # Entity creation continues in the native background job path.
+    if not is_sync:
         response = EntityResponse(
             id=result.id,
             entity_type=entity.entity_type,
@@ -1625,31 +1556,13 @@ async def create_entity(
             tags=entity.tags or [],
             metadata=merged_metadata,
             source_file=None,
-            created_at=response_timestamp,
-            updated_at=response_timestamp,
+            created_at=None,
+            updated_at=None,
         )
-
-        # Broadcast creation event (scoped to org)
+        # Broadcast pending creation event
         await broadcast_event(
-            WSEvent.ENTITY_CREATED, response.model_dump(mode="json"), org_id=str(org.id)
+            WSEvent.ENTITY_PENDING, response.model_dump(mode="json"), org_id=str(org.id)
         )
-
-        if entity.entity_type == EntityType.PROJECT:
-            await create_project_record(
-                organization_id=org.id,
-                owner_user_id=ctx.user.id,
-                graph_project_id=result.id,
-                name=entity.name,
-                description=content,
-            )
-            await log_audit_event(
-                action="project.create",
-                user_id=ctx.user.id,
-                organization_id=org.id,
-                request=request,
-                details={"project_id": result.id, "name": entity.name},
-            )
-
         if ctx.user is not None:
             await save_idempotent_response(
                 request,
@@ -1662,16 +1575,59 @@ async def create_entity(
                 status_code=201,
                 content_session=content_session,
             )
-
         return response
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("create_entity_failed", error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to create entity. Please try again."
-        ) from e
+    response_timestamp = getattr(result, "timestamp", None) or datetime.now(UTC)
+    response = EntityResponse(
+        id=result.id,
+        entity_type=entity.entity_type,
+        name=entity.name,
+        description=entity.description or "",
+        content=content,
+        category=entity.category,
+        languages=entity.languages or [],
+        tags=entity.tags or [],
+        metadata=merged_metadata,
+        source_file=None,
+        created_at=response_timestamp,
+        updated_at=response_timestamp,
+    )
+
+    # Broadcast creation event (scoped to org)
+    await broadcast_event(
+        WSEvent.ENTITY_CREATED, response.model_dump(mode="json"), org_id=str(org.id)
+    )
+
+    if entity.entity_type == EntityType.PROJECT:
+        await create_project_record(
+            organization_id=org.id,
+            owner_user_id=ctx.user.id,
+            graph_project_id=result.id,
+            name=entity.name,
+            description=content,
+        )
+        await log_audit_event(
+            action="project.create",
+            user_id=ctx.user.id,
+            organization_id=org.id,
+            request=request,
+            details={"project_id": result.id, "name": entity.name},
+        )
+
+    if ctx.user is not None:
+        await save_idempotent_response(
+            request,
+            organization_id=org.id,
+            principal_id=str(ctx.user.id),
+            method="POST",
+            path="/entities",
+            payload=idempotency_payload,
+            response=response,
+            status_code=201,
+            content_session=content_session,
+        )
+
+    return response
 
 
 # =============================================================================

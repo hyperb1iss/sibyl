@@ -8,6 +8,7 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.schemas import (
     AssigneeStats,
     OrgMetricsResponse,
@@ -504,76 +505,68 @@ async def _list_summary_metric_tasks(
 
 
 @router.get("/projects/{project_id}", response_model=ProjectMetricsResponse)
+@handle_workflow_errors("get_project_metrics", id_param="project_id")
 async def get_project_metrics(
     project_id: str,
     org: AuthOrganization = Depends(get_current_organization),
 ) -> ProjectMetricsResponse:
     """Get metrics for a specific project."""
-    try:
-        group_id = str(org.id)
-        service = await get_knowledge_read_adapter(group_id)
-        entity_runtime = await get_entity_graph_runtime(group_id)
+    group_id = str(org.id)
+    service = await get_knowledge_read_adapter(group_id)
+    entity_runtime = await get_entity_graph_runtime(group_id)
 
-        # Get project
-        project = await service.get_entity(project_id)
-        if not project:
-            raise HTTPException(
-                status_code=404,
-                detail=(
-                    f"Project not found: {project_id}. Run 'sibyl project relink' or use "
-                    "--all-projects for an unscoped write."
-                ),
-            )
-
-        project_tasks = await _list_entities_by_type_paginated(
-            entity_runtime.entity_manager,
-            EntityType.TASK,
-            project_id=project_id,
-        )
-        tasks = [task.model_dump() for task in project_tasks]
-
-        # Compute metrics
-        status_dist = _compute_status_distribution(tasks)
-        priority_dist = _compute_priority_distribution(tasks)
-        assignees = _compute_assignee_stats(tasks)
-        velocity = _compute_velocity_trend(tasks)
-
-        total = len(tasks)
-        completed = status_dist.done
-        completion_rate = (completed / total * 100) if total > 0 else 0.0
-
-        # Count recent activity
-        tasks_created_7d = _count_recent_tasks(tasks, 7, "created_at")
-        tasks_completed_7d = sum(1 for t in tasks if t.get("metadata", {}).get("status") == "done")
-        # Re-count completed in last 7d using velocity
-        tasks_completed_7d = (
-            sum(p.value for p in velocity[-7:])
-            if len(velocity) >= 7
-            else sum(p.value for p in velocity)
-        )
-
-        metrics = ProjectMetrics(
-            project_id=project_id,
-            project_name=project.name,
-            total_tasks=total,
-            status_distribution=status_dist,
-            priority_distribution=priority_dist,
-            completion_rate=round(completion_rate, 1),
-            assignees=assignees[:10],  # Top 10 assignees
-            tasks_created_last_7d=tasks_created_7d,
-            tasks_completed_last_7d=tasks_completed_7d,
-            velocity_trend=velocity,
-        )
-
-        return ProjectMetricsResponse(metrics=metrics)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("get_project_metrics_failed", project_id=project_id, error=str(e))
+    # Get project
+    project = await service.get_entity(project_id)
+    if not project:
         raise HTTPException(
-            status_code=500, detail="Failed to get project metrics. Please try again."
-        ) from e
+            status_code=404,
+            detail=(
+                f"Project not found: {project_id}. Run 'sibyl project relink' or use "
+                "--all-projects for an unscoped write."
+            ),
+        )
+
+    project_tasks = await _list_entities_by_type_paginated(
+        entity_runtime.entity_manager,
+        EntityType.TASK,
+        project_id=project_id,
+    )
+    tasks = [task.model_dump() for task in project_tasks]
+
+    # Compute metrics
+    status_dist = _compute_status_distribution(tasks)
+    priority_dist = _compute_priority_distribution(tasks)
+    assignees = _compute_assignee_stats(tasks)
+    velocity = _compute_velocity_trend(tasks)
+
+    total = len(tasks)
+    completed = status_dist.done
+    completion_rate = (completed / total * 100) if total > 0 else 0.0
+
+    # Count recent activity
+    tasks_created_7d = _count_recent_tasks(tasks, 7, "created_at")
+    tasks_completed_7d = sum(1 for t in tasks if t.get("metadata", {}).get("status") == "done")
+    # Re-count completed in last 7d using velocity
+    tasks_completed_7d = (
+        sum(p.value for p in velocity[-7:])
+        if len(velocity) >= 7
+        else sum(p.value for p in velocity)
+    )
+
+    metrics = ProjectMetrics(
+        project_id=project_id,
+        project_name=project.name,
+        total_tasks=total,
+        status_distribution=status_dist,
+        priority_distribution=priority_dist,
+        completion_rate=round(completion_rate, 1),
+        assignees=assignees[:10],  # Top 10 assignees
+        tasks_created_last_7d=tasks_created_7d,
+        tasks_completed_last_7d=tasks_completed_7d,
+        velocity_trend=velocity,
+    )
+
+    return ProjectMetricsResponse(metrics=metrics)
 
 
 @router.get("/projects-summary", response_model=ProjectSummariesResponse)

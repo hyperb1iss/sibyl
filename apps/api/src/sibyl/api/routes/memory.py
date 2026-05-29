@@ -11,6 +11,7 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.schemas import (
     MemoryAuditEventResponse,
     MemoryAuditListResponse,
@@ -1810,6 +1811,7 @@ async def get_memory_source_import_status(
     response_model=MemorySourceInspectResponse,
     dependencies=[Depends(require_org_role(*_ADMIN_ROLES))],
 )
+@handle_workflow_errors("inspect_memory_source", id_param="source_id")
 async def inspect_memory_source(
     source_id: str,
     http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
@@ -1821,45 +1823,39 @@ async def inspect_memory_source(
     if not principal_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    try:
-        memory = await _load_memory_source_for_org(
-            organization_id=str(org.id),
-            source_id=source_id,
-        )
-        policy_decision = await _inspect_content_policy(ctx=ctx, memory=memory)
-        audit_events = await _source_audit_events(
-            organization_id=str(org.id),
-            source_id=source_id,
-            memory=memory,
-        )
-        response = _memory_source_inspect_response(
-            memory=memory,
-            policy_decision=policy_decision,
-            audit_events=audit_events,
-        )
-        await _log_memory_audit(
-            action="memory.inspect",
-            ctx=ctx,
-            request=http_request,
-            memory_scope=memory.memory_scope.value,
-            scope_key=memory.scope_key,
-            project_id=response.project_id,
-            source_surface="memory_inspect",
-            source_ids=[memory.id, memory.source_id],
-            derived_ids=response.derived_ids,
-            policy_allowed=policy_decision.allowed,
-            policy_reason=policy_decision.reason,
-            details={
-                "audit_event_count": response.audit_event_count,
-                "content_redacted": response.content_redacted,
-            },
-        )
-        return response
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("inspect_memory_source_failed", error=str(e), source_id=source_id)
-        raise HTTPException(status_code=500, detail="Failed to inspect memory source.") from e
+    memory = await _load_memory_source_for_org(
+        organization_id=str(org.id),
+        source_id=source_id,
+    )
+    policy_decision = await _inspect_content_policy(ctx=ctx, memory=memory)
+    audit_events = await _source_audit_events(
+        organization_id=str(org.id),
+        source_id=source_id,
+        memory=memory,
+    )
+    response = _memory_source_inspect_response(
+        memory=memory,
+        policy_decision=policy_decision,
+        audit_events=audit_events,
+    )
+    await _log_memory_audit(
+        action="memory.inspect",
+        ctx=ctx,
+        request=http_request,
+        memory_scope=memory.memory_scope.value,
+        scope_key=memory.scope_key,
+        project_id=response.project_id,
+        source_surface="memory_inspect",
+        source_ids=[memory.id, memory.source_id],
+        derived_ids=response.derived_ids,
+        policy_allowed=policy_decision.allowed,
+        policy_reason=policy_decision.reason,
+        details={
+            "audit_event_count": response.audit_event_count,
+            "content_redacted": response.content_redacted,
+        },
+    )
+    return response
 
 
 @router.post(
@@ -1989,6 +1985,7 @@ async def apply_memory_correction_route(
     response_model=MemorySharePreviewResponse,
     dependencies=[Depends(require_org_role(*_WRITE_ROLES))],
 )
+@handle_workflow_errors("preview_memory_share")
 async def preview_memory_share_route(
     request: MemorySharePreviewRequest,
     http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
@@ -2000,57 +1997,44 @@ async def preview_memory_share_route(
     if not principal_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    try:
-        accessible_projects = await _accessible_projects_for_share_preview(
-            ctx=ctx,
-            request=request,
-            http_request=http_request,
-        )
-        result = await preview_memory_share(
-            source_ids=request.source_ids,
-            organization_id=str(org.id),
-            principal_id=principal_id,
-            target_scope=request.target_scope,
-            target_scope_key=request.target_scope_key,
-            recipient_organization_id=request.recipient_organization_id,
-            accessible_projects=accessible_projects,
-        )
-        await _log_memory_audit(
-            action="memory.share.preview",
-            ctx=ctx,
-            request=http_request,
-            memory_scope=result.target_scope.value if result.target_scope else request.target_scope,
-            scope_key=result.target_scope_key or request.target_scope_key,
-            project_id=request.project_id
-            or (request.target_scope_key if request.target_scope == "project" else None),
-            source_surface="memory_share_preview",
-            source_ids=list(result.source_ids),
-            derived_ids=[],
-            policy_allowed=result.allowed,
-            policy_reason=result.reason,
-            details={
-                "denied_source_count": len(result.denied_source_ids),
-                "hidden_but_relevant_count": result.hidden_but_relevant_count,
-                "preview": True,
-                "recipient_organization_id": request.recipient_organization_id,
-                "redacted_count": result.redacted_count,
-                "target_scope": result.target_scope.value if result.target_scope else None,
-                "visible_source_count": len(result.visible_source_ids),
-            },
-        )
-        return _share_preview_response(result)
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception(
-            "preview_memory_share_failed",
-            error=str(e),
-            source_count=len(request.source_ids),
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to preview memory sharing.",
-        ) from e
+    accessible_projects = await _accessible_projects_for_share_preview(
+        ctx=ctx,
+        request=request,
+        http_request=http_request,
+    )
+    result = await preview_memory_share(
+        source_ids=request.source_ids,
+        organization_id=str(org.id),
+        principal_id=principal_id,
+        target_scope=request.target_scope,
+        target_scope_key=request.target_scope_key,
+        recipient_organization_id=request.recipient_organization_id,
+        accessible_projects=accessible_projects,
+    )
+    await _log_memory_audit(
+        action="memory.share.preview",
+        ctx=ctx,
+        request=http_request,
+        memory_scope=result.target_scope.value if result.target_scope else request.target_scope,
+        scope_key=result.target_scope_key or request.target_scope_key,
+        project_id=request.project_id
+        or (request.target_scope_key if request.target_scope == "project" else None),
+        source_surface="memory_share_preview",
+        source_ids=list(result.source_ids),
+        derived_ids=[],
+        policy_allowed=result.allowed,
+        policy_reason=result.reason,
+        details={
+            "denied_source_count": len(result.denied_source_ids),
+            "hidden_but_relevant_count": result.hidden_but_relevant_count,
+            "preview": True,
+            "recipient_organization_id": request.recipient_organization_id,
+            "redacted_count": result.redacted_count,
+            "target_scope": result.target_scope.value if result.target_scope else None,
+            "visible_source_count": len(result.visible_source_ids),
+        },
+    )
+    return _share_preview_response(result)
 
 
 @router.post(
@@ -2058,6 +2042,7 @@ async def preview_memory_share_route(
     response_model=ReflectionPromotionPreviewResponse,
     dependencies=[Depends(require_org_role(*_WRITE_ROLES))],
 )
+@handle_workflow_errors("preview_reflection_promotion", id_param="candidate_id")
 async def preview_reflection_promotion(
     request: ReflectionPromotionRequest,
     http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
@@ -2069,62 +2054,47 @@ async def preview_reflection_promotion(
     if not principal_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    try:
-        accessible_projects = await _accessible_projects_for_promotion(
-            ctx=ctx,
-            request=request,
-            http_request=http_request,
-        )
-        result = await preview_reflection_candidate_promotion(
-            candidate_id=request.candidate_id,
-            organization_id=str(org.id),
-            principal_id=principal_id,
-            promote_to_scope=request.promote_to_scope,
-            promote_to_scope_key=request.promote_to_scope_key,
-            domain=request.domain,
-            project=request.project,
-            accessible_projects=accessible_projects,
-        )
-        await _log_memory_audit(
-            action="memory.reflect.promote.preview",
-            ctx=ctx,
-            request=http_request,
-            memory_scope=result.memory_scope.value
-            if result.memory_scope
-            else request.promote_to_scope,
-            scope_key=result.scope_key or request.promote_to_scope_key,
-            project_id=request.project,
-            source_surface="reflection_promote_preview",
-            source_ids=[request.candidate_id, *result.raw_source_ids],
-            derived_ids=[],
-            policy_allowed=result.allowed,
-            policy_reason=result.reason,
-            details={
-                "domain": request.domain,
-                "preview": True,
-                "related_to_count": len(request.related_to),
-                "review_state": result.review_state,
-                "source_count": len(result.raw_source_ids),
-            },
-        )
-        if result.reason == "candidate_not_found":
-            raise HTTPException(
-                status_code=404,
-                detail="reflection_candidate_not_found",
-            )
-        return _promotion_preview_response(result)
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception(
-            "preview_reflection_promotion_failed",
-            candidate_id=request.candidate_id,
-            error=str(e),
-        )
+    accessible_projects = await _accessible_projects_for_promotion(
+        ctx=ctx,
+        request=request,
+        http_request=http_request,
+    )
+    result = await preview_reflection_candidate_promotion(
+        candidate_id=request.candidate_id,
+        organization_id=str(org.id),
+        principal_id=principal_id,
+        promote_to_scope=request.promote_to_scope,
+        promote_to_scope_key=request.promote_to_scope_key,
+        domain=request.domain,
+        project=request.project,
+        accessible_projects=accessible_projects,
+    )
+    await _log_memory_audit(
+        action="memory.reflect.promote.preview",
+        ctx=ctx,
+        request=http_request,
+        memory_scope=result.memory_scope.value if result.memory_scope else request.promote_to_scope,
+        scope_key=result.scope_key or request.promote_to_scope_key,
+        project_id=request.project,
+        source_surface="reflection_promote_preview",
+        source_ids=[request.candidate_id, *result.raw_source_ids],
+        derived_ids=[],
+        policy_allowed=result.allowed,
+        policy_reason=result.reason,
+        details={
+            "domain": request.domain,
+            "preview": True,
+            "related_to_count": len(request.related_to),
+            "review_state": result.review_state,
+            "source_count": len(result.raw_source_ids),
+        },
+    )
+    if result.reason == "candidate_not_found":
         raise HTTPException(
-            status_code=500,
-            detail="Failed to preview reflection promotion.",
-        ) from e
+            status_code=404,
+            detail="reflection_candidate_not_found",
+        )
+    return _promotion_preview_response(result)
 
 
 @router.post(

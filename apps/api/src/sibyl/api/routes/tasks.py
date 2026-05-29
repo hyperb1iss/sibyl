@@ -171,6 +171,7 @@ class CreateTaskRequest(BaseModel):
 
 
 @router.post("", response_model=TaskActionResponse)
+@handle_workflow_errors("create_task")
 async def create_task(
     http_request: Request,
     request: CreateTaskRequest,
@@ -190,119 +191,110 @@ async def create_task(
         require_existing_project=True,
     )
 
-    try:
-        idempotency_payload = {"body": request.model_dump(mode="json")}
-        replayed = await replay_idempotent_response(
-            http_request,
-            organization_id=org.id,
-            principal_id=str(user.id),
-            method="POST",
-            path="/tasks",
-            payload=idempotency_payload,
-            response_model=TaskActionResponse,
-            content_session=None,
+    idempotency_payload = {"body": request.model_dump(mode="json")}
+    replayed = await replay_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=str(user.id),
+        method="POST",
+        path="/tasks",
+        payload=idempotency_payload,
+        response_model=TaskActionResponse,
+        content_session=None,
+    )
+    if replayed is not None:
+        return replayed
+
+    runtime = await get_task_graph_runtime(str(org.id))
+
+    if request.epic_id:
+        await _verify_epic_exists(runtime.entity_manager, request.epic_id)
+
+    # Create task entity with actor attribution
+    task = Task(
+        id=str(uuid.uuid4()),
+        name=request.title,
+        title=request.title,
+        description=request.description or "",
+        status=TaskStatus(request.status),
+        priority=TaskPriority(request.priority),
+        complexity=TaskComplexity(request.complexity),
+        project_id=request.project_id,
+        epic_id=request.epic_id,
+        assignees=request.assignees,
+        feature=request.feature,
+        tags=request.tags,
+        technologies=request.technologies,
+        created_by=str(user.id),
+    )
+
+    # Create in graph
+    task_id = await runtime.entity_manager.create_direct(task)
+
+    relationships = [
+        Relationship(
+            id=f"rel_{task_id}_belongs_to_{request.project_id}",
+            source_id=task_id,
+            target_id=request.project_id,
+            relationship_type=RelationshipType.BELONGS_TO,
         )
-        if replayed is not None:
-            return replayed
+    ]
 
-        runtime = await get_task_graph_runtime(str(org.id))
-
-        if request.epic_id:
-            await _verify_epic_exists(runtime.entity_manager, request.epic_id)
-
-        # Create task entity with actor attribution
-        task = Task(
-            id=str(uuid.uuid4()),
-            name=request.title,
-            title=request.title,
-            description=request.description or "",
-            status=TaskStatus(request.status),
-            priority=TaskPriority(request.priority),
-            complexity=TaskComplexity(request.complexity),
-            project_id=request.project_id,
-            epic_id=request.epic_id,
-            assignees=request.assignees,
-            feature=request.feature,
-            tags=request.tags,
-            technologies=request.technologies,
-            created_by=str(user.id),
-        )
-
-        # Create in graph
-        task_id = await runtime.entity_manager.create_direct(task)
-
-        relationships = [
+    if request.epic_id:
+        relationships.append(
             Relationship(
-                id=f"rel_{task_id}_belongs_to_{request.project_id}",
+                id=f"rel_{task_id}_belongs_to_{request.epic_id}",
                 source_id=task_id,
-                target_id=request.project_id,
+                target_id=request.epic_id,
                 relationship_type=RelationshipType.BELONGS_TO,
             )
-        ]
-
-        if request.epic_id:
-            relationships.append(
-                Relationship(
-                    id=f"rel_{task_id}_belongs_to_{request.epic_id}",
-                    source_id=task_id,
-                    target_id=request.epic_id,
-                    relationship_type=RelationshipType.BELONGS_TO,
-                )
-            )
-
-        relationships.extend(
-            Relationship(
-                id=f"rel_{task_id}_depends_on_{dep_id}",
-                source_id=task_id,
-                target_id=dep_id,
-                relationship_type=RelationshipType.DEPENDS_ON,
-            )
-            for dep_id in request.depends_on
         )
 
-        await asyncio.gather(
-            *(runtime.relationship_manager.create(relationship) for relationship in relationships)
+    relationships.extend(
+        Relationship(
+            id=f"rel_{task_id}_depends_on_{dep_id}",
+            source_id=task_id,
+            target_id=dep_id,
+            relationship_type=RelationshipType.DEPENDS_ON,
         )
+        for dep_id in request.depends_on
+    )
 
-        log.info(
-            "create_task_success",
-            task_id=task_id,
-            project_id=request.project_id,
-        )
+    await asyncio.gather(
+        *(runtime.relationship_manager.create(relationship) for relationship in relationships)
+    )
 
-        await broadcast_event(
-            WSEvent.ENTITY_CREATED,
-            {"id": task_id, "entity_type": "task", "name": request.title},
-            org_id=str(org.id),
-        )
+    log.info(
+        "create_task_success",
+        task_id=task_id,
+        project_id=request.project_id,
+    )
 
-        response = TaskActionResponse(
-            success=True,
-            action="create",
-            task_id=task_id,
-            message="Task created successfully",
-            data={"project_id": request.project_id},
-        )
-        await save_idempotent_response(
-            http_request,
-            organization_id=org.id,
-            principal_id=str(user.id),
-            method="POST",
-            path="/tasks",
-            payload=idempotency_payload,
-            response=response,
-            status_code=200,
-            content_session=None,
-        )
-        return response
+    await broadcast_event(
+        WSEvent.ENTITY_CREATED,
+        {"id": task_id, "entity_type": "task", "name": request.title},
+        org_id=str(org.id),
+    )
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("create_task_failed", error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to create task. Please try again."
-        ) from e
+    response = TaskActionResponse(
+        success=True,
+        action="create",
+        task_id=task_id,
+        message="Task created successfully",
+        data={"project_id": request.project_id},
+    )
+    await save_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=str(user.id),
+        method="POST",
+        path="/tasks",
+        payload=idempotency_payload,
+        response=response,
+        status_code=200,
+        content_session=None,
+    )
+    return response
 
 
 # =============================================================================
@@ -888,6 +880,7 @@ class NotesListResponse(BaseModel):
 
 
 @router.post("/{task_id}/notes", response_model=NoteResponse)
+@handle_workflow_errors("create_note")
 async def create_note(
     task_id: str,
     http_request: Request,
@@ -908,120 +901,53 @@ async def create_note(
 
     await _verify_task_access(task_id, org, auth)
 
-    try:
-        group_id = str(org.id)
-        idempotency_path = f"/tasks/{task_id}/notes"
-        idempotency_payload = {"body": request.model_dump(mode="json")}
-        replayed = await replay_idempotent_response(
-            http_request,
-            organization_id=org.id,
-            principal_id=str(user.id),
-            method="POST",
-            path=idempotency_path,
-            payload=idempotency_payload,
-            response_model=NoteResponse,
-            content_session=None,
+    group_id = str(org.id)
+    idempotency_path = f"/tasks/{task_id}/notes"
+    idempotency_payload = {"body": request.model_dump(mode="json")}
+    replayed = await replay_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=str(user.id),
+        method="POST",
+        path=idempotency_path,
+        payload=idempotency_payload,
+        response_model=NoteResponse,
+        content_session=None,
+    )
+    if replayed is not None:
+        return replayed
+
+    note_id = f"note_{uuid.uuid4()}"
+    created_at = datetime.now(UTC)
+
+    # Check if task is still being created asynchronously
+    pending = await is_pending(task_id)
+    if pending:
+        # Queue the note operation to run when task materializes
+        op_id = await queue_pending_operation(
+            entity_id=task_id,
+            operation="add_note",
+            payload={
+                "note_id": note_id,
+                "content": request.content,
+                "author_type": request.author_type.value,
+                "author_name": request.author_name,
+                "created_at": created_at.isoformat(),
+                "user_id": str(user.id),
+            },
+            user_id=str(user.id),
         )
-        if replayed is not None:
-            return replayed
-
-        note_id = f"note_{uuid.uuid4()}"
-        created_at = datetime.now(UTC)
-
-        # Check if task is still being created asynchronously
-        pending = await is_pending(task_id)
-        if pending:
-            # Queue the note operation to run when task materializes
-            op_id = await queue_pending_operation(
-                entity_id=task_id,
-                operation="add_note",
-                payload={
-                    "note_id": note_id,
-                    "content": request.content,
-                    "author_type": request.author_type.value,
-                    "author_name": request.author_name,
-                    "created_at": created_at.isoformat(),
-                    "user_id": str(user.id),
-                },
-                user_id=str(user.id),
-            )
-
-            log.info(
-                "create_note_queued",
-                note_id=note_id,
-                task_id=task_id,
-                op_id=op_id,
-            )
-
-            await broadcast_event(
-                WSEvent.NOTE_PENDING,
-                {"id": note_id, "task_id": task_id, "op_id": op_id},
-                org_id=group_id,
-            )
-
-            response = NoteResponse(
-                id=note_id,
-                task_id=task_id,
-                content=request.content,
-                author_type=request.author_type.value,
-                author_name=request.author_name,
-                created_at=created_at.isoformat(),
-                status="pending",
-            )
-            await save_idempotent_response(
-                http_request,
-                organization_id=org.id,
-                principal_id=str(user.id),
-                method="POST",
-                path=idempotency_path,
-                payload=idempotency_payload,
-                response=response,
-                status_code=200,
-                content_session=None,
-            )
-            return response
-
-        # Task exists - create note synchronously
-        runtime = await get_task_graph_runtime(group_id)
-
-        # Verify task exists in graph
-        task = await runtime.entity_manager.get(task_id)
-        if not task:
-            raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
-
-        note = Note(
-            id=note_id,
-            name=request.content[:50] + ("..." if len(request.content) > 50 else ""),
-            task_id=task_id,
-            content=request.content,
-            author_type=request.author_type,
-            author_name=request.author_name,
-            created_at=created_at,
-            created_by=str(user.id),
-        )
-
-        # Create in graph
-        await runtime.entity_manager.create_direct(note)
-
-        # Create BELONGS_TO relationship with task
-        belongs_to = Relationship(
-            id=f"rel_{note_id}_belongs_to_{task_id}",
-            source_id=note_id,
-            target_id=task_id,
-            relationship_type=RelationshipType.BELONGS_TO,
-        )
-        await runtime.relationship_manager.create(belongs_to)
 
         log.info(
-            "create_note_success",
+            "create_note_queued",
             note_id=note_id,
             task_id=task_id,
-            author_type=request.author_type,
+            op_id=op_id,
         )
 
         await broadcast_event(
-            WSEvent.NOTE_CREATED,
-            {"id": note_id, "task_id": task_id, "author_type": request.author_type.value},
+            WSEvent.NOTE_PENDING,
+            {"id": note_id, "task_id": task_id, "op_id": op_id},
             org_id=group_id,
         )
 
@@ -1032,6 +958,7 @@ async def create_note(
             author_type=request.author_type.value,
             author_name=request.author_name,
             created_at=created_at.isoformat(),
+            status="pending",
         )
         await save_idempotent_response(
             http_request,
@@ -1046,16 +973,74 @@ async def create_note(
         )
         return response
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("create_note_failed", task_id=task_id, error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to create note. Please try again."
-        ) from e
+    # Task exists - create note synchronously
+    runtime = await get_task_graph_runtime(group_id)
+
+    # Verify task exists in graph
+    task = await runtime.entity_manager.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+
+    note = Note(
+        id=note_id,
+        name=request.content[:50] + ("..." if len(request.content) > 50 else ""),
+        task_id=task_id,
+        content=request.content,
+        author_type=request.author_type,
+        author_name=request.author_name,
+        created_at=created_at,
+        created_by=str(user.id),
+    )
+
+    # Create in graph
+    await runtime.entity_manager.create_direct(note)
+
+    # Create BELONGS_TO relationship with task
+    belongs_to = Relationship(
+        id=f"rel_{note_id}_belongs_to_{task_id}",
+        source_id=note_id,
+        target_id=task_id,
+        relationship_type=RelationshipType.BELONGS_TO,
+    )
+    await runtime.relationship_manager.create(belongs_to)
+
+    log.info(
+        "create_note_success",
+        note_id=note_id,
+        task_id=task_id,
+        author_type=request.author_type,
+    )
+
+    await broadcast_event(
+        WSEvent.NOTE_CREATED,
+        {"id": note_id, "task_id": task_id, "author_type": request.author_type.value},
+        org_id=group_id,
+    )
+
+    response = NoteResponse(
+        id=note_id,
+        task_id=task_id,
+        content=request.content,
+        author_type=request.author_type.value,
+        author_name=request.author_name,
+        created_at=created_at.isoformat(),
+    )
+    await save_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=str(user.id),
+        method="POST",
+        path=idempotency_path,
+        payload=idempotency_payload,
+        response=response,
+        status_code=200,
+        content_session=None,
+    )
+    return response
 
 
 @router.get("/{task_id}/notes", response_model=NotesListResponse)
+@handle_workflow_errors("list_notes")
 async def list_notes(
     task_id: str,
     limit: int = 50,
@@ -1066,33 +1051,24 @@ async def list_notes(
     # Read access is sufficient for listing notes
     await _verify_task_access(task_id, org, auth, required_role=ProjectRole.VIEWER)
 
-    try:
-        group_id = str(org.id)
-        runtime = await get_task_graph_runtime(group_id)
+    group_id = str(org.id)
+    runtime = await get_task_graph_runtime(group_id)
 
-        # Get notes for task
-        notes_entities = await runtime.entity_manager.get_notes_for_task(task_id, limit=limit)
+    # Get notes for task
+    notes_entities = await runtime.entity_manager.get_notes_for_task(task_id, limit=limit)
 
-        notes = []
-        for entity in notes_entities:
-            metadata = entity.metadata or {}
-            notes.append(
-                NoteResponse(
-                    id=entity.id,
-                    task_id=metadata.get("task_id", task_id),
-                    content=entity.content,
-                    author_type=metadata.get("author_type", "user"),
-                    author_name=metadata.get("author_name", ""),
-                    created_at=entity.created_at.isoformat() if entity.created_at else "",
-                )
+    notes = []
+    for entity in notes_entities:
+        metadata = entity.metadata or {}
+        notes.append(
+            NoteResponse(
+                id=entity.id,
+                task_id=metadata.get("task_id", task_id),
+                content=entity.content,
+                author_type=metadata.get("author_type", "user"),
+                author_name=metadata.get("author_name", ""),
+                created_at=entity.created_at.isoformat() if entity.created_at else "",
             )
+        )
 
-        return NotesListResponse(notes=notes, count=len(notes))
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("list_notes_failed", task_id=task_id, error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to list notes. Please try again."
-        ) from e
+    return NotesListResponse(notes=notes, count=len(notes))
