@@ -379,12 +379,10 @@ sibyl project create --name "Auth System" --description "OAuth and JWT implement
 
 Epics group related tasks into larger features or initiatives.
 
-> **An Epic is a SEPARATE entity from a task — this trips agents up.** Epics have an `epic_…` ID and
-> are created ONLY with `sibyl epic create`. Do NOT try to make an epic with
-> `sibyl task create --complexity epic`: that flag is just a task *size* label and produces a task,
-> not an Epic. The `--epic` flag (on `task create`/`task list`) requires an `epic_…` ID from
-> `sibyl epic create` or `sibyl epic list`; passing a task UUID returns `invalid_request`. When
-> scripting, add `--sync` to `sibyl epic create` so the new `epic_…` ID is immediately usable.
+> **An epic is just a task with subtasks.** There is no separate Epic entity to manage: any task you
+> hang children off of IS an epic, and its rolled-up status derives from its subtasks. The `sibyl
+> epic` commands still work as sugar over this task tree. The `--complexity epic` flag is unrelated:
+> it is only a task *size* label and does not create or link anything.
 
 ```bash
 sibyl epic list                                    # List epics
@@ -396,8 +394,8 @@ sibyl epic complete epic_a1b2c3d4e5f6              # Complete epic
 sibyl epic archive epic_a1b2c3d4e5f6               # Archive epic
 ```
 
-**Workflow:** `sibyl epic create` (get the `epic_…` ID) → `sibyl task create --epic epic_…` per
-task → work tasks → complete. `--complexity` sizes a task; `--epic` links it to an Epic container.
+**Workflow:** create the parent (epic) → create tasks under it with `--epic <id>` → work tasks →
+complete. `--complexity` sizes a task; `--epic` links it under a parent work item.
 
 **Find tasks in an epic:** `sibyl task list --epic epic_a1b2c3d4e5f6`
 

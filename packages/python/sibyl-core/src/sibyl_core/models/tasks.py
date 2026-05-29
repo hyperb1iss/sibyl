@@ -61,9 +61,15 @@ class Task(Entity):
     # all entities will have a project_id (using shared project for org-wide knowledge).
     # TODO: Make this required after migration completes across all deployments.
     project_id: str | None = Field(default=None, description="Parent project UUID (optional)")
-    epic_id: str | None = Field(default=None, description="Parent epic UUID (optional)")
-    # Forward-looking replacement for epic_id: a task with children IS an epic. Both
-    # fields coexist during the work-item unification; epic_id stays fully functional.
+    epic_id: str | None = Field(
+        default=None,
+        description=(
+            "DEPRECATED alias for parent_task_id (a task with children IS an epic). "
+            "Still fully functional; prefer parent_task_id for new work."
+        ),
+    )
+    # epic_id is a deprecated alias: a task with children IS an epic. Both fields
+    # coexist during the work-item unification; epic_id stays fully functional.
     parent_task_id: str | None = Field(
         default=None, description="Parent work item UUID (the task this is a subtask of)"
     )
@@ -173,7 +179,13 @@ class Project(Entity):
 
 
 class EpicStatus(StrEnum):
-    """Epic lifecycle states."""
+    """Epic lifecycle states.
+
+    DEPRECATED as a stored field: a task with children IS an epic (W14), and a
+    container's status derives from its subtasks via ``derive_container_status``
+    rather than being stored separately. Retained as the enum that derivation
+    returns and that the deprecated ``Epic`` view exposes.
+    """
 
     PLANNING = "planning"  # Scoping, not started
     IN_PROGRESS = "in_progress"  # Active development
@@ -213,6 +225,13 @@ def derive_container_status(child_statuses: Iterable[TaskStatus]) -> EpicStatus:
 
 class Epic(Entity):
     """A feature initiative grouping related tasks within a project.
+
+    DEPRECATED as a standalone entity: a task with children IS an epic (W14).
+    Model epics as a parent task plus subtasks (``parent_task_id``); a
+    container's status derives from its children via ``derive_container_status``.
+    This class is retained as a read-only projection (see ``derived_from_task``)
+    and as sugar behind ``sibyl epic``; it stays fully functional, nothing is
+    removed.
 
     Epics provide a layer between Projects and Tasks for organizing
     larger feature work that spans multiple tasks and sessions.

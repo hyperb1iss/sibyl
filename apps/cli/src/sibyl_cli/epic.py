@@ -30,7 +30,12 @@ from sibyl_cli.id_resolution import resolve_id_prefix
 
 app = typer.Typer(
     name="epic",
-    help="Epic lifecycle management (feature grouping for tasks)",
+    help=(
+        "Epic lifecycle management (feature grouping for tasks). "
+        "DEPRECATED: an epic is just a task with subtasks, so prefer 'sibyl task' "
+        "and group children with 'sibyl task create --epic <id>'. These commands "
+        "keep working as sugar over the task tree."
+    ),
     no_args_is_help=True,
 )
 
