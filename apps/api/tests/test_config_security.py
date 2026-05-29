@@ -43,7 +43,6 @@ class TestDisableAuthSecurity:
                 "auth_store": "surreal",
             }
             if env == "production":
-                kwargs["postgres_password"] = "secure_postgres_pw"
                 kwargs["surreal_url"] = "ws://surrealdb:8000/rpc"
             settings = Settings(**kwargs)  # type: ignore[arg-type]
             assert settings.disable_auth is False
@@ -75,7 +74,6 @@ class TestEnvironmentValidation:
                 "auth_store": "surreal",
             }
             if env == "production":
-                kwargs["postgres_password"] = "secure_postgres_pw"
                 kwargs["surreal_url"] = "ws://surrealdb:8000/rpc"
             settings = Settings(**kwargs)  # type: ignore[arg-type]
             assert settings.environment == env
@@ -102,16 +100,14 @@ class TestProductionPasswordSecurity:
                 environment="production",
                 store="surreal",
                 auth_store="surreal",
-                postgres_password="sibyl_dev",
                 surreal_url="",
             )
 
-    def test_legacy_password_defaults_do_not_block_fully_surreal_production(self) -> None:
+    def test_fully_surreal_production_construction(self) -> None:
         settings = Settings(
             environment="production",
             store="surreal",
             auth_store="surreal",
-            postgres_password="sibyl_dev",
             surreal_url="ws://surrealdb:8000/rpc",
         )
 
@@ -192,21 +188,12 @@ class TestProductionPasswordSecurity:
 
         assert settings.environment == "production"
 
-    def test_default_passwords_allowed_in_development(self) -> None:
-        """Default passwords should be allowed in development."""
-        settings = Settings(
-            environment="development",
-            postgres_password="sibyl_dev",
-        )
-        assert settings.postgres_password.get_secret_value() == "sibyl_dev"
-
-    def test_secure_passwords_work_in_production(self) -> None:
-        """Non-default passwords should work in production."""
+    def test_surreal_production_settings_construct(self) -> None:
+        """Fully-surreal production settings should construct with a remote URL."""
         settings = Settings(
             environment="production",
             store="surreal",
             auth_store="surreal",
-            postgres_password="my_secure_postgres",
             surreal_url="ws://surrealdb:8000/rpc",
         )
         assert settings.environment == "production"

@@ -217,14 +217,6 @@ class Settings(BaseSettings):
                     "CRITICAL: disable_auth=True is forbidden in production environment. "
                     "Set SIBYL_ENVIRONMENT=development to use disable_auth for testing."
                 )
-            if (
-                requires_relational_support(store=self.store, auth_store=self.auth_store)
-                and self.postgres_password.get_secret_value() == "sibyl_dev"
-            ):
-                raise ValueError(
-                    "CRITICAL: Default PostgreSQL password 'sibyl_dev' is forbidden in production. "
-                    "Set SIBYL_POSTGRES_PASSWORD to a secure value."
-                )
             if self.auth_store == "surreal" and self.resolved_surreal_url.startswith("memory://"):
                 raise ValueError(
                     "CRITICAL: In-memory SurrealDB is forbidden in production. "
@@ -434,16 +426,9 @@ class Settings(BaseSettings):
         description="Log SurrealDB queries at warning level when elapsed time exceeds this threshold.",
     )
 
-    # PostgreSQL configuration
+    # PostgreSQL host/port retained for the migration-rehearsal doctor checks
     postgres_host: str = Field(default="localhost", description="PostgreSQL host")
     postgres_port: int = Field(default=5433, description="PostgreSQL port")
-    postgres_user: str = Field(default="sibyl", description="PostgreSQL user")
-    postgres_password: SecretStr = Field(
-        default=SecretStr("sibyl_dev"), description="PostgreSQL password"
-    )
-    postgres_db: str = Field(default="sibyl", description="PostgreSQL database name")
-    postgres_pool_size: int = Field(default=10, description="Connection pool size")
-    postgres_max_overflow: int = Field(default=20, description="Max overflow connections")
 
     # LLM Provider configuration
     llm_provider: Literal["openai", "anthropic"] = Field(
@@ -675,17 +660,6 @@ class Settings(BaseSettings):
         if self.surreal_data_dir:
             return f"surrealkv://{self.surreal_data_dir}"
         return "memory://"
-
-    @property
-    def postgres_url(self) -> str:
-        """Construct PostgreSQL connection URL for archive rehearsal tools."""
-        password = self.postgres_password.get_secret_value()
-        return f"postgresql://{self.postgres_user}:{password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
-
-    @property
-    def postgres_url_sync(self) -> str:
-        """Backward-compatible alias for archive rehearsal tooling."""
-        return self.postgres_url
 
     @property
     def fully_surreal(self) -> bool:
