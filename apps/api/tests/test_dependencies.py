@@ -14,12 +14,9 @@ import pytest
 
 from sibyl.api.dependencies import (
     get_entity_manager,
-    get_graph,
     get_graph_client,
     get_graph_store,
-    get_group_id,
     get_knowledge_read_service,
-    get_relationship_manager,
 )
 
 
@@ -54,10 +51,10 @@ def mock_graph_runtime(mock_org: MagicMock) -> SimpleNamespace:
 
 
 # =============================================================================
-# get_graph Tests
+# get_graph_client Tests
 # =============================================================================
-class TestGetGraph:
-    """Tests for get_graph dependency."""
+class TestGetGraphClient:
+    """Tests for get_graph_client dependency."""
 
     @pytest.mark.asyncio
     async def test_graph_client_uses_native_service(self) -> None:
@@ -72,30 +69,6 @@ class TestGetGraph:
 
         assert result is mock_client
         mock_get.assert_awaited_once_with()
-
-    @pytest.mark.asyncio
-    async def test_returns_graph_client(self) -> None:
-        """Returns a graph client from get_graph_client."""
-        mock_client = AsyncMock()
-
-        with patch(
-            "sibyl.api.dependencies.get_graph_client",
-            return_value=mock_client,
-        ):
-            result = await get_graph()
-            assert result is mock_client
-
-    @pytest.mark.asyncio
-    async def test_calls_get_graph_client(self) -> None:
-        """Calls get_graph_client to obtain client."""
-        mock_client = AsyncMock()
-
-        with patch(
-            "sibyl.api.dependencies.get_graph_client",
-            return_value=mock_client,
-        ) as mock_get:
-            await get_graph()
-            mock_get.assert_called_once()
 
 
 # =============================================================================
@@ -152,84 +125,10 @@ class TestGetEntityManager:
 
 
 # =============================================================================
-# get_relationship_manager Tests
-# =============================================================================
-class TestGetRelationshipManager:
-    """Tests for get_relationship_manager dependency."""
-
-    @pytest.mark.asyncio
-    async def test_returns_relationship_manager(
-        self,
-        mock_org: MagicMock,
-        mock_graph_runtime: SimpleNamespace,
-    ) -> None:
-        """Returns the native runtime's relationship manager."""
-        with patch(
-            "sibyl.persistence.graph_runtime.get_entity_graph_runtime",
-            return_value=mock_graph_runtime,
-        ):
-            result = await get_relationship_manager(org=mock_org)
-
-        assert result is mock_graph_runtime.relationship_manager
-
-    @pytest.mark.asyncio
-    async def test_uses_org_id_as_group_id(
-        self,
-        mock_org: MagicMock,
-        mock_graph_runtime: SimpleNamespace,
-    ) -> None:
-        """Uses organization ID as the group_id for graph scoping."""
-        with patch(
-            "sibyl.persistence.graph_runtime.get_entity_graph_runtime",
-            return_value=mock_graph_runtime,
-        ):
-            result = await get_relationship_manager(org=mock_org)
-
-        assert result._group_id == str(mock_org.id)
-
-
-# =============================================================================
-# get_group_id Tests
-# =============================================================================
-class TestGetGroupId:
-    """Tests for get_group_id dependency."""
-
-    @pytest.mark.asyncio
-    async def test_returns_string(self, mock_org: MagicMock) -> None:
-        """Returns organization ID as string."""
-        result = await get_group_id(org=mock_org)
-        assert isinstance(result, str)
-
-    @pytest.mark.asyncio
-    async def test_returns_org_id(self, mock_org: MagicMock) -> None:
-        """Returns the organization's ID."""
-        result = await get_group_id(org=mock_org)
-        assert result == str(mock_org.id)
-
-
-# =============================================================================
 # Integration Pattern Tests
 # =============================================================================
 class TestDependencyPatterns:
     """Tests demonstrating intended usage patterns."""
-
-    @pytest.mark.asyncio
-    async def test_multiple_managers_same_org(
-        self,
-        mock_org: MagicMock,
-        mock_graph_runtime: SimpleNamespace,
-    ) -> None:
-        """Multiple manager types can be created for the same org."""
-        with patch(
-            "sibyl.persistence.graph_runtime.get_entity_graph_runtime",
-            return_value=mock_graph_runtime,
-        ):
-            entity_mgr = await get_entity_manager(org=mock_org)
-            rel_mgr = await get_relationship_manager(org=mock_org)
-
-        # Both should have same group_id
-        assert entity_mgr._group_id == rel_mgr._group_id
-        assert entity_mgr._group_id == str(mock_org.id)
 
     @pytest.mark.asyncio
     async def test_different_orgs_different_scopes(

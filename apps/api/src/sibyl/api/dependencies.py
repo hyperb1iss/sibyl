@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from sibyl.persistence.graph_runtime import ActiveGraphStore as ActiveGraphStoreType
     from sibyl_core.services.graph import (
         EntityManager,
-        RelationshipManager,
         SurrealGraphClient,
     )
     from sibyl_core.storage import GraphStore
@@ -65,18 +64,6 @@ async def get_graph_client() -> SurrealGraphClient:
     return await _get_graph_client()
 
 
-async def get_graph() -> SurrealGraphClient:
-    """Get the shared graph client.
-
-    This is a thin wrapper around get_graph_client for use as a FastAPI
-    dependency. The client is a singleton, so this is cheap to call.
-
-    Returns:
-        Native Surreal graph client instance
-    """
-    return await get_graph_client()
-
-
 async def get_entity_manager(
     org: AuthOrganization = Depends(get_current_organization),
 ) -> EntityManager:
@@ -104,25 +91,6 @@ async def get_entity_manager(
     return runtime.entity_manager
 
 
-async def get_relationship_manager(
-    org: AuthOrganization = Depends(get_current_organization),
-) -> RelationshipManager:
-    """Get a native relationship manager scoped to the current organization.
-
-    Similar to get_entity_manager but for relationship operations.
-
-    Args:
-        org: Current organization from auth context (auto-resolved)
-
-    Returns:
-        Relationship manager configured for the current org's graph
-    """
-    from sibyl.persistence.graph_runtime import get_entity_graph_runtime
-
-    runtime = await get_entity_graph_runtime(str(org.id))
-    return runtime.relationship_manager
-
-
 async def get_graph_store(
     org: AuthOrganization = Depends(get_current_organization),
 ) -> ActiveGraphStoreType:
@@ -137,17 +105,3 @@ async def get_knowledge_read_service(
 ) -> KnowledgeReadService:
     """Get the seam-based graph read service backed by the active runtime."""
     return GraphReadServiceAdapter(graph_store)
-
-
-async def get_group_id(
-    org: AuthOrganization = Depends(get_current_organization),
-) -> str:
-    """Get the graph group_id (org ID as string) for the current organization.
-
-    Useful when you need the group_id for direct graph operations
-    without a full manager.
-
-    Returns:
-        Organization ID as string (used as the graph group namespace)
-    """
-    return str(org.id)
