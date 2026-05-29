@@ -43,7 +43,6 @@ dependencies = [
     "surrealdb>=2.0.0,<3.0",
     # Auth & HTTP (server-specific deps)
     "email-validator>=2.3.0",
-    "passlib>=1.7",
     "pyyaml>=6.0",
     # CLI & Output (server-side commands)
     "rich>=13.0",
@@ -63,7 +62,6 @@ dependencies = [
 [project.optional-dependencies]
 generator = [
     "anthropic>=0.75",
-    "faker>=30.0",
 ]
 graphrag = [
     "networkx>=3.0",

@@ -32,7 +32,6 @@ dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     # Auth primitives (JWT, password hashing)
-    "passlib>=1.7",
     "pyjwt>=2.10",
     # Async & HTTP
     "anyio>=4.0",
@@ -40,7 +39,6 @@ dependencies = [
     # Logging
     "structlog>=24.0",
     # Environment
-    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]

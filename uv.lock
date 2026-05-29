@@ -768,18 +768,6 @@ wheels = [
 ]
 
 [[package]]
-name = "faker"
-version = "40.19.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "tzdata", marker = "sys_platform == 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/15/01/28c8ddae8caaf82c929655000963d83e3f01265a9af34e823c2ef2eee8ac/faker-40.19.1.tar.gz", hash = "sha256:76fa71fd3bf320db25e5504eb356f9a76b8a95cd6098524d006f446035b6b89d", size = 1969318, upload-time = "2026-05-22T15:57:37.433Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/49/b4/40a1ec12ec834604f3848143343baf1c67bc9a1096e401907eaa0d25876a/faker-40.19.1-py3-none-any.whl", hash = "sha256:265259b37c013838baaae34940207288170df385d6c5281413fce56a3504d580", size = 2007643, upload-time = "2026-05-22T15:57:35.867Z" },
-]
-
-[[package]]
 name = "fastapi"
 version = "0.136.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2047,15 +2035,6 @@ wheels = [
 ]
 
 [[package]]
-name = "passlib"
-version = "1.7.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b6/06/9da9ee59a67fae7761aab3ccc84fa4f3f33f125b370f1ccdb915bf967c11/passlib-1.7.4.tar.gz", hash = "sha256:defd50f72b65c5402ab2c573830a6978e5f202ad0d984793c8dde2c4152ebe04", size = 689844, upload-time = "2020-10-08T19:00:52.121Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/a4/ab6b7589382ca3df236e03faa71deac88cae040af60c071a78d254a62172/passlib-1.7.4-py2.py3-none-any.whl", hash = "sha256:aa6bca462b8d8bda89c70b382f0c298a20b5560af6cbfa2dce410c0a2fb669f1", size = 525554, upload-time = "2020-10-08T19:00:49.856Z" },
-]
-
-[[package]]
 name = "patchright"
 version = "1.60.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3045,11 +3024,9 @@ source = { editable = "packages/python/sibyl-core" }
 dependencies = [
     { name = "anyio" },
     { name = "httpx" },
-    { name = "passlib" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyjwt" },
-    { name = "python-dotenv" },
     { name = "structlog" },
 ]
 
@@ -3097,13 +3074,11 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "mistune", marker = "extra == 'crawler'", specifier = ">=3.0" },
     { name = "mistune", marker = "extra == 'runtime'", specifier = ">=3.0" },
-    { name = "passlib", specifier = ">=1.7" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'llm'", specifier = ">=1.99.0,<2" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'runtime'", specifier = ">=1.99.0,<2" },
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "pyjwt", specifier = ">=2.10" },
-    { name = "python-dotenv", specifier = ">=1.0" },
     { name = "python-louvain", marker = "extra == 'graphrag'", specifier = ">=0.16" },
     { name = "python-louvain", marker = "extra == 'runtime'", specifier = ">=0.16" },
     { name = "structlog", specifier = ">=24.0" },
@@ -3125,7 +3100,6 @@ name = "sibyl-dev"
 source = { editable = "apps/cli" }
 dependencies = [
     { name = "httpx" },
-    { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "rich" },
     { name = "sibyl-core" },
@@ -3145,7 +3119,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
-    { name = "pyjwt", specifier = ">=2.10" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13.0" },
     { name = "sibyl-core", editable = "packages/python/sibyl-core" },
@@ -3175,7 +3148,6 @@ dependencies = [
     { name = "greenlet" },
     { name = "itsdangerous" },
     { name = "mcp" },
-    { name = "passlib" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "pyyaml" },
     { name = "rich" },
@@ -3196,7 +3168,6 @@ docs = [
 ]
 generator = [
     { name = "anthropic" },
-    { name = "faker" },
 ]
 graphrag = [
     { name = "networkx" },
@@ -3224,7 +3195,6 @@ requires-dist = [
     { name = "arq", specifier = ">=0.26.3" },
     { name = "authlib", specifier = ">=1.7.2,<1.8" },
     { name = "email-validator", specifier = ">=2.3.0" },
-    { name = "faker", marker = "extra == 'generator'", specifier = ">=30.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "google-genai", specifier = ">=2.0.1" },
     { name = "greenlet", specifier = ">=3.3.0" },
@@ -3237,7 +3207,6 @@ requires-dist = [
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.27" },
     { name = "networkx", marker = "extra == 'graphrag'", specifier = ">=3.0" },
     { name = "networkx", marker = "extra == 'graphrag-leiden'", specifier = ">=3.0" },
-    { name = "passlib", specifier = ">=1.7" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.13.0,<3" },
     { name = "python-louvain", marker = "extra == 'graphrag'", specifier = ">=0.16" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -3541,15 +3510,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/55/e3/70399cb7dd41c10ac53367ae42139cf4b1ca5f36bb3dc6c9d33acdb43655/typing_inspection-0.4.2.tar.gz", hash = "sha256:ba561c48a67c5958007083d386c3295464928b01faa735ab8547c5692e87f464", size = 75949, upload-time = "2025-10-01T02:14:41.687Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/dc/9b/47798a6c91d8bdb567fe2698fe81e0c6b7cb7ef4d13da4114b41d239f65d/typing_inspection-0.4.2-py3-none-any.whl", hash = "sha256:4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7", size = 14611, upload-time = "2025-10-01T02:14:40.154Z" },
-]
-
-[[package]]
-name = "tzdata"
-version = "2026.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ba/19/1b9b0e29f30c6d35cb345486df41110984ea67ae69dddbc0e8a100999493/tzdata-2026.2.tar.gz", hash = "sha256:9173fde7d80d9018e02a662e168e5a2d04f87c41ea174b139fbef642eda62d10", size = 198254, upload-time = "2026-04-24T15:22:08.651Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ce/e4/dccd7f47c4b64213ac01ef921a1337ee6e30e8c6466046018326977efd95/tzdata-2026.2-py2.py3-none-any.whl", hash = "sha256:bbe9af844f658da81a5f95019480da3a89415801f6cc966806612cc7169bffe7", size = 349321, upload-time = "2026-04-24T15:22:05.876Z" },
 ]
 
 [[package]]

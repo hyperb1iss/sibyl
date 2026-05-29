@@ -35,7 +35,6 @@ dependencies = [
     # HTTP Client
     "httpx>=0.27",
     # Auth
-    "pyjwt>=2.10",
     # Config
     "pyyaml>=6.0",
     "tomli-w>=1.2.0",
