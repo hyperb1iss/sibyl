@@ -12,12 +12,7 @@ import structlog
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from sibyl.runtime_shape import (
-    default_auth_store,
-    fully_surreal_runtime,
-    resolve_coordination_backend,
-    uses_relational_auth,
-)
+from sibyl.runtime_shape import resolve_coordination_backend
 
 _log = structlog.get_logger()
 
@@ -207,7 +202,7 @@ class Settings(BaseSettings):
     def validate_security_settings(self) -> "Settings":
         """Prevent insecure settings in production."""
         if "auth_store" not in self.model_fields_set:
-            object.__setattr__(self, "auth_store", default_auth_store(store=self.store))
+            object.__setattr__(self, "auth_store", "surreal")
         if "local_auth_enabled" not in self.model_fields_set and self.environment == "development":
             object.__setattr__(self, "local_auth_enabled", True)
         if self.environment == "production":
@@ -455,7 +450,7 @@ class Settings(BaseSettings):
     def check_api_key_fallbacks(self) -> "Settings":
         """Fall back to non-prefixed env vars for API keys."""
         if "auth_store" not in self.model_fields_set:
-            object.__setattr__(self, "auth_store", default_auth_store(store=self.store))
+            object.__setattr__(self, "auth_store", "surreal")
         if "local_auth_enabled" not in self.model_fields_set and self.environment == "development":
             object.__setattr__(self, "local_auth_enabled", True)
 
@@ -659,18 +654,12 @@ class Settings(BaseSettings):
     @property
     def fully_surreal(self) -> bool:
         """Whether both the main store and auth runtime are fully Surreal-backed."""
-        return fully_surreal_runtime(store=self.store, auth_store=self.auth_store)
-
-    @property
-    def uses_relational_auth(self) -> bool:
-        """Whether auth/session persistence still depends on PostgreSQL."""
-        return uses_relational_auth(auth_store=self.auth_store)
+        return True
 
     @property
     def resolved_coordination_backend(self) -> Literal["local", "redis"]:
         """Resolve the active coordination backend for this runtime."""
         return resolve_coordination_backend(
-            store=self.store,
             coordination_backend=self.coordination_backend,
         )
 

@@ -34,11 +34,7 @@ from sibyl.cli.export import app as export_app
 from sibyl.cli.generate import app as generate_app
 from sibyl.cli.migrate import app as migrate_app
 from sibyl.cli.up_cmd import down, status as up_status, up
-from sibyl.runtime_shape import (
-    requires_object_surreal_support,
-    resolve_object_coordination_backend,
-    resolve_object_store,
-)
+from sibyl.runtime_shape import resolve_object_coordination_backend
 
 # Main app
 app = typer.Typer(
@@ -380,13 +376,7 @@ def _check_coordination_services(settings: Any) -> bool:
 
 
 def _check_runtime_services(settings: Any) -> bool:
-    store = resolve_object_store(settings, default="surreal")
-    all_good = True
-
-    if requires_object_surreal_support(settings, default_store=store):
-        all_good = _check_surreal_services(settings) and all_good
-
-    return all_good
+    return _check_surreal_services(settings)
 
 
 @app.command()

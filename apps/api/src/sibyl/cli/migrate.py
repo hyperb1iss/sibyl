@@ -237,9 +237,6 @@ def _warn_if_auth_payload_skipped(*, archive: object, restore_auth: bool) -> Non
         warn("Archive includes auth.json, but auth restore is disabled")
         info("Pass --restore-auth when you want the Surreal auth snapshot imported")
         return
-    if settings.uses_relational_auth:
-        warn("Archive includes auth.json, but SIBYL_AUTH_STORE is not surreal")
-        info("The active auth store is still relational; auth.json will be skipped")
 
 
 def _warn_if_content_payload_skipped(*, archive: object, restore_content: bool) -> None:
@@ -303,7 +300,7 @@ def _print_archive_restore_review(
         + _payload_decision(
             present=AUTH_FILENAME in archive_files,
             enabled=restore_auth,
-            blocked=settings.uses_relational_auth,
+            blocked=False,
         )
     )
     info(
@@ -500,10 +497,6 @@ def _print_writes_remain_frozen_notice() -> None:
 def _require_cutover_surreal_runtime() -> None:
     if settings.store != "surreal":
         error("Cutover must run with SIBYL_STORE=surreal on the target runtime")
-        raise typer.Exit(code=1)
-    if settings.uses_relational_auth:
-        error("Cutover must run with SIBYL_AUTH_STORE=surreal on the target runtime")
-        info("Use import or rehearse for mixed-mode debugging before the cutover gate")
         raise typer.Exit(code=1)
 
 
@@ -742,9 +735,8 @@ def _bootstrap_surreal_runtimes(*, clean: bool) -> None:
 
     @run_async
     async def _bootstrap() -> None:
-        if not settings.uses_relational_auth:
-            info("Bootstrapping Surreal auth schema...")
-            await bootstrap_auth_schema(build_surreal_auth_client(), reset=clean)
+        info("Bootstrapping Surreal auth schema...")
+        await bootstrap_auth_schema(build_surreal_auth_client(), reset=clean)
         if settings.store == "surreal":
             info("Bootstrapping Surreal content schema...")
             await bootstrap_content_schema(build_surreal_content_client(), reset=clean)
@@ -1205,7 +1197,7 @@ def import_archive(
 
     _bootstrap_surreal_runtimes(clean=clean)
 
-    if restore_auth and AUTH_FILENAME in archive.files and not settings.uses_relational_auth:
+    if restore_auth and AUTH_FILENAME in archive.files:
         info("Restoring auth payload into Surreal auth storage...")
         payload = auth_payload_from_archive(archive)
         if payload is None or not _restore_auth_payload(payload, clean=clean):
@@ -1500,7 +1492,7 @@ def rehearse_archive(
 
     _bootstrap_surreal_runtimes(clean=clean)
 
-    if restore_auth and AUTH_FILENAME in archive.files and not settings.uses_relational_auth:
+    if restore_auth and AUTH_FILENAME in archive.files:
         info("Restoring auth payload into Surreal auth storage...")
         payload = auth_payload_from_archive(archive)
         if payload is None or not _restore_auth_payload(payload, clean=clean):
@@ -1737,7 +1729,7 @@ def cutover_archive(
 
     _bootstrap_surreal_runtimes(clean=clean)
 
-    if restore_auth and AUTH_FILENAME in archive.files and not settings.uses_relational_auth:
+    if restore_auth and AUTH_FILENAME in archive.files:
         info("Importing auth payload into the Surreal auth runtime...")
         payload = auth_payload_from_archive(archive)
         if payload is None or not _restore_auth_payload(payload, clean=clean):

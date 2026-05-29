@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import structlog
 
-from sibyl.config import settings
-
 log = structlog.get_logger()
 
 
@@ -32,7 +30,7 @@ async def bootstrap_surreal_content_schema() -> None:
 
 
 async def bootstrap_surreal_runtime_schemas() -> bool:
-    bootstrap_auth = not settings.uses_relational_auth
+    bootstrap_auth = True
 
     bootstrapped = False
     if bootstrap_auth:

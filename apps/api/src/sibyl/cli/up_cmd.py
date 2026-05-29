@@ -27,11 +27,7 @@ from sibyl.cli.common import (
     success,
     warn,
 )
-from sibyl.runtime_shape import (
-    default_auth_store,
-    requires_surreal_support,
-    resolve_coordination_backend,
-)
+from sibyl.runtime_shape import resolve_coordination_backend
 
 
 # Find project root (where docker-compose.yml lives)
@@ -86,34 +82,29 @@ def _default_local_surreal_url(env: dict[str, str]) -> str:
 
 def _resolve_coordination_backend(env: dict[str, str]) -> str:
     return resolve_coordination_backend(
-        store=env.get("SIBYL_STORE", "surreal"),
         coordination_backend=env.get("SIBYL_COORDINATION_BACKEND", "auto"),
     )
 
 
 def _apply_surreal_dev_defaults(env: dict[str, str]) -> None:
     env.setdefault("SIBYL_STORE", "surreal")
-    env["SIBYL_AUTH_STORE"] = default_auth_store(store=env["SIBYL_STORE"])
+    env["SIBYL_AUTH_STORE"] = "surreal"
     env.setdefault("SIBYL_COORDINATION_BACKEND", "auto")
 
-    if requires_surreal_support(
-        store=env["SIBYL_STORE"],
-        auth_store=env["SIBYL_AUTH_STORE"],
-    ):
-        env.setdefault("SIBYL_SURREAL_URL", _default_local_surreal_url(env))
-        env.pop("SIBYL_SURREAL_DATA_DIR", None)
+    env.setdefault("SIBYL_SURREAL_URL", _default_local_surreal_url(env))
+    env.pop("SIBYL_SURREAL_DATA_DIR", None)
 
-        surreal_url = env["SIBYL_SURREAL_URL"]
-        if surreal_url.startswith(
-            (
-                "ws://127.0.0.1",
-                "ws://localhost",
-                "http://127.0.0.1",
-                "http://localhost",
-            )
-        ):
-            env.setdefault("SIBYL_SURREAL_USERNAME", "root")
-            env.setdefault("SIBYL_SURREAL_PASSWORD", "root")
+    surreal_url = env["SIBYL_SURREAL_URL"]
+    if surreal_url.startswith(
+        (
+            "ws://127.0.0.1",
+            "ws://localhost",
+            "http://127.0.0.1",
+            "http://localhost",
+        )
+    ):
+        env.setdefault("SIBYL_SURREAL_USERNAME", "root")
+        env.setdefault("SIBYL_SURREAL_PASSWORD", "root")
 
     if env["SIBYL_STORE"] != "surreal":
         warn("SIBYL_STORE=legacy is no longer supported by `sibyld up`; using SurrealDB")
@@ -154,12 +145,8 @@ def _load_runtime_env(project_root: Path) -> dict[str, str]:
 
 
 def _compose_services_for_env(env: dict[str, str]) -> list[str]:
-    store = env.get("SIBYL_STORE", "surreal")
-    auth_store = env.get("SIBYL_AUTH_STORE", default_auth_store(store=store))
-    services: list[str] = []
+    services: list[str] = ["surrealdb"]
 
-    if requires_surreal_support(store=store, auth_store=auth_store):
-        services.append("surrealdb")
     if _resolve_coordination_backend(env) == "redis":
         services.append("redis")
     return services

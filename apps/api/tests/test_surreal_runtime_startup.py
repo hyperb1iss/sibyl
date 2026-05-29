@@ -15,30 +15,6 @@ async def test_bootstrap_surreal_runtime_schemas_runs_auth_and_content(
     bootstrap_auth = AsyncMock()
     bootstrap_content = AsyncMock()
 
-    monkeypatch.setattr(surreal_runtime_startup.settings, "store", "surreal")
-    monkeypatch.setattr(surreal_runtime_startup.settings, "auth_store", "surreal")
-    monkeypatch.setattr(surreal_runtime_startup, "bootstrap_surreal_auth_schema", bootstrap_auth)
-    monkeypatch.setattr(
-        surreal_runtime_startup,
-        "bootstrap_surreal_content_schema",
-        bootstrap_content,
-    )
-
-    assert await surreal_runtime_startup.bootstrap_surreal_runtime_schemas() is True
-
-    bootstrap_auth.assert_awaited_once()
-    bootstrap_content.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_bootstrap_surreal_runtime_schemas_bootstraps_auth_when_postgres_requested(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    bootstrap_auth = AsyncMock()
-    bootstrap_content = AsyncMock()
-
-    monkeypatch.setattr(surreal_runtime_startup.settings, "store", "surreal")
-    monkeypatch.setattr(surreal_runtime_startup.settings, "auth_store", "postgres")
     monkeypatch.setattr(surreal_runtime_startup, "bootstrap_surreal_auth_schema", bootstrap_auth)
     monkeypatch.setattr(
         surreal_runtime_startup,
@@ -59,8 +35,6 @@ async def test_bootstrap_surreal_runtime_schemas_continues_after_auth_failure(
     bootstrap_auth = AsyncMock(side_effect=RuntimeError("auth offline"))
     bootstrap_content = AsyncMock()
 
-    monkeypatch.setattr(surreal_runtime_startup.settings, "store", "surreal")
-    monkeypatch.setattr(surreal_runtime_startup.settings, "auth_store", "surreal")
     monkeypatch.setattr(surreal_runtime_startup, "bootstrap_surreal_auth_schema", bootstrap_auth)
     monkeypatch.setattr(
         surreal_runtime_startup,
