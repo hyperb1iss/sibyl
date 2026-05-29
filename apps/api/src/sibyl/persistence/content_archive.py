@@ -9,8 +9,11 @@ from enum import Enum
 from uuid import UUID
 
 from sibyl import config as config_module
-from sibyl.persistence.surreal.content import _normalize_records
 from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
+from sibyl_core.backends.surreal.records import (
+    normalize_records as _normalize_records,
+    query_error as _query_error,
+)
 
 CONTENT_ARCHIVE_VERSION = "1.0"
 
@@ -176,25 +179,6 @@ def _deserialize_vector(value: object) -> list[float] | object:
             continue
         return value
     return out
-
-
-def _query_error(result: object) -> str | None:
-    if isinstance(result, str):
-        return result
-    if isinstance(result, dict):
-        payload = {str(key): value for key, value in result.items()}
-        status = payload.get("status")
-        if isinstance(status, str) and status.upper() == "ERR":
-            detail = payload.get("detail") or payload.get("result") or payload
-            return str(detail)
-        return None
-    if not isinstance(result, list):
-        return None
-    for item in result:
-        error = _query_error(item)
-        if error is not None:
-            return error
-    return None
 
 
 def _sort_content_rows(

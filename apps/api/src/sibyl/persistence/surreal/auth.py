@@ -6,7 +6,6 @@ import asyncio
 from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Self, cast
 from uuid import UUID, uuid4
 
@@ -28,6 +27,13 @@ from sibyl_core.auth import (
     PasswordChange,
 )
 from sibyl_core.backends.surreal import SurrealAuthClient
+from sibyl_core.backends.surreal.records import (
+    coerce_datetime as _coerce_datetime,
+    coerce_uuid as _coerce_uuid,
+    normalize_record as _normalize_record,
+    normalize_records as _normalize_records,
+    utcnow as _utcnow,
+)
 
 AUTH_NAMESPACE = "sibyl_auth"
 AUTH_DATABASE = "auth"
@@ -88,66 +94,6 @@ async def close_shared_surreal_auth_client() -> None:
 @asynccontextmanager
 async def surreal_auth_client_scope() -> AsyncGenerator[SurrealAuthClient]:
     yield await get_shared_surreal_auth_client()
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
-
-
-def _normalize_record(record: object) -> SurrealRecord | None:
-    if record is None or not isinstance(record, dict):
-        return None
-    out = {str(key): value for key, value in record.items()}
-    out.pop("id", None)
-    return out
-
-
-def _normalize_records(result: object) -> list[SurrealRecord]:
-    if result is None:
-        return []
-    if isinstance(result, dict):
-        record = _normalize_record(result)
-        return [record] if record is not None else []
-    if not isinstance(result, list):
-        return []
-
-    records: list[SurrealRecord] = []
-    for item in result:
-        if isinstance(item, list):
-            for nested in item:
-                record = _normalize_record(nested)
-                if record is not None:
-                    records.append(record)
-            continue
-        record = _normalize_record(item)
-        if record is not None:
-            records.append(record)
-    return records
-
-
-def _coerce_uuid(value: object | None, *, field_name: str) -> UUID:
-    if isinstance(value, UUID):
-        return value
-    if isinstance(value, str):
-        return UUID(value)
-    msg = f"{field_name} is required"
-    raise TypeError(msg)
-
-
-def _coerce_datetime(value: object | None) -> datetime | None:
-    if value is None:
-        return value
-    if isinstance(value, datetime):
-        if value.tzinfo is not None:
-            return value.astimezone(UTC).replace(tzinfo=None)
-        return value
-    if isinstance(value, str):
-        normalized = value.replace("Z", "+00:00")
-        parsed = datetime.fromisoformat(normalized)
-        if parsed.tzinfo is not None:
-            return parsed.astimezone(UTC).replace(tzinfo=None)
-        return parsed
-    return None
 
 
 def _coerce_optional_str(value: object | None) -> str | None:

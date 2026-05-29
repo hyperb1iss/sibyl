@@ -8,8 +8,12 @@ from datetime import UTC, datetime
 from enum import Enum
 from uuid import UUID
 
-from sibyl.persistence.surreal.auth import _normalize_records, build_surreal_auth_client
+from sibyl.persistence.surreal.auth import build_surreal_auth_client
 from sibyl_core.backends.surreal import bootstrap_auth_schema
+from sibyl_core.backends.surreal.records import (
+    normalize_records as _normalize_records,
+    query_error as _query_error,
+)
 
 AUTH_ARCHIVE_VERSION = "1.0"
 _AUTH_ARCHIVE_SQL = {
@@ -189,25 +193,6 @@ def _deserialize_value(value: object) -> object:
             return parsed.astimezone(UTC).replace(tzinfo=None)
         return parsed
     return value
-
-
-def _query_error(result: object) -> str | None:
-    if isinstance(result, str):
-        return result
-    if isinstance(result, dict):
-        payload = {str(key): value for key, value in result.items()}
-        status = payload.get("status")
-        if isinstance(status, str) and status.upper() == "ERR":
-            detail = payload.get("detail") or payload.get("result") or payload
-            return str(detail)
-        return None
-    if not isinstance(result, list):
-        return None
-    for item in result:
-        error = _query_error(item)
-        if error is not None:
-            return error
-    return None
 
 
 def _sort_auth_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:

@@ -65,6 +65,14 @@ from sibyl_core.auth import (
 )
 from sibyl_core.backends.surreal import SurrealAuthClient
 from sibyl_core.backends.surreal.connection import _is_transient_connection_error
+from sibyl_core.backends.surreal.records import (
+    coerce_datetime as _coerce_datetime,
+    coerce_uuid as _coerce_uuid,
+    normalize_record as _normalize_record,
+    normalize_records as _normalize_records,
+    query_error as _query_error,
+    utcnow as _utcnow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -245,41 +253,6 @@ class UserDeletionRequestResult:
     sessions_revoked: int
 
 
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
-
-
-def _normalize_record(record: object) -> SurrealRecord | None:
-    if record is None or not isinstance(record, dict):
-        return None
-    out = {str(key): value for key, value in record.items()}
-    out.pop("id", None)
-    return out
-
-
-def _normalize_records(result: object) -> list[SurrealRecord]:
-    if result is None:
-        return []
-    if isinstance(result, dict):
-        record = _normalize_record(result)
-        return [record] if record is not None else []
-    if not isinstance(result, list):
-        return []
-
-    records: list[SurrealRecord] = []
-    for item in result:
-        if isinstance(item, list):
-            for nested in item:
-                record = _normalize_record(nested)
-                if record is not None:
-                    records.append(record)
-            continue
-        record = _normalize_record(item)
-        if record is not None:
-            records.append(record)
-    return records
-
-
 def _normalize_raw_statement_records(
     result: object, *, statement_index: int
 ) -> list[SurrealRecord]:
@@ -306,40 +279,6 @@ def _record_payload(value: object) -> SurrealRecord:
     return {str(key): item for key, item in value.items()}
 
 
-def _query_error(result: object) -> str | None:
-    if isinstance(result, str):
-        return result
-    if isinstance(result, dict):
-        payload = {str(key): value for key, value in result.items()}
-        if (
-            "result" in payload
-            and "status" not in payload
-            and isinstance(payload.get("result"), list)
-        ):
-            return _query_error(payload["result"])
-        status = payload.get("status")
-        if isinstance(status, str) and status.upper() == "ERR":
-            detail = payload.get("detail") or payload.get("result") or payload
-            return str(detail)
-        return None
-    if not isinstance(result, list):
-        return None
-    for item in result:
-        error = _query_error(item)
-        if error is not None:
-            return error
-    return None
-
-
-def _coerce_uuid(value: object | None, *, field_name: str) -> UUID:
-    if isinstance(value, UUID):
-        return value
-    if isinstance(value, str):
-        return UUID(value)
-    msg = f"{field_name} is required"
-    raise TypeError(msg)
-
-
 def _coerce_optional_uuid(value: object | None) -> UUID | None:
     if value is None or value == "":
         return None
@@ -347,22 +286,6 @@ def _coerce_optional_uuid(value: object | None) -> UUID | None:
         return value
     if isinstance(value, str):
         return UUID(value)
-    return None
-
-
-def _coerce_datetime(value: object | None) -> datetime | None:
-    if value is None:
-        return value
-    if isinstance(value, datetime):
-        if value.tzinfo is not None:
-            return value.astimezone(UTC).replace(tzinfo=None)
-        return value
-    if isinstance(value, str):
-        normalized = value.replace("Z", "+00:00")
-        parsed = datetime.fromisoformat(normalized)
-        if parsed.tzinfo is not None:
-            return parsed.astimezone(UTC).replace(tzinfo=None)
-        return parsed
     return None
 
 

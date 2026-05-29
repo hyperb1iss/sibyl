@@ -18,21 +18,20 @@ from sibyl.persistence.backups_common import (
 )
 from sibyl.persistence.surreal.content import (
     _coerce_bool,
-    _coerce_datetime,
     _coerce_float,
     _coerce_int,
     _coerce_optional_str,
     _coerce_optional_uuid,
     _coerce_str,
-    _coerce_uuid,
-    _normalize_records,
-    _query_error,
     surreal_content_client,
 )
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
+from sibyl_core.backends.surreal.records import (
+    coerce_datetime as _coerce_datetime,
+    coerce_uuid as _coerce_uuid,
+    normalize_records as _normalize_records,
+    query_error as _query_error,
+    utcnow as _utcnow,
+)
 
 
 def _normalize_datetime(value: datetime | None) -> datetime | None:

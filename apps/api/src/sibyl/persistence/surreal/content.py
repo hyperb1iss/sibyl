@@ -23,6 +23,13 @@ from sibyl.persistence.content_common import (
 )
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
+from sibyl_core.backends.surreal.records import (
+    coerce_datetime as _coerce_datetime,
+    coerce_uuid as _coerce_uuid,
+    normalize_records as _normalize_records,
+    query_error as _query_error,
+    utcnow as _utcnow,
+)
 from sibyl_core.models import ChunkType, CrawlStatus, SourceType
 from sibyl_core.services.link_graph_status import LinkGraphSourceStatusData, LinkGraphStatusData
 
@@ -109,59 +116,6 @@ async def surreal_content_client() -> AsyncGenerator[SurrealContentClient]:
     yield await get_shared_surreal_content_client()
 
 
-def _normalize_record(record: object) -> SurrealRecord | None:
-    if not isinstance(record, dict):
-        return None
-    out = {str(key): value for key, value in record.items()}
-    if "result" in out and ("status" in out or "time" in out):
-        return None
-    out.pop("id", None)
-    return out
-
-
-def _normalize_records(result: object) -> list[SurrealRecord]:
-    if result is None:
-        return []
-    if isinstance(result, dict):
-        payload = {str(key): value for key, value in result.items()}
-        if "result" in payload and ("status" in payload or "time" in payload):
-            return _normalize_records(payload.get("result"))
-        record = _normalize_record(payload)
-        return [record] if record is not None else []
-    if not isinstance(result, list):
-        return []
-
-    records: list[SurrealRecord] = []
-    for item in result:
-        records.extend(_normalize_records(item))
-    return records
-
-
-def _query_error(result: object) -> str | None:
-    if isinstance(result, str):
-        return result
-    if isinstance(result, dict):
-        payload = {str(key): value for key, value in result.items()}
-        if (
-            "result" in payload
-            and "status" not in payload
-            and isinstance(payload.get("result"), list)
-        ):
-            return _query_error(payload["result"])
-        status = payload.get("status")
-        if isinstance(status, str) and status.upper() == "ERR":
-            detail = payload.get("detail") or payload.get("result") or payload
-            return str(detail)
-        return None
-    if not isinstance(result, list):
-        return None
-    for item in result:
-        error = _query_error(item)
-        if error is not None:
-            return error
-    return None
-
-
 def _serialize_value(value: object) -> object:
     if isinstance(value, UUID):
         return str(value)
@@ -176,19 +130,6 @@ def _serialize_value(value: object) -> object:
     return value
 
 
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
-
-
-def _coerce_uuid(value: object | None, *, field_name: str) -> UUID:
-    if isinstance(value, UUID):
-        return value
-    if isinstance(value, str) and value:
-        return UUID(value)
-    msg = f"{field_name} is required"
-    raise TypeError(msg)
-
-
 def _coerce_optional_uuid(value: object | None) -> UUID | None:
     if value is None or value == "":
         return None
@@ -196,18 +137,6 @@ def _coerce_optional_uuid(value: object | None) -> UUID | None:
         return value
     if isinstance(value, str):
         return UUID(value)
-    return None
-
-
-def _coerce_datetime(value: object | None) -> datetime | None:
-    if value is None or isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        normalized = value.replace("Z", "+00:00")
-        parsed = datetime.fromisoformat(normalized)
-        if parsed.tzinfo is not None:
-            return parsed.astimezone(UTC).replace(tzinfo=None)
-        return parsed
     return None
 
 

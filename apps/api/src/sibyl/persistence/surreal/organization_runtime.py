@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Protocol
 from uuid import UUID, uuid4
@@ -33,6 +33,14 @@ from sibyl.persistence.organization_common import (
 from sibyl.persistence.surreal.auth import surreal_auth_client_scope
 from sibyl.persistence.surreal.auth_runtime import SurrealSessionRepository
 from sibyl_core.auth import AuthUser, OrganizationRole, ProjectRole
+from sibyl_core.backends.surreal.records import (
+    coerce_datetime as _coerce_datetime,
+    coerce_uuid as _coerce_uuid,
+    normalize_record as _normalize_record,
+    normalize_records as _normalize_records,
+    query_error as _query_error,
+    utcnow as _utcnow,
+)
 
 log = structlog.get_logger()
 type SurrealRecord = dict[str, object]
@@ -63,41 +71,6 @@ class QueryClient(Protocol):
     async def execute_query(self, query: str, **params: object) -> object: ...
 
 
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
-
-
-def _normalize_record(record: object) -> SurrealRecord | None:
-    if record is None or not isinstance(record, dict):
-        return None
-    out = {str(key): value for key, value in record.items()}
-    out.pop("id", None)
-    return out
-
-
-def _normalize_records(result: object) -> list[SurrealRecord]:
-    if result is None:
-        return []
-    if isinstance(result, dict):
-        record = _normalize_record(result)
-        return [record] if record is not None else []
-    if not isinstance(result, list):
-        return []
-
-    records: list[SurrealRecord] = []
-    for item in result:
-        if isinstance(item, list):
-            for nested in item:
-                record = _normalize_record(nested)
-                if record is not None:
-                    records.append(record)
-            continue
-        record = _normalize_record(item)
-        if record is not None:
-            records.append(record)
-    return records
-
-
 def _enforce_owner_role_boundary(
     *,
     actor_role: OrganizationRole,
@@ -116,53 +89,9 @@ def _record_payload(value: object) -> SurrealRecord:
     return {str(key): item for key, item in value.items()}
 
 
-def _query_error(result: object) -> str | None:
-    if isinstance(result, str):
-        return result
-    if isinstance(result, dict):
-        payload = {str(key): value for key, value in result.items()}
-        status_value = payload.get("status")
-        if isinstance(status_value, str) and status_value.upper() == "ERR":
-            detail = payload.get("detail") or payload.get("result") or payload
-            return str(detail)
-        return None
-    if not isinstance(result, list):
-        return None
-    for item in result:
-        error = _query_error(item)
-        if error is not None:
-            return error
-    return None
-
-
 def _is_uniqueness_error(error: str) -> bool:
     lowered = error.lower()
     return "unique" in lowered or "already contains" in lowered
-
-
-def _coerce_uuid(value: object | None, *, field_name: str) -> UUID:
-    if isinstance(value, UUID):
-        return value
-    if isinstance(value, str):
-        return UUID(value)
-    msg = f"{field_name} is required"
-    raise TypeError(msg)
-
-
-def _coerce_datetime(value: object | None) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        if value.tzinfo is not None:
-            return value.astimezone(UTC).replace(tzinfo=None)
-        return value
-    if isinstance(value, str):
-        normalized = value.replace("Z", "+00:00")
-        parsed = datetime.fromisoformat(normalized)
-        if parsed.tzinfo is not None:
-            return parsed.astimezone(UTC).replace(tzinfo=None)
-        return parsed
-    return None
 
 
 async def _list_user_records_by_id(
