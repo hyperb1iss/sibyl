@@ -22,6 +22,7 @@ from sibyl.persistence.auth_runtime import (
     create_project_record,
     has_owner_membership,
     resolve_accessible_project_graph_ids,
+    resolve_org_role,
 )
 from sibyl.services.recall_limits import (
     RecallConcurrencyLimitExceededError,
@@ -180,11 +181,15 @@ async def _get_mcp_context() -> McpContext | None:
 
     if org_id:
         log.debug("mcp_context", org_id=org_id, user_id=user_id)
+        org_role = await resolve_org_role(
+            org_id=str(org_id),
+            user_id=str(user_id) if user_id else None,
+        )
         return McpContext(
             org_id=str(org_id),
             user_id=str(user_id) if user_id else None,
             scopes=claims.get("scopes"),
-            org_role=str(claims["org_role"]) if claims.get("org_role") else None,
+            org_role=org_role,
         )
     return None
 

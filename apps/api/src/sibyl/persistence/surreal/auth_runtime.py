@@ -4083,6 +4083,30 @@ async def has_owner_membership(*, org_id: str, user_id: str | None) -> bool:
         return bool(records) and _role_value(records[0].get("role")) == "owner"
 
 
+async def resolve_org_role(*, org_id: str, user_id: str | None) -> str | None:
+    """Resolve a user's current org role from live membership.
+
+    Mirrors the membership-validated source REST uses so authorization never
+    trusts a role baked into a stale token; a downgraded or revoked member
+    resolves to ``None`` even if their claim still carries an elevated role.
+    """
+    if user_id is None:
+        return None
+    async with _auth_client_scope() as client:
+        records = _normalize_records(
+            await client.execute_query(
+                """
+                    SELECT role FROM organization_members
+                    WHERE organization_id = $organization_id AND user_id = $user_id
+                    LIMIT 1;
+                """,
+                organization_id=str(UUID(org_id)),
+                user_id=str(UUID(user_id)),
+            )
+        )
+        return _role_value(records[0].get("role")) if records else None
+
+
 async def list_accessible_project_graph_ids(ctx) -> set[str]:
     if ctx.organization is None:
         return set()
@@ -4419,6 +4443,7 @@ __all__ = [
     "request_password_reset",
     "resolve_accessible_project_graph_ids",
     "resolve_auth_context",
+    "resolve_org_role",
     "resolve_request_claims",
     "resolve_request_user",
     "revoke_access_session",

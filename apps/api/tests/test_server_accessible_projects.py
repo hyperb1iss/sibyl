@@ -1085,6 +1085,67 @@ async def test_get_mcp_context_uses_legacy_api_key_auth() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_mcp_context_resolves_org_role_live_ignoring_stale_claim() -> None:
+    org_id = str(uuid4())
+    user_id = str(uuid4())
+    raw = "jwt.with.stale.owner.claim"
+
+    with (
+        patch("sibyl.server.get_access_token", return_value=SimpleNamespace(token=raw)),
+        patch(
+            "sibyl.auth.jwt.verify_access_token",
+            return_value={
+                "org": org_id,
+                "sub": user_id,
+                "scopes": ["mcp"],
+                "org_role": "owner",
+            },
+        ),
+        patch(
+            "sibyl.server.resolve_org_role",
+            AsyncMock(return_value="member"),
+        ) as resolve_role,
+    ):
+        result = await _get_mcp_context()
+
+    assert result is not None
+    assert result.org_id == org_id
+    assert result.user_id == user_id
+    assert result.org_role == "member"
+    resolve_role.assert_awaited_once_with(org_id=org_id, user_id=user_id)
+
+
+@pytest.mark.asyncio
+async def test_get_mcp_context_drops_role_when_membership_revoked() -> None:
+    org_id = str(uuid4())
+    user_id = str(uuid4())
+    raw = "jwt.with.stale.admin.claim"
+
+    with (
+        patch("sibyl.server.get_access_token", return_value=SimpleNamespace(token=raw)),
+        patch(
+            "sibyl.auth.jwt.verify_access_token",
+            return_value={
+                "org": org_id,
+                "sub": user_id,
+                "scopes": ["mcp"],
+                "org_role": "admin",
+            },
+        ),
+        patch(
+            "sibyl.server.resolve_org_role",
+            AsyncMock(return_value=None),
+        ) as resolve_role,
+    ):
+        result = await _get_mcp_context()
+
+    assert result is not None
+    assert result.org_id == org_id
+    assert result.org_role is None
+    resolve_role.assert_awaited_once_with(org_id=org_id, user_id=user_id)
+
+
+@pytest.mark.asyncio
 async def test_require_owner_mcp_context_uses_legacy_owner_check() -> None:
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()))
 
