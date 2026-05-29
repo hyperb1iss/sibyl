@@ -27,10 +27,19 @@ def _dedup_rows_to_entities(rows: list[tuple[str, str, str, list[float]]]) -> li
     ]
 
 
-def _wire_dedup_list_all(mock_client: MagicMock, mock_entity_manager: MagicMock) -> None:
+def _set_dedup_entities(
+    mock_entity_manager: MagicMock,
+    rows: list[tuple[str, str, str, list[float]]],
+) -> None:
+    """Wire the entity manager to return these rows as listable entities.
+
+    The deduplicator reads candidates via ``entity_manager.list_all``; tests
+    configure that surface directly rather than a graph-query indirection.
+    """
+    entities = _dedup_rows_to_entities(rows)
+
     async def _list_all(limit: int = 100, offset: int = 0, **kwargs) -> list[Entity]:
-        rows = await mock_client.execute_read_org("", organization_id=mock_entity_manager._group_id)
-        return _dedup_rows_to_entities(rows)[offset : offset + limit]
+        return entities[offset : offset + limit]
 
     mock_entity_manager.list_all = AsyncMock(side_effect=_list_all)
 
@@ -190,27 +199,8 @@ class TestEntityDeduplicator:
 
     @pytest.fixture
     def mock_client(self) -> MagicMock:
-        """Create mock graph client."""
-        client = MagicMock()
-        client.client.driver.execute_query = AsyncMock(return_value=[])
-
-        async def _execute_read(query: str, **params) -> list:
-            return await client.client.driver.execute_query(query, **params)
-
-        async def _execute_read_org(query: str, organization_id: str, **params) -> list:
-            return await client.client.driver.execute_query(query, **params)
-
-        async def _execute_write(query: str, **params) -> list:
-            return await client.client.driver.execute_query(query, **params)
-
-        async def _execute_write_org(query: str, organization_id: str, **params) -> list:
-            return await client.client.driver.execute_query(query, **params)
-
-        client.execute_read = AsyncMock(side_effect=_execute_read)
-        client.execute_read_org = AsyncMock(side_effect=_execute_read_org)
-        client.execute_write = AsyncMock(side_effect=_execute_write)
-        client.execute_write_org = AsyncMock(side_effect=_execute_write_org)
-        return client
+        """Neutral graph-client stand-in (dedup reads through the entity manager)."""
+        return MagicMock()
 
     @pytest.fixture
     def mock_entity_manager(self) -> MagicMock:
@@ -220,12 +210,12 @@ class TestEntityDeduplicator:
         manager.get = AsyncMock(return_value=None)
         manager.update = AsyncMock(return_value=None)
         manager.delete = AsyncMock(return_value=True)
+        manager.list_all = AsyncMock(return_value=[])
         return manager
 
     @pytest.fixture
     def dedup(self, mock_client: MagicMock, mock_entity_manager: MagicMock) -> EntityDeduplicator:
         """Create EntityDeduplicator with mocks."""
-        _wire_dedup_list_all(mock_client, mock_entity_manager)
         return EntityDeduplicator(
             client=mock_client,
             entity_manager=mock_entity_manager,
@@ -240,12 +230,11 @@ class TestEntityDeduplicator:
 
     @pytest.mark.asyncio
     async def test_find_duplicates_single_entity(
-        self, dedup: EntityDeduplicator, mock_client: MagicMock
+        self, dedup: EntityDeduplicator, mock_entity_manager: MagicMock
     ) -> None:
         """Single entity returns empty duplicates."""
-        # Return single entity with embedding
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[("id1", "Entity One", "pattern", [1.0, 0.0, 0.0])]
+        _set_dedup_entities(
+            mock_entity_manager, [("id1", "Entity One", "pattern", [1.0, 0.0, 0.0])]
         )
 
         pairs = await dedup.find_duplicates()
@@ -253,15 +242,16 @@ class TestEntityDeduplicator:
 
     @pytest.mark.asyncio
     async def test_find_duplicates_no_matches(
-        self, dedup: EntityDeduplicator, mock_client: MagicMock
+        self, dedup: EntityDeduplicator, mock_entity_manager: MagicMock
     ) -> None:
         """Different entities return empty duplicates."""
         # Two orthogonal embeddings = 0 similarity
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
+        _set_dedup_entities(
+            mock_entity_manager,
+            [
                 ("id1", "Entity One", "pattern", [1.0, 0.0, 0.0]),
                 ("id2", "Entity Two", "pattern", [0.0, 1.0, 0.0]),
-            ]
+            ],
         )
 
         pairs = await dedup.find_duplicates()
@@ -269,15 +259,16 @@ class TestEntityDeduplicator:
 
     @pytest.mark.asyncio
     async def test_find_duplicates_matching_pair(
-        self, dedup: EntityDeduplicator, mock_client: MagicMock
+        self, dedup: EntityDeduplicator, mock_entity_manager: MagicMock
     ) -> None:
         """Similar entities are detected as duplicates."""
         # Nearly identical embeddings
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
+        _set_dedup_entities(
+            mock_entity_manager,
+            [
                 ("id1", "Error handling", "pattern", [1.0, 0.0, 0.0]),
                 ("id2", "Error handling pattern", "pattern", [0.99, 0.01, 0.0]),
-            ]
+            ],
         )
 
         pairs = await dedup.find_duplicates(threshold=0.9)
@@ -286,26 +277,22 @@ class TestEntityDeduplicator:
         assert pairs[0].entity1_id == "id1"
         assert pairs[0].entity2_id == "id2"
         assert pairs[0].similarity > 0.9
-        mock_client.execute_read.assert_not_called()
-        assert mock_client.execute_read_org.await_count >= 1
+        mock_entity_manager.list_all.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_find_duplicates_same_type_only(
-        self, dedup: EntityDeduplicator, mock_client: MagicMock
+        self, dedup: EntityDeduplicator, mock_entity_manager: MagicMock
     ) -> None:
         """Different entity types are not compared when same_type_only=True."""
         dedup.config.same_type_only = True
 
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
+        _set_dedup_entities(
+            mock_entity_manager,
+            [
                 ("id1", "Error handling", "pattern", [1.0, 0.0, 0.0]),
-                (
-                    "id2",
-                    "Error handling",
-                    "rule",
-                    [1.0, 0.0, 0.0],
-                ),  # Same embedding, different type
-            ]
+                # Same embedding, different type
+                ("id2", "Error handling", "rule", [1.0, 0.0, 0.0]),
+            ],
         )
 
         pairs = await dedup.find_duplicates(threshold=0.9)
@@ -321,13 +308,12 @@ class TestEntityDeduplicator:
             entity_manager=mock_entity_manager,
             config=DedupConfig(same_type_only=False, min_name_overlap=0.0),
         )
-        _wire_dedup_list_all(mock_client, mock_entity_manager)
-
-        mock_client.client.driver.execute_query = AsyncMock(
-            return_value=[
+        _set_dedup_entities(
+            mock_entity_manager,
+            [
                 ("id1", "Error handling", "pattern", [1.0, 0.0, 0.0]),
                 ("id2", "Error handling", "rule", [1.0, 0.0, 0.0]),  # Same embedding
-            ]
+            ],
         )
 
         pairs = await dedup.find_duplicates(threshold=0.9)
@@ -335,15 +321,16 @@ class TestEntityDeduplicator:
 
     @pytest.mark.asyncio
     async def test_find_duplicates_sorted_by_similarity(
-        self, dedup: EntityDeduplicator, mock_client: MagicMock
+        self, dedup: EntityDeduplicator, mock_entity_manager: MagicMock
     ) -> None:
         """Results are sorted by similarity (highest first)."""
-        mock_client.client.driver.execute_query = AsyncMock(
-            return_value=[
+        _set_dedup_entities(
+            mock_entity_manager,
+            [
                 ("id1", "Entity A", "pattern", [1.0, 0.0, 0.0]),
                 ("id2", "Entity B", "pattern", [0.95, 0.05, 0.0]),  # Lower similarity to id1
                 ("id3", "Entity C", "pattern", [0.99, 0.01, 0.0]),  # Higher similarity to id1
-            ]
+            ],
         )
 
         pairs = await dedup.find_duplicates(threshold=0.9)
@@ -367,7 +354,7 @@ class TestEntityDeduplicator:
 
     @pytest.mark.asyncio
     async def test_merge_entities_success(
-        self, dedup: EntityDeduplicator, mock_entity_manager: MagicMock, mock_client: MagicMock
+        self, dedup: EntityDeduplicator, mock_entity_manager: MagicMock
     ) -> None:
         """Successful merge removes entity and redirects relationships."""
         # Setup entity returns
@@ -410,7 +397,6 @@ class TestEntityDeduplicator:
         assert result is True
         # Entity manager delete should be called
         mock_entity_manager.delete.assert_called_once_with("remove")
-        assert mock_client.execute_write_org.await_count == 0
         mock_relationship_manager.get_for_entity.assert_awaited_once_with(
             "remove", direction="both"
         )
@@ -436,7 +422,7 @@ class TestEntityDeduplicator:
 
     @pytest.mark.asyncio
     async def test_merge_entities_preserves_keep_metadata(
-        self, dedup: EntityDeduplicator, mock_entity_manager: MagicMock, mock_client: MagicMock
+        self, dedup: EntityDeduplicator, mock_entity_manager: MagicMock
     ) -> None:
         """Keep entity's metadata takes precedence during merge."""
         keep_entity = MagicMock()
@@ -462,7 +448,7 @@ class TestEntityDeduplicator:
 
     @pytest.mark.asyncio
     async def test_merge_entities_no_metadata_merge(
-        self, dedup: EntityDeduplicator, mock_entity_manager: MagicMock, mock_client: MagicMock
+        self, dedup: EntityDeduplicator, mock_entity_manager: MagicMock
     ) -> None:
         """Metadata is not merged when merge_metadata=False."""
         keep_entity = MagicMock()
@@ -505,25 +491,15 @@ class TestDedupWithNameOverlap:
 
     @pytest.fixture
     def mock_client(self) -> MagicMock:
-        """Create mock graph client."""
-        client = MagicMock()
-        client.client.driver.execute_query = AsyncMock(return_value=[])
-
-        async def _execute_read(query: str, **params) -> list:
-            return await client.client.driver.execute_query(query, **params)
-
-        async def _execute_read_org(query: str, organization_id: str, **params) -> list:
-            return await client.client.driver.execute_query(query, **params)
-
-        client.execute_read = AsyncMock(side_effect=_execute_read)
-        client.execute_read_org = AsyncMock(side_effect=_execute_read_org)
-        return client
+        """Neutral graph-client stand-in (dedup reads through the entity manager)."""
+        return MagicMock()
 
     @pytest.fixture
     def mock_entity_manager(self) -> MagicMock:
         """Create mock entity manager."""
         manager = MagicMock()
         manager._group_id = "org-123"
+        manager.list_all = AsyncMock(return_value=[])
         return manager
 
     @pytest.mark.asyncio
@@ -536,14 +512,14 @@ class TestDedupWithNameOverlap:
             entity_manager=mock_entity_manager,
             config=DedupConfig(min_name_overlap=0.5),  # Require 50% name overlap
         )
-        _wire_dedup_list_all(mock_client, mock_entity_manager)
 
         # Same embedding but different names
-        mock_client.client.driver.execute_query = AsyncMock(
-            return_value=[
+        _set_dedup_entities(
+            mock_entity_manager,
+            [
                 ("id1", "Error handling patterns", "pattern", [1.0, 0.0, 0.0]),
                 ("id2", "Completely different topic", "pattern", [1.0, 0.0, 0.0]),
-            ]
+            ],
         )
 
         pairs = await dedup.find_duplicates(threshold=0.9)
@@ -560,14 +536,14 @@ class TestDedupWithNameOverlap:
             entity_manager=mock_entity_manager,
             config=DedupConfig(min_name_overlap=0.3),
         )
-        _wire_dedup_list_all(mock_client, mock_entity_manager)
 
         # Same embedding and similar names
-        mock_client.client.driver.execute_query = AsyncMock(
-            return_value=[
+        _set_dedup_entities(
+            mock_entity_manager,
+            [
                 ("id1", "Error handling patterns", "pattern", [1.0, 0.0, 0.0]),
                 ("id2", "Error handling best patterns", "pattern", [1.0, 0.0, 0.0]),
-            ]
+            ],
         )
 
         pairs = await dedup.find_duplicates(threshold=0.9)

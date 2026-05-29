@@ -284,11 +284,8 @@ class TestDeduplicationIntegration:
 
     @pytest.fixture
     def mock_client(self) -> MagicMock:
-        """Create mock graph client."""
-        client = MagicMock()
-        client.client.driver.execute_query = AsyncMock(return_value=[])
-        client.execute_read_org = AsyncMock(return_value=[])
-        return client
+        """Neutral graph-client stand-in (dedup reads through the entity manager)."""
+        return MagicMock()
 
     @pytest.fixture
     def mock_entity_manager(self) -> MagicMock:
@@ -298,6 +295,7 @@ class TestDeduplicationIntegration:
         manager.get = AsyncMock(return_value=None)
         manager.update = AsyncMock(return_value=None)
         manager.delete = AsyncMock(return_value=True)
+        manager.list_all = AsyncMock(return_value=[])
         return manager
 
     def test_cosine_similarity_detects_duplicates(self) -> None:
@@ -319,28 +317,17 @@ class TestDeduplicationIntegration:
         self, mock_client: MagicMock, mock_entity_manager: MagicMock
     ) -> None:
         """Deduplicator finds entities with similar embeddings."""
-        # Mock entities with embeddings
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                ("e1", "Error Handling Pattern", "pattern", [1.0, 0.0, 0.0]),
-                ("e2", "Error Handling Best Practices", "pattern", [0.99, 0.01, 0.0]),  # Similar
-                ("e3", "Database Pooling", "pattern", [0.0, 1.0, 0.0]),  # Different
-            ]
-        )
+        rows = [
+            ("e1", "Error Handling Pattern", "pattern", [1.0, 0.0, 0.0]),
+            ("e2", "Error Handling Best Practices", "pattern", [0.99, 0.01, 0.0]),  # Similar
+            ("e3", "Database Pooling", "pattern", [0.0, 1.0, 0.0]),  # Different
+        ]
+        entities = [
+            Entity(id=eid, name=name, entity_type=EntityType(etype), embedding=emb)
+            for eid, name, etype, emb in rows
+        ]
 
         async def _list_all(limit: int = 100, offset: int = 0, **kwargs) -> list[Entity]:
-            rows = await mock_client.execute_read_org(
-                "", organization_id=mock_entity_manager._group_id
-            )
-            entities = [
-                Entity(
-                    id=entity_id,
-                    name=name,
-                    entity_type=EntityType(entity_type),
-                    embedding=embedding,
-                )
-                for entity_id, name, entity_type, embedding in rows
-            ]
             return entities[offset : offset + limit]
 
         mock_entity_manager.list_all = AsyncMock(side_effect=_list_all)

@@ -1,7 +1,7 @@
 """Mock implementations for testing MCP tools.
 
-Provides mock versions of GraphClient, EntityManager, and RelationshipManager
-that can be used to test tools without requiring a real FalkorDB connection.
+Provides mock versions of the graph client, EntityManager, and
+RelationshipManager so tools can be tested without a real SurrealDB connection.
 """
 
 from dataclasses import dataclass, field
@@ -26,16 +26,6 @@ class MockGraphClient:
         """Return connection status."""
         return self._connected
 
-    @property
-    def client(self) -> "MockGraphitiClient":
-        """Return mock Graphiti client."""
-        return MockGraphitiClient()
-
-    @property
-    def driver(self) -> "MockDriver":
-        """Return mock driver (shortcut to client.driver)."""
-        return self.client.driver
-
     async def connect(self) -> None:
         """Simulate connection."""
         self._connected = True
@@ -44,49 +34,12 @@ class MockGraphClient:
         """Simulate disconnection."""
         self._connected = False
 
-    @staticmethod
-    def normalize_result(result: object) -> list[dict[str, Any]]:
-        """Normalize query results to a consistent format."""
-        if result is None:
-            return []
-        if isinstance(result, tuple):
-            records = result[0] if len(result) > 0 else []
-            return records or []
-        if isinstance(result, list):
-            return result
-        return []
-
-    async def execute_read(self, query: str, **params: object) -> list[dict[str, Any]]:
-        """Execute a read query and normalize results."""
-        result = await self.client.driver.execute_query(query, **params)
-        return self.normalize_result(result)
-
-    async def execute_write(self, query: str, **params: object) -> list[dict[str, Any]]:
-        """Execute a write query and normalize results."""
-        result = await self.client.driver.execute_query(query, **params)
-        return self.normalize_result(result)
-
-
-@dataclass
-class MockGraphitiClient:
-    """Mock Graphiti client with driver property."""
-
-    @property
-    def driver(self) -> "MockDriver":
-        """Return mock driver."""
-        return MockDriver()
-
-
-@dataclass
-class MockDriver:
-    """Mock FalkorDB driver for query execution."""
-
-    def clone(self, database: str) -> "MockDriver":
-        """Return a shallow clone for org-scoped queries."""
-        return self
-
     async def execute_query(self, query: str, **params: Any) -> list[Any]:
         """Execute a mock query - returns empty list by default."""
+        return []
+
+    async def execute_query_raw(self, query: str, **params: Any) -> list[Any]:
+        """Execute a mock raw query - returns empty list by default."""
         return []
 
 

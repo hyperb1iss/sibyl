@@ -80,7 +80,7 @@ class ToolTestContext:
             query: str,
             **params: Any,
         ) -> list[dict[str, Any]]:
-            return await self.graph_client.execute_read(query, **params)
+            return await self.graph_client.execute_query(query, **params)
 
         patches = [
             # Patch at the module level where tools import from
