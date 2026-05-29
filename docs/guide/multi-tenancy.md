@@ -108,14 +108,14 @@ async def _require_org_id() -> str:
 
 ## Code Patterns
 
-### Native Graph Runtime Pattern
+### Graph Runtime Pattern
 
 Always resolve graph helpers with explicit org context:
 
 ```python
-from sibyl_core.services.native_graph import get_native_graph_runtime
+from sibyl_core.services.graph import get_surreal_graph_runtime
 
-runtime = await get_native_graph_runtime(str(org_id))
+runtime = await get_surreal_graph_runtime(str(org_id))
 
 manager = runtime.entity_manager
 ```

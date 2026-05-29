@@ -182,9 +182,9 @@ for entity, score in results:
 
 For more control, use the hybrid search module directly:
 
-Native context packs use direct Surreal full-text, vector search, raw memory recall, graph
-neighborhood expansion, and RRF fusion. `hybrid_search()` remains the lower-level compatibility path
-for legacy graph search surfaces while the native loop runs through `native_context_search()`.
+Context packs use direct Surreal full-text, vector search, raw memory recall, graph
+neighborhood expansion, and RRF fusion. `hybrid_search()` is the lower-level building block; the
+context loop runs through `context_search()`.
 
 ```python
 from sibyl_core.retrieval import hybrid_search, HybridConfig

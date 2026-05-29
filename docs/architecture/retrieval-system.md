@@ -24,8 +24,7 @@ Sibyl's memory has three major surfaces, served from a single SurrealDB runtime:
    tasks, reflection, synthesis, and logs. Everything that talks to memory goes through here.
 
 There is no Graphiti runtime, no external graph engine, and no separate vector database. SurrealDB
-unifies graph traversal, vector KNN, full-text search, and document storage. Legacy Graphiti-shaped
-records are handled by Sibyl-owned projection and archive code; no supported install pulls Graphiti.
+unifies graph traversal, vector KNN, full-text search, and document storage.
 
 ## The Isolation Model
 
@@ -99,7 +98,7 @@ and ranks results through the shared query-aware ranker in
 
 ### Candidate sources
 
-The native search plan models each candidate source as a `NativeRetrievalSignal`. The current
+The native search plan models each candidate source as a `RetrievalSignal`. The current
 production set:
 
 | Signal             | Backend                           | What it captures                          |
@@ -260,7 +259,7 @@ Every run produces diagnostics alongside metrics. From the latest full run:
 - 3,000 `surreal_query_failed` warnings — almost all expected relation-cleanup `NotFoundError`s on
   throwaway org teardown.
 - 513 `surreal_query_slow` warnings (informational, no failure).
-- 1 `native_graph_embedding_failed` (relationship embedding timeout at 20s).
+- 1 `graph_embedding_failed` (relationship embedding timeout at 20s).
 - 3 `native_entity_vector_search_failed` (query embedding/vector search timeouts).
 - SurrealDB stayed up for the run: `restartCount=0`, `oomKilled=false`, exit code `0`, and peak
   sampled memory `6.361GiB / 15.61GiB`.
