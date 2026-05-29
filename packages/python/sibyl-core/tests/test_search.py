@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+import sibyl_core.retrieval.hybrid as hybrid_module
+import sibyl_core.retrieval.query_ranking as query_ranking_module
 import sibyl_core.retrieval.search as search_module
 from sibyl_core.auth.memory_policy import memory_scope_policy_key
 from sibyl_core.embeddings.providers import (
@@ -1445,3 +1447,145 @@ async def test_edge_fulltext_splits_matches_from_relation_hydration() -> None:
     assert client.calls[0][1]["project_ids"] == ["project_123"]
     assert "fact @0@" not in hydrate_query
     assert "uuid IN $match_uuids" in hydrate_query
+
+
+# --- H6: one shared fusion+ranking core across both retrieval surfaces -------
+
+
+def _fused_entry(
+    candidate: RetrievalCandidate,
+    score: float,
+) -> tuple[RetrievalCandidate, float, dict[str, object]]:
+    return (candidate, score, {"sources": [], "ranks": {}, "original_scores": {}})
+
+
+def test_context_search_and_hybrid_share_one_query_coverage_core() -> None:
+    """Both retrieval surfaces route final ranking through the same function."""
+
+    assert (
+        hybrid_module.rank_items_by_query_coverage
+        is query_ranking_module.rank_items_by_query_coverage
+    )
+    assert (
+        search_module.rank_items_by_query_coverage
+        is query_ranking_module.rank_items_by_query_coverage
+    )
+
+
+def test_context_query_coverage_reranks_through_shared_core(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """context_search's post-fusion pass calls the shared coverage ranker."""
+
+    calls: list[str] = []
+    real = query_ranking_module.rank_items_by_query_coverage
+
+    def spy(query, items, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(query)
+        return real(query, items, **kwargs)
+
+    monkeypatch.setattr(search_module, "rank_items_by_query_coverage", spy)
+
+    strong = RetrievalCandidate(
+        id="strong",
+        type="session",
+        name="Homegrown tomato basil dinner",
+        content="User: my homegrown tomato and basil dinner recipe was a hit.",
+        score=1.0,
+        source=None,
+        metadata={},
+    )
+    weak = RetrievalCandidate(
+        id="weak",
+        type="session",
+        name="Unrelated",
+        content="User: we talked about the weather forecast yesterday.",
+        score=1.0,
+        source=None,
+        metadata={},
+    )
+    fused = [_fused_entry(weak, 0.9), _fused_entry(strong, 0.8)]
+
+    reranked = search_module._apply_query_coverage_to_fused(
+        "what homegrown tomato basil dinner recipe did I make",
+        fused,
+        temporal_target=None,
+    )
+
+    assert calls == ["what homegrown tomato basil dinner recipe did I make"]
+    assert reranked[0][0].id == "strong"
+    # Fusion metadata is preserved through the rerank for each candidate.
+    assert {candidate.id for candidate, _score, _meta in reranked} == {"strong", "weak"}
+
+
+def test_context_query_coverage_preserves_base_order_for_thin_query() -> None:
+    """A query the coverage core cannot act on leaves the fused order intact."""
+
+    first = RetrievalCandidate(
+        id="first",
+        type="session",
+        name="First",
+        content="A grounded lexical session hit.",
+        score=1.0,
+        source=None,
+        metadata={},
+    )
+    second = RetrievalCandidate(
+        id="second",
+        type="session",
+        name="Second",
+        content="Another grounded session hit.",
+        score=1.0,
+        source=None,
+        metadata={},
+    )
+    fused = [_fused_entry(first, 0.9), _fused_entry(second, 0.8)]
+
+    # Single-keyword query: rank_by_query_coverage does not apply, so the
+    # shared core returns the prior order unchanged.
+    reranked = search_module._apply_query_coverage_to_fused(
+        "coffee",
+        fused,
+        temporal_target=None,
+    )
+
+    assert [candidate.id for candidate, _score, _meta in reranked] == ["first", "second"]
+
+
+def test_hybrid_query_coverage_rerank_matches_direct_core_call() -> None:
+    """hybrid_search ranking output is unchanged: the helper now just delegates."""
+
+    results = [
+        (
+            {
+                "id": "weak",
+                "name": "Weather chatter",
+                "content": "User: we chatted about the weather forecast.",
+            },
+            0.9,
+        ),
+        (
+            {
+                "id": "strong",
+                "name": "Homegrown tomato basil dinner",
+                "content": "User: my homegrown tomato and basil dinner recipe was a hit.",
+            },
+            0.8,
+        ),
+    ]
+    query = "what homegrown tomato basil dinner recipe did I make"
+
+    via_helper = hybrid_module._apply_query_coverage_rerank(query, list(results))
+    via_core = query_ranking_module.rank_items_by_query_coverage(
+        query,
+        list(results),
+        text_fn=hybrid_module._entity_text,
+        id_fn=hybrid_module._entity_id,
+        timestamp_fn=hybrid_module.get_entity_timestamp,
+        temporal_target=None,
+    )
+
+    assert [entity["id"] for entity, _score in via_helper[0]] == [
+        entity["id"] for entity, _score in via_core[0]
+    ]
+    assert via_helper[1:] == via_core[1:]

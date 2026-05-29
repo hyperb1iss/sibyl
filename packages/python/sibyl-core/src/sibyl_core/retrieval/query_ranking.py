@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from itertools import pairwise
@@ -784,6 +784,59 @@ def _coverage_signal_sum[T](
     limit: int,
 ) -> float:
     return sum(max(0.0, candidate.overlap) for candidate in ranked[:limit])
+
+
+def rank_items_by_query_coverage[T](
+    query: str,
+    items: Sequence[tuple[T, float]],
+    *,
+    text_fn: Callable[[T], str],
+    id_fn: Callable[[T], str],
+    timestamp_fn: Callable[[T], Any] = lambda _item: None,
+    temporal_target: datetime | None = None,
+) -> tuple[list[tuple[T, float]], bool, bool]:
+    """Rank ``(item, prior_score)`` pairs through the query-coverage core.
+
+    This is the single shared ranking entry point: both the hybrid graph search
+    and the native context-pack plan route their post-fusion ordering through
+    here so they share one proven scorer. Candidates are scored once, then a
+    guarded refinement pass re-ranks the survivors and is accepted only when it
+    measurably improves the top window without sacrificing guard coverage.
+
+    Returns the re-ranked ``(item, score)`` pairs alongside whether ranking
+    applied and whether the refinement pass was accepted.
+    """
+    candidates = [
+        QueryCoverageCandidate(
+            item=item,
+            stable_id=id_fn(item),
+            text=text_fn(item),
+            prior_score=score,
+            original_rank=index + 1,
+            timestamp=timestamp_fn(item),
+        )
+        for index, (item, score) in enumerate(items)
+    ]
+    ranking = rank_by_query_coverage(query, candidates, temporal_target=temporal_target)
+    if not ranking.applied:
+        return list(items), False, False
+
+    refined_candidates = [
+        QueryCoverageCandidate(
+            item=ranked.item,
+            stable_id=ranked.stable_id,
+            text=text_fn(ranked.item),
+            prior_score=ranked.score,
+            original_rank=index + 1,
+            timestamp=timestamp_fn(ranked.item),
+        )
+        for index, ranked in enumerate(ranking.ranked)
+    ]
+    refined = rank_by_query_coverage(query, refined_candidates, temporal_target=temporal_target)
+    if should_accept_query_coverage_refinement(ranking, refined):
+        return [(ranked.item, ranked.score) for ranked in refined.ranked], True, True
+
+    return [(ranked.item, ranked.score) for ranked in ranking.ranked], ranking.changed, False
 
 
 def extract_keywords(query: str) -> list[str]:

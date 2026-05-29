@@ -96,12 +96,17 @@ UX-hostile and a hidden benchmark prerequisite.
 which fuses candidate lists and then ranks them through the shared query-aware ranker in
 [`sibyl_core/retrieval/query_ranking.py`](https://github.com/hyperb1iss/sibyl/blob/main/packages/python/sibyl-core/src/sibyl_core/retrieval/query_ranking.py).
 
-Context-pack builds take a parallel path: the native retrieval plan in
+Context-pack builds run the native retrieval plan in
 [`sibyl_core/retrieval/search.py`](https://github.com/hyperb1iss/sibyl/blob/main/packages/python/sibyl-core/src/sibyl_core/retrieval/search.py)
-(`context_search`) does fusion and arithmetic boosts in-DB. These two engines are not yet
-unified; reconciling them onto one fusion+ranking core is an eval-gated change tracked separately
-(audit H6, behind LongMemEval gating) and is deliberately out of scope for the dead-code and
-RRF-consolidation cleanup that named these modules.
+(`context_search`). It still fetches candidates with DB-native KNN, full-text, and graph expansion,
+and still applies its in-DB-shaped demotions and arithmetic boosts (vector-only demotion,
+graph-expansion-only demotion, active-task / project-match / direct-source / freshness boosts) to
+produce a base order. When the plan carries a query, that base order is then re-ranked through the
+same query-coverage core the hybrid path uses, so both surfaces share one fusion+ranking primitive
+(audit H6). When there is no query (pure context assembly), the coverage pass is skipped and the
+base order stands. The shared invocation is `rank_items_by_query_coverage` in
+[`query_ranking.py`](https://github.com/hyperb1iss/sibyl/blob/main/packages/python/sibyl-core/src/sibyl_core/retrieval/query_ranking.py),
+called by both `hybrid_search` and `context_search`.
 
 ### Candidate sources
 
@@ -134,7 +139,10 @@ it, so there is one RRF scorer, not several.
 
 ### Ranking
 
-After fusion, candidates pass through `rank_by_query_coverage`. This is interpretable ranking, not
+After fusion, candidates pass through the query-coverage core. Both surfaces enter it through
+`rank_items_by_query_coverage`, a thin shared wrapper that builds coverage candidates from each
+item, calls `rank_by_query_coverage`, and runs one guarded refinement pass (accepted only when it
+improves the top window without sacrificing guard coverage). This is interpretable ranking, not
 LLM-based reranking. The ranker takes the fused list and reshuffles based on query coverage signals,
 with a top-window stabilizer that protects strong base retrieval from being destroyed by weak
 signals.

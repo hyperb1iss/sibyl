@@ -18,12 +18,10 @@ import structlog
 from sibyl_core.models.entities import Entity
 from sibyl_core.retrieval.fusion import rrf_merge_with_metadata
 from sibyl_core.retrieval.query_ranking import (
-    QueryCoverageCandidate,
     extract_keywords,
     extract_primary_text_from_text,
     generic_assistant_marker_count,
-    rank_by_query_coverage,
-    should_accept_query_coverage_refinement,
+    rank_items_by_query_coverage,
 )
 from sibyl_core.retrieval.temporal import (
     get_entity_timestamp,
@@ -112,41 +110,14 @@ def _apply_query_coverage_rerank(
     *,
     temporal_target: datetime | None = None,
 ) -> tuple[list[tuple[Any, float]], bool, bool]:
-    candidates = [
-        QueryCoverageCandidate(
-            item=entity,
-            stable_id=_entity_id(entity),
-            text=_entity_text(entity),
-            prior_score=score,
-            original_rank=index + 1,
-            timestamp=get_entity_timestamp(entity),
-        )
-        for index, (entity, score) in enumerate(results)
-    ]
-    ranking = rank_by_query_coverage(query, candidates, temporal_target=temporal_target)
-    if not ranking.applied:
-        return results, False, False
-
-    refined_candidates = [
-        QueryCoverageCandidate(
-            item=ranked.item,
-            stable_id=ranked.stable_id,
-            text=_entity_text(ranked.item),
-            prior_score=ranked.score,
-            original_rank=index + 1,
-            timestamp=get_entity_timestamp(ranked.item),
-        )
-        for index, ranked in enumerate(ranking.ranked)
-    ]
-    refined = rank_by_query_coverage(
+    return rank_items_by_query_coverage(
         query,
-        refined_candidates,
+        results,
+        text_fn=_entity_text,
+        id_fn=_entity_id,
+        timestamp_fn=get_entity_timestamp,
         temporal_target=temporal_target,
     )
-    if should_accept_query_coverage_refinement(ranking, refined):
-        return [(ranked.item, ranked.score) for ranked in refined.ranked], True, True
-
-    return [(ranked.item, ranked.score) for ranked in ranking.ranked], ranking.changed, False
 
 
 @dataclass
