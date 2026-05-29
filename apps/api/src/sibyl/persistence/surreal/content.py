@@ -28,6 +28,7 @@ from sibyl_core.backends.surreal.records import (
     coerce_uuid as _coerce_uuid,
     normalize_records as _normalize_records,
     query_error as _query_error,
+    raise_on_error as _raise_on_error,
     utcnow as _utcnow,
 )
 from sibyl_core.models import ChunkType, CrawlStatus, SourceType
@@ -583,6 +584,17 @@ async def _select_many_raw(
     if error is not None:
         raise RuntimeError(error)
     return _normalize_raw_statement_records(result, statement_index=-1)
+
+
+async def _execute_raw_transaction(
+    client: SurrealContentClient, query: str, **params: object
+) -> None:
+    execute_query_raw = getattr(client, "execute_query_raw", None)
+    if callable(execute_query_raw):
+        result = await cast("RawExecuteQuery", execute_query_raw)(query, **params)
+    else:
+        result = await client.execute_query(query, **params)
+    _raise_on_error(result, query=query)
 
 
 async def _select_one(
@@ -1713,14 +1725,15 @@ async def delete_crawled_document_record(
         )
         chunks_deleted = len(chunk_rows)
 
-        chunk_delete_result = await client.execute_query(
-            "DELETE FROM document_chunks WHERE document_id = $document_id;",
+        await _execute_raw_transaction(
+            client,
+            "BEGIN TRANSACTION;\n"
+            "DELETE FROM document_chunks WHERE document_id = $document_id;\n"
+            "DELETE FROM crawled_documents WHERE uuid = $document_uuid;\n"
+            "COMMIT TRANSACTION;",
             document_id=str(document_id),
+            document_uuid=str(document.id),
         )
-        chunk_delete_error = _query_error(chunk_delete_result)
-        if chunk_delete_error is not None:
-            raise RuntimeError(chunk_delete_error)
-        await _delete_record(client, "crawled_documents", uuid=document.id)
 
         source.document_count = max(0, source.document_count - 1)
         source.chunk_count = max(0, source.chunk_count - chunks_deleted)
@@ -1763,24 +1776,23 @@ async def delete_crawl_source_record(
             for document_row in document_rows
             if document_row.get("uuid") is not None
         ]
+        statements: list[str] = []
         if document_ids:
-            chunk_delete_result = await client.execute_query(
-                "DELETE FROM document_chunks WHERE document_id IN $document_ids;",
-                document_ids=document_ids,
+            statements.append(
+                "DELETE FROM document_chunks WHERE document_id IN $document_ids;"
             )
-            chunk_delete_error = _query_error(chunk_delete_result)
-            if chunk_delete_error is not None:
-                raise RuntimeError(chunk_delete_error)
-
-            document_delete_result = await client.execute_query(
-                "DELETE FROM crawled_documents WHERE source_id = $source_id;",
-                source_id=str(source_id),
+            statements.append(
+                "DELETE FROM crawled_documents WHERE source_id = $source_id;"
             )
-            document_delete_error = _query_error(document_delete_result)
-            if document_delete_error is not None:
-                raise RuntimeError(document_delete_error)
-
-        await _delete_record(client, "crawl_sources", uuid=source.id)
+        statements.append("DELETE FROM crawl_sources WHERE uuid = $source_uuid;")
+        body = "\n".join(statements)
+        await _execute_raw_transaction(
+            client,
+            f"BEGIN TRANSACTION;\n{body}\nCOMMIT TRANSACTION;",
+            document_ids=document_ids,
+            source_id=str(source_id),
+            source_uuid=str(source.id),
+        )
 
     return source
 

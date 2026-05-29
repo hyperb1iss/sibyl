@@ -396,8 +396,13 @@ async def test_surreal_delete_document_batches_chunk_delete(
 
     assert deleted is not None
     queries = [query for query, _params in client.calls]
-    assert "DELETE FROM document_chunks WHERE document_id = $document_id;" in queries
-    assert "DELETE FROM document_chunks WHERE uuid = $uuid;" not in queries
+    txns = [query for query in queries if "BEGIN TRANSACTION;" in query]
+    assert len(txns) == 1
+    txn = txns[0]
+    assert "COMMIT TRANSACTION;" in txn
+    assert "DELETE FROM document_chunks WHERE document_id = $document_id;" in txn
+    assert "DELETE FROM crawled_documents WHERE uuid = $document_uuid;" in txn
+    assert "DELETE FROM document_chunks WHERE uuid = $uuid;" not in txn
 
 
 @pytest.mark.asyncio
