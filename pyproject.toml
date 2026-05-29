@@ -147,11 +147,9 @@ include = ["**/crawler/*.py"]
 [tool.ty.overrides.rules]
 missing-argument = "ignore"
 
-# SQLAlchemy/SQLModel: column comparisons return ColumnElement, not bool
-# Also affects .desc(), .asc(), .label(), .op() methods on mapped columns
-# cli/*.py also has entity union types (EntitySummary | RelatedEntity | Unknown)
+# cli/*.py has entity union types (EntitySummary | RelatedEntity | Unknown)
 [[tool.ty.overrides]]
-include = ["**/db/*.py", "**/api/routes/*.py", "**/auth/*.py", "**/cli/*.py"]
+include = ["**/api/routes/*.py", "**/auth/*.py", "**/cli/*.py"]
 [tool.ty.overrides.rules]
 invalid-argument-type = "ignore"
 unresolved-attribute = "ignore"

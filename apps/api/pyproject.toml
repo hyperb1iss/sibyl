@@ -223,7 +223,6 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"alembic/**/*.py" = ["ERA001", "INP001"]
 "examples/**/*.py" = ["BLE001", "PLR0915", "T201", "TRY002"]
 "src/sibyl/cli/**/*.py" = ["S110", "T201"]
 "src/sibyl/config.py" = ["S104"]
