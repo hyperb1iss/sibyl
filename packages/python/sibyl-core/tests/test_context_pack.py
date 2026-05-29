@@ -244,52 +244,6 @@ async def test_compile_context_falls_back_when_batched_native_search_fails(
 
 
 @pytest.mark.asyncio
-async def test_compile_context_keeps_successful_facets_when_one_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    warnings: list[dict[str, str]] = []
-
-    class FakeLog:
-        def info(self, _event: str, **_kwargs: str) -> None:
-            pass
-
-        def warning(self, _event: str, **kwargs: str) -> None:
-            warnings.append(kwargs)
-
-    monkeypatch.setattr(context_module, "log", FakeLog())
-
-    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
-        facet = kwargs.get("facet")
-        if facet is ContextFacet.DECISIONS:
-            raise RuntimeError("decision search unavailable")
-        if facet is ContextFacet.ACTIVE_WORK:
-            return SearchResponse(
-                results=[_result("task-1", "task", "Keep moving")],
-                total=1,
-                query=kwargs["plan"].query,
-                filters={},
-            )
-        return SearchResponse(results=[], total=0, query=kwargs["plan"].query, filters={})
-
-    monkeypatch.setattr(context_module, "context_search", fake_native_context_search)
-
-    async def fallback_search(**kwargs: Any) -> SearchResponse:
-        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
-
-    pack = await compile_context(
-        "resilient context facets",
-        intent="build",
-        organization_id="org-123",
-        search_fn=fallback_search,
-        retrieval_mode="compare",
-    )
-
-    assert pack.total_items == 1
-    assert pack.items[0].id == "task-1"
-    assert warnings == [{"facet": "decisions", "error_type": "RuntimeError"}]
-
-
-@pytest.mark.asyncio
 async def test_compile_context_defaults_to_native_retrieval_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -384,81 +338,6 @@ async def test_compile_context_scopes_related_items_to_api_key_grants(
 
 
 @pytest.mark.asyncio
-async def test_compile_context_compare_mode_logs_policy_safe_diff(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    info_calls: list[dict[str, Any]] = []
-
-    class FakeLog:
-        def info(self, _event: str, **kwargs: Any) -> None:
-            info_calls.append(kwargs)
-
-        def warning(self, *_args: Any, **_kwargs: Any) -> None:
-            pass
-
-    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
-        if kwargs["facet"] is not ContextFacet.DECISIONS:
-            return SearchResponse(results=[], total=0, query=kwargs["plan"].query, filters={})
-        return SearchResponse(
-            results=[
-                _result(
-                    "decision-native",
-                    "decision",
-                    "Native decision",
-                    source="source:native",
-                    metadata={
-                        "source_id": "source:native",
-                        "policy_reason": "project_access_verified",
-                    },
-                )
-            ],
-            total=1,
-            query=kwargs["plan"].query,
-            filters={},
-        )
-
-    async def fallback_search(**kwargs: Any) -> SearchResponse:
-        if kwargs["types"] != ["decision"]:
-            return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
-        return SearchResponse(
-            results=[
-                _result(
-                    "decision-other-project",
-                    "decision",
-                    "Filtered fallback decision",
-                    metadata={
-                        "project_id": "project_other",
-                        "source_id": "source:filtered",
-                    },
-                )
-            ],
-            total=1,
-            query=kwargs["query"],
-            filters={},
-        )
-
-    monkeypatch.setattr(context_module, "log", FakeLog())
-    monkeypatch.setattr(context_module, "context_search", fake_native_context_search)
-
-    pack = await compile_context(
-        "compare retrieval mode",
-        intent="decide",
-        project="project_123",
-        accessible_projects={"project_123"},
-        principal_id="user-123",
-        organization_id="org-123",
-        search_fn=fallback_search,
-        retrieval_mode="compare",
-    )
-
-    assert [item.id for item in pack.items] == ["decision-native"]
-    decision_log = next(call for call in info_calls if call["facet"] == "decisions")
-    assert decision_log["native_count"] == 1
-    assert decision_log["fallback_count"] == 0
-    assert decision_log["fallback_only_ids"] == []
-
-
-@pytest.mark.asyncio
 async def test_compile_context_wake_layer_caps_items_and_skips_related(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -511,40 +390,6 @@ async def test_compile_context_wake_layer_caps_items_and_skips_related(
     ]
     assert all(not item.related for item in pack.items)
     assert related_calls == []
-
-
-@pytest.mark.asyncio
-async def test_compile_context_keeps_graph_context_when_a_facet_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
-        facet = kwargs.get("facet")
-        if facet is ContextFacet.RECENT_MEMORY:
-            raise RuntimeError("recent memory unavailable")
-        return SearchResponse(
-            results=[_result("decision-1", "decision", "Use layered packs")],
-            total=1,
-            query=kwargs["plan"].query,
-            filters={},
-        )
-
-    monkeypatch.setattr(context_module, "context_search", fake_native_context_search)
-
-    async def fallback_search(**kwargs: Any) -> SearchResponse:
-        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
-
-    pack = await compile_context(
-        "graph context resilience",
-        intent="build",
-        principal_id="user-123",
-        organization_id="org-123",
-        limit=1,
-        search_fn=fallback_search,
-        retrieval_mode="compare",
-    )
-
-    assert pack.total_items == 1
-    assert pack.items[0].id == "decision-1"
 
 
 @pytest.mark.asyncio
@@ -623,51 +468,6 @@ async def test_compile_context_dedupes_results_across_facets(
 
     assert pack.total_items == 1
     assert pack.items[0].id == "same-id"
-
-
-@pytest.mark.asyncio
-async def test_compile_context_falls_back_to_broad_search_when_facets_miss(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[dict[str, Any]] = []
-
-    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
-        calls.append(kwargs)
-        results = []
-        if kwargs.get("types") is None:
-            results = [
-                _result(
-                    "decision-1",
-                    "decision",
-                    "Scoped remember captures linked project context",
-                    metadata={"project_id": "project_123"},
-                )
-            ]
-        return SearchResponse(
-            results=results,
-            total=len(results),
-            query=kwargs["plan"].query,
-            filters={},
-        )
-
-    monkeypatch.setattr(context_module, "context_search", fake_native_context_search)
-
-    pack = await compile_context(
-        "build project-scoped remember and recall",
-        intent="build",
-        domain="sibyl",
-        project="project_123",
-        accessible_projects={"project_123"},
-        organization_id="org-123",
-        retrieval_mode="compare",
-    )
-
-    assert pack.total_items == 1
-    assert pack.sections[0].facet == ContextFacet.DECISIONS
-    assert pack.items[0].id == "decision-1"
-    fallback_call = calls[-1]
-    assert fallback_call["types"] is None
-    assert fallback_call["plan"].project == "project_123"
 
 
 @pytest.mark.asyncio
@@ -972,7 +772,6 @@ async def test_compile_context_native_ranks_agent_diary_by_relevance(
         organization_id="org-123",
         limit=8,
         raw_memory_recall_fn=fake_raw_recall,
-        retrieval_mode="native",
     )
 
     assert pack.sections[0].facet == ContextFacet.RECENT_MEMORY

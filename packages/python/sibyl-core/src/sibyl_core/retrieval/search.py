@@ -53,14 +53,6 @@ async def _get_read_only_graph_runtime(organization_id: str) -> Any:
         return await get_surreal_graph_runtime(organization_id)
 
 
-class RetrievalMode(StrEnum):
-    NATIVE = "native"
-    COMPARE = "compare"
-
-
-DEFAULT_RETRIEVAL_MODE = RetrievalMode.NATIVE
-
-
 class FusionBackend(StrEnum):
     PYTHON_RRF = "python_rrf"
     SURREAL_RRF = "surreal_rrf"
@@ -160,24 +152,6 @@ class RetrievalCandidate:
     created_at: datetime | None = None
     policy_reason: str | None = None
     visibility: str | None = None
-
-
-def coerce_retrieval_mode(value: str | RetrievalMode | None) -> RetrievalMode:
-    if isinstance(value, RetrievalMode):
-        return value
-    if value is None or not value.strip():
-        return DEFAULT_RETRIEVAL_MODE
-    try:
-        return RetrievalMode(value.strip().lower())
-    except ValueError:
-        return DEFAULT_RETRIEVAL_MODE
-
-
-def retrieval_mode_from_env(
-    environ: Mapping[str, str] | None = None,
-) -> RetrievalMode:
-    source = os.environ if environ is None else environ
-    return coerce_retrieval_mode(source.get("SIBYL_RETRIEVAL_MODE"))
 
 
 def coerce_fusion_backend(
@@ -428,7 +402,7 @@ async def context_search(
         filters={
             "types": list(types) if types else None,
             "project": search_plan.project,
-            "retrieval_mode": RetrievalMode.NATIVE.value,
+            "retrieval_mode": "native",
             "fusion_backend": fusion_backend.value,
         },
         graph_count=len([result for result in results if result.result_origin == "graph"]),

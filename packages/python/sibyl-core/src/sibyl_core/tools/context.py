@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, replace
 from typing import Any
 
 import structlog
 
-from sibyl_core.auth.memory_policy import authorize_memory_read
 from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.models.context import (
     ContextFacet,
@@ -22,11 +20,8 @@ from sibyl_core.models.context import (
     ContextSection,
 )
 from sibyl_core.retrieval.search import (
-    RetrievalMode,
     build_context_retrieval_plan,
-    coerce_retrieval_mode,
     context_search,
-    retrieval_mode_from_env,
 )
 from sibyl_core.services.graph import get_surreal_graph_runtime
 from sibyl_core.services.surreal_content import (
@@ -662,49 +657,6 @@ async def _compile_fallback_sections(
     ]
 
 
-async def _compile_facet_section(
-    *,
-    query: str,
-    facet: ContextFacet,
-    domain: str | None,
-    project: str | None,
-    accessible_projects: set[str] | None,
-    organization_id: str,
-    limit: int,
-    search_fn: SearchFn,
-) -> ContextSection | None:
-    response = await search_fn(
-        query=query,
-        types=FACET_TYPES[facet],
-        category=domain,
-        project=project,
-        accessible_projects=accessible_projects,
-        limit=limit,
-        include_content=True,
-        include_documents=facet == ContextFacet.ARTIFACTS,
-        include_graph=True,
-        organization_id=organization_id,
-    )
-    items = [
-        _item_from_result(result, facet)
-        for result in response.results
-        if not _is_synthetic_relationship_result(result)
-    ]
-    if not items:
-        return None
-    return ContextSection(facet=facet, title=FACET_TITLES[facet], items=items)
-
-
-def _facet_for_search_types(types: Sequence[str] | None) -> ContextFacet | None:
-    if not types:
-        return None
-    normalized_types = [value.lower() for value in types]
-    for facet, facet_types in FACET_TYPES.items():
-        if normalized_types == facet_types:
-            return facet
-    return None
-
-
 def _types_for_facets(facets: Sequence[ContextFacet]) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
@@ -739,7 +691,7 @@ def _sections_from_response(
 
 async def _compile_native_sections(
     *,
-    native_plan: Any,
+    plan: Any,
     facets: Sequence[ContextFacet],
     limit: int,
     per_facet_limit: int,
@@ -747,7 +699,7 @@ async def _compile_native_sections(
 ) -> list[ContextSection]:
     search_limit = min(50, max(limit, per_facet_limit * len(facets)))
     response = await context_search(
-        plan=native_plan,
+        plan=plan,
         types=_types_for_facets(facets),
         facet=ContextFacet.RECENT_MEMORY if ContextFacet.RECENT_MEMORY in facets else None,
         limit=search_limit,
@@ -756,85 +708,6 @@ async def _compile_native_sections(
         raw_memory_recall_fn=raw_memory_recall_fn,
     )
     return _sections_from_response(response, facets=facets)
-
-
-def _compare_safe_response(
-    response: SearchResponse,
-    *,
-    principal_id: str | None,
-    project: str | None,
-    accessible_projects: set[str] | None,
-) -> SearchResponse:
-    filtered: list[SearchResult] = []
-    for result in response.results:
-        metadata = dict(result.metadata or {})
-        memory_scope = metadata.get("memory_scope")
-        project_id = _compact_metadata_value(metadata.get("project_id") or metadata.get("project"))
-
-        if isinstance(memory_scope, str):
-            decision = authorize_memory_read(
-                principal_id=principal_id,
-                memory_scope=memory_scope,
-                scope_key=_compact_metadata_value(metadata.get("scope_key")) or project_id,
-                project_id=project_id,
-                accessible_projects=accessible_projects,
-            )
-            if not decision.allowed:
-                continue
-            metadata["policy_reason"] = decision.reason
-        elif (project and project_id is not None and project_id != project) or (
-            accessible_projects is not None
-            and project_id is not None
-            and project_id not in accessible_projects
-        ):
-            continue
-
-        filtered.append(replace(result, metadata=metadata))
-
-    return SearchResponse(
-        results=filtered,
-        total=len(filtered),
-        query=response.query,
-        filters=dict(response.filters),
-        graph_count=len([result for result in filtered if result.result_origin == "graph"]),
-        document_count=len([result for result in filtered if result.result_origin == "document"]),
-        limit=response.limit,
-        offset=response.offset,
-        has_more=False,
-        usage_hint=response.usage_hint,
-    )
-
-
-def _log_compare_results(
-    *,
-    facet: ContextFacet | None,
-    native_response: SearchResponse,
-    fallback_response: SearchResponse,
-) -> None:
-    native_ids = {result.id for result in native_response.results}
-    fallback_ids = {result.id for result in fallback_response.results}
-    log.info(
-        "context_retrieval_compare",
-        facet=facet.value if facet else None,
-        native_count=len(native_ids),
-        fallback_count=len(fallback_ids),
-        native_only_ids=sorted(native_ids - fallback_ids)[:20],
-        fallback_only_ids=sorted(fallback_ids - native_ids)[:20],
-        native_policy_reasons=sorted(
-            {
-                str(result.metadata.get("policy_reason"))
-                for result in native_response.results
-                if result.metadata.get("policy_reason")
-            }
-        ),
-        fallback_policy_reasons=sorted(
-            {
-                str(result.metadata.get("policy_reason"))
-                for result in fallback_response.results
-                if result.metadata.get("policy_reason")
-            }
-        ),
-    )
 
 
 async def compile_context(
@@ -854,7 +727,6 @@ async def compile_context(
     search_fn: SearchFn = default_search,
     related_fn: RelatedFn = _default_related_items,
     raw_memory_recall_fn: RawMemoryRecallFn = recall_raw_memory,
-    retrieval_mode: str | RetrievalMode | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
 ) -> ContextPack:
     """Build a small, structured context pack for an agent goal."""
@@ -873,12 +745,7 @@ async def compile_context(
     limit = max(1, min(limit, LAYER_LIMITS[normalized_layer]))
     facets = _facets_for_layer(normalized_intent, normalized_layer)
     per_facet_limit = max(2, min(8, (limit + len(facets) - 1) // len(facets)))
-    normalized_retrieval_mode = (
-        retrieval_mode_from_env()
-        if retrieval_mode is None
-        else coerce_retrieval_mode(retrieval_mode)
-    )
-    native_plan = build_context_retrieval_plan(
+    plan = build_context_retrieval_plan(
         query=query,
         organization_id=organization_id,
         facets=facets,
@@ -891,79 +758,25 @@ async def compile_context(
         allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
 
-    async def selected_search_fn(**kwargs: Any) -> SearchResponse:
-        facet = _facet_for_search_types(kwargs.get("types"))
-        native_response = await context_search(
-            plan=native_plan,
-            types=kwargs.get("types"),
-            facet=facet,
-            limit=int(kwargs.get("limit") or per_facet_limit),
-            include_content=bool(kwargs.get("include_content", True)),
-            embedding_provider=configured_embedding_provider(),
+    sections: list[ContextSection] = []
+    retrieval_failed = False
+    try:
+        sections = await _compile_native_sections(
+            plan=plan,
+            facets=facets,
+            limit=limit,
+            per_facet_limit=per_facet_limit,
             raw_memory_recall_fn=raw_memory_recall_fn,
         )
-        if normalized_retrieval_mode is RetrievalMode.COMPARE:
-            fallback = await search_fn(**kwargs)
-            fallback = _compare_safe_response(
-                fallback,
-                principal_id=principal_id,
-                project=project,
-                accessible_projects=accessible_projects,
-            )
-            _log_compare_results(
-                facet=facet,
-                native_response=native_response,
-                fallback_response=fallback,
-            )
-        return native_response
-
-    sections: list[ContextSection] = []
-    native_failed = False
-    if normalized_retrieval_mode is RetrievalMode.NATIVE:
-        try:
-            sections = await _compile_native_sections(
-                native_plan=native_plan,
-                facets=facets,
-                limit=limit,
-                per_facet_limit=per_facet_limit,
-                raw_memory_recall_fn=raw_memory_recall_fn,
-            )
-        except Exception as exc:
-            native_failed = True
-            log.warning(
-                "context_native_search_failed",
-                error_type=type(exc).__name__,
-            )
-    else:
-        facet_section_tasks = [
-            _compile_facet_section(
-                query=query,
-                facet=facet,
-                domain=domain,
-                project=project,
-                accessible_projects=accessible_projects,
-                organization_id=organization_id,
-                limit=per_facet_limit,
-                search_fn=selected_search_fn,
-            )
-            for facet in facets
-        ]
-        facet_sections = await asyncio.gather(*facet_section_tasks, return_exceptions=True)
-
-        for facet, facet_section in zip(facets, facet_sections, strict=True):
-            if isinstance(facet_section, BaseException):
-                log.warning(
-                    "context_facet_search_failed",
-                    facet=facet.value,
-                    error_type=type(facet_section).__name__,
-                )
-                continue
-            items = list(facet_section.items) if facet_section is not None else []
-            if items:
-                sections.append(ContextSection(facet=facet, title=FACET_TITLES[facet], items=items))
+    except Exception as exc:
+        retrieval_failed = True
+        log.warning(
+            "context_native_search_failed",
+            error_type=type(exc).__name__,
+        )
 
     sections = _dedupe_sections(sections, limit)
-    if not sections and (normalized_retrieval_mode is not RetrievalMode.NATIVE or native_failed):
+    if not sections and retrieval_failed:
         sections = _dedupe_sections(
             await _compile_fallback_sections(
                 query=query,
@@ -973,15 +786,13 @@ async def compile_context(
                 accessible_projects=accessible_projects,
                 organization_id=organization_id,
                 limit=limit,
-                search_fn=search_fn if native_failed else selected_search_fn,
+                search_fn=search_fn,
             ),
             limit,
         )
     if include_related and normalized_layer is not ContextLayer.WAKE:
         related_projects = (
-            set(native_plan.accessible_projects)
-            if native_plan.accessible_projects is not None
-            else None
+            set(plan.accessible_projects) if plan.accessible_projects is not None else None
         )
         sections = await _attach_related_items(
             sections,

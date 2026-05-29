@@ -13,29 +13,12 @@ from sibyl_core.retrieval.search import (
     DEFAULT_FILTER_SELECTIVITY_THRESHOLD,
     FusionBackend,
     RetrievalCandidate,
-    RetrievalMode,
     RetrievalSignal,
     build_context_retrieval_plan,
     coerce_fusion_backend,
-    coerce_retrieval_mode,
     fusion_backend_from_env,
-    retrieval_mode_from_env,
 )
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
-
-
-def test_retrieval_mode_defaults_to_native() -> None:
-    assert coerce_retrieval_mode(None) is RetrievalMode.NATIVE
-    assert coerce_retrieval_mode("") is RetrievalMode.NATIVE
-    assert coerce_retrieval_mode("surreal") is RetrievalMode.NATIVE
-    assert retrieval_mode_from_env({}) is RetrievalMode.NATIVE
-
-
-def test_retrieval_mode_accepts_native_and_compare() -> None:
-    assert coerce_retrieval_mode("graphiti") is RetrievalMode.NATIVE
-    assert coerce_retrieval_mode("native") is RetrievalMode.NATIVE
-    assert coerce_retrieval_mode("COMPARE") is RetrievalMode.COMPARE
-    assert retrieval_mode_from_env({"SIBYL_RETRIEVAL_MODE": "native"}) is (RetrievalMode.NATIVE)
 
 
 def test_fusion_backend_defaults_to_python_rrf() -> None:

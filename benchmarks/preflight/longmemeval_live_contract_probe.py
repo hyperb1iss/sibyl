@@ -205,9 +205,9 @@ def _source_semantics() -> dict[str, Any]:
         graph_source,
         "    async def _vector_search(",
     )
-    context_start, selected_search = _extract_indented_block(
+    context_start, context_native_fn = _extract_indented_block(
         context_tool,
-        "    async def selected_search_fn",
+        "async def _compile_native_sections",
     )
     graph_search_surface = "\n".join((graph_search, graph_vector_search))
     return {
@@ -222,7 +222,7 @@ def _source_semantics() -> dict[str, Any]:
         "context_pack_native_function": {
             "path": str(context_tool.relative_to(ROOT)),
             "line": context_start,
-            "passes_embedding_provider": "embedding_provider=" in selected_search,
+            "passes_embedding_provider": "embedding_provider=" in context_native_fn,
         },
         "verified_result_signal_label": "node_fulltext",
     }
