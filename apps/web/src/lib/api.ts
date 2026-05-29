@@ -662,62 +662,6 @@ export interface SearchResponse {
   actual_total?: number;
 }
 
-export interface GraphNode {
-  id: string;
-  type: string;
-  label: string;
-  color: string;
-  size: number;
-  x?: number;
-  y?: number;
-  metadata: Record<string, unknown>;
-}
-
-export interface GraphEdge {
-  id: string;
-  source: string;
-  target: string;
-  type: string;
-  label: string;
-  weight: number;
-}
-
-export interface GraphData {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-  node_count: number;
-  edge_count: number;
-}
-
-// Cluster types for bubble visualization
-export interface Cluster {
-  id: string;
-  count: number;
-  dominant_type: string;
-  type_distribution: Record<string, number>;
-  level: number;
-}
-
-export interface ClustersResponse {
-  clusters: Cluster[];
-  total_nodes: number;
-  total_clusters: number;
-}
-
-export interface ClusterDetailResponse {
-  cluster_id: string;
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-  node_count: number;
-  edge_count: number;
-}
-
-export interface GraphStatsResponse {
-  total_nodes: number;
-  total_edges: number;
-  by_type: Record<string, number>;
-}
-
 // Hierarchical graph with cluster assignments for rich visualization
 export type GraphResolution = 'overview' | 'detail';
 
@@ -2313,61 +2257,6 @@ export const api = {
 
   // Graph
   graph: {
-    nodes: (params?: { types?: string[]; limit?: number }) => {
-      const searchParams = new URLSearchParams();
-      if (params?.types) {
-        for (const t of params.types) searchParams.append('types', t);
-      }
-      if (params?.limit) searchParams.set('limit', params.limit.toString());
-      const query = searchParams.toString();
-      return fetchApi<GraphNode[]>(`/graph/nodes${query ? `?${query}` : ''}`);
-    },
-
-    edges: (params?: { relationship_types?: string[]; limit?: number }) => {
-      const searchParams = new URLSearchParams();
-      if (params?.relationship_types) {
-        for (const t of params.relationship_types) searchParams.append('relationship_types', t);
-      }
-      if (params?.limit) searchParams.set('limit', params.limit.toString());
-      const query = searchParams.toString();
-      return fetchApi<GraphEdge[]>(`/graph/edges${query ? `?${query}` : ''}`);
-    },
-
-    full: (params?: { types?: string[]; max_nodes?: number; max_edges?: number }) => {
-      const searchParams = new URLSearchParams();
-      if (params?.types) {
-        for (const t of params.types) searchParams.append('types', t);
-      }
-      if (params?.max_nodes) searchParams.set('max_nodes', params.max_nodes.toString());
-      if (params?.max_edges) searchParams.set('max_edges', params.max_edges.toString());
-      const query = searchParams.toString();
-      return fetchApi<GraphData>(`/graph/full${query ? `?${query}` : ''}`);
-    },
-
-    subgraph: (params: {
-      entity_id: string;
-      depth?: number;
-      relationship_types?: string[];
-      max_nodes?: number;
-    }) =>
-      fetchApi<GraphData>('/graph/subgraph', {
-        method: 'POST',
-        body: JSON.stringify(params),
-      }),
-
-    // Cluster endpoints for bubble visualization
-    clusters: (params?: { refresh?: boolean }) => {
-      const searchParams = new URLSearchParams();
-      if (params?.refresh) searchParams.set('refresh', 'true');
-      const query = searchParams.toString();
-      return fetchApi<ClustersResponse>(`/graph/clusters${query ? `?${query}` : ''}`);
-    },
-
-    clusterDetail: (clusterId: string) =>
-      fetchApi<ClusterDetailResponse>(`/graph/clusters/${encodeURIComponent(clusterId)}`),
-
-    stats: () => fetchApi<GraphStatsResponse>('/graph/stats'),
-
     // Hierarchical graph with cluster assignments for rich visualization
     hierarchical: (params?: {
       max_nodes?: number;
@@ -2952,13 +2841,6 @@ export const api = {
 
   // RAG (Documentation Search)
   rag: {
-    // Vector similarity search on document chunks
-    search: (params: RAGSearchParams) =>
-      fetchApi<RAGSearchResponse>('/rag/search', {
-        method: 'POST',
-        body: JSON.stringify(params),
-      }),
-
     // Hybrid search (vector + full-text)
     hybridSearch: (params: RAGSearchParams) =>
       fetchApi<RAGSearchResponse>('/rag/hybrid-search', {

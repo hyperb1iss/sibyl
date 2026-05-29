@@ -5,7 +5,6 @@ import { serverOnly } from 'next-dynenv';
 import type {
   Entity,
   EntityListResponse,
-  GraphData,
   HealthResponse,
   ProjectSummariesResponse,
   SearchResponse,
@@ -273,26 +272,6 @@ export async function fetchProjectSummaries(): Promise<ProjectSummariesResponse>
     '/metrics/projects-summary',
     CACHE_CONFIG.userScoped
   );
-}
-
-/**
- * Fetch full graph data.
- * User-scoped: graph data is filtered by org.
- */
-export async function fetchGraphData(params?: {
-  types?: string[];
-  max_nodes?: number;
-  max_edges?: number;
-}): Promise<GraphData> {
-  const searchParams = new URLSearchParams();
-  if (params?.types) {
-    for (const t of params.types) searchParams.append('types', t);
-  }
-  if (params?.max_nodes) searchParams.set('max_nodes', params.max_nodes.toString());
-  if (params?.max_edges) searchParams.set('max_edges', params.max_edges.toString());
-
-  const query = searchParams.toString();
-  return serverFetch<GraphData>(`/graph/full${query ? `?${query}` : ''}`, CACHE_CONFIG.userScoped);
 }
 
 /**
