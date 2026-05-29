@@ -91,10 +91,17 @@ UX-hostile and a hidden benchmark prerequisite.
 
 ## The Search Path
 
-`POST /api/search` is the single retrieval surface. It composes the production search system in
-[`sibyl_core/retrieval/native.py`](https://github.com/hyperb1iss/sibyl/blob/main/packages/python/sibyl-core/src/sibyl_core/retrieval/native.py)
-and ranks results through the shared query-aware ranker in
+`POST /api/search` is the public retrieval surface. It runs the hybrid graph search in
+[`sibyl_core/retrieval/hybrid.py`](https://github.com/hyperb1iss/sibyl/blob/main/packages/python/sibyl-core/src/sibyl_core/retrieval/hybrid.py),
+which fuses candidate lists and then ranks them through the shared query-aware ranker in
 [`sibyl_core/retrieval/query_ranking.py`](https://github.com/hyperb1iss/sibyl/blob/main/packages/python/sibyl-core/src/sibyl_core/retrieval/query_ranking.py).
+
+Context-pack builds take a parallel path: the native retrieval plan in
+[`sibyl_core/retrieval/search.py`](https://github.com/hyperb1iss/sibyl/blob/main/packages/python/sibyl-core/src/sibyl_core/retrieval/search.py)
+(`context_search`) does fusion and arithmetic boosts in-DB. These two engines are not yet
+unified; reconciling them onto one fusion+ranking core is an eval-gated change tracked separately
+(audit H6, behind LongMemEval gating) and is deliberately out of scope for the dead-code and
+RRF-consolidation cleanup that named these modules.
 
 ### Candidate sources
 
@@ -120,7 +127,10 @@ completes.
 Candidate lists from each signal merge via reciprocal-rank fusion. The fusion backend is
 configurable: `python_rrf` (the default and what CI uses) and `surreal_rrf` (delegated to
 SurrealDB's `search::rrf()`). Either backend produces a single ranked candidate list before the
-ranking pass.
+ranking pass. The in-process implementation lives in a single module,
+[`sibyl_core/retrieval/fusion.py`](https://github.com/hyperb1iss/sibyl/blob/main/packages/python/sibyl-core/src/sibyl_core/retrieval/fusion.py)
+(`rrf_merge` / `rrf_merge_with_metadata`); both the native plan and the hybrid path route through
+it, so there is one RRF scorer, not several.
 
 ### Ranking
 
