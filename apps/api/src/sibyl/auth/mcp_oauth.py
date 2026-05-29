@@ -451,10 +451,7 @@ class SibylMcpOAuthProvider(
         return await create_session_record(**kwargs)
 
     async def _load_oauth_client_registration(self, client_id: str) -> dict[str, object] | None:
-        return cast(
-            "dict[str, object] | None",
-            await load_oauth_client_registration(client_id),
-        )
+        return await load_oauth_client_registration(client_id)
 
     async def _save_oauth_client_registration(
         self,

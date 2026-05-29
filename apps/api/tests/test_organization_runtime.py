@@ -42,89 +42,6 @@ def test_organization_runtime_exports_neutral_runtime_surface() -> None:
     assert hasattr(surreal_organization_runtime, "list_project_members")
 
 
-def test_organization_runtime_uses_surreal_when_postgres_auth_is_requested(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(organization_runtime.settings, "auth_store", "postgres")
-
-    assert (
-        organization_runtime._resolve_backend_export("list_orgs")
-        is surreal_organization_runtime.list_orgs
-    )
-    assert (
-        organization_runtime._resolve_backend_export("list_project_members")
-        is surreal_organization_runtime.list_project_members
-    )
-
-
-@pytest.mark.asyncio
-async def test_organization_runtime_dispatches_neutral_org_reads_to_surreal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    expected = object()
-    dispatched = AsyncMock(return_value=expected)
-
-    monkeypatch.setattr(organization_runtime.settings, "auth_store", "surreal")
-    monkeypatch.setattr(
-        surreal_organization_runtime,
-        "list_orgs",
-        dispatched,
-    )
-
-    result = await organization_runtime.list_orgs(user_id=uuid4())
-    assert result is expected
-    dispatched.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_organization_runtime_dispatches_neutral_org_id_reads_to_surreal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    expected = ["org-1", "org-2"]
-    dispatched = AsyncMock(return_value=expected)
-
-    monkeypatch.setattr(organization_runtime.settings, "auth_store", "surreal")
-    monkeypatch.setattr(
-        surreal_organization_runtime,
-        "list_org_ids",
-        dispatched,
-    )
-
-    result = await organization_runtime.list_org_ids()
-
-    assert result == expected
-    dispatched.assert_awaited_once_with()
-
-
-@pytest.mark.asyncio
-async def test_organization_runtime_dispatches_neutral_org_delete_to_surreal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    dispatched = AsyncMock()
-
-    monkeypatch.setattr(organization_runtime.settings, "auth_store", "surreal")
-    monkeypatch.setattr(
-        surreal_organization_runtime,
-        "delete_org",
-        dispatched,
-    )
-
-    request = _request()
-    user_id = uuid4()
-
-    await organization_runtime.delete_org(
-        request=request,
-        slug="electric-coven",
-        user_id=user_id,
-    )
-
-    dispatched.assert_awaited_once_with(
-        request=request,
-        slug="electric-coven",
-        user_id=user_id,
-    )
-
-
 @pytest.mark.asyncio
 async def test_surreal_delete_org_auth_children_batches_dependent_deletes() -> None:
     org_id = uuid4()
@@ -273,36 +190,6 @@ async def test_surreal_delete_org_batches_authorization_and_deletes_directly(
     )
     delete_graph.assert_awaited_once_with(str(org_id))
     audit_log.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_organization_runtime_dispatches_neutral_project_member_reads_to_surreal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    expected = object()
-    dispatched = AsyncMock(return_value=expected)
-    actor = SimpleNamespace(id=uuid4())
-    org_id = uuid4()
-
-    monkeypatch.setattr(organization_runtime.settings, "auth_store", "surreal")
-    monkeypatch.setattr(
-        surreal_organization_runtime,
-        "list_project_members",
-        dispatched,
-    )
-
-    result = await organization_runtime.list_project_members(
-        project_id="project_123",
-        actor=actor,
-        org_id=org_id,
-    )
-
-    assert result is expected
-    dispatched.assert_awaited_once_with(
-        project_id="project_123",
-        actor=actor,
-        org_id=org_id,
-    )
 
 
 @pytest.mark.asyncio

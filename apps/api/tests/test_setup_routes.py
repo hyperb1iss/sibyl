@@ -5,7 +5,6 @@ from fastapi.routing import APIRoute
 
 from sibyl.api.routes import setup as setup_routes
 from sibyl.persistence.setup_common import SetupStatus
-from sibyl.persistence.surreal import setup as surreal_setup
 
 
 @pytest.mark.asyncio
@@ -51,7 +50,7 @@ async def test_get_setup_status_skips_provider_validation(
 
 
 @pytest.mark.asyncio
-async def test_get_setup_status_uses_surreal_setup_runtime_in_surreal_mode(
+async def test_get_setup_status_uses_runtime_setup_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = AsyncMock()
@@ -63,7 +62,7 @@ async def test_get_setup_status_uses_surreal_setup_runtime_in_surreal_mode(
         return_value=SetupStatus(has_users=True, has_orgs=True, setup_complete=True)
     )
 
-    monkeypatch.setattr(surreal_setup, "get_setup_status", surreal_status)
+    monkeypatch.setattr(setup_routes, "get_runtime_setup_status", surreal_status)
     monkeypatch.setattr(setup_routes, "get_settings_service", lambda: service)
 
     response = await setup_routes.get_setup_status(validate_keys=False)

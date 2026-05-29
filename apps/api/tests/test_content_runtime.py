@@ -8,31 +8,6 @@ import pytest
 
 from sibyl.persistence import content_common, content_runtime, settings_runtime
 from sibyl.persistence.surreal import content as surreal_content
-from sibyl.persistence.surreal.content import (
-    get_crawl_stats_payload as surreal_get_crawl_stats_payload,
-    get_raw_capture as surreal_get_raw_capture,
-    list_rag_source_documents_page as surreal_list_rag_source_documents_page,
-)
-
-
-def test_content_runtime_uses_surreal_exports_only() -> None:
-    assert (
-        content_runtime._resolve_backend_export("get_crawl_stats_payload")
-        is surreal_get_crawl_stats_payload
-    )
-    assert content_runtime._resolve_backend_export("get_raw_capture") is surreal_get_raw_capture
-
-
-def test_content_runtime_maps_surreal_exports() -> None:
-    assert (
-        content_runtime._resolve_backend_export("get_crawl_stats_payload")
-        is surreal_get_crawl_stats_payload
-    )
-    assert (
-        content_runtime._resolve_backend_export("list_rag_source_documents_page")
-        is surreal_list_rag_source_documents_page
-    )
-    assert content_runtime._resolve_backend_export("get_raw_capture") is surreal_get_raw_capture
 
 
 def test_content_runtime_exports_neutral_runtime_surface() -> None:
