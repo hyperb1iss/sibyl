@@ -4,7 +4,6 @@ Tests the complete retrieval pipeline including:
 - Hybrid search (vector + graph traversal)
 - Temporal boosting
 - RRF fusion
-- BM25 keyword search
 - Community-aware search
 
 These tests use mocks but simulate realistic data patterns
@@ -18,7 +17,6 @@ import pytest
 
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.retrieval import (
-    BM25Index,
     rrf_merge,
     temporal_boost,
 )
@@ -190,93 +188,6 @@ class TestHybridSearchPipeline:
         assert "graph" in metadata["sources"]
         assert metadata["ranks"]["vector"] == 2
         assert metadata["ranks"]["graph"] == 1
-
-
-class TestBM25Integration:
-    """Integration tests for BM25 keyword search."""
-
-    @pytest.fixture
-    def bm25_index(self) -> BM25Index:
-        """Create and populate a BM25 index."""
-        index = BM25Index()
-
-        # Add programming patterns
-        index.add(
-            {
-                "id": "1",
-                "name": "Python Error Handling",
-                "description": "Best practices for handling errors in Python applications",
-            }
-        )
-        index.add(
-            {
-                "id": "2",
-                "name": "JavaScript Async Patterns",
-                "description": "Using async/await and promises effectively",
-            }
-        )
-        index.add(
-            {
-                "id": "3",
-                "name": "Python Async Programming",
-                "description": "Asyncio patterns for concurrent Python code",
-            }
-        )
-        index.add(
-            {
-                "id": "4",
-                "name": "Database Error Recovery",
-                "description": "Handling database connection errors gracefully",
-            }
-        )
-
-        return index
-
-    def test_exact_term_matching(self, bm25_index: BM25Index) -> None:
-        """BM25 finds entities with exact term matches."""
-        results = bm25_index.search("python")
-
-        result_ids = [e["id"] for e, _ in results]
-
-        # Should find both Python entities
-        assert "1" in result_ids  # Python Error Handling
-        assert "3" in result_ids  # Python Async Programming
-        # Should not find JavaScript
-        assert "2" not in result_ids
-
-    def test_multi_term_scoring(self, bm25_index: BM25Index) -> None:
-        """Multiple matching terms increase score."""
-        results = bm25_index.search("python async")
-
-        # Python Async Programming has both terms
-        result_ids = [e["id"] for e, _ in results]
-        {e["id"]: s for e, s in results}
-
-        # Entity 3 (Python Async) should score highest
-        assert result_ids[0] == "3"
-
-        # Both Python entities should appear
-        assert "1" in result_ids
-        assert "3" in result_ids
-
-    def test_bm25_plus_rrf(self, bm25_index: BM25Index) -> None:
-        """BM25 results can be merged with other sources via RRF."""
-        bm25_results = bm25_index.search("error handling")
-
-        # Simulated vector results (different ordering)
-        vector_results = [
-            ({"id": "4"}, 0.9),  # Database Error Recovery
-            ({"id": "1"}, 0.85),  # Python Error Handling
-        ]
-
-        merged = rrf_merge([bm25_results, vector_results])
-
-        merged_ids = [e["id"] for e, _ in merged]
-
-        # Entity 1 appears in both, should rank high
-        assert "1" in merged_ids[:2]
-        # Entity 4 appears in both
-        assert "4" in merged_ids
 
 
 class TestDeduplicationIntegration:

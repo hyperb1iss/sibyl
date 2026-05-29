@@ -3,13 +3,14 @@
 This module provides advanced retrieval strategies:
 - temporal: Time-decay boosting for recency
 - fusion: Reciprocal Rank Fusion for merging results
-- bm25: Keyword-based BM25 search
 - hybrid: Combined vector + graph traversal
 - dedup: Entity deduplication via embeddings
-- reranking: Cross-encoder reranking for improved relevance
+- reranking: Cross-encoder reranking (optional, requires the `reranking` extra)
+
+Lexical search is served natively by SurrealDB FULLTEXT indexes, not by an
+in-process keyword index.
 """
 
-from sibyl_core.retrieval.bm25 import BM25Config, BM25Index, bm25_search, get_bm25_index
 from sibyl_core.retrieval.dedup import (
     DedupConfig,
     DuplicatePair,
@@ -57,8 +58,6 @@ from sibyl_core.retrieval.temporal import (
 
 __all__ = [
     "DEFAULT_FILTER_SELECTIVITY_THRESHOLD",
-    "BM25Config",
-    "BM25Index",
     "CandidateLimits",
     "CrossEncoderConfig",
     "DedupConfig",
@@ -75,14 +74,12 @@ __all__ = [
     "ScopeSpec",
     "SearchFilter",
     "TemporalConfig",
-    "bm25_search",
     "build_context_retrieval_plan",
     "calculate_boost",
     "context_search",
     "cosine_similarity",
     "cross_encoder_rerank",
     "find_duplicates",
-    "get_bm25_index",
     "get_deduplicator",
     "hybrid_search",
     "rerank_results",
