@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { memo } from 'react';
 import { EntityBadge } from '@/components/ui/badge';
 import { EntityIcon } from '@/components/ui/entity-icon';
-import { ENTITY_COLORS, type EntityType } from '@/lib/constants';
+import { getEntityColorVar } from '@/lib/constants';
 
 interface Entity {
   id: string;
@@ -25,16 +25,17 @@ export const EntityCard = memo(function EntityCard({
   onDelete,
   showActions = true,
 }: EntityCardProps) {
-  const color = ENTITY_COLORS[entity.entity_type as EntityType] ?? '#8b85a0';
+  const color = getEntityColorVar(entity.entity_type);
 
-  // Use CSS custom properties for dynamic colors with CSS hover states
+  // Use CSS custom properties for dynamic colors with CSS hover states. The
+  // entity color is a themed var, so color-mix keeps the tints adapting in dawn.
   const cardStyle = {
     '--entity-color': color,
-    '--entity-color-40': `${color}40`,
-    '--entity-color-60': `${color}60`,
-    '--entity-glow': `0 4px 8px oklch(0% 0 0 / 0.3), 0 8px 20px oklch(0% 0 0 / 0.2), 0 0 24px ${color}30, inset 0 1px 0 oklch(100% 0 0 / 0.05)`,
-    background: `linear-gradient(135deg, ${color}18 0%, var(--sc-bg-base) 50%, var(--sc-bg-base) 100%)`,
-    borderColor: `${color}40`,
+    '--entity-color-40': `color-mix(in oklch, ${color} 25%, transparent)`,
+    '--entity-color-60': `color-mix(in oklch, ${color} 38%, transparent)`,
+    '--entity-glow': `0 4px 8px oklch(0% 0 0 / 0.3), 0 8px 20px oklch(0% 0 0 / 0.2), 0 0 24px color-mix(in oklch, ${color} 19%, transparent), inset 0 1px 0 oklch(100% 0 0 / 0.05)`,
+    background: `linear-gradient(135deg, color-mix(in oklch, ${color} 9%, transparent) 0%, var(--sc-bg-elevated) 50%, var(--sc-bg-elevated) 100%)`,
+    borderColor: `color-mix(in oklch, ${color} 25%, transparent)`,
   } as React.CSSProperties;
 
   return (
@@ -58,7 +59,7 @@ export const EntityCard = memo(function EntityCard({
 
             {/* Title */}
             <Link href={`/entities/${entity.id}`} className="block group/link">
-              <h3 className="text-base font-semibold text-sc-fg-primary truncate transition-colors group-hover/link:text-white">
+              <h3 className="text-base font-semibold text-sc-fg-primary truncate transition-colors group-hover/link:text-[var(--entity-color)]">
                 {entity.name}
               </h3>
             </Link>

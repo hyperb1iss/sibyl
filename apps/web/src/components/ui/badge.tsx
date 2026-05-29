@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion } from 'motion/react';
 import { Check, RefreshDouble, Xmark } from '@/components/ui/icons';
-import { ENTITY_COLORS, type EntityType, getRelationshipConfig } from '@/lib/constants';
+import { getEntityStyles, getRelationshipConfig } from '@/lib/constants';
 import { EntityIcon } from './entity-icon';
 
 type BadgeSize = 'sm' | 'md' | 'lg';
@@ -27,17 +27,12 @@ export function EntityBadge({
   showIcon = false,
   className = '',
 }: EntityBadgeProps) {
-  const color = ENTITY_COLORS[type as EntityType] ?? '#8b85a0';
   const sizeConfig = sizes[size];
+  const styles = getEntityStyles(type);
 
   return (
     <span
-      className={`inline-flex items-center rounded font-medium capitalize border ${sizeConfig.classes} ${className}`}
-      style={{
-        backgroundColor: `${color}20`,
-        color: color,
-        borderColor: `${color}40`,
-      }}
+      className={`inline-flex items-center rounded font-medium capitalize border ${sizeConfig.classes} ${styles.badge} ${className}`}
     >
       {showIcon && <EntityIcon type={type} size={sizeConfig.iconSize} className="opacity-80" />}
       {type.replace(/_/g, ' ')}

@@ -16,6 +16,7 @@ export {
   type EntityStyle,
   type EntityType,
   getEntityColor,
+  getEntityColorVar,
   getEntityStyles,
 } from './entities';
 // Epics

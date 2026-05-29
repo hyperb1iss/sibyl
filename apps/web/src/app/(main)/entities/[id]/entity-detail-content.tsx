@@ -12,7 +12,7 @@ import { Card } from '@/components/ui/card';
 import { Input, Textarea } from '@/components/ui/input';
 import { Markdown } from '@/components/ui/markdown';
 import type { Entity } from '@/lib/api';
-import { ENTITY_COLORS, type EntityType, formatDateTime } from '@/lib/constants';
+import { formatDateTime, getEntityColorVar } from '@/lib/constants';
 import { useDeleteEntity, useEntity, useUpdateEntity } from '@/lib/hooks';
 
 interface EntityDetailContentProps {
@@ -35,7 +35,7 @@ export function EntityDetailContent({ initialEntity }: EntityDetailContentProps)
 
   // Use entity from query (may be more up-to-date) or fall back to initial
   const currentEntity = entity ?? initialEntity;
-  const color = ENTITY_COLORS[currentEntity.entity_type as EntityType] ?? '#8b85a0';
+  const color = getEntityColorVar(currentEntity.entity_type);
 
   const handleStartEdit = () => {
     setEditedName(currentEntity.name);
@@ -85,8 +85,8 @@ export function EntityDetailContent({ initialEntity }: EntityDetailContentProps)
       <div
         className="relative overflow-hidden rounded-xl border"
         style={{
-          background: `linear-gradient(135deg, ${color}18 0%, var(--sc-bg-base) 50%, var(--sc-bg-base) 100%)`,
-          borderColor: `${color}40`,
+          background: `linear-gradient(135deg, color-mix(in oklch, ${color} 9%, transparent) 0%, var(--sc-bg-base) 50%, var(--sc-bg-base) 100%)`,
+          borderColor: `color-mix(in oklch, ${color} 25%, transparent)`,
         }}
       >
         {/* Accent bar */}

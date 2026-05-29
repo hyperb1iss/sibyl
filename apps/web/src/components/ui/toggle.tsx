@@ -1,4 +1,4 @@
-import { ENTITY_COLORS, type EntityType } from '@/lib/constants';
+import { getEntityColorVar } from '@/lib/constants';
 import { EntityIcon } from './entity-icon';
 
 interface ToggleProps {
@@ -243,20 +243,21 @@ export function EntityTypeChip({
   count,
   disabled,
 }: EntityTypeChipProps) {
-  const color = ENTITY_COLORS[entityType as EntityType] ?? '#8b85a0';
+  const color = getEntityColorVar(entityType);
+  const mix = (pct: number) => `color-mix(in oklch, ${color} ${pct}%, transparent)`;
 
-  // Use CSS custom properties for dynamic colors with CSS hover states
-  // When not active, hover styles override via CSS; when active, hover has no effect
+  // Themed CSS custom properties so chip tints adapt across neon and dawn.
+  // When not active, hover styles override via CSS; when active, hover has no effect.
   const chipStyle = {
     '--chip-color': color,
     '--chip-bg': active
-      ? `linear-gradient(135deg, ${color}30 0%, ${color}15 100%)`
-      : `linear-gradient(135deg, ${color}12 0%, transparent 100%)`,
-    '--chip-bg-hover': `linear-gradient(135deg, ${color}20 0%, ${color}08 100%)`,
-    '--chip-border': active ? `${color}50` : `${color}25`,
-    '--chip-border-hover': `${color}40`,
-    '--chip-shadow': active ? `0 0 16px ${color}30, 0 0 4px ${color}20` : `0 0 0 1px ${color}08`,
-    '--chip-shadow-hover': `0 0 12px ${color}20`,
+      ? `linear-gradient(135deg, ${mix(19)} 0%, ${mix(8)} 100%)`
+      : `linear-gradient(135deg, ${mix(7)} 0%, transparent 100%)`,
+    '--chip-bg-hover': `linear-gradient(135deg, ${mix(13)} 0%, ${mix(3)} 100%)`,
+    '--chip-border': active ? mix(31) : mix(15),
+    '--chip-border-hover': mix(25),
+    '--chip-shadow': active ? `0 0 16px ${mix(19)}, 0 0 4px ${mix(13)}` : `0 0 0 1px ${mix(3)}`,
+    '--chip-shadow-hover': `0 0 12px ${mix(13)}`,
     background: 'var(--chip-bg)',
     borderColor: 'var(--chip-border)',
     color: active ? color : undefined,
@@ -288,8 +289,8 @@ export function EntityTypeChip({
           <span
             className="ml-0.5 text-xs px-1.5 py-0.5 rounded-full font-semibold"
             style={{
-              backgroundColor: active ? `${color}30` : `${color}15`,
-              color: active ? color : `${color}cc`,
+              backgroundColor: active ? mix(19) : mix(8),
+              color: active ? color : `color-mix(in oklch, ${color} 80%, transparent)`,
             }}
           >
             {count}
