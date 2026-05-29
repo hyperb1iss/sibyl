@@ -4,6 +4,10 @@ RRF combines multiple ranked lists using the formula:
     score(d) = sum(1 / (k + rank(d, L))) for each list L
 
 This produces a unified ranking that balances results from different sources.
+
+This is the single in-process RRF implementation. Both the native context-search
+plan (``retrieval.search``) and the hybrid graph search (``retrieval.hybrid``)
+route their fusion through ``rrf_merge`` / ``rrf_merge_with_metadata`` here.
 """
 
 from __future__ import annotations
@@ -168,7 +172,7 @@ def rrf_merge_with_metadata[T](
 
     Args:
         result_lists: List of result lists.
-        list_names: Names for each list (e.g., ['vector', 'graph', 'bm25']).
+        list_names: Names for each list (e.g., ['vector', 'graph', 'fulltext']).
         k: RRF constant.
         weights: Optional weights.
         dedup_key: Deduplication key function.

@@ -22,6 +22,7 @@ from sibyl_core.backends.surreal.fulltext import build_fulltext_query
 from sibyl_core.config import core_config
 from sibyl_core.embeddings.providers import EmbeddingMetadata, EmbeddingProvider
 from sibyl_core.models.context import ContextFacet
+from sibyl_core.retrieval.fusion import rrf_merge
 from sibyl_core.services.graph import get_surreal_graph_runtime, normalize_records
 from sibyl_core.services.surreal_content import (
     MemoryScope,
@@ -1810,11 +1811,12 @@ def _python_rrf_scores(
     *,
     rrf_k: int,
 ) -> dict[str, float]:
-    scores: dict[str, float] = defaultdict(float)
-    for _signal, candidates in source_lists:
-        for rank, candidate in enumerate(candidates, start=1):
-            scores[candidate.id] += 1.0 / (rrf_k + rank)
-    return dict(scores)
+    ranked_lists = [
+        [(candidate, candidate.score) for candidate in candidates]
+        for _signal, candidates in source_lists
+    ]
+    merged = rrf_merge(ranked_lists, k=float(rrf_k), dedup_key=lambda candidate: candidate.id)
+    return {candidate.id: score for candidate, score in merged}
 
 
 async def _surreal_rrf_scores(
