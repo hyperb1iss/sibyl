@@ -14,7 +14,7 @@ import { useTheme } from '@/lib/theme';
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), {
   ssr: false,
   loading: () => (
-    <div className="flex items-center justify-center h-full bg-sc-bg-secondary/50 rounded-lg">
+    <div className="flex items-center justify-center h-full bg-sc-bg-highlight/50 rounded-lg">
       <div className="text-sc-fg-muted text-xs">Loading...</div>
     </div>
   ),
@@ -284,14 +284,14 @@ export function RelatedEntitiesSection({
       {/* Header with view toggle */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-sc-fg-muted">{title}</h3>
-        <div className="flex items-center gap-1 rounded-lg bg-sc-bg-secondary p-0.5">
+        <div className="flex items-center gap-1 rounded-lg bg-sc-bg-highlight p-0.5">
           <button
             type="button"
             onClick={() => setView('list')}
             className={`p-1.5 rounded transition-colors ${
               view === 'list'
-                ? 'bg-sc-bg-tertiary text-sc-fg-default'
-                : 'text-sc-fg-muted hover:text-sc-fg-default'
+                ? 'bg-sc-bg-elevated text-sc-fg-primary'
+                : 'text-sc-fg-muted hover:text-sc-fg-primary'
             }`}
             title="List view"
           >
@@ -302,8 +302,8 @@ export function RelatedEntitiesSection({
             onClick={() => setView('graph')}
             className={`p-1.5 rounded transition-colors ${
               view === 'graph'
-                ? 'bg-sc-bg-tertiary text-sc-fg-default'
-                : 'text-sc-fg-muted hover:text-sc-fg-default'
+                ? 'bg-sc-bg-elevated text-sc-fg-primary'
+                : 'text-sc-fg-muted hover:text-sc-fg-primary'
             }`}
             title="Graph view"
           >
@@ -319,11 +319,11 @@ export function RelatedEntitiesSection({
             <Link
               key={item.id}
               href={getEntityUrl(item.id, item.entity_type)}
-              className="flex items-center gap-2 p-2 rounded-lg bg-sc-bg-secondary/50 hover:bg-sc-bg-secondary transition-colors group"
+              className="flex items-center gap-2 p-2 rounded-lg bg-sc-bg-highlight/50 hover:bg-sc-bg-highlight transition-colors group"
             >
               <RelationshipBadge type={item.relationship} direction={item.direction} size="xs" />
               <EntityBadge type={item.entity_type} size="sm" showIcon />
-              <span className="flex-1 text-sm text-sc-fg-default truncate">{item.name}</span>
+              <span className="flex-1 text-sm text-sc-fg-primary truncate">{item.name}</span>
               <ArrowRight className="w-4 h-4 text-sc-fg-muted opacity-0 group-hover:opacity-100 transition-opacity" />
             </Link>
           ))}
@@ -346,7 +346,7 @@ export function RelatedEntitiesSection({
           />
           <Link
             href={`/graph?selected=${entityId}`}
-            className="absolute bottom-2 right-2 text-xs text-sc-cyan hover:text-sc-cyan/80 bg-sc-bg-secondary/90 px-2 py-1 rounded"
+            className="absolute bottom-2 right-2 text-xs text-sc-cyan hover:text-sc-cyan/80 bg-sc-bg-highlight/90 px-2 py-1 rounded"
           >
             Open in Graph
           </Link>
