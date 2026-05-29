@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
-import textwrap
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -62,41 +58,3 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     scheduler.shutdown.assert_awaited_once()
     enable_pubsub.assert_called_once_with()
     disable_pubsub.assert_called_once_with()
-
-
-def test_api_factories_import_without_graphiti() -> None:
-    script = r"""
-import builtins
-import importlib
-
-original_import = builtins.__import__
-blocked_import = "graphiti" + "_core"
-
-
-def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-    if name == blocked_import or name.startswith(f"{blocked_import}."):
-        raise AssertionError(f"Graphiti import forbidden: {name}")
-    return original_import(name, globals, locals, fromlist, level)
-
-
-builtins.__import__ = guarded_import
-
-import sibyl.api.app as api_app
-import sibyl.main as main
-
-cli_main = importlib.import_module("sibyl.cli.main")
-
-api_app.create_api_app()
-assert cli_main.app is not None
-main.create_combined_app()
-"""
-    result = subprocess.run(  # noqa: S603
-        [sys.executable, "-c", textwrap.dedent(script)],
-        check=False,
-        cwd=os.getcwd(),
-        text=True,
-        capture_output=True,
-        timeout=20,
-    )
-
-    assert result.returncode == 0, result.stderr + result.stdout

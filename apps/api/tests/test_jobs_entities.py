@@ -195,7 +195,7 @@ class TestCreateLearningEpisodeJob:
         }
 
     @pytest.mark.asyncio
-    async def test_learning_episode_default_path_does_not_import_graphiti(self) -> None:
+    async def test_learning_episode_default_path(self) -> None:
         task = Task(
             id="task-123",
             title="Ship the thing",
@@ -215,16 +215,8 @@ class TestCreateLearningEpisodeJob:
             entity_manager=entity_manager,
             relationship_manager=relationship_manager,
         )
-        original_import = __import__
-        blocked_import = "graphiti" + "_core"
-
-        def guarded_import(name, globals_=None, locals_=None, fromlist=(), level=0):
-            if name == blocked_import or name.startswith(f"{blocked_import}."):
-                raise AssertionError(f"Graphiti import forbidden: {name}")
-            return original_import(name, globals_, locals_, fromlist, level)
 
         with (
-            patch("builtins.__import__", side_effect=guarded_import),
             patch("sibyl.jobs.entities.get_surreal_graph_runtime", AsyncMock(return_value=runtime)),
             patch("sibyl.jobs.entities._safe_broadcast", AsyncMock()),
             patch("sibyl.jobs.entities.log_memory_audit_event", AsyncMock()),

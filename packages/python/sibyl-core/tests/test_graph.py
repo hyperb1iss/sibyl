@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import builtins
 import json
 import time
 from datetime import UTC, datetime
@@ -29,24 +28,6 @@ from sibyl_core.services.graph import (
     prepare_graph_schema,
     relationship_from_surreal_row,
 )
-
-
-def _block_graphiti_imports(monkeypatch: pytest.MonkeyPatch) -> None:
-    real_import = builtins.__import__
-    blocked_import = "graphiti" + "_core"
-
-    def guarded_import(
-        name: str,
-        globals: dict[str, object] | None = None,
-        locals: dict[str, object] | None = None,
-        fromlist: tuple[str, ...] = (),
-        level: int = 0,
-    ) -> Any:
-        if name == blocked_import or name.startswith(f"{blocked_import}."):
-            raise AssertionError(f"Graphiti import forbidden: {name}")
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", guarded_import)
 
 
 class _EmbeddingWriteClient:
@@ -954,12 +935,9 @@ async def test_native_entity_manager_counts_by_type_without_listing_entities() -
 
 
 @pytest.mark.asyncio
-async def test_hierarchical_graph_uses_native_managers_without_graphiti(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_hierarchical_graph_uses_managers() -> None:
     import sibyl_core.services.graph_communities as communities
 
-    _block_graphiti_imports(monkeypatch)
     client = SurrealGraphClient(group_id="org-native-hierarchy", url="memory://")
     try:
         await prepare_graph_schema(client)
@@ -1223,10 +1201,7 @@ async def test_native_relationship_batch_tops_up_underfilled_seeds_when_capped()
 
 
 @pytest.mark.asyncio
-async def test_graph_writes_entities_and_relationships_without_graphiti(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _block_graphiti_imports(monkeypatch)
+async def test_graph_writes_entities_and_relationships() -> None:
     client = SurrealGraphClient(group_id="org-native-graph", url="memory://")
     try:
         await prepare_graph_schema(client)

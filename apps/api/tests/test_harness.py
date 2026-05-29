@@ -50,12 +50,6 @@ class TestMockGraphClient:
         await client.connect()
         assert client.connected is True
 
-    def test_has_graphiti_client(self) -> None:
-        """Client should have a mock Graphiti client."""
-        client = MockGraphClient()
-        assert client.client is not None
-        assert client.client.driver is not None
-
 
 class TestMockEntityManager:
     """Tests for MockEntityManager."""

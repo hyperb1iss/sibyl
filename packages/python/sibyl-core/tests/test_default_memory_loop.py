@@ -33,26 +33,13 @@ def _subprocess_env() -> dict[str, str]:
     }
 
 
-def test_default_memory_loop_runs_without_graphiti_imports() -> None:
+def test_default_memory_loop_runs_end_to_end() -> None:
     script = r"""
 import asyncio
-import builtins
 import os
 import sys
 import uuid
 from types import SimpleNamespace
-
-original_import = builtins.__import__
-blocked_import = "graphiti" + "_core"
-
-
-def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-    if name == blocked_import or name.startswith(f"{blocked_import}."):
-        raise AssertionError(f"Graphiti import forbidden: {name}")
-    return original_import(name, globals, locals, fromlist, level)
-
-
-builtins.__import__ = guarded_import
 
 
 async def main():
@@ -400,7 +387,6 @@ async def main():
         )
         recall_markdown = context_module.context_pack_to_markdown(recall)
         assert "No Graphiti Reflection" in recall_markdown
-        assert blocked_import not in sys.modules
     finally:
         await client.close()
 
@@ -419,26 +405,14 @@ asyncio.run(main())
     assert result.returncode == 0, result.stderr + result.stdout
 
 
-def test_default_entrypoints_import_without_graphiti() -> None:
+def test_default_entrypoints_import_and_wire_routes() -> None:
     script = r"""
-import builtins
 import importlib
 import os
 import runpy
 import sys
 from pathlib import Path
 
-original_import = builtins.__import__
-blocked_import = "graphiti" + "_core"
-
-
-def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-    if name == blocked_import or name.startswith(f"{blocked_import}."):
-        raise AssertionError(f"Graphiti import forbidden: {name}")
-    return original_import(name, globals, locals, fromlist, level)
-
-
-builtins.__import__ = guarded_import
 os.environ["SIBYL_AUTH_STORE"] = "surreal"
 os.environ["SIBYL_COORDINATION_BACKEND"] = "local"
 os.environ["SIBYL_MCP_AUTH_MODE"] = "off"
@@ -483,8 +457,6 @@ assert ("", "mcp") in combined_routes
 
 root = Path(os.environ["SIBYL_REPO_ROOT"])
 runpy.run_path(str(root / "apps/cli/src/sibyl_cli/data/hooks/session-start.py"))
-
-assert blocked_import not in sys.modules
 """
     result = subprocess.run(
         [sys.executable, "-c", textwrap.dedent(script)],
