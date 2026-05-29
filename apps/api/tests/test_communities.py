@@ -652,7 +652,7 @@ class TestStoreCommunities:
         entity_manager.list_by_type = AsyncMock(return_value=[])
         entity_manager.create = AsyncMock(side_effect=["c1", "c2"])
         relationship_manager = MagicMock()
-        relationship_manager.create = AsyncMock(side_effect=["r1", "r2", "r3", "r4"])
+        relationship_manager.create_bulk = AsyncMock(return_value=(4, 0))
         communities = [
             DetectedCommunity(id="c1", member_ids=["e1", "e2"], level=0, resolution=1.0),
             DetectedCommunity(id="c2", member_ids=["e3", "e4"], level=0, resolution=1.0),
@@ -672,7 +672,11 @@ class TestStoreCommunities:
 
         assert stored == 2
         assert entity_manager.create.await_count == 2
-        assert relationship_manager.create.await_count == 4
+        assert relationship_manager.create_bulk.await_count == 1
+        membership_edges = relationship_manager.create_bulk.await_args_list[0].args[0]
+        assert len(membership_edges) == 4
+        assert {edge.target_id for edge in membership_edges} == {"c1", "c2"}
+        assert {edge.source_id for edge in membership_edges} == {"e1", "e2", "e3", "e4"}
 
         first_entity = entity_manager.create.await_args_list[0].args[0]
         assert first_entity.entity_type == EntityType.COMMUNITY

@@ -1945,17 +1945,19 @@ async def store_communities(
             log.warning("store_community_failed", community_id=community.id, error=str(e))
 
     # Create BELONGS_TO relationships from members to communities
-    for community in communities:
-        for member_id in community.member_ids:
-            with contextlib.suppress(Exception):
-                await relationship_manager.create(
-                    Relationship(
-                        id=str(uuid.uuid4()),
-                        source_id=member_id,
-                        target_id=community.id,
-                        relationship_type=RelationshipType.BELONGS_TO,
-                    )
-                )
+    membership_edges = [
+        Relationship(
+            id=str(uuid.uuid4()),
+            source_id=member_id,
+            target_id=community.id,
+            relationship_type=RelationshipType.BELONGS_TO,
+        )
+        for community in communities
+        for member_id in community.member_ids
+    ]
+    if membership_edges:
+        with contextlib.suppress(Exception):
+            await relationship_manager.create_bulk(membership_edges)
 
     log.info("store_communities_complete", stored=stored)
     return stored
