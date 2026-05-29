@@ -16,6 +16,7 @@ from sibyl_core.embeddings.providers import (
     EmbeddingMetadata,
 )
 from sibyl_core.models.entities import Entity, EntityType, Procedure, Relationship, RelationshipType
+from sibyl_core.models.tasks import EpicStatus, TaskPriority
 from sibyl_core.retrieval.dedup import EntityDeduplicator
 from sibyl_core.services.graph import (
     EntityManager,
@@ -1861,5 +1862,83 @@ async def test_native_parent_task_id_round_trips_and_lists_subtasks() -> None:
         # The parent itself (no parent_task_id) is not its own child.
         assert "parent_task" not in {entity.id for entity in subtasks}
         assert "orphan_task" not in {entity.id for entity in subtasks}
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_native_derive_epic_from_task_projects_children() -> None:
+    client = SurrealGraphClient(group_id="org-native-derive-epic", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        entity_manager = EntityManager(client, group_id=client.group_id)
+
+        await entity_manager.create_direct(
+            Entity(
+                id="parent_epic",
+                entity_type=EntityType.TASK,
+                name="Parent work item",
+                description="A task that acts as an epic",
+                organization_id="org-native-derive-epic",
+                metadata={
+                    "title": "Parent work item",
+                    "project_id": "project_native",
+                    "status": "todo",
+                    "priority": "high",
+                    "assignees": ["alice"],
+                    "tags": ["backend"],
+                },
+            )
+        )
+        for child_id, status in (
+            ("child_done", "done"),
+            ("child_doing", "doing"),
+            ("child_todo", "todo"),
+        ):
+            await entity_manager.create_direct(
+                Entity(
+                    id=child_id,
+                    entity_type=EntityType.TASK,
+                    name=f"Subtask {child_id}",
+                    description="Child of parent_epic",
+                    organization_id="org-native-derive-epic",
+                    metadata={
+                        "project_id": "project_native",
+                        "parent_task_id": "parent_epic",
+                        "status": status,
+                    },
+                )
+            )
+
+        epic = await entity_manager.derive_epic_from_task("parent_epic")
+        assert epic is not None
+        assert epic.id == "parent_epic"
+        assert epic.title == "Parent work item"
+        assert epic.project_id == "project_native"
+        assert epic.priority == TaskPriority.HIGH
+        assert epic.assignees == ["alice"]
+        assert epic.tags == ["backend"]
+        # A DOING child makes the derived container IN_PROGRESS; one of three done.
+        assert epic.status == EpicStatus.IN_PROGRESS
+        assert epic.total_tasks == 3
+        assert epic.completed_tasks == 1
+
+        # A childless task still projects (planning, no progress yet).
+        await entity_manager.create_direct(
+            Entity(
+                id="leaf_task",
+                entity_type=EntityType.TASK,
+                name="Leaf task",
+                organization_id="org-native-derive-epic",
+                metadata={"project_id": "project_native", "status": "todo"},
+            )
+        )
+        leaf_epic = await entity_manager.derive_epic_from_task("leaf_task")
+        assert leaf_epic is not None
+        assert leaf_epic.status == EpicStatus.PLANNING
+        assert leaf_epic.total_tasks == 0
+
+        # Missing parent -> None, no raise.
+        assert await entity_manager.derive_epic_from_task("does_not_exist") is None
     finally:
         await client.close()

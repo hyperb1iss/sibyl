@@ -1,6 +1,15 @@
 """Tests for sibyl-core models."""
 
-from sibyl_core.models import EntityType, Task, TaskComplexity, TaskPriority, TaskStatus
+from sibyl_core.models import (
+    EntityType,
+    Epic,
+    EpicStatus,
+    Task,
+    TaskComplexity,
+    TaskPriority,
+    TaskStatus,
+    derive_container_status,
+)
 
 
 def test_entity_type_accepts_guide_alias() -> None:
@@ -98,3 +107,105 @@ class TestTaskModel:
         assert TaskComplexity.MEDIUM.value == "medium"
         assert TaskComplexity.COMPLEX.value == "complex"
         assert TaskComplexity.EPIC.value == "epic"
+
+
+class TestDeriveContainerStatus:
+    """The unified container-status rule (W14) derived from child statuses."""
+
+    def test_no_children_is_planning(self) -> None:
+        assert derive_container_status([]) == EpicStatus.PLANNING
+
+    def test_doing_child_is_in_progress(self) -> None:
+        assert (
+            derive_container_status([TaskStatus.TODO, TaskStatus.DOING]) == EpicStatus.IN_PROGRESS
+        )
+
+    def test_review_child_is_in_progress(self) -> None:
+        assert (
+            derive_container_status([TaskStatus.DONE, TaskStatus.REVIEW]) == EpicStatus.IN_PROGRESS
+        )
+
+    def test_doing_outranks_blocked(self) -> None:
+        # Live work wins even when another child is blocked.
+        assert (
+            derive_container_status([TaskStatus.BLOCKED, TaskStatus.DOING])
+            == EpicStatus.IN_PROGRESS
+        )
+
+    def test_blocked_child_is_blocked_without_active_work(self) -> None:
+        assert derive_container_status([TaskStatus.TODO, TaskStatus.BLOCKED]) == EpicStatus.BLOCKED
+
+    def test_all_terminal_with_a_done_is_completed(self) -> None:
+        assert (
+            derive_container_status([TaskStatus.DONE, TaskStatus.ARCHIVED]) == EpicStatus.COMPLETED
+        )
+
+    def test_all_done_is_completed(self) -> None:
+        assert derive_container_status([TaskStatus.DONE, TaskStatus.DONE]) == EpicStatus.COMPLETED
+
+    def test_all_archived_is_archived(self) -> None:
+        assert (
+            derive_container_status([TaskStatus.ARCHIVED, TaskStatus.ARCHIVED])
+            == EpicStatus.ARCHIVED
+        )
+
+    def test_only_todo_backlog_is_planning(self) -> None:
+        assert derive_container_status([TaskStatus.TODO, TaskStatus.BACKLOG]) == EpicStatus.PLANNING
+
+    def test_terminal_free_mix_is_planning(self) -> None:
+        # TODO/BACKLOG with no doing, blocked, or done falls through to planning.
+        assert derive_container_status([TaskStatus.BACKLOG]) == EpicStatus.PLANNING
+
+
+class TestEpicDerivedFromTask:
+    """Project a parent task plus its subtasks into an Epic-shaped view."""
+
+    def _parent(self) -> Task:
+        return Task(
+            id="parent_task",
+            name="Parent work item",
+            title="Parent work item",
+            description="A task that acts as an epic",
+            project_id="project_xyz",
+            priority=TaskPriority.HIGH,
+            assignees=["alice"],
+            tags=["backend"],
+        )
+
+    def test_projects_identity_status_and_progress(self) -> None:
+        parent = self._parent()
+        children = [
+            Task(id="c1", name="c1", title="c1", status=TaskStatus.DONE),
+            Task(id="c2", name="c2", title="c2", status=TaskStatus.DOING),
+            Task(id="c3", name="c3", title="c3", status=TaskStatus.TODO),
+        ]
+
+        epic = Epic.derived_from_task(parent, children)
+
+        assert isinstance(epic, Epic)
+        assert epic.id == "parent_task"
+        assert epic.title == "Parent work item"
+        assert epic.description == "A task that acts as an epic"
+        assert epic.project_id == "project_xyz"
+        assert epic.priority == TaskPriority.HIGH
+        assert epic.assignees == ["alice"]
+        assert epic.tags == ["backend"]
+        # One DOING child makes the container IN_PROGRESS; one DONE of three.
+        assert epic.status == EpicStatus.IN_PROGRESS
+        assert epic.total_tasks == 3
+        assert epic.completed_tasks == 1
+
+    def test_childless_parent_projects_to_planning(self) -> None:
+        epic = Epic.derived_from_task(self._parent(), [])
+        assert epic.status == EpicStatus.PLANNING
+        assert epic.total_tasks == 0
+        assert epic.completed_tasks == 0
+
+    def test_projection_does_not_mutate_parent_collections(self) -> None:
+        parent = self._parent()
+        epic = Epic.derived_from_task(parent, [])
+        epic.assignees.append("bob")
+        epic.tags.append("frontend")
+        # Copies, not aliases: the parent's lists are untouched.
+        assert parent.assignees == ["alice"]
+        assert parent.tags == ["backend"]

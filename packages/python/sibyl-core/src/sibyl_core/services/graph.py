@@ -37,6 +37,7 @@ from sibyl_core.models.entities import (
     RelationshipType,
 )
 from sibyl_core.models.tasks import (
+    Epic,
     Task,
     TaskComplexity,
     TaskPriority,
@@ -550,6 +551,23 @@ class EntityManager:
             status=status,
             limit=limit,
             include_archived=include_archived,
+        )
+
+    async def derive_epic_from_task(self, parent_task_id: str) -> Epic | None:
+        """View a task-with-children as an epic, status derived from its subtasks.
+
+        Returns ``None`` when the parent task does not exist. This is a read-only
+        projection (W14): it never writes, leaves the stored Epic entity and
+        ``epic_id`` untouched, and reuses the U1 subtask query for the children.
+        """
+        try:
+            parent = await self.get(parent_task_id)
+        except KeyError:
+            return None
+        children = await self.list_subtasks(parent_task_id)
+        return Epic.derived_from_task(
+            _entity_to_task(parent),
+            [_entity_to_task(child) for child in children],
         )
 
     async def get_project_summary(

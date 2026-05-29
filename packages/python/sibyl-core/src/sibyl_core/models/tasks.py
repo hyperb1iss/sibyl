@@ -1,6 +1,7 @@
 """Task management models for the knowledge graph."""
 
 import uuid
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -181,6 +182,35 @@ class EpicStatus(StrEnum):
     ARCHIVED = "archived"  # Historical record
 
 
+def derive_container_status(child_statuses: Iterable[TaskStatus]) -> EpicStatus:
+    """Derive a container work-item's status from its children's statuses.
+
+    This is the unified container-status rule: a task with children IS an epic,
+    and its status is a function of its subtasks rather than a separately stored
+    value. W14/U5 retires the standalone ``EpicStatus`` field in favor of this
+    derivation; U3/U4 consume it. Precedence is strict and order-sensitive:
+
+    - no children -> PLANNING (nothing scoped yet)
+    - any child DOING or REVIEW -> IN_PROGRESS (work is live)
+    - else any child BLOCKED -> BLOCKED
+    - else all children terminal (DONE/ARCHIVED) with at least one DONE -> COMPLETED
+    - else all children ARCHIVED -> ARCHIVED (closed without completion)
+    - else (only TODO/BACKLOG, or a terminal-free mix) -> PLANNING
+    """
+    statuses = set(child_statuses)
+    if not statuses:
+        return EpicStatus.PLANNING
+    if statuses & {TaskStatus.DOING, TaskStatus.REVIEW}:
+        return EpicStatus.IN_PROGRESS
+    if TaskStatus.BLOCKED in statuses:
+        return EpicStatus.BLOCKED
+    if statuses <= {TaskStatus.DONE, TaskStatus.ARCHIVED}:
+        if TaskStatus.DONE in statuses:
+            return EpicStatus.COMPLETED
+        return EpicStatus.ARCHIVED
+    return EpicStatus.PLANNING
+
+
 class Epic(Entity):
     """A feature initiative grouping related tasks within a project.
 
@@ -225,6 +255,30 @@ class Epic(Entity):
             if "content" not in data and "description" in data:
                 data["content"] = data["description"]
         return data
+
+    @classmethod
+    def derived_from_task(cls, parent: "Task", children: Sequence["Task"]) -> "Epic":
+        """Project a parent task and its subtasks into an Epic-shaped view.
+
+        A task with children IS an epic (W14): this builds the read-only epic
+        view from in-memory objects with no persistence. Status and progress are
+        derived from the children; identity, scoping, and ownership come from the
+        parent. Timeline fields are left at defaults — they are not derivable
+        from a flat child list and stay the parent's concern.
+        """
+        return cls(
+            id=parent.id,
+            name=parent.title,
+            title=parent.title,
+            description=parent.description,
+            project_id=parent.project_id or "",
+            status=derive_container_status(child.status for child in children),
+            priority=parent.priority,
+            total_tasks=len(children),
+            completed_tasks=sum(1 for child in children if child.status == TaskStatus.DONE),
+            assignees=list(parent.assignees),
+            tags=list(parent.tags),
+        )
 
 
 class Team(Entity):

@@ -100,6 +100,7 @@ from sibyl_core.models.tasks import (
     TaskStatus,
     Team,
     TimeEntry,
+    derive_container_status,
 )
 from sibyl_core.models.tools import (
     AddLearningInput,
@@ -203,5 +204,6 @@ __all__ = [
     "TimeEntry",
     "Tool",
     "Topic",
+    "derive_container_status",
     "is_shared_project_slug",
 ]
