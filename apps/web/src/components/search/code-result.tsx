@@ -4,21 +4,22 @@ import Link from 'next/link';
 import { ExternalLink } from '@/components/ui/icons';
 import type { CodeExampleResult } from '@/lib/api';
 
-// Language colors for common languages
+// Language identity mapped onto the SilkCircuit palette so the chips stay
+// distinguishable yet theme-correct in both neon and dawn (no frozen brand hex).
 const LANGUAGE_COLORS: Record<string, string> = {
-  python: 'bg-[#3572A5]/20 text-[#3572A5] border-[#3572A5]/30',
-  typescript: 'bg-[#3178c6]/20 text-[#3178c6] border-[#3178c6]/30',
-  javascript: 'bg-[#f1e05a]/20 text-[#f1e05a] border-[#f1e05a]/30',
-  rust: 'bg-[#dea584]/20 text-[#dea584] border-[#dea584]/30',
-  go: 'bg-[#00ADD8]/20 text-[#00ADD8] border-[#00ADD8]/30',
-  java: 'bg-[#b07219]/20 text-[#b07219] border-[#b07219]/30',
-  ruby: 'bg-[#701516]/20 text-[#cc342d] border-[#701516]/30',
-  php: 'bg-[#4F5D95]/20 text-[#4F5D95] border-[#4F5D95]/30',
-  css: 'bg-[#563d7c]/20 text-[#563d7c] border-[#563d7c]/30',
-  html: 'bg-[#e34c26]/20 text-[#e34c26] border-[#e34c26]/30',
+  python: 'bg-sc-cyan/20 text-sc-cyan border-sc-cyan/30',
+  typescript: 'bg-sc-cyan/20 text-sc-cyan border-sc-cyan/30',
+  javascript: 'bg-sc-yellow/20 text-sc-yellow border-sc-yellow/30',
+  rust: 'bg-sc-orange/20 text-sc-orange border-sc-orange/30',
+  go: 'bg-sc-cyan/20 text-sc-cyan border-sc-cyan/30',
+  java: 'bg-sc-orange/20 text-sc-orange border-sc-orange/30',
+  ruby: 'bg-sc-red/20 text-sc-red border-sc-red/30',
+  php: 'bg-sc-purple/20 text-sc-purple border-sc-purple/30',
+  css: 'bg-sc-purple/20 text-sc-purple border-sc-purple/30',
+  html: 'bg-sc-coral/20 text-sc-coral border-sc-coral/30',
   bash: 'bg-sc-fg-subtle/20 text-sc-fg-muted border-sc-fg-subtle/30',
   shell: 'bg-sc-fg-subtle/20 text-sc-fg-muted border-sc-fg-subtle/30',
-  sql: 'bg-[#e38c00]/20 text-[#e38c00] border-[#e38c00]/30',
+  sql: 'bg-sc-yellow/20 text-sc-yellow border-sc-yellow/30',
   json: 'bg-sc-yellow/20 text-sc-yellow border-sc-yellow/30',
   yaml: 'bg-sc-coral/20 text-sc-coral border-sc-coral/30',
   markdown: 'bg-sc-cyan/20 text-sc-cyan border-sc-cyan/30',
@@ -48,7 +49,7 @@ export function CodeResult({ result }: CodeResultProps) {
   return (
     <Link
       href={internalUrl}
-      className="block bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl overflow-hidden transition-all duration-200 hover:shadow-lg hover:border-sc-purple/30"
+      className="block bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-xl overflow-hidden transition-all duration-200 shadow-card hover:shadow-card-hover hover:border-sc-purple/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
     >
       {/* Header */}
       <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-sc-fg-subtle/10">
@@ -59,9 +60,9 @@ export function CodeResult({ result }: CodeResultProps) {
           <span className="text-xs text-sc-fg-subtle truncate">{result.source_name}</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <div className="w-16 h-1.5 bg-sc-bg-elevated rounded-full overflow-hidden">
+          <div className="w-16 h-1.5 bg-sc-bg-highlight rounded-full overflow-hidden">
             <div
-              className="h-full bg-sc-purple rounded-full transition-all"
+              className="h-full bg-sc-purple rounded-full transition-all duration-200"
               style={{ width: `${scorePercent}%` }}
             />
           </div>
@@ -71,7 +72,7 @@ export function CodeResult({ result }: CodeResultProps) {
 
       {/* Heading Path */}
       {result.heading_path.length > 0 && (
-        <div className="flex items-center gap-1 px-4 py-2 text-xs text-sc-fg-muted bg-sc-bg-elevated/50 overflow-x-auto">
+        <div className="flex items-center gap-1 px-4 py-2 text-xs text-sc-fg-muted bg-sc-bg-highlight/50 overflow-x-auto">
           {result.heading_path.map((heading, i) => (
             <span
               key={`path-${i}-${heading.slice(0, 20)}`}
@@ -93,7 +94,7 @@ export function CodeResult({ result }: CodeResultProps) {
         </pre>
         {hasMore && (
           <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-sc-bg-dark to-transparent flex items-end justify-center pb-2">
-            <span className="text-xs text-sc-fg-subtle px-2 py-1 bg-sc-bg-elevated rounded">
+            <span className="text-xs text-sc-fg-subtle px-2 py-1 bg-sc-bg-highlight rounded">
               +{codeLines.length - 15} more lines
             </span>
           </div>
@@ -102,7 +103,7 @@ export function CodeResult({ result }: CodeResultProps) {
 
       {/* Context (if available) */}
       {result.context && (
-        <div className="px-4 py-2 border-t border-sc-fg-subtle/10 bg-sc-bg-elevated/30">
+        <div className="px-4 py-2 border-t border-sc-fg-subtle/10 bg-sc-bg-highlight/30">
           <p className="text-xs text-sc-fg-muted line-clamp-2">{result.context}</p>
         </div>
       )}

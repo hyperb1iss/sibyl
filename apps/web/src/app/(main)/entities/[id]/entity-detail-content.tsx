@@ -9,6 +9,7 @@ import { EntityBreadcrumb } from '@/components/layout/breadcrumb';
 import { EntityBadge } from '@/components/ui/badge';
 import { Button, ColorButton } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input, Textarea } from '@/components/ui/input';
 import { Markdown } from '@/components/ui/markdown';
 import type { Entity } from '@/lib/api';
@@ -32,6 +33,7 @@ export function EntityDetailContent({ initialEntity }: EntityDetailContentProps)
   const [editedName, setEditedName] = useState('');
   const [editedDescription, setEditedDescription] = useState('');
   const [editedContent, setEditedContent] = useState('');
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   // Use entity from query (may be more up-to-date) or fall back to initial
   const currentEntity = entity ?? initialEntity;
@@ -66,14 +68,13 @@ export function EntityDetailContent({ initialEntity }: EntityDetailContentProps)
   };
 
   const handleDelete = async () => {
-    if (confirm('Are you sure you want to delete this entity? This action cannot be undone.')) {
-      try {
-        await deleteEntity.mutateAsync(entityId);
-        toast.success('Entity deleted');
-        router.push('/entities');
-      } catch (_err) {
-        toast.error('Failed to delete entity');
-      }
+    try {
+      await deleteEntity.mutateAsync(entityId);
+      toast.success('Entity deleted');
+      router.push('/entities');
+    } catch (_err) {
+      toast.error('Failed to delete entity');
+      setConfirmDeleteOpen(false);
     }
   };
 
@@ -134,7 +135,11 @@ export function EntityDetailContent({ initialEntity }: EntityDetailContentProps)
                   <ColorButton color="cyan" onClick={handleStartEdit}>
                     Edit
                   </ColorButton>
-                  <ColorButton color="red" onClick={handleDelete} disabled={deleteEntity.isPending}>
+                  <ColorButton
+                    color="red"
+                    onClick={() => setConfirmDeleteOpen(true)}
+                    disabled={deleteEntity.isPending}
+                  >
                     {deleteEntity.isPending ? 'Deleting...' : 'Delete'}
                   </ColorButton>
                 </>
@@ -244,13 +249,24 @@ export function EntityDetailContent({ initialEntity }: EntityDetailContentProps)
           {currentEntity.metadata && Object.keys(currentEntity.metadata).length > 0 && (
             <Card>
               <h2 className="text-lg font-semibold text-sc-fg-primary mb-4">Metadata</h2>
-              <pre className="font-mono text-xs text-sc-fg-muted whitespace-pre-wrap overflow-x-auto">
+              <pre className="rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-highlight p-3 font-mono text-xs text-sc-fg-muted whitespace-pre-wrap overflow-x-auto">
                 {JSON.stringify(currentEntity.metadata, null, 2)}
               </pre>
             </Card>
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        onOpenChange={setConfirmDeleteOpen}
+        title="Delete entity?"
+        description="This removes the entity from your knowledge graph. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleteEntity.isPending}
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }

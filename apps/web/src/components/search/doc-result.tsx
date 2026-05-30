@@ -19,7 +19,7 @@ export function DocChunkResult({ result }: DocChunkResultProps) {
   return (
     <Link
       href={internalUrl}
-      className="block bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-4 transition-all duration-200 hover:shadow-lg hover:border-sc-cyan/30"
+      className="block bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-xl p-4 transition-all duration-200 shadow-card hover:shadow-card-hover hover:border-sc-cyan/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
     >
       <div className="space-y-2">
         {/* Header: Source + Score */}
@@ -31,9 +31,9 @@ export function DocChunkResult({ result }: DocChunkResultProps) {
             <span className="text-xs text-sc-fg-subtle shrink-0">{result.chunk_type}</span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <div className="w-16 h-1.5 bg-sc-bg-elevated rounded-full overflow-hidden">
+            <div className="w-16 h-1.5 bg-sc-bg-highlight rounded-full overflow-hidden">
               <div
-                className="h-full bg-sc-cyan rounded-full transition-all"
+                className="h-full bg-sc-cyan rounded-full transition-all duration-200"
                 style={{ width: `${scorePercent}%` }}
               />
             </div>
@@ -98,7 +98,7 @@ export function DocPageResult({ result }: DocPageResultProps) {
   return (
     <Link
       href={internalUrl}
-      className="block bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-4 transition-all duration-200 hover:shadow-lg hover:border-sc-cyan/30"
+      className="block bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-xl p-4 transition-all duration-200 shadow-card hover:shadow-card-hover hover:border-sc-cyan/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
     >
       <div className="space-y-2">
         {/* Header: Source + Score */}
@@ -114,9 +114,9 @@ export function DocPageResult({ result }: DocPageResultProps) {
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <div className="w-16 h-1.5 bg-sc-bg-elevated rounded-full overflow-hidden">
+            <div className="w-16 h-1.5 bg-sc-bg-highlight rounded-full overflow-hidden">
               <div
-                className="h-full bg-sc-cyan rounded-full transition-all"
+                className="h-full bg-sc-cyan rounded-full transition-all duration-200"
                 style={{ width: `${scorePercent}%` }}
               />
             </div>
@@ -133,7 +133,7 @@ export function DocPageResult({ result }: DocPageResultProps) {
             {result.headings.slice(0, 5).map((heading, i) => (
               <span
                 key={`heading-${i}-${heading.slice(0, 20)}`}
-                className="px-1.5 py-0.5 text-xs bg-sc-bg-elevated text-sc-fg-muted rounded"
+                className="px-1.5 py-0.5 text-xs bg-sc-bg-highlight text-sc-fg-muted rounded"
               >
                 {heading}
               </span>

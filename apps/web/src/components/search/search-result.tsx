@@ -44,6 +44,7 @@ export function SearchResultCard({ result }: SearchResultCardProps) {
         transition-all duration-200 group
         hover:shadow-lg ${styles.glow}
         hover:-translate-y-0.5
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
       `}
     >
       {/* Accent bar */}
@@ -98,9 +99,9 @@ export function SearchResultCard({ result }: SearchResultCardProps) {
 
           {/* Score indicator */}
           <div className="shrink-0 flex flex-col items-end gap-1 pt-1">
-            <div className="w-20 h-1.5 bg-sc-bg-elevated rounded-full overflow-hidden">
+            <div className="w-20 h-1.5 bg-sc-bg-highlight rounded-full overflow-hidden">
               <div
-                className={`h-full rounded-full transition-all ${styles.accent}`}
+                className={`h-full rounded-full transition-all duration-200 ${styles.accent}`}
                 style={{ width: `${scorePercent}%` }}
               />
             </div>
@@ -113,16 +114,16 @@ export function SearchResultCard({ result }: SearchResultCardProps) {
 
 export function SearchResultSkeleton() {
   return (
-    <div className="relative bg-sc-bg-base rounded-xl overflow-hidden border border-sc-fg-subtle/10 animate-pulse">
+    <div className="relative bg-sc-bg-elevated rounded-xl overflow-hidden border border-sc-fg-subtle/10 animate-pulse">
       <div className="absolute left-0 top-0 bottom-0 w-1 bg-sc-fg-subtle/20" />
       <div className="pl-4 pr-3 py-4">
         <div className="flex items-center gap-2 mb-2.5">
-          <div className="w-5 h-5 bg-sc-bg-elevated rounded" />
-          <div className="h-5 w-16 bg-sc-bg-elevated rounded" />
-          <div className="ml-auto h-4 w-10 bg-sc-bg-elevated rounded" />
+          <div className="w-5 h-5 bg-sc-bg-highlight rounded" />
+          <div className="h-5 w-16 bg-sc-bg-highlight rounded" />
+          <div className="ml-auto h-4 w-10 bg-sc-bg-highlight rounded" />
         </div>
-        <div className="h-5 w-3/4 bg-sc-bg-elevated rounded mb-2" />
-        <div className="h-4 w-full bg-sc-bg-elevated rounded" />
+        <div className="h-5 w-3/4 bg-sc-bg-highlight rounded mb-2" />
+        <div className="h-4 w-full bg-sc-bg-highlight rounded" />
       </div>
     </div>
   );

@@ -133,11 +133,11 @@ function MiniGraph({
     const links: GraphLink[] = related.map(r => ({
       source: r.direction === 'outgoing' ? entityId : r.id,
       target: r.direction === 'outgoing' ? r.id : entityId,
-      color: '#4a4560',
+      color: colors.fgSubtle,
     }));
 
     return { nodes, links };
-  }, [entityId, entityName, entityType, related]);
+  }, [entityId, entityName, entityType, related, colors.fgSubtle]);
 
   // Custom node rendering
   const paintNode = useCallback(
@@ -146,12 +146,15 @@ function MiniGraph({
       const x = node.x || 0;
       const y = node.y || 0;
 
-      // Glow for center node
+      // Glow for center node, derived from the node's own entity color so it
+      // matches the type accent instead of a frozen purple.
       if (node.isCenter) {
         ctx.beginPath();
         ctx.arc(x, y, size + 3, 0, 2 * Math.PI);
-        ctx.fillStyle = 'rgba(225, 53, 255, 0.3)';
+        ctx.globalAlpha = 0.3;
+        ctx.fillStyle = node.color;
         ctx.fill();
+        ctx.globalAlpha = 1;
       }
 
       // Main node
@@ -161,7 +164,7 @@ function MiniGraph({
       ctx.fill();
 
       // Border
-      ctx.strokeStyle = node.isCenter ? '#e135ff' : colors.fgSubtle;
+      ctx.strokeStyle = node.isCenter ? node.color : colors.fgSubtle;
       ctx.lineWidth = node.isCenter ? 1.5 : 0.5;
       ctx.stroke();
 

@@ -7,7 +7,9 @@ import { toast } from 'sonner';
 import { EntityCard } from '@/components/entities/entity-card';
 import { PageHeader } from '@/components/layout/page-header';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { EntitiesEmptyState } from '@/components/ui/empty-state';
+import { ChevronDown, Search } from '@/components/ui/icons';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -63,6 +65,26 @@ export function EntitiesContent({
   // Local state for input (synced from URL, debounced to URL)
   const [searchInput, setSearchInput] = useState(search);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Type-filter popover (contained, mirrors the tasks tag-filter pattern)
+  const [typeMenuOpen, setTypeMenuOpen] = useState(false);
+  const [typeSearch, setTypeSearch] = useState('');
+  const typeMenuRef = useRef<HTMLDivElement>(null);
+
+  // Pending delete target drives the themed ConfirmDialog
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+  // Close the type menu on outside click
+  useEffect(() => {
+    if (!typeMenuOpen) return;
+    function handleClickOutside(event: MouseEvent) {
+      if (typeMenuRef.current && !typeMenuRef.current.contains(event.target as Node)) {
+        setTypeMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [typeMenuOpen]);
 
   // Sync input when URL search changes (e.g., browser back/forward)
   useEffect(() => {
@@ -150,6 +172,13 @@ export function EntitiesContent({
 
   const entityTypes = stats ? Object.keys(stats.entity_counts).sort() : [];
 
+  // Types shown inside the filter popover, narrowed by its search box
+  const filteredTypes = (() => {
+    const query = typeSearch.trim().toLowerCase();
+    if (!query) return entityTypes;
+    return entityTypes.filter(type => type.toLowerCase().includes(query));
+  })();
+
   const handleTypeFilter = useCallback(
     (type: string | null) => {
       const params = new URLSearchParams(searchParams);
@@ -198,19 +227,21 @@ export function EntitiesContent({
 
   const currentSortValue = `${sortBy}-${sortOrder}`;
 
-  const handleDelete = useCallback(
-    async (id: string) => {
-      if (confirm('Are you sure you want to delete this entity?')) {
-        try {
-          await deleteEntity.mutateAsync(id);
-          toast.success('Entity deleted');
-        } catch (_err) {
-          toast.error('Failed to delete entity');
-        }
-      }
-    },
-    [deleteEntity]
-  );
+  const handleDelete = useCallback((id: string) => {
+    setDeleteTarget(id);
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget) return;
+    try {
+      await deleteEntity.mutateAsync(deleteTarget);
+      toast.success('Entity deleted');
+    } catch (_err) {
+      toast.error('Failed to delete entity');
+    } finally {
+      setDeleteTarget(null);
+    }
+  }, [deleteEntity, deleteTarget]);
 
   // Deduplicate entities by ID (API may return duplicates)
   const entities = (() => {
@@ -241,7 +272,8 @@ export function EntitiesContent({
               placeholder="Search entities..."
               value={searchInput}
               onChange={e => handleSearchChange(e.target.value)}
-              icon="⌕"
+              aria-label="Search entities"
+              icon={<Search width={16} height={16} />}
             />
           </div>
           <div className="flex items-center gap-2">
@@ -261,21 +293,94 @@ export function EntitiesContent({
           </div>
         </div>
 
-        {/* Type Filter - scrollable on mobile */}
-        <div className="flex flex-wrap gap-1.5 sm:gap-2">
-          <FilterChip active={!typeFilter} onClick={() => handleTypeFilter(null)}>
-            All
-          </FilterChip>
-          {entityTypes.map(type => (
-            <EntityTypeChip
-              key={type}
-              entityType={type}
-              active={typeFilter === type}
-              onClick={() => handleTypeFilter(type)}
-              count={stats?.entity_counts[type]}
-            />
-          ))}
-        </div>
+        {/* Type Filter - contained popover so it never floods the grid */}
+        {entityTypes.length > 0 && (
+          <div className="flex items-center gap-2">
+            <div ref={typeMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setTypeMenuOpen(open => !open)}
+                aria-expanded={typeMenuOpen}
+                aria-label="Filter by entity type"
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base ${
+                  typeFilter
+                    ? 'bg-sc-purple/10 text-sc-purple border-sc-purple/30'
+                    : 'text-sc-fg-muted border-sc-fg-subtle/20 hover:text-sc-fg-primary hover:border-sc-fg-subtle/40'
+                }`}
+              >
+                <span>Type</span>
+                <span className="text-sc-fg-subtle">({entityTypes.length})</span>
+                <ChevronDown
+                  width={12}
+                  height={12}
+                  className={`transition-transform duration-200 ${typeMenuOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+
+              {typeMenuOpen && (
+                <div className="absolute top-full left-0 mt-1.5 w-72 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-xl shadow-card-elevated z-50 overflow-hidden animate-fade-in">
+                  <div className="p-2 border-b border-sc-fg-subtle/10">
+                    <div className="relative">
+                      <Search
+                        width={14}
+                        height={14}
+                        className="absolute left-2 top-1/2 -translate-y-1/2 text-sc-fg-subtle"
+                      />
+                      <input
+                        type="text"
+                        value={typeSearch}
+                        onChange={e => setTypeSearch(e.target.value)}
+                        placeholder="Search types..."
+                        aria-label="Search entity types"
+                        // biome-ignore lint/a11y/noAutofocus: focus the search when the menu opens
+                        autoFocus
+                        className="w-full pl-7 pr-2 py-1.5 text-xs bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary placeholder:text-sc-fg-subtle focus-visible:outline-none focus-visible:border-sc-purple/50"
+                      />
+                    </div>
+                  </div>
+                  <div className="max-h-56 overflow-y-auto p-2 flex flex-wrap gap-1.5">
+                    <FilterChip
+                      active={!typeFilter}
+                      onClick={() => {
+                        handleTypeFilter(null);
+                        setTypeMenuOpen(false);
+                        setTypeSearch('');
+                      }}
+                    >
+                      All
+                    </FilterChip>
+                    {filteredTypes.length === 0 ? (
+                      <span className="text-xs text-sc-fg-subtle px-1 py-2">No matching types</span>
+                    ) : (
+                      filteredTypes.map(type => (
+                        <EntityTypeChip
+                          key={type}
+                          entityType={type}
+                          active={typeFilter === type}
+                          onClick={() => {
+                            handleTypeFilter(typeFilter === type ? null : type);
+                            setTypeMenuOpen(false);
+                            setTypeSearch('');
+                          }}
+                          count={stats?.entity_counts[type]}
+                        />
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {typeFilter && (
+              <EntityTypeChip
+                entityType={typeFilter}
+                active
+                onClick={() => handleTypeFilter(null)}
+                count={stats?.entity_counts[typeFilter]}
+              />
+            )}
+          </div>
+        )}
       </div>
 
       {/* Content */}
@@ -337,6 +442,19 @@ export function EntitiesContent({
           )}
         </>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={open => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title="Delete entity?"
+        description="This removes the entity from your knowledge graph. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleteEntity.isPending}
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 }

@@ -10,6 +10,13 @@ import { Button } from '@/components/ui/button';
 import { EnhancedEmptyState, SearchEmptyState } from '@/components/ui/empty-state';
 import { Code, FileText } from '@/components/ui/icons';
 import { SearchInput } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { LoadingState } from '@/components/ui/spinner';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FilterChip } from '@/components/ui/toggle';
@@ -17,6 +24,10 @@ import { ErrorState } from '@/components/ui/tooltip';
 import type { SearchResponse, SearchResult, StatsResponse } from '@/lib/api';
 import { TASK_STATUS_CONFIG, TASK_STATUSES } from '@/lib/constants';
 import { useCodeExamples, useRAGHybridSearch, useSearch, useSources, useStats } from '@/lib/hooks';
+
+// Radix Select forbids empty-string item values, so the "All sources" option
+// uses this sentinel and maps back to the empty filter in state.
+const ALL_SOURCES = '__all__';
 
 // Search modes
 type SearchMode = 'knowledge' | 'docs' | 'code';
@@ -208,6 +219,12 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
     setSelectedStatus(prev => (prev === status ? null : status));
   };
 
+  // Bridge the shared Select (no empty values) to the source filter state
+  const sourceValue = selectedSource || ALL_SOURCES;
+  const handleSourceChange = (value: string) => {
+    setSelectedSource(value === ALL_SOURCES ? '' : value);
+  };
+
   // Knowledge results are now filtered server-side
   const filteredKnowledgeResults = knowledgeResults?.results;
 
@@ -253,6 +270,7 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
               ref={inputRef}
               value={query}
               onChange={e => setQuery(e.target.value)}
+              aria-label="Search"
               placeholder={
                 mode === 'knowledge'
                   ? 'Search patterns, procedures, rules, templates...'
@@ -269,7 +287,7 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
         </div>
 
         {/* Mode-specific Filters */}
-        <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-lg sm:rounded-xl p-3 sm:p-4 space-y-3 sm:space-y-4 shadow-card">
+        <div className="bg-sc-bg-elevated border border-sc-fg-subtle/30 rounded-xl p-3 sm:p-4 space-y-3 sm:space-y-4 shadow-card">
           {/* Knowledge Mode Filters */}
           {mode === 'knowledge' && (
             <>
@@ -347,18 +365,24 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
               {/* Date Range Filter */}
               <div className="space-y-2 pt-2 border-t border-sc-fg-subtle/10">
                 <div className="flex items-center gap-2">
-                  <span className="text-sc-fg-muted text-sm font-medium">Created Since</span>
+                  <span id="since-date-label" className="text-sc-fg-muted text-sm font-medium">
+                    Created Since
+                  </span>
                   {sinceDate && (
                     <button
                       type="button"
                       onClick={() => setSinceDate('')}
-                      className="text-xs text-sc-purple hover:underline"
+                      className="text-xs text-sc-purple hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base rounded"
                     >
                       Clear
                     </button>
                   )}
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div
+                  className="flex flex-wrap gap-2"
+                  role="group"
+                  aria-labelledby="since-date-label"
+                >
                   <button
                     type="button"
                     onClick={() => {
@@ -366,7 +390,11 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
                       d.setDate(d.getDate() - 7);
                       setSinceDate(d.toISOString().split('T')[0]);
                     }}
-                    className={`text-xs px-2 py-1 rounded border transition-colors ${
+                    aria-pressed={
+                      !!sinceDate &&
+                      new Date(sinceDate) >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+                    }
+                    className={`text-xs px-2 py-1 rounded border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base ${
                       sinceDate &&
                       new Date(sinceDate) >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
                         ? 'bg-sc-purple/20 border-sc-purple/40 text-sc-purple'
@@ -382,7 +410,12 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
                       d.setMonth(d.getMonth() - 1);
                       setSinceDate(d.toISOString().split('T')[0]);
                     }}
-                    className={`text-xs px-2 py-1 rounded border transition-colors ${
+                    aria-pressed={
+                      !!sinceDate &&
+                      new Date(sinceDate) >= new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) &&
+                      new Date(sinceDate) < new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+                    }
+                    className={`text-xs px-2 py-1 rounded border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base ${
                       sinceDate &&
                       new Date(sinceDate) >= new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) &&
                       new Date(sinceDate) < new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
@@ -396,7 +429,8 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
                     type="date"
                     value={sinceDate}
                     onChange={e => setSinceDate(e.target.value)}
-                    className="text-xs px-2 py-1 rounded border border-sc-fg-subtle/20 bg-sc-bg-elevated text-sc-fg-primary focus:outline-none focus:border-sc-purple/40"
+                    aria-label="Created since date"
+                    className="text-xs px-2 py-1 rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-highlight text-sc-fg-primary transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
                   />
                 </div>
               </div>
@@ -408,31 +442,41 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
             <div className="flex flex-wrap gap-4">
               {/* Source Filter */}
               <div className="space-y-2 flex-1 min-w-[200px]">
-                <span className="text-sc-fg-muted text-sm font-medium block">Source</span>
-                <select
-                  value={selectedSource}
-                  onChange={e => setSelectedSource(e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-elevated text-sc-fg-primary focus:outline-none focus:border-sc-purple/40"
-                >
-                  <option value="">All sources</option>
-                  {sources.map(source => (
-                    <option key={source.id} value={source.id}>
-                      {source.name}
-                    </option>
-                  ))}
-                </select>
+                <span id="docs-source-label" className="text-sc-fg-muted text-sm font-medium block">
+                  Source
+                </span>
+                <Select value={sourceValue} onValueChange={handleSourceChange}>
+                  <SelectTrigger aria-labelledby="docs-source-label">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_SOURCES}>All sources</SelectItem>
+                    {sources.map(source => (
+                      <SelectItem key={source.id} value={source.id}>
+                        {source.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Return Mode */}
               <div className="space-y-2">
-                <span className="text-sc-fg-muted text-sm font-medium block">Results as</span>
-                <div className="flex gap-1 p-1 bg-sc-bg-elevated rounded-lg">
+                <span id="return-mode-label" className="text-sc-fg-muted text-sm font-medium block">
+                  Results as
+                </span>
+                <div
+                  className="flex gap-1 p-1 bg-sc-bg-elevated rounded-lg"
+                  role="group"
+                  aria-labelledby="return-mode-label"
+                >
                   <button
                     type="button"
                     onClick={() => setReturnMode('chunks')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    aria-pressed={returnMode === 'chunks'}
+                    className={`px-3 py-1.5 text-xs font-medium rounded transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base ${
                       returnMode === 'chunks'
-                        ? 'bg-sc-cyan text-sc-bg-dark'
+                        ? 'bg-sc-cyan/15 text-sc-cyan'
                         : 'text-sc-fg-muted hover:text-sc-fg-primary'
                     }`}
                   >
@@ -441,9 +485,10 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
                   <button
                     type="button"
                     onClick={() => setReturnMode('pages')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    aria-pressed={returnMode === 'pages'}
+                    className={`px-3 py-1.5 text-xs font-medium rounded transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base ${
                       returnMode === 'pages'
-                        ? 'bg-sc-cyan text-sc-bg-dark'
+                        ? 'bg-sc-cyan/15 text-sc-cyan'
                         : 'text-sc-fg-muted hover:text-sc-fg-primary'
                     }`}
                   >
@@ -459,29 +504,39 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
             <div className="flex flex-wrap gap-4">
               {/* Source Filter */}
               <div className="space-y-2 flex-1 min-w-[200px]">
-                <span className="text-sc-fg-muted text-sm font-medium block">Source</span>
-                <select
-                  value={selectedSource}
-                  onChange={e => setSelectedSource(e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-elevated text-sc-fg-primary focus:outline-none focus:border-sc-purple/40"
-                >
-                  <option value="">All sources</option>
-                  {sources.map(source => (
-                    <option key={source.id} value={source.id}>
-                      {source.name}
-                    </option>
-                  ))}
-                </select>
+                <span id="code-source-label" className="text-sc-fg-muted text-sm font-medium block">
+                  Source
+                </span>
+                <Select value={sourceValue} onValueChange={handleSourceChange}>
+                  <SelectTrigger aria-labelledby="code-source-label">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_SOURCES}>All sources</SelectItem>
+                    {sources.map(source => (
+                      <SelectItem key={source.id} value={source.id}>
+                        {source.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Language Filter */}
               <div className="space-y-2">
-                <span className="text-sc-fg-muted text-sm font-medium block">Language</span>
-                <div className="flex flex-wrap gap-1.5">
+                <span id="language-label" className="text-sc-fg-muted text-sm font-medium block">
+                  Language
+                </span>
+                <div
+                  className="flex flex-wrap gap-1.5"
+                  role="group"
+                  aria-labelledby="language-label"
+                >
                   <button
                     type="button"
                     onClick={() => setSelectedLanguage('')}
-                    className={`px-2 py-1 text-xs rounded border transition-colors ${
+                    aria-pressed={!selectedLanguage}
+                    className={`px-2 py-1 text-xs rounded border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base ${
                       !selectedLanguage
                         ? 'bg-sc-purple/20 border-sc-purple/40 text-sc-purple'
                         : 'border-sc-fg-subtle/20 text-sc-fg-muted hover:border-sc-fg-subtle/40'
@@ -494,7 +549,8 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
                       key={lang}
                       type="button"
                       onClick={() => setSelectedLanguage(lang)}
-                      className={`px-2 py-1 text-xs rounded border transition-colors ${
+                      aria-pressed={selectedLanguage === lang}
+                      className={`px-2 py-1 text-xs rounded border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base ${
                         selectedLanguage === lang
                           ? 'bg-sc-purple/20 border-sc-purple/40 text-sc-purple'
                           : 'border-sc-fg-subtle/20 text-sc-fg-muted hover:border-sc-fg-subtle/40'
