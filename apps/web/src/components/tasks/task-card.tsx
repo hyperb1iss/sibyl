@@ -254,7 +254,7 @@ export const TaskCard = memo(function TaskCard({
         {/* Learnings preview - show snippet for completed tasks with learnings */}
         {hasLearnings && (
           <div className="mt-2 px-2 py-1.5 rounded-lg bg-sc-green/10 border border-sc-green/20">
-            <p className="text-[11px] text-sc-green line-clamp-2 leading-relaxed">💡 {learnings}</p>
+            <p className="text-[11px] text-sc-green line-clamp-2 leading-relaxed">{learnings}</p>
           </div>
         )}
 

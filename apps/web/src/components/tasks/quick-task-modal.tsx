@@ -1,8 +1,21 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Button,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui';
+import { ChevronRight, Layers, Menu, X } from '@/components/ui/icons';
 import type { TaskPriority } from '@/lib/api';
 import { TASK_PRIORITIES, TASK_PRIORITY_CONFIG } from '@/lib/constants';
+
+// Radix Select forbids an empty-string item value, so the "none" options use a
+// sentinel that maps back to '' when read.
+const NONE_VALUE = '__none__';
 
 export interface QuickTaskData {
   title: string;
@@ -150,7 +163,7 @@ export function QuickTaskModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="quick-task-title"
-        className="relative w-full max-w-lg bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl shadow-2xl overflow-hidden"
+        className="relative w-full max-w-lg bg-sc-bg-elevated border border-sc-fg-subtle/30 rounded-xl shadow-card-elevated overflow-hidden"
         onKeyDown={handleKeyDown}
       >
         {/* Header */}
@@ -159,15 +172,17 @@ export function QuickTaskModal({
             id="quick-task-title"
             className="text-lg font-semibold text-sc-fg-primary flex items-center gap-2"
           >
-            <span className="text-sc-purple">☰</span>
+            <Menu width={18} height={18} className="text-sc-purple" />
             Quick Task
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="text-sc-fg-subtle hover:text-sc-fg-primary transition-colors"
+            aria-label="Close"
+            className="rounded-lg p-1 text-sc-fg-muted hover:text-sc-fg-primary transition-colors duration-200
+                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
           >
-            ✕
+            <X width={18} height={18} />
           </button>
         </div>
 
@@ -181,7 +196,8 @@ export function QuickTaskModal({
               value={title}
               onChange={e => setTitle(e.target.value)}
               placeholder="What needs to be done?"
-              className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none focus:ring-2 focus:ring-sc-purple/10 transition-all"
+              aria-label="Task title"
+              className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary placeholder:text-sc-fg-muted transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
             />
           </div>
 
@@ -192,7 +208,8 @@ export function QuickTaskModal({
               onChange={e => setDescription(e.target.value)}
               placeholder="Add description (optional)"
               rows={2}
-              className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none focus:ring-2 focus:ring-sc-purple/10 transition-all resize-none"
+              aria-label="Task description"
+              className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary placeholder:text-sc-fg-muted transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated resize-none"
             />
           </div>
 
@@ -201,67 +218,70 @@ export function QuickTaskModal({
             {/* Project select */}
             {projects && projects.length > 0 && (
               <div className="flex-1">
-                <label
-                  htmlFor="quick-task-project"
-                  className="block text-xs text-sc-fg-subtle mb-1"
-                >
+                <label htmlFor="quick-task-project" className="block text-xs text-sc-fg-muted mb-1">
                   Project
                 </label>
-                <select
-                  id="quick-task-project"
-                  value={projectId}
-                  onChange={e => setProjectId(e.target.value)}
-                  className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary focus:border-sc-purple focus:outline-none focus:ring-2 focus:ring-sc-purple/10 transition-all"
+                <Select
+                  value={projectId || NONE_VALUE}
+                  onValueChange={v => setProjectId(v === NONE_VALUE ? '' : v)}
                 >
-                  <option value="">No project</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger id="quick-task-project" aria-label="Project" className="min-w-0">
+                    <SelectValue placeholder="No project" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE_VALUE}>No project</SelectItem>
+                    {projects.map(p => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
 
             {/* Epic select - only show if epics exist */}
             {filteredEpics.length > 0 && (
               <div className="flex-1">
-                <label htmlFor="quick-task-epic" className="block text-xs text-sc-fg-subtle mb-1">
-                  <span className="text-sc-orange">◈</span> Epic
+                <label htmlFor="quick-task-epic" className="block text-xs text-sc-fg-muted mb-1">
+                  <Layers width={12} height={12} className="inline text-sc-orange" /> Epic
                 </label>
-                <select
-                  id="quick-task-epic"
-                  value={epicId}
-                  onChange={e => setEpicId(e.target.value)}
-                  className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary focus:border-sc-purple focus:outline-none focus:ring-2 focus:ring-sc-purple/10 transition-all"
+                <Select
+                  value={epicId || NONE_VALUE}
+                  onValueChange={v => setEpicId(v === NONE_VALUE ? '' : v)}
                 >
-                  <option value="">No epic</option>
-                  {filteredEpics.map(e => (
-                    <option key={e.id} value={e.id}>
-                      {e.name}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger id="quick-task-epic" aria-label="Epic" className="min-w-0">
+                    <SelectValue placeholder="No epic" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE_VALUE}>No epic</SelectItem>
+                    {filteredEpics.map(e => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {e.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
 
             {/* Priority select */}
             <div className={projects && projects.length > 0 ? 'w-32' : 'flex-1'}>
-              <label htmlFor="quick-task-priority" className="block text-xs text-sc-fg-subtle mb-1">
+              <label htmlFor="quick-task-priority" className="block text-xs text-sc-fg-muted mb-1">
                 Priority
               </label>
-              <select
-                id="quick-task-priority"
-                value={priority}
-                onChange={e => setPriority(e.target.value as TaskPriority)}
-                className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary focus:border-sc-purple focus:outline-none focus:ring-2 focus:ring-sc-purple/10 transition-all"
-              >
-                {TASK_PRIORITIES.map(p => (
-                  <option key={p} value={p}>
-                    {TASK_PRIORITY_CONFIG[p]?.label ?? p}
-                  </option>
-                ))}
-              </select>
+              <Select value={priority} onValueChange={v => setPriority(v as TaskPriority)}>
+                <SelectTrigger id="quick-task-priority" aria-label="Priority" className="min-w-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TASK_PRIORITIES.map(p => (
+                    <SelectItem key={p} value={p}>
+                      {TASK_PRIORITY_CONFIG[p]?.label ?? p}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -269,14 +289,15 @@ export function QuickTaskModal({
           <button
             type="button"
             onClick={() => setShowAdvanced(!showAdvanced)}
-            className="text-sm text-sc-fg-subtle hover:text-sc-purple transition-colors flex items-center gap-1"
+            aria-expanded={showAdvanced}
+            className="rounded-lg text-sm text-sc-fg-muted hover:text-sc-purple transition-colors duration-200 flex items-center gap-1
+                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
           >
-            <span
-              className="transition-transform duration-200"
-              style={{ transform: showAdvanced ? 'rotate(90deg)' : 'rotate(0deg)' }}
-            >
-              ▶
-            </span>
+            <ChevronRight
+              width={14}
+              height={14}
+              className={`transition-transform duration-200 ${showAdvanced ? 'rotate-90' : ''}`}
+            />
             {showAdvanced ? 'Hide' : 'Show'} more options
           </button>
 
@@ -288,7 +309,7 @@ export function QuickTaskModal({
                 <div className="flex-1">
                   <label
                     htmlFor="quick-task-feature"
-                    className="block text-xs text-sc-fg-subtle mb-1"
+                    className="block text-xs text-sc-fg-muted mb-1"
                   >
                     Feature / Tag
                   </label>
@@ -298,11 +319,11 @@ export function QuickTaskModal({
                     value={feature}
                     onChange={e => setFeature(e.target.value)}
                     placeholder="e.g., auth, api, ui"
-                    className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none focus:ring-2 focus:ring-sc-purple/10 transition-all"
+                    className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary placeholder:text-sc-fg-muted transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                   />
                 </div>
                 <div className="w-40">
-                  <label htmlFor="quick-task-due" className="block text-xs text-sc-fg-subtle mb-1">
+                  <label htmlFor="quick-task-due" className="block text-xs text-sc-fg-muted mb-1">
                     Due Date
                   </label>
                   <input
@@ -310,7 +331,7 @@ export function QuickTaskModal({
                     type="date"
                     value={dueDate}
                     onChange={e => setDueDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary focus:border-sc-purple focus:outline-none focus:ring-2 focus:ring-sc-purple/10 transition-all"
+                    className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                   />
                 </div>
               </div>
@@ -320,7 +341,7 @@ export function QuickTaskModal({
                 <div className="flex-1">
                   <label
                     htmlFor="quick-task-assignees"
-                    className="block text-xs text-sc-fg-subtle mb-1"
+                    className="block text-xs text-sc-fg-muted mb-1"
                   >
                     Assignees
                   </label>
@@ -330,14 +351,11 @@ export function QuickTaskModal({
                     value={assigneesInput}
                     onChange={e => setAssigneesInput(e.target.value)}
                     placeholder="Comma-separated names"
-                    className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none focus:ring-2 focus:ring-sc-purple/10 transition-all"
+                    className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary placeholder:text-sc-fg-muted transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                   />
                 </div>
                 <div className="w-24">
-                  <label
-                    htmlFor="quick-task-hours"
-                    className="block text-xs text-sc-fg-subtle mb-1"
-                  >
+                  <label htmlFor="quick-task-hours" className="block text-xs text-sc-fg-muted mb-1">
                     Est. Hours
                   </label>
                   <input
@@ -348,7 +366,7 @@ export function QuickTaskModal({
                     value={estimatedHours}
                     onChange={e => setEstimatedHours(e.target.value)}
                     placeholder="0"
-                    className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none focus:ring-2 focus:ring-sc-purple/10 transition-all"
+                    className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary placeholder:text-sc-fg-muted transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                   />
                 </div>
               </div>
@@ -357,27 +375,24 @@ export function QuickTaskModal({
 
           {/* Actions */}
           <div className="flex items-center justify-between pt-2">
-            <div className="text-xs text-sc-fg-subtle">
+            <div className="text-xs text-sc-fg-muted">
               <kbd className="bg-sc-bg-highlight px-1.5 py-0.5 rounded">⌘</kbd>
               <span className="mx-1">+</span>
               <kbd className="bg-sc-bg-highlight px-1.5 py-0.5 rounded">↵</kbd>
               <span className="ml-1">to submit</span>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 text-sc-fg-muted hover:text-sc-fg-primary transition-colors"
-              >
+              <Button type="button" variant="ghost" onClick={onClose}>
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
-                disabled={!title.trim() || isSubmitting}
-                className="px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
+                variant="primary"
+                disabled={!title.trim()}
+                loading={isSubmitting}
               >
                 {isSubmitting ? 'Creating...' : 'Create Task'}
-              </button>
+              </Button>
             </div>
           </div>
         </form>

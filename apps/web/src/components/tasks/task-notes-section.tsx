@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Button } from '@/components/ui';
 import { Command, EditPencil, Send, User } from '@/components/ui/icons';
 import { formatDistanceToNow } from '@/lib/constants';
 import { useAddTaskNote, useTaskNotes } from '@/lib/hooks';
@@ -36,12 +37,12 @@ export function TaskNotesSection({ taskId }: TaskNotesSectionProps) {
   const notes = data?.notes ?? [];
 
   return (
-    <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-6">
-      <h2 className="text-sm font-semibold text-sc-fg-subtle uppercase tracking-wide mb-4 flex items-center gap-2">
+    <div className="bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-xl p-6">
+      <h2 className="text-sm font-semibold text-sc-fg-secondary uppercase tracking-wide mb-4 flex items-center gap-2">
         <EditPencil width={16} height={16} />
         Notes
         {notes.length > 0 && (
-          <span className="text-xs font-normal bg-sc-fg-subtle/10 px-2 py-0.5 rounded-full">
+          <span className="text-xs font-normal text-sc-fg-muted bg-sc-bg-highlight px-2 py-0.5 rounded-full">
             {notes.length}
           </span>
         )}
@@ -55,35 +56,38 @@ export function TaskNotesSection({ taskId }: TaskNotesSectionProps) {
             value={content}
             onChange={e => setContent(e.target.value)}
             placeholder="Add a note..."
-            className="flex-1 px-3 py-2 text-sm bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg
+            aria-label="Add a note"
+            title="Add a note"
+            className="flex-1 px-3 py-2 text-sm bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg
                        text-sc-fg-primary placeholder:text-sc-fg-subtle
-                       focus:outline-none focus:border-sc-purple/50 focus:ring-1 focus:ring-sc-purple/20
-                       transition-colors"
+                       transition-colors duration-200
+                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
             disabled={addNote.isPending}
           />
-          <button
+          <Button
             type="submit"
+            size="md"
             disabled={!content.trim() || addNote.isPending}
-            className="px-3 py-2 bg-sc-purple text-white rounded-lg text-sm font-medium
-                       hover:bg-sc-purple/80 disabled:opacity-50 disabled:cursor-not-allowed
-                       transition-colors flex items-center gap-1.5"
+            aria-label="Send note"
+            title="Send note"
+            icon={<Send width={14} height={14} />}
           >
-            <Send width={14} height={14} />
-          </button>
+            Send
+          </Button>
         </div>
       </form>
 
       {/* Notes list */}
       {isLoading ? (
-        <div className="text-sm text-sc-fg-subtle animate-pulse">Loading notes...</div>
+        <div className="text-sm text-sc-fg-muted animate-pulse">Loading notes...</div>
       ) : notes.length === 0 ? (
-        <p className="text-sm text-sc-fg-subtle italic">No notes yet. Add one above!</p>
+        <p className="text-sm text-sc-fg-muted italic">No notes yet. Add one above!</p>
       ) : (
         <div className="space-y-3 max-h-80 overflow-y-auto">
           {notes.map(note => (
             <div
               key={note.id}
-              className="p-3 bg-sc-bg-elevated rounded-lg border border-sc-fg-subtle/10"
+              className="p-3 bg-sc-bg-highlight rounded-lg border border-sc-fg-subtle/10"
             >
               <div className="flex items-start gap-2">
                 {/* Author icon */}
@@ -112,7 +116,7 @@ export function TaskNotesSection({ taskId }: TaskNotesSectionProps) {
                         {note.author_name}
                       </span>
                     )}
-                    <span className="text-xs text-sc-fg-subtle">
+                    <span className="text-xs text-sc-fg-muted">
                       {formatDistanceToNow(note.created_at)}
                     </span>
                   </div>
