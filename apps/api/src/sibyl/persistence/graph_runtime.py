@@ -575,6 +575,10 @@ class GraphSearchIndex(SearchIndex):
         driver = _driver_for_client(self._client, self._group_id)
         if _surreal_driver_for(driver) is not None:
             from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
+            from sibyl_core.migrate.legacy_graph_archive import (
+                ARCHIVE_GRAPH_EDGES,
+                ARCHIVE_GRAPH_TABLES,
+            )
 
             entity_rows = await _surreal_rows_or_empty(
                 driver,
@@ -603,7 +607,7 @@ class GraphSearchIndex(SearchIndex):
                 if row.get("entity_type")
             }
             for table in GRAPH_TABLES:
-                if table == "entity":
+                if table == "entity" or table in ARCHIVE_GRAPH_TABLES:
                     continue
                 count = await _surreal_group_count(driver, table, self._group_id)
                 if count:
@@ -615,7 +619,7 @@ class GraphSearchIndex(SearchIndex):
                 if _coerce_int(row.get("cnt"))
             }
             for table in GRAPH_EDGES:
-                if table == "relates_to":
+                if table == "relates_to" or table in ARCHIVE_GRAPH_EDGES:
                     continue
                 count = await _surreal_group_count(driver, table, self._group_id)
                 if count:
@@ -1249,6 +1253,7 @@ def graph_stats_payload(stats: GraphStats) -> dict[str, object]:
 
 async def _graph_stats_payload(group_id: str) -> dict[str, object]:
     from sibyl_core.backends.surreal.schema import GRAPH_TABLES
+    from sibyl_core.migrate.legacy_graph_archive import ARCHIVE_GRAPH_TABLES
 
     runtime = await _get_graph_runtime(group_id)
     rows = normalize_records(
@@ -1260,12 +1265,6 @@ async def _graph_stats_payload(group_id: str) -> dict[str, object]:
                     FROM entity
                     WHERE group_id = $group_id
                     GROUP BY entity_type
-                ),
-                episode_count: (
-                    SELECT count() AS cnt
-                    FROM episode
-                    WHERE group_id = $group_id
-                    GROUP ALL
                 ),
                 community_count: (
                     SELECT count() AS cnt
@@ -1291,7 +1290,7 @@ async def _graph_stats_payload(group_id: str) -> dict[str, object]:
         if entity_type:
             entity_counts[str(entity_type)] = _surreal_count_number(entity_row.get("cnt", 0))
     for table in GRAPH_TABLES:
-        if table == "entity":
+        if table == "entity" or table in ARCHIVE_GRAPH_TABLES:
             continue
         count = _surreal_count_value(row.get(f"{table}_count"))
         if count:

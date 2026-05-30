@@ -21,6 +21,7 @@ from sibyl_core.migrate.archive import (
     validate_archive,
     write_archive,
 )
+from sibyl_core.migrate.legacy_graph_archive import record_id
 from sibyl_core.migrate.verify import verify_graph_archive
 
 
@@ -457,6 +458,16 @@ def test_effective_graph_counts_normalize_duplicate_edges() -> None:
         "episode_count": 1,
         "mention_count": 2,
     }
+
+
+@pytest.mark.asyncio
+async def test_legacy_graph_archive_record_id_rejects_unknown_tables() -> None:
+    class FakeClient:
+        async def execute_query(self, query: str, **params: object) -> object:
+            raise AssertionError("unsupported table names must not reach Surreal")
+
+    with pytest.raises(ValueError, match="Unsupported backup record table"):
+        await record_id(FakeClient(), "entity;DELETE", "entity-1")
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ from unittest.mock import ANY, AsyncMock, call, patch
 
 import pytest
 
+from sibyl_core.migrate.legacy_graph_archive import parse_backup_datetime
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.tasks import Epic, Project, ProjectStatus, Task, TaskPriority, TaskStatus
 from sibyl_core.services.graph import (
@@ -191,7 +192,7 @@ class TestBackupInventory:
 
     def test_parse_backup_datetime_rejects_invalid_values(self) -> None:
         with pytest.raises(ValueError):
-            admin_module._parse_backup_datetime("not-a-date")
+            parse_backup_datetime("not-a-date")
 
 
 class TestHealthAndStats:

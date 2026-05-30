@@ -66,6 +66,11 @@ structured archive exports read from Surreal; `--restore-database-dump` is only 
 explicitly replaying a retained `postgres.sql` archive during rehearsal or rollback validation with
 `--source-type legacy-archive --target-mode postgres-rehearsal`.
 
+Legacy `episode` nodes and `mentions` edges are archive compatibility records. They are restored
+only so older Graphiti/Falkor exports can round-trip and verify. Current runtime memory uses
+`entity(entity_type='episode')` plus normal `relates_to` edges, and live graph stats do not count the
+archive-only tables.
+
 ### 3. Verify
 
 ```bash
