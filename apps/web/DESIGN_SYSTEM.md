@@ -6,33 +6,57 @@ Sibyl's design language: electric meets elegant. Neon hues over deep purple-blac
 
 ### Core Colors (OKLCH)
 
-| Token          | OKLCH                 | Usage                                 |
-| -------------- | --------------------- | ------------------------------------- |
-| `--sc-purple`  | `oklch(64% 0.31 328)` | Primary actions, keywords, importance |
-| `--sc-magenta` | `oklch(70% 0.32 328)` | Secondary accent                      |
-| `--sc-cyan`    | `oklch(92% 0.16 180)` | Interactions, focus, links            |
-| `--sc-coral`   | `oklch(72% 0.22 350)` | Data, hashes, numbers                 |
-| `--sc-yellow`  | `oklch(95% 0.13 105)` | Warnings, attention                   |
-| `--sc-green`   | `oklch(88% 0.23 145)` | Success, confirmations                |
-| `--sc-red`     | `oklch(68% 0.22 25)`  | Errors, danger                        |
+| Token           | OKLCH (neon)          | Usage                                          |
+| --------------- | --------------------- | ---------------------------------------------- |
+| `--sc-purple`   | `oklch(64% 0.31 328)` | Primary actions, "doing", keywords, importance |
+| `--sc-magenta`  | `oklch(70% 0.32 328)` | Secondary accent, `topic` entity               |
+| `--sc-cyan`     | `oklch(92% 0.16 180)` | Interactions, focus, links, "todo"             |
+| `--sc-coral`    | `oklch(72% 0.22 350)` | Data, hashes, numbers                          |
+| `--sc-yellow`   | `oklch(95% 0.13 105)` | Warnings, "review", attention                  |
+| `--sc-green`    | `oklch(88% 0.23 145)` | Success, "done", confirmations                 |
+| `--sc-red`      | `oklch(68% 0.22 25)`  | Errors, danger, "blocked"                      |
+| `--sc-orange`   | `oklch(78% 0.16 60)`  | Epic identity, `guide`/`epic` entities         |
+| `--sc-on-accent`| `oklch(100% 0 0)`     | Text/icons on saturated fills (the only white) |
 
 ### Background Hierarchy
 
-| Token               | OKLCH                  | Usage             |
-| ------------------- | ---------------------- | ----------------- |
-| `--sc-bg-dark`      | `oklch(6% 0.015 285)`  | Page background   |
-| `--sc-bg-base`      | `oklch(10% 0.02 285)`  | Cards, containers |
-| `--sc-bg-highlight` | `oklch(14% 0.025 285)` | Hover states      |
-| `--sc-bg-elevated`  | `oklch(17% 0.03 285)`  | Modals, dropdowns |
-| `--sc-bg-surface`   | `oklch(21% 0.035 285)` | Active states     |
+| Token               | OKLCH (neon)           | Role (both themes)                          |
+| ------------------- | ---------------------- | ------------------------------------------- |
+| `--sc-bg-dark`      | `oklch(6% 0.015 285)`  | Page body background                        |
+| `--sc-bg-base`      | `oklch(10% 0.02 285)`  | Sidebar, page containers, NON-card panels   |
+| `--sc-bg-elevated`  | `oklch(17% 0.03 285)`  | **Cards, modals, dropdowns** (the pop surface) |
+| `--sc-bg-highlight` | `oklch(14% 0.025 285)` | Hover states, count chips, inset pills      |
+| `--sc-bg-surface`   | `oklch(21% 0.035 285)` | Active states, deep wells, dividers         |
+
+In dawn the lightness ladder inverts: `bg-dark` is the lavender page (95%),
+`bg-base` is 97%, and `bg-elevated` is pure white (100%). **Put cards/modals on
+`bg-sc-bg-elevated`, never `bg-sc-bg-base`** — on dawn a card on `base` (97%)
+does not separate from the page.
 
 ### Foreground
 
-| Token             | OKLCH                  | Usage             |
-| ----------------- | ---------------------- | ----------------- |
-| `--sc-fg-primary` | `oklch(98% 0.005 110)` | Primary text      |
-| `--sc-fg-muted`   | `oklch(62% 0.035 280)` | Secondary text    |
-| `--sc-fg-subtle`  | `oklch(42% 0.03 280)`  | Disabled, borders |
+| Token               | OKLCH (neon)           | Usage                                   |
+| ------------------- | ---------------------- | --------------------------------------- |
+| `--sc-fg-primary`   | `oklch(98% 0.005 110)` | Body text, headings                     |
+| `--sc-fg-secondary` | `oklch(80% 0.02 280)`  | Section titles, mid-tier labels         |
+| `--sc-fg-muted`     | `oklch(62% 0.035 280)` | Secondary text, captions, hints         |
+| `--sc-fg-subtle`    | `oklch(42% 0.03 280)`  | Borders / dividers / disabled ONLY      |
+
+`--sc-fg-subtle` is a border tone (≈2.8:1 in dawn) — do not use it for real
+informational text; that is `--sc-fg-muted` or stronger.
+
+### Entity & status colors
+
+Entity-type colors are themed CSS variables — `--entity-<type>` (e.g.
+`--entity-task`, `--entity-error-pattern`) — each mapping to a core token, and
+exposed as Tailwind utilities (`bg-entity-task`, `text-entity-task`,
+`border-entity-task/30`). They are the canonical source for entity color and
+adapt across themes. Use `getEntityStyles(type)` / `getEntityColorVar(type)`
+from `@/lib/constants`; never inline raw hex. Status maps
+(`TASK_STATUS_CONFIG`, `EPIC_STATUS_CONFIG`, `CRAWL_STATUS_CONFIG`) follow the
+same shape (`color: var(--sc-*)`, `bg-sc-*/20`, `text-sc-*`). The force-graph
+canvas is the one sanctioned exception: it cannot read CSS variables, so it
+uses theme-keyed hex maps (`CANVAS_COLORS`, `canvasNodeColor`).
 
 ## Theming
 
@@ -69,11 +93,13 @@ className = "bg-sc-bg-elevated hover:bg-sc-bg-highlight";
 
 ## Focus States
 
-All interactive elements use consistent focus styles:
+All interactive elements use consistent focus styles — cyan ring-2 with the
+offset against the surface the control sits on (`-elevated` on cards, the
+prevalent case; `-base` on the page/sidebar):
 
 ```tsx
 className =
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base";
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated";
 ```
 
 ## Components
@@ -465,6 +491,26 @@ className = "text-sc-fg-muted"; // Muted purple-gray
 className = "text-sc-fg-subtle"; // Subtle, borders
 ```
 
+## Hard Rules
+
+These are enforced; a change is not done until it holds in **both** themes.
+
+1. **No raw hex in `className` or inline `style`.** Every color resolves to a
+   `--sc-*` token, an `--entity-*` var, or `color-mix` on one. Banned:
+   `bg-[#…]`, `text-[#…]`, inline `rgba()`, hardcoded tailwind grays
+   (`bg-gray-*`). The only exceptions are the force-graph canvas (theme-keyed
+   hex maps) and code-language brand colors.
+2. **No native OS chrome.** No `window.confirm`/`window.alert` (use
+   `ConfirmDialog` / `toast`), no native `<select>` (use `Select`), no
+   hand-rolled `fixed inset-0` modals (use `Dialog`).
+3. **Locked radius:** `rounded` (chips/kbd) · `rounded-lg` (buttons/inputs) ·
+   `rounded-xl` (cards/panels/dialogs) · `rounded-full` (pills/dots). No
+   `rounded-2xl` / `rounded-md`.
+4. **Cards/modals use `bg-sc-bg-elevated`**, scrims use `bg-sc-bg-dark/70-80`
+   (never `bg-black/*`), glows use `shadow-glow-*` (never baked `rgba()`).
+5. **Every interactive element** gets the locked focus ring and an accessible
+   name. Card-title hover never goes to `text-white` (invisible on dawn).
+
 ## Best Practices
 
 ### 1. Always use design tokens
@@ -479,10 +525,11 @@ className = "bg-gray-800 text-white";
 
 ### 2. Consistent focus states
 
-Copy the standard focus ring to all interactive elements:
+Copy the standard focus ring to all interactive elements (offset against the
+host surface — `-elevated` on cards, `-base` on the page):
 
 ```tsx
-"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base";
+"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated";
 ```
 
 ### 3. Use Radix primitives
