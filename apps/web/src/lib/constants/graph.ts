@@ -25,10 +25,37 @@ export function getClusterColor(clusterId: string, clusterIndex: number): string
   return CLUSTER_COLORS[clusterIndex % (CLUSTER_COLORS.length - 1)];
 }
 
+// Canvas cannot read CSS custom properties, so node/cluster colors live as hex.
+// The hexes are tuned for the dark neon canvas; on the light dawn canvas they
+// wash out, so darken them toward a deeper, more saturated tone that reads on
+// the lavender background.
+function darkenHex(hex: string, factor: number): string {
+  const value = hex.replace('#', '');
+  if (value.length !== 6) return hex;
+  const channel = (start: number) =>
+    Math.max(
+      0,
+      Math.min(255, Math.round(Number.parseInt(value.slice(start, start + 2), 16) * factor))
+    )
+      .toString(16)
+      .padStart(2, '0');
+  return `#${channel(0)}${channel(2)}${channel(4)}`;
+}
+
+export function canvasNodeColor(baseHex: string, theme: 'neon' | 'dawn'): string {
+  return theme === 'dawn' ? darkenHex(baseHex, 0.6) : baseHex;
+}
+
+export function canvasClusterColor(baseHex: string, theme: 'neon' | 'dawn'): string {
+  return theme === 'dawn' ? darkenHex(baseHex, 0.62) : baseHex;
+}
+
 // Graph visualization defaults
 export const GRAPH_DEFAULTS = {
-  MAX_NODES: 1000, // Increased for hierarchical view
-  MAX_EDGES: 5000, // Increased for hierarchical view
+  // Render budget per request. Kept legible on purpose — a connected ~500-node
+  // web reads as an explorable galaxy, where 1000+ collapses into a hairball.
+  MAX_NODES: 500,
+  MAX_EDGES: 2500,
   // Node sizing
   NODE_SIZE_MIN: 3,
   NODE_SIZE_MAX: 10,

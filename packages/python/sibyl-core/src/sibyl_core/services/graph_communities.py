@@ -57,6 +57,10 @@ DETECTION_MAX_ENTITIES = 25_000
 DETECTION_MAX_RELATIONSHIPS = 100_000
 # Above this focused-node count the UI defaults to the aggregate overview.
 OVERVIEW_NODE_THRESHOLD = 400
+# The overview is a legible MAP of domains, not every community. Show the
+# largest communities as labeled bubbles; the long tail of tiny communities and
+# the unclustered remainder are reached by drilling in or searching, not mapped.
+OVERVIEW_MAX_CLUSTERS = 18
 # Share of the render budget seeded with top-degree hubs before BFS growth.
 _GRAPH_HUB_SEED_SHARE = 0.4
 
@@ -572,8 +576,12 @@ def _pick_connected_node_ids(
     repeatedly attaching the highest-degree unselected neighbor of the current
     set, so every added node carries at least one surviving edge.
     """
+    # Only nodes that actually connect to something. Isolated singletons (no
+    # focused edge) add no signal and render as a starfield halo around the
+    # connected core, so they are excluded from the displayed subgraph.
+    connected_ids = {entity_id for entity_id in focused_ids if degrees.get(entity_id, 0) > 0}
     ranked_ids = sorted(
-        focused_ids,
+        connected_ids,
         key=lambda entity_id: _entity_priority_key(entity_id, entity_by_id, degrees),
         reverse=True,
     )
@@ -588,7 +596,7 @@ def _pick_connected_node_ids(
 
     def _enqueue_neighbors(node_id: str) -> None:
         for neighbor in adjacency.get(node_id, ()):
-            if neighbor in queued:
+            if neighbor in queued or degrees.get(neighbor, 0) == 0:
                 continue
             queued.add(neighbor)
             heapq.heappush(frontier, (-degrees.get(neighbor, 0), neighbor))
@@ -976,9 +984,23 @@ def _build_overview_graph_from_snapshot(
         entity_type = entity.entity_type.value
         type_counts[entity_type] = type_counts.get(entity_type, 0) + 1
 
+    # Map the largest real communities only — exclude the unclustered remainder
+    # and the long tail of tiny communities so the overview reads as a clean
+    # domain map, not a field of dots.
+    ranked_clusters = sorted(
+        (
+            (cluster_id, members)
+            for cluster_id, members in members_by_cluster.items()
+            if cluster_id != "unclustered"
+        ),
+        key=lambda item: len(item[1]),
+        reverse=True,
+    )[:OVERVIEW_MAX_CLUSTERS]
+    kept_cluster_ids = {cluster_id for cluster_id, _ in ranked_clusters}
+
     aggregate_nodes: list[dict[str, Any]] = []
     enriched_clusters: list[dict[str, Any]] = []
-    for cluster_id, members in members_by_cluster.items():
+    for cluster_id, members in ranked_clusters:
         type_dist = type_counts_by_cluster.get(cluster_id, {})
         dominant = _dominant_type(type_dist)
         label = _overview_cluster_label(cluster_id, members, entity_by_id, degrees, dominant)
@@ -1013,9 +1035,6 @@ def _build_overview_graph_from_snapshot(
             }
         )
 
-    aggregate_nodes.sort(key=lambda node: node["member_count"], reverse=True)
-    enriched_clusters.sort(key=lambda cluster: cluster["member_count"], reverse=True)
-
     cluster_edge_counts: dict[tuple[str, str], int] = {}
     for relationship in relationships:
         if relationship.source_id not in focused_ids or relationship.target_id not in focused_ids:
@@ -1023,6 +1042,8 @@ def _build_overview_graph_from_snapshot(
         source_cluster = node_to_cluster.get(relationship.source_id, "unclustered")
         target_cluster = node_to_cluster.get(relationship.target_id, "unclustered")
         if source_cluster == target_cluster:
+            continue
+        if source_cluster not in kept_cluster_ids or target_cluster not in kept_cluster_ids:
             continue
         ordered = sorted((source_cluster, target_cluster))
         pair: tuple[str, str] = (ordered[0], ordered[1])
@@ -1859,6 +1880,8 @@ async def get_hierarchical_graph(
 
     data.total_nodes = total_node_count
     data.total_edges = total_edge_count
+    # Large graphs land on the labeled domain map; small ones go straight to the
+    # connected node view since there's little to summarize.
     data.recommended_resolution = (
         GRAPH_RESOLUTION_OVERVIEW
         if total_node_count > OVERVIEW_NODE_THRESHOLD

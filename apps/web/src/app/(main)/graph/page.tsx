@@ -31,7 +31,13 @@ import type {
   HierarchicalNode,
   RelatedEntitySummary,
 } from '@/lib/api';
-import { ENTITY_TYPES, GRAPH_DEFAULTS, getClusterColor, getEntityColor } from '@/lib/constants';
+import {
+  canvasNodeColor,
+  ENTITY_TYPES,
+  GRAPH_DEFAULTS,
+  getClusterColor,
+  getEntityColor,
+} from '@/lib/constants';
 import { useHierarchicalGraph, useMediaQuery, useProjects } from '@/lib/hooks';
 import { useProjectContext } from '@/lib/project-context';
 import { useTheme } from '@/lib/theme';
@@ -205,7 +211,7 @@ function ClusterLegend({
             .map(cluster => {
               const color = clusterColorMap.get(cluster.id) || '#8b85a0';
               const isSelected = selectedCluster === cluster.id;
-              const label = getClusterLabel(cluster, nodes);
+              const label = cluster.label || getClusterLabel(cluster, nodes);
               return (
                 <button
                   key={cluster.id}
@@ -300,8 +306,18 @@ function StatsOverlay({
   );
 }
 
+// Radius of an aggregate (cluster) bubble, by member count. Shared by the paint
+// path and the collision force so bubbles never overlap.
+function aggregateRadius(memberCount: number): number {
+  return 10 + Math.log2(memberCount + 1) * 3.2;
+}
+
 // Unified graph toolbar - zoom, search, filters
 function GraphToolbar({
+  resolution,
+  onResolutionChange,
+  selectedClusterLabel,
+  onClearCluster,
   onZoomIn,
   onZoomOut,
   onFitView,
@@ -324,6 +340,10 @@ function GraphToolbar({
   focusedProjectCount,
   focusAvailable,
 }: {
+  resolution: GraphResolution;
+  onResolutionChange: (next: GraphResolution) => void;
+  selectedClusterLabel?: string | null;
+  onClearCluster?: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFitView: () => void;
@@ -449,6 +469,50 @@ function GraphToolbar({
       {/* Desktop unified toolbar */}
       <div className="absolute top-4 left-4 z-10 hidden md:block">
         <Card className="!p-1.5 flex items-center gap-2">
+          {/* Resolution toggle: aggregate overview vs. node detail */}
+          <div className="flex items-center rounded-lg bg-sc-bg-base p-0.5">
+            <button
+              type="button"
+              onClick={() => onResolutionChange('overview')}
+              aria-pressed={resolution === 'overview'}
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                resolution === 'overview'
+                  ? 'bg-sc-purple/20 text-sc-purple'
+                  : 'text-sc-fg-muted hover:text-sc-fg-primary'
+              }`}
+              title="Cluster overview"
+            >
+              Overview
+            </button>
+            <button
+              type="button"
+              onClick={() => onResolutionChange('detail')}
+              aria-pressed={resolution === 'detail'}
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                resolution === 'detail'
+                  ? 'bg-sc-purple/20 text-sc-purple'
+                  : 'text-sc-fg-muted hover:text-sc-fg-primary'
+              }`}
+              title="Node detail"
+            >
+              Detail
+            </button>
+          </div>
+
+          {selectedClusterLabel && (
+            <button
+              type="button"
+              onClick={onClearCluster}
+              className="flex items-center gap-1 max-w-[12rem] px-2 py-1 text-xs rounded-lg bg-sc-cyan/10 text-sc-cyan hover:bg-sc-cyan/20 transition-colors"
+              title="Back to all clusters"
+            >
+              <X width={12} height={12} className="flex-shrink-0" />
+              <span className="truncate">{selectedClusterLabel}</span>
+            </button>
+          )}
+
+          <div className="w-px h-5 bg-sc-fg-subtle/20" />
+
           {/* Zoom controls */}
           <div className="flex items-center gap-0.5">
             <button
@@ -814,14 +878,27 @@ function GraphPageContent() {
     cluster_id: selectedCluster ?? undefined,
   });
 
-  // Reset stale selection state when filters change
+  // Reset stale selection state when filters change. The chosen resolution is
+  // preserved — only the cluster/node focus is cleared.
   useEffect(() => {
     if (!filtersKey) return;
     setSelectedCluster(null);
     setSelectedNodeId(null);
     setHoveredNode(null);
-    setGraphResolution('detail');
   }, [filtersKey]);
+
+  // Default the initial mode to the server's recommendation (large graphs open
+  // on the legible overview). Only applied once, before the user picks a mode.
+  const initialResolutionAppliedRef = useRef(false);
+  useEffect(() => {
+    if (initialResolutionAppliedRef.current) return;
+    const recommended = data?.recommended_resolution;
+    if (!recommended) return;
+    initialResolutionAppliedRef.current = true;
+    if (recommended !== graphResolution && !selectedCluster) {
+      setGraphResolution(recommended);
+    }
+  }, [data?.recommended_resolution, graphResolution, selectedCluster]);
 
   // Build cluster color map
   const clusterColorMap = useMemo(() => {
@@ -1028,31 +1105,62 @@ function GraphPageContent() {
     const linkCount = graphData.links.length;
     if (!graphRef.current || !graphRenderKey || (nodeCount === 0 && linkCount === 0)) return;
 
-    // Adaptive forces keep large graphs readable and prevent "starfield" dispersion
-    // after project filter transitions.
-    const largeGraphScale = nodeCount >= 900 ? 0.4 : nodeCount >= 500 ? 0.55 : 1;
-    const chargeStrength = Math.round(GRAPH_DEFAULTS.CHARGE_STRENGTH * largeGraphScale);
-    const linkDistance =
-      nodeCount >= 900 ? 42 : nodeCount >= 500 ? 50 : GRAPH_DEFAULTS.LINK_DISTANCE;
-    const collisionRadius =
-      nodeCount >= 900 ? 10 : nodeCount >= 500 ? 12 : GRAPH_DEFAULTS.COLLISION_RADIUS;
-    const centerStrength =
-      nodeCount >= 900 ? 0.12 : nodeCount >= 500 ? 0.08 : GRAPH_DEFAULTS.CENTER_STRENGTH;
+    const isOverview = graphResolution === 'overview';
+
+    // Overview: a few large bubbles that must spread and never overlap — strong
+    // repulsion, long links, and a per-node collision radius matching each
+    // bubble's painted size. Detail: strong repulsion + long links spread a
+    // dense subgraph into an explorable web instead of a hairball.
+    // Overview is a handful of big bubbles: let collision do the spacing, keep
+    // charge low and centering strong so the map stays a compact, framed cluster
+    // instead of flinging outliers off-canvas.
+    const chargeStrength = isOverview
+      ? -260
+      : nodeCount >= 600
+        ? -240
+        : nodeCount >= 300
+          ? -200
+          : -150;
+    const linkDistance = isOverview
+      ? 130
+      : nodeCount >= 600
+        ? 75
+        : nodeCount >= 300
+          ? 65
+          : GRAPH_DEFAULTS.LINK_DISTANCE;
+    const baseCollision = nodeCount >= 600 ? 18 : nodeCount >= 300 ? 16 : 14;
+    const centerStrength = isOverview ? 0.3 : 0.04;
 
     graphRef.current.d3Force(
       'charge',
       d3Force
         .forceManyBody()
         .strength(chargeStrength)
-        .distanceMax(linkDistance * 8)
+        .distanceMax(linkDistance * 12)
     );
     graphRef.current.d3Force('center', d3Force.forceCenter().strength(centerStrength));
-    graphRef.current.d3Force('collision', d3Force.forceCollide().radius(collisionRadius));
+    graphRef.current.d3Force(
+      'collision',
+      d3Force
+        .forceCollide()
+        .radius((node: d3Force.SimulationNodeDatum) => {
+          const graphNode = node as GraphNode;
+          return graphNode.aggregate
+            ? aggregateRadius(graphNode.member_count || 1) + 22
+            : baseCollision;
+        })
+        .strength(0.95)
+    );
 
     // Link force with distance - ForceFn has [key: string]: any so we can access distance directly
     const linkForce = graphRef.current.d3Force('link');
     if (linkForce && typeof linkForce.distance === 'function') {
       linkForce.distance(linkDistance);
+    }
+    // In overview, keep links weak so a heavily-bridged set of domains doesn't
+    // yank into a tight clump — collision and centering set the spacing instead.
+    if (linkForce && typeof linkForce.strength === 'function' && isOverview) {
+      linkForce.strength(0.04);
     }
 
     // Reheat simulation after re-keyed graph mounts (project/type/cluster switches).
@@ -1062,7 +1170,18 @@ function GraphPageContent() {
     if (typeof graph.d3ReheatSimulation === 'function') {
       graph.d3ReheatSimulation();
     }
-  }, [graphData.nodes.length, graphData.links.length, graphRenderKey]);
+  }, [graphData.nodes.length, graphData.links.length, graphRenderKey, graphResolution]);
+
+  // Reliably frame the layout once it has settled. onEngineStop can fire before
+  // the reheated simulation finishes spreading, leaving the graph small and
+  // off-center, so re-fit on a short delay whenever the dataset/mode changes.
+  useEffect(() => {
+    if (!graphRef.current || graphData.nodes.length === 0) return;
+    const timer = setTimeout(() => {
+      graphRef.current?.zoomToFit(600, GRAPH_DEFAULTS.FIT_PADDING);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [graphRenderKey, graphData.nodes.length]);
 
   // Clean node rendering - entity colors + degree-based sizing
   // Labels scale with zoom: more labels appear as you zoom in
@@ -1092,7 +1211,7 @@ function GraphPageContent() {
       if (isProject) {
         size = 14 + combinedScale * 10;
       } else if (isAggregate) {
-        size = Math.max(10, 8 + Math.log2(memberCount + 1) * 3 + combinedScale * 6);
+        size = Math.max(14, aggregateRadius(memberCount) + combinedScale * 6);
       } else if (isSelected) {
         size = Math.max(12, 6 + combinedScale * 10);
       } else if (isHovered) {
@@ -1105,7 +1224,17 @@ function GraphPageContent() {
         size = 5 + combinedScale * 12;
       }
 
-      const baseColor = node.entityColor || '#8b85a0';
+      const isDawn = theme === 'dawn';
+      // Color the whole-graph web by community (color = cluster, so regions
+      // read at a glance); within a drilled-in cluster, color by entity type to
+      // show the variety inside that domain. Aggregate bubbles keep their
+      // dominant-type color.
+      const rawColor =
+        !isAggregate && !selectedCluster
+          ? node.clusterColor || node.entityColor || '#8b85a0'
+          : node.entityColor || '#8b85a0';
+      // Canvas can't read CSS vars, so darken node hues for the light canvas.
+      const baseColor = canvasNodeColor(rawColor, theme);
       // Neighbors are rendered at 40% opacity to fade into background
       // Search matches keep full opacity
       const color =
@@ -1131,19 +1260,46 @@ function GraphPageContent() {
         ctx.fill();
       }
 
-      // Main node
-      ctx.beginPath();
-      ctx.arc(x, y, size, 0, 2 * Math.PI);
-      ctx.fillStyle = color;
-      ctx.fill();
+      if (isAggregate) {
+        // Cluster bubble: translucent fill, solid ring, member count inside.
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, 2 * Math.PI);
+        ctx.fillStyle = `${baseColor}2e`;
+        ctx.fill();
+        ctx.strokeStyle = baseColor;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        const countText =
+          memberCount >= 1000 ? `${(memberCount / 1000).toFixed(1)}k` : String(memberCount);
+        const countFont = Math.max(6, Math.min(size * 0.8, 22));
+        ctx.font = `600 ${countFont}px "Space Grotesk", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = colors.fgPrimary;
+        ctx.fillText(countText, x, y);
+      } else {
+        // Main node
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.fill();
+
+        // On the light dawn canvas a thin dark outline keeps pale nodes legible.
+        if (isDawn && !isSelected && !isHovered && !isSearchMatch) {
+          ctx.strokeStyle = 'rgba(43, 37, 64, 0.55)';
+          ctx.lineWidth = 0.6;
+          ctx.stroke();
+        }
+      }
 
       // Border for selected/hovered/search match
       if (isSelected) {
-        ctx.strokeStyle = '#ffffff';
+        ctx.strokeStyle = isDawn ? '#2b2540' : '#ffffff';
         ctx.lineWidth = 2;
         ctx.stroke();
       } else if (isHovered) {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.strokeStyle = isDawn ? 'rgba(43, 37, 64, 0.5)' : 'rgba(255, 255, 255, 0.5)';
         ctx.lineWidth = 1.5;
         ctx.stroke();
       } else if (isSearchMatch) {
@@ -1169,7 +1325,8 @@ function GraphPageContent() {
       } else if (isNeighbor) {
         // Neighbors only show label when zoomed in very close
         showLabel = globalScale >= 4.0;
-      } else if (isAggregate && globalScale >= 0.45) {
+      } else if (isAggregate) {
+        // Domain bubbles are always named — the label is the meaningful part.
         showLabel = true;
       } else if (isProject && globalScale >= 0.4) {
         showLabel = true;
@@ -1215,7 +1372,7 @@ function GraphPageContent() {
         ctx.fillText(displayLabel, x, labelY);
       }
     },
-    [selectedNodeId, hoveredNode, graphData.maxDegree, theme, colors]
+    [selectedNodeId, hoveredNode, graphData.maxDegree, theme, colors, selectedCluster]
   );
 
   // Use the library's native link renderer for robustness; only customize
@@ -1241,9 +1398,9 @@ function GraphPageContent() {
         targetId === hoveredNode;
 
       if (isHighlighted) {
-        return theme === 'neon' ? 'rgba(255, 255, 255, 0.72)' : 'rgba(43, 37, 64, 0.62)';
+        return theme === 'neon' ? 'rgba(255, 255, 255, 0.72)' : 'rgba(43, 37, 64, 0.78)';
       }
-      return theme === 'neon' ? 'rgba(255, 255, 255, 0.52)' : 'rgba(43, 37, 64, 0.42)';
+      return theme === 'neon' ? 'rgba(255, 255, 255, 0.52)' : 'rgba(43, 37, 64, 0.6)';
     },
     [getLinkEndpointId, selectedNodeId, hoveredNode, theme]
   );
@@ -1268,12 +1425,22 @@ function GraphPageContent() {
     setHasInitialFit(true);
   }, [hasInitialFit]);
 
+  const handleResolutionChange = useCallback((next: GraphResolution) => {
+    setGraphResolution(next);
+    if (next === 'overview') {
+      setSelectedCluster(null);
+      setSelectedNodeId(null);
+    }
+  }, []);
+
   // Smooth zoom to node on click
   const handleNodeClick = useCallback(
     (node: GraphNode) => {
       if (node.aggregate) {
+        // Drill from an overview bubble into that cluster's detail view.
         setSelectedNodeId(null);
         setSelectedCluster(node.cluster_id || null);
+        setGraphResolution('detail');
         if (graphRef.current && node.x !== undefined && node.y !== undefined) {
           graphRef.current.centerAt(node.x, node.y, 800);
           graphRef.current.zoom(2.1, 800);
@@ -1378,6 +1545,12 @@ function GraphPageContent() {
   const edgeCount = graphData.links.length;
   const canToggleShared = Boolean(sharedProjectId && selectedProjects.length > 0 && focusProjects);
   const canToggleFocus = hasProjectSelection;
+  const selectedClusterLabel = useMemo(() => {
+    if (!selectedCluster || !data?.clusters) return null;
+    const cluster = data.clusters.find(c => c.id === selectedCluster);
+    if (!cluster) return null;
+    return cluster.label || getClusterLabel(cluster, allNodesWithDegree);
+  }, [selectedCluster, data?.clusters, allNodesWithDegree]);
 
   return (
     <div
@@ -1393,6 +1566,10 @@ function GraphPageContent() {
           suppressHydrationWarning
         >
           <GraphToolbar
+            resolution={graphResolution}
+            onResolutionChange={handleResolutionChange}
+            selectedClusterLabel={selectedClusterLabel}
+            onClearCluster={() => setSelectedCluster(null)}
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}
             onFitView={handleFitView}
@@ -1492,7 +1669,15 @@ function GraphPageContent() {
                 clusters={data.clusters}
                 clusterColorMap={clusterColorMap}
                 selectedCluster={selectedCluster}
-                onClusterClick={setSelectedCluster}
+                onClusterClick={clusterId => {
+                  if (clusterId) {
+                    setSelectedCluster(clusterId);
+                    setGraphResolution('detail');
+                  } else {
+                    setSelectedCluster(null);
+                    setGraphResolution('overview');
+                  }
+                }}
                 nodes={allNodesWithDegree}
               />
             </div>

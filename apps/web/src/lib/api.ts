@@ -685,6 +685,7 @@ export interface HierarchicalEdge {
 
 export interface HierarchicalCluster {
   id: string;
+  label?: string;
   member_count: number;
   displayed_member_count?: number;
   level: number;
@@ -710,6 +711,7 @@ export interface HierarchicalGraphResponse {
   displayed_nodes?: number;
   displayed_edges?: number;
   resolution?: GraphResolution;
+  recommended_resolution?: GraphResolution;
 }
 
 export interface HealthResponse {

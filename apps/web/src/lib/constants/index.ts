@@ -24,7 +24,13 @@ export { EPIC_STATUS_CONFIG, EPIC_STATUSES, type EpicStatusType } from './epics'
 // Formatting
 export { formatDateTime, formatDistanceToNow, formatUptime } from './formatting';
 // Graph
-export { CLUSTER_COLORS, GRAPH_DEFAULTS, getClusterColor } from './graph';
+export {
+  CLUSTER_COLORS,
+  canvasClusterColor,
+  canvasNodeColor,
+  GRAPH_DEFAULTS,
+  getClusterColor,
+} from './graph';
 // Navigation
 export {
   NAVIGATION,
