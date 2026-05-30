@@ -518,9 +518,9 @@ body {
   background: color-mix(in oklch, var(--sc-purple) 40%, transparent);
 }
 
-/* Focus outline - subtle purple instead of bright cyan */
+/* Focus outline - opaque cyan so keyboard focus clears 3:1 in both themes */
 :focus-visible {
-  outline: 2px solid color-mix(in oklch, var(--sc-purple) 50%, transparent);
+  outline: 2px solid var(--sc-cyan);
   outline-offset: 2px;
 }
 

@@ -25,7 +25,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             w-full bg-sc-bg-highlight border rounded-lg
             text-sc-fg-primary placeholder:text-sc-fg-subtle
             transition-colors duration-150
-            focus:outline-none focus:border-sc-cyan focus:ring-1 focus:ring-sc-cyan/20
+            focus:outline-none focus:border-sc-cyan focus:ring-2 focus:ring-sc-cyan/20
             disabled:opacity-50 disabled:cursor-not-allowed
             ${icon ? 'pl-10' : 'pl-4'} pr-4 py-2
             ${error ? 'border-sc-red' : 'border-sc-fg-subtle/20'}
@@ -60,7 +60,7 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
             w-full pl-12 pr-4 py-3 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl
             text-lg text-sc-fg-primary placeholder:text-sc-fg-subtle
             transition-all duration-200
-            focus:outline-none focus:border-sc-purple focus:ring-2 focus:ring-sc-purple/10
+            focus:outline-none focus:border-sc-cyan focus:ring-2 focus:ring-sc-cyan/20
             hover:border-sc-fg-subtle/40
             ${className}
           `}
@@ -92,7 +92,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
             w-full bg-sc-bg-highlight border rounded-lg px-4 py-3
             text-sc-fg-primary placeholder:text-sc-fg-subtle
             transition-colors duration-150 resize-none
-            focus:outline-none focus:border-sc-cyan focus:ring-1 focus:ring-sc-cyan/20
+            focus:outline-none focus:border-sc-cyan focus:ring-2 focus:ring-sc-cyan/20
             disabled:opacity-50 disabled:cursor-not-allowed
             ${monospace ? 'font-mono text-sm' : ''}
             ${error ? 'border-sc-red' : 'border-sc-fg-subtle/20'}
