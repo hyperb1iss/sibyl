@@ -586,6 +586,136 @@ class TestRestoreBackup:
         ]
 
     @pytest.mark.asyncio
+    async def test_restore_round_trips_legacy_episode_mentions(self) -> None:
+        org_id = "00000000-0000-0000-0000-000000000111"
+        client = SurrealGraphClient(group_id=org_id, url="memory://")
+        await prepare_graph_schema(client)
+        entity_manager = EntityManager(client, group_id=org_id)
+        relationship_manager = RelationshipManager(client, group_id=org_id)
+        backup_data = BackupData(
+            version="2.0",
+            created_at="2026-04-19T00:00:00Z",
+            organization_id=org_id,
+            entity_count=1,
+            relationship_count=0,
+            entities=[
+                Entity(
+                    id="entity-legacy",
+                    entity_type=EntityType.TOPIC,
+                    name="Legacy entity",
+                    organization_id=org_id,
+                ).model_dump(mode="json")
+            ],
+            relationships=[],
+            episode_count=1,
+            mention_count=1,
+            episodes=[
+                {
+                    "uuid": "episode-legacy",
+                    "name": "Legacy conversation",
+                    "source": "message",
+                    "source_description": "chat",
+                    "content": "legacy archive payload",
+                    "created_at": "2026-04-19T00:00:00Z",
+                    "valid_at": "2026-04-19T00:00:00Z",
+                    "entity_edges": [],
+                }
+            ],
+            mentions=[
+                {
+                    "uuid": "mention-legacy",
+                    "source_node_uuid": "episode-legacy",
+                    "target_node_uuid": "entity-legacy",
+                    "created_at": "2026-04-19T00:00:00Z",
+                }
+            ],
+        )
+
+        try:
+            with patch(
+                "sibyl_core.tools.admin.get_graph_runtime",
+                AsyncMock(
+                    return_value=SimpleNamespace(
+                        client=client,
+                        entity_manager=entity_manager,
+                        relationship_manager=relationship_manager,
+                    )
+                ),
+            ):
+                first_result = await restore_backup(
+                    backup_data,
+                    organization_id=org_id,
+                    skip_existing=False,
+                )
+                second_result = await restore_backup(
+                    backup_data,
+                    organization_id=org_id,
+                    skip_existing=True,
+                )
+                backup_result = await create_backup(organization_id=org_id)
+
+            episode_rows = normalize_records(
+                await client.execute_query(
+                    """
+                    SELECT uuid, source, source_description, content, group_id, entity_edges
+                    FROM episode
+                    WHERE uuid = "episode-legacy";
+                    """
+                )
+            )
+            mention_rows = normalize_records(
+                await client.execute_query(
+                    """
+                    SELECT uuid, in.uuid AS source_id, out.uuid AS target_id, group_id
+                    FROM mentions
+                    WHERE uuid = "mention-legacy";
+                    """
+                )
+            )
+        finally:
+            await client.close()
+
+        assert first_result.success is True
+        assert first_result.episodes_restored == 1
+        assert first_result.mentions_restored == 1
+        assert second_result.success is True
+        assert second_result.episodes_restored == 0
+        assert second_result.mentions_restored == 0
+        assert second_result.episodes_skipped == 1
+        assert second_result.mentions_skipped == 1
+        assert episode_rows == [
+            {
+                "uuid": "episode-legacy",
+                "source": "message",
+                "source_description": "chat",
+                "content": "legacy archive payload",
+                "group_id": org_id,
+                "entity_edges": [],
+            }
+        ]
+        assert mention_rows == [
+            {
+                "uuid": "mention-legacy",
+                "source_id": "episode-legacy",
+                "target_id": "entity-legacy",
+                "group_id": org_id,
+            }
+        ]
+        assert backup_result.success is True
+        assert backup_result.episode_count == 1
+        assert backup_result.mention_count == 1
+        assert backup_result.backup_data is not None
+        assert backup_result.backup_data.mentions == [
+            {
+                "uuid": "mention-legacy",
+                "source_id": "episode-legacy",
+                "target_id": "entity-legacy",
+                "group_id": org_id,
+                "created_at": "2026-04-19T00:00:00+00:00",
+            }
+        ]
+
+    @pytest.mark.asyncio
     async def test_restore_preserves_task_link_source_metadata(self) -> None:
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()

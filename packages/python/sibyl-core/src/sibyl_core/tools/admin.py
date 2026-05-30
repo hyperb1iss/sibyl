@@ -1117,13 +1117,10 @@ async def restore_backup(
             try:
                 episode = _episode_from_payload(episode_data, organization_id=organization_id)
                 if skip_existing:
-                    try:
-                        existing = await entity_manager.get(episode.uuid)
-                        if existing:
-                            episodes_skipped += 1
-                            continue
-                    except Exception:
-                        pass
+                    existing = await _record_id(driver, "episode", episode.uuid)
+                    if existing:
+                        episodes_skipped += 1
+                        continue
 
                 episodes_to_restore.append(episode)
             except Exception as e:

@@ -47,6 +47,47 @@ def _graph_bytes(
     ).encode("utf-8")
 
 
+def _legacy_graph_payload() -> dict[str, object]:
+    return {
+        "version": "2.0",
+        "created_at": "2026-04-19T20:00:00+00:00",
+        "organization_id": "org-123",
+        "entity_count": 1,
+        "relationship_count": 0,
+        "episode_count": 1,
+        "mention_count": 1,
+        "entities": [{"id": "entity-1", "entity_type": "topic", "name": "Legacy entity"}],
+        "relationships": [],
+        "episodes": [
+            {
+                "uuid": "episode-1",
+                "name": "Legacy episode",
+                "source": "message",
+                "source_description": "chat",
+                "content": "legacy memory payload",
+                "labels": ["Episodic"],
+                "group_id": "org-123",
+                "created_at": "2026-04-19T20:00:00+00:00",
+                "valid_at": "2026-04-19T20:00:00+00:00",
+                "entity_edges": [],
+            }
+        ],
+        "mentions": [
+            {
+                "uuid": "mention-1",
+                "group_id": "org-123",
+                "source_node_uuid": "episode-1",
+                "target_node_uuid": "entity-1",
+                "created_at": "2026-04-19T20:00:00+00:00",
+            }
+        ],
+    }
+
+
+def _legacy_graph_bytes() -> bytes:
+    return json.dumps(_legacy_graph_payload()).encode("utf-8")
+
+
 def _auth_bytes(*, user_rows: int = 1) -> bytes:
     return json.dumps(
         {
@@ -128,6 +169,33 @@ def test_archive_round_trip_preserves_manifest_and_payloads(tmp_path: Path) -> N
     assert graph_payload_from_archive(loaded)["entity_count"] == 2
     assert auth_payload_from_archive(loaded)["row_counts"]["users"] == 1
     assert content_payload_from_archive(loaded)["row_counts"]["document_chunks"] == 1
+
+
+def test_legacy_graph_archive_preserves_episode_and_mentions_records(tmp_path: Path) -> None:
+    files = {GRAPH_FILENAME: _legacy_graph_bytes()}
+    manifest = build_manifest(
+        organization_id="org-123",
+        source_store="legacy",
+        files=files,
+        file_metadata={GRAPH_FILENAME: {"kind": "graph"}},
+    )
+    archive_path = tmp_path / "legacy-migration.tar.gz"
+
+    write_archive(archive_path, manifest=manifest, files=files)
+    loaded = load_archive(archive_path)
+
+    graph_payload = graph_payload_from_archive(loaded)
+    assert graph_payload is not None
+    assert validate_archive(loaded) == []
+    assert graph_payload["episodes"] == _legacy_graph_payload()["episodes"]
+    assert graph_payload["mentions"] == _legacy_graph_payload()["mentions"]
+    assert normalize_mention_payloads(graph_payload["mentions"]) == graph_payload["mentions"]
+    assert effective_graph_counts(graph_payload) == {
+        "entity_count": 1,
+        "relationship_count": 0,
+        "episode_count": 1,
+        "mention_count": 1,
+    }
 
 
 def test_validate_archive_detects_checksum_mismatch(tmp_path: Path) -> None:
@@ -395,7 +463,7 @@ def test_effective_graph_counts_normalize_duplicate_edges() -> None:
 async def test_verify_graph_archive_checks_counts_and_samples(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    files = {GRAPH_FILENAME: _graph_bytes(episode_count=1, mention_count=1)}
+    files = {GRAPH_FILENAME: _legacy_graph_bytes()}
     manifest = build_manifest(
         organization_id="org-123",
         source_store="legacy",
@@ -424,8 +492,8 @@ async def test_verify_graph_archive_checks_counts_and_samples(
 
     class FakeBackup:
         success = True
-        entity_count = 2
-        relationship_count = 1
+        entity_count = 1
+        relationship_count = 0
         episode_count = 1
         mention_count = 1
         message = "ok"
@@ -444,11 +512,11 @@ async def test_verify_graph_archive_checks_counts_and_samples(
     result = await verify_graph_archive(loaded, organization_id="org-123")
 
     assert result.success is True
-    assert result.expected_entities == 2
-    assert result.actual_entities == 2
+    assert result.expected_entities == 1
+    assert result.actual_entities == 1
     assert result.expected_episodes == 1
     assert result.actual_episodes == 1
     assert result.expected_mentions == 1
     assert result.actual_mentions == 1
-    assert result.validated_entity_ids == ["entity-1", "entity-2"]
+    assert result.validated_entity_ids == ["entity-1"]
     assert result.validated_episode_ids == ["episode-1"]
