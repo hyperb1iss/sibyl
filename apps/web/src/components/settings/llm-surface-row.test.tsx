@@ -149,7 +149,8 @@ describe('LLMSurfaceRow', () => {
   it('saves changed routing through the LLM settings mutation', async () => {
     const { user } = renderCrawler();
 
-    await user.selectOptions(screen.getAllByRole('combobox')[0], 'gemini');
+    await user.click(screen.getAllByRole('combobox')[0]);
+    await user.click(await screen.findByRole('option', { name: 'Gemini' }));
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(updateMutateAsync).toHaveBeenCalledWith({

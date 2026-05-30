@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { type RenderOptions, render } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement, ReactNode } from 'react';
+import { ThemeProvider } from '@/lib/theme';
 
 /**
  * Create a fresh QueryClient for tests with sensible defaults.
@@ -32,7 +33,11 @@ function createWrapper(queryClient?: QueryClient) {
   const client = queryClient ?? createTestQueryClient();
 
   return function Wrapper({ children }: WrapperProps) {
-    return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    return (
+      <QueryClientProvider client={client}>
+        <ThemeProvider>{children}</ThemeProvider>
+      </QueryClientProvider>
+    );
   };
 }
 

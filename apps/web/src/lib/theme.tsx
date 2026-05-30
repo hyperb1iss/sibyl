@@ -56,6 +56,8 @@ function subscribeToStorage(callback: () => void) {
 }
 
 function getStorageSnapshot(): ThemePreference {
+  // Guard against environments without Web Storage (SSR, hardened test envs).
+  if (typeof localStorage === 'undefined') return 'system';
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored === 'neon' || stored === 'dawn' || stored === 'system') {
     return stored;
@@ -68,7 +70,9 @@ function getServerSnapshot(): ThemePreference {
 }
 
 function setStoredPreference(pref: ThemePreference) {
-  localStorage.setItem(STORAGE_KEY, pref);
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(STORAGE_KEY, pref);
+  }
   // Notify all listeners
   for (const listener of listeners) {
     listener();

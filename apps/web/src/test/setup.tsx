@@ -54,16 +54,36 @@ Object.defineProperty(window, 'matchMedia', {
   })),
 });
 
-// Mock ResizeObserver
-global.ResizeObserver = vi.fn().mockImplementation(() => ({
-  observe: vi.fn(),
-  unobserve: vi.fn(),
-  disconnect: vi.fn(),
-}));
+// Mock ResizeObserver / IntersectionObserver as real classes — @floating-ui
+// (Radix Select's positioner) constructs them with `new`, which a plain vi.fn
+// implementation does not satisfy.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+class IntersectionObserverStub {
+  readonly root = null;
+  readonly rootMargin = '';
+  readonly thresholds = [];
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords() {
+    return [];
+  }
+}
+global.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+global.IntersectionObserver = IntersectionObserverStub as unknown as typeof IntersectionObserver;
 
-// Mock IntersectionObserver
-global.IntersectionObserver = vi.fn().mockImplementation(() => ({
-  observe: vi.fn(),
-  unobserve: vi.fn(),
-  disconnect: vi.fn(),
-}));
+// jsdom lacks the pointer-capture / scroll APIs that Radix Select (and other
+// Radix primitives) rely on; stub them so they can open in tests.
+if (!window.HTMLElement.prototype.hasPointerCapture) {
+  window.HTMLElement.prototype.hasPointerCapture = vi.fn(() => false);
+}
+if (!window.HTMLElement.prototype.releasePointerCapture) {
+  window.HTMLElement.prototype.releasePointerCapture = vi.fn();
+}
+if (!window.HTMLElement.prototype.scrollIntoView) {
+  window.HTMLElement.prototype.scrollIntoView = vi.fn();
+}

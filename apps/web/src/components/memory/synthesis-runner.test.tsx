@@ -179,7 +179,7 @@ describe('SynthesisRunner', () => {
       })
     );
     expect(await screen.findByText(/Ship the unified memory workspace/i)).toBeInTheDocument();
-    expect(screen.getByText('remembered')).toBeInTheDocument();
+    expect(screen.getByText('Remembered')).toBeInTheDocument();
     expect(screen.getByText('artifact-1')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'source-remembered' })).toHaveAttribute(
       'href',

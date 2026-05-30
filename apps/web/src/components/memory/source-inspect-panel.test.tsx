@@ -210,7 +210,8 @@ describe('SourceInspectPanel', () => {
     const { user } = render(<SourceInspectPanel sourceId="raw-1" />);
 
     await user.click(screen.getByRole('button', { name: /correction/i }));
-    await user.selectOptions(screen.getByRole('combobox', { name: /action/i }), 'mark_stale');
+    await user.click(screen.getByRole('combobox', { name: /action/i }));
+    await user.click(await screen.findByRole('option', { name: 'Mark stale' }));
     await user.type(screen.getByRole('textbox', { name: /reason/i }), 'outdated source');
     await user.click(screen.getByRole('button', { name: 'Preview' }));
 
