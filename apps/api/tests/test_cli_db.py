@@ -54,6 +54,63 @@ def test_stats_requires_org_id() -> None:
     assert "--org-id is required for graph operations" in result.output
 
 
+def test_inventory_requires_org_id() -> None:
+    result = runner.invoke(db_cli.app, ["inventory"])
+
+    assert result.exit_code == 1
+    assert "--org-id is required for inventory" in result.output
+
+
+def test_inventory_collects_schema_tables_orphans_and_vectors() -> None:
+    class FakeInventoryClient:
+        def __init__(self, *, plane: str) -> None:
+            self.plane = plane
+            self.close = AsyncMock()
+            self.execute_query = AsyncMock(side_effect=self._execute_query)
+
+        async def _execute_query(self, query: str, **params: object) -> object:
+            assert params.get("org_id", "org-123") == "org-123"
+            if query == "INFO FOR DB;":
+                return [{"tables": {f"{self.plane}_table": "DEFINE TABLE"}}]
+            if query.startswith("INFO FOR TABLE"):
+                table = query.removeprefix("INFO FOR TABLE ").removesuffix(";")
+                return [{"indexes": {f"idx_{table}_uuid": f"DEFINE INDEX idx_{table}_uuid"}}]
+            if "FROM schema_version" in query:
+                return [{"name": self.plane, "version": 1, "embedding_dimension": None}]
+            if "count()" in query:
+                return [{"count": 2}]
+            return []
+
+    auth_client = FakeInventoryClient(plane="auth")
+    content_client = FakeInventoryClient(plane="content")
+    graph_client = FakeInventoryClient(plane="graph")
+
+    with (
+        patch("sibyl.persistence.surreal.auth.build_surreal_auth_client", return_value=auth_client),
+        patch(
+            "sibyl.persistence.surreal.content.build_surreal_content_client",
+            return_value=content_client,
+        ),
+        patch(
+            "sibyl_core.services.graph.get_surreal_graph_client",
+            AsyncMock(return_value=graph_client),
+        ),
+    ):
+        result = runner.invoke(db_cli.app, ["inventory", "--org-id", "org-123", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["org_id"] == "org-123"
+    assert payload["auth"]["schema_versions"][0]["name"] == "auth"
+    assert payload["content"]["tables"][0]["count"] == 2
+    assert payload["graph"]["tables"][0]["indexes"][0]["name"].startswith("idx_")
+    assert payload["orphans"]["content"][0]["name"] == "crawled_documents_missing_source"
+    assert {vector["plane"] for vector in payload["vectors"]} == {"content", "graph"}
+    auth_client.close.assert_awaited_once()
+    content_client.close.assert_awaited_once()
+    graph_client.close.assert_awaited_once()
+
+
 def test_restore_accepts_graph_export_payload(tmp_path: Path) -> None:
     graph_file = tmp_path / "graph-export.json"
     graph_file.write_text(

@@ -4,6 +4,7 @@ Commands for backup, restore, and database management.
 """
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -17,6 +18,7 @@ from sibyl.cli.common import (
     error,
     info,
     print_db_hint,
+    print_json,
     run_async,
     success,
     warn,
@@ -40,6 +42,341 @@ def _first_count(rows: object) -> int:
         value = row[0]
         return value if isinstance(value, int) else 0
     return 0
+
+
+def _first_mapping(rows: object) -> dict[str, object]:
+    if isinstance(rows, Mapping):
+        return dict(rows)
+    if isinstance(rows, list) and rows and isinstance(rows[0], Mapping):
+        return dict(rows[0])
+    return {}
+
+
+def _normalize_rows(rows: object) -> list[dict[str, object]]:
+    if not isinstance(rows, list):
+        return []
+    return [dict(row) for row in rows if isinstance(row, Mapping)]
+
+
+def _extract_definitions(value: object) -> list[dict[str, str]]:
+    if isinstance(value, Mapping):
+        return [
+            {"name": str(name), "definition": str(definition)}
+            for name, definition in sorted(value.items(), key=lambda item: str(item[0]))
+        ]
+    if isinstance(value, list):
+        definitions: list[dict[str, str]] = []
+        for item in value:
+            if isinstance(item, Mapping):
+                name = item.get("name") or item.get("id")
+                definition = item.get("definition") or item.get("sql") or item
+                definitions.append({"name": str(name or ""), "definition": str(definition)})
+            else:
+                definitions.append({"name": "", "definition": str(item)})
+        return definitions
+    return []
+
+
+def _extract_table_names(db_info: Mapping[str, object]) -> list[str]:
+    tables = db_info.get("tables")
+    if isinstance(tables, Mapping):
+        return sorted(str(table) for table in tables)
+    return []
+
+
+async def _safe_execute(
+    client: Any, query: str, **params: object
+) -> tuple[object | None, str | None]:
+    try:
+        return await client.execute_query(query, **params), None
+    except Exception as exc:  # pragma: no cover - exercised through command behavior
+        return None, str(exc)
+
+
+async def _collect_table_inventory(client: Any, tables: tuple[str, ...]) -> list[dict[str, object]]:
+    inventory: list[dict[str, object]] = []
+    for table in tables:
+        count_rows, count_error = await _safe_execute(
+            client,
+            f"SELECT count() AS count FROM {table} GROUP ALL;",  # noqa: S608
+        )
+        info_rows, info_error = await _safe_execute(
+            client,
+            f"INFO FOR TABLE {table};",
+        )
+        table_info = _first_mapping(info_rows)
+        entry: dict[str, object] = {
+            "name": table,
+            "count": None if count_error else _first_count(count_rows),
+            "indexes": _extract_definitions(table_info.get("indexes")),
+        }
+        if count_error:
+            entry["count_error"] = count_error
+        if info_error:
+            entry["info_error"] = info_error
+        inventory.append(entry)
+    return inventory
+
+
+async def _collect_schema_versions(client: Any) -> list[dict[str, object]]:
+    rows, error_text = await _safe_execute(
+        client,
+        """
+        SELECT name, version, embedding_dimension, migrations
+        FROM schema_version
+        ORDER BY name;
+        """,
+    )
+    if error_text:
+        return [{"error": error_text}]
+    return _normalize_rows(rows)
+
+
+async def _collect_plane_inventory(
+    client: Any,
+    *,
+    tables: tuple[str, ...],
+) -> dict[str, object]:
+    db_info_rows, error_text = await _safe_execute(client, "INFO FOR DB;")
+    db_info = _first_mapping(db_info_rows)
+    inventory: dict[str, object] = {
+        "tables": await _collect_table_inventory(client, tables),
+        "schema_versions": await _collect_schema_versions(client),
+        "defined_tables": _extract_table_names(db_info),
+        "table_definitions": _extract_definitions(db_info.get("tables")),
+    }
+    if error_text:
+        inventory["info_error"] = error_text
+    return inventory
+
+
+async def _collect_orphan_counts(
+    client: Any,
+    checks: tuple[tuple[str, str], ...],
+    *,
+    org_id: str,
+) -> list[dict[str, object]]:
+    results: list[dict[str, object]] = []
+    for name, query in checks:
+        rows, error_text = await _safe_execute(client, query, org_id=org_id)
+        entry: dict[str, object] = {"name": name, "count": 0 if error_text else _first_count(rows)}
+        if error_text:
+            entry["error"] = error_text
+        results.append(entry)
+    return results
+
+
+def _configured_vector_indexes() -> list[dict[str, object]]:
+    from sibyl_core.backends.surreal.content_schema import EMBEDDING_DIM as CONTENT_EMBEDDING_DIM
+    from sibyl_core.backends.surreal.schema import (
+        EMBEDDING_DIM as GRAPH_EMBEDDING_DIM,
+        EMBEDDING_VECTOR_FIELDS,
+    )
+
+    vectors: list[dict[str, object]] = [
+        {
+            "plane": "content",
+            "table": "document_chunks",
+            "field": "embedding",
+            "index": "idx_document_chunks_embedding",
+            "dimension": CONTENT_EMBEDDING_DIM,
+            "definition": (
+                "DEFINE INDEX idx_document_chunks_embedding ON document_chunks FIELDS embedding "
+                f"HNSW DIMENSION {CONTENT_EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12"
+            ),
+        }
+    ]
+    vectors.extend(
+        {
+            "plane": "graph",
+            "table": vector_field.table,
+            "field": vector_field.field,
+            "index": vector_field.index,
+            "dimension": GRAPH_EMBEDDING_DIM,
+            "definition": vector_field.index_definition(GRAPH_EMBEDDING_DIM).definition,
+        }
+        for vector_field in EMBEDDING_VECTOR_FIELDS
+    )
+    return vectors
+
+
+_AUTH_ORPHAN_CHECKS = (
+    (
+        "organization_members_missing_organization",
+        """
+        SELECT count() AS count FROM organization_members
+        WHERE organization_id = $org_id
+          AND organization_id NOT IN (SELECT VALUE uuid FROM organizations)
+        GROUP ALL;
+        """,
+    ),
+    (
+        "organization_members_missing_user",
+        """
+        SELECT count() AS count FROM organization_members
+        WHERE organization_id = $org_id
+          AND user_id NOT IN (SELECT VALUE uuid FROM users)
+        GROUP ALL;
+        """,
+    ),
+    (
+        "projects_missing_owner",
+        """
+        SELECT count() AS count FROM projects
+        WHERE organization_id = $org_id
+          AND owner_user_id != NONE
+          AND owner_user_id NOT IN (SELECT VALUE uuid FROM users)
+        GROUP ALL;
+        """,
+    ),
+    (
+        "project_members_missing_project",
+        """
+        SELECT count() AS count FROM project_members
+        WHERE organization_id = $org_id
+          AND project_id NOT IN (SELECT VALUE uuid FROM projects)
+        GROUP ALL;
+        """,
+    ),
+    (
+        "project_members_missing_user",
+        """
+        SELECT count() AS count FROM project_members
+        WHERE organization_id = $org_id
+          AND user_id NOT IN (SELECT VALUE uuid FROM users)
+        GROUP ALL;
+        """,
+    ),
+)
+
+
+_CONTENT_ORPHAN_CHECKS = (
+    (
+        "crawled_documents_missing_source",
+        """
+        SELECT count() AS count FROM crawled_documents
+        WHERE source_id NOT IN (SELECT VALUE uuid FROM crawl_sources)
+        GROUP ALL;
+        """,
+    ),
+    (
+        "document_chunks_missing_document",
+        """
+        SELECT count() AS count FROM document_chunks
+        WHERE document_id NOT IN (SELECT VALUE uuid FROM crawled_documents)
+        GROUP ALL;
+        """,
+    ),
+    (
+        "raw_captures_missing_source",
+        """
+        SELECT count() AS count FROM raw_captures
+        WHERE organization_id = $org_id
+          AND source_id != ''
+          AND source_id NOT IN (SELECT VALUE uuid FROM crawl_sources)
+        GROUP ALL;
+        """,
+    ),
+)
+
+
+_GRAPH_ORPHAN_CHECKS = (
+    (
+        "relates_to_missing_source",
+        """
+        SELECT count() AS count FROM relates_to
+        WHERE group_id = $org_id
+          AND in NOT IN (SELECT VALUE id FROM entity)
+        GROUP ALL;
+        """,
+    ),
+    (
+        "relates_to_missing_target",
+        """
+        SELECT count() AS count FROM relates_to
+        WHERE group_id = $org_id
+          AND out NOT IN (SELECT VALUE id FROM entity)
+        GROUP ALL;
+        """,
+    ),
+    (
+        "mentions_missing_episode",
+        """
+        SELECT count() AS count FROM mentions
+        WHERE group_id = $org_id
+          AND in NOT IN (SELECT VALUE id FROM episode)
+        GROUP ALL;
+        """,
+    ),
+    (
+        "mentions_missing_entity",
+        """
+        SELECT count() AS count FROM mentions
+        WHERE group_id = $org_id
+          AND out NOT IN (SELECT VALUE id FROM entity)
+        GROUP ALL;
+        """,
+    ),
+    (
+        "has_member_missing_member",
+        """
+        SELECT count() AS count FROM has_member
+        WHERE group_id = $org_id
+          AND out NOT IN (SELECT VALUE id FROM entity)
+          AND out NOT IN (SELECT VALUE id FROM community)
+        GROUP ALL;
+        """,
+    ),
+)
+
+
+async def collect_database_inventory(org_id: str) -> dict[str, object]:
+    from sibyl.persistence.surreal.auth import build_surreal_auth_client
+    from sibyl.persistence.surreal.content import build_surreal_content_client
+    from sibyl_core.backends.surreal.auth_schema import AUTH_TABLES
+    from sibyl_core.backends.surreal.content_schema import CONTENT_TABLES
+    from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
+    from sibyl_core.services.graph import get_surreal_graph_client
+
+    auth_client = build_surreal_auth_client()
+    content_client = build_surreal_content_client()
+    graph_client = None
+    try:
+        graph_client = await get_surreal_graph_client(org_id)
+        return {
+            "org_id": org_id,
+            "auth": await _collect_plane_inventory(auth_client, tables=AUTH_TABLES),
+            "content": await _collect_plane_inventory(content_client, tables=CONTENT_TABLES),
+            "graph": await _collect_plane_inventory(
+                graph_client,
+                tables=(*GRAPH_TABLES, *GRAPH_EDGES),
+            ),
+            "orphans": {
+                "auth": await _collect_orphan_counts(
+                    auth_client,
+                    _AUTH_ORPHAN_CHECKS,
+                    org_id=org_id,
+                ),
+                "content": await _collect_orphan_counts(
+                    content_client,
+                    _CONTENT_ORPHAN_CHECKS,
+                    org_id=org_id,
+                ),
+                "graph": await _collect_orphan_counts(
+                    graph_client,
+                    _GRAPH_ORPHAN_CHECKS,
+                    org_id=org_id,
+                ),
+            },
+            "vectors": _configured_vector_indexes(),
+        }
+    finally:
+        for client in (auth_client, content_client, graph_client):
+            if client is None:
+                continue
+            close = getattr(client, "close", None)
+            if callable(close):
+                await close()
 
 
 async def _get_graph_client(org_id: str):
@@ -360,6 +697,78 @@ def db_stats(
             print_db_hint()
 
     _stats()
+
+
+@app.command("inventory")
+def db_inventory(
+    org_id: Annotated[
+        str,
+        typer.Option("--org-id", help="Organization UUID for graph and scoped checks"),
+    ] = "",
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Print the inventory as JSON"),
+    ] = False,
+) -> None:
+    """Collect a read-only schema and data inventory across Surreal stores."""
+    if not org_id:
+        error("--org-id is required for inventory")
+        raise typer.Exit(code=1)
+
+    @run_async
+    async def _inventory() -> None:
+        try:
+            inventory = await collect_database_inventory(org_id)
+            if json_output:
+                print_json(inventory)
+                return
+
+            console.print(f"\n[{NEON_CYAN}]Database Inventory[/{NEON_CYAN}]\n")
+            console.print(f"  Org: [{ELECTRIC_PURPLE}]{org_id}[/{ELECTRIC_PURPLE}]")
+            for plane in ("auth", "content", "graph"):
+                plane_inventory = inventory.get(plane)
+                if not isinstance(plane_inventory, Mapping):
+                    continue
+                tables = plane_inventory.get("tables")
+                table_count = len(tables) if isinstance(tables, list) else 0
+                schema_versions = plane_inventory.get("schema_versions")
+                console.print(f"\n  [{NEON_CYAN}]{plane}[/{NEON_CYAN}]")
+                console.print(f"    Tables: {table_count}")
+                if isinstance(schema_versions, list) and schema_versions:
+                    console.print("    Schema versions:")
+                    for row in schema_versions:
+                        if isinstance(row, Mapping):
+                            name = row.get("name") or plane
+                            version = row.get("version", "unknown")
+                            console.print(f"      {name}: v{version}")
+
+            orphans = inventory.get("orphans")
+            if isinstance(orphans, Mapping):
+                console.print("\n  [dim]Orphan checks:[/dim]")
+                for plane, checks in orphans.items():
+                    if isinstance(checks, list):
+                        total = sum(
+                            int(check.get("count", 0))
+                            for check in checks
+                            if isinstance(check, Mapping) and isinstance(check.get("count"), int)
+                        )
+                        console.print(f"    {plane}: {total}")
+
+            vectors = inventory.get("vectors")
+            if isinstance(vectors, list):
+                console.print("\n  [dim]Vector indexes:[/dim]")
+                for vector in vectors:
+                    if isinstance(vector, Mapping):
+                        console.print(
+                            "    "
+                            f"{vector.get('plane')}.{vector.get('table')}.{vector.get('field')}: "
+                            f"{vector.get('dimension')}d"
+                        )
+        except Exception as e:
+            error(f"Inventory failed: {e}")
+            print_db_hint()
+
+    _inventory()
 
 
 @app.command("fix-embeddings")
