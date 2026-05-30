@@ -197,7 +197,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
       <WelcomeBanner totalEntities={stats?.total_entities ?? 0} />
 
       {/* Hero Section - System Overview */}
-      <div className="bg-gradient-to-br from-sc-bg-base via-sc-bg-elevated to-sc-purple/5 border border-sc-fg-subtle/20 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-xl shadow-black/10">
+      <div className="bg-gradient-to-br from-sc-bg-base via-sc-bg-elevated to-sc-purple/5 border border-sc-fg-subtle/20 rounded-xl sm:rounded-xl p-4 sm:p-6 shadow-xl shadow-black/10">
         <div className="flex flex-col lg:flex-row gap-4 sm:gap-8 items-start lg:items-center justify-between">
           {/* Left: Status & Welcome */}
           <div className="flex-1 space-y-3 sm:space-y-4 min-w-0">
@@ -292,7 +292,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
         {/* Left Column - Main content */}
         <div className="flex-1 space-y-4 sm:space-y-6">
           {/* Task Overview */}
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-xl p-4 sm:p-6 shadow-card">
             <div className="flex items-center justify-between mb-4 sm:mb-6 gap-2">
               <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                 <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-coral/10 border border-sc-coral/20 flex items-center justify-center shrink-0">
@@ -390,7 +390,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
 
           {/* Velocity Chart */}
           {orgMetrics && (
-            <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
+            <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-xl p-4 sm:p-6 shadow-card">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2 sm:gap-3">
                   <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-green/10 border border-sc-green/20 flex items-center justify-center shrink-0">
@@ -411,7 +411,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
           )}
 
           {/* Knowledge Distribution */}
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-xl p-4 sm:p-6 shadow-card">
             <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
               <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-cyan/10 border border-sc-cyan/20 flex items-center justify-center shrink-0">
                 <Layers width={16} height={16} className="text-sc-cyan sm:w-5 sm:h-5" />
@@ -473,7 +473,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
 
         {/* Right Column - Sidebar */}
         <div className="lg:w-80 shrink-0 space-y-4 sm:space-y-6">
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-xl p-4 sm:p-6 shadow-card">
             <div className="flex items-center gap-2 sm:gap-3 mb-4">
               <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-cyan/10 border border-sc-cyan/20 flex items-center justify-center">
                 <Activity width={16} height={16} className="text-sc-cyan sm:w-5 sm:h-5" />
@@ -560,7 +560,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
           </div>
 
           {/* Quick Actions */}
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-xl p-4 sm:p-6 shadow-card">
             <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
               <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-purple/10 border border-sc-purple/20 flex items-center justify-center">
                 <Zap width={16} height={16} className="text-sc-purple sm:w-5 sm:h-5" />
@@ -724,7 +724,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
 
           {/* This Week Stats */}
           {orgMetrics && (
-            <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
+            <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-xl p-4 sm:p-6 shadow-card">
               <div className="flex items-center gap-2 sm:gap-3 mb-3">
                 <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-purple/10 border border-sc-purple/20 flex items-center justify-center">
                   <BarChart3 width={16} height={16} className="text-sc-purple sm:w-5 sm:h-5" />
@@ -772,7 +772,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
 
       {/* Error Display */}
       {mounted && health?.errors && health.errors.length > 0 && (
-        <div className="bg-sc-red/10 border border-sc-red/30 rounded-xl sm:rounded-2xl p-4 sm:p-6">
+        <div className="bg-sc-red/10 border border-sc-red/30 rounded-xl sm:rounded-xl p-4 sm:p-6">
           <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
             <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-red/20 flex items-center justify-center">
               <Activity width={16} height={16} className="text-sc-red sm:w-5 sm:h-5" />
@@ -794,7 +794,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
       )}
 
       {/* Runtime Performance */}
-      <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-xl p-4 sm:p-6 shadow-card">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2 sm:gap-3">

@@ -55,7 +55,7 @@ function SidebarContent({ onNavClick }: SidebarContentProps) {
               href={APP_CONFIG.GITHUB_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-md p-1.5 text-sc-fg-subtle transition-colors hover:bg-sc-bg-highlight hover:text-sc-cyan"
+              className="rounded-lg p-1.5 text-sc-fg-subtle transition-colors hover:bg-sc-bg-highlight hover:text-sc-cyan"
               aria-label="Sibyl on GitHub"
             >
               <Github width={15} height={15} />
@@ -66,7 +66,7 @@ function SidebarContent({ onNavClick }: SidebarContentProps) {
               href={APP_CONFIG.SPONSOR_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-md p-1.5 text-sc-fg-subtle transition-colors hover:bg-sc-bg-highlight hover:text-sc-coral"
+              className="rounded-lg p-1.5 text-sc-fg-subtle transition-colors hover:bg-sc-bg-highlight hover:text-sc-coral"
               aria-label="Sponsor Sibyl"
             >
               <Heart width={15} height={15} />
@@ -119,7 +119,7 @@ export function Sidebar() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden"
+              className="fixed inset-0 bg-sc-bg-dark/80 backdrop-blur-sm z-40 md:hidden"
               onClick={close}
               aria-hidden="true"
             />

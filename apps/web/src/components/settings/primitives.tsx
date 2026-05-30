@@ -299,7 +299,7 @@ export function SettingsSectionSkeleton({
               <Skeleton className="h-3 w-32" />
               <Skeleton className="h-2.5 w-48" />
             </div>
-            <Skeleton className="h-7 w-28 rounded-md" />
+            <Skeleton className="h-7 w-28 rounded-lg" />
           </div>
         ))}
       </div>

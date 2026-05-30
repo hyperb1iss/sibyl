@@ -235,7 +235,7 @@ export function MemoryActivityFeed({
                 className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-4 py-2.5"
               >
                 <span
-                  className={`mt-0.5 flex h-7 w-7 items-center justify-center rounded-md border ${eventTone(event)}`}
+                  className={`mt-0.5 flex h-7 w-7 items-center justify-center rounded-lg border ${eventTone(event)}`}
                   title={event.action}
                 >
                   <Icon width={13} height={13} />

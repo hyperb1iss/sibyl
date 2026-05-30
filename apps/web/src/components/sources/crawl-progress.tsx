@@ -262,7 +262,7 @@ export const CrawlProgressPanel = memo(function CrawlProgressPanel({
   if (operations.length === 0) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 w-80 max-h-[60vh] flex flex-col bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-2xl shadow-2xl shadow-black/40 overflow-hidden">
+    <div className="fixed bottom-4 right-4 z-40 w-80 max-h-[60vh] flex flex-col bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-xl shadow-2xl shadow-black/40 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-sc-fg-subtle/10 bg-sc-bg-base">
         <div className="flex items-center gap-2">

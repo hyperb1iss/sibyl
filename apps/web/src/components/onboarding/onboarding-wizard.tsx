@@ -55,7 +55,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
         transition={{ type: 'spring', duration: 0.5 }}
         className="relative w-full max-w-2xl mx-4"
       >
-        <div className="bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-2xl shadow-2xl shadow-black/40 overflow-hidden">
+        <div className="bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-xl shadow-2xl shadow-black/40 overflow-hidden">
           {/* Progress indicator */}
           {step !== 'complete' && (
             <div className="px-6 pt-5 pb-3 border-b border-sc-fg-subtle/10">

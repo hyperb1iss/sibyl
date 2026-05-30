@@ -147,7 +147,7 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
     <div className="p-8">
       {/* Header */}
       <div className="text-center mb-8">
-        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-sc-cyan/20 to-sc-purple/20 flex items-center justify-center">
+        <div className="w-14 h-14 mx-auto mb-4 rounded-xl bg-gradient-to-br from-sc-cyan/20 to-sc-purple/20 flex items-center justify-center">
           <Key width={28} height={28} className="text-sc-cyan" />
         </div>
         <h2 className="text-xl font-semibold text-sc-fg-primary mb-2">Configure API Keys</h2>

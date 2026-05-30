@@ -36,7 +36,7 @@ export function TaskNotesSection({ taskId }: TaskNotesSectionProps) {
   const notes = data?.notes ?? [];
 
   return (
-    <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-2xl p-6">
+    <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-6">
       <h2 className="text-sm font-semibold text-sc-fg-subtle uppercase tracking-wide mb-4 flex items-center gap-2">
         <EditPencil width={16} height={16} />
         Notes

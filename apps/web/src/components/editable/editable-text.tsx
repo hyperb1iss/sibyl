@@ -99,7 +99,7 @@ export function EditableText({
   const baseInputClass = `
     w-full bg-transparent border-none outline-none
     focus:ring-2 focus:ring-sc-purple/30 focus:bg-sc-bg-highlight
-    rounded-md px-1 -mx-1 py-0.5 -my-0.5
+    rounded-lg px-1 -mx-1 py-0.5 -my-0.5
     transition-all duration-150
     ${inputClassName}
   `;
@@ -155,7 +155,7 @@ export function EditableText({
       className={`
         ${className}
         ${disabled ? 'cursor-default' : 'cursor-text hover:bg-sc-bg-highlight/50'}
-        rounded-md px-1 -mx-1 py-0.5 -my-0.5
+        rounded-lg px-1 -mx-1 py-0.5 -my-0.5
         transition-colors duration-150
         focus:outline-none focus:ring-2 focus:ring-sc-purple/30
         ${!value && placeholder ? 'text-sc-fg-subtle italic' : ''}

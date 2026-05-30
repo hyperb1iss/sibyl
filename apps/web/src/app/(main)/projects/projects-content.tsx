@@ -436,7 +436,7 @@ function ProjectCard({ project, stats, isSelected, onClick }: ProjectCardProps) 
               ? 'text-sc-fg-muted'
               : isSelected
                 ? 'text-sc-purple'
-                : 'text-sc-fg-primary group-hover:text-white'
+                : 'text-sc-fg-primary group-hover:text-sc-fg-primary'
           }`}
         >
           {project.name}
@@ -1022,7 +1022,7 @@ function TaskRow({ task }: { task: TaskSummary }) {
       className="flex items-center gap-3 p-3 rounded-lg bg-sc-bg-highlight/30 hover:bg-sc-bg-highlight/50 transition-colors group"
     >
       <span className={config?.textClass}>{config?.icon}</span>
-      <span className="flex-1 text-sm text-sc-fg-primary group-hover:text-white truncate">
+      <span className="flex-1 text-sm text-sc-fg-primary group-hover:text-sc-fg-primary truncate">
         {task.name}
       </span>
       {priority && (

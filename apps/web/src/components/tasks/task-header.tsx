@@ -39,7 +39,7 @@ export function TaskHeader({
   const currentStatusIndex = STATUS_FLOW.indexOf(status);
 
   return (
-    <div className="bg-gradient-to-br from-sc-bg-base to-sc-bg-elevated border border-sc-fg-subtle/20 rounded-2xl overflow-hidden shadow-xl shadow-black/20">
+    <div className="bg-gradient-to-br from-sc-bg-base to-sc-bg-elevated border border-sc-fg-subtle/20 rounded-xl overflow-hidden shadow-xl shadow-black/20">
       {/* Status Progress Bar */}
       <div className="relative h-1 bg-sc-bg-dark">
         <div

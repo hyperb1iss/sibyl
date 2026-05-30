@@ -133,7 +133,7 @@ export function CaptureMemoryDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="capture-memory-title"
-        className="relative mx-4 w-full max-w-2xl overflow-hidden rounded-2xl border border-sc-purple/20 bg-sc-bg-base shadow-2xl shadow-sc-purple/10"
+        className="relative mx-4 w-full max-w-2xl overflow-hidden rounded-xl border border-sc-purple/20 bg-sc-bg-base shadow-2xl shadow-sc-purple/10"
         onKeyDown={handleKeyDown}
       >
         <div className="border-b border-sc-fg-subtle/10 bg-gradient-to-r from-sc-purple/10 via-transparent to-sc-cyan/10 px-5 py-4">

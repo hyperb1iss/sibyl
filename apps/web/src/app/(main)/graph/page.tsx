@@ -103,7 +103,7 @@ function MobileEntitySheet({
     <div className="fixed inset-0 z-50 md:hidden">
       <button
         type="button"
-        className="absolute inset-0 bg-black/75 cursor-default"
+        className="absolute inset-0 bg-sc-bg-dark/80 cursor-default"
         onClick={onClose}
         onKeyDown={e => e.key === 'Escape' && onClose()}
         aria-label="Close panel"
@@ -475,7 +475,7 @@ function GraphToolbar({
               type="button"
               onClick={() => onResolutionChange('overview')}
               aria-pressed={resolution === 'overview'}
-              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+              className={`px-2.5 py-1 text-xs font-medium rounded-lg transition-colors ${
                 resolution === 'overview'
                   ? 'bg-sc-purple/20 text-sc-purple'
                   : 'text-sc-fg-muted hover:text-sc-fg-primary'
@@ -488,7 +488,7 @@ function GraphToolbar({
               type="button"
               onClick={() => onResolutionChange('detail')}
               aria-pressed={resolution === 'detail'}
-              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+              className={`px-2.5 py-1 text-xs font-medium rounded-lg transition-colors ${
                 resolution === 'detail'
                   ? 'bg-sc-purple/20 text-sc-purple'
                   : 'text-sc-fg-muted hover:text-sc-fg-primary'

@@ -130,7 +130,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
   if (error) {
     return (
       <div className="space-y-4 animate-fade-in">
-        <div className="bg-sc-bg-base border border-sc-red/40 rounded-2xl p-8 text-center shadow-glow-red">
+        <div className="bg-sc-bg-base border border-sc-red/40 rounded-xl p-8 text-center shadow-glow-red">
           <p className="text-sc-red font-medium">Failed to load source</p>
           <p className="text-sc-fg-subtle text-sm mt-2">
             {error instanceof Error ? error.message : 'Unknown error'}
@@ -150,7 +150,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
   if (isLoading || !source) {
     return (
       <div className="space-y-6 animate-fade-in">
-        <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-2xl p-8 shadow-card-elevated">
+        <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-8 shadow-card-elevated">
           <div className="animate-pulse space-y-4">
             <div className="h-8 bg-sc-bg-highlight rounded w-1/3" />
             <div className="h-4 bg-sc-bg-highlight rounded w-2/3" />
@@ -176,7 +176,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-2xl p-6 shadow-card-elevated">
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-6 shadow-card-elevated">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-2">
@@ -360,7 +360,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
       </div>
 
       {/* Documents List */}
-      <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-2xl p-6 shadow-card-elevated">
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-6 shadow-card-elevated">
         <h2 className="text-lg font-semibold text-sc-fg-primary mb-4 flex items-center gap-2">
           <FileText width={20} height={20} className="text-sc-cyan" />
           {source.source_type === 'local' ? 'Files' : 'Documents'}
@@ -436,11 +436,11 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
       {isEditOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            className="absolute inset-0 bg-sc-bg-dark/80 backdrop-blur-sm"
             onClick={() => setIsEditOpen(false)}
             onKeyDown={e => e.key === 'Escape' && setIsEditOpen(false)}
           />
-          <div className="relative bg-sc-bg-base border border-sc-fg-subtle/20 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+          <div className="relative bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-6 w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-lg font-semibold text-sc-fg-primary">Crawl Settings</h2>
               <button

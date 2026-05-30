@@ -62,7 +62,7 @@ export function EditableSelect({
         <button
           type="button"
           className={`
-            inline-flex items-center gap-1 rounded-md px-1 -mx-1 py-0.5 -my-0.5
+            inline-flex items-center gap-1 rounded-lg px-1 -mx-1 py-0.5 -my-0.5
             transition-all duration-150
             ${disabled ? 'cursor-default opacity-60' : 'cursor-pointer hover:bg-sc-bg-highlight/50'}
             focus:outline-none focus:ring-2 focus:ring-sc-purple/30

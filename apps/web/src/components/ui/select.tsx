@@ -89,7 +89,7 @@ const SelectItem = forwardRef<
     className={`
       relative flex items-center gap-2
       px-2 py-1.5 pr-8 w-full
-      text-sm text-sc-fg-primary rounded-md
+      text-sm text-sc-fg-primary rounded-lg
       cursor-pointer select-none outline-none
       transition-colors duration-150
       hover:bg-sc-bg-highlight hover:text-sc-cyan

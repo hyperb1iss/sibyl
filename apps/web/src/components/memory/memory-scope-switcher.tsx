@@ -33,7 +33,7 @@ export function MemoryScopeSwitcher({ value, onChange, counts = {} }: MemoryScop
               key={scope.value}
               type="button"
               onClick={() => onChange(scope.value)}
-              className={`flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors ${
+              className={`flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors ${
                 active
                   ? 'bg-sc-purple/20 text-sc-purple'
                   : 'text-sc-fg-muted hover:bg-sc-bg-highlight hover:text-sc-fg-primary'

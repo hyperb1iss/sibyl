@@ -21,7 +21,7 @@ const DropdownMenuSubTrigger = forwardRef<
     ref={ref}
     className={`
       flex items-center gap-2
-      px-2 py-1.5 rounded-md
+      px-2 py-1.5 rounded-lg
       text-sm text-sc-fg-primary
       cursor-pointer select-none outline-none
       transition-colors duration-150
@@ -96,7 +96,7 @@ const DropdownMenuItem = forwardRef<
     ref={ref}
     className={`
       relative flex items-center gap-2
-      px-2 py-1.5 rounded-md
+      px-2 py-1.5 rounded-lg
       text-sm cursor-pointer select-none outline-none
       transition-colors duration-150
       ${
@@ -121,7 +121,7 @@ const DropdownMenuCheckboxItem = forwardRef<
     ref={ref}
     className={`
       relative flex items-center gap-2
-      pl-8 pr-2 py-1.5 rounded-md
+      pl-8 pr-2 py-1.5 rounded-lg
       text-sm text-sc-fg-primary
       cursor-pointer select-none outline-none
       transition-colors duration-150
@@ -151,7 +151,7 @@ const DropdownMenuRadioItem = forwardRef<
     ref={ref}
     className={`
       relative flex items-center gap-2
-      pl-8 pr-2 py-1.5 rounded-md
+      pl-8 pr-2 py-1.5 rounded-lg
       text-sm text-sc-fg-primary
       cursor-pointer select-none outline-none
       transition-colors duration-150

@@ -85,7 +85,7 @@ export function SetupWizard({ initialStatus, onComplete }: SetupWizardProps) {
 
   return (
     <div className="w-full max-w-2xl">
-      <div className="bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-2xl shadow-2xl shadow-black/40 overflow-hidden">
+      <div className="bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-xl shadow-2xl shadow-black/40 overflow-hidden">
         {/* Progress indicator */}
         {!isLastStep && (
           <div className="px-6 pt-5 pb-3 border-b border-sc-fg-subtle/10">

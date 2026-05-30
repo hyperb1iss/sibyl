@@ -240,7 +240,7 @@ export const TaskCard = memo(function TaskCard({
               ? 'text-sc-yellow'
               : isDoing
                 ? 'text-sc-fg-primary'
-                : 'text-sc-fg-primary group-hover:text-white'
+                : 'text-sc-fg-primary group-hover:text-sc-fg-primary'
           }`}
         >
           {task.name}

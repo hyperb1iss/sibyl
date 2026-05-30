@@ -159,7 +159,7 @@ export function TaskDetailPanel({ task }: TaskDetailPanelProps) {
 export function TaskDetailSkeleton() {
   return (
     <div className="space-y-6 animate-pulse">
-      <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-2xl overflow-hidden">
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl overflow-hidden">
         <div className="h-1 bg-sc-bg-dark" />
         <div className="p-6">
           <div className="flex gap-2 mb-4">
@@ -176,7 +176,7 @@ export function TaskDetailSkeleton() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-2xl p-6">
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-6">
             <div className="h-4 w-20 bg-sc-fg-subtle/10 rounded mb-4" />
             <div className="space-y-2">
               <div className="h-4 w-full bg-sc-fg-subtle/10 rounded" />
@@ -186,7 +186,7 @@ export function TaskDetailSkeleton() {
           </div>
         </div>
         <div className="space-y-6">
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-2xl p-5">
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
             <div className="h-4 w-24 bg-sc-fg-subtle/10 rounded mb-4" />
             <div className="space-y-4">
               <div className="h-8 w-full bg-sc-fg-subtle/10 rounded" />

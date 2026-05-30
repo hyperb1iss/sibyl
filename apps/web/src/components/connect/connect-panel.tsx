@@ -145,7 +145,7 @@ function CopyBlock({ value, scroll = false }: { value: string; scroll?: boolean 
       <button
         type="button"
         onClick={handleCopy}
-        className="absolute right-2 top-2 rounded-md bg-sc-bg-elevated/80 p-1.5 text-sc-fg-muted transition-colors hover:bg-sc-bg-elevated hover:text-sc-fg-primary"
+        className="absolute right-2 top-2 rounded-lg bg-sc-bg-elevated/80 p-1.5 text-sc-fg-muted transition-colors hover:bg-sc-bg-elevated hover:text-sc-fg-primary"
         title="Copy to clipboard"
         aria-label="Copy to clipboard"
       >

@@ -263,7 +263,7 @@ export default function EpicDetailPage({ params }: EpicDetailPageProps) {
                   />
 
                   {/* Task name */}
-                  <span className="flex-1 text-sm text-sc-fg-primary group-hover:text-white truncate">
+                  <span className="flex-1 text-sm text-sc-fg-primary group-hover:text-sc-fg-primary truncate">
                     {task.name}
                   </span>
 

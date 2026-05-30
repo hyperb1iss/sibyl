@@ -410,7 +410,7 @@ export function SourcesSkeleton() {
         {Array.from({ length: 6 }).map((_, i) => (
           <div
             key={i}
-            className="rounded-2xl border border-sc-fg-subtle/10 bg-sc-bg-base p-5 space-y-4"
+            className="rounded-xl border border-sc-fg-subtle/10 bg-sc-bg-base p-5 space-y-4"
           >
             <div className="flex items-start gap-3">
               <Skeleton className="h-10 w-10 rounded-xl" />
@@ -554,7 +554,7 @@ export function MemoryHomeSkeleton() {
   return (
     <div className="space-y-4 animate-fade-in">
       <Skeleton className="h-4 w-40" />
-      <div className="rounded-2xl border border-sc-fg-subtle/10 bg-sc-bg-base p-6 space-y-3">
+      <div className="rounded-xl border border-sc-fg-subtle/10 bg-sc-bg-base p-6 space-y-3">
         <Skeleton className="h-7 w-48" />
         <Skeleton className="h-4 w-2/3 max-w-xl" />
         <div className="flex flex-wrap gap-3 pt-1">

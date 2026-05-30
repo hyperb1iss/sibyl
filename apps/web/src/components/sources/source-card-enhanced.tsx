@@ -99,7 +99,7 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      className={`group relative bg-gradient-to-br from-sc-bg-base to-sc-bg-elevated border rounded-2xl transition-all duration-300 ${
+      className={`group relative bg-gradient-to-br from-sc-bg-base to-sc-bg-elevated border rounded-xl transition-all duration-300 ${
         isActive
           ? 'border-sc-purple/50 shadow-lg shadow-sc-purple/20'
           : crawlStatus === 'failed'
@@ -445,7 +445,7 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
 
 export function SourceCardSkeleton() {
   return (
-    <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-2xl p-5 animate-pulse">
+    <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5 animate-pulse">
       <div className="flex items-start gap-3 mb-4">
         <div className="w-10 h-10 rounded-xl bg-sc-fg-subtle/10" />
         <div className="flex-1">

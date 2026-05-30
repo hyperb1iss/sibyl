@@ -303,7 +303,7 @@ function EditModal({
         type="button"
         aria-label="Close"
         onClick={onClose}
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        className="absolute inset-0 bg-sc-bg-dark/80 backdrop-blur-sm"
       />
       <div className="relative w-full max-w-md rounded-xl border border-sc-fg-subtle/15 bg-sc-bg-dark shadow-2xl">
         <div className="p-6">

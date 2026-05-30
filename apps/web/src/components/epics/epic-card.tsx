@@ -199,7 +199,7 @@ export const EpicCard = memo(function EpicCard({
               ? 'text-sc-red'
               : isCompleted
                 ? 'text-sc-green'
-                : 'text-sc-fg-primary group-hover:text-white'
+                : 'text-sc-fg-primary group-hover:text-sc-fg-primary'
           }`}
         >
           {epic.name}

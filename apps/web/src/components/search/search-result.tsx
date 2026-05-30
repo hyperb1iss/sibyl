@@ -63,7 +63,7 @@ export function SearchResultCard({ result }: SearchResultCardProps) {
             </div>
 
             {/* Title */}
-            <h3 className="text-base font-semibold text-sc-fg-primary truncate transition-colors group-hover:text-white">
+            <h3 className="text-base font-semibold text-sc-fg-primary truncate transition-colors group-hover:text-sc-fg-primary">
               {result.name}
             </h3>
 

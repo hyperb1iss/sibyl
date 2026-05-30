@@ -10,7 +10,7 @@ export function WelcomeStep({ onNext }: WelcomeStepProps) {
   return (
     <div className="p-8">
       {/* Icon */}
-      <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-sc-purple/20 to-sc-cyan/20 flex items-center justify-center">
+      <div className="w-16 h-16 mx-auto mb-6 rounded-xl bg-gradient-to-br from-sc-purple/20 to-sc-cyan/20 flex items-center justify-center">
         <LightBulb width={32} height={32} className="text-sc-purple" />
       </div>
 

@@ -87,7 +87,7 @@ export default function SetupPage() {
       <header className="flex items-center justify-center py-8">
         <div className="flex flex-col items-center group">
           <div className="relative mb-2">
-            <div className="absolute -inset-4 rounded-2xl bg-sc-purple/10 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+            <div className="absolute -inset-4 rounded-xl bg-sc-purple/10 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
             <Image
               src="/sibyl-logo.png"
               alt="Sibyl"

@@ -126,7 +126,7 @@ function AvatarUploadModal({
           <button
             type="button"
             onClick={() => setMode('url')}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               mode === 'url'
                 ? 'bg-sc-purple text-white shadow-lg shadow-sc-purple/20'
                 : 'text-sc-fg-muted hover:text-sc-fg-primary'
@@ -138,7 +138,7 @@ function AvatarUploadModal({
           <button
             type="button"
             onClick={() => setMode('upload')}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               mode === 'upload'
                 ? 'bg-sc-purple text-white shadow-lg shadow-sc-purple/20'
                 : 'text-sc-fg-muted hover:text-sc-fg-primary'

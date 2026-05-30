@@ -135,7 +135,7 @@ const SortDropdown = memo(function SortDropdown({
       <Popover.Trigger asChild>
         <button
           type="button"
-          className="p-1 rounded-md text-sc-fg-subtle hover:text-sc-fg-muted hover:bg-sc-bg-highlight/50 transition-colors"
+          className="p-1 rounded-lg text-sc-fg-subtle hover:text-sc-fg-muted hover:bg-sc-bg-highlight/50 transition-colors"
           title={`Sort by ${current?.label}`}
         >
           <ArrowUpDown width={12} height={12} />

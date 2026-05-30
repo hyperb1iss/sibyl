@@ -45,7 +45,7 @@ export function EnhancedEmptyState({
       {/* Icon with glow effect */}
       <div
         className={`
-          text-5xl mb-4 p-4 rounded-2xl
+          text-5xl mb-4 p-4 rounded-xl
           ${variant === 'success' ? 'bg-sc-green/10 shadow-lg shadow-sc-green/20' : ''}
           ${variant === 'filtered' ? 'bg-sc-yellow/10' : ''}
           ${variant === 'default' ? 'bg-sc-bg-highlight' : ''}

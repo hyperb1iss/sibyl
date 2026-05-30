@@ -92,7 +92,7 @@ export function EditableTags({
             exit={{ opacity: 0, scale: 0.8 }}
             transition={{ duration: 0.15 }}
             className={`
-              inline-flex items-center gap-1 px-2 py-0.5 text-sm rounded-md border
+              inline-flex items-center gap-1 px-2 py-0.5 text-sm rounded-lg border
               ${tagClassName}
               ${disabled ? '' : 'group'}
             `}
@@ -118,7 +118,7 @@ export function EditableTags({
             <button
               type="button"
               className={`
-                inline-flex items-center gap-1 px-2 py-0.5 text-sm rounded-md
+                inline-flex items-center gap-1 px-2 py-0.5 text-sm rounded-lg
                 text-sc-fg-subtle hover:text-sc-fg-muted hover:bg-sc-bg-highlight/50
                 transition-colors duration-150
                 focus:outline-none focus:ring-2 focus:ring-sc-purple/30

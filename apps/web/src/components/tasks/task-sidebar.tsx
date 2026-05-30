@@ -54,7 +54,7 @@ export function TaskSidebar({
   return (
     <div className="space-y-6">
       {/* Properties */}
-      <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-2xl p-5">
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
         <h2 className="text-sm font-semibold text-sc-fg-subtle uppercase tracking-wide mb-4">
           Properties
         </h2>
@@ -146,7 +146,7 @@ export function TaskSidebar({
       </div>
 
       {/* Development */}
-      <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-2xl p-5">
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
         <h2 className="text-sm font-semibold text-sc-fg-subtle uppercase tracking-wide mb-4">
           Development
         </h2>
@@ -199,7 +199,7 @@ export function TaskSidebar({
       {projectId && (
         <Link
           href={`/tasks?project=${projectId}`}
-          className="flex items-center gap-3 p-4 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-2xl hover:border-sc-cyan/30 hover:bg-sc-bg-elevated transition-all group"
+          className="flex items-center gap-3 p-4 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl hover:border-sc-cyan/30 hover:bg-sc-bg-elevated transition-all group"
         >
           <div className="w-10 h-10 rounded-xl bg-sc-cyan/10 border border-sc-cyan/20 flex items-center justify-center">
             <Target width={18} height={18} className="text-sc-cyan" />
@@ -219,7 +219,7 @@ export function TaskSidebar({
       )}
 
       {/* Danger Zone */}
-      <div className="bg-sc-bg-base border border-sc-red/20 rounded-2xl p-5">
+      <div className="bg-sc-bg-base border border-sc-red/20 rounded-xl p-5">
         <h2 className="text-sm font-semibold text-sc-red uppercase tracking-wide mb-3">
           Danger Zone
         </h2>

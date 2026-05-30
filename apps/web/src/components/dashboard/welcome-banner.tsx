@@ -54,7 +54,7 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
   const apisReady = (openaiReady || geminiReady) && anthropicReady;
 
   return (
-    <div className="relative bg-gradient-to-r from-sc-purple/10 via-sc-cyan/5 to-sc-coral/10 border border-sc-purple/20 rounded-xl sm:rounded-2xl p-4 sm:p-6 mb-4 sm:mb-6 animate-fade-in overflow-hidden">
+    <div className="relative bg-gradient-to-r from-sc-purple/10 via-sc-cyan/5 to-sc-coral/10 border border-sc-purple/20 rounded-xl sm:rounded-xl p-4 sm:p-6 mb-4 sm:mb-6 animate-fade-in overflow-hidden">
       {/* Background glow effect */}
       <div className="absolute -top-20 -right-20 w-40 h-40 bg-sc-purple/10 rounded-full blur-3xl" />
       <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-sc-cyan/10 rounded-full blur-2xl" />

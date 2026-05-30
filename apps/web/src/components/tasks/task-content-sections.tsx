@@ -35,7 +35,7 @@ export function TaskContentSections({
   return (
     <div className="lg:col-span-2 space-y-6">
       {/* Details */}
-      <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-2xl p-6">
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-sc-fg-subtle uppercase tracking-wide">
             Details
@@ -78,7 +78,7 @@ export function TaskContentSections({
       </div>
 
       {/* Technologies */}
-      <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-2xl p-6">
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-6">
         <h2 className="text-sm font-semibold text-sc-fg-subtle uppercase tracking-wide mb-4">
           Technologies
         </h2>
@@ -92,7 +92,7 @@ export function TaskContentSections({
       </div>
 
       {/* Tags */}
-      <div className="bg-gradient-to-br from-sc-bg-base to-sc-purple/5 border border-sc-purple/20 rounded-2xl p-6">
+      <div className="bg-gradient-to-br from-sc-bg-base to-sc-purple/5 border border-sc-purple/20 rounded-xl p-6">
         <h2 className="text-sm font-semibold text-sc-purple uppercase tracking-wide mb-4 flex items-center gap-2">
           <Hash width={16} height={16} />
           Tags
@@ -131,7 +131,7 @@ export function TaskContentSections({
 
       {/* Learnings - show when done or has content */}
       {(status === 'done' || learnings) && (
-        <div className="bg-gradient-to-br from-sc-green/10 to-sc-cyan/5 border border-sc-green/20 rounded-2xl p-6">
+        <div className="bg-gradient-to-br from-sc-green/10 to-sc-cyan/5 border border-sc-green/20 rounded-xl p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-sc-green uppercase tracking-wide flex items-center gap-2">
               <CheckCircle2 width={16} height={16} />
@@ -177,7 +177,7 @@ export function TaskContentSections({
 
       {/* Related Entities */}
       {task.related && task.related.length > 0 && (
-        <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-2xl p-6">
+        <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-6">
           <RelatedEntitiesSection
             entityId={task.id}
             entityName={task.name}

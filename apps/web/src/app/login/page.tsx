@@ -118,7 +118,7 @@ function LoginContent() {
       {/* Logo + Branding */}
       <div className="mb-8 flex flex-col items-center animate-fade-in group">
         <div className="relative mb-3">
-          <div className="absolute -inset-4 rounded-2xl bg-sc-purple/10 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+          <div className="absolute -inset-4 rounded-xl bg-sc-purple/10 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
           <Image
             src="/sibyl-logo.png"
             alt="Sibyl"
@@ -137,7 +137,7 @@ function LoginContent() {
 
       {/* Auth Card */}
       <div className="w-full max-w-sm animate-slide-up">
-        <div className="bg-sc-bg-elevated rounded-2xl border border-sc-fg-subtle/20 shadow-card-elevated overflow-hidden">
+        <div className="bg-sc-bg-elevated rounded-xl border border-sc-fg-subtle/20 shadow-card-elevated overflow-hidden">
           {/* Tab Switcher */}
           {allowSignup ? (
             <div className="flex border-b border-sc-fg-subtle/10">

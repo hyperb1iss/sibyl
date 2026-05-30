@@ -64,7 +64,7 @@ export function AdminAccountStep({ onBack, onAccountCreated }: AdminAccountStepP
     <div className="p-8">
       {/* Header */}
       <div className="text-center mb-8">
-        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-sc-purple/20 to-sc-coral/20 flex items-center justify-center">
+        <div className="w-14 h-14 mx-auto mb-4 rounded-xl bg-gradient-to-br from-sc-purple/20 to-sc-coral/20 flex items-center justify-center">
           <User aria-hidden="true" width={28} height={28} className="text-sc-purple" />
         </div>
         <h2 className="text-xl font-semibold text-sc-fg-primary mb-2">Create Admin Account</h2>
