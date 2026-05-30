@@ -610,7 +610,7 @@ class EntityManager:
             metadata = task.metadata or {}
             status_value = str(metadata.get("status") or "todo")
             priority = str(metadata.get("priority") or "")
-            epic_ref = metadata.get("epic_id")
+            epic_ref = metadata.get("parent_task_id") or metadata.get("epic_id")
 
             status_counts[status_value] = status_counts.get(status_value, 0) + 1
             if epic_ref:
@@ -745,10 +745,23 @@ class EntityManager:
             where_clauses.append(_surreal_indexed_field_equals_or_missing("project_id"))
             query_params["project_id"] = project_id
         if epic_id is not None:
-            where_clauses.append(_surreal_indexed_field_equals_or_missing("epic_id"))
+            where_clauses.append(
+                "("
+                + _surreal_indexed_field_equals_or_missing("parent_task_id")
+                + " OR "
+                + _surreal_indexed_field_equals_or_missing("epic_id")
+                + ")"
+            )
             query_params["epic_id"] = epic_id
+            query_params["parent_task_id"] = epic_id
         if no_epic:
-            where_clauses.append(_surreal_indexed_field_missing("epic_id"))
+            where_clauses.append(
+                "("
+                + _surreal_indexed_field_missing("parent_task_id")
+                + " AND "
+                + _surreal_indexed_field_missing("epic_id")
+                + ")"
+            )
         if parent_task_id is not None:
             where_clauses.append(_surreal_indexed_field_equals_or_missing("parent_task_id"))
             query_params["parent_task_id"] = parent_task_id
@@ -971,7 +984,7 @@ class EntityManager:
         where_clauses = [
             "group_id = $group_id",
             "entity_type = 'task'",
-            "epic_id IN $epic_ids",
+            "parent_task_id IN $epic_ids",
         ]
         params: dict[str, Any] = {
             "group_id": self._group_id,
@@ -984,12 +997,12 @@ class EntityManager:
         rows = normalize_records(
             await self._client.execute_query(
                 """
-                SELECT epic_id, status, count() AS task_count
+                SELECT parent_task_id AS epic_id, status, count() AS task_count
                 FROM entity
                 WHERE """
                 + " AND ".join(where_clauses)
                 + """
-                GROUP BY epic_id, status;
+                GROUP BY parent_task_id, status;
                 """,
                 **params,
             )
@@ -997,8 +1010,8 @@ class EntityManager:
         legacy_where_clauses = [
             "group_id = $group_id",
             "entity_type = 'task'",
-            _surreal_indexed_field_missing("epic_id"),
-            "attributes.epic_id IN $epic_ids",
+            _surreal_indexed_field_missing("parent_task_id"),
+            "(attributes.parent_task_id IN $epic_ids OR attributes.epic_id IN $epic_ids)",
         ]
         if project_id is not None:
             legacy_where_clauses.append(
@@ -1983,10 +1996,12 @@ def _entity_matches_list_filters(
 ) -> bool:
     if project_id and _metadata_scalar(entity, "project_id") != project_id:
         return False
+    entity_parent_task_id = _metadata_scalar(entity, "parent_task_id")
     entity_epic_id = _metadata_scalar(entity, "epic_id")
-    if epic_id and entity_epic_id != epic_id:
+    entity_epic_alias = entity_parent_task_id or entity_epic_id
+    if epic_id and entity_epic_alias != epic_id and entity_epic_id != epic_id:
         return False
-    if no_epic and entity_epic_id:
+    if no_epic and (entity_parent_task_id or entity_epic_id):
         return False
     if parent_task_id and _metadata_scalar(entity, "parent_task_id") != parent_task_id:
         return False
@@ -2605,7 +2620,12 @@ async def _execute_replace_entities_bulk_query(
     return await client.execute_query(_ENTITY_BULK_UPSERT_QUERY, rows=list(records))
 
 
-def _entity_record(entity: Entity, *, group_id: str) -> SurrealRecord:
+def _entity_record(
+    entity: Entity,
+    *,
+    group_id: str,
+    canonicalize_parent_task_id: bool = True,
+) -> SurrealRecord:
     metadata = _entity_metadata(entity)
     now = datetime.now(UTC)
     updated_at = _metadata_datetime(metadata.get("updated_at")) or entity.updated_at or now
@@ -2613,6 +2633,8 @@ def _entity_record(entity: Entity, *, group_id: str) -> SurrealRecord:
     project_id = _metadata_str(metadata, "project_id")
     epic_id = _metadata_str(metadata, "epic_id")
     parent_task_id = _metadata_str(metadata, "parent_task_id")
+    if canonicalize_parent_task_id and not parent_task_id and entity.entity_type == EntityType.TASK:
+        parent_task_id = epic_id
     task_id = _metadata_str(metadata, "task_id")
     status = _metadata_str(metadata, "status")
     priority = _metadata_str(metadata, "priority")

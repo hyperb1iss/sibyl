@@ -276,7 +276,7 @@ def _record_with_metadata(
         source_file=source.source_file,
         embedding=source.embedding,
     )
-    return _entity_record(rebuilt, group_id=group_id)
+    return _entity_record(rebuilt, group_id=group_id, canonicalize_parent_task_id=False)
 
 
 def _coerce_epic_status(value: str) -> EpicStatus:

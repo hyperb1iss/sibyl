@@ -89,23 +89,19 @@ DEFINE FIELD IF NOT EXISTS tags ON entity TYPE option<array<string>>;
 DEFINE FIELD IF NOT EXISTS name_embedding ON entity TYPE option<array<float, {EMBEDDING_DIM}>>;
 
 DEFINE INDEX IF NOT EXISTS idx_entity_uuid ON entity FIELDS uuid UNIQUE;
-DEFINE INDEX IF NOT EXISTS idx_entity_group ON entity FIELDS group_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_type ON entity FIELDS entity_type;
 DEFINE INDEX IF NOT EXISTS idx_entity_labels ON entity FIELDS labels;
 DEFINE INDEX IF NOT EXISTS idx_entity_project ON entity FIELDS project_id;
-DEFINE INDEX IF NOT EXISTS idx_entity_epic ON entity FIELDS epic_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_parent_task ON entity FIELDS parent_task_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_task ON entity FIELDS task_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_status ON entity FIELDS status;
 DEFINE INDEX IF NOT EXISTS idx_entity_priority ON entity FIELDS priority;
-DEFINE INDEX IF NOT EXISTS idx_entity_group_updated ON entity FIELDS group_id, updated_at, created_at, uuid;
-DEFINE INDEX IF NOT EXISTS idx_entity_group_type_updated ON entity FIELDS group_id, entity_type, updated_at, created_at, uuid;
-DEFINE INDEX IF NOT EXISTS idx_entity_group_type_project_updated ON entity FIELDS group_id, entity_type, project_id, updated_at, created_at, uuid;
-DEFINE INDEX IF NOT EXISTS idx_entity_group_type_epic_updated ON entity FIELDS group_id, entity_type, epic_id, updated_at, created_at, uuid;
-DEFINE INDEX IF NOT EXISTS idx_entity_group_type_parent_task_updated ON entity FIELDS group_id, entity_type, parent_task_id, updated_at, created_at, uuid;
-DEFINE INDEX IF NOT EXISTS idx_entity_group_type_status_updated ON entity FIELDS group_id, entity_type, status, updated_at, created_at, uuid;
-DEFINE INDEX IF NOT EXISTS idx_entity_group_type_epic_status ON entity FIELDS group_id, entity_type, epic_id, status;
-DEFINE INDEX IF NOT EXISTS idx_entity_group_type_project_status ON entity FIELDS group_id, entity_type, project_id, status;
+DEFINE INDEX IF NOT EXISTS idx_entity_updated ON entity FIELDS updated_at, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_entity_type_updated ON entity FIELDS entity_type, updated_at, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_entity_type_project_updated ON entity FIELDS entity_type, project_id, updated_at, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_entity_type_parent_task_updated ON entity FIELDS entity_type, parent_task_id, updated_at, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_entity_type_status_updated ON entity FIELDS entity_type, status, updated_at, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_entity_type_project_status ON entity FIELDS entity_type, project_id, status;
 DEFINE INDEX IF NOT EXISTS idx_entity_name_ft ON entity FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
 DEFINE INDEX IF NOT EXISTS idx_entity_summary_ft ON entity FIELDS summary FULLTEXT ANALYZER content_analyzer BM25;
 REMOVE INDEX IF EXISTS idx_entity_description_ft ON TABLE entity;
@@ -135,7 +131,6 @@ DEFINE FIELD IF NOT EXISTS entity_edges ON episode TYPE array<string> DEFAULT []
 DEFINE FIELD IF NOT EXISTS project_id ON episode TYPE option<string>;
 
 DEFINE INDEX IF NOT EXISTS idx_episode_uuid ON episode FIELDS uuid UNIQUE;
-DEFINE INDEX IF NOT EXISTS idx_episode_group ON episode FIELDS group_id;
 DEFINE INDEX IF NOT EXISTS idx_episode_created ON episode FIELDS created_at;
 DEFINE INDEX IF NOT EXISTS idx_episode_content_ft ON episode FIELDS content FULLTEXT ANALYZER content_analyzer BM25;
 """
@@ -175,15 +170,14 @@ DEFINE FIELD IF NOT EXISTS valid_at ON relates_to TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS invalid_at ON relates_to TYPE option<datetime>;
 
 DEFINE INDEX IF NOT EXISTS idx_relates_uuid ON relates_to FIELDS uuid UNIQUE;
-DEFINE INDEX IF NOT EXISTS idx_relates_group ON relates_to FIELDS group_id;
-DEFINE INDEX IF NOT EXISTS idx_relates_group_source ON relates_to FIELDS group_id, source_id;
-DEFINE INDEX IF NOT EXISTS idx_relates_group_target ON relates_to FIELDS group_id, target_id;
-DEFINE INDEX IF NOT EXISTS idx_relates_group_name_source ON relates_to FIELDS group_id, name, source_id;
-DEFINE INDEX IF NOT EXISTS idx_relates_group_name_target ON relates_to FIELDS group_id, name, target_id;
-DEFINE INDEX IF NOT EXISTS idx_relates_group_source_target_name ON relates_to FIELDS group_id, source_id, target_id, name;
-DEFINE INDEX IF NOT EXISTS idx_relates_group_source_created ON relates_to FIELDS group_id, source_id, created_at, uuid;
-DEFINE INDEX IF NOT EXISTS idx_relates_group_target_created ON relates_to FIELDS group_id, target_id, created_at, uuid;
-DEFINE INDEX IF NOT EXISTS idx_relates_group_created ON relates_to FIELDS group_id, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_relates_source ON relates_to FIELDS source_id;
+DEFINE INDEX IF NOT EXISTS idx_relates_target ON relates_to FIELDS target_id;
+DEFINE INDEX IF NOT EXISTS idx_relates_name_source ON relates_to FIELDS name, source_id;
+DEFINE INDEX IF NOT EXISTS idx_relates_name_target ON relates_to FIELDS name, target_id;
+DEFINE INDEX IF NOT EXISTS idx_relates_source_target_name ON relates_to FIELDS source_id, target_id, name;
+DEFINE INDEX IF NOT EXISTS idx_relates_source_created ON relates_to FIELDS source_id, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_relates_target_created ON relates_to FIELDS target_id, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_relates_created ON relates_to FIELDS created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_relates_fact_ft ON relates_to FIELDS fact FULLTEXT ANALYZER content_analyzer BM25;
 DEFINE INDEX IF NOT EXISTS idx_relates_fact_embedding ON relates_to FIELDS fact_embedding
     HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC {HNSW_EFC} M {HNSW_M};
@@ -197,11 +191,10 @@ DEFINE FIELD IF NOT EXISTS target_id ON mentions TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS created_at ON mentions TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX IF NOT EXISTS idx_mentions_uuid ON mentions FIELDS uuid UNIQUE;
-DEFINE INDEX IF NOT EXISTS idx_mentions_group ON mentions FIELDS group_id;
-DEFINE INDEX IF NOT EXISTS idx_mentions_group_source ON mentions FIELDS group_id, source_id;
-DEFINE INDEX IF NOT EXISTS idx_mentions_group_target ON mentions FIELDS group_id, target_id;
-DEFINE INDEX IF NOT EXISTS idx_mentions_group_source_created ON mentions FIELDS group_id, source_id, created_at, uuid;
-DEFINE INDEX IF NOT EXISTS idx_mentions_group_target_created ON mentions FIELDS group_id, target_id, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_mentions_source ON mentions FIELDS source_id;
+DEFINE INDEX IF NOT EXISTS idx_mentions_target ON mentions FIELDS target_id;
+DEFINE INDEX IF NOT EXISTS idx_mentions_source_created ON mentions FIELDS source_id, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_mentions_target_created ON mentions FIELDS target_id, created_at, uuid;
 """
 
 
@@ -217,12 +210,12 @@ RELATION_ENDPOINT_SCHEMA_DEFINITIONS = """
 DEFINE FIELD IF NOT EXISTS source_id ON mentions TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS target_id ON mentions TYPE option<string>;
 
-DEFINE INDEX IF NOT EXISTS idx_relates_group_source_created ON relates_to FIELDS group_id, source_id, created_at, uuid;
-DEFINE INDEX IF NOT EXISTS idx_relates_group_target_created ON relates_to FIELDS group_id, target_id, created_at, uuid;
-DEFINE INDEX IF NOT EXISTS idx_mentions_group_source ON mentions FIELDS group_id, source_id;
-DEFINE INDEX IF NOT EXISTS idx_mentions_group_target ON mentions FIELDS group_id, target_id;
-DEFINE INDEX IF NOT EXISTS idx_mentions_group_source_created ON mentions FIELDS group_id, source_id, created_at, uuid;
-DEFINE INDEX IF NOT EXISTS idx_mentions_group_target_created ON mentions FIELDS group_id, target_id, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_relates_source_created ON relates_to FIELDS source_id, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_relates_target_created ON relates_to FIELDS target_id, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_mentions_source ON mentions FIELDS source_id;
+DEFINE INDEX IF NOT EXISTS idx_mentions_target ON mentions FIELDS target_id;
+DEFINE INDEX IF NOT EXISTS idx_mentions_source_created ON mentions FIELDS source_id, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_mentions_target_created ON mentions FIELDS target_id, created_at, uuid;
 """
 
 
@@ -268,6 +261,93 @@ DEFINE INDEX OVERWRITE idx_entity_group_type_status_updated
 """
 
 
+PARENT_TASK_CANONICALIZATION_DEFINITIONS = """
+UPDATE entity SET parent_task_id = epic_id
+WHERE entity_type = 'task'
+    AND (parent_task_id = NONE OR parent_task_id = '')
+    AND epic_id != NONE
+    AND epic_id != '';
+
+UPDATE entity SET parent_task_id = attributes.parent_task_id
+WHERE entity_type = 'task'
+    AND (parent_task_id = NONE OR parent_task_id = '')
+    AND attributes.parent_task_id != NONE
+    AND attributes.parent_task_id != '';
+
+UPDATE entity SET parent_task_id = attributes.epic_id
+WHERE entity_type = 'task'
+    AND (parent_task_id = NONE OR parent_task_id = '')
+    AND attributes.epic_id != NONE
+    AND attributes.epic_id != '';
+"""
+
+
+GRAPH_INDEX_PRUNE_DEFINITIONS = """
+REMOVE INDEX IF EXISTS idx_entity_group ON TABLE entity;
+REMOVE INDEX IF EXISTS idx_entity_epic ON TABLE entity;
+REMOVE INDEX IF EXISTS idx_entity_group_updated ON TABLE entity;
+REMOVE INDEX IF EXISTS idx_entity_group_type_updated ON TABLE entity;
+REMOVE INDEX IF EXISTS idx_entity_group_type_project_updated ON TABLE entity;
+REMOVE INDEX IF EXISTS idx_entity_group_type_epic_updated ON TABLE entity;
+REMOVE INDEX IF EXISTS idx_entity_group_type_parent_task_updated ON TABLE entity;
+REMOVE INDEX IF EXISTS idx_entity_group_type_status_updated ON TABLE entity;
+REMOVE INDEX IF EXISTS idx_entity_group_type_epic_status ON TABLE entity;
+REMOVE INDEX IF EXISTS idx_entity_group_type_project_status ON TABLE entity;
+REMOVE INDEX IF EXISTS idx_episode_group ON TABLE episode;
+REMOVE INDEX IF EXISTS idx_relates_group ON TABLE relates_to;
+REMOVE INDEX IF EXISTS idx_relates_group_source ON TABLE relates_to;
+REMOVE INDEX IF EXISTS idx_relates_group_target ON TABLE relates_to;
+REMOVE INDEX IF EXISTS idx_relates_group_name_source ON TABLE relates_to;
+REMOVE INDEX IF EXISTS idx_relates_group_name_target ON TABLE relates_to;
+REMOVE INDEX IF EXISTS idx_relates_group_source_target_name ON TABLE relates_to;
+REMOVE INDEX IF EXISTS idx_relates_group_source_created ON TABLE relates_to;
+REMOVE INDEX IF EXISTS idx_relates_group_target_created ON TABLE relates_to;
+REMOVE INDEX IF EXISTS idx_relates_group_created ON TABLE relates_to;
+REMOVE INDEX IF EXISTS idx_mentions_group ON TABLE mentions;
+REMOVE INDEX IF EXISTS idx_mentions_group_source ON TABLE mentions;
+REMOVE INDEX IF EXISTS idx_mentions_group_target ON TABLE mentions;
+REMOVE INDEX IF EXISTS idx_mentions_group_source_created ON TABLE mentions;
+REMOVE INDEX IF EXISTS idx_mentions_group_target_created ON TABLE mentions;
+
+DEFINE INDEX OVERWRITE idx_entity_updated
+    ON entity FIELDS updated_at, created_at, uuid CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_entity_type_updated
+    ON entity FIELDS entity_type, updated_at, created_at, uuid CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_entity_type_project_updated
+    ON entity FIELDS entity_type, project_id, updated_at, created_at, uuid CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_entity_type_parent_task_updated
+    ON entity FIELDS entity_type, parent_task_id, updated_at, created_at, uuid CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_entity_type_status_updated
+    ON entity FIELDS entity_type, status, updated_at, created_at, uuid CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_entity_type_project_status
+    ON entity FIELDS entity_type, project_id, status CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_relates_source
+    ON relates_to FIELDS source_id CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_relates_target
+    ON relates_to FIELDS target_id CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_relates_name_source
+    ON relates_to FIELDS name, source_id CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_relates_name_target
+    ON relates_to FIELDS name, target_id CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_relates_source_target_name
+    ON relates_to FIELDS source_id, target_id, name CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_relates_source_created
+    ON relates_to FIELDS source_id, created_at, uuid CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_relates_target_created
+    ON relates_to FIELDS target_id, created_at, uuid CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_relates_created
+    ON relates_to FIELDS created_at, uuid CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_mentions_source
+    ON mentions FIELDS source_id CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_mentions_target
+    ON mentions FIELDS target_id CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_mentions_source_created
+    ON mentions FIELDS source_id, created_at, uuid CONCURRENTLY;
+DEFINE INDEX OVERWRITE idx_mentions_target_created
+    ON mentions FIELDS target_id, created_at, uuid CONCURRENTLY;
+"""
+
+
 CURRENT_SCHEMA_MAINTENANCE_DEFINITIONS = ENTITY_DENORMALIZATION_MAINTENANCE_DEFINITIONS
 
 
@@ -304,9 +384,18 @@ GRAPH_SCHEMA_MIGRATIONS = (
         statements=tuple(split_statements(ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS)),
     ),
     SchemaMigration(
-        version=GRAPH_SCHEMA_CURRENT_VERSION,
+        version=6,
         name="relation_endpoint_mirror_backfill",
         statements=tuple(split_statements(RELATION_ENDPOINT_BACKFILL_DEFINITIONS)),
+    ),
+    SchemaMigration(
+        version=GRAPH_SCHEMA_CURRENT_VERSION,
+        name="graph_index_prune",
+        statements=tuple(
+            split_statements(
+                PARENT_TASK_CANONICALIZATION_DEFINITIONS + "\n" + GRAPH_INDEX_PRUNE_DEFINITIONS
+            )
+        ),
     ),
 )
 
@@ -609,9 +698,11 @@ __all__ = [
     "EMBEDDING_VECTOR_FIELDS",
     "ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS",
     "GRAPH_EDGES",
+    "GRAPH_INDEX_PRUNE_DEFINITIONS",
     "GRAPH_SCHEMA_MIGRATIONS",
     "GRAPH_TABLES",
     "NODE_DEFINITIONS",
+    "PARENT_TASK_CANONICALIZATION_DEFINITIONS",
     "RELATION_EDGE_CLEANUP_DEFINITIONS",
     "REMOVED_GRAPH_EDGES",
     "REMOVED_GRAPH_OBJECTS",

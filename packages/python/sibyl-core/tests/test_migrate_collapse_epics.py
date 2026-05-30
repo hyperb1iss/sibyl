@@ -7,6 +7,7 @@ storage, reversibility, idempotency, org isolation) is exercised end to end.
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import pytest
@@ -18,8 +19,10 @@ from sibyl_core.migrate.collapse_epics import (
 from sibyl_core.models.entities import EntityType
 from sibyl_core.models.tasks import Epic, EpicStatus, Task, TaskStatus
 from sibyl_core.services.graph import (
+    _ENTITY_BULK_UPSERT_QUERY,
     EntityManager,
     SurrealGraphClient,
+    _entity_record,
     prepare_graph_schema,
 )
 
@@ -58,6 +61,25 @@ def _task(
     )
 
 
+async def _create_legacy_epic_child(
+    client: SurrealGraphClient,
+    task: Task,
+    *,
+    group_id: str,
+) -> None:
+    record = _entity_record(task, group_id=group_id)
+    record["parent_task_id"] = None
+    attributes = dict(record["attributes"])
+    attributes.pop("parent_task_id", None)
+    raw_metadata = attributes.get("metadata")
+    if isinstance(raw_metadata, str):
+        metadata = json.loads(raw_metadata)
+        metadata.pop("parent_task_id", None)
+        attributes["metadata"] = json.dumps(metadata)
+    record["attributes"] = attributes
+    await client.execute_query(_ENTITY_BULK_UPSERT_QUERY, rows=[record])
+
+
 @pytest.mark.asyncio
 async def test_forward_converts_epic_and_repoints_children() -> None:
     group_id = "00000000-0000-0000-0000-0000000000a1"
@@ -67,8 +89,8 @@ async def test_forward_converts_epic_and_repoints_children() -> None:
     await manager.create_direct(epic)
     child_a = _task(title="Child A", status=TaskStatus.DOING, epic_id=epic.id)
     child_b = _task(title="Child B", status=TaskStatus.TODO, epic_id=epic.id)
-    await manager.create_direct(child_a)
-    await manager.create_direct(child_b)
+    await _create_legacy_epic_child(client, child_a, group_id=group_id)
+    await _create_legacy_epic_child(client, child_b, group_id=group_id)
 
     result = await collapse_epics_in_org(client, group_id=group_id, dry_run=False)
 
@@ -132,7 +154,7 @@ async def test_forward_is_idempotent() -> None:
     epic = _epic(title="Launch", status=EpicStatus.COMPLETED)
     await manager.create_direct(epic)
     child = _task(title="Child", status=TaskStatus.DONE, epic_id=epic.id)
-    await manager.create_direct(child)
+    await _create_legacy_epic_child(client, child, group_id=group_id)
 
     first = await collapse_epics_in_org(client, group_id=group_id, dry_run=False)
     assert first.epics_converted == 1
@@ -159,7 +181,7 @@ async def test_reverse_restores_epic_and_clears_parent() -> None:
     epic = _epic(title="Launch", status=EpicStatus.BLOCKED)
     await manager.create_direct(epic)
     child = _task(title="Child", status=TaskStatus.BLOCKED, epic_id=epic.id)
-    await manager.create_direct(child)
+    await _create_legacy_epic_child(client, child, group_id=group_id)
 
     forward = await collapse_epics_in_org(client, group_id=group_id, dry_run=False)
     assert forward.epics_converted == 1
@@ -214,7 +236,7 @@ async def test_dry_run_writes_nothing() -> None:
     epic = _epic(title="Launch", status=EpicStatus.PLANNING)
     await manager.create_direct(epic)
     child = _task(title="Child", epic_id=epic.id)
-    await manager.create_direct(child)
+    await _create_legacy_epic_child(client, child, group_id=group_id)
 
     result = await collapse_epics_in_org(client, group_id=group_id, dry_run=True)
     assert result.success is True

@@ -23,8 +23,10 @@ from sibyl_core.backends.surreal.schema import (
     DEAD_GRAPH_OBJECT_REMOVAL_DEFINITIONS,
     EDGE_DEFINITIONS,
     ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS,
+    GRAPH_INDEX_PRUNE_DEFINITIONS,
     GRAPH_SCHEMA_MIGRATIONS,
     NODE_DEFINITIONS,
+    PARENT_TASK_CANONICALIZATION_DEFINITIONS,
     RELATION_EDGE_CLEANUP_DEFINITIONS,
     RELATION_ENDPOINT_BACKFILL_DEFINITIONS,
     RELATION_ENDPOINT_SCHEMA_DEFINITIONS,
@@ -221,15 +223,15 @@ def test_graph_hnsw_indexes_use_configurable_defaults() -> None:
 def test_graph_relation_endpoint_indexes_match_hot_lookups() -> None:
     assert "DEFINE FIELD IF NOT EXISTS source_id ON mentions" in EDGE_DEFINITIONS
     assert "DEFINE FIELD IF NOT EXISTS target_id ON mentions" in EDGE_DEFINITIONS
-    assert "idx_relates_group_source_created" in EDGE_DEFINITIONS
-    assert "idx_relates_group_target_created" in EDGE_DEFINITIONS
-    assert "idx_mentions_group_source_created" in EDGE_DEFINITIONS
-    assert "idx_mentions_group_target_created" in EDGE_DEFINITIONS
+    assert "idx_relates_source_created" in EDGE_DEFINITIONS
+    assert "idx_relates_target_created" in EDGE_DEFINITIONS
+    assert "idx_mentions_source_created" in EDGE_DEFINITIONS
+    assert "idx_mentions_target_created" in EDGE_DEFINITIONS
 
 
 def test_graph_relation_endpoint_backfill_is_versioned() -> None:
-    assert "idx_relates_group_source_created" in RELATION_ENDPOINT_SCHEMA_DEFINITIONS
-    assert "idx_mentions_group_source_created" in RELATION_ENDPOINT_SCHEMA_DEFINITIONS
+    assert "idx_relates_source_created" in RELATION_ENDPOINT_SCHEMA_DEFINITIONS
+    assert "idx_mentions_source_created" in RELATION_ENDPOINT_SCHEMA_DEFINITIONS
     assert "UPDATE relates_to SET" in RELATION_ENDPOINT_BACKFILL_DEFINITIONS
     assert "source_id = in.uuid" in RELATION_ENDPOINT_BACKFILL_DEFINITIONS
     assert "target_id = out.uuid" in RELATION_ENDPOINT_BACKFILL_DEFINITIONS
@@ -272,6 +274,65 @@ def test_entity_updated_at_datetime_migration_is_versioned() -> None:
     )
     assert "CONCURRENTLY" in ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS
     assert "DEFINE FIELD OVERWRITE updated_at ON entity TYPE option<datetime>" in migration_sql
+
+
+def test_graph_index_prune_removes_constant_namespace_prefixes() -> None:
+    current_schema = "\n".join((NODE_DEFINITIONS, EDGE_DEFINITIONS))
+    migration_sql = "\n".join(
+        statement for migration in GRAPH_SCHEMA_MIGRATIONS for statement in migration.statements
+    )
+
+    for old_index in (
+        "idx_entity_group",
+        "idx_entity_epic",
+        "idx_entity_group_updated",
+        "idx_entity_group_type_updated",
+        "idx_entity_group_type_project_updated",
+        "idx_entity_group_type_epic_updated",
+        "idx_entity_group_type_parent_task_updated",
+        "idx_entity_group_type_status_updated",
+        "idx_entity_group_type_epic_status",
+        "idx_entity_group_type_project_status",
+        "idx_episode_group",
+        "idx_relates_group",
+        "idx_relates_group_source",
+        "idx_relates_group_target",
+        "idx_relates_group_name_source",
+        "idx_relates_group_name_target",
+        "idx_relates_group_source_target_name",
+        "idx_relates_group_source_created",
+        "idx_relates_group_target_created",
+        "idx_relates_group_created",
+        "idx_mentions_group",
+        "idx_mentions_group_source",
+        "idx_mentions_group_target",
+        "idx_mentions_group_source_created",
+        "idx_mentions_group_target_created",
+    ):
+        assert f"DEFINE INDEX IF NOT EXISTS {old_index}" not in current_schema
+        assert f"REMOVE INDEX IF EXISTS {old_index}" in GRAPH_INDEX_PRUNE_DEFINITIONS
+
+    for new_index in (
+        "idx_entity_updated",
+        "idx_entity_type_updated",
+        "idx_entity_type_project_updated",
+        "idx_entity_type_parent_task_updated",
+        "idx_entity_type_status_updated",
+        "idx_entity_type_project_status",
+        "idx_relates_source_created",
+        "idx_relates_target_created",
+        "idx_mentions_source_created",
+        "idx_mentions_target_created",
+    ):
+        assert f"DEFINE INDEX IF NOT EXISTS {new_index}" in current_schema
+        assert f"DEFINE INDEX OVERWRITE {new_index}" in GRAPH_INDEX_PRUNE_DEFINITIONS
+
+    assert "SET parent_task_id = epic_id" in PARENT_TASK_CANONICALIZATION_DEFINITIONS
+    assert "SET parent_task_id = attributes.parent_task_id" in (
+        PARENT_TASK_CANONICALIZATION_DEFINITIONS
+    )
+    assert "SET parent_task_id = attributes.epic_id" in (PARENT_TASK_CANONICALIZATION_DEFINITIONS)
+    assert "DEFINE INDEX OVERWRITE idx_entity_type_parent_task_updated" in migration_sql
 
 
 def test_graph_relation_cleanup_covers_all_relation_tables() -> None:
@@ -346,8 +407,8 @@ async def test_graph_bootstrap_applies_migrations_without_full_rebuild() -> None
 
     assert not any("DEFINE TABLE IF NOT EXISTS entity" in statement for statement in client.calls)
     assert not any("DEFINE TABLE OVERWRITE relates_to" in statement for statement in client.calls)
-    assert any("idx_relates_group_source_created" in statement for statement in client.calls)
-    assert any("idx_mentions_group_source_created" in statement for statement in client.calls)
+    assert any("idx_relates_source_created" in statement for statement in client.calls)
+    assert any("idx_mentions_source_created" in statement for statement in client.calls)
     assert sum("UPDATE relates_to SET" in statement for statement in client.calls) == 2
     assert sum("UPDATE mentions SET" in statement for statement in client.calls) == 2
     for table in (*REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES):

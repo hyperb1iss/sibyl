@@ -928,12 +928,12 @@ class GraphQueryAdapter:
                         expired_at,
                         valid_at,
                         invalid_at,
-                        in.uuid AS source_uuid,
-                        out.uuid AS target_uuid
+                        source_id AS source_uuid,
+                        target_id AS target_uuid
                     FROM relates_to
                     WHERE group_id = $group_id
-                      AND in.uuid IN $entity_ids
-                      AND out.uuid IN $entity_ids
+                      AND source_id IN $entity_ids
+                      AND target_id IN $entity_ids
                       {type_clause}
                     ORDER BY uuid DESC
                     LIMIT $limit
@@ -994,10 +994,10 @@ class GraphQueryAdapter:
             rows = _normalize_result(
                 await self._driver.execute_query(
                     f"""
-                    SELECT in.uuid AS source_id, out.uuid AS target_id
+                    SELECT source_id, target_id
                     FROM relates_to
                     WHERE group_id = $group_id
-                      AND (in.uuid IN $entity_ids OR out.uuid IN $entity_ids)
+                      AND (source_id IN $entity_ids OR target_id IN $entity_ids)
                       {type_clause};
                     """,  # noqa: S608
                     group_id=self._group_id,
@@ -1202,20 +1202,20 @@ async def delete_project_graph_data(group_id: str, project_id: str) -> None:
         query = """
             BEGIN TRANSACTION;
             LET $project_entity_ids = (
-                SELECT VALUE id FROM entity
+                SELECT VALUE uuid FROM entity
                 WHERE group_id = $group_id
                   AND (project_id = $project_id OR uuid = $project_id)
             );
             LET $project_episode_ids = (
-                SELECT VALUE id FROM episode
+                SELECT VALUE uuid FROM episode
                 WHERE group_id = $group_id AND project_id = $project_id
             );
             DELETE FROM relates_to
             WHERE group_id = $group_id
-              AND (in IN $project_entity_ids OR out IN $project_entity_ids);
+              AND (source_id IN $project_entity_ids OR target_id IN $project_entity_ids);
             DELETE FROM mentions
             WHERE group_id = $group_id
-              AND (in IN $project_episode_ids OR out IN $project_entity_ids);
+              AND (source_id IN $project_episode_ids OR target_id IN $project_entity_ids);
             DELETE FROM entity
             WHERE group_id = $group_id
               AND (project_id = $project_id OR uuid = $project_id);

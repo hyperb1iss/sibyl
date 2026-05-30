@@ -1098,10 +1098,10 @@ def _edge_filter_clause(
         )
         params["project_ids"] = list(search_filter.project_ids)
     if source_node_uuid is not None:
-        clauses.append("in.uuid = $source_node_uuid")
+        clauses.append("source_id = $source_node_uuid")
         params["source_node_uuid"] = source_node_uuid
     if target_node_uuid is not None:
-        clauses.append("out.uuid = $target_node_uuid")
+        clauses.append("target_id = $target_node_uuid")
         params["target_node_uuid"] = target_node_uuid
     return clauses, params
 
@@ -1117,8 +1117,8 @@ def _edge_select(extra: str | None = None) -> str:
     return f"""
         SELECT uuid, name, fact, fact_embedding, group_id, episodes, attributes,
                created_at, expired_at, valid_at, invalid_at,
-               in.uuid AS source_node_uuid,
-               out.uuid AS target_node_uuid,
+               source_id AS source_node_uuid,
+               target_id AS target_node_uuid,
                in.project_id AS source_node_project_id,
                out.project_id AS target_node_project_id{extra_select}
         FROM relates_to
@@ -1211,9 +1211,9 @@ async def _mentioned_entity_uuids(
     rows = normalize_records(
         await client.execute_query(
             """
-            SELECT out.uuid AS uuid
+            SELECT target_id AS uuid
             FROM mentions
-            WHERE in.uuid IN $episode_uuids
+            WHERE source_id IN $episode_uuids
               AND group_id = $group_id
               AND out.group_id = $group_id
             LIMIT $limit;
@@ -1238,9 +1238,9 @@ async def _relation_target_uuids(
     rows = normalize_records(
         await client.execute_query(
             """
-            SELECT out.uuid AS uuid
+            SELECT target_id AS uuid
             FROM relates_to
-            WHERE in.uuid IN $source_uuids
+            WHERE source_id IN $source_uuids
               AND group_id = $group_id
               AND out.group_id = $group_id
             LIMIT $limit;
