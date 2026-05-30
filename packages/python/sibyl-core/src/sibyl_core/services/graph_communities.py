@@ -1001,6 +1001,14 @@ def _build_overview_graph_from_snapshot(
         key=lambda item: len(item[1]),
         reverse=True,
     )[:OVERVIEW_MAX_CLUSTERS]
+
+    # Fallback: if community detection produced no real clusters (e.g. networkx
+    # unavailable, or every node landed unclustered), show the unclustered set
+    # as a single bubble so the overview is never blank. type_counts_by_cluster
+    # already holds the correct distribution for the unclustered bucket.
+    if not ranked_clusters and members_by_cluster.get("unclustered"):
+        ranked_clusters = [("unclustered", members_by_cluster["unclustered"])]
+
     kept_cluster_ids = {cluster_id for cluster_id, _ in ranked_clusters}
 
     aggregate_nodes: list[dict[str, Any]] = []

@@ -37,7 +37,7 @@ def _relationship(
     )
 
 
-def test_build_overview_graph_preserves_rare_categories() -> None:
+def test_build_overview_graph_emits_aggregate_cluster_bubbles() -> None:
     entities = [
         _entity("task-1", EntityType.TASK),
         _entity("task-2", EntityType.TASK),
@@ -73,21 +73,24 @@ def test_build_overview_graph_preserves_rare_categories() -> None:
     )
 
     assert graph.resolution == GRAPH_RESOLUTION_OVERVIEW
-    assert {node["id"] for node in graph.nodes} == {
-        "task-1",
-        "task-2",
-        "task-3",
-        "episode-1",
-        "epic-1",
-    }
-    assert any(node["type"] == "episode" and node["name"] == "episode-1" for node in graph.nodes)
-    assert any(node["type"] == "epic" and node["name"] == "epic-1" for node in graph.nodes)
-    assert all(not node.get("aggregate", False) for node in graph.nodes)
-    assert any(edge["source"] == "task-1" and edge["target"] == "epic-1" for edge in graph.edges)
+    # Overview emits one aggregate bubble per real cluster (the unclustered
+    # remainder and the tiny tail are excluded), sized by member_count and
+    # colored by dominant type.
+    nodes_by_id = {node["id"]: node for node in graph.nodes}
+    assert set(nodes_by_id) == {"cluster-a", "cluster-b"}
+    assert all(node["aggregate"] is True for node in graph.nodes)
+    assert nodes_by_id["cluster-a"]["member_count"] == 4
+    assert nodes_by_id["cluster-a"]["type"] == "task"  # dominant of {task:3, episode:1}
+    assert nodes_by_id["cluster-b"]["member_count"] == 1
+    assert nodes_by_id["cluster-b"]["type"] == "epic"
+    # The cross-cluster BELONGS_TO (task-1 -> epic-1) becomes an inter-cluster edge.
+    assert any(
+        {edge["source"], edge["target"]} == {"cluster-a", "cluster-b"} for edge in graph.edges
+    )
     cluster_a = next(cluster for cluster in graph.clusters if cluster["id"] == "cluster-a")
-    assert cluster_a["displayed_member_count"] == 4
-    assert cluster_a["displayed_type_distribution"]["task"] == 3
-    assert cluster_a["displayed_type_distribution"]["episode"] == 1
+    assert cluster_a["member_count"] == 4
+    assert cluster_a["type_distribution"]["task"] == 3
+    assert cluster_a["type_distribution"]["episode"] == 1
 
 
 def test_build_cluster_detail_graph_includes_cluster_members_and_neighbors() -> None:

@@ -6,6 +6,8 @@ import pytest
 
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.services.graph_communities import (
+    DETECTION_MAX_ENTITIES,
+    DETECTION_MAX_RELATIONSHIPS,
     CommunityConfig,
     DetectedCommunity,
     detect_communities,
@@ -473,17 +475,19 @@ class TestHierarchicalGraph:
 
         assert {node["id"] for node in data.nodes} == {"core-1", "core-2", "core-3"}
         assert data.displayed_edges == 2
+        # Detection loads the whole graph (analytic caps), not the per-request
+        # render budget — capping the snapshot is what caused the starfield.
         list_entities.assert_awaited_once_with(
             mock_client,
             TEST_ORG_ID,
-            batch_size=3,
-            max_items=3,
+            batch_size=DETECTION_MAX_ENTITIES,
+            max_items=DETECTION_MAX_ENTITIES,
         )
         list_relationships.assert_awaited_once_with(
             mock_client,
             TEST_ORG_ID,
-            batch_size=10,
-            max_items=10,
+            batch_size=DETECTION_MAX_RELATIONSHIPS,
+            max_items=DETECTION_MAX_RELATIONSHIPS,
         )
 
     @pytest.mark.asyncio

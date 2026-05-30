@@ -299,6 +299,7 @@ class TestGraphRoutes:
             displayed_nodes=1,
             displayed_edges=1,
             resolution="overview",
+            recommended_resolution="detail",
         )
 
         with (
@@ -350,6 +351,7 @@ class TestGraphRoutes:
             displayed_nodes=1,
             displayed_edges=1,
             resolution="detail",
+            recommended_resolution="detail",
         )
 
         with (
