@@ -71,7 +71,7 @@ const DropdownMenuContent = forwardRef<
       className={`
         z-50 min-w-[8rem] overflow-hidden
         bg-sc-bg-elevated border border-sc-purple/20 rounded-lg p-1
-        shadow-[0_4px_24px_rgba(0,0,0,0.4),0_0_32px_rgba(225,53,255,0.12),inset_0_1px_0_rgba(255,255,255,0.05)]
+        shadow-[0_4px_24px_oklch(0%_0_0_/_0.4),0_0_32px_color-mix(in_oklch,var(--sc-purple)_12%,transparent),inset_0_1px_0_oklch(100%_0_0_/_0.05)]
         data-[state=open]:animate-in data-[state=closed]:animate-out
         data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0
         data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95

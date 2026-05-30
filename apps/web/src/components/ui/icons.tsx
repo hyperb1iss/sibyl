@@ -297,7 +297,7 @@ export function StatusIndicator({ status, showLabel = true }: StatusIndicatorPro
       icon: Wifi,
       label: 'Live',
       className: 'text-sc-green',
-      glow: 'shadow-[0_0_8px_rgba(80,250,123,0.8)]',
+      glow: 'shadow-[0_0_8px_color-mix(in_oklch,var(--sc-green)_80%,transparent)]',
       bg: 'bg-sc-green/5 border-sc-green/20',
     },
     connecting: {
@@ -311,7 +311,7 @@ export function StatusIndicator({ status, showLabel = true }: StatusIndicatorPro
       icon: WifiOff,
       label: 'Offline',
       className: 'text-sc-red',
-      glow: 'shadow-[0_0_8px_rgba(255,99,99,0.6)]',
+      glow: 'shadow-[0_0_8px_color-mix(in_oklch,var(--sc-red)_60%,transparent)]',
       bg: 'bg-sc-red/5 border-sc-red/20',
     },
   };

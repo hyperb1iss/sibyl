@@ -279,7 +279,7 @@ export function ProgressSpinner({
           strokeDasharray={circumference}
           strokeDashoffset={offset}
           strokeLinecap="round"
-          className="text-sc-cyan transition-all duration-300 drop-shadow-[0_0_8px_rgba(128,255,234,0.5)]"
+          className="text-sc-cyan transition-all duration-300 drop-shadow-[0_0_8px_color-mix(in_oklch,var(--sc-cyan)_50%,transparent)]"
         />
       </svg>
       {showPercent && (

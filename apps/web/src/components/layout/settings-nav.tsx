@@ -93,7 +93,7 @@ function NavItem({ item, active }: NavItemProps) {
       {active && (
         <span
           aria-hidden="true"
-          className="absolute -left-1 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-sc-purple shadow-[0_0_8px_rgba(225,53,255,0.6)]"
+          className="absolute -left-1 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-sc-purple shadow-[0_0_8px_color-mix(in_oklch,var(--sc-purple)_60%,transparent)]"
         />
       )}
       <Icon

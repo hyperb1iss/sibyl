@@ -1,6 +1,13 @@
 'use client';
 
 import { ArrowLeft, ArrowRight } from '@/components/ui/icons';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 interface PaginationProps {
   currentPage: number;
@@ -248,24 +255,18 @@ export function PageSizeSelector({
   return (
     <div className={`flex items-center gap-2 text-sm ${className}`}>
       <span className="text-sc-fg-muted">Show</span>
-      <select
-        value={value}
-        onChange={e => onChange(Number(e.target.value))}
-        className="
-          h-9 px-3 rounded-lg
-          bg-sc-bg-highlight border border-sc-fg-subtle/20
-          text-sc-fg-primary
-          transition-colors duration-150
-          hover:border-sc-purple/50
-          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
-        "
-      >
-        {options.map(opt => (
-          <option key={opt} value={opt}>
-            {opt}
-          </option>
-        ))}
-      </select>
+      <Select value={String(value)} onValueChange={next => onChange(Number(next))}>
+        <SelectTrigger className="h-9 w-[4.5rem]" aria-label="Items per page">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map(opt => (
+            <SelectItem key={opt} value={String(opt)}>
+              {opt}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <span className="text-sc-fg-muted">per page</span>
     </div>
   );
