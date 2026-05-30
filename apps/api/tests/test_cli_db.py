@@ -61,6 +61,13 @@ def test_inventory_requires_org_id() -> None:
     assert "--org-id is required for inventory" in result.output
 
 
+def test_plan_probes_requires_org_id() -> None:
+    result = runner.invoke(db_cli.app, ["plan-probes"])
+
+    assert result.exit_code == 1
+    assert "--org-id is required for plan probes" in result.output
+
+
 def test_inventory_collects_schema_tables_orphans_and_vectors() -> None:
     class FakeInventoryClient:
         def __init__(self, *, plane: str) -> None:
@@ -107,6 +114,66 @@ def test_inventory_collects_schema_tables_orphans_and_vectors() -> None:
     assert payload["orphans"]["content"][0]["name"] == "crawled_documents_missing_source"
     assert {vector["plane"] for vector in payload["vectors"]} == {"content", "graph"}
     auth_client.close.assert_awaited_once()
+    content_client.close.assert_awaited_once()
+    graph_client.close.assert_awaited_once()
+
+
+def test_plan_probes_runs_graph_and_content_explain_queries() -> None:
+    class FakePlanClient:
+        def __init__(self) -> None:
+            self.close = AsyncMock()
+            self.execute_query = AsyncMock(side_effect=self._execute_query)
+
+        async def _execute_query(self, query: str, **_params: object) -> object:
+            if "fact_embedding" in query:
+                index = "idx_relates_fact_embedding"
+            elif "document_chunks" in query and "content @0@" in query:
+                index = "idx_document_chunks_content_ft"
+            elif "document_chunks" in query:
+                index = "idx_document_chunks_embedding"
+            else:
+                index = "idx_entity_embedding"
+            return [{"operation": "Iterate Index", "detail": {"plan": {"index": index}}}]
+
+    content_client = FakePlanClient()
+    graph_client = FakePlanClient()
+
+    with (
+        patch(
+            "sibyl.persistence.surreal.content.build_surreal_content_client",
+            return_value=content_client,
+        ),
+        patch(
+            "sibyl_core.services.graph.get_surreal_graph_client",
+            AsyncMock(return_value=graph_client),
+        ),
+    ):
+        result = runner.invoke(
+            db_cli.app,
+            [
+                "plan-probes",
+                "--org-id",
+                "org-123",
+                "--source-id",
+                "source-123",
+                "--project-id",
+                "project-123",
+                "--graph-embedding-dim",
+                "4",
+                "--content-embedding-dim",
+                "4",
+                "--json",
+            ],
+        )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["org_id"] == "org-123"
+    assert len(payload["probes"]) == 5
+    assert {probe["plane"] for probe in payload["probes"]} == {"graph", "content"}
+    assert all(probe["analysis"]["uses_expected_index"] for probe in payload["probes"])
+    assert content_client.execute_query.await_count == 2
+    assert graph_client.execute_query.await_count == 3
     content_client.close.assert_awaited_once()
     graph_client.close.assert_awaited_once()
 

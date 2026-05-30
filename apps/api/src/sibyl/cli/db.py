@@ -5,6 +5,7 @@ Commands for backup, restore, and database management.
 
 import json
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -14,6 +15,7 @@ from sibyl.cli.common import (
     ELECTRIC_PURPLE,
     ERROR_RED,
     NEON_CYAN,
+    SUCCESS_GREEN,
     console,
     error,
     info,
@@ -200,6 +202,17 @@ def _configured_vector_indexes() -> list[dict[str, object]]:
     return vectors
 
 
+def _zero_vector(dimensions: int) -> list[float]:
+    return [0.0] * max(int(dimensions), 1)
+
+
+def _split_probe_values(raw: str, *, fallback: str | None = None) -> tuple[str, ...]:
+    values = tuple(value.strip() for value in raw.split(",") if value.strip())
+    if values:
+        return values
+    return (fallback,) if fallback is not None else ()
+
+
 _AUTH_ORPHAN_CHECKS = (
     (
         "organization_members_missing_organization",
@@ -372,6 +385,65 @@ async def collect_database_inventory(org_id: str) -> dict[str, object]:
         }
     finally:
         for client in (auth_client, content_client, graph_client):
+            if client is None:
+                continue
+            close = getattr(client, "close", None)
+            if callable(close):
+                await close()
+
+
+async def collect_query_plan_probe_report(
+    *,
+    org_id: str,
+    source_ids: tuple[str, ...],
+    project_ids: tuple[str, ...],
+    entity_types: tuple[str, ...],
+    node_types: tuple[str, ...],
+    query_text: str,
+    limit: int,
+    graph_embedding_dim: int,
+    content_embedding_dim: int,
+    max_executed_rows: int | None,
+) -> dict[str, object]:
+    from sibyl.persistence.surreal.content import build_surreal_content_client
+    from sibyl_core.backends.surreal.query_plan_probes import (
+        build_hot_query_plan_probes,
+        run_query_plan_probes,
+    )
+    from sibyl_core.services.graph import get_surreal_graph_client
+
+    content_client = build_surreal_content_client()
+    graph_client = None
+    try:
+        graph_client = await get_surreal_graph_client(org_id)
+        probes = list(
+            build_hot_query_plan_probes(
+                org_id=org_id,
+                graph_query_embedding=_zero_vector(graph_embedding_dim),
+                content_query_embedding=_zero_vector(content_embedding_dim),
+                query_text=query_text,
+                source_ids=source_ids,
+                project_ids=project_ids,
+                entity_types=entity_types,
+                node_types=node_types,
+                limit=limit,
+            )
+        )
+        if max_executed_rows is not None:
+            probes = [replace(probe, max_executed_rows=max_executed_rows) for probe in probes]
+        results = await run_query_plan_probes(
+            {"content": content_client, "graph": graph_client},
+            probes,
+        )
+        return {
+            "org_id": org_id,
+            "source_ids": list(source_ids),
+            "project_ids": list(project_ids),
+            "query_text": query_text,
+            "probes": [result.to_dict() for result in results],
+        }
+    finally:
+        for client in (content_client, graph_client):
             if client is None:
                 continue
             close = getattr(client, "close", None)
@@ -769,6 +841,133 @@ def db_inventory(
             print_db_hint()
 
     _inventory()
+
+
+@app.command("plan-probes")
+def db_plan_probes(
+    org_id: Annotated[
+        str,
+        typer.Option("--org-id", help="Organization UUID for graph and scoped checks"),
+    ] = "",
+    source_ids: Annotated[
+        str,
+        typer.Option(
+            "--source-id",
+            help="Comma-separated content source UUIDs or names used by content probes",
+        ),
+    ] = "",
+    project_ids: Annotated[
+        str,
+        typer.Option("--project-id", help="Comma-separated graph project IDs used by probes"),
+    ] = "",
+    entity_types: Annotated[
+        str,
+        typer.Option("--entity-type", help="Comma-separated entity types for entity search"),
+    ] = "",
+    node_types: Annotated[
+        str,
+        typer.Option("--node-type", help="Comma-separated node types for context search"),
+    ] = "task",
+    query_text: Annotated[
+        str,
+        typer.Option("--query", help="Lexical query text used by content probes"),
+    ] = "sibyl query plan probe",
+    limit: Annotated[
+        int,
+        typer.Option("--limit", help="Requested result limit for probe query construction", min=1),
+    ] = 10,
+    graph_embedding_dim: Annotated[
+        int,
+        typer.Option(
+            "--graph-embedding-dim",
+            help="Graph query vector dimensions; 0 uses the configured schema dimension",
+            min=0,
+        ),
+    ] = 0,
+    content_embedding_dim: Annotated[
+        int,
+        typer.Option(
+            "--content-embedding-dim",
+            help="Content query vector dimensions; 0 uses the configured schema dimension",
+            min=0,
+        ),
+    ] = 0,
+    max_executed_rows: Annotated[
+        int,
+        typer.Option(
+            "--max-executed-rows",
+            help="Optional threshold for EXPLAIN FULL row-count warnings; 0 disables it",
+            min=0,
+        ),
+    ] = 0,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Print probe results as JSON"),
+    ] = False,
+) -> None:
+    """Run read-only EXPLAIN FULL probes for hot graph and content searches."""
+    if not org_id:
+        error("--org-id is required for plan probes")
+        raise typer.Exit(code=1)
+
+    @run_async
+    async def _plan_probes() -> None:
+        from sibyl_core.backends.surreal.content_schema import (
+            EMBEDDING_DIM as CONTENT_EMBEDDING_DIM,
+        )
+        from sibyl_core.backends.surreal.schema import EMBEDDING_DIM as GRAPH_EMBEDDING_DIM
+
+        try:
+            report = await collect_query_plan_probe_report(
+                org_id=org_id,
+                source_ids=_split_probe_values(source_ids, fallback="probe-source"),
+                project_ids=_split_probe_values(project_ids, fallback="probe-project"),
+                entity_types=_split_probe_values(entity_types),
+                node_types=_split_probe_values(node_types, fallback="task"),
+                query_text=query_text,
+                limit=limit,
+                graph_embedding_dim=graph_embedding_dim or GRAPH_EMBEDDING_DIM,
+                content_embedding_dim=content_embedding_dim or CONTENT_EMBEDDING_DIM,
+                max_executed_rows=max_executed_rows or None,
+            )
+            if json_output:
+                print_json(report)
+                return
+
+            console.print(f"\n[{NEON_CYAN}]Query Plan Probes[/{NEON_CYAN}]\n")
+            console.print(f"  Org: [{ELECTRIC_PURPLE}]{org_id}[/{ELECTRIC_PURPLE}]")
+            probes = report.get("probes")
+            if not isinstance(probes, list):
+                return
+            for probe in probes:
+                if not isinstance(probe, Mapping):
+                    continue
+                analysis = probe.get("analysis")
+                error_text = probe.get("error")
+                expected = probe.get("expected_indexes")
+                if error_text:
+                    console.print(
+                        f"  [{ERROR_RED}]check[/{ERROR_RED}] {probe.get('name')}: {error_text}"
+                    )
+                    continue
+                uses_expected = (
+                    isinstance(analysis, Mapping) and analysis.get("uses_expected_index") is True
+                )
+                label = "ok" if uses_expected else "check"
+                color = SUCCESS_GREEN if uses_expected else ERROR_RED
+                console.print(f"  [{color}]{label}[/{color}] {probe.get('name')}")
+                if expected:
+                    console.print(f"      expected: {expected}")
+                if isinstance(analysis, Mapping):
+                    console.print(f"      used: {analysis.get('used_indexes')}")
+                    scan_operations = analysis.get("scan_operations")
+                    if scan_operations:
+                        console.print(f"      scans: {scan_operations}")
+        except Exception as e:
+            error(f"Plan probes failed: {e}")
+            print_db_hint()
+
+    _plan_probes()
 
 
 @app.command("fix-embeddings")
