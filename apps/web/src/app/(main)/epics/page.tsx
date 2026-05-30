@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { EpicList } from '@/components/epics';
+import { PageHeader } from '@/components/layout/page-header';
 import { ChevronDown, Search, X } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/spinner';
 import { FilterChip } from '@/components/ui/toggle';
@@ -206,18 +207,10 @@ function EpicsPageContent() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-sc-fg-primary flex items-center gap-2">
-            <span className="text-sc-orange">◈</span>
-            Epics
-          </h1>
-          <p className="text-sm text-sc-fg-muted mt-1">
-            Feature initiatives that group related tasks
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        description="Feature initiatives that group related tasks"
+        meta={`${epics.length} epic${epics.length === 1 ? '' : 's'}`}
+      />
 
       {/* Search + Filters */}
       <div className="space-y-3">
@@ -228,20 +221,22 @@ function EpicsPageContent() {
             <Search
               width={16}
               height={16}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-sc-fg-subtle"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-sc-fg-muted"
             />
             <input
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder="Search epics..."
-              className="w-full pl-9 pr-3 py-2 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none focus:ring-2 focus:ring-sc-purple/10 transition-all"
+              aria-label="Search epics"
+              className="w-full pl-9 pr-3 py-2 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg text-sm text-sc-fg-primary placeholder:text-sc-fg-muted transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-sc-fg-subtle hover:text-sc-fg-primary"
+                aria-label="Clear search"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-sc-fg-muted hover:text-sc-fg-primary transition-colors duration-200 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
               >
                 <X width={14} height={14} />
               </button>
@@ -253,7 +248,10 @@ function EpicsPageContent() {
             <button
               type="button"
               onClick={() => setIsSortOpen(!isSortOpen)}
-              className="flex items-center gap-2 px-3 py-2 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg text-sm text-sc-fg-muted hover:text-sc-fg-primary hover:border-sc-fg-subtle/40 transition-all min-w-[160px]"
+              aria-label="Sort epics"
+              aria-haspopup="listbox"
+              aria-expanded={isSortOpen}
+              className="flex items-center gap-2 px-3 py-2 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg text-sm text-sc-fg-muted hover:text-sc-fg-primary hover:border-sc-fg-subtle/40 transition-colors duration-200 min-w-[160px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
             >
               <span className="flex-1 text-left">
                 {SORT_OPTIONS.find(o => o.value === sortOption)?.label ?? 'Sort'}
@@ -261,7 +259,7 @@ function EpicsPageContent() {
               <ChevronDown
                 width={14}
                 height={14}
-                className={`transition-transform ${isSortOpen ? 'rotate-180' : ''}`}
+                className={`transition-transform duration-200 ${isSortOpen ? 'rotate-180' : ''}`}
               />
             </button>
             {isSortOpen && (
@@ -272,13 +270,18 @@ function EpicsPageContent() {
                   onClick={() => setIsSortOpen(false)}
                   onKeyDown={e => e.key === 'Escape' && setIsSortOpen(false)}
                 />
-                <div className="absolute right-0 top-full mt-1 z-20 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg shadow-lg py-1 min-w-[160px]">
+                <div
+                  role="listbox"
+                  className="absolute right-0 top-full mt-1 z-20 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg shadow-card-elevated py-1 min-w-[160px]"
+                >
                   {SORT_OPTIONS.map(option => (
                     <button
                       key={option.value}
                       type="button"
+                      role="option"
+                      aria-selected={sortOption === option.value}
                       onClick={() => handleSortChange(option.value)}
-                      className={`w-full px-3 py-1.5 text-left text-sm transition-colors ${
+                      className={`w-full px-3 py-1.5 text-left text-sm transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sc-cyan ${
                         sortOption === option.value
                           ? 'text-sc-purple bg-sc-purple/10'
                           : 'text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight'
@@ -296,7 +299,7 @@ function EpicsPageContent() {
         {/* Status Filter (Multi-select) */}
         <div className="flex items-center gap-2">
           <div className="flex flex-wrap items-center gap-2 flex-1">
-            <span className="text-xs text-sc-fg-subtle font-medium">Status:</span>
+            <span className="text-xs text-sc-fg-muted font-medium">Status:</span>
             {EPIC_STATUSES.map(status => {
               const config = EPIC_STATUS_CONFIG[status];
               const isActive = selectedStatuses.has(status);
@@ -314,14 +317,15 @@ function EpicsPageContent() {
               );
             })}
             {selectedStatuses.size === 0 && (
-              <span className="text-xs text-sc-fg-subtle italic">All</span>
+              <span className="text-xs text-sc-fg-muted italic">All</span>
             )}
           </div>
           {selectedStatuses.size > 0 && (
             <button
               type="button"
               onClick={handleClearStatuses}
-              className="text-xs text-sc-fg-muted hover:text-sc-fg-primary flex items-center gap-1 px-2 py-1 rounded bg-sc-bg-elevated hover:bg-sc-bg-highlight transition-colors shrink-0"
+              aria-label="Clear status filters"
+              className="text-xs text-sc-fg-muted hover:text-sc-fg-primary flex items-center gap-1 px-2 py-1 rounded bg-sc-bg-elevated hover:bg-sc-bg-highlight transition-colors duration-200 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
             >
               <X width={12} height={12} />
               Clear

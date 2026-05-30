@@ -10,6 +10,8 @@ import { ROUTE_CONFIG, useSetBreadcrumb } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import { VelocityLineChart } from '@/components/metrics/charts';
 import { CreateProjectDialog } from '@/components/projects/create-project-dialog';
+import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { ProjectsEmptyState } from '@/components/ui/empty-state';
 import {
   AlertTriangle,
@@ -17,6 +19,7 @@ import {
   ArrowDownAZ,
   BarChart3,
   CheckCircle2,
+  ChevronDown,
   Clock,
   FolderKanban,
   GitBranch,
@@ -28,6 +31,13 @@ import {
   Users,
   Zap,
 } from '@/components/ui/icons';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import { ErrorState, Tooltip } from '@/components/ui/tooltip';
 import type {
@@ -123,6 +133,7 @@ export function ProjectsContent({
   const setShowArchived = (v: boolean) => setPrefs(p => ({ ...p, showArchived: v }));
 
   const [showCreate, setShowCreate] = useState(false);
+  const [isSortOpen, setIsSortOpen] = useState(false);
   const selectedProjectId = searchParams.get('id');
 
   // Fetch projects
@@ -266,14 +277,13 @@ export function ProjectsContent({
         description="Manage your development projects"
         meta={`${projects.length} projects | ${totalStats.tasks} tasks | ${totalStats.active} active`}
         action={
-          <button
-            type="button"
+          <Button
             onClick={() => setShowCreate(true)}
-            className="shrink-0 px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg font-medium transition-colors flex items-center gap-1.5 text-sm"
+            icon={<Plus width={16} height={16} />}
+            className="shrink-0"
           >
-            <span>+</span>
-            <span>New Project</span>
-          </button>
+            New Project
+          </Button>
         }
       />
 
@@ -288,7 +298,7 @@ export function ProjectsContent({
         <div className="w-80 shrink-0">
           <div className="sticky top-4 space-y-2">
             {/* Header with sort options */}
-            <div className="flex items-center justify-between px-1 mb-3">
+            <div className="flex items-center justify-between gap-2 px-1 mb-3">
               <h2 className="text-sm font-semibold text-sc-fg-muted">All Projects</h2>
               {/* Sort + filter options */}
               <div className="flex items-center gap-2">
@@ -297,32 +307,74 @@ export function ProjectsContent({
                   <button
                     type="button"
                     onClick={() => setShowArchived(!showArchived)}
-                    className={`p-1.5 rounded transition-colors ${
+                    aria-label={showArchived ? 'Hide archived projects' : 'Show archived projects'}
+                    aria-pressed={showArchived}
+                    className={`p-1.5 rounded-lg transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base ${
                       showArchived
                         ? 'bg-sc-yellow/20 text-sc-yellow'
-                        : 'text-sc-fg-subtle hover:text-sc-fg-muted hover:bg-sc-bg-highlight/50'
+                        : 'text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight/50'
                     }`}
                   >
                     <Archive width={14} height={14} />
                   </button>
                 </Tooltip>
-                <span className="w-px h-4 bg-sc-fg-subtle/20" />
-                {/* Sort options */}
-                {PROJECT_SORT_OPTIONS.map(option => (
-                  <Tooltip key={option.value} content={option.label} side="bottom">
-                    <button
-                      type="button"
-                      onClick={() => setSortBy(option.value)}
-                      className={`p-1.5 rounded transition-colors ${
-                        sortBy === option.value
-                          ? 'bg-sc-purple/20 text-sc-purple'
-                          : 'text-sc-fg-subtle hover:text-sc-fg-muted hover:bg-sc-bg-highlight/50'
-                      }`}
-                    >
-                      {option.icon}
-                    </button>
-                  </Tooltip>
-                ))}
+
+                {/* Sort dropdown (labeled; mirrors the epics-page sort control) */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setIsSortOpen(!isSortOpen)}
+                    aria-label="Sort projects"
+                    aria-haspopup="listbox"
+                    aria-expanded={isSortOpen}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg text-xs text-sc-fg-muted hover:text-sc-fg-primary hover:border-sc-fg-subtle/40 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
+                  >
+                    {PROJECT_SORT_OPTIONS.find(o => o.value === sortBy)?.icon}
+                    <span>
+                      {PROJECT_SORT_OPTIONS.find(o => o.value === sortBy)?.label ?? 'Sort'}
+                    </span>
+                    <ChevronDown
+                      width={12}
+                      height={12}
+                      className={`transition-transform duration-200 ${isSortOpen ? 'rotate-180' : ''}`}
+                    />
+                  </button>
+                  {isSortOpen && (
+                    <>
+                      {/* Backdrop to close dropdown */}
+                      <div
+                        className="fixed inset-0 z-10"
+                        onClick={() => setIsSortOpen(false)}
+                        onKeyDown={e => e.key === 'Escape' && setIsSortOpen(false)}
+                      />
+                      <div
+                        role="listbox"
+                        className="absolute right-0 top-full mt-1 z-20 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg shadow-card-elevated py-1 min-w-[160px]"
+                      >
+                        {PROJECT_SORT_OPTIONS.map(option => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            role="option"
+                            aria-selected={sortBy === option.value}
+                            onClick={() => {
+                              setSortBy(option.value);
+                              setIsSortOpen(false);
+                            }}
+                            className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sc-cyan ${
+                              sortBy === option.value
+                                ? 'text-sc-purple bg-sc-purple/10'
+                                : 'text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight'
+                            }`}
+                          >
+                            {option.icon}
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -370,9 +422,11 @@ export function ProjectsContent({
           {isLoading || detailLoading ? (
             <ProjectDetailSkeleton />
           ) : !selectedProject ? (
-            <div className="flex items-center justify-center h-64 text-sc-fg-subtle">
+            <div className="flex items-center justify-center h-64 text-sc-fg-muted">
               <div className="text-center">
-                <div className="text-4xl mb-4">◇</div>
+                <div className="mb-4 flex justify-center">
+                  <FolderKanban width={40} height={40} className="text-sc-fg-subtle" />
+                </div>
                 <p>Select a project from the sidebar</p>
               </div>
             </div>
@@ -405,25 +459,52 @@ function ProjectCard({ project, stats, isSelected, onClick }: ProjectCardProps) 
   const hasActive = stats && stats.doing > 0;
   const isArchived = project.metadata.status === 'archived';
 
+  // Health-driven accent so the sidebar isn't a monotone pink ladder: blocked or
+  // critical work reads red, near-done projects read green, active work reads
+  // purple, everything else settles on the neutral interaction cyan.
+  const isBlocked = (stats?.blocked ?? 0) > 0 || (stats?.critical ?? 0) > 0;
+  const isComplete = stats != null && stats.total > 0 && progress >= 80;
+  const accent = isBlocked
+    ? { bar: 'bg-sc-red', border: 'hover:border-sc-red/40', title: 'group-hover:text-sc-red' }
+    : isComplete
+      ? {
+          bar: 'bg-sc-green',
+          border: 'hover:border-sc-green/40',
+          title: 'group-hover:text-sc-green',
+        }
+      : hasActive
+        ? {
+            bar: 'bg-sc-purple',
+            border: 'hover:border-sc-purple/40',
+            title: 'group-hover:text-sc-purple',
+          }
+        : {
+            bar: 'bg-sc-cyan',
+            border: 'hover:border-sc-cyan/40',
+            title: 'group-hover:text-sc-cyan',
+          };
+
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-label={`Open project ${project.name}`}
       className={`
-        w-full text-left p-4 rounded-xl transition-all duration-150
+        w-full text-left p-4 rounded-xl transition-all duration-200
         border group relative overflow-hidden
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
         ${
           isArchived
             ? 'bg-sc-bg-base/50 border-sc-fg-subtle/10 opacity-75'
             : isSelected
               ? 'bg-gradient-to-br from-sc-purple/15 via-sc-bg-base to-sc-bg-base border-sc-purple/50 shadow-glow-purple'
-              : 'bg-sc-bg-base border-sc-fg-subtle/30 shadow-card hover:border-sc-purple/30 hover:shadow-card-hover hover:bg-sc-bg-highlight/30'
+              : `bg-sc-bg-base border-sc-fg-subtle/30 shadow-card ${accent.border} hover:shadow-card-hover hover:bg-sc-bg-highlight/30`
         }
       `}
     >
-      {/* Active indicator bar */}
-      {hasActive && !isSelected && !isArchived && (
-        <div className="absolute left-0 top-0 bottom-0 w-1 bg-sc-purple" />
+      {/* Health accent bar */}
+      {!isSelected && !isArchived && (
+        <div className={`absolute left-0 top-0 bottom-0 w-1 ${accent.bar}`} />
       )}
       {/* Archived indicator bar */}
       {isArchived && <div className="absolute left-0 top-0 bottom-0 w-1 bg-sc-yellow/50" />}
@@ -431,12 +512,12 @@ function ProjectCard({ project, stats, isSelected, onClick }: ProjectCardProps) 
       {/* Header with name and badges */}
       <div className="flex items-start justify-between gap-2 mb-2">
         <h3
-          className={`font-semibold truncate ${
+          className={`font-semibold truncate transition-colors duration-200 ${
             isArchived
               ? 'text-sc-fg-muted'
               : isSelected
                 ? 'text-sc-purple'
-                : 'text-sc-fg-primary group-hover:text-sc-fg-primary'
+                : `text-sc-fg-primary ${accent.title}`
           }`}
         >
           {project.name}
@@ -476,7 +557,7 @@ function ProjectCard({ project, stats, isSelected, onClick }: ProjectCardProps) 
           <div className="h-1.5 bg-sc-bg-elevated rounded-full overflow-hidden">
             <div
               className={`h-full transition-all duration-500 ${
-                progress === 100 ? 'bg-sc-green' : 'bg-sc-purple'
+                progress === 100 ? 'bg-sc-green' : accent.bar
               }`}
               style={{ width: `${progress}%` }}
             />
@@ -484,7 +565,7 @@ function ProjectCard({ project, stats, isSelected, onClick }: ProjectCardProps) 
 
           {/* Stats row */}
           <div className="flex items-center justify-between text-[10px]">
-            <div className="flex items-center gap-2 text-sc-fg-subtle">
+            <div className="flex items-center gap-2 text-sc-fg-muted">
               <span className="flex items-center gap-1">
                 <CheckCircle2 width={10} height={10} className="text-sc-green" />
                 {stats.done}/{stats.total}
@@ -507,7 +588,7 @@ function ProjectCard({ project, stats, isSelected, onClick }: ProjectCardProps) 
 
       {/* Empty project indicator */}
       {(!stats || stats.total === 0) && (
-        <div className="text-xs text-sc-fg-subtle italic">No tasks yet</div>
+        <div className="text-xs text-sc-fg-muted italic">No tasks yet</div>
       )}
     </button>
   );
@@ -717,15 +798,16 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
               href={repoUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="p-2 bg-sc-bg-elevated hover:bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-muted hover:text-sc-cyan transition-colors"
+              className="p-2 bg-sc-bg-elevated hover:bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-muted hover:text-sc-cyan transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
               title="View Repository"
+              aria-label="View repository"
             >
               <GitBranch width={18} height={18} />
             </a>
           )}
           <Link
             href={`/tasks?project=${project.id}`}
-            className="px-3 py-2 bg-sc-bg-elevated hover:bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-muted hover:text-sc-cyan transition-colors flex items-center gap-1.5 text-sm"
+            className="px-3 py-2 bg-sc-bg-elevated hover:bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-muted hover:text-sc-cyan transition-colors duration-200 flex items-center gap-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
           >
             <FolderKanban width={14} height={14} />
             <span>Tasks</span>
@@ -734,7 +816,8 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
             <button
               type="button"
               onClick={handleArchiveToggle}
-              className={`p-2 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg transition-colors ${
+              aria-label={isArchived ? 'Restore project' : 'Archive project'}
+              className={`p-2 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base ${
                 isArchived
                   ? 'hover:bg-sc-green/20 hover:border-sc-green/30 text-sc-yellow hover:text-sc-green'
                   : 'hover:bg-sc-yellow/20 hover:border-sc-yellow/30 text-sc-fg-muted hover:text-sc-yellow'
@@ -746,61 +829,37 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
           <button
             type="button"
             onClick={() => setShowDeleteConfirm(true)}
-            className="p-2 bg-sc-bg-elevated hover:bg-sc-red/20 border border-sc-fg-subtle/20 hover:border-sc-red/30 rounded-lg text-sc-fg-muted hover:text-sc-red transition-colors"
+            className="p-2 bg-sc-bg-elevated hover:bg-sc-red/20 border border-sc-fg-subtle/20 hover:border-sc-red/30 rounded-lg text-sc-fg-muted hover:text-sc-red transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
             title="Delete Project"
+            aria-label="Delete project"
           >
             <Trash width={18} height={18} />
           </button>
         </div>
       </div>
 
-      {/* Delete Confirmation Modal */}
-      {showDeleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <button
-            type="button"
-            className="absolute inset-0 bg-sc-bg-dark/80 backdrop-blur-sm cursor-default"
-            onClick={() => setShowDeleteConfirm(false)}
-            aria-label="Close"
-          />
-          <div className="relative bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
-            <div className="flex items-start gap-4">
-              <div className="p-3 bg-sc-red/20 rounded-full">
-                <AlertTriangle width={24} height={24} className="text-sc-red" />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-lg font-semibold text-sc-fg-primary mb-2">Delete Project?</h3>
-                <p className="text-sm text-sc-fg-muted mb-1">
-                  Are you sure you want to delete <strong>{project.name}</strong>?
-                </p>
-                {stats && stats.total > 0 && (
-                  <p className="text-sm text-sc-yellow">
-                    This project has {stats.total} task{stats.total !== 1 ? 's' : ''} that will be
-                    orphaned.
-                  </p>
-                )}
-              </div>
-            </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                type="button"
-                onClick={() => setShowDeleteConfirm(false)}
-                className="px-4 py-2 text-sc-fg-muted hover:text-sc-fg-primary transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={deleteEntity.isPending}
-                className="px-4 py-2 bg-sc-red hover:bg-sc-red/80 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
-              >
-                {deleteEntity.isPending ? 'Deleting...' : 'Delete Project'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Delete Confirmation */}
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        title="Delete Project?"
+        description={
+          <>
+            Are you sure you want to delete{' '}
+            <strong className="text-sc-fg-primary">{project.name}</strong>?
+            {stats && stats.total > 0 && (
+              <span className="mt-2 block text-sc-yellow">
+                This project has {stats.total} task{stats.total !== 1 ? 's' : ''} that will be
+                orphaned.
+              </span>
+            )}
+          </>
+        }
+        confirmLabel={deleteEntity.isPending ? 'Deleting...' : 'Delete Project'}
+        variant="danger"
+        loading={deleteEntity.isPending}
+        onConfirm={handleDelete}
+      />
 
       {/* Stats Overview */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -835,7 +894,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
             <span className="text-sm font-medium">Active</span>
           </div>
           <div className="text-3xl font-bold text-sc-fg-primary">{stats?.doing ?? 0}</div>
-          <div className="text-xs text-sc-fg-subtle mt-1">{stats?.review ?? 0} in review</div>
+          <div className="text-xs text-sc-fg-muted mt-1">{stats?.review ?? 0} in review</div>
         </div>
 
         {/* Blocked/Urgent */}
@@ -865,7 +924,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
               ? stats?.blocked
               : (stats?.critical ?? 0) + (stats?.high ?? 0)}
           </div>
-          <div className="text-xs text-sc-fg-subtle mt-1">
+          <div className="text-xs text-sc-fg-muted mt-1">
             {(stats?.blocked ?? 0) > 0 ? 'needs attention' : 'high priority'}
           </div>
         </div>
@@ -898,7 +957,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
         <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-sc-fg-primary">Active Work</h2>
-            <span className="text-xs text-sc-fg-subtle">{activeTasks.length} tasks</span>
+            <span className="text-xs text-sc-fg-muted">{activeTasks.length} tasks</span>
           </div>
           <div className="space-y-2">
             {activeTasks.slice(0, 5).map(task => (
@@ -921,7 +980,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
         <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-sc-fg-primary">Up Next</h2>
-            <span className="text-xs text-sc-fg-subtle">
+            <span className="text-xs text-sc-fg-muted">
               {stats?.todo ?? 0} todo, {stats?.backlog ?? 0} backlog
             </span>
           </div>
@@ -991,7 +1050,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
           <p className="text-sc-fg-muted mb-4">Create your first task to get started</p>
           <Link
             href={`/tasks?project=${project.id}`}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg font-medium transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-sc-on-accent rounded-lg font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
           >
             <Plus width={16} height={16} />
             <span>Add Task</span>
@@ -1019,10 +1078,10 @@ function TaskRow({ task }: { task: TaskSummary }) {
   return (
     <Link
       href={`/tasks/${task.id}`}
-      className="flex items-center gap-3 p-3 rounded-lg bg-sc-bg-highlight/30 hover:bg-sc-bg-highlight/50 transition-colors group"
+      className="flex items-center gap-3 p-3 rounded-lg bg-sc-bg-highlight/30 hover:bg-sc-bg-highlight/50 transition-colors duration-200 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
     >
       <span className={config?.textClass}>{config?.icon}</span>
-      <span className="flex-1 text-sm text-sc-fg-primary group-hover:text-sc-fg-primary truncate">
+      <span className="flex-1 text-sm text-sc-fg-primary group-hover:text-sc-cyan transition-colors duration-200 truncate">
         {task.name}
       </span>
       {priority && (
@@ -1092,6 +1151,9 @@ function ProjectMembersList({ projectId }: { projectId: string }) {
   const { data, isLoading } = useProjectMembers(projectId);
   const updateRole = useUpdateProjectMemberRole();
   const removeMember = useRemoveProjectMember();
+  const [pendingRemoval, setPendingRemoval] = useState<{ userId: string; userName: string } | null>(
+    null
+  );
 
   const currentUserId = me?.user?.id;
 
@@ -1118,11 +1180,12 @@ function ProjectMembersList({ projectId }: { projectId: string }) {
     }
   };
 
-  const handleRemove = async (userId: string, userName: string | null) => {
-    if (!confirm(`Remove ${userName || 'this member'} from the project?`)) return;
+  const handleConfirmRemove = async () => {
+    if (!pendingRemoval) return;
     try {
-      await removeMember.mutateAsync({ projectId, userId });
+      await removeMember.mutateAsync({ projectId, userId: pendingRemoval.userId });
       toast.success('Member removed');
+      setPendingRemoval(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to remove member');
     }
@@ -1155,33 +1218,62 @@ function ProjectMembersList({ projectId }: { projectId: string }) {
           </div>
           {canManage && !member.is_owner && member.user.id !== currentUserId ? (
             <div className="flex items-center gap-2">
-              <select
+              <Select
                 value={member.role}
-                onChange={e => handleRoleChange(member.user.id, e.target.value as ProjectRole)}
-                className="text-xs bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded px-2 py-1 text-sc-fg-secondary"
+                onValueChange={value => handleRoleChange(member.user.id, value as ProjectRole)}
               >
-                {PROJECT_ROLES.filter(role => role !== 'project_owner').map(role => (
-                  <option key={role} value={role}>
-                    {ROLE_DISPLAY[role]}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger
+                  aria-label={`Role for ${member.user.name || member.user.email || 'member'}`}
+                  className="min-w-[130px] w-[130px] py-1 text-xs"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PROJECT_ROLES.filter(role => role !== 'project_owner').map(role => (
+                    <SelectItem key={role} value={role}>
+                      {ROLE_DISPLAY[role]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <button
                 type="button"
-                onClick={() => handleRemove(member.user.id, member.user.name)}
-                className="p-1 text-sc-fg-muted hover:text-sc-red transition-colors"
+                onClick={() =>
+                  setPendingRemoval({
+                    userId: member.user.id,
+                    userName: member.user.name || member.user.email || 'this member',
+                  })
+                }
+                className="p-1 rounded text-sc-fg-muted hover:text-sc-red transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
                 title="Remove member"
+                aria-label={`Remove ${member.user.name || member.user.email || 'member'}`}
               >
                 <Trash width={14} height={14} />
               </button>
             </div>
           ) : (
-            <span className="text-xs text-sc-fg-muted px-2 py-1 bg-sc-bg-highlight rounded">
+            <span className="text-xs text-sc-fg-muted px-2 py-1 bg-sc-bg-highlight rounded-full">
               {ROLE_DISPLAY[member.role]}
             </span>
           )}
         </div>
       ))}
+
+      <ConfirmDialog
+        open={pendingRemoval !== null}
+        onOpenChange={open => !open && setPendingRemoval(null)}
+        title="Remove member?"
+        description={
+          <>
+            Remove <strong className="text-sc-fg-primary">{pendingRemoval?.userName}</strong> from
+            this project? They will lose access to its tasks.
+          </>
+        }
+        confirmLabel={removeMember.isPending ? 'Removing...' : 'Remove'}
+        variant="danger"
+        loading={removeMember.isPending}
+        onConfirm={handleConfirmRemove}
+      />
     </div>
   );
 }

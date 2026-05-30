@@ -124,9 +124,11 @@ export const EpicCard = memo(function EpicCard({
         hover:-translate-y-0.5
         group select-none
         border ${cardBorder} ${cardBg}
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
       `}
       role="button"
       tabIndex={0}
+      aria-label={`Open epic ${epic.name}`}
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -168,8 +170,9 @@ export const EpicCard = memo(function EpicCard({
                   e.stopPropagation();
                   onProjectClick?.(projectId);
                 }}
-                className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-sc-bg-elevated text-sc-fg-muted hover:text-sc-cyan hover:bg-sc-cyan/10 transition-colors truncate max-w-[80px]"
+                className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-sc-bg-elevated text-sc-fg-muted hover:text-sc-cyan hover:bg-sc-cyan/10 transition-colors duration-200 truncate max-w-[80px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
                 title={`View ${projectName}`}
+                aria-label={`View project ${projectName}`}
               >
                 {projectName}
               </button>
@@ -194,12 +197,12 @@ export const EpicCard = memo(function EpicCard({
 
         {/* Title */}
         <h4
-          className={`text-sm font-medium line-clamp-2 leading-snug transition-colors ${
+          className={`text-sm font-medium line-clamp-2 leading-snug transition-colors duration-200 ${
             isBlocked
               ? 'text-sc-red'
               : isCompleted
                 ? 'text-sc-green'
-                : 'text-sc-fg-primary group-hover:text-sc-fg-primary'
+                : 'text-sc-fg-primary group-hover:text-sc-orange'
           }`}
         >
           {epic.name}
@@ -207,7 +210,7 @@ export const EpicCard = memo(function EpicCard({
 
         {/* Description preview */}
         {epic.description && (
-          <p className="text-xs text-sc-fg-subtle line-clamp-1 mt-1.5">{epic.description}</p>
+          <p className="text-xs text-sc-fg-muted line-clamp-1 mt-1.5">{epic.description}</p>
         )}
 
         {/* Progress bar */}
@@ -218,7 +221,7 @@ export const EpicCard = memo(function EpicCard({
                 <Layers width={10} height={10} />
                 {doneTasks}/{totalTasks} tasks
               </span>
-              <span className={progressPercent === 100 ? 'text-sc-green' : 'text-sc-fg-subtle'}>
+              <span className={progressPercent === 100 ? 'text-sc-green' : 'text-sc-fg-muted'}>
                 {progressPercent}%
               </span>
             </div>

@@ -5,6 +5,7 @@ import { use, useMemo } from 'react';
 import { RelatedEntitiesSection } from '@/components/entities/related-entities-section';
 import { EntityBreadcrumb } from '@/components/layout/breadcrumb';
 import { EpicDetailSkeleton } from '@/components/suspense-boundary';
+import { EnhancedEmptyState } from '@/components/ui/empty-state';
 import { CheckCircle, Clock, Layers, Pause, Target, Zap } from '@/components/ui/icons';
 import { Skeleton } from '@/components/ui/spinner';
 import { ErrorState } from '@/components/ui/tooltip';
@@ -140,7 +141,7 @@ export default function EpicDetailPage({ params }: EpicDetailPageProps) {
           <div className="flex items-center gap-2 mb-3 flex-wrap">
             {/* Priority */}
             <span
-              className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded border ${priorityConfig?.bgClass ?? 'bg-sc-orange/20'} ${priorityConfig?.textClass ?? 'text-sc-orange'} border-current/30`}
+              className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded border ${priorityConfig?.bgClass ?? 'bg-sc-orange/20'} ${priorityConfig?.textClass ?? 'text-sc-orange'} ${priorityConfig?.borderClass ?? 'border-sc-orange/30'}`}
             >
               {priority === 'critical' && <Zap width={12} height={12} className="animate-pulse" />}
               {priorityConfig?.label ?? priority}
@@ -156,7 +157,8 @@ export default function EpicDetailPage({ params }: EpicDetailPageProps) {
               <button
                 type="button"
                 onClick={() => router.push(`/projects/${parentProject.id}`)}
-                className="text-xs px-2 py-0.5 rounded bg-sc-bg-elevated text-sc-fg-muted hover:text-sc-cyan hover:bg-sc-cyan/10 transition-colors flex items-center gap-1"
+                aria-label={`View project ${parentProject.name}`}
+                className="text-xs px-2 py-0.5 rounded bg-sc-bg-elevated text-sc-fg-muted hover:text-sc-cyan hover:bg-sc-cyan/10 transition-colors duration-200 flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
               >
                 <Target width={12} height={12} />
                 {parentProject.name}
@@ -182,7 +184,7 @@ export default function EpicDetailPage({ params }: EpicDetailPageProps) {
                 </span>
                 <span
                   className={
-                    progressPercent === 100 ? 'text-sc-green font-medium' : 'text-sc-fg-subtle'
+                    progressPercent === 100 ? 'text-sc-green font-medium' : 'text-sc-fg-muted'
                   }
                 >
                   {progressPercent}%
@@ -229,8 +231,13 @@ export default function EpicDetailPage({ params }: EpicDetailPageProps) {
             ))}
           </div>
         ) : tasks.length === 0 ? (
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-lg p-8 text-center">
-            <p className="text-sm text-sc-fg-muted">No tasks in this epic yet</p>
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-xl">
+            <EnhancedEmptyState
+              icon={<Layers width={40} height={40} className="text-sc-orange" />}
+              title="No tasks in this epic yet"
+              description="Tasks grouped under this epic will show up here. Add tasks to start tracking progress toward the initiative."
+              actions={[{ label: 'View Tasks', href: '/tasks', variant: 'secondary' }]}
+            />
           </div>
         ) : (
           <div className="space-y-2">
@@ -245,7 +252,8 @@ export default function EpicDetailPage({ params }: EpicDetailPageProps) {
                   key={task.id}
                   type="button"
                   onClick={() => router.push(`/tasks/${task.id}`)}
-                  className="w-full flex items-center gap-3 p-3 bg-sc-bg-base border border-sc-fg-subtle/10 rounded-lg hover:border-sc-fg-subtle/30 hover:bg-sc-bg-elevated transition-colors text-left group"
+                  aria-label={`Open task ${task.name}`}
+                  className="w-full flex items-center gap-3 p-3 bg-sc-bg-base border border-sc-fg-subtle/10 rounded-lg hover:border-sc-fg-subtle/30 hover:bg-sc-bg-elevated transition-colors duration-200 text-left group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
                 >
                   {/* Status indicator */}
                   <span
@@ -263,12 +271,12 @@ export default function EpicDetailPage({ params }: EpicDetailPageProps) {
                   />
 
                   {/* Task name */}
-                  <span className="flex-1 text-sm text-sc-fg-primary group-hover:text-sc-fg-primary truncate">
+                  <span className="flex-1 text-sm text-sc-fg-primary group-hover:text-sc-cyan transition-colors duration-200 truncate">
                     {task.name}
                   </span>
 
                   {/* Priority badge */}
-                  <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-sc-bg-elevated text-sc-fg-subtle uppercase">
+                  <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-sc-bg-elevated text-sc-fg-muted uppercase">
                     {taskPriority}
                   </span>
 
