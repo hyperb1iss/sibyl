@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ROUTE_CONFIG, useSetBreadcrumb } from '@/components/layout/breadcrumb';
+import { Button } from '@/components/ui';
 import {
   ArrowLeft,
   Calendar,
@@ -12,7 +13,6 @@ import {
   ExternalLink,
   FileText,
   Hash,
-  Loader2,
   Network,
   Pencil,
   X,
@@ -116,14 +116,14 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
   if (error) {
     return (
       <div className="space-y-4 animate-fade-in">
-        <div className="bg-sc-bg-base border border-sc-red/30 rounded-xl p-8 text-center">
+        <div className="bg-sc-bg-elevated border border-sc-red/30 rounded-xl p-8 text-center">
           <p className="text-sc-red font-medium">Failed to load document</p>
-          <p className="text-sc-fg-subtle text-sm mt-2">
+          <p className="text-sc-fg-muted text-sm mt-2">
             {error instanceof Error ? error.message : 'Unknown error'}
           </p>
           <Link
             href={`/sources/${sourceId}`}
-            className="inline-flex items-center gap-2 mt-4 text-sc-cyan hover:text-sc-purple transition-colors"
+            className="inline-flex items-center gap-2 mt-4 text-sc-cyan hover:text-sc-purple transition-colors duration-200 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
           >
             <ArrowLeft width={16} height={16} />
             Back to Source
@@ -136,7 +136,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
   if (isLoading || !document) {
     return (
       <div className="space-y-6 animate-fade-in">
-        <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-xl p-8">
+        <div className="bg-sc-bg-elevated border border-sc-fg-subtle/10 rounded-xl p-8">
           <div className="animate-pulse space-y-4">
             <div className="h-8 bg-sc-bg-highlight rounded w-2/3" />
             <div className="h-4 bg-sc-bg-highlight rounded w-1/3" />
@@ -153,7 +153,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
         {/* Main Content */}
         <div className="lg:col-span-3 space-y-6">
           {/* Header Card */}
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-6 shadow-card">
+          <div className="bg-sc-bg-elevated border border-sc-fg-subtle/30 rounded-xl p-6 shadow-card">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 {/* Title */}
@@ -165,25 +165,28 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
                         ref={titleInputRef}
                         type="text"
                         value={editedTitle}
+                        aria-label="Document title"
                         onChange={e => setEditedTitle(e.target.value)}
                         onKeyDown={e => {
                           if (e.key === 'Enter') void handleSaveTitle();
                           if (e.key === 'Escape') handleCancelTitle();
                         }}
-                        className="flex-1 bg-sc-bg-dark border border-sc-purple/50 rounded-lg px-3 py-1.5 text-xl font-bold text-sc-fg-primary focus:outline-none focus:border-sc-purple"
+                        className="flex-1 bg-sc-bg-highlight border border-sc-purple/50 rounded-lg px-3 py-1.5 text-xl font-bold text-sc-fg-primary transition-colors duration-200 focus:border-sc-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
                       />
                       <button
                         type="button"
                         onClick={handleSaveTitle}
                         disabled={updateDocument.isPending}
-                        className="p-1.5 text-sc-green hover:bg-sc-green/10 rounded-lg transition-colors"
+                        aria-label="Save title"
+                        className="p-1.5 text-sc-green hover:bg-sc-green/10 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
                       >
                         <Check width={18} height={18} />
                       </button>
                       <button
                         type="button"
                         onClick={handleCancelTitle}
-                        className="p-1.5 text-sc-fg-subtle hover:text-sc-red hover:bg-sc-red/10 rounded-lg transition-colors"
+                        aria-label="Cancel editing title"
+                        className="p-1.5 text-sc-fg-subtle hover:text-sc-red hover:bg-sc-red/10 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
                       >
                         <X width={18} height={18} />
                       </button>
@@ -196,7 +199,8 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
                       <button
                         type="button"
                         onClick={() => setIsEditingTitle(true)}
-                        className="p-1.5 text-sc-fg-subtle opacity-0 group-hover:opacity-100 hover:text-sc-purple hover:bg-sc-purple/10 rounded-lg transition-all"
+                        aria-label="Edit title"
+                        className="p-1.5 text-sc-fg-subtle opacity-0 group-hover:opacity-100 hover:text-sc-purple hover:bg-sc-purple/10 rounded-lg transition-colors duration-200 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
                       >
                         <Pencil width={14} height={14} />
                       </button>
@@ -209,7 +213,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
                   href={document.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-sc-cyan hover:text-sc-purple transition-colors text-sm"
+                  className="inline-flex items-center gap-1.5 text-sc-cyan hover:text-sc-purple transition-colors duration-200 text-sm rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                 >
                   <ExternalLink width={14} height={14} />
                   {document.url}
@@ -236,7 +240,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
           </div>
 
           {/* Content Card */}
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-xl overflow-hidden">
+          <div className="bg-sc-bg-elevated border border-sc-fg-subtle/10 rounded-xl overflow-hidden">
             {/* Content Header */}
             <div className="flex items-center justify-between px-6 py-3 border-b border-sc-fg-subtle/10">
               <h2 className="text-sm font-semibold text-sc-fg-muted uppercase tracking-wide">
@@ -251,10 +255,11 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
                     setIsEditingContent(true);
                   }
                 }}
-                className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                aria-label={isEditingContent ? 'Cancel editing content' : 'Edit content'}
+                className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base ${
                   isEditingContent
                     ? 'bg-sc-bg-highlight text-sc-fg-muted'
-                    : 'text-sc-fg-subtle hover:text-sc-purple hover:bg-sc-purple/10'
+                    : 'text-sc-fg-muted hover:text-sc-purple hover:bg-sc-purple/10'
                 }`}
               >
                 {isEditingContent ? (
@@ -278,31 +283,23 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
                   <textarea
                     ref={contentRef}
                     value={editedContent}
+                    aria-label="Document content"
                     onChange={e => setEditedContent(e.target.value)}
-                    className="w-full min-h-[400px] bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl p-4 text-sc-fg-primary font-mono text-sm leading-relaxed focus:outline-none focus:border-sc-purple/50 resize-y"
+                    className="w-full min-h-[400px] bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl p-4 text-sc-fg-primary font-mono text-sm leading-relaxed transition-colors duration-200 focus:border-sc-purple/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated resize-y"
                     placeholder="Document content (Markdown supported)..."
                   />
                   <div className="flex items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={handleCancelContent}
-                      className="px-4 py-2 text-sm text-sc-fg-muted hover:text-sc-fg-primary transition-colors"
-                    >
+                    <Button variant="ghost" onClick={handleCancelContent}>
                       Cancel
-                    </button>
-                    <button
-                      type="button"
+                    </Button>
+                    <Button
+                      variant="primary"
                       onClick={handleSaveContent}
-                      disabled={updateDocument.isPending}
-                      className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg transition-colors disabled:opacity-50"
+                      loading={updateDocument.isPending}
+                      icon={<Check width={14} height={14} />}
                     >
-                      {updateDocument.isPending ? (
-                        <Loader2 width={14} height={14} className="animate-spin" />
-                      ) : (
-                        <Check width={14} height={14} />
-                      )}
                       Save Changes
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ) : (
@@ -315,7 +312,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
         {/* Sidebar */}
         <div className="space-y-6">
           {/* Stats Card */}
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
+          <div className="bg-sc-bg-elevated border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
             <h3 className="text-xs font-semibold text-sc-fg-subtle uppercase tracking-wide mb-4">
               Document Info
             </h3>
@@ -340,32 +337,32 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
 
           {/* Outline Card */}
           {document.headings.length > 0 && (
-            <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
+            <div className="bg-sc-bg-elevated border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
               <h3 className="text-xs font-semibold text-sc-fg-subtle uppercase tracking-wide mb-4">
                 Outline
               </h3>
-              <nav className="space-y-1.5">
+              <ul className="space-y-1.5">
                 {document.headings.slice(0, 15).map((heading, i) => (
-                  <div
+                  <li
                     key={`heading-${i}-${heading.slice(0, 20)}`}
-                    className="flex items-center gap-2 text-sm text-sc-fg-muted hover:text-sc-cyan transition-colors cursor-pointer truncate"
+                    className="flex items-center gap-2 text-sm text-sc-fg-muted truncate"
                   >
                     <ChevronRight width={12} height={12} className="text-sc-fg-subtle shrink-0" />
                     <span className="truncate">{heading}</span>
-                  </div>
+                  </li>
                 ))}
                 {document.headings.length > 15 && (
-                  <p className="text-xs text-sc-fg-subtle mt-2">
+                  <li className="text-xs text-sc-fg-muted mt-2">
                     +{document.headings.length - 15} more
-                  </p>
+                  </li>
                 )}
-              </nav>
+              </ul>
             </div>
           )}
 
           {/* Links Card */}
           {document.links.length > 0 && (
-            <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
+            <div className="bg-sc-bg-elevated border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
               <h3 className="text-xs font-semibold text-sc-fg-subtle uppercase tracking-wide mb-4">
                 Links ({document.links.length})
               </h3>
@@ -376,7 +373,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
                     href={link}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-xs text-sc-fg-muted hover:text-sc-cyan transition-colors truncate"
+                    className="flex items-center gap-2 text-xs text-sc-fg-muted hover:text-sc-cyan transition-colors duration-200 truncate rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                   >
                     <ExternalLink width={10} height={10} className="shrink-0" />
                     <span className="truncate">{link}</span>
@@ -393,7 +390,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
 
           {/* Graph Connections */}
           {entitiesData && entitiesData.entities.length > 0 && (
-            <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
+            <div className="bg-sc-bg-elevated border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
               <div className="flex items-center gap-2 mb-4">
                 <Network width={14} height={14} className="text-sc-purple" />
                 <h3 className="text-xs font-semibold text-sc-fg-subtle uppercase tracking-wide">
@@ -408,7 +405,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
                     <Link
                       key={entity.id}
                       href={`/entities/${entity.id}`}
-                      className="flex items-center gap-3 p-2 -mx-2 rounded-lg hover:bg-sc-bg-highlight transition-colors group"
+                      className="flex items-center gap-3 p-2 -mx-2 rounded-lg hover:bg-sc-bg-highlight transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated group"
                     >
                       <div className={`w-2 h-2 rounded-full shrink-0 ${dotClass}`} />
                       <div className="flex-1 min-w-0">
@@ -418,9 +415,9 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
                         <p className="text-xs text-sc-fg-subtle truncate">
                           {entity.entity_type}
                           {entity.chunk_count > 0 && (
-                            <span className="text-sc-fg-subtle/60">
+                            <span className="text-sc-fg-muted">
                               {' '}
-                              · {entity.chunk_count}% match
+                              · {entity.chunk_count} chunk{entity.chunk_count === 1 ? '' : 's'}
                             </span>
                           )}
                         </p>
@@ -443,10 +440,10 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
           )}
 
           {/* Actions */}
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
+          <div className="bg-sc-bg-elevated border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
             <Link
               href={`/sources/${sourceId}`}
-              className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-sc-fg-muted hover:text-sc-purple hover:bg-sc-purple/10 rounded-xl transition-colors"
+              className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-sc-fg-muted hover:text-sc-purple hover:bg-sc-purple/10 rounded-xl transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
             >
               <ArrowLeft width={16} height={16} />
               Back to Source

@@ -20,6 +20,7 @@ import {
   Globe,
   Grid3X3,
   LayoutList,
+  Plus,
   RefreshCw,
   Search,
 } from '@/components/ui/icons';
@@ -340,7 +341,7 @@ export default function SourcesPage() {
           <button
             type="button"
             onClick={() => refetch()}
-            className="px-4 py-2 bg-sc-red/20 text-sc-red rounded-lg hover:bg-sc-red/30 transition-colors"
+            className="px-4 py-2 bg-sc-red/20 text-sc-red rounded-lg hover:bg-sc-red/30 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
           >
             Try Again
           </button>
@@ -374,9 +375,9 @@ export default function SourcesPage() {
           <button
             type="button"
             onClick={() => setShowAddDialog(true)}
-            className="shrink-0 px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg font-medium transition-colors flex items-center gap-1.5 text-sm"
+            className="shrink-0 px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-sc-on-accent rounded-lg font-medium transition-colors duration-200 flex items-center gap-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
           >
-            <span>+</span>
+            <Plus width={16} height={16} />
             <span>Add Source</span>
           </button>
         }
@@ -396,7 +397,8 @@ export default function SourcesPage() {
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="Search sources..."
-            className="w-full pl-10 pr-4 py-2 sm:py-2.5 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-lg sm:rounded-xl text-sm sm:text-base text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none focus:ring-1 focus:ring-sc-purple/30 transition-colors"
+            aria-label="Search sources"
+            className="w-full pl-10 pr-4 py-2 sm:py-2.5 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-lg sm:rounded-xl text-sm sm:text-base text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus:border-sc-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
           />
         </div>
 
@@ -406,7 +408,9 @@ export default function SourcesPage() {
           <button
             type="button"
             onClick={() => setShowFilters(!showFilters)}
-            className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-2 sm:py-2.5 rounded-lg sm:rounded-xl border transition-colors ${
+            aria-label="Toggle filters"
+            aria-expanded={showFilters}
+            className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-2 sm:py-2.5 rounded-lg sm:rounded-xl border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base ${
               showFilters || filterStatus !== 'all' || filterType !== 'all'
                 ? 'bg-sc-purple/20 border-sc-purple/40 text-sc-purple'
                 : 'bg-sc-bg-base border-sc-fg-subtle/20 text-sc-fg-muted hover:border-sc-fg-subtle/40'
@@ -424,7 +428,9 @@ export default function SourcesPage() {
             <button
               type="button"
               onClick={() => setViewMode('grid')}
-              className={`p-2.5 transition-colors ${
+              aria-label="Grid view"
+              aria-pressed={viewMode === 'grid'}
+              className={`p-2.5 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sc-cyan ${
                 viewMode === 'grid'
                   ? 'bg-sc-purple/20 text-sc-purple'
                   : 'text-sc-fg-muted hover:text-sc-fg-primary'
@@ -436,7 +442,9 @@ export default function SourcesPage() {
             <button
               type="button"
               onClick={() => setViewMode('list')}
-              className={`p-2.5 transition-colors ${
+              aria-label="List view"
+              aria-pressed={viewMode === 'list'}
+              className={`p-2.5 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sc-cyan ${
                 viewMode === 'list'
                   ? 'bg-sc-purple/20 text-sc-purple'
                   : 'text-sc-fg-muted hover:text-sc-fg-primary'
@@ -451,7 +459,8 @@ export default function SourcesPage() {
           <button
             type="button"
             onClick={() => refetch()}
-            className="p-2 sm:p-2.5 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-lg sm:rounded-xl text-sc-fg-muted hover:text-sc-fg-primary hover:border-sc-fg-subtle/40 transition-colors"
+            aria-label="Refresh sources"
+            className="p-2 sm:p-2.5 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-lg sm:rounded-xl text-sc-fg-muted hover:text-sc-fg-primary hover:border-sc-fg-subtle/40 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
             title="Refresh"
           >
             <RefreshCw width={16} height={16} />
@@ -486,9 +495,10 @@ export default function SourcesPage() {
                       key={status.value}
                       type="button"
                       onClick={() => setFilterStatus(status.value)}
-                      className={`px-2.5 sm:px-3 py-1.5 text-xs rounded-lg transition-colors capitalize ${
+                      aria-pressed={filterStatus === status.value}
+                      className={`px-2.5 sm:px-3 py-1.5 text-xs rounded-lg transition-colors duration-200 capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base ${
                         filterStatus === status.value
-                          ? 'bg-sc-purple text-white'
+                          ? 'bg-sc-purple text-sc-on-accent'
                           : 'bg-sc-bg-highlight text-sc-fg-muted hover:text-sc-fg-primary'
                       }`}
                     >
@@ -515,11 +525,12 @@ export default function SourcesPage() {
                         key={type.value}
                         type="button"
                         onClick={() => setFilterType(type.value)}
-                        className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                        aria-pressed={filterType === type.value}
+                        className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base ${
                           filterType === type.value
                             ? type.value === 'local'
                               ? 'bg-sc-yellow text-sc-bg-dark'
-                              : 'bg-sc-purple text-white'
+                              : 'bg-sc-purple text-sc-on-accent'
                             : 'bg-sc-bg-highlight text-sc-fg-muted hover:text-sc-fg-primary'
                         }`}
                       >
@@ -546,7 +557,8 @@ export default function SourcesPage() {
                       key={option.value}
                       type="button"
                       onClick={() => setSortBy(option.value)}
-                      className={`px-2.5 sm:px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                      aria-pressed={sortBy === option.value}
+                      className={`px-2.5 sm:px-3 py-1.5 text-xs rounded-lg transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base ${
                         sortBy === option.value
                           ? 'bg-sc-cyan text-sc-bg-dark'
                           : 'bg-sc-bg-highlight text-sc-fg-muted hover:text-sc-fg-primary'

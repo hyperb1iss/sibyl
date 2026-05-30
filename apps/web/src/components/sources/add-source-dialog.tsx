@@ -3,7 +3,17 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FileText, Folder, Globe, Loader2, Plus, Upload, X } from '@/components/ui/icons';
+import {
+  ChevronRight,
+  FileText,
+  Folder,
+  Globe,
+  Loader2,
+  NavArrowDown,
+  Plus,
+  Upload,
+  X,
+} from '@/components/ui/icons';
 import { api } from '@/lib/api';
 
 interface AddSourceDialogProps {
@@ -321,7 +331,8 @@ export function AddSourceDialog({
                   <Dialog.Close asChild>
                     <button
                       type="button"
-                      className="p-1.5 rounded-lg text-sc-fg-subtle hover:text-sc-fg-primary hover:bg-sc-bg-highlight transition-colors"
+                      aria-label="Close dialog"
+                      className="p-1.5 rounded-lg text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                     >
                       <X width={18} height={18} />
                     </button>
@@ -333,7 +344,7 @@ export function AddSourceDialog({
                   <button
                     type="button"
                     onClick={() => setActiveTab('url')}
-                    className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors relative ${
+                    className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors duration-200 relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sc-cyan ${
                       activeTab === 'url'
                         ? 'text-sc-purple'
                         : 'text-sc-fg-muted hover:text-sc-fg-primary'
@@ -352,7 +363,7 @@ export function AddSourceDialog({
                     type="button"
                     onClick={() => setActiveTab('file')}
                     disabled={!onSubmitFile}
-                    className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors relative ${
+                    className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors duration-200 relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sc-cyan ${
                       activeTab === 'file'
                         ? 'text-sc-cyan'
                         : 'text-sc-fg-muted hover:text-sc-fg-primary'
@@ -371,7 +382,7 @@ export function AddSourceDialog({
                     type="button"
                     onClick={() => setActiveTab('local')}
                     disabled={!onSubmitLocal}
-                    className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors relative ${
+                    className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors duration-200 relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sc-cyan ${
                       activeTab === 'local'
                         ? 'text-sc-yellow'
                         : 'text-sc-fg-muted hover:text-sc-fg-primary'
@@ -416,7 +427,7 @@ export function AddSourceDialog({
                             onChange={e => handleUrlChange(e.target.value)}
                             placeholder="https://docs.example.com"
                             required
-                            className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none focus:ring-1 focus:ring-sc-purple/30 transition-colors"
+                            className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus:border-sc-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                           />
                         </div>
 
@@ -448,7 +459,7 @@ export function AddSourceDialog({
                                 ? 'Fetching from website...'
                                 : 'Auto-generated from page title'
                             }
-                            className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none focus:ring-1 focus:ring-sc-purple/30 transition-colors"
+                            className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus:border-sc-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                           />
                         </div>
 
@@ -466,7 +477,7 @@ export function AddSourceDialog({
                             onChange={e => setUrlDescription(e.target.value)}
                             placeholder="What is this documentation about?"
                             rows={2}
-                            className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none focus:ring-1 focus:ring-sc-purple/30 transition-colors resize-none"
+                            className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus:border-sc-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated resize-none"
                           />
                         </div>
 
@@ -512,7 +523,8 @@ export function AddSourceDialog({
                                 <button
                                   type="button"
                                   onClick={() => handleRemoveTag(tag)}
-                                  className="hover:text-white transition-colors"
+                                  aria-label={`Remove tag ${tag}`}
+                                  className="rounded-full text-sc-purple hover:bg-sc-purple/25 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                                 >
                                   <X width={12} height={12} />
                                 </button>
@@ -532,7 +544,7 @@ export function AddSourceDialog({
                                 }
                               }}
                               placeholder="Add a tag..."
-                              className="flex-1 px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none"
+                              className="flex-1 px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus:border-sc-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                             />
                           </div>
                           {/* Suggested tags */}
@@ -542,9 +554,11 @@ export function AddSourceDialog({
                                 key={tag}
                                 type="button"
                                 onClick={() => handleAddTag(tag)}
-                                className="px-2 py-0.5 text-xs text-sc-fg-subtle border border-sc-fg-subtle/20 rounded-full hover:border-sc-purple/30 hover:text-sc-purple transition-colors"
+                                aria-label={`Add tag ${tag}`}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 text-xs text-sc-fg-muted border border-sc-fg-subtle/20 rounded-full hover:border-sc-purple/30 hover:text-sc-purple transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                               >
-                                + {tag}
+                                <Plus width={10} height={10} />
+                                {tag}
                               </button>
                             ))}
                           </div>
@@ -554,9 +568,15 @@ export function AddSourceDialog({
                         <button
                           type="button"
                           onClick={() => setShowAdvanced(!showAdvanced)}
-                          className="text-sm text-sc-fg-subtle hover:text-sc-fg-muted transition-colors"
+                          aria-expanded={showAdvanced}
+                          className="inline-flex items-center gap-1.5 text-sm text-sc-fg-muted hover:text-sc-fg-primary transition-colors duration-200 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                         >
-                          {showAdvanced ? '▼' : '▶'} Advanced Options
+                          {showAdvanced ? (
+                            <NavArrowDown width={14} height={14} />
+                          ) : (
+                            <ChevronRight width={14} height={14} />
+                          )}
+                          Advanced Options
                         </button>
 
                         {/* Advanced Options */}
@@ -581,7 +601,7 @@ export function AddSourceDialog({
                                   onChange={e => setIncludePatterns(e.target.value)}
                                   placeholder="/docs/.*&#10;/api/.*"
                                   rows={2}
-                                  className="w-full px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sm font-mono text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none resize-none"
+                                  className="w-full px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sm font-mono text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus:border-sc-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated resize-none"
                                 />
                               </div>
                               <div>
@@ -597,7 +617,7 @@ export function AddSourceDialog({
                                   onChange={e => setExcludePatterns(e.target.value)}
                                   placeholder="/blog/.*&#10;/changelog/.*"
                                   rows={2}
-                                  className="w-full px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sm font-mono text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none resize-none"
+                                  className="w-full px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sm font-mono text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus:border-sc-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated resize-none"
                                 />
                               </div>
                             </motion.div>
@@ -609,14 +629,14 @@ export function AddSourceDialog({
                           <button
                             type="button"
                             onClick={handleClose}
-                            className="px-4 py-2 text-sm text-sc-fg-muted hover:text-sc-fg-primary transition-colors"
+                            className="px-4 py-2 text-sm text-sc-fg-muted hover:text-sc-fg-primary transition-colors duration-200 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                           >
                             Cancel
                           </button>
                           <button
                             type="submit"
                             disabled={!url.trim() || isSubmitting}
-                            className="flex items-center gap-2 px-5 py-2.5 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-sc-purple/25"
+                            className="flex items-center gap-2 px-5 py-2.5 bg-sc-purple hover:bg-sc-purple/80 text-sc-on-accent rounded-xl font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-sc-purple/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                           >
                             {isSubmitting ? (
                               <>
@@ -676,7 +696,8 @@ export function AddSourceDialog({
                               <button
                                 type="button"
                                 onClick={() => setFile(null)}
-                                className="text-xs text-sc-coral hover:underline"
+                                aria-label="Remove selected file"
+                                className="text-xs text-sc-coral hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                               >
                                 Remove
                               </button>
@@ -712,7 +733,7 @@ export function AddSourceDialog({
                             value={fileName}
                             onChange={e => setFileName(e.target.value)}
                             placeholder="Auto-generated from filename"
-                            className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-cyan focus:outline-none focus:ring-1 focus:ring-sc-cyan/30 transition-colors"
+                            className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus:border-sc-cyan focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                           />
                         </div>
 
@@ -730,7 +751,7 @@ export function AddSourceDialog({
                             onChange={e => setFileDescription(e.target.value)}
                             placeholder="What is this document about?"
                             rows={2}
-                            className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-cyan focus:outline-none focus:ring-1 focus:ring-sc-cyan/30 transition-colors resize-none"
+                            className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus:border-sc-cyan focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated resize-none"
                           />
                         </div>
 
@@ -752,7 +773,8 @@ export function AddSourceDialog({
                                 <button
                                   type="button"
                                   onClick={() => handleRemoveTag(tag, 'file')}
-                                  className="hover:text-white transition-colors"
+                                  aria-label={`Remove tag ${tag}`}
+                                  className="rounded-full text-sc-cyan hover:bg-sc-cyan/25 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                                 >
                                   <X width={12} height={12} />
                                 </button>
@@ -770,7 +792,7 @@ export function AddSourceDialog({
                                 e.currentTarget.value = '';
                               }
                             }}
-                            className="w-full px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-cyan focus:outline-none"
+                            className="w-full px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus:border-sc-cyan focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                           />
                         </div>
 
@@ -779,14 +801,14 @@ export function AddSourceDialog({
                           <button
                             type="button"
                             onClick={handleClose}
-                            className="px-4 py-2 text-sm text-sc-fg-muted hover:text-sc-fg-primary transition-colors"
+                            className="px-4 py-2 text-sm text-sc-fg-muted hover:text-sc-fg-primary transition-colors duration-200 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                           >
                             Cancel
                           </button>
                           <button
                             type="submit"
                             disabled={!file || isSubmitting}
-                            className="flex items-center gap-2 px-5 py-2.5 bg-sc-cyan hover:bg-sc-cyan/80 text-sc-bg-dark rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-sc-cyan/25"
+                            className="flex items-center gap-2 px-5 py-2.5 bg-sc-cyan hover:bg-sc-cyan/80 text-sc-bg-dark rounded-xl font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-sc-cyan/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                           >
                             {isSubmitting ? (
                               <>
@@ -834,7 +856,7 @@ export function AddSourceDialog({
                               onChange={e => setLocalPath(e.target.value)}
                               placeholder="~/dev/knowledge or /absolute/path"
                               required
-                              className="w-full pl-10 pr-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary font-mono text-sm placeholder:text-sc-fg-subtle focus:border-sc-yellow focus:outline-none focus:ring-1 focus:ring-sc-yellow/30 transition-colors"
+                              className="w-full pl-10 pr-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary font-mono text-sm placeholder:text-sc-fg-subtle transition-colors duration-200 focus:border-sc-yellow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                             />
                           </div>
                           <p className="text-xs text-sc-fg-subtle mt-1.5">
@@ -856,7 +878,7 @@ export function AddSourceDialog({
                             value={localName}
                             onChange={e => setLocalName(e.target.value)}
                             placeholder="Auto-generated from directory name"
-                            className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-yellow focus:outline-none focus:ring-1 focus:ring-sc-yellow/30 transition-colors"
+                            className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus:border-sc-yellow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                           />
                         </div>
 
@@ -874,7 +896,7 @@ export function AddSourceDialog({
                             onChange={e => setLocalDescription(e.target.value)}
                             placeholder="What's in this directory?"
                             rows={2}
-                            className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-yellow focus:outline-none focus:ring-1 focus:ring-sc-yellow/30 transition-colors resize-none"
+                            className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus:border-sc-yellow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated resize-none"
                           />
                         </div>
 
@@ -896,7 +918,8 @@ export function AddSourceDialog({
                                 <button
                                   type="button"
                                   onClick={() => handleRemoveTag(tag, 'local')}
-                                  className="hover:text-white transition-colors"
+                                  aria-label={`Remove tag ${tag}`}
+                                  className="rounded-full text-sc-yellow hover:bg-sc-yellow/25 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                                 >
                                   <X width={12} height={12} />
                                 </button>
@@ -916,7 +939,7 @@ export function AddSourceDialog({
                                 }
                               }}
                               placeholder="Add a tag..."
-                              className="flex-1 px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-yellow focus:outline-none"
+                              className="flex-1 px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus:border-sc-yellow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                             />
                           </div>
                           {/* Suggested tags for local */}
@@ -928,9 +951,11 @@ export function AddSourceDialog({
                                   key={tag}
                                   type="button"
                                   onClick={() => handleAddTag(tag, 'local')}
-                                  className="px-2 py-0.5 text-xs text-sc-fg-subtle border border-sc-fg-subtle/20 rounded-full hover:border-sc-yellow/30 hover:text-sc-yellow transition-colors"
+                                  aria-label={`Add tag ${tag}`}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs text-sc-fg-muted border border-sc-fg-subtle/20 rounded-full hover:border-sc-yellow/30 hover:text-sc-yellow transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                                 >
-                                  + {tag}
+                                  <Plus width={10} height={10} />
+                                  {tag}
                                 </button>
                               ))}
                           </div>
@@ -941,14 +966,14 @@ export function AddSourceDialog({
                           <button
                             type="button"
                             onClick={handleClose}
-                            className="px-4 py-2 text-sm text-sc-fg-muted hover:text-sc-fg-primary transition-colors"
+                            className="px-4 py-2 text-sm text-sc-fg-muted hover:text-sc-fg-primary transition-colors duration-200 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                           >
                             Cancel
                           </button>
                           <button
                             type="submit"
                             disabled={!localPath.trim() || isSubmitting}
-                            className="flex items-center gap-2 px-5 py-2.5 bg-sc-yellow hover:bg-sc-yellow/80 text-sc-bg-dark rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-sc-yellow/25"
+                            className="flex items-center gap-2 px-5 py-2.5 bg-sc-yellow hover:bg-sc-yellow/80 text-sc-bg-dark rounded-xl font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-sc-yellow/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                           >
                             {isSubmitting ? (
                               <>

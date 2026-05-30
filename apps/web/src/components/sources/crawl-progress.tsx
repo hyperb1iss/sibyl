@@ -52,7 +52,7 @@ const STATUS_CONFIG = {
   processing: { label: 'Processing', color: 'text-sc-coral', bg: 'bg-sc-coral/10' },
   completed: { label: 'Completed', color: 'text-sc-green', bg: 'bg-sc-green/10' },
   error: { label: 'Error', color: 'text-sc-red', bg: 'bg-sc-red/10' },
-  stopped: { label: 'Stopped', color: 'text-sc-fg-subtle', bg: 'bg-sc-fg-subtle/10' },
+  stopped: { label: 'Stopped', color: 'text-sc-fg-muted', bg: 'bg-sc-fg-subtle/10' },
 };
 
 const CrawlOperationCard = memo(function CrawlOperationCard({
@@ -135,8 +135,9 @@ const CrawlOperationCard = memo(function CrawlOperationCard({
               <button
                 type="button"
                 onClick={() => onStop(operation.id)}
-                className="p-1.5 text-sc-fg-subtle hover:text-sc-red hover:bg-sc-red/10 rounded-lg transition-colors"
+                className="p-1.5 text-sc-fg-muted hover:text-sc-red hover:bg-sc-red/10 rounded-lg transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
                 title="Stop crawl"
+                aria-label={`Stop crawl for ${operation.sourceName}`}
               >
                 <Square width={14} height={14} />
               </button>
@@ -145,8 +146,9 @@ const CrawlOperationCard = memo(function CrawlOperationCard({
               <button
                 type="button"
                 onClick={() => onDismiss(operation.id)}
-                className="p-1.5 text-sc-fg-subtle hover:text-sc-fg-primary hover:bg-sc-bg-highlight rounded-lg transition-colors"
+                className="p-1.5 text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight rounded-lg transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
                 title="Dismiss"
+                aria-label={`Dismiss ${operation.sourceName}`}
               >
                 <X width={14} height={14} />
               </button>
@@ -197,7 +199,8 @@ const CrawlOperationCard = memo(function CrawlOperationCard({
             <button
               type="button"
               onClick={() => setIsExpanded(!isExpanded)}
-              className="w-full flex items-center justify-between text-xs text-sc-fg-subtle hover:text-sc-fg-muted transition-colors"
+              aria-expanded={isExpanded}
+              className="w-full flex items-center justify-between text-xs text-sc-fg-muted hover:text-sc-fg-primary transition-colors duration-200 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
             >
               <span>{operation.discoveredUrls.length} discovered URLs</span>
               {isExpanded ? (
@@ -233,7 +236,7 @@ const CrawlOperationCard = memo(function CrawlOperationCard({
           <button
             type="button"
             onClick={() => onViewSource(operation.sourceId)}
-            className="w-full mt-2 px-3 py-2 text-sm text-sc-fg-muted hover:text-sc-purple hover:bg-sc-purple/10 rounded-lg transition-colors flex items-center justify-center gap-2"
+            className="w-full mt-2 px-3 py-2 text-sm text-sc-fg-muted hover:text-sc-purple hover:bg-sc-purple/10 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
           >
             <Globe width={14} height={14} />
             View Source
@@ -262,7 +265,7 @@ export const CrawlProgressPanel = memo(function CrawlProgressPanel({
   if (operations.length === 0) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 w-80 max-h-[60vh] flex flex-col bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-xl shadow-2xl shadow-black/40 overflow-hidden">
+    <div className="fixed bottom-4 right-4 z-40 w-80 max-h-[60vh] flex flex-col bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-xl shadow-card-elevated overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-sc-fg-subtle/10 bg-sc-bg-base">
         <div className="flex items-center gap-2">
@@ -280,7 +283,9 @@ export const CrawlProgressPanel = memo(function CrawlProgressPanel({
         <button
           type="button"
           onClick={() => setIsCollapsed(!isCollapsed)}
-          className="p-1 text-sc-fg-subtle hover:text-sc-fg-primary transition-colors"
+          aria-label={isCollapsed ? 'Expand crawl operations' : 'Collapse crawl operations'}
+          aria-expanded={!isCollapsed}
+          className="p-1 text-sc-fg-muted hover:text-sc-fg-primary rounded-lg transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
         >
           {isCollapsed ? (
             <ChevronUp width={16} height={16} />

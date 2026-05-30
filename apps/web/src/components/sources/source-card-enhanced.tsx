@@ -3,6 +3,7 @@
 import { AnimatePresence, motion } from 'motion/react';
 import Link from 'next/link';
 import { memo, useState } from 'react';
+import { ConfirmDialog } from '@/components/ui';
 import {
   AlertCircle,
   CheckCircle2,
@@ -99,12 +100,12 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      className={`group relative bg-gradient-to-br from-sc-bg-base to-sc-bg-elevated border rounded-xl transition-all duration-300 ${
+      className={`group relative bg-gradient-to-br from-sc-bg-base to-sc-bg-elevated border rounded-xl transition-colors duration-200 ${
         isActive
           ? 'border-sc-purple/50 shadow-lg shadow-sc-purple/20'
           : crawlStatus === 'failed'
             ? 'border-sc-red/30 hover:border-sc-red/50'
-            : 'border-sc-fg-subtle/20 hover:border-sc-purple/40 hover:shadow-xl hover:shadow-black/20'
+            : 'border-sc-fg-subtle/20 hover:border-sc-purple/40 hover:shadow-card-hover'
       }`}
     >
       {/* Progress bar overlay for active crawls */}
@@ -301,7 +302,8 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
             <button
               type="button"
               onClick={() => onCancel?.(source.id)}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-red/20 text-sc-red hover:bg-sc-red/30 border border-sc-red/30 transition-all"
+              aria-label={`Cancel ${sourceType === 'local' ? 'sync' : 'crawl'} for ${source.name}`}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-red/20 text-sc-red hover:bg-sc-red/30 border border-sc-red/30 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
             >
               <StopCircle width={14} height={14} />
               Cancel
@@ -310,10 +312,11 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
             <button
               type="button"
               onClick={() => onCrawl?.(source.id)}
-              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              aria-label={`${crawlStatus === 'completed' ? 'Re-crawl' : 'Crawl'} ${source.name}`}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base ${
                 crawlStatus === 'completed'
                   ? 'bg-sc-bg-highlight text-sc-fg-primary hover:bg-sc-purple/20 hover:text-sc-purple border border-sc-fg-subtle/10'
-                  : 'bg-sc-purple hover:bg-sc-purple/80 text-white shadow-lg shadow-sc-purple/25'
+                  : 'bg-sc-purple hover:bg-sc-purple/80 text-sc-on-accent shadow-lg shadow-sc-purple/25'
               }`}
             >
               {crawlStatus === 'completed' ? (
@@ -333,7 +336,8 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
           {/* View Button */}
           <Link
             href={`/sources/${source.id}`}
-            className="px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-bg-highlight text-sc-fg-muted hover:text-sc-cyan hover:bg-sc-cyan/10 border border-sc-fg-subtle/10 transition-colors"
+            aria-label={`View ${source.name}`}
+            className="px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-bg-highlight text-sc-fg-muted hover:text-sc-cyan hover:bg-sc-cyan/10 border border-sc-fg-subtle/10 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
           >
             View
           </Link>
@@ -343,7 +347,10 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
             <button
               type="button"
               onClick={() => setShowMenu(!showMenu)}
-              className="p-2.5 rounded-xl text-sc-fg-subtle hover:text-sc-fg-primary hover:bg-sc-bg-highlight transition-colors"
+              aria-label={`More actions for ${source.name}`}
+              aria-haspopup="menu"
+              aria-expanded={showMenu}
+              className="p-2.5 rounded-xl text-sc-fg-subtle hover:text-sc-fg-primary hover:bg-sc-bg-highlight transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
             >
               <MoreVertical width={16} height={16} />
             </button>
@@ -374,7 +381,7 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
                           onRefresh(source.id);
                           setShowMenu(false);
                         }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight transition-colors"
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sc-cyan"
                       >
                         <RefreshCw width={14} height={14} />
                         Refresh
@@ -387,7 +394,7 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
                           setShowDeleteConfirm(true);
                           setShowMenu(false);
                         }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-sc-red hover:bg-sc-red/10 transition-colors"
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-sc-red hover:bg-sc-red/10 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sc-cyan"
                       >
                         <Trash2 width={14} height={14} />
                         Delete
@@ -402,50 +409,25 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
       </div>
 
       {/* Delete Confirmation */}
-      <AnimatePresence>
-        {showDeleteConfirm && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-sc-bg-dark/95 backdrop-blur-sm flex items-center justify-center p-4"
-          >
-            <div className="text-center space-y-3">
-              <AlertCircle width={32} height={32} className="mx-auto text-sc-red" />
-              <p className="text-sm text-sc-fg-primary">Delete this source?</p>
-              <p className="text-xs text-sc-fg-subtle">
-                This will remove all {documentCount} documents.
-              </p>
-              <div className="flex gap-2 justify-center">
-                <button
-                  type="button"
-                  onClick={() => setShowDeleteConfirm(false)}
-                  className="px-4 py-2 text-sm text-sc-fg-muted hover:text-sc-fg-primary transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onDelete?.(source.id);
-                    setShowDeleteConfirm(false);
-                  }}
-                  className="px-4 py-2 text-sm bg-sc-red text-white rounded-lg hover:bg-sc-red/80 transition-colors"
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        title={`Delete "${source.name}"?`}
+        description={`This will remove all ${documentCount} document${documentCount === 1 ? '' : 's'} and cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => {
+          onDelete?.(source.id);
+          setShowDeleteConfirm(false);
+        }}
+      />
     </motion.div>
   );
 });
 
 export function SourceCardSkeleton() {
   return (
-    <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5 animate-pulse">
+    <div className="bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-xl p-5 animate-pulse">
       <div className="flex items-start gap-3 mb-4">
         <div className="w-10 h-10 rounded-xl bg-sc-fg-subtle/10" />
         <div className="flex-1">

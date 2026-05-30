@@ -5,6 +5,15 @@ import { use, useCallback, useState } from 'react';
 import { toast } from 'sonner';
 import { ROUTE_CONFIG, useSetBreadcrumb } from '@/components/layout/breadcrumb';
 import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Tooltip,
+} from '@/components/ui';
+import {
   ArrowLeft,
   Calendar,
   ChevronRight,
@@ -19,7 +28,6 @@ import {
   RefreshCw,
   Settings,
   StopCircle,
-  X,
 } from '@/components/ui/icons';
 import { CRAWL_STATUS_CONFIG, formatDateTime, SOURCE_TYPE_CONFIG } from '@/lib/constants';
 import {
@@ -130,14 +138,14 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
   if (error) {
     return (
       <div className="space-y-4 animate-fade-in">
-        <div className="bg-sc-bg-base border border-sc-red/40 rounded-xl p-8 text-center shadow-glow-red">
+        <div className="bg-sc-bg-elevated border border-sc-red/40 rounded-xl p-8 text-center shadow-glow-red">
           <p className="text-sc-red font-medium">Failed to load source</p>
-          <p className="text-sc-fg-subtle text-sm mt-2">
+          <p className="text-sc-fg-muted text-sm mt-2">
             {error instanceof Error ? error.message : 'Unknown error'}
           </p>
           <Link
             href="/sources"
-            className="inline-flex items-center gap-2 mt-4 text-sc-cyan hover:text-sc-purple transition-colors"
+            className="inline-flex items-center gap-2 mt-4 text-sc-cyan hover:text-sc-purple transition-colors duration-200 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
           >
             <ArrowLeft width={16} height={16} />
             Back to Sources
@@ -203,7 +211,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
                 href={source.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 mt-3 text-sc-cyan hover:text-sc-purple transition-colors text-sm"
+                className="inline-flex items-center gap-1.5 mt-3 text-sc-cyan hover:text-sc-purple transition-colors duration-200 text-sm rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
               >
                 <ExternalLink width={14} height={14} />
                 {source.url}
@@ -217,7 +225,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
               <button
                 type="button"
                 onClick={handleCancel}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-red/20 text-sc-red hover:bg-sc-red/30 border border-sc-red/30 transition-all"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-red/20 text-sc-red hover:bg-sc-red/30 border border-sc-red/30 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
               >
                 <StopCircle width={16} height={16} />
                 Cancel {source.source_type === 'local' ? 'Sync' : 'Crawl'}
@@ -226,10 +234,10 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
               <button
                 type="button"
                 onClick={handleCrawl}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base ${
                   source.source_type === 'local'
                     ? 'bg-sc-yellow hover:bg-sc-yellow/80 text-sc-bg-dark'
-                    : 'bg-sc-purple hover:bg-sc-purple/80 text-white'
+                    : 'bg-sc-purple hover:bg-sc-purple/80 text-sc-on-accent'
                 }`}
               >
                 {source.crawl_status === 'completed' ? (
@@ -245,19 +253,27 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
                 )}
               </button>
             )}
-            <button
-              type="button"
-              onClick={handleSync}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-bg-highlight text-sc-fg-muted hover:text-sc-cyan hover:bg-sc-cyan/10 border border-sc-fg-subtle/10 transition-colors"
-            >
-              <RefreshCw width={16} height={16} />
-              Sync
-            </button>
+            {/* Sync is an incremental re-crawl; only show it for website sources,
+                where it is distinct from the full Start Crawl / Re-crawl above. */}
+            {source.source_type !== 'local' && !isActive && (
+              <Tooltip content="Re-crawl to pick up changes since the last crawl">
+                <button
+                  type="button"
+                  onClick={handleSync}
+                  aria-label="Sync source to pick up changes"
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-bg-highlight text-sc-fg-muted hover:text-sc-cyan hover:bg-sc-cyan/10 border border-sc-fg-subtle/10 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
+                >
+                  <RefreshCw width={16} height={16} />
+                  Sync
+                </button>
+              </Tooltip>
+            )}
             {source.source_type !== 'local' && (
               <button
                 type="button"
                 onClick={openEditModal}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-bg-highlight text-sc-fg-muted hover:text-sc-purple hover:bg-sc-purple/10 border border-sc-fg-subtle/10 transition-colors"
+                aria-label="Open crawl settings"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-bg-highlight text-sc-fg-muted hover:text-sc-purple hover:bg-sc-purple/10 border border-sc-fg-subtle/10 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
               >
                 <Settings width={16} height={16} />
                 Settings
@@ -387,7 +403,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
               <Link
                 key={page.id}
                 href={`/sources/${id}/documents/${page.id}`}
-                className="flex items-center justify-between gap-4 p-3 bg-sc-bg-dark rounded-xl hover:bg-sc-bg-highlight transition-colors group"
+                className="flex items-center justify-between gap-4 p-3 bg-sc-bg-dark rounded-xl hover:bg-sc-bg-highlight transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base group"
               >
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-sc-fg-primary truncate group-hover:text-sc-cyan transition-colors">
@@ -416,7 +432,8 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
                       e.stopPropagation();
                       window.open(page.url, '_blank', 'noopener,noreferrer');
                     }}
-                    className="p-1.5 text-sc-fg-subtle hover:text-sc-cyan transition-colors"
+                    aria-label={`Open ${page.title} in a new tab`}
+                    className="p-1.5 text-sc-fg-subtle hover:text-sc-cyan transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
                   >
                     <ExternalLink width={14} height={14} />
                   </button>
@@ -433,102 +450,77 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
       </div>
 
       {/* Edit Settings Modal */}
-      {isEditOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div
-            className="absolute inset-0 bg-sc-bg-dark/80 backdrop-blur-sm"
-            onClick={() => setIsEditOpen(false)}
-            onKeyDown={e => e.key === 'Escape' && setIsEditOpen(false)}
-          />
-          <div className="relative bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-6 w-full max-w-md shadow-2xl">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-semibold text-sc-fg-primary">Crawl Settings</h2>
-              <button
-                type="button"
-                onClick={() => setIsEditOpen(false)}
-                className="p-1.5 text-sc-fg-subtle hover:text-sc-fg-primary transition-colors"
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent size="md">
+          <DialogHeader>
+            <DialogTitle>Crawl Settings</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <label
+                htmlFor="crawl_depth"
+                className="block text-sm font-medium text-sc-fg-muted mb-1.5"
               >
-                <X width={18} height={18} />
-              </button>
+                Crawl Depth
+              </label>
+              <input
+                id="crawl_depth"
+                type="number"
+                min={1}
+                max={5}
+                value={editForm.crawl_depth}
+                onChange={e => setEditForm(f => ({ ...f, crawl_depth: Number(e.target.value) }))}
+                className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary transition-colors duration-200 focus:border-sc-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
+              />
+              <p className="text-xs text-sc-fg-muted mt-1">How many links deep to follow (1-5)</p>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label
-                  htmlFor="crawl_depth"
-                  className="block text-sm font-medium text-sc-fg-muted mb-1.5"
-                >
-                  Crawl Depth
-                </label>
-                <input
-                  id="crawl_depth"
-                  type="number"
-                  min={1}
-                  max={5}
-                  value={editForm.crawl_depth}
-                  onChange={e => setEditForm(f => ({ ...f, crawl_depth: Number(e.target.value) }))}
-                  className="w-full px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary focus:outline-none focus:border-sc-purple"
-                />
-                <p className="text-xs text-sc-fg-subtle mt-1">
-                  How many links deep to follow (1-5)
-                </p>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="include_patterns"
-                  className="block text-sm font-medium text-sc-fg-muted mb-1.5"
-                >
-                  Include Patterns
-                </label>
-                <textarea
-                  id="include_patterns"
-                  value={editForm.include_patterns}
-                  onChange={e => setEditForm(f => ({ ...f, include_patterns: e.target.value }))}
-                  placeholder="One pattern per line"
-                  rows={3}
-                  className="w-full px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary font-mono text-sm focus:outline-none focus:border-sc-purple resize-none"
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="exclude_patterns"
-                  className="block text-sm font-medium text-sc-fg-muted mb-1.5"
-                >
-                  Exclude Patterns
-                </label>
-                <textarea
-                  id="exclude_patterns"
-                  value={editForm.exclude_patterns}
-                  onChange={e => setEditForm(f => ({ ...f, exclude_patterns: e.target.value }))}
-                  placeholder="One pattern per line"
-                  rows={3}
-                  className="w-full px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary font-mono text-sm focus:outline-none focus:border-sc-purple resize-none"
-                />
-              </div>
+            <div>
+              <label
+                htmlFor="include_patterns"
+                className="block text-sm font-medium text-sc-fg-muted mb-1.5"
+              >
+                Include Patterns
+              </label>
+              <textarea
+                id="include_patterns"
+                value={editForm.include_patterns}
+                onChange={e => setEditForm(f => ({ ...f, include_patterns: e.target.value }))}
+                placeholder="One pattern per line"
+                rows={3}
+                className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary font-mono text-sm transition-colors duration-200 focus:border-sc-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base resize-none"
+              />
             </div>
 
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                type="button"
-                onClick={() => setIsEditOpen(false)}
-                className="px-4 py-2 text-sm font-medium text-sc-fg-muted hover:text-sc-fg-primary transition-colors"
+            <div>
+              <label
+                htmlFor="exclude_patterns"
+                className="block text-sm font-medium text-sc-fg-muted mb-1.5"
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveSettings}
-                disabled={updateSource.isPending}
-                className="px-4 py-2 text-sm font-medium bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg transition-colors disabled:opacity-50"
-              >
-                {updateSource.isPending ? 'Saving...' : 'Save Changes'}
-              </button>
+                Exclude Patterns
+              </label>
+              <textarea
+                id="exclude_patterns"
+                value={editForm.exclude_patterns}
+                onChange={e => setEditForm(f => ({ ...f, exclude_patterns: e.target.value }))}
+                placeholder="One pattern per line"
+                rows={3}
+                className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary font-mono text-sm transition-colors duration-200 focus:border-sc-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base resize-none"
+              />
             </div>
           </div>
-        </div>
-      )}
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setIsEditOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={handleSaveSettings} loading={updateSource.isPending}>
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -543,10 +535,10 @@ function StatCard({
   value: string | number;
 }) {
   return (
-    <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-4 shadow-card">
+    <div className="bg-sc-bg-elevated border border-sc-fg-subtle/30 rounded-xl p-4 shadow-card">
       <div className="flex items-center gap-2 mb-1">
         {icon}
-        <span className="text-xs text-sc-fg-subtle">{label}</span>
+        <span className="text-xs text-sc-fg-muted">{label}</span>
       </div>
       <p className="text-xl font-bold text-sc-fg-primary">{value}</p>
     </div>
