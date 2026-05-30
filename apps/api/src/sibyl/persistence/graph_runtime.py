@@ -469,6 +469,19 @@ class GraphRelationshipStore(RelationshipStore):
     ) -> list[Relationship]:
         return await self._manager.get_for_entity(entity_id, relationship_types)
 
+    async def get_related_entities(
+        self,
+        entity_id: str,
+        *,
+        relationship_types: list[RelationshipType] | None = None,
+        limit: int = 50,
+    ) -> list[tuple[Entity, Relationship]]:
+        return await self._manager.get_related_entities(
+            entity_id=entity_id,
+            relationship_types=relationship_types,
+            limit=limit,
+        )
+
     async def find_between(
         self,
         source_id: str,
@@ -739,7 +752,17 @@ class GraphReadServiceAdapter(KnowledgeReadService):
         if entity is None:
             return None
 
-        relationships = await self._store.relationships.list_for_entity(entity_id)
+        relationship_store: Any = self._store.relationships
+        get_related_entities = getattr(relationship_store, "get_related_entities", None)
+        if callable(get_related_entities):
+            related_pairs = await get_related_entities(entity_id, limit=50)
+            return EntityBundle(
+                entity=entity,
+                relationships=[relationship for _entity, relationship in related_pairs],
+                related_entities=[related for related, _relationship in related_pairs],
+            )
+
+        relationships = await relationship_store.list_for_entity(entity_id)
         related_ids = list(_collect_related_ids(entity_id, relationships))
         related_entities = await self._store.entities.get_many(related_ids)
         return EntityBundle(

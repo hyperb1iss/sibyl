@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from sibyl.persistence import graph_runtime
+from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 
 
 class _ProjectDeleteDriver:
@@ -133,3 +134,36 @@ async def test_graph_stats_payload_skips_archive_only_tables(
     assert all("episode_count" not in query for query in client.queries)
     assert all("community_count" not in query for query in client.queries)
     assert all("saga_count" not in query for query in client.queries)
+
+
+@pytest.mark.asyncio
+async def test_graph_read_service_bundle_uses_native_related_pairs() -> None:
+    entity = Entity(id="task-1", entity_type=EntityType.TASK, name="Task")
+    related = Entity(id="topic-1", entity_type=EntityType.TOPIC, name="Topic")
+    relationship = Relationship(
+        id="rel-task-topic",
+        relationship_type=RelationshipType.RELATED_TO,
+        source_id="task-1",
+        target_id="topic-1",
+    )
+    entity_store = SimpleNamespace(
+        get=AsyncMock(return_value=entity),
+        get_many=AsyncMock(return_value=[]),
+    )
+    relationship_store = SimpleNamespace(
+        get_related_entities=AsyncMock(return_value=[(related, relationship)]),
+        list_for_entity=AsyncMock(return_value=[]),
+    )
+    service = graph_runtime.GraphReadServiceAdapter(
+        SimpleNamespace(entities=entity_store, relationships=relationship_store)
+    )
+
+    bundle = await service.get_entity_bundle("task-1")
+
+    assert bundle is not None
+    assert bundle.entity == entity
+    assert bundle.related_entities == [related]
+    assert bundle.relationships == [relationship]
+    relationship_store.get_related_entities.assert_awaited_once_with("task-1", limit=50)
+    relationship_store.list_for_entity.assert_not_awaited()
+    entity_store.get_many.assert_not_awaited()

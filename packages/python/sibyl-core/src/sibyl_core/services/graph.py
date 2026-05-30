@@ -59,6 +59,38 @@ _TASK_PRIORITY_ORDER = {
     "someday": 4,
 }
 _ENTITY_LIST_FIELDS = "* OMIT content, embedding, name_embedding, attributes.content"
+_RELATED_ENTITY_PROJECTION_FIELDS = (
+    ("id", "record_id"),
+    ("uuid", "uuid"),
+    ("name", "name"),
+    ("entity_type", "entity_type"),
+    ("summary", "summary"),
+    ("description", "description"),
+    ("labels", "labels"),
+    ("attributes", "attributes"),
+    ("group_id", "group_id"),
+    ("created_at", "created_at"),
+    ("updated_at", "updated_at"),
+    ("project_id", "project_id"),
+    ("epic_id", "epic_id"),
+    ("parent_task_id", "parent_task_id"),
+    ("task_id", "task_id"),
+    ("status", "status"),
+    ("priority", "priority"),
+    ("complexity", "complexity"),
+    ("feature", "feature"),
+    ("tags", "tags"),
+    ("source_id", "source_id"),
+    ("source_ids", "source_ids"),
+    ("confidence", "confidence"),
+    ("valid_at", "valid_at"),
+    ("valid_from", "valid_from"),
+    ("valid_to", "valid_to"),
+    ("invalid_at", "invalid_at"),
+    ("created_by", "created_by"),
+    ("modified_by", "modified_by"),
+    ("source_file", "source_file"),
+)
 _ENTITY_BULK_UPSERT_QUERY = """
 INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     uuid = $input.uuid,
@@ -1239,60 +1271,36 @@ class RelationshipManager:
         type_values = [rel_type.value for rel_type in relationship_types or ()]
         type_clause = "AND name IN $relationship_types" if type_values else ""
         per_seed_limit = max(int(limit_per_entity), 1)
-        edge_rows = await self._get_indexed_related_edge_rows(
+        related_rows = await self._get_native_related_entity_rows(
             seed_ids,
             type_clause=type_clause,
             type_values=type_values,
             limit=per_seed_limit,
         )
 
-        seed_id_set = set(seed_ids)
-        edge_pairs_by_seed: dict[str, list[tuple[SurrealRecord, str]]] = {
+        results: dict[str, list[tuple[Entity, Relationship]]] = {
             seed_id: [] for seed_id in seed_ids
         }
-        other_ids: list[str] = []
-        for row in edge_rows:
-            source_id = row.get("source_uuid")
-            target_id = row.get("target_uuid")
-            if isinstance(source_id, str) and isinstance(target_id, str):
-                if source_id in seed_id_set:
-                    outgoing_row = {**row, "direction": "outgoing"}
-                    edge_pairs_by_seed[source_id].append((outgoing_row, target_id))
-                    other_ids.append(target_id)
-                if target_id in seed_id_set:
-                    incoming_row = {**row, "direction": "incoming"}
-                    edge_pairs_by_seed[target_id].append((incoming_row, source_id))
-                    other_ids.append(source_id)
-
-        if not other_ids:
-            return {seed_id: [] for seed_id in seed_ids}
-
-        entity_rows = normalize_records(
-            await self._client.execute_query(
-                """
-                SELECT *
-                FROM entity
-                WHERE group_id = $group_id AND uuid IN $entity_ids;
-                """,
-                group_id=self._group_id,
-                entity_ids=list(dict.fromkeys(other_ids)),
-            )
-        )
-        entities_by_id = {str(row.get("uuid")): _entity_from_row(row) for row in entity_rows}
-        results: dict[str, list[tuple[Entity, Relationship]]] = {}
-        for seed_id, edge_pairs in edge_pairs_by_seed.items():
-            seed_results: list[tuple[Entity, Relationship]] = []
-            for row, other_id in edge_pairs:
-                if len(seed_results) >= per_seed_limit:
-                    break
-                entity = entities_by_id.get(other_id)
-                if entity is None:
-                    continue
-                seed_results.append((entity, _relationship_from_row(row)))
-            results[seed_id] = seed_results
+        seen_by_seed: dict[str, set[tuple[str, object]]] = {seed_id: set() for seed_id in seed_ids}
+        for row in related_rows:
+            seed_id = row.get("seed_uuid")
+            if not isinstance(seed_id, str) or seed_id not in results:
+                continue
+            seed_results = results[seed_id]
+            if len(seed_results) >= per_seed_limit:
+                continue
+            entity = _related_entity_from_row(row)
+            if entity is None:
+                continue
+            relationship = _relationship_from_row(row)
+            key = (relationship.id, row.get("direction"))
+            if key in seen_by_seed[seed_id]:
+                continue
+            seen_by_seed[seed_id].add(key)
+            seed_results.append((entity, relationship))
         return results
 
-    async def _get_indexed_related_edge_rows(
+    async def _get_native_related_entity_rows(
         self,
         seed_ids: Sequence[str],
         *,
@@ -1300,18 +1308,22 @@ class RelationshipManager:
         type_values: Sequence[str],
         limit: int,
     ) -> list[SurrealRecord]:
-        outgoing_rows = await self._get_indexed_related_edge_direction_rows(
+        outgoing_rows = await self._get_native_related_entity_direction_rows(
             seed_ids,
             endpoint_field="source_id",
             endpoint_alias="source_uuid",
+            related_side="out",
+            direction="outgoing",
             type_clause=type_clause,
             type_values=type_values,
             limit=limit,
         )
-        incoming_rows = await self._get_indexed_related_edge_direction_rows(
+        incoming_rows = await self._get_native_related_entity_direction_rows(
             seed_ids,
             endpoint_field="target_id",
             endpoint_alias="target_uuid",
+            related_side="in",
+            direction="incoming",
             type_clause=type_clause,
             type_values=type_values,
             limit=limit,
@@ -1320,19 +1332,28 @@ class RelationshipManager:
         rows: list[SurrealRecord] = []
         seen: set[str] = set()
         for row in [*outgoing_rows, *incoming_rows]:
-            key = str(row.get("uuid") or row.get("record_id") or id(row))
+            key = ":".join(
+                str(value)
+                for value in (
+                    row.get("seed_uuid"),
+                    row.get("direction"),
+                    row.get("uuid") or row.get("record_id") or id(row),
+                )
+            )
             if key in seen:
                 continue
             seen.add(key)
             rows.append(row)
         return rows
 
-    async def _get_indexed_related_edge_direction_rows(
+    async def _get_native_related_entity_direction_rows(
         self,
         seed_ids: Sequence[str],
         *,
         endpoint_field: str,
         endpoint_alias: str,
+        related_side: str,
+        direction: str,
         type_clause: str,
         type_values: Sequence[str],
         limit: int,
@@ -1353,10 +1374,13 @@ class RelationshipManager:
                        valid_at,
                        invalid_at,
                        source_id AS source_uuid,
-                       target_id AS target_uuid
+                       target_id AS target_uuid,
+                       {endpoint_field} AS seed_uuid,
+                       {_related_entity_projection(related_side)}
                 FROM relates_to
                 WHERE group_id = $group_id
                   AND {endpoint_field} IN $entity_ids
+                  AND {related_side}.group_id = $group_id
                 """
                 + type_clause
                 + """
@@ -1369,6 +1393,9 @@ class RelationshipManager:
                 limit=batch_limit,
             )
         )
+        for row in rows:
+            row["direction"] = direction
+            row.setdefault("seed_uuid", row.get(endpoint_alias))
         if len(rows) < batch_limit:
             return rows
 
@@ -1397,10 +1424,13 @@ class RelationshipManager:
                                valid_at,
                                invalid_at,
                                source_id AS source_uuid,
-                               target_id AS target_uuid
+                               target_id AS target_uuid,
+                               {endpoint_field} AS seed_uuid,
+                               {_related_entity_projection(related_side)}
                         FROM relates_to
                         WHERE group_id = $group_id
                           AND {endpoint_field} = $entity_id
+                          AND {related_side}.group_id = $group_id
                         """
                         + type_clause
                         + """
@@ -1414,6 +1444,9 @@ class RelationshipManager:
                     )
                 )
             )
+        for row in rows:
+            row["direction"] = direction
+            row.setdefault("seed_uuid", row.get(endpoint_alias))
         return rows
 
     async def list_all(
@@ -1711,6 +1744,24 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
 
 def _entity_from_row(row: SurrealRecord) -> Entity:
     return entity_from_surreal_row(row)
+
+
+def _related_entity_projection(side: str) -> str:
+    return ",\n                       ".join(
+        f"{side}.{field_name} AS related_{alias}"
+        for field_name, alias in _RELATED_ENTITY_PROJECTION_FIELDS
+    )
+
+
+def _related_entity_from_row(row: Mapping[str, object]) -> Entity | None:
+    related_row = {
+        key.removeprefix("related_"): value
+        for key, value in row.items()
+        if key.startswith("related_")
+    }
+    if not _first_text(related_row.get("uuid")):
+        return None
+    return entity_from_surreal_row(related_row)
 
 
 def _entity_select_fields(include_content: bool) -> str:

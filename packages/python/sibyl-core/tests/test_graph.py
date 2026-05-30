@@ -101,69 +101,41 @@ class _RelatedBatchClient:
         now = datetime.now(UTC)
         if "FROM relates_to" in query and "source_id IN $entity_ids" in query:
             return [
-                {
-                    "record_id": "relates_to:rel_seed_a_target_a",
-                    "uuid": "rel_seed_a_target_a",
-                    "name": "RELATED_TO",
-                    "fact": "seed-a points at target-a",
-                    "group_id": self.group_id,
-                    "episodes": [],
-                    "attributes": {},
-                    "created_at": now,
-                    "expired_at": None,
-                    "valid_at": now,
-                    "invalid_at": None,
-                    "source_uuid": "seed-a",
-                    "target_uuid": "target-a",
-                },
-                {
-                    "record_id": "relates_to:rel_seed_a_seed_b",
-                    "uuid": "rel_seed_a_seed_b",
-                    "name": "RELATED_TO",
-                    "fact": "seed-a points at seed-b",
-                    "group_id": self.group_id,
-                    "episodes": [],
-                    "attributes": {},
-                    "created_at": now,
-                    "expired_at": None,
-                    "valid_at": now,
-                    "invalid_at": None,
-                    "source_uuid": "seed-a",
-                    "target_uuid": "seed-b",
-                },
+                _related_edge_row(
+                    uuid="rel_seed_a_target_a",
+                    source_id="seed-a",
+                    target_id="target-a",
+                    related_id="target-a",
+                    group_id=self.group_id,
+                    created_at=now,
+                ),
+                _related_edge_row(
+                    uuid="rel_seed_a_seed_b",
+                    source_id="seed-a",
+                    target_id="seed-b",
+                    related_id="seed-b",
+                    group_id=self.group_id,
+                    created_at=now,
+                ),
             ]
         if "FROM relates_to" in query and "target_id IN $entity_ids" in query:
             return [
-                {
-                    "record_id": "relates_to:rel_source_a_seed_a",
-                    "uuid": "rel_source_a_seed_a",
-                    "name": "RELATED_TO",
-                    "fact": "source-a points at seed-a",
-                    "group_id": self.group_id,
-                    "episodes": [],
-                    "attributes": {},
-                    "created_at": now,
-                    "expired_at": None,
-                    "valid_at": now,
-                    "invalid_at": None,
-                    "source_uuid": "source-a",
-                    "target_uuid": "seed-a",
-                },
-                {
-                    "record_id": "relates_to:rel_seed_a_seed_b",
-                    "uuid": "rel_seed_a_seed_b",
-                    "name": "RELATED_TO",
-                    "fact": "seed-a points at seed-b",
-                    "group_id": self.group_id,
-                    "episodes": [],
-                    "attributes": {},
-                    "created_at": now,
-                    "expired_at": None,
-                    "valid_at": now,
-                    "invalid_at": None,
-                    "source_uuid": "seed-a",
-                    "target_uuid": "seed-b",
-                },
+                _related_edge_row(
+                    uuid="rel_source_a_seed_a",
+                    source_id="source-a",
+                    target_id="seed-a",
+                    related_id="source-a",
+                    group_id=self.group_id,
+                    created_at=now,
+                ),
+                _related_edge_row(
+                    uuid="rel_seed_a_seed_b",
+                    source_id="seed-a",
+                    target_id="seed-b",
+                    related_id="seed-a",
+                    group_id=self.group_id,
+                    created_at=now,
+                ),
             ]
         if "FROM entity" in query:
             entity_ids = cast("list[str]", params["entity_ids"])
@@ -189,6 +161,7 @@ def _related_edge_row(
     uuid: str,
     source_id: str,
     target_id: str,
+    related_id: str | None = None,
     group_id: str,
     created_at: datetime,
 ) -> dict[str, object]:
@@ -206,6 +179,27 @@ def _related_edge_row(
         "invalid_at": None,
         "source_uuid": source_id,
         "target_uuid": target_id,
+    } | _related_entity_row(related_id or target_id, group_id=group_id, created_at=created_at)
+
+
+def _related_entity_row(
+    entity_id: str,
+    *,
+    group_id: str,
+    created_at: datetime,
+) -> dict[str, object]:
+    return {
+        "related_record_id": f"entity:{entity_id}",
+        "related_uuid": entity_id,
+        "related_name": entity_id.title(),
+        "related_entity_type": "topic",
+        "related_summary": "",
+        "related_description": "",
+        "related_labels": [],
+        "related_attributes": {},
+        "related_group_id": group_id,
+        "related_created_at": created_at,
+        "related_updated_at": created_at,
     }
 
 
@@ -1715,7 +1709,7 @@ async def test_graph_migration_backfills_relationship_endpoint_mirrors() -> None
 
 
 @pytest.mark.asyncio
-async def test_native_relationship_batch_uses_indexed_set_reads() -> None:
+async def test_native_relationship_batch_uses_native_traversal_projection() -> None:
     client = _RelatedBatchClient()
     relationship_manager = RelationshipManager(
         cast("SurrealGraphClient", client),
@@ -1730,10 +1724,12 @@ async def test_native_relationship_batch_uses_indexed_set_reads() -> None:
     relates_queries = [call for call in client.calls if "FROM relates_to" in call[0]]
     entity_queries = [call for call in client.calls if "FROM entity" in call[0]]
     assert len(relates_queries) == 2
-    assert len(entity_queries) == 1
+    assert entity_queries == []
     assert all("IN $entity_ids" in query for query, _ in relates_queries)
     assert all("$entity_id" not in params for _, params in relates_queries)
     assert [params["limit"] for _, params in relates_queries] == [6, 6]
+    assert any("out.uuid AS related_uuid" in query for query, _ in relates_queries)
+    assert any("in.uuid AS related_uuid" in query for query, _ in relates_queries)
 
     assert [entity.id for entity, _ in related["seed-a"]] == [
         "target-a",
@@ -1758,7 +1754,9 @@ async def test_native_relationship_batch_tops_up_underfilled_seeds_when_capped()
     )
 
     relates_queries = [call for call in client.calls if "FROM relates_to" in call[0]]
+    entity_queries = [call for call in client.calls if "FROM entity" in call[0]]
     assert len(relates_queries) == 3
+    assert entity_queries == []
     assert any("source_id IN $entity_ids" in query for query, _ in relates_queries)
     assert any("target_id IN $entity_ids" in query for query, _ in relates_queries)
     top_up_calls = [
