@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import sibyl_core.services.graph_communities as communities
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.services.graph_communities import (
     DETECTION_MAX_ENTITIES,
@@ -12,6 +13,8 @@ from sibyl_core.services.graph_communities import (
     DetectedCommunity,
     detect_communities,
     export_to_networkx,
+    get_cluster_nodes,
+    get_clusters_for_visualization,
     get_community_members,
     get_entity_communities,
     get_hierarchical_graph,
@@ -636,6 +639,137 @@ class TestHierarchicalGraph:
         assert data.displayed_nodes == 100
         assert cluster["member_count"] == 120
         assert cluster["displayed_member_count"] == 100
+
+
+class TestClusterVisualization:
+    """Tests for bounded cluster visualization queries."""
+
+    @pytest.fixture
+    def mock_client(self) -> MagicMock:
+        client = MagicMock()
+        client.execute_read_org = AsyncMock(return_value=[])
+        client.execute_write_org = AsyncMock(return_value=[])
+        return client
+
+    @pytest.mark.asyncio
+    async def test_clusters_use_detection_caps(
+        self,
+        mock_client: MagicMock,
+    ) -> None:
+        entity_manager = MagicMock()
+        entity_manager.supports_lightweight_entity_list = False
+        entity_manager.list_all = AsyncMock(
+            return_value=[
+                _make_entity("task-1", "Task One", EntityType.TASK),
+                _make_entity("task-2", "Task Two", EntityType.TASK),
+            ]
+        )
+        relationship_manager = MagicMock()
+        relationship_manager.list_all = AsyncMock(
+            return_value=[_make_relationship("rel-1", "task-1", "task-2")]
+        )
+
+        with (
+            patch.dict("sibyl_core.services.graph_communities.CLUSTER_CACHE", {}, clear=True),
+            patch.dict(
+                "sibyl_core.services.graph_communities.GRAPH_SNAPSHOT_CACHE", {}, clear=True
+            ),
+            patch(
+                "sibyl_core.services.graph_communities._entity_manager_factory",
+                return_value=entity_manager,
+            ),
+            patch(
+                "sibyl_core.services.graph_communities._relationship_manager_factory",
+                return_value=relationship_manager,
+            ),
+            patch(
+                "sibyl_core.services.graph_communities.detect_communities_louvain",
+                return_value=({"task-1": 0, "task-2": 0}, 0.5),
+            ),
+        ):
+            clusters = await get_clusters_for_visualization(
+                mock_client,
+                TEST_ORG_ID,
+                force_refresh=True,
+            )
+
+        assert len(clusters) == 1
+        assert clusters[0].type_distribution == {"task": 2}
+        entity_manager.list_all.assert_awaited_once_with(
+            limit=DETECTION_MAX_ENTITIES,
+            offset=0,
+            include_archived=True,
+        )
+        relationship_manager.list_all.assert_awaited_once_with(
+            relationship_types=None,
+            limit=DETECTION_MAX_RELATIONSHIPS,
+            offset=0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_type_based_clusters_use_native_aggregates(self) -> None:
+        queries: list[str] = []
+
+        class NativeClient:
+            async def execute_query(self, query: str, **_params: object) -> list[dict[str, object]]:
+                queries.append(query)
+                if "GROUP BY entity_type" in query:
+                    return [{"entity_type": "task", "member_count": 3}]
+                return [{"uuid": "task-1"}, {"uuid": "task-2"}]
+
+        clusters = await communities._create_type_based_clusters(NativeClient(), TEST_ORG_ID)
+
+        assert clusters[0].member_count == 3
+        assert clusters[0].member_ids == ["task-1", "task-2"]
+        assert any("GROUP BY entity_type" in query for query in queries)
+        assert any("LIMIT $limit" in query for query in queries)
+
+    @pytest.mark.asyncio
+    async def test_cluster_nodes_use_render_limits(
+        self,
+        mock_client: MagicMock,
+    ) -> None:
+        snapshot = communities.GraphSnapshot(
+            entities=[
+                _make_entity("task-1", "Task One", EntityType.TASK),
+                _make_entity("task-2", "Task Two", EntityType.TASK),
+                _make_entity("task-3", "Task Three", EntityType.TASK),
+            ],
+            relationships=[
+                _make_relationship("rel-1", "task-1", "task-2"),
+                _make_relationship("rel-2", "task-1", "task-3"),
+            ],
+            entity_by_id={},
+        )
+        snapshot.entity_by_id = {entity.id: entity for entity in snapshot.entities if entity.id}
+        cluster = communities.ClusterSummary(
+            id="cluster-1",
+            member_count=3,
+            dominant_type="task",
+            type_distribution={"task": 3},
+            member_ids=["task-1", "task-2", "task-3"],
+        )
+
+        with (
+            patch(
+                "sibyl_core.services.graph_communities.get_clusters_for_visualization",
+                AsyncMock(return_value=[cluster]),
+            ),
+            patch(
+                "sibyl_core.services.graph_communities._get_graph_snapshot",
+                AsyncMock(return_value=snapshot),
+            ),
+        ):
+            result = await get_cluster_nodes(
+                mock_client,
+                TEST_ORG_ID,
+                "cluster-1",
+                max_nodes=2,
+                max_edges=1,
+            )
+
+        assert [node["id"] for node in result["nodes"]] == ["task-1", "task-2"]
+        assert result["edges"] == [{"source": "task-1", "target": "task-2", "type": "RELATED_TO"}]
 
 
 class TestStoreCommunities:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import heapq
+import inspect
 import uuid
 from collections import Counter
 from collections.abc import Callable
@@ -55,6 +56,9 @@ GRAPH_RESOLUTION_DETAIL = "detail"
 # detection (store_communities) rather than shrinking what we detect on.
 DETECTION_MAX_ENTITIES = 25_000
 DETECTION_MAX_RELATIONSHIPS = 100_000
+CLUSTER_DETAIL_MAX_NODES = 1000
+CLUSTER_DETAIL_MAX_EDGES = 5000
+CLUSTER_SUMMARY_MEMBER_SAMPLE = 1000
 # Above this focused-node count the UI defaults to the aggregate overview.
 OVERVIEW_NODE_THRESHOLD = 400
 # The overview is a legible MAP of domains, not every community. Show the
@@ -364,6 +368,28 @@ def _count_int(value: object) -> int:
         except (TypeError, ValueError):
             return 0
     return 0
+
+
+async def _native_rows(
+    client: Any,
+    organization_id: str,
+    query: str,
+    **params: object,
+) -> list[dict[str, object]] | None:
+    execute_query = getattr(client, "execute_query", None)
+    if not callable(execute_query):
+        return None
+
+    try:
+        result = execute_query(query, group_id=organization_id, **params)
+        if not inspect.isawaitable(result):
+            return None
+        from sibyl_core.services.graph import normalize_records
+
+        return normalize_records(await result)
+    except Exception as exc:
+        log.warning("native_graph_query_failed", org_id=organization_id, error=str(exc))
+        return None
 
 
 async def _graph_totals(
@@ -1264,6 +1290,169 @@ def _build_cluster_detail_graph_from_snapshot(
     )
 
 
+async def _native_type_counts_for_ids(
+    client: Any,
+    organization_id: str,
+    member_ids: list[str],
+) -> dict[str, int] | None:
+    if not member_ids:
+        return {}
+
+    rows = await _native_rows(
+        client,
+        organization_id,
+        """
+        SELECT entity_type, count() AS member_count
+        FROM entity
+        WHERE group_id = $group_id
+          AND uuid IN $member_ids
+        GROUP BY entity_type;
+        """,
+        member_ids=member_ids,
+    )
+    if rows is None:
+        return None
+
+    type_counts: dict[str, int] = {}
+    for row in rows:
+        entity_type = row.get("entity_type")
+        if not entity_type:
+            continue
+        type_counts[str(entity_type)] = _count_int(row.get("member_count"))
+    return type_counts
+
+
+async def _native_type_based_clusters(
+    client: Any,
+    organization_id: str,
+) -> list[ClusterSummary] | None:
+    rows = await _native_rows(
+        client,
+        organization_id,
+        """
+        SELECT entity_type, count() AS member_count
+        FROM entity
+        WHERE group_id = $group_id
+        GROUP BY entity_type;
+        """,
+    )
+    if rows is None:
+        return None
+
+    clusters: list[ClusterSummary] = []
+    for index, row in enumerate(rows):
+        entity_type = str(row.get("entity_type") or "unknown")
+        member_count = _count_int(row.get("member_count"))
+        member_rows = await _native_rows(
+            client,
+            organization_id,
+            """
+            SELECT uuid
+            FROM entity
+            WHERE group_id = $group_id
+              AND entity_type = $entity_type
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT $limit;
+            """,
+            entity_type=entity_type,
+            limit=CLUSTER_SUMMARY_MEMBER_SAMPLE,
+        )
+        if member_rows is None:
+            return None
+        member_ids = [str(row.get("uuid")) for row in member_rows if row.get("uuid")]
+        clusters.append(
+            ClusterSummary(
+                id=f"type_{entity_type}_{index}",
+                member_count=member_count,
+                dominant_type=entity_type,
+                type_distribution={entity_type: member_count},
+                member_ids=member_ids,
+                level=0,
+            )
+        )
+
+    return clusters
+
+
+async def _native_entities_by_ids(
+    client: Any,
+    organization_id: str,
+    member_ids: list[str],
+) -> dict[str, Entity] | None:
+    if not member_ids:
+        return {}
+
+    rows = await _native_rows(
+        client,
+        organization_id,
+        """
+        SELECT *
+        FROM entity
+        WHERE group_id = $group_id
+          AND uuid IN $member_ids
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT $limit;
+        """,
+        member_ids=member_ids,
+        limit=len(member_ids),
+    )
+    if rows is None:
+        return None
+
+    from sibyl_core.services.graph import entity_from_surreal_row
+
+    entities: dict[str, Entity] = {}
+    for row in rows:
+        with contextlib.suppress(Exception):
+            entity = entity_from_surreal_row(row)
+            if entity.id:
+                entities[entity.id] = entity
+    return entities
+
+
+async def _native_relationship_edges_between_ids(
+    client: Any,
+    organization_id: str,
+    member_ids: list[str],
+    *,
+    max_edges: int,
+) -> list[dict[str, Any]] | None:
+    if not member_ids:
+        return []
+
+    rows = await _native_rows(
+        client,
+        organization_id,
+        """
+        SELECT source_id, target_id, name
+        FROM relates_to
+        WHERE group_id = $group_id
+          AND source_id IN $member_ids
+          AND target_id IN $member_ids
+        LIMIT $limit;
+        """,
+        member_ids=member_ids,
+        limit=max_edges,
+    )
+    if rows is None:
+        return None
+
+    edges: list[dict[str, Any]] = []
+    for row in rows:
+        source_id = str(row.get("source_id") or "")
+        target_id = str(row.get("target_id") or "")
+        if not source_id or not target_id:
+            continue
+        edges.append(
+            {
+                "source": source_id,
+                "target": target_id,
+                "type": str(row.get("name") or RelationshipType.RELATED_TO.value),
+            }
+        )
+    return edges
+
+
 @dataclass
 class ClusterSummary:
     """Lightweight cluster summary for visualization.
@@ -1313,11 +1502,16 @@ async def get_clusters_for_visualization(
 
     log.info("cluster_cache_miss", org_id=organization_id)
 
-    # Run community detection
+    snapshot = await _get_graph_snapshot(
+        client,
+        organization_id,
+        max_entities=DETECTION_MAX_ENTITIES,
+        max_relationships=DETECTION_MAX_RELATIONSHIPS,
+    )
+
     try:
-        detected = await detect_communities(
-            client,
-            organization_id,
+        detected = _detect_communities_from_graph(
+            _snapshot_to_networkx(snapshot.entities, snapshot.relationships),
             config=CommunityConfig(
                 resolutions=[1.0],  # Single level for now
                 min_community_size=2,
@@ -1333,10 +1527,15 @@ async def get_clusters_for_visualization(
 
     if not detected:
         # Fallback: Create pseudo-clusters by entity type
-        clusters = await _create_type_based_clusters(client, organization_id)
+        clusters = await _create_type_based_clusters(client, organization_id, snapshot.entities)
     else:
         # Convert DetectedCommunity to ClusterSummary
-        clusters = await _enrich_cluster_summaries(client, organization_id, detected)
+        clusters = await _enrich_cluster_summaries(
+            client,
+            organization_id,
+            detected,
+            entity_by_id=snapshot.entity_by_id,
+        )
 
     # Cache result
     CLUSTER_CACHE[cache_key] = (datetime.now(UTC), clusters)
@@ -1348,10 +1547,22 @@ async def get_clusters_for_visualization(
 async def _create_type_based_clusters(
     client: Any,
     organization_id: str,
+    entities: list[Entity] | None = None,
 ) -> list[ClusterSummary]:
     """Create clusters based on entity type (fallback when no networkx)."""
+    native_clusters = await _native_type_based_clusters(client, organization_id)
+    if native_clusters is not None:
+        return native_clusters
+
     try:
-        entities = await _list_all_entities(client, organization_id)
+        if entities is None:
+            snapshot = await _get_graph_snapshot(
+                client,
+                organization_id,
+                max_entities=DETECTION_MAX_ENTITIES,
+                max_relationships=0,
+            )
+            entities = snapshot.entities
         grouped_ids: dict[str, list[str]] = {}
         for entity in entities:
             if not entity.id:
@@ -1385,20 +1596,31 @@ async def _enrich_cluster_summaries(
     client: Any,
     organization_id: str,
     detected: list[DetectedCommunity],
+    *,
+    entity_by_id: dict[str, Entity] | None = None,
 ) -> list[ClusterSummary]:
     """Convert DetectedCommunity to ClusterSummary with type distribution."""
-    entity_by_id = _entity_index(await _list_all_entities(client, organization_id))
+    if entity_by_id is None:
+        snapshot = await _get_graph_snapshot(
+            client,
+            organization_id,
+            max_entities=DETECTION_MAX_ENTITIES,
+            max_relationships=0,
+        )
+        entity_by_id = snapshot.entity_by_id
     summaries = []
 
     for community in detected:
         if not community.member_ids:
             continue
 
-        type_dist: dict[str, int] = {}
-        for member_id in community.member_ids:
-            entity = entity_by_id.get(member_id)
-            entity_type = entity.entity_type.value if entity is not None else "unknown"
-            type_dist[entity_type] = type_dist.get(entity_type, 0) + 1
+        type_dist = await _native_type_counts_for_ids(client, organization_id, community.member_ids)
+        if type_dist is None:
+            type_dist = {}
+            for member_id in community.member_ids:
+                entity = entity_by_id.get(member_id)
+                entity_type = entity.entity_type.value if entity is not None else "unknown"
+                type_dist[entity_type] = type_dist.get(entity_type, 0) + 1
 
         # Find dominant type
         dominant = max(type_dist.items(), key=lambda x: x[1])[0] if type_dist else "unknown"
@@ -1421,6 +1643,9 @@ async def get_cluster_nodes(
     client: Any,
     organization_id: str,
     cluster_id: str,
+    *,
+    max_nodes: int = CLUSTER_DETAIL_MAX_NODES,
+    max_edges: int = CLUSTER_DETAIL_MAX_EDGES,
 ) -> dict[str, Any]:
     """Get nodes and edges for a specific cluster.
 
@@ -1439,10 +1664,24 @@ async def get_cluster_nodes(
     if not cluster:
         return {"nodes": [], "edges": [], "error": "Cluster not found"}
 
-    member_ids = cluster.member_ids
+    member_ids = cluster.member_ids[:max_nodes]
     member_id_set = set(member_ids)
-    entity_by_id = _entity_index(await _list_all_entities(client, organization_id))
-    relationships = await _list_all_relationships(client, organization_id)
+    entity_by_id = await _native_entities_by_ids(client, organization_id, member_ids)
+    if entity_by_id is None:
+        snapshot = await _get_graph_snapshot(
+            client,
+            organization_id,
+            max_entities=DETECTION_MAX_ENTITIES,
+            max_relationships=DETECTION_MAX_RELATIONSHIPS,
+        )
+        entity_by_id = snapshot.entity_by_id
+
+    edges = await _native_relationship_edges_between_ids(
+        client,
+        organization_id,
+        member_ids,
+        max_edges=max_edges,
+    )
 
     nodes = [
         {
@@ -1455,15 +1694,23 @@ async def get_cluster_nodes(
         if (entity := entity_by_id.get(member_id)) is not None
     ]
 
-    edges = [
-        {
-            "source": relationship.source_id,
-            "target": relationship.target_id,
-            "type": relationship.relationship_type.value,
-        }
-        for relationship in relationships
-        if relationship.source_id in member_id_set and relationship.target_id in member_id_set
-    ]
+    if edges is None:
+        snapshot = await _get_graph_snapshot(
+            client,
+            organization_id,
+            max_entities=DETECTION_MAX_ENTITIES,
+            max_relationships=DETECTION_MAX_RELATIONSHIPS,
+        )
+        edges = _build_graph_edges_from_snapshot(
+            [
+                relationship
+                for relationship in snapshot.relationships
+                if relationship.source_id in member_id_set
+                and relationship.target_id in member_id_set
+            ],
+            member_id_set,
+            max_edges=max_edges,
+        )
 
     return {
         "nodes": nodes,
@@ -1968,6 +2215,9 @@ async def export_to_networkx(
     client: Any,
     organization_id: str,
     type_affinity_weight: float = 2.0,
+    *,
+    max_entities: int | None = None,
+    max_relationships: int | None = None,
 ) -> Any:
     """Export knowledge graph to NetworkX format with type affinity.
 
@@ -1987,17 +2237,32 @@ async def export_to_networkx(
     """
     log.info("export_to_networkx_start", org_id=organization_id, type_affinity=type_affinity_weight)
 
-    try:
-        entities = await _list_all_entities(client, organization_id)
-    except Exception as e:
-        log.warning("export_nodes_failed", error=str(e))
-        entities = []
+    if max_entities is None and max_relationships is None:
+        log.info("export_to_networkx_unbounded_materialization", org_id=organization_id)
+        try:
+            entities = await _list_all_entities(client, organization_id)
+        except Exception as e:
+            log.warning("export_nodes_failed", error=str(e))
+            entities = []
 
-    try:
-        relationships = await _list_all_relationships(client, organization_id)
-    except Exception as e:
-        log.warning("export_edges_failed", error=str(e))
-        relationships = []
+        try:
+            relationships = await _list_all_relationships(client, organization_id)
+        except Exception as e:
+            log.warning("export_edges_failed", error=str(e))
+            relationships = []
+    else:
+        try:
+            snapshot = await _get_graph_snapshot(
+                client,
+                organization_id,
+                max_entities=max_entities,
+                max_relationships=max_relationships,
+            )
+        except Exception as e:
+            log.warning("export_graph_snapshot_failed", error=str(e))
+            snapshot = GraphSnapshot(entities=[], relationships=[], entity_by_id={})
+        entities = snapshot.entities
+        relationships = snapshot.relationships
 
     G = _snapshot_to_networkx(
         entities,
@@ -2185,6 +2450,9 @@ async def detect_communities(
     organization_id: str,
     config: CommunityConfig | None = None,
     algorithm: str = "louvain",
+    *,
+    max_entities: int | None = None,
+    max_relationships: int | None = None,
 ) -> list[DetectedCommunity]:
     """Detect hierarchical communities in the knowledge graph.
 
@@ -2207,7 +2475,12 @@ async def detect_communities(
     )
 
     # Export graph to NetworkX
-    G = await export_to_networkx(client, organization_id)
+    G = await export_to_networkx(
+        client,
+        organization_id,
+        max_entities=max_entities,
+        max_relationships=max_relationships,
+    )
     return _detect_communities_from_graph(G, config=config, algorithm=algorithm)
 
 
