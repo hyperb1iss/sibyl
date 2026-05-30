@@ -26,15 +26,19 @@ _DEFAULT_BATCH_SIZE = 128
 _DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS = 3.0
 _LIFECYCLE_FILTER_OVERFETCH_FACTOR = 4
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+")
-_DELETE_BY_UUID = {
-    "crawl_sources": "DELETE FROM crawl_sources WHERE uuid = $uuid;",
-    "crawled_documents": "DELETE FROM crawled_documents WHERE uuid = $uuid;",
-    "raw_captures": "DELETE FROM raw_captures WHERE uuid = $uuid;",
-}
 _UPSERT_RECORD = {
-    "crawl_sources": "UPSERT crawl_sources CONTENT $record WHERE uuid = $uuid;",
-    "crawled_documents": "UPSERT crawled_documents CONTENT $record WHERE uuid = $uuid;",
-    "raw_captures": "UPSERT raw_captures CONTENT $record WHERE uuid = $uuid;",
+    "crawl_sources": (
+        "UPSERT crawl_sources CONTENT $record "
+        "WHERE uuid = $uuid AND organization_id = $organization_id;"
+    ),
+    "crawled_documents": (
+        "UPSERT crawled_documents CONTENT $record "
+        "WHERE uuid = $uuid AND organization_id = $organization_id;"
+    ),
+    "raw_captures": (
+        "UPSERT raw_captures CONTENT $record "
+        "WHERE uuid = $uuid AND organization_id = $organization_id;"
+    ),
 }
 AGENT_DIARY_CAPTURE_SURFACE = "agent_diary"
 type SurrealRecord = dict[str, object]
@@ -539,13 +543,6 @@ async def _select_one(
     return rows[0] if rows else None
 
 
-async def _delete_record(client: SurrealContentClient, table: str, *, uuid: str) -> None:
-    result = await client.execute_query(_DELETE_BY_UUID[table], uuid=uuid)
-    error = _query_error(result)
-    if error is not None:
-        raise RuntimeError(error)
-
-
 async def _replace_record(
     client: SurrealContentClient,
     table: str,
@@ -553,7 +550,16 @@ async def _replace_record(
     uuid: str,
     record: SurrealRecord,
 ) -> SurrealRecord:
-    rows = await _select_many(client, _UPSERT_RECORD[table], uuid=uuid, record=record)
+    organization_id = record.get("organization_id")
+    if organization_id is None:
+        raise RuntimeError(f"{table} record {uuid} requires organization_id")
+    rows = await _select_many(
+        client,
+        _UPSERT_RECORD[table],
+        uuid=uuid,
+        organization_id=str(organization_id),
+        record=record,
+    )
     if rows:
         return rows[0]
     created = await _select_one(

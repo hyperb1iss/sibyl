@@ -136,9 +136,31 @@ async def test_surreal_content_replace_record_uses_single_upsert_statement() -> 
     assert saved["uuid"] == str(source_id)
     assert len(client.calls) == 1
     query, params = client.calls[0]
-    assert "UPSERT crawl_sources CONTENT $record WHERE uuid = $uuid" in query
+    assert (
+        "UPSERT crawl_sources CONTENT $record "
+        "WHERE uuid = $uuid AND organization_id = $organization_id"
+    ) in query
     assert "DELETE FROM crawl_sources" not in query
-    assert params == {"uuid": str(source_id), "record": record}
+    assert params == {
+        "uuid": str(source_id),
+        "organization_id": record["organization_id"],
+        "record": record,
+    }
+
+
+@pytest.mark.asyncio
+async def test_surreal_content_replace_record_requires_org_scope() -> None:
+    client = _RecordingContentClient([])
+
+    with pytest.raises(RuntimeError, match="requires organization_id"):
+        await surreal_content._replace_record(
+            client,
+            "raw_captures",
+            uuid=uuid4(),
+            record={"uuid": str(uuid4()), "title": "missing scope"},
+        )
+
+    assert client.calls == []
 
 
 @pytest.mark.asyncio
@@ -168,8 +190,12 @@ async def test_api_idempotency_record_round_trips_through_surreal(
 
     assert saved == record
     query, params = client.calls[0]
-    assert "UPSERT api_idempotency_records CONTENT $record WHERE uuid = $uuid" in query
+    assert (
+        "UPSERT api_idempotency_records CONTENT $record "
+        "WHERE uuid = $uuid AND organization_id = $organization_id"
+    ) in query
     assert params["uuid"] == str(record.id)
+    assert params["organization_id"] == str(record.organization_id)
     assert params["record"]["response_body"] == {"id": "episode_123"}
 
 
@@ -1232,6 +1258,54 @@ async def test_surreal_content_write_helpers_round_trip(
     assert deleted_source is not None
     assert source_rows == []
     assert document_rows == []
+
+
+@pytest.mark.asyncio
+async def test_raw_capture_save_rejects_cross_org_uuid_overwrite(
+    surreal_content_client: SurrealContentClient,
+) -> None:
+    capture_id = uuid4()
+    first_org_id = uuid4()
+    second_org_id = uuid4()
+
+    with (
+        patch.object(surreal_content_client, "close", AsyncMock()),
+        patch(
+            "sibyl.persistence.surreal.content.build_surreal_content_client",
+            return_value=surreal_content_client,
+        ),
+    ):
+        await save_raw_capture_record(
+            None,
+            capture=RawCaptureRecord(
+                id=capture_id,
+                organization_id=first_org_id,
+                title="Original",
+                raw_content="keep me",
+                entity_type="episode",
+            ),
+        )
+
+        with pytest.raises(RuntimeError):
+            await save_raw_capture_record(
+                None,
+                capture=RawCaptureRecord(
+                    id=capture_id,
+                    organization_id=second_org_id,
+                    title="Overwrite",
+                    raw_content="wrong org",
+                    entity_type="episode",
+                ),
+            )
+
+    rows = _normalize_records(
+        await surreal_content_client.execute_query(
+            "SELECT * FROM raw_captures WHERE uuid = $uuid LIMIT 1;",
+            uuid=str(capture_id),
+        )
+    )
+    assert rows[0]["organization_id"] == str(first_org_id)
+    assert rows[0]["raw_content"] == "keep me"
 
 
 @pytest.mark.asyncio

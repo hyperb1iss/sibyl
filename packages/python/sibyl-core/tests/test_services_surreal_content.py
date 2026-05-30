@@ -108,9 +108,30 @@ class TestSurrealContentHelpers:
         assert saved["uuid"] == "src-1"
         assert len(fake_client.calls) == 1
         query, params = fake_client.calls[0]
-        assert "UPSERT crawl_sources CONTENT $record WHERE uuid = $uuid" in query
+        assert (
+            "UPSERT crawl_sources CONTENT $record "
+            "WHERE uuid = $uuid AND organization_id = $organization_id"
+        ) in query
         assert "DELETE FROM crawl_sources" not in query
-        assert params == {"uuid": "src-1", "record": record}
+        assert params == {
+            "uuid": "src-1",
+            "organization_id": "org-1",
+            "record": record,
+        }
+
+    @pytest.mark.asyncio
+    async def test_replace_record_requires_org_scope(self) -> None:
+        fake_client = FakeClient([])
+
+        with pytest.raises(RuntimeError, match="requires organization_id"):
+            await _replace_record(
+                fake_client,
+                "raw_captures",
+                uuid="capture-1",
+                record={"uuid": "capture-1", "title": "missing"},
+            )
+
+        assert fake_client.calls == []
 
     @pytest.mark.asyncio
     async def test_get_or_create_source_returns_existing_record(self) -> None:

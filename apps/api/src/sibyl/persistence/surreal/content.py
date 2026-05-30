@@ -35,23 +35,31 @@ from sibyl_core.models import ChunkType, CrawlStatus, SourceType
 from sibyl_core.services.link_graph_status import LinkGraphSourceStatusData, LinkGraphStatusData
 
 _DEFAULT_BATCH_SIZE = 128
-_DELETE_BY_UUID = {
-    "crawl_sources": "DELETE FROM crawl_sources WHERE uuid = $uuid;",
-    "crawled_documents": "DELETE FROM crawled_documents WHERE uuid = $uuid;",
-    "document_chunks": "DELETE FROM document_chunks WHERE uuid = $uuid;",
-    "raw_captures": "DELETE FROM raw_captures WHERE uuid = $uuid;",
-    "api_idempotency_records": "DELETE FROM api_idempotency_records WHERE uuid = $uuid;",
-    "source_imports": "DELETE FROM source_imports WHERE uuid = $uuid;",
-}
 _UPSERT_RECORD = {
-    "crawl_sources": "UPSERT crawl_sources CONTENT $record WHERE uuid = $uuid;",
-    "crawled_documents": "UPSERT crawled_documents CONTENT $record WHERE uuid = $uuid;",
-    "document_chunks": "UPSERT document_chunks CONTENT $record WHERE uuid = $uuid;",
-    "raw_captures": "UPSERT raw_captures CONTENT $record WHERE uuid = $uuid;",
-    "api_idempotency_records": (
-        "UPSERT api_idempotency_records CONTENT $record WHERE uuid = $uuid;"
+    "crawl_sources": (
+        "UPSERT crawl_sources CONTENT $record "
+        "WHERE uuid = $uuid AND organization_id = $organization_id;"
     ),
-    "source_imports": "UPSERT source_imports CONTENT $record WHERE uuid = $uuid;",
+    "crawled_documents": (
+        "UPSERT crawled_documents CONTENT $record "
+        "WHERE uuid = $uuid AND organization_id = $organization_id;"
+    ),
+    "document_chunks": (
+        "UPSERT document_chunks CONTENT $record "
+        "WHERE uuid = $uuid AND organization_id = $organization_id;"
+    ),
+    "raw_captures": (
+        "UPSERT raw_captures CONTENT $record "
+        "WHERE uuid = $uuid AND organization_id = $organization_id;"
+    ),
+    "api_idempotency_records": (
+        "UPSERT api_idempotency_records CONTENT $record "
+        "WHERE uuid = $uuid AND organization_id = $organization_id;"
+    ),
+    "source_imports": (
+        "UPSERT source_imports CONTENT $record "
+        "WHERE uuid = $uuid AND organization_id = $organization_id;"
+    ),
 }
 type SurrealRecord = dict[str, object]
 
@@ -622,7 +630,16 @@ async def _replace_record(
     uuid: UUID | str,
     record: SurrealRecord,
 ) -> SurrealRecord:
-    result = await client.execute_query(_UPSERT_RECORD[table], uuid=str(uuid), record=record)
+    organization_id = record.get("organization_id")
+    if organization_id is None:
+        msg = f"{table} record {uuid} requires organization_id"
+        raise RuntimeError(msg)
+    result = await client.execute_query(
+        _UPSERT_RECORD[table],
+        uuid=str(uuid),
+        organization_id=str(organization_id),
+        record=record,
+    )
     error = _query_error(result)
     if error is not None:
         raise RuntimeError(error)
@@ -631,18 +648,6 @@ async def _replace_record(
         msg = f"Failed to write {table} record {uuid}"
         raise RuntimeError(msg)
     return created[0]
-
-
-async def _delete_record(
-    client: SurrealContentClient,
-    table: str,
-    *,
-    uuid: UUID | str,
-) -> None:
-    delete_result = await client.execute_query(_DELETE_BY_UUID[table], uuid=str(uuid))
-    delete_error = _query_error(delete_result)
-    if delete_error is not None:
-        raise RuntimeError(delete_error)
 
 
 async def _load_sources_for_org(
