@@ -536,17 +536,28 @@ async def test_surreal_content_client_emits_query_telemetry(monkeypatch) -> None
 
     await client.execute_query("SELECT * FROM crawl_sources;")
 
-    assert telemetry == [
-        {
-            "query": "SELECT * FROM crawl_sources;",
-            "client_kind": "content",
-            "namespace": "sibyl_content",
-            "database": "content",
-            "raw": False,
-            "elapsed": 12.3,
-            "retry_count": 0,
-        }
-    ]
+    assert len(telemetry) == 1
+    event = telemetry[0]
+    assert {
+        "query": event["query"],
+        "client_kind": event["client_kind"],
+        "namespace": event["namespace"],
+        "database": event["database"],
+        "raw": event["raw"],
+        "elapsed": event["elapsed"],
+        "retry_count": event["retry_count"],
+    } == {
+        "query": "SELECT * FROM crawl_sources;",
+        "client_kind": "content",
+        "namespace": "sibyl_content",
+        "database": "content",
+        "raw": False,
+        "elapsed": 12.3,
+        "retry_count": 0,
+    }
+    assert event["param_keys"] == []
+    assert event["query_label"] is None
+    assert str(event["query_origin"]).startswith(__name__ + ":")
 
 
 def test_surreal_raw_retry_predicate_allows_let_reads() -> None:

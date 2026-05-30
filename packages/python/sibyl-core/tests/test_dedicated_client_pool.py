@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from sibyl_core.backends.surreal import dedicated_client as dedicated_client_module
 from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient
 
 
@@ -173,6 +174,39 @@ async def test_embedded_url_hard_clamps_explicit_pool_size(monkeypatch) -> None:
     await asyncio.gather(*(client.execute_query("SELECT * FROM crawl_sources;") for _ in range(6)))
 
     assert len(clients) == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_query_logs_label_origin_and_param_keys(monkeypatch) -> None:
+    tracker = _ConcurrencyTracker()
+    tracker.release.set()
+    _install_overlap_surreal(monkeypatch, tracker)
+    log_calls: list[dict[str, object]] = []
+
+    def fake_log_query(_query: str, **fields: object) -> None:
+        log_calls.append(fields)
+
+    monkeypatch.setattr(dedicated_client_module, "log_query", fake_log_query)
+
+    client = DedicatedSurrealClient(
+        url="ws://localhost:8000/rpc",
+        username="root",
+        password="root",
+        namespace="org_log_context",
+        database="graph",
+        pool_size=1,
+    )
+
+    await client.execute_query(
+        "SELECT * FROM entity WHERE group_id = $group_id;",
+        group_id="org_log_context",
+        _query_label="entity.search.fulltext",
+    )
+
+    assert log_calls
+    assert log_calls[0]["param_keys"] == ["group_id"]
+    assert log_calls[0]["query_label"] == "entity.search.fulltext"
+    assert str(log_calls[0]["query_origin"]).startswith(__name__ + ":")
 
 
 @pytest.mark.asyncio

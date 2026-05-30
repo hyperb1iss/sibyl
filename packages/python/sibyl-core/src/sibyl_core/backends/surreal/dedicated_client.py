@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import sys
 from typing import cast
 
 from sibyl_core.backends.surreal.connection import (
@@ -164,10 +165,24 @@ class DedicatedSurrealClient:
             self._available.put_nowait(connection)
 
     async def execute_query(self, query: str, **params: object) -> object:
-        return await self._execute(query, params=params, raw=False)
+        query_label = _pop_query_label(params)
+        return await self._execute(
+            query,
+            params=params,
+            raw=False,
+            query_label=query_label,
+            query_origin=_caller_origin(),
+        )
 
     async def execute_query_raw(self, query: str, **params: object) -> object:
-        return await self._execute(query, params=params, raw=True)
+        query_label = _pop_query_label(params)
+        return await self._execute(
+            query,
+            params=params,
+            raw=True,
+            query_label=query_label,
+            query_origin=_caller_origin(),
+        )
 
     async def close(self) -> None:
         async with self._close_lock:
@@ -211,7 +226,15 @@ class DedicatedSurrealClient:
         finally:
             self._available.put_nowait(connection)
 
-    async def _execute(self, query: str, *, params: QueryParams, raw: bool) -> object:
+    async def _execute(
+        self,
+        query: str,
+        *,
+        params: QueryParams,
+        raw: bool,
+        query_label: str | None,
+        query_origin: str | None,
+    ) -> object:
         started_at = query_start()
         retry_count = 0
         result: object = None
@@ -244,6 +267,9 @@ class DedicatedSurrealClient:
                 database=self._database,
                 raw=raw,
                 elapsed=elapsed_ms(started_at),
+                param_keys=sorted(params),
+                query_label=query_label,
+                query_origin=query_origin,
                 retry_count=retry_count,
                 error=exc,
             )
@@ -257,6 +283,9 @@ class DedicatedSurrealClient:
             database=self._database,
             raw=raw,
             elapsed=elapsed_ms(started_at),
+            param_keys=sorted(params),
+            query_label=query_label,
+            query_origin=query_origin,
             retry_count=retry_count,
         )
         return result
@@ -273,6 +302,27 @@ class DedicatedSurrealClient:
         if raw:
             return await client.query_raw(query, bound_params)
         return await client.query(query, bound_params)
+
+
+def _caller_origin() -> str | None:
+    try:
+        frame = sys._getframe(2)
+    except ValueError:
+        return None
+    module = frame.f_globals.get("__name__")
+    function = frame.f_code.co_name
+    if not isinstance(module, str) or not module:
+        return None
+    return f"{module}:{function}:{frame.f_lineno}"
+
+
+def _pop_query_label(params: QueryParams) -> str | None:
+    value = params.pop("_query_label", None)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return str(value)
 
 
 __all__ = ["DedicatedSurrealClient"]

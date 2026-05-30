@@ -59,6 +59,32 @@ def test_slow_query_log_uses_safe_fingerprint(monkeypatch) -> None:
     assert "search_query" not in fields
 
 
+def test_query_log_includes_safe_debug_context(monkeypatch) -> None:
+    fake_log = FakeLog()
+    monkeypatch.setattr(observability, "log", fake_log)
+    monkeypatch.setattr(observability, "_slow_query_threshold_ms", lambda: 500.0)
+
+    observability.log_query(
+        "SELECT * FROM entity WHERE content = $secret_content;",
+        client_kind="graph",
+        namespace="org_safe",
+        database="graph",
+        raw=False,
+        elapsed=750.0,
+        param_keys=["secret_content", "group_id"],
+        query_label="entity.search.fulltext",
+        query_origin="sibyl_core.services.graph:search:335",
+    )
+
+    _level, event, fields = fake_log.events[0]
+    assert event == "surreal_query_slow"
+    assert fields["param_keys"] == ["group_id", "secret_content"]
+    assert fields["query_label"] == "entity.search.fulltext"
+    assert fields["query_origin"] == "sibyl_core.services.graph:search:335"
+    assert "secret_content" in fields["param_keys"]
+    assert "content = $secret_content" not in str(fields)
+
+
 def test_fast_query_logs_at_debug(monkeypatch) -> None:
     fake_log = FakeLog()
     monkeypatch.setattr(observability, "log", fake_log)

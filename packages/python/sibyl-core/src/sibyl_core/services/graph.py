@@ -359,6 +359,7 @@ class EntityManager:
                 search_query=search_query,
                 entity_types=type_values,
                 limit=result_limit,
+                _query_label="entity.search.fulltext",
             )
         )
         fulltext_results: list[tuple[Entity, float]] = []
@@ -432,6 +433,7 @@ class EntityManager:
                     query_embedding=query_embedding,
                     entity_types=type_values,
                     limit=candidate_limit,
+                    _query_label="entity.search.vector",
                 )
             )
         except Exception as exc:

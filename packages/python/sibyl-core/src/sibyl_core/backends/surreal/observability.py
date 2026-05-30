@@ -124,6 +124,9 @@ def log_query(
     database: str,
     raw: bool,
     elapsed: float,
+    param_keys: list[str] | None = None,
+    query_label: str | None = None,
+    query_origin: str | None = None,
     retry_count: int = 0,
     error: BaseException | None = None,
 ) -> None:
@@ -153,6 +156,12 @@ def log_query(
         "tables": _query_tables(query),
         "query_hash": query_hash,
     }
+    if param_keys:
+        fields["param_keys"] = sorted(param_keys)
+    if query_label:
+        fields["query_label"] = query_label
+    if query_origin:
+        fields["query_origin"] = query_origin
     if error is not None:
         log.warning("surreal_query_failed", **_error_log_fields(error), **fields)
         return
