@@ -2,8 +2,8 @@ apiVersion: v2
 name: sibyl
 description: Knowledge graph and task workflow for durable development memory
 type: application
-version: 1.0.0-rc.1
-appVersion: "1.0.0-rc.1"
+version: 1.0.0-rc.2
+appVersion: "1.0.0-rc.2"
 keywords:
   - knowledge-graph
   - mcp
