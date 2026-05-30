@@ -61,6 +61,11 @@ OVERVIEW_NODE_THRESHOLD = 400
 # largest communities as labeled bubbles; the long tail of tiny communities and
 # the unclustered remainder are reached by drilling in or searching, not mapped.
 OVERVIEW_MAX_CLUSTERS = 18
+# MENTIONS edges (topic/session -> entity) are ~84% of all edges and bury the
+# real structure in a hairball. The graph is project / task / memory focused, so
+# it is built from the structural relationships only — BELONGS_TO (task/epic ->
+# project), DEPENDS_ON, RELATED_TO, DERIVED_FROM, USES_PROCEDURE, PART_OF.
+_NOISE_RELATIONSHIP_TYPES = frozenset({RelationshipType.MENTIONS})
 # Share of the render budget seeded with top-degree hubs before BFS growth.
 _GRAPH_HUB_SEED_SHARE = 0.4
 
@@ -1779,19 +1784,28 @@ async def get_hierarchical_graph(
         max_relationships=DETECTION_MAX_RELATIONSHIPS,
     )
     entities = snapshot.entities
-    relationships = snapshot.relationships
-    totals = None
-    if not project_ids and not entity_types:
-        totals = await _graph_totals(client, organization_id)
-    if totals is None:
-        total_node_count, total_edge_count = _graph_totals_from_snapshot(
-            entities,
-            relationships,
-            project_ids=project_ids,
-            entity_types=entity_types,
-        )
-    else:
-        total_node_count, total_edge_count = totals
+    # Build from structural edges only — drop the MENTIONS hairball so projects
+    # and their tasks/memory are the visible structure. Totals reflect this
+    # focused graph, not the raw edge count.
+    relationships = [
+        relationship
+        for relationship in snapshot.relationships
+        if relationship.relationship_type not in _NOISE_RELATIONSHIP_TYPES
+    ]
+    totals_focused = _focused_entity_ids(
+        entities,
+        relationships,
+        project_ids=project_ids,
+        entity_types=entity_types,
+    )
+    structural_endpoints: set[str] = set()
+    total_edge_count = 0
+    for relationship in relationships:
+        if relationship.source_id in totals_focused and relationship.target_id in totals_focused:
+            total_edge_count += 1
+            structural_endpoints.add(relationship.source_id)
+            structural_endpoints.add(relationship.target_id)
+    total_node_count = len(structural_endpoints)
     log.info(
         "graph_totals_queried",
         total_nodes=total_node_count,
@@ -1880,13 +1894,8 @@ async def get_hierarchical_graph(
 
     data.total_nodes = total_node_count
     data.total_edges = total_edge_count
-    # Large graphs land on the labeled domain map; small ones go straight to the
-    # connected node view since there's little to summarize.
-    data.recommended_resolution = (
-        GRAPH_RESOLUTION_OVERVIEW
-        if total_node_count > OVERVIEW_NODE_THRESHOLD
-        else GRAPH_RESOLUTION_DETAIL
-    )
+    # Land on the project/task/memory node graph; the domain map is an opt-in lens.
+    data.recommended_resolution = GRAPH_RESOLUTION_DETAIL
 
     log.info(
         "get_hierarchical_graph_complete",

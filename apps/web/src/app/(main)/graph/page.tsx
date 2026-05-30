@@ -1225,16 +1225,9 @@ function GraphPageContent() {
       }
 
       const isDawn = theme === 'dawn';
-      // Color the whole-graph web by community (color = cluster, so regions
-      // read at a glance); within a drilled-in cluster, color by entity type to
-      // show the variety inside that domain. Aggregate bubbles keep their
-      // dominant-type color.
-      const rawColor =
-        !isAggregate && !selectedCluster
-          ? node.clusterColor || node.entityColor || '#8b85a0'
-          : node.entityColor || '#8b85a0';
-      // Canvas can't read CSS vars, so darken node hues for the light canvas.
-      const baseColor = canvasNodeColor(rawColor, theme);
+      // Color by entity type so projects, tasks, and memory are distinguishable
+      // at a glance. Canvas can't read CSS vars, so darken hues for dawn.
+      const baseColor = canvasNodeColor(node.entityColor || '#8b85a0', theme);
       // Neighbors are rendered at 40% opacity to fade into background
       // Search matches keep full opacity
       const color =
@@ -1328,7 +1321,8 @@ function GraphPageContent() {
       } else if (isAggregate) {
         // Domain bubbles are always named — the label is the meaningful part.
         showLabel = true;
-      } else if (isProject && globalScale >= 0.4) {
+      } else if (isProject) {
+        // Projects are the anchors — always name them.
         showLabel = true;
       } else if (isHubNode && globalScale >= 0.7) {
         showLabel = true;
@@ -1372,7 +1366,7 @@ function GraphPageContent() {
         ctx.fillText(displayLabel, x, labelY);
       }
     },
-    [selectedNodeId, hoveredNode, graphData.maxDegree, theme, colors, selectedCluster]
+    [selectedNodeId, hoveredNode, graphData.maxDegree, theme, colors]
   );
 
   // Use the library's native link renderer for robustness; only customize
