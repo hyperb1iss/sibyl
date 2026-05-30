@@ -138,34 +138,6 @@ DEFINE INDEX IF NOT EXISTS idx_episode_uuid ON episode FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_episode_group ON episode FIELDS group_id;
 DEFINE INDEX IF NOT EXISTS idx_episode_created ON episode FIELDS created_at;
 DEFINE INDEX IF NOT EXISTS idx_episode_content_ft ON episode FIELDS content FULLTEXT ANALYZER content_analyzer BM25;
-
-DEFINE TABLE IF NOT EXISTS community SCHEMAFULL;
-ALTER TABLE IF EXISTS community SCHEMAFULL;
-DEFINE FIELD IF NOT EXISTS uuid ON community TYPE string;
-DEFINE FIELD IF NOT EXISTS name ON community TYPE string;
-DEFINE FIELD IF NOT EXISTS summary ON community TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS labels ON community TYPE array<string> DEFAULT [];
-DEFINE FIELD IF NOT EXISTS group_id ON community TYPE string;
-DEFINE FIELD IF NOT EXISTS created_at ON community TYPE datetime DEFAULT time::now();
-DEFINE FIELD IF NOT EXISTS name_embedding ON community TYPE option<array<float, {EMBEDDING_DIM}>>;
-
-DEFINE INDEX IF NOT EXISTS idx_community_uuid ON community FIELDS uuid UNIQUE;
-DEFINE INDEX IF NOT EXISTS idx_community_group ON community FIELDS group_id;
-DEFINE INDEX IF NOT EXISTS idx_community_name_ft ON community FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
-DEFINE INDEX IF NOT EXISTS idx_community_summary_ft ON community FIELDS summary FULLTEXT ANALYZER content_analyzer BM25;
-DEFINE INDEX IF NOT EXISTS idx_community_embedding ON community FIELDS name_embedding
-    HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC {HNSW_EFC} M {HNSW_M};
-
-DEFINE TABLE IF NOT EXISTS saga SCHEMAFULL;
-ALTER TABLE IF EXISTS saga SCHEMAFULL;
-DEFINE FIELD IF NOT EXISTS uuid ON saga TYPE string;
-DEFINE FIELD IF NOT EXISTS name ON saga TYPE string;
-DEFINE FIELD IF NOT EXISTS labels ON saga TYPE array<string> DEFAULT [];
-DEFINE FIELD IF NOT EXISTS group_id ON saga TYPE string;
-DEFINE FIELD IF NOT EXISTS created_at ON saga TYPE datetime DEFAULT time::now();
-
-DEFINE INDEX IF NOT EXISTS idx_saga_uuid ON saga FIELDS uuid UNIQUE;
-DEFINE INDEX IF NOT EXISTS idx_saga_group ON saga FIELDS group_id;
 """
 
 
@@ -182,21 +154,6 @@ WHERE episodes = NONE OR attributes = NONE;
 DELETE FROM mentions
 WHERE in NOT IN (SELECT VALUE id FROM episode)
    OR out NOT IN (SELECT VALUE id FROM entity);
-
-DELETE FROM has_episode
-WHERE in NOT IN (SELECT VALUE id FROM saga)
-   OR out NOT IN (SELECT VALUE id FROM episode);
-
-DELETE FROM next_episode
-WHERE in NOT IN (SELECT VALUE id FROM episode)
-   OR out NOT IN (SELECT VALUE id FROM episode);
-
-DELETE FROM has_member
-WHERE in NOT IN (SELECT VALUE id FROM community)
-   OR (
-       out NOT IN (SELECT VALUE id FROM entity)
-       AND out NOT IN (SELECT VALUE id FROM community)
-   );
 """
 
 
@@ -245,30 +202,6 @@ DEFINE INDEX IF NOT EXISTS idx_mentions_group_source ON mentions FIELDS group_id
 DEFINE INDEX IF NOT EXISTS idx_mentions_group_target ON mentions FIELDS group_id, target_id;
 DEFINE INDEX IF NOT EXISTS idx_mentions_group_source_created ON mentions FIELDS group_id, source_id, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_mentions_group_target_created ON mentions FIELDS group_id, target_id, created_at, uuid;
-
-DEFINE TABLE OVERWRITE has_episode SCHEMAFULL TYPE RELATION IN saga OUT episode ENFORCED;
-ALTER TABLE IF EXISTS has_episode SCHEMAFULL;
-DEFINE FIELD IF NOT EXISTS uuid ON has_episode TYPE string;
-DEFINE FIELD IF NOT EXISTS group_id ON has_episode TYPE string;
-DEFINE FIELD IF NOT EXISTS created_at ON has_episode TYPE datetime DEFAULT time::now();
-
-DEFINE INDEX IF NOT EXISTS idx_has_ep_uuid ON has_episode FIELDS uuid UNIQUE;
-
-DEFINE TABLE OVERWRITE next_episode SCHEMAFULL TYPE RELATION IN episode OUT episode ENFORCED;
-ALTER TABLE IF EXISTS next_episode SCHEMAFULL;
-DEFINE FIELD IF NOT EXISTS uuid ON next_episode TYPE string;
-DEFINE FIELD IF NOT EXISTS group_id ON next_episode TYPE string;
-DEFINE FIELD IF NOT EXISTS created_at ON next_episode TYPE datetime DEFAULT time::now();
-
-DEFINE INDEX IF NOT EXISTS idx_next_ep_uuid ON next_episode FIELDS uuid UNIQUE;
-
-DEFINE TABLE OVERWRITE has_member SCHEMAFULL TYPE RELATION IN community OUT entity | community ENFORCED;
-ALTER TABLE IF EXISTS has_member SCHEMAFULL;
-DEFINE FIELD IF NOT EXISTS uuid ON has_member TYPE string;
-DEFINE FIELD IF NOT EXISTS group_id ON has_member TYPE string;
-DEFINE FIELD IF NOT EXISTS created_at ON has_member TYPE datetime DEFAULT time::now();
-
-DEFINE INDEX IF NOT EXISTS idx_has_member_uuid ON has_member FIELDS uuid UNIQUE;
 """
 
 
@@ -311,21 +244,32 @@ CURRENT_SCHEMA_MAINTENANCE_DEFINITIONS = (
 )
 
 
-GRAPH_TABLES = ("entity", "episode", "community", "saga")
-GRAPH_EDGES = ("relates_to", "mentions", "has_episode", "next_episode", "has_member")
+GRAPH_TABLES = ("entity", "episode")
+GRAPH_EDGES = ("relates_to", "mentions")
+REMOVED_GRAPH_TABLES = ("community", "saga")
+REMOVED_GRAPH_EDGES = ("has_episode", "next_episode", "has_member")
+REMOVED_GRAPH_OBJECTS = (*REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES)
+DEAD_GRAPH_OBJECT_REMOVAL_DEFINITIONS = "\n".join(
+    f"REMOVE TABLE IF EXISTS {table};" for table in REMOVED_GRAPH_OBJECTS
+)
 GRAPH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
         version=2,
         name="graph_schema_bootstrap",
     ),
     SchemaMigration(
-        version=GRAPH_SCHEMA_CURRENT_VERSION,
+        version=3,
         name="relation_endpoint_denormalization",
         statements=tuple(
             split_statements(
                 RELATION_ENDPOINT_SCHEMA_DEFINITIONS + "\n" + RELATION_ENDPOINT_BACKFILL_DEFINITIONS
             )
         ),
+    ),
+    SchemaMigration(
+        version=GRAPH_SCHEMA_CURRENT_VERSION,
+        name="drop_dead_graph_objects",
+        statements=tuple(split_statements(DEAD_GRAPH_OBJECT_REMOVAL_DEFINITIONS)),
     ),
 )
 
@@ -360,9 +304,6 @@ class EmbeddingVectorField:
 
 EMBEDDING_VECTOR_FIELDS = (
     EmbeddingVectorField(table="entity", field="name_embedding", index="idx_entity_embedding"),
-    EmbeddingVectorField(
-        table="community", field="name_embedding", index="idx_community_embedding"
-    ),
     EmbeddingVectorField(
         table="relates_to", field="fact_embedding", index="idx_relates_fact_embedding"
     ),
@@ -462,6 +403,63 @@ def _is_missing_table_error(error: Exception) -> bool:
     return "the table" in message and "does not exist" in message
 
 
+def _coerce_count(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int | float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
+
+
+def _first_count_value(value: object) -> object:
+    value_map = _object_mapping(value)
+    if value_map is not None:
+        if "result" in value_map:
+            return _first_count_value(value_map.get("result"))
+        count = value_map.get("count")
+        if count is not None:
+            return count
+        return value_map.get("cnt", 0)
+    if isinstance(value, list):
+        for item in value:
+            count = _first_count_value(item)
+            if count is not None:
+                return count
+    return None
+
+
+async def _dead_graph_object_count(driver: SchemaDriver, table: str) -> int:
+    _validate_identifier(table)
+    try:
+        result = await driver.execute_query(f"SELECT count() AS count FROM {table} GROUP ALL;")
+    except Exception as exc:
+        if _is_missing_table_error(exc):
+            return 0
+        raise
+    return _coerce_count(_first_count_value(result))
+
+
+async def _ensure_removed_graph_objects_empty(driver: SchemaDriver) -> None:
+    occupied: dict[str, int] = {}
+    for table in REMOVED_GRAPH_OBJECTS:
+        count = await _dead_graph_object_count(driver, table)
+        if count:
+            occupied[table] = count
+
+    if occupied:
+        summary = ", ".join(f"{table}={count}" for table, count in occupied.items())
+        msg = (
+            "Dead graph objects still contain rows; export or clear them before "
+            f"graph schema v{GRAPH_SCHEMA_CURRENT_VERSION} migration: {summary}"
+        )
+        raise RuntimeError(msg)
+
+
 def render_fulltext_compatible_sql(sql: str, *, url: str) -> str:
     if url.startswith(("memory://", "surrealkv://")):
         return sql.replace("FULLTEXT ANALYZER", "SEARCH ANALYZER")
@@ -479,8 +477,9 @@ async def bootstrap_schema(
         raise ValueError(msg)
 
     if reset:
-        for table in (*GRAPH_EDGES, *GRAPH_TABLES, SCHEMA_VERSION_TABLE):
+        for table in (*GRAPH_EDGES, *GRAPH_TABLES, *REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES):
             await driver.execute_query(f"REMOVE TABLE IF EXISTS {table};")
+        await driver.execute_query(f"REMOVE TABLE IF EXISTS {SCHEMA_VERSION_TABLE};")
     else:
         await ensure_schema_version_table(driver.execute_query, group_id=driver.group_id)
         current_version = await get_schema_version(driver.execute_query)
@@ -489,6 +488,7 @@ async def bootstrap_schema(
                 await _reconcile_embedding_dimension(driver)
                 return
         elif current_version > 0 and not force:
+            await _ensure_removed_graph_objects_empty(driver)
             await apply_schema_migrations(
                 driver.execute_query,
                 GRAPH_SCHEMA_MIGRATIONS,
@@ -496,6 +496,7 @@ async def bootstrap_schema(
             )
             await _reconcile_embedding_dimension(driver)
             return
+        await _ensure_removed_graph_objects_empty(driver)
 
     compatible_blocks = (
         ANALYZER_DEFINITIONS,
@@ -565,6 +566,7 @@ async def drop_all_indexes(driver: SchemaDriver) -> None:
 
 __all__ = [
     "ANALYZER_DEFINITIONS",
+    "DEAD_GRAPH_OBJECT_REMOVAL_DEFINITIONS",
     "EDGE_DEFINITIONS",
     "EMBEDDING_DIM",
     "EMBEDDING_VECTOR_FIELDS",
@@ -573,6 +575,9 @@ __all__ = [
     "GRAPH_TABLES",
     "NODE_DEFINITIONS",
     "RELATION_EDGE_CLEANUP_DEFINITIONS",
+    "REMOVED_GRAPH_EDGES",
+    "REMOVED_GRAPH_OBJECTS",
+    "REMOVED_GRAPH_TABLES",
     "EmbeddingVectorField",
     "bootstrap_schema",
     "drop_all_indexes",

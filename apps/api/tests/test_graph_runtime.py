@@ -31,12 +31,15 @@ class _StatsDriver:
         self.queries.append(query)
         if "FROM episode" in query or "FROM mentions" in query:
             raise AssertionError("archive-only graph tables must not feed live stats")
+        if "FROM community" in query or "FROM saga" in query:
+            raise AssertionError("dead graph tables must not feed live stats")
         if "FROM entity" in query and "GROUP BY entity_type" in query:
-            return [{"entity_type": "task", "cnt": 2}]
+            return [
+                {"entity_type": "task", "cnt": 2},
+                {"entity_type": "community", "cnt": 3},
+            ]
         if "FROM relates_to" in query and "GROUP BY name" in query:
             return [{"relationship_type": "depends_on", "cnt": 1}]
-        if "FROM community" in query:
-            return [{"cnt": 3}]
         return []
 
 
@@ -48,9 +51,10 @@ class _StatsPayloadClient:
         self.queries.append(query)
         return [
             {
-                "entity_types": [{"entity_type": "task", "cnt": 2}],
-                "community_count": [{"cnt": 3}],
-                "saga_count": [{"cnt": 0}],
+                "entity_types": [
+                    {"entity_type": "task", "cnt": 2},
+                    {"entity_type": "community", "cnt": 3},
+                ],
             }
         ]
 
@@ -77,9 +81,9 @@ async def test_delete_project_graph_data_sweeps_project_scoped_graph(
     assert "LET $project_episode_ids" in query
     assert "DELETE FROM relates_to" in query
     assert "DELETE FROM mentions" in query
-    assert "DELETE FROM has_episode" in query
-    assert "DELETE FROM next_episode" in query
-    assert "DELETE FROM has_member" in query
+    assert "DELETE FROM has_episode" not in query
+    assert "DELETE FROM next_episode" not in query
+    assert "DELETE FROM has_member" not in query
     assert "DELETE FROM entity" in query
     assert "DELETE FROM episode" in query
     assert "COMMIT TRANSACTION;" in query
@@ -106,6 +110,8 @@ async def test_graph_search_index_stats_skips_archive_only_tables(
     assert stats.relationships_by_type == {"depends_on": 1}
     assert all("FROM episode" not in query for query in driver.queries)
     assert all("FROM mentions" not in query for query in driver.queries)
+    assert all("FROM community" not in query for query in driver.queries)
+    assert all("FROM saga" not in query for query in driver.queries)
 
 
 @pytest.mark.asyncio
@@ -125,3 +131,5 @@ async def test_graph_stats_payload_skips_archive_only_tables(
     assert payload["entity_counts"]["community"] == 3
     assert payload["entity_counts"]["episode"] == 0
     assert all("episode_count" not in query for query in client.queries)
+    assert all("community_count" not in query for query in client.queries)
+    assert all("saga_count" not in query for query in client.queries)

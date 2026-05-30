@@ -1216,14 +1216,6 @@ async def delete_project_graph_data(group_id: str, project_id: str) -> None:
             DELETE FROM mentions
             WHERE group_id = $group_id
               AND (in IN $project_episode_ids OR out IN $project_entity_ids);
-            DELETE FROM has_episode
-            WHERE group_id = $group_id AND out IN $project_episode_ids;
-            DELETE FROM next_episode
-            WHERE group_id = $group_id
-              AND (in IN $project_episode_ids OR out IN $project_episode_ids);
-            DELETE FROM has_member
-            WHERE group_id = $group_id
-              AND (in IN $project_entity_ids OR out IN $project_entity_ids);
             DELETE FROM entity
             WHERE group_id = $group_id
               AND (project_id = $project_id OR uuid = $project_id);
@@ -1265,18 +1257,6 @@ async def _graph_stats_payload(group_id: str) -> dict[str, object]:
                     FROM entity
                     WHERE group_id = $group_id
                     GROUP BY entity_type
-                ),
-                community_count: (
-                    SELECT count() AS cnt
-                    FROM community
-                    WHERE group_id = $group_id
-                    GROUP ALL
-                ),
-                saga_count: (
-                    SELECT count() AS cnt
-                    FROM saga
-                    WHERE group_id = $group_id
-                    GROUP ALL
                 ),
             };
             """,

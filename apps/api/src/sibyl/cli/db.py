@@ -330,16 +330,6 @@ _GRAPH_ORPHAN_CHECKS = (
         GROUP ALL;
         """,
     ),
-    (
-        "has_member_missing_member",
-        """
-        SELECT count() AS count FROM has_member
-        WHERE group_id = $org_id
-          AND out NOT IN (SELECT VALUE id FROM entity)
-          AND out NOT IN (SELECT VALUE id FROM community)
-        GROUP ALL;
-        """,
-    ),
 )
 
 
