@@ -133,7 +133,10 @@ class RawMemory:
     metadata: dict[str, object] = field(default_factory=dict)
     provenance: dict[str, object] = field(default_factory=dict)
     capture_surface: str | None = None
+    created_by_user_id: str | None = None
     captured_at: datetime | None = None
+    deleted_at: datetime | None = None
+    purge_after: datetime | None = None
     created_at: datetime | None = None
     score: float = 0.0
 
@@ -445,7 +448,10 @@ def _raw_memory_from_record(record: Mapping[str, object]) -> RawMemory:
         metadata=metadata,
         provenance=_coerce_dict(record.get("provenance")),
         capture_surface=_coerce_optional_str(record.get("capture_surface")),
+        created_by_user_id=_coerce_optional_str(record.get("created_by_user_id")),
         captured_at=_coerce_datetime(record.get("captured_at")),
+        deleted_at=_coerce_datetime(record.get("deleted_at")),
+        purge_after=_coerce_datetime(record.get("purge_after")),
         created_at=_coerce_datetime(record.get("created_at")),
         score=_coerce_float(record.get("score")),
     )
@@ -488,8 +494,10 @@ def _raw_memory_record(memory: RawMemory) -> SurrealRecord:
         "metadata": dict(memory.metadata),
         "provenance": dict(memory.provenance),
         "capture_surface": memory.capture_surface,
-        "created_by_user_id": memory.principal_id,
+        "created_by_user_id": memory.created_by_user_id or memory.principal_id,
         "captured_at": memory.captured_at,
+        "deleted_at": memory.deleted_at,
+        "purge_after": memory.purge_after,
         "created_at": memory.created_at,
     }
 

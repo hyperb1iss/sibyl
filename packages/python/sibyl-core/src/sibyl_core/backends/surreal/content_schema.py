@@ -39,12 +39,13 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 6
+CONTENT_SCHEMA_CURRENT_VERSION = 7
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
 _CONTENT_REVIEW_STATE_VALUES = (
     "pending",
+    "deferred",
     "promoted",
     "archived",
     "deleted",
@@ -151,6 +152,11 @@ ALTER TABLE IF EXISTS backups PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 """
 
+CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS = f"""
+DEFINE FIELD OVERWRITE review_state ON raw_captures TYPE string DEFAULT 'pending'
+    ASSERT $value IN {_surql_string_array(_CONTENT_REVIEW_STATE_VALUES)};
+"""
+
 
 def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
     compatible_schema = render_fulltext_compatible_sql(
@@ -189,6 +195,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=6,
             name="content_table_permissions",
             statements=tuple(split_statements(CONTENT_PERMISSION_MIGRATION_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=7,
+            name="content_review_state_deferred",
+            statements=tuple(split_statements(CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS)),
         ),
     )
 
@@ -439,6 +450,7 @@ __all__ = [
     "CONTENT_DOCUMENT_URL_SCOPE_MIGRATION_DEFINITIONS",
     "CONTENT_ENUM_ASSERTION_MIGRATION_DEFINITIONS",
     "CONTENT_PERMISSION_MIGRATION_DEFINITIONS",
+    "CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS",
     "CONTENT_SCHEMA_CURRENT_VERSION",
     "CONTENT_SCHEMA_DEFINITIONS",
     "CONTENT_SCHEMA_NAME",

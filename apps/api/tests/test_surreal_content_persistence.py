@@ -199,6 +199,60 @@ async def test_api_idempotency_record_round_trips_through_surreal(
     assert params["record"]["response_body"] == {"id": "episode_123"}
 
 
+def test_raw_capture_record_preserves_first_class_lifecycle_fields() -> None:
+    org_id = uuid4()
+    user_id = uuid4()
+    captured_at = datetime(2026, 5, 30, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+    deleted_at = datetime(2026, 5, 31, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+    purge_after = deleted_at + timedelta(days=30)
+    capture = RawCaptureRecord(
+        organization_id=org_id,
+        title="Project import",
+        raw_content="captured body",
+        entity_type="note",
+        source_id="source:project:1",
+        principal_id=str(user_id),
+        memory_scope="project",
+        scope_key="project_123",
+        agent_id="agent_123",
+        project_id="project_123",
+        review_state="deferred",
+        entity_id="note_123",
+        tags=["raw"],
+        metadata={"source": "manual"},
+        provenance={"source_import_id": "import_123"},
+        capture_surface="source_import",
+        created_by_user_id=user_id,
+        captured_at=captured_at,
+        deleted_at=deleted_at,
+        purge_after=purge_after,
+    )
+
+    record = surreal_content._raw_capture_record(capture)
+    round_tripped = surreal_content._raw_capture_from_record(record)
+
+    assert record["source_id"] == "source:project:1"
+    assert record["principal_id"] == str(user_id)
+    assert record["memory_scope"] == "project"
+    assert record["scope_key"] == "project_123"
+    assert record["agent_id"] == "agent_123"
+    assert record["project_id"] == "project_123"
+    assert record["review_state"] == "deferred"
+    assert record["provenance"] == {"source_import_id": "import_123"}
+    assert record["captured_at"] == captured_at
+    assert record["deleted_at"] == deleted_at
+    assert record["purge_after"] == purge_after
+    assert round_tripped.source_id == "source:project:1"
+    assert round_tripped.principal_id == str(user_id)
+    assert round_tripped.memory_scope == "project"
+    assert round_tripped.scope_key == "project_123"
+    assert round_tripped.review_state == "deferred"
+    assert round_tripped.provenance == {"source_import_id": "import_123"}
+    assert round_tripped.captured_at == captured_at
+    assert round_tripped.deleted_at == deleted_at
+    assert round_tripped.purge_after == purge_after
+
+
 @pytest.mark.asyncio
 async def test_link_graph_status_uses_server_side_aggregate_counts(
     monkeypatch: pytest.MonkeyPatch,

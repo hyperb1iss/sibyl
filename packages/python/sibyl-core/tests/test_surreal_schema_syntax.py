@@ -21,6 +21,7 @@ from sibyl_core.backends.surreal.auth_schema import (
 )
 from sibyl_core.backends.surreal.content_schema import (
     CONTENT_PERMISSION_MIGRATION_DEFINITIONS,
+    CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS,
     CONTENT_SCHEMA_CURRENT_VERSION,
     CONTENT_SCHEMA_DEFINITIONS,
     CONTENT_TABLES,
@@ -280,6 +281,19 @@ def test_content_table_permissions_are_versioned() -> None:
             CONTENT_PERMISSION_MIGRATION_DEFINITIONS
         )
     assert CONTENT_PERMISSION_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
+
+
+def test_content_review_state_deferred_is_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration_sql = "\n".join(
+        statement for migration in migrations for statement in migration.statements
+    )
+
+    assert "deferred" in CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS
+    assert "content_review_state_deferred" in [migration.name for migration in migrations]
+    assert (
+        CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
+    )
 
 
 @pytest.mark.asyncio

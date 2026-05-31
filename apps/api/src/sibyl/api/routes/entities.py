@@ -171,6 +171,12 @@ async def _archive_raw_capture(
         session,
         capture=RawCaptureRecord(
             organization_id=organization_id,
+            principal_id=str(user_id) if user_id else "",
+            memory_scope=str(metadata.get("memory_scope") or "private"),
+            scope_key=str(metadata["scope_key"]) if metadata.get("scope_key") else None,
+            agent_id=str(metadata["agent_id"]) if metadata.get("agent_id") else None,
+            project_id=str(metadata["project_id"]) if metadata.get("project_id") else None,
+            review_state=str(metadata.get("review_state") or "pending"),
             entity_id=entity_id,
             title=entity_name,
             raw_content=entity_content,
@@ -184,7 +190,7 @@ async def _archive_raw_capture(
 
 
 def _raw_capture_review_state(capture: RawCaptureRecord) -> str:
-    return str(capture.metadata.get("review_state") or "pending")
+    return capture.review_state
 
 
 def _serialize_raw_capture_summary(capture: RawCaptureRecord) -> RawCaptureSummary:
@@ -276,15 +282,22 @@ def _raw_capture_visible_to_reader(
     accessible_projects: set[str],
 ) -> bool:
     metadata = capture.metadata or {}
-    memory_scope = str(metadata.get("memory_scope") or "private")
+    memory_scope = capture.memory_scope or str(metadata.get("memory_scope") or "private")
 
     if memory_scope == "project":
-        project_id = str(metadata.get("scope_key") or metadata.get("project_id") or "").strip()
+        project_id = str(
+            capture.scope_key
+            or capture.project_id
+            or metadata.get("scope_key")
+            or metadata.get("project_id")
+            or ""
+        ).strip()
         return bool(project_id and project_id in accessible_projects)
 
     if memory_scope == "private":
         owner = str(
-            metadata.get("principal_id")
+            capture.principal_id
+            or metadata.get("principal_id")
             or (str(capture.created_by_user_id) if capture.created_by_user_id else "")
         ).strip()
         return bool(owner and reader_user_id and owner == reader_user_id)

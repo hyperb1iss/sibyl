@@ -111,7 +111,20 @@ class RawCaptureSummary(BaseModel):
     tags: list[str] = Field(default_factory=list, description="Captured tags")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Original request metadata")
     capture_surface: str | None = Field(default=None, description="Where the capture originated")
-    review_state: Literal["pending", "deferred", "archived", "promoted"] = Field(
+    review_state: Literal[
+        "pending",
+        "deferred",
+        "archived",
+        "promoted",
+        "deleted",
+        "duplicate",
+        "hidden",
+        "redacted",
+        "sensitive",
+        "stale",
+        "superseded",
+        "wrong",
+    ] = Field(
         default="pending",
         description="Review queue state",
     )

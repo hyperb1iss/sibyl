@@ -87,6 +87,9 @@ async def test_quick_capture_creates_raw_archive_record(
     assert archive.title == "Quick memory"
     assert archive.raw_content == "remember this exact text"
     assert archive.entity_type == EntityType.EPISODE.value
+    assert archive.principal_id == str(ctx.user.id)
+    assert archive.memory_scope == "private"
+    assert archive.review_state == "pending"
     assert archive.tags == ["alpha", "beta"]
     assert archive.metadata == {
         "capture_mode": "quick",

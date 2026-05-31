@@ -428,20 +428,48 @@ def _chunk_record(chunk: DocumentChunk) -> SurrealRecord:
 
 def _raw_capture_from_record(record: Mapping[str, object]) -> RawCaptureRecord:
     now = datetime.now(UTC).replace(tzinfo=None)
+    metadata = _coerce_dict(record.get("metadata") or record.get("metadata_"))
+    created_by_user_id = _coerce_optional_uuid(record.get("created_by_user_id"))
     return RawCaptureRecord(
         id=_coerce_uuid(record.get("uuid"), field_name="raw_captures.uuid"),
         organization_id=_coerce_uuid(
             record.get("organization_id"),
             field_name="raw_captures.organization_id",
         ),
+        source_id=_coerce_str(
+            record.get("source_id") or metadata.get("raw_source_id") or metadata.get("source_id")
+        ),
+        principal_id=_coerce_str(
+            record.get("principal_id")
+            or metadata.get("principal_id")
+            or (str(created_by_user_id) if created_by_user_id else "")
+        ),
+        memory_scope=_coerce_str(
+            record.get("memory_scope") or metadata.get("memory_scope"), default="private"
+        ),
+        scope_key=_coerce_optional_str(record.get("scope_key"))
+        or _coerce_optional_str(metadata.get("scope_key")),
+        agent_id=_coerce_optional_str(record.get("agent_id"))
+        or _coerce_optional_str(metadata.get("agent_id")),
+        project_id=_coerce_optional_str(record.get("project_id"))
+        or _coerce_optional_str(metadata.get("project_id")),
+        review_state=_coerce_str(
+            record.get("review_state") or metadata.get("review_state"), default="pending"
+        ),
         entity_id=_coerce_optional_str(record.get("entity_id")),
         title=_coerce_str(record.get("title")),
         raw_content=_coerce_str(record.get("raw_content")),
         entity_type=_coerce_str(record.get("entity_type")),
         tags=_coerce_str_list(record.get("tags")),
-        metadata=_coerce_dict(record.get("metadata") or record.get("metadata_")),
+        metadata=metadata,
+        provenance=_coerce_dict(record.get("provenance") or metadata.get("provenance")),
         capture_surface=_coerce_optional_str(record.get("capture_surface")),
-        created_by_user_id=_coerce_optional_uuid(record.get("created_by_user_id")),
+        created_by_user_id=created_by_user_id,
+        captured_at=_coerce_datetime(record.get("captured_at"))
+        or _coerce_datetime(record.get("created_at"))
+        or now,
+        deleted_at=_coerce_datetime(record.get("deleted_at")),
+        purge_after=_coerce_datetime(record.get("purge_after")),
         created_at=_coerce_datetime(record.get("created_at")) or now,
     )
 
@@ -449,26 +477,40 @@ def _raw_capture_from_record(record: Mapping[str, object]) -> RawCaptureRecord:
 def _raw_capture_record(capture: RawCaptureRecord) -> SurrealRecord:
     metadata = dict(capture.metadata or {})
     created_by_user_id = str(capture.created_by_user_id) if capture.created_by_user_id else ""
+    source_id = capture.source_id or str(
+        metadata.get("raw_source_id") or metadata.get("source_id") or ""
+    )
+    principal_id = capture.principal_id or str(metadata.get("principal_id") or created_by_user_id)
+    memory_scope = capture.memory_scope or str(metadata.get("memory_scope") or "private")
+    review_state = capture.review_state or str(metadata.get("review_state") or "pending")
     return {
         "uuid": str(capture.id),
         "organization_id": str(capture.organization_id),
-        "source_id": str(metadata.get("raw_source_id") or metadata.get("source_id") or ""),
-        "principal_id": str(metadata.get("principal_id") or created_by_user_id),
-        "memory_scope": str(metadata.get("memory_scope") or "private"),
-        "scope_key": metadata.get("scope_key"),
-        "agent_id": metadata.get("agent_id"),
-        "project_id": metadata.get("project_id"),
-        "review_state": str(metadata.get("review_state") or "pending"),
+        "source_id": source_id,
+        "principal_id": principal_id,
+        "memory_scope": memory_scope,
+        "scope_key": capture.scope_key
+        if capture.scope_key is not None
+        else metadata.get("scope_key"),
+        "agent_id": capture.agent_id if capture.agent_id is not None else metadata.get("agent_id"),
+        "project_id": capture.project_id
+        if capture.project_id is not None
+        else metadata.get("project_id"),
+        "review_state": review_state,
         "entity_id": capture.entity_id,
         "title": capture.title,
         "raw_content": capture.raw_content,
         "entity_type": capture.entity_type,
         "tags": list(capture.tags or []),
         "metadata": metadata,
-        "provenance": dict(cast("Mapping[str, object]", metadata.get("provenance") or {})),
+        "provenance": dict(
+            capture.provenance or cast("Mapping[str, object]", metadata.get("provenance") or {})
+        ),
         "capture_surface": capture.capture_surface,
         "created_by_user_id": created_by_user_id or None,
-        "captured_at": capture.created_at,
+        "captured_at": capture.captured_at,
+        "deleted_at": capture.deleted_at,
+        "purge_after": capture.purge_after,
         "created_at": capture.created_at,
     }
 

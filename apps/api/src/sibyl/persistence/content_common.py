@@ -115,11 +115,22 @@ class RawCaptureRecord:
     title: str
     raw_content: str
     entity_type: str
+    source_id: str = ""
+    principal_id: str = ""
+    memory_scope: str = "private"
+    scope_key: str | None = None
+    agent_id: str | None = None
+    project_id: str | None = None
+    review_state: str = "pending"
     entity_id: str | None = None
     tags: list[str] = field(default_factory=list)
     metadata: dict[str, object] = field(default_factory=dict)
+    provenance: dict[str, object] = field(default_factory=dict)
     capture_surface: str | None = None
     created_by_user_id: UUID | None = None
+    captured_at: datetime = field(default_factory=utcnow_naive)
+    deleted_at: datetime | None = None
+    purge_after: datetime | None = None
     id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=utcnow_naive)
 
