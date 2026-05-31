@@ -142,6 +142,7 @@ class RawMemory:
     agent_id: str | None = None
     project_id: str | None = None
     review_state: str = "pending"
+    entity_id: str | None = None
     entity_type: str = "raw_memory"
     title: str = ""
     raw_content: str = ""
@@ -592,6 +593,7 @@ def _raw_memory_from_record(record: Mapping[str, object]) -> RawMemory:
         review_state=_coerce_str(
             record.get("review_state") or metadata.get("review_state"), default="pending"
         ),
+        entity_id=_coerce_optional_str(record.get("entity_id")),
         entity_type=_coerce_str(record.get("entity_type"), default="raw_memory"),
         title=_coerce_str(record.get("title")),
         raw_content=_coerce_str(record.get("raw_content")),
@@ -639,6 +641,7 @@ def _raw_memory_record(memory: RawMemory) -> SurrealRecord:
         "agent_id": memory.agent_id,
         "project_id": memory.project_id,
         "review_state": memory.review_state,
+        "entity_id": memory.entity_id,
         "title": memory.title,
         "raw_content": memory.raw_content,
         "entity_type": memory.entity_type,
@@ -1142,6 +1145,52 @@ async def resolve_raw_memory_prefix(
             limit=limit,
         )
     return [_raw_memory_from_record(row) for row in rows]
+
+
+async def list_raw_memories_for_promotion(
+    *,
+    organization_id: str,
+    raw_memory_ids: list[str] | None = None,
+    limit: int = 100,
+) -> list[RawMemory]:
+    if limit <= 0:
+        return []
+    if raw_memory_ids:
+        rows: list[SurrealRecord] = []
+        for batch in _value_batches(list(dict.fromkeys(raw_memory_ids))):
+            async with surreal_content_client() as client:
+                rows.extend(
+                    await _select_many(
+                        client,
+                        "SELECT * FROM raw_captures "
+                        "WHERE organization_id = $organization_id AND uuid INSIDE $raw_memory_ids "
+                        "ORDER BY captured_at ASC, uuid ASC;",
+                        organization_id=organization_id,
+                        raw_memory_ids=batch,
+                    )
+                )
+        memories = [_raw_memory_from_record(row) for row in rows]
+        order = {memory_id: index for index, memory_id in enumerate(raw_memory_ids)}
+        return sorted(memories, key=lambda memory: order.get(memory.id, len(order)))[:limit]
+
+    query_limit = limit * _LIFECYCLE_FILTER_OVERFETCH_FACTOR
+    async with surreal_content_client() as client:
+        rows = await _select_many(
+            client,
+            "SELECT * FROM raw_captures "
+            "WHERE organization_id = $organization_id "
+            "AND deleted_at = NONE "
+            "AND (metadata.raw_promotion_state = NONE "
+            "OR metadata.raw_promotion_state = '' "
+            "OR metadata.raw_promotion_state = 'pending') "
+            "ORDER BY captured_at ASC, uuid ASC LIMIT $limit;",
+            organization_id=organization_id,
+            limit=query_limit,
+        )
+    memories = [_raw_memory_from_record(row) for row in rows]
+    return [
+        memory for memory in memories if memory.deleted_at is None and raw_memory_recallable(memory)
+    ][:limit]
 
 
 async def save_raw_memory(memory: RawMemory) -> RawMemory:
@@ -1718,6 +1767,7 @@ __all__ = [
     "get_raw_memory_by_source_id",
     "lexical_score",
     "lexical_score_from_tokens",
+    "list_raw_memories_for_promotion",
     "list_raw_memories_for_scope",
     "list_reflection_candidate_reviews",
     "list_reflection_dream_source_memories",

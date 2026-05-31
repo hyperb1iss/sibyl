@@ -23,6 +23,7 @@ from sibyl.coordination.broker import (
     JobStatus,
     memory_extraction_job_id,
     memory_projection_job_id,
+    raw_promotion_job_id,
 )
 from sibyl_core.observability import telemetry_registry
 
@@ -444,6 +445,38 @@ class RedisQueueBroker:
             return result.job_id
 
         log.info("Enqueued source import drain", job_id=result.job_id, import_id=import_id)
+        return result.job_id
+
+    async def enqueue_raw_promotion(
+        self,
+        organization_id: str,
+        *,
+        raw_memory_ids: list[str] | None = None,
+        limit: int = 100,
+        force: bool = False,
+    ) -> str:
+        """Enqueue raw capture promotion into searchable document chunks."""
+        job_id = raw_promotion_job_id(
+            organization_id,
+            raw_memory_ids=raw_memory_ids,
+        )
+        result = await self._enqueue_unique(
+            "promote_raw_captures",
+            organization_id,
+            job_id=job_id,
+            clear_result=True,
+            raw_memory_ids=raw_memory_ids,
+            limit=limit,
+            force=force,
+        )
+
+        if not result.created:
+            log.info(
+                "Raw promotion already running", job_id=job_id, organization_id=organization_id
+            )
+            return result.job_id
+
+        log.info("Enqueued raw promotion", job_id=result.job_id, organization_id=organization_id)
         return result.job_id
 
     async def get_job_status(self, job_id: str) -> JobInfo:

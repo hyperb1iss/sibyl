@@ -47,7 +47,7 @@ class CrawlSourceRecord:
 
 @dataclass(slots=True)
 class CrawledDocumentRecord:
-    source_id: UUID
+    source_id: UUID | str
     url: str
     id: UUID = field(default_factory=uuid4)
     organization_id: UUID | None = None
@@ -79,7 +79,7 @@ class DocumentChunkRecord:
     content: str
     id: UUID = field(default_factory=uuid4)
     organization_id: UUID | None = None
-    source_id: UUID | None = None
+    source_id: UUID | str | None = None
     chunk_type: ChunkType = ChunkType.TEXT
     context: str | None = None
     token_count: int = 0

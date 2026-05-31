@@ -10,6 +10,7 @@ from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_LIMIT,
     JobInfo,
     JobStatus,
+    raw_promotion_job_id,
 )
 
 
@@ -333,6 +334,30 @@ async def test_enqueue_source_import_drain_indexes_run_scoped_job() -> None:
     assert pool.delete.await_args_list[-1].args == (
         "arq:result:source_import_drain:source_import:run-123",
     )
+
+
+@pytest.mark.asyncio
+async def test_enqueue_raw_promotion_indexes_org_scoped_job() -> None:
+    pool = RecordingEnqueuePool()
+    broker = make_broker(pool)
+    raw_memory_ids = ["raw-a", "raw-b"]
+
+    job_id = await broker.enqueue_raw_promotion(
+        "org-123",
+        raw_memory_ids=raw_memory_ids,
+        limit=50,
+        force=True,
+    )
+
+    expected_job_id = raw_promotion_job_id("org-123", raw_memory_ids=raw_memory_ids)
+    assert job_id == expected_job_id
+    assert pool.calls[0][0] == "promote_raw_captures"
+    assert pool.calls[0][1] == "org-123"
+    assert pool.calls[0][2]["raw_memory_ids"] == raw_memory_ids
+    assert pool.calls[0][2]["limit"] == 50
+    assert pool.calls[0][2]["force"] is True
+    assert pool.delete.await_args_list[-1].args == (f"arq:result:{expected_job_id}",)
+    assert_recent_job_indexed(pool, expected_job_id)
     assert_recent_job_indexed(pool, job_id)
 
 

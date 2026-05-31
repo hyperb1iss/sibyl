@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol, cast
+from uuid import UUID
 
 import structlog
 
@@ -47,8 +48,6 @@ from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.models.sources import SourceType
 
 if TYPE_CHECKING:
-    from uuid import UUID
-
     from sibyl_core.services.graph import EntityManager
 
 
@@ -390,6 +389,9 @@ class IngestionPipeline:
         stored_document = document
 
         async with get_content_read_session() as session:
+            if not isinstance(document.source_id, UUID):
+                msg = f"Crawl pipeline requires a crawl source UUID: {document.source_id}"
+                raise TypeError(msg)
             source = await get_crawl_source_by_id(session, source_id=document.source_id)
             if source is None:
                 msg = f"Source not found for document {document.source_id}"

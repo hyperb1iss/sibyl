@@ -14,6 +14,7 @@ from sibyl.coordination.broker import (
     JobStatus,
     QueueBroker,
     get_broker,
+    raw_promotion_job_id,
 )
 
 __all__ = [
@@ -33,6 +34,7 @@ __all__ = [
     "enqueue_memory_extraction",
     "enqueue_memory_projection",
     "enqueue_priority_decay",
+    "enqueue_raw_promotion",
     "enqueue_reflection_dream_cycle",
     "enqueue_source_import_drain",
     "enqueue_sync",
@@ -43,6 +45,7 @@ __all__ = [
     "get_queue",
     "get_redis_settings",
     "list_jobs",
+    "raw_promotion_job_id",
 ]
 
 
@@ -222,6 +225,22 @@ async def enqueue_source_import_drain(
         policy_context=policy_context,
         batch_size=batch_size,
         promotion_preview_approved=promotion_preview_approved,
+    )
+
+
+async def enqueue_raw_promotion(
+    organization_id: str,
+    *,
+    raw_memory_ids: list[str] | None = None,
+    limit: int = 100,
+    force: bool = False,
+) -> str:
+    """Enqueue raw capture promotion into document chunks and graph anchors."""
+    return await get_queue().enqueue_raw_promotion(
+        organization_id,
+        raw_memory_ids=raw_memory_ids,
+        limit=limit,
+        force=force,
     )
 
 

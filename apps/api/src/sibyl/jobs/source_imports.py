@@ -783,7 +783,34 @@ async def resume_source_import(
     else:
         run.status = SourceImportStatus.PAUSED
     await _persist_run(run)
+    await _enqueue_raw_promotion_after_import(
+        organization_id=run.organization_id,
+        raw_memory_ids=[str(raw_id) for raw_id in result["raw_memory_ids"]],
+    )
     return run.status_payload()
+
+
+async def _enqueue_raw_promotion_after_import(
+    *,
+    organization_id: str,
+    raw_memory_ids: list[str],
+) -> None:
+    if not raw_memory_ids:
+        return
+    try:
+        from sibyl.jobs import queue as job_queue
+
+        await job_queue.enqueue_raw_promotion(
+            organization_id,
+            raw_memory_ids=raw_memory_ids,
+        )
+    except Exception as exc:
+        log.warning(
+            "source_import_raw_promotion_enqueue_failed",
+            organization_id=organization_id,
+            raw_memory_count=len(raw_memory_ids),
+            error=str(exc),
+        )
 
 
 async def cancel_source_import(

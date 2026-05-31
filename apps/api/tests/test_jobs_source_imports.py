@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from sibyl.jobs import source_imports
+from sibyl.jobs.raw_promotion import promote_raw_captures
 from sibyl.jobs.worker import WorkerSettings
 from sibyl_core.models.sources import SourceRecord
 from sibyl_core.services.source_adapters import (
@@ -694,6 +695,41 @@ async def test_resume_source_import_preserves_external_cancel_after_batch(
 
 
 @pytest.mark.asyncio
+async def test_resume_source_import_enqueues_raw_promotion_after_batch(tmp_path: Path) -> None:
+    mbox_path = _write_mbox(tmp_path / "promote-after-batch.mbox")
+
+    with patch("sibyl.jobs.source_imports.settings.source_import_dir", tmp_path):
+        first = await source_imports.start_source_import(
+            source_uri=str(mbox_path),
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            batch_size=1,
+        )
+
+    enqueue_raw_promotion = AsyncMock(return_value="raw_promotion:job")
+    with (
+        patch(
+            "sibyl.jobs.source_imports.import_source_archive",
+            AsyncMock(return_value=_source_import_result_payload(raw_memory_ids=["raw-new"])),
+        ),
+        patch("sibyl.jobs.queue.enqueue_raw_promotion", enqueue_raw_promotion),
+    ):
+        result = await source_imports.resume_source_import(
+            str(first["import_id"]),
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+        )
+
+    assert result["status"] == "completed"
+    enqueue_raw_promotion.assert_awaited_once_with(
+        "org-1",
+        raw_memory_ids=["raw-new"],
+    )
+
+
+@pytest.mark.asyncio
 async def test_source_import_controls_are_principal_bound(tmp_path: Path) -> None:
     mbox_path = _write_resume_mbox(tmp_path / "principal.mbox")
 
@@ -774,3 +810,4 @@ async def test_resume_source_import_rechecks_current_policy_context(tmp_path: Pa
 def test_worker_settings_registers_source_import_job() -> None:
     assert source_imports.import_source_archive in WorkerSettings.functions
     assert source_imports.drain_source_import in WorkerSettings.functions
+    assert promote_raw_captures in WorkerSettings.functions

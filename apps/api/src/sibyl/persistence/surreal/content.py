@@ -149,6 +149,23 @@ def _coerce_optional_uuid(value: object | None) -> UUID | None:
     return None
 
 
+def _coerce_uuid_or_str(value: object | None, *, field_name: str) -> UUID | str:
+    text = _coerce_str(value)
+    if not text:
+        msg = f"Missing UUID/string field {field_name}"
+        raise ValueError(msg)
+    try:
+        return UUID(text)
+    except ValueError:
+        return text
+
+
+def _coerce_optional_uuid_or_str(value: object | None) -> UUID | str | None:
+    if value is None or value == "":
+        return None
+    return _coerce_uuid_or_str(value, field_name="record")
+
+
 def _coerce_str(value: object | None, *, default: str = "") -> str:
     return str(value) if value is not None else default
 
@@ -322,7 +339,10 @@ def _document_from_record(record: Mapping[str, object]) -> CrawledDocument:
     now = datetime.now(UTC).replace(tzinfo=None)
     return CrawledDocument(
         id=_coerce_uuid(record.get("uuid"), field_name="crawled_documents.uuid"),
-        source_id=_coerce_uuid(record.get("source_id"), field_name="crawled_documents.source_id"),
+        source_id=_coerce_uuid_or_str(
+            record.get("source_id"),
+            field_name="crawled_documents.source_id",
+        ),
         organization_id=_coerce_optional_uuid(record.get("organization_id")),
         url=_coerce_str(record.get("url")),
         title=_coerce_str(record.get("title")),
@@ -383,7 +403,7 @@ def _chunk_from_record(record: Mapping[str, object]) -> DocumentChunk:
             record.get("document_id"), field_name="document_chunks.document_id"
         ),
         organization_id=_coerce_optional_uuid(record.get("organization_id")),
-        source_id=_coerce_optional_uuid(record.get("source_id")),
+        source_id=_coerce_optional_uuid_or_str(record.get("source_id")),
         chunk_index=_coerce_int(record.get("chunk_index")),
         chunk_type=_coerce_chunk_type(record.get("chunk_type")),
         content=_coerce_str(record.get("content")),
@@ -1832,6 +1852,23 @@ async def save_document_chunks(
             )
             saved.append(_chunk_from_record(record))
     return saved
+
+
+async def delete_document_chunks_for_document(
+    _session: object,
+    *,
+    document_id: UUID,
+    organization_id: UUID,
+) -> int:
+    async with surreal_content_client() as client:
+        rows = await _select_many(
+            client,
+            "DELETE FROM document_chunks "
+            "WHERE document_id = $document_id AND organization_id = $organization_id RETURN BEFORE;",
+            document_id=str(document_id),
+            organization_id=str(organization_id),
+        )
+    return len(rows)
 
 
 async def delete_crawled_document_record(

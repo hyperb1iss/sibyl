@@ -70,6 +70,17 @@ def memory_extraction_job_id(
     return f"extract_memory:{digest}"
 
 
+def raw_promotion_job_id(
+    organization_id: str,
+    *,
+    raw_memory_ids: list[str] | None = None,
+) -> str:
+    raw_ids = list(raw_memory_ids or [])
+    digest_source = "|".join([organization_id, *raw_ids]) if raw_ids else organization_id
+    digest = sha256(digest_source.encode()).hexdigest()[:16]
+    return f"raw_promotion:{digest}"
+
+
 class QueueBroker(Protocol):
     """Backend contract for job queue coordination."""
 
@@ -177,6 +188,15 @@ class QueueBroker(Protocol):
         policy_context: dict[str, Any],
         batch_size: int | None = None,
         promotion_preview_approved: bool | None = None,
+    ) -> str: ...
+
+    async def enqueue_raw_promotion(
+        self,
+        organization_id: str,
+        *,
+        raw_memory_ids: list[str] | None = None,
+        limit: int = 100,
+        force: bool = False,
     ) -> str: ...
 
     async def get_job_status(self, job_id: str) -> JobInfo: ...

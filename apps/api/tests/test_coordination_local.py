@@ -414,6 +414,63 @@ async def test_local_queue_broker_executes_source_import_drain() -> None:
 
 
 @pytest.mark.asyncio
+async def test_local_queue_broker_executes_raw_promotion() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def promote_raw_captures(
+        ctx: dict[str, object],
+        organization_id: str,
+        *,
+        raw_memory_ids: list[str] | None = None,
+        limit: int = 100,
+        force: bool = False,
+    ) -> dict[str, object]:
+        calls.append(
+            (
+                organization_id,
+                {
+                    "raw_memory_ids": raw_memory_ids or [],
+                    "limit": limit,
+                    "force": force,
+                    "ctx_has_start_time": "start_time" in ctx,
+                },
+            )
+        )
+        return {"organization_id": organization_id, "promoted_count": 2}
+
+    broker = LocalQueueBroker(
+        functions={"promote_raw_captures": promote_raw_captures},
+        max_concurrency=1,
+        result_ttl_seconds=60,
+    )
+
+    await broker.startup()
+    job_id = await broker.enqueue_raw_promotion(
+        "org-1",
+        raw_memory_ids=["raw-1", "raw-2"],
+        limit=25,
+        force=True,
+    )
+    info = await _wait_for_job_status(broker, job_id, JobStatus.COMPLETE)
+
+    assert job_id.startswith("raw_promotion:")
+    assert info.result == {"organization_id": "org-1", "promoted_count": 2}
+    assert calls == [
+        (
+            "org-1",
+            {
+                "raw_memory_ids": ["raw-1", "raw-2"],
+                "limit": 25,
+                "force": True,
+                "ctx_has_start_time": True,
+            },
+        )
+    ]
+
+    await broker.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_local_queue_broker_force_reruns_completed_job() -> None:
     calls: list[str] = []
 

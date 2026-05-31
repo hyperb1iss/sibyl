@@ -16,6 +16,7 @@ from sibyl_core.services.surreal_content import (
     get_or_create_source,
     get_raw_memory_by_dedupe_key,
     get_raw_memory_by_source_id,
+    list_raw_memories_for_promotion,
     list_unlinked_document_chunks,
     load_search_scope,
     raw_memory_embedding_text,
@@ -818,6 +819,51 @@ class TestSurrealContentHelpers:
         assert saved_record["agent_id"] is None
         assert saved_record["project_id"] is None
         assert saved_record["review_state"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_list_raw_memories_for_promotion_filters_and_maps_entity_id(self) -> None:
+        rows = [
+            {
+                "uuid": "memory-1",
+                "organization_id": "org-1",
+                "source_id": "source-email-1",
+                "principal_id": "user-bliss",
+                "memory_scope": "private",
+                "review_state": "pending",
+                "entity_id": "document-1",
+                "title": "Architecture note",
+                "raw_content": "promote this",
+                "metadata": {},
+            },
+            {
+                "uuid": "memory-2",
+                "organization_id": "org-1",
+                "source_id": "source-email-2",
+                "principal_id": "user-bliss",
+                "memory_scope": "private",
+                "review_state": "superseded",
+                "title": "Old note",
+                "raw_content": "skip this",
+                "metadata": {"superseded_by_raw_memory_id": "memory-1"},
+            },
+        ]
+        fake_client = FakeClient([_query_result(rows)])
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            memories = await list_raw_memories_for_promotion(organization_id="org-1", limit=10)
+
+        assert [memory.id for memory in memories] == ["memory-1"]
+        assert memories[0].entity_id == "document-1"
+        query, params = fake_client.calls[0]
+        assert "metadata.raw_promotion_state" in query
+        assert params["organization_id"] == "org-1"
 
     @pytest.mark.asyncio
     async def test_remember_raw_memory_writes_embedding_when_provider_supplied(self) -> None:

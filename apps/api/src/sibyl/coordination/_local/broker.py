@@ -21,6 +21,7 @@ from sibyl.coordination.broker import (
     JobStatus,
     memory_extraction_job_id,
     memory_projection_job_id,
+    raw_promotion_job_id,
 )
 from sibyl.jobs.worker import WorkerSettings
 from sibyl_core.observability import telemetry_registry
@@ -404,6 +405,28 @@ class LocalQueueBroker:
             policy_context=policy_context,
             batch_size=batch_size,
             promotion_preview_approved=promotion_preview_approved,
+        )
+        return result.job_id
+
+    async def enqueue_raw_promotion(
+        self,
+        organization_id: str,
+        *,
+        raw_memory_ids: list[str] | None = None,
+        limit: int = 100,
+        force: bool = False,
+    ) -> str:
+        result = await self._enqueue_unique(
+            "promote_raw_captures",
+            organization_id,
+            job_id=raw_promotion_job_id(
+                organization_id,
+                raw_memory_ids=raw_memory_ids,
+            ),
+            clear_result=True,
+            raw_memory_ids=raw_memory_ids,
+            limit=limit,
+            force=force,
         )
         return result.job_id
 

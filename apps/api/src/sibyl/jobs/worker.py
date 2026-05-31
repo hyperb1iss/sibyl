@@ -8,6 +8,7 @@ This is the worker entrypoint. Job implementations are in:
 - memory_extraction.py: extract_memory_entities
 - backup.py: run_backup, cleanup_old_backups
 - source_imports.py: import_source_archive, drain_source_import
+- raw_promotion.py: promote_raw_captures
 """
 
 import time
@@ -36,6 +37,7 @@ from sibyl.jobs.entities import (
 )
 from sibyl.jobs.memory_extraction import extract_memory_entities
 from sibyl.jobs.privacy import purge_due_deleted_personal_memories
+from sibyl.jobs.raw_promotion import promote_raw_captures
 from sibyl.jobs.reflection import run_reflection_dream_cycle, run_reflection_dream_cycle_all_orgs
 from sibyl.jobs.source_imports import drain_source_import, import_source_archive
 from sibyl_core.observability import elapsed_ms, telemetry_registry
@@ -278,6 +280,7 @@ class WorkerSettings:
         # Source import jobs
         import_source_archive,
         drain_source_import,
+        promote_raw_captures,
         # Consolidation jobs
         consolidate_org,
         consolidate_all_orgs,

@@ -50,6 +50,7 @@ from sibyl.jobs.queue import (
     enqueue_memory_extraction,
     enqueue_memory_projection,
     enqueue_priority_decay,
+    enqueue_raw_promotion,
     enqueue_reflection_dream_cycle,
     enqueue_source_import_drain,
     enqueue_sync,
@@ -58,6 +59,7 @@ from sibyl.jobs.queue import (
     get_job_status,
     get_redis_settings,
 )
+from sibyl.jobs.raw_promotion import promote_raw_captures
 from sibyl.jobs.reflection import run_reflection_dream_cycle, run_reflection_dream_cycle_all_orgs
 from sibyl.jobs.source_imports import drain_source_import, import_source_archive
 from sibyl.jobs.worker import WorkerSettings, run_worker_async
@@ -95,6 +97,7 @@ __all__ = [
     "enqueue_backup_cleanup",
     "enqueue_consolidation",
     "enqueue_priority_decay",
+    "enqueue_raw_promotion",
     "enqueue_reflection_dream_cycle",
     "enqueue_source_import_drain",
     # Job functions (for direct testing)
@@ -103,6 +106,7 @@ __all__ = [
     "sync_all_sources",
     "drain_source_import",
     "import_source_archive",
+    "promote_raw_captures",
     "create_entity",
     "create_learning_episode",
     "create_learning_procedure",
