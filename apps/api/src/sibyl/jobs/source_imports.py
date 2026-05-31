@@ -501,6 +501,13 @@ def _default_supersession_handler(*, organization_id: str) -> SourceRecordSupers
         )
         if superseded is None:
             return False
+        if (
+            superseded.principal_id != memory.principal_id
+            or superseded.memory_scope != memory.memory_scope
+            or superseded.scope_key != memory.scope_key
+            or superseded.source_id != memory.source_id
+        ):
+            return False
 
         superseded_metadata = dict(superseded.metadata)
         superseded_metadata["superseded_by_raw_memory_id"] = memory.id
