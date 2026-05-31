@@ -904,6 +904,26 @@ def _print_promotion_preview(data: dict[str, object]) -> None:
     console.print(table)
 
 
+def _print_promotion_result(data: dict[str, object]) -> None:
+    console.print("\n[bold]Promotion result[/bold]\n")
+    table = create_table(None, "Field", "Value", expand=False)
+    table.add_row("State", "promoted" if data.get("success") is True else "blocked")
+    table.add_row("Reason", str(data.get("reason") or ""))
+    table.add_row("Candidate", str(data.get("candidate_id") or ""))
+    table.add_row("Review", str(data.get("review_state") or ""))
+    table.add_row(
+        "Target",
+        _preview_target(data.get("memory_scope"), data.get("scope_key")),
+    )
+    table.add_row("Sources", _preview_id_summary(data.get("raw_source_ids")))
+    table.add_row("Policy", _preview_id_summary(data.get("policy_reasons")))
+    if promoted_id := data.get("promoted_id"):
+        table.add_row("Promoted", str(promoted_id))
+    if audit_id := _preview_audit_id(data):
+        table.add_row("Audit", audit_id)
+    console.print(table)
+
+
 def _print_promotion_autonomy(data: dict[str, object]) -> None:
     console.print("\n[bold]Automatic memory review[/bold]\n")
     table = create_table(None, "Field", "Value", expand=False)
@@ -2293,8 +2313,9 @@ def memory_import_status(
 
 @app.command("memory-promote")
 def memory_promote(
-    candidate_id: str = typer.Argument(..., help="Raw reflection candidate ID"),
+    candidate_id: str = typer.Argument(..., help="Raw memory or reflection candidate ID"),
     preview: bool = typer.Option(False, "--preview", help="Preview without promoting"),
+    apply_changes: bool = typer.Option(False, "--apply", help="Apply the promotion"),
     auto: bool = typer.Option(False, "--auto", help="Auto-review and promote when safe"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Evaluate auto-review without applying"),
     confidence_threshold: float | None = typer.Option(
@@ -2325,9 +2346,10 @@ def memory_promote(
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ) -> None:
-    """Preview or auto-review reflection candidate promotion."""
-    if preview and auto:
-        error("Choose either --preview or --auto.")
+    """Preview or apply memory promotion."""
+    selected_modes = sum(1 for selected in (preview, apply_changes, auto) if selected)
+    if selected_modes > 1:
+        error("Choose only one of --preview, --apply, or --auto.")
         raise typer.Exit(code=1)
     if dry_run and not auto:
         error("--dry-run is only available with --auto.")
@@ -2335,8 +2357,8 @@ def memory_promote(
     if confidence_threshold is not None and not auto:
         error("--confidence-threshold is only available with --auto.")
         raise typer.Exit(code=1)
-    if not preview and not auto:
-        error("memory-promote currently supports --preview or --auto.")
+    if selected_modes == 0:
+        error("memory-promote requires --preview, --apply, or --auto.")
         raise typer.Exit(code=1)
 
     effective_project = project or (None if all_projects else resolve_project_from_cwd())
@@ -2361,8 +2383,17 @@ def memory_promote(
                         dry_run=dry_run,
                         confidence_threshold=confidence_threshold,
                     )
+                elif apply_changes:
+                    data = await client.promote_memory(
+                        candidate_id=resolved_candidate_id,
+                        promote_to_scope=promote_to_scope,
+                        promote_to_scope_key=target_scope_key,
+                        domain=domain,
+                        project=effective_project,
+                        related_to=related_ids,
+                    )
                 else:
-                    data = await client.preview_reflection_promotion(
+                    data = await client.preview_memory_promotion(
                         candidate_id=resolved_candidate_id,
                         promote_to_scope=promote_to_scope,
                         promote_to_scope_key=target_scope_key,
@@ -2376,6 +2407,8 @@ def memory_promote(
             payload = cast("dict[str, object]", data)
             if auto:
                 _print_promotion_autonomy(payload)
+            elif apply_changes:
+                _print_promotion_result(payload)
             else:
                 _print_promotion_preview(payload)
         except SibylClientError as e:

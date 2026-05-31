@@ -1324,6 +1324,56 @@ class SibylClient:
             data["project"] = project
         return await self._request("POST", "/memory/reflection/promote/preview", json=data)
 
+    async def preview_memory_promotion(
+        self,
+        *,
+        candidate_id: str,
+        promote_to_scope: str | None = None,
+        promote_to_scope_key: str | None = None,
+        domain: str | None = None,
+        project: str | None = None,
+        related_to: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Preview promotion for a reflection candidate or raw memory."""
+        data: dict[str, Any] = {
+            "candidate_id": candidate_id,
+            "related_to": related_to or [],
+        }
+        if promote_to_scope:
+            data["promote_to_scope"] = promote_to_scope
+        if promote_to_scope_key:
+            data["promote_to_scope_key"] = promote_to_scope_key
+        if domain:
+            data["domain"] = domain
+        if project:
+            data["project"] = project
+        return await self._request("POST", "/memory/promote/preview", json=data)
+
+    async def promote_memory(
+        self,
+        *,
+        candidate_id: str,
+        promote_to_scope: str | None = None,
+        promote_to_scope_key: str | None = None,
+        domain: str | None = None,
+        project: str | None = None,
+        related_to: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Promote a reflection candidate or raw memory."""
+        data: dict[str, Any] = {
+            "candidate_id": candidate_id,
+            "related_to": related_to or [],
+        }
+        if promote_to_scope:
+            data["promote_to_scope"] = promote_to_scope
+        if promote_to_scope_key:
+            data["promote_to_scope_key"] = promote_to_scope_key
+        if domain:
+            data["domain"] = domain
+        if project:
+            data["project"] = project
+        return await self._request("POST", "/memory/promote", json=data)
+
     async def auto_review_reflection_promotion(
         self,
         *,

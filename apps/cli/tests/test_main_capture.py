@@ -1612,7 +1612,7 @@ def test_memory_promote_preview_command_renders_decision(
 ) -> None:
     mock_client = MagicMock()
     mock_client.resolve_id_prefix = AsyncMock(return_value={"matches": [{"id": "candidate-1"}]})
-    mock_client.preview_reflection_promotion = AsyncMock(
+    mock_client.preview_memory_promotion = AsyncMock(
         return_value={
             "allowed": False,
             "candidate_id": "candidate-1",
@@ -1653,13 +1653,64 @@ def test_memory_promote_preview_command_renders_decision(
         "candidate-1",
         entity_type="raw_memory",
     )
-    mock_client.preview_reflection_promotion.assert_awaited_once_with(
+    mock_client.preview_memory_promotion.assert_awaited_once_with(
         candidate_id="candidate-1",
         promote_to_scope="project",
         promote_to_scope_key="project_123",
         domain="sibyl",
         project="project_123",
         related_to=["plan_1", "task_1"],
+    )
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_memory_promote_apply_command_renders_result(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.resolve_id_prefix = AsyncMock(return_value={"matches": [{"id": "raw-1"}]})
+    mock_client.promote_memory = AsyncMock(
+        return_value={
+            "success": True,
+            "candidate_id": "raw-1",
+            "promoted_id": "episode_123",
+            "reason": "promoted",
+            "review_state": "promoted",
+            "memory_scope": "project",
+            "scope_key": "project_123",
+            "raw_source_ids": ["raw-1"],
+            "policy_reasons": ["same_scope_write_allowed"],
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "memory-promote",
+            "raw-1",
+            "--apply",
+            "--scope",
+            "project",
+            "--domain",
+            "sibyl",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Promotion result" in result.stdout
+    assert "episode_123" in result.stdout
+    mock_client.promote_memory.assert_awaited_once_with(
+        candidate_id="raw-1",
+        promote_to_scope="project",
+        promote_to_scope_key="project_123",
+        domain="sibyl",
+        project="project_123",
+        related_to=[],
     )
     mock_resolve_project_from_cwd.assert_called_once_with()
 
@@ -1739,7 +1790,7 @@ def test_memory_promote_without_preview_is_denied(mock_get_client: MagicMock) ->
     result = runner.invoke(app, ["memory-promote", "candidate-1"])
 
     assert result.exit_code == 1
-    assert "supports --preview or --auto" in result.stdout
+    assert "requires --preview, --apply, or --auto" in result.stdout
     mock_get_client.assert_not_called()
 
 

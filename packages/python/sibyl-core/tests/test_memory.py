@@ -18,7 +18,9 @@ from sibyl_core.services.memory import (
     preview_memory_access,
     preview_memory_correction,
     preview_memory_share,
+    preview_raw_memory_promotion,
     preview_reflection_candidate_promotion,
+    promote_raw_memory,
     promote_reflection_candidate_review,
     reflection_write_enabled,
     write_mode_from_env,
@@ -52,6 +54,32 @@ def _raw_review_candidate(**overrides: object) -> RawMemory:
         },
         "provenance": {"raw_source_ids": ["source-1"]},
         "capture_surface": "reflection_candidate",
+        "captured_at": datetime(2026, 5, 12, 12, 0, 0, tzinfo=UTC),
+        "created_at": datetime(2026, 5, 12, 12, 0, 0, tzinfo=UTC),
+    }
+    values.update(overrides)
+    return RawMemory(**values)
+
+
+def _raw_import_memory(**overrides: object) -> RawMemory:
+    values = {
+        "id": "raw-1",
+        "organization_id": "org-1",
+        "source_id": "mailbox:thread-1",
+        "principal_id": "user-1",
+        "memory_scope": MemoryScope.PRIVATE,
+        "scope_key": None,
+        "review_state": "pending",
+        "entity_type": "episode",
+        "title": "Mailbox thread",
+        "raw_content": "Bliss and Nova discussed the import promotion path.",
+        "tags": ["mailbox"],
+        "metadata": {
+            "domain": "sibyl",
+            "participants": ["bliss@example.com", "nova@example.com"],
+        },
+        "provenance": {"source_type": "email"},
+        "capture_surface": "raw_memory",
         "captured_at": datetime(2026, 5, 12, 12, 0, 0, tzinfo=UTC),
         "created_at": datetime(2026, 5, 12, 12, 0, 0, tzinfo=UTC),
     }
@@ -150,6 +178,41 @@ async def test_preview_review_candidate_returns_missing_without_write(
     assert not result.allowed
     assert result.reason == "candidate_not_found"
     assert result.raw_source_ids == []
+    persist.assert_not_awaited()
+    save.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_preview_raw_memory_promotion_uses_write_policy_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_import_memory()
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    persist = AsyncMock()
+    save = AsyncMock()
+    monkeypatch.setattr(memory_module, "persist_reflection_candidate", persist)
+    monkeypatch.setattr(memory_module, "save_raw_memory", save)
+
+    result = await preview_raw_memory_promotion(
+        raw_memory_id="raw-1",
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="project",
+        promote_to_scope_key="project_123",
+        project="project_123",
+        accessible_projects={"project_123"},
+    )
+
+    assert result.allowed
+    assert result.reason == "promotion_preview_allowed"
+    assert result.memory_scope is MemoryScope.PROJECT
+    assert result.scope_key == "project_123"
+    assert result.raw_source_ids == ["raw-1"]
+    assert result.metadata is not None
+    assert result.metadata["source_family"] == "raw_memory"
+    assert result.metadata["input_scopes"] == [
+        {"id": "raw-1", "memory_scope": "private", "scope_key": None}
+    ]
     persist.assert_not_awaited()
     save.assert_not_awaited()
 
@@ -867,3 +930,67 @@ async def test_promote_review_candidate_persists_native_record_and_marks_promote
     assert lifecycle.derived_ids == ["decision_123"]
     assert findings[-1].kind == "promotion"
     assert findings[-1].related_source_ids == ["decision_123"]
+
+
+@pytest.mark.asyncio
+async def test_promote_raw_memory_persists_native_record_and_marks_promoted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_import_memory()
+    saved: list[RawMemory] = []
+
+    async def fake_persist(**kwargs):
+        assert kwargs["memory_scope"] is MemoryScope.PROJECT
+        assert kwargs["scope_key"] == "project_123"
+        assert kwargs["source_id"] == "raw-1"
+        assert kwargs["accessible_projects"] == {"project_123"}
+        assert kwargs["candidate"].metadata["native_write_path"] == "raw_memory_promotion"
+        assert kwargs["candidate"].metadata["imported_capture_id"] == "raw-1"
+        return ReflectionWriteResult(
+            response=AddResponse(
+                success=True,
+                id="episode_123",
+                message="promoted",
+                timestamp=datetime.now(UTC),
+            ),
+            metadata={
+                "policy_allowed": True,
+                "policy_reasons": [
+                    "same_scope_reflect_allowed",
+                    "same_scope_write_allowed",
+                ],
+                "native_write_path": "raw_memory_promotion",
+            },
+        )
+
+    async def fake_save(memory: RawMemory) -> RawMemory:
+        saved.append(memory)
+        return memory
+
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "persist_reflection_candidate", fake_persist)
+    monkeypatch.setattr(memory_module, "save_raw_memory", fake_save)
+
+    result = await promote_raw_memory(
+        raw_memory_id="raw-1",
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="project",
+        promote_to_scope_key="project_123",
+        project="project_123",
+        accessible_projects={"project_123"},
+    )
+
+    assert result.success
+    assert result.promoted_id == "episode_123"
+    assert result.reason == "promoted"
+    assert saved[0].review_state == "promoted"
+    assert saved[0].metadata["promoted_entity_id"] == "episode_123"
+    assert saved[0].metadata["native_write_path"] == "raw_memory_promotion"
+    lifecycle = memory_lifecycle_from_metadata(
+        saved[0].metadata,
+        source_id="raw-1",
+        review_state=saved[0].review_state,
+    )
+    assert lifecycle.state == "promoted"
+    assert lifecycle.derived_ids == ["episode_123"]

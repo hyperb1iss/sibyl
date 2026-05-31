@@ -312,6 +312,9 @@ async def persist_reflection_candidate(
         }
     )
     created_id = await runtime.entity_manager.create_direct(entity)
+    native_write_path = _metadata_str(candidate.metadata, "native_write_path")
+    if not native_write_path:
+        native_write_path = "reflection_promotion"
     relationships = _relationships_for_promotion(
         created_id,
         project=project,
@@ -319,6 +322,7 @@ async def persist_reflection_candidate(
         related_to=related_to,
         supersedes=superseded_ids,
         raw_source_ids=source_ids,
+        native_write_path=native_write_path,
     )
     if relationships:
         await runtime.relationship_manager.create_bulk(relationships)
@@ -333,7 +337,7 @@ async def persist_reflection_candidate(
         metadata={
             **policy_metadata,
             "native_write_mode": WriteMode.ENABLED.value,
-            "native_write_path": "reflection_promotion",
+            "native_write_path": native_write_path,
             "native_relationship_count": len(relationships),
             "raw_source_ids": source_ids,
             "source_ids": source_ids,
@@ -432,6 +436,97 @@ async def promote_reflection_candidate_review(
     )
 
 
+async def promote_raw_memory(
+    *,
+    raw_memory_id: str,
+    organization_id: str,
+    principal_id: str | None,
+    promote_to_scope: MemoryScope | str | None,
+    promote_to_scope_key: str | None = None,
+    domain: str | None = None,
+    project: str | None = None,
+    related_to: Sequence[str] | None = None,
+    accessible_projects: Iterable[str] | None = None,
+) -> ReflectionPromotionResult:
+    plan = await _resolve_raw_memory_promotion_plan(
+        raw_memory_id=raw_memory_id,
+        organization_id=organization_id,
+        principal_id=principal_id,
+        promote_to_scope=promote_to_scope,
+        promote_to_scope_key=promote_to_scope_key,
+        domain=domain,
+        project=project,
+        accessible_projects=accessible_projects,
+    )
+    if isinstance(plan, ReflectionPromotionResult):
+        return plan
+
+    result = await persist_reflection_candidate(
+        candidate=plan.promotion_candidate,
+        organization_id=organization_id,
+        principal_id=principal_id,
+        domain=domain or _metadata_str(plan.candidate_memory.metadata, "domain"),
+        project=plan.target_project,
+        source_id=plan.candidate_memory.id,
+        related_to=related_to,
+        accessible_projects=accessible_projects,
+        memory_scope=plan.target_scope,
+        scope_key=plan.target_scope_key,
+        link_source_entity=False,
+    )
+    if not result.response.success:
+        return ReflectionPromotionResult(
+            success=False,
+            candidate_id=plan.candidate_memory.id,
+            promoted_id=None,
+            reason=_policy_denial_reason(result.metadata),
+            review_state=plan.candidate_memory.review_state,
+            memory_scope=plan.target_scope,
+            scope_key=plan.target_scope_key,
+            raw_source_ids=plan.raw_source_ids,
+            metadata=result.metadata,
+        )
+
+    promoted_at = datetime.now(UTC).isoformat()
+    metadata = {
+        **plan.candidate_memory.metadata,
+        **result.metadata,
+        "review_state": _PROMOTED_REVIEW_STATE,
+        "promoted_at": promoted_at,
+        "promoted_entity_id": result.response.id,
+        "promote_to_scope": plan.target_scope.value,
+        "promote_to_scope_key": plan.target_scope_key,
+        "raw_source_ids": plan.raw_source_ids,
+        "source_ids": plan.raw_source_ids,
+    }
+    metadata = _promotion_lifecycle_metadata(
+        metadata=metadata,
+        promoted_entity_id=str(result.response.id),
+        source_ids=plan.raw_source_ids,
+        source_id=plan.candidate_memory.id,
+        reason="accepted_raw_memory",
+        policy_metadata=result.metadata,
+    )
+    updated = replace(
+        plan.candidate_memory,
+        review_state=_PROMOTED_REVIEW_STATE,
+        metadata=metadata,
+    )
+    await save_raw_memory(updated)
+
+    return ReflectionPromotionResult(
+        success=True,
+        candidate_id=plan.candidate_memory.id,
+        promoted_id=result.response.id,
+        reason="promoted",
+        review_state=_PROMOTED_REVIEW_STATE,
+        memory_scope=plan.target_scope,
+        scope_key=plan.target_scope_key,
+        raw_source_ids=plan.raw_source_ids,
+        metadata=metadata,
+    )
+
+
 async def preview_reflection_candidate_promotion(
     *,
     candidate_id: str,
@@ -467,6 +562,57 @@ async def preview_reflection_candidate_promotion(
         **reflection_autonomy_candidate_metadata(plan.candidate_memory),
         "input_scopes": _scope_metadata(plan.input_memories),
         "source_count": len(plan.raw_source_ids),
+        "target_project": plan.target_project,
+    }
+    allowed = all(decision.allowed for decision in policy_decisions)
+    return ReflectionPromotionPreview(
+        allowed=allowed,
+        candidate_id=plan.candidate_memory.id,
+        reason="promotion_preview_allowed" if allowed else _policy_denial_reason(metadata),
+        review_state=plan.candidate_memory.review_state,
+        memory_scope=plan.target_scope,
+        scope_key=plan.target_scope_key,
+        raw_source_ids=plan.raw_source_ids,
+        policy_decisions=policy_decisions,
+        metadata=metadata,
+    )
+
+
+async def preview_raw_memory_promotion(
+    *,
+    raw_memory_id: str,
+    organization_id: str,
+    principal_id: str | None,
+    promote_to_scope: MemoryScope | str | None,
+    promote_to_scope_key: str | None = None,
+    domain: str | None = None,
+    project: str | None = None,
+    accessible_projects: Iterable[str] | None = None,
+) -> ReflectionPromotionPreview:
+    plan = await _resolve_raw_memory_promotion_plan(
+        raw_memory_id=raw_memory_id,
+        organization_id=organization_id,
+        principal_id=principal_id,
+        promote_to_scope=promote_to_scope,
+        promote_to_scope_key=promote_to_scope_key,
+        domain=domain,
+        project=project,
+        accessible_projects=accessible_projects,
+    )
+    if isinstance(plan, ReflectionPromotionResult):
+        return _promotion_preview_from_denial(plan)
+
+    policy_decisions = _authorize_reflection_write(
+        principal_id=principal_id,
+        memory_scope=plan.target_scope,
+        scope_key=plan.target_scope_key,
+        accessible_projects=accessible_projects,
+    )
+    metadata = {
+        **_policy_metadata(policy_decisions),
+        "input_scopes": _scope_metadata(plan.input_memories),
+        "source_count": len(plan.raw_source_ids),
+        "source_family": "raw_memory",
         "target_project": plan.target_project,
     }
     allowed = all(decision.allowed for decision in policy_decisions)
@@ -1320,6 +1466,119 @@ async def _resolve_reflection_promotion_plan(
     )
 
 
+async def _resolve_raw_memory_promotion_plan(
+    *,
+    raw_memory_id: str,
+    organization_id: str,
+    principal_id: str | None,
+    promote_to_scope: MemoryScope | str | None,
+    promote_to_scope_key: str | None = None,
+    domain: str | None = None,
+    project: str | None = None,
+    accessible_projects: Iterable[str] | None = None,
+) -> _ReflectionPromotionPlan | ReflectionPromotionResult:
+    memory = await get_raw_memory(
+        organization_id=organization_id,
+        memory_id=raw_memory_id,
+    )
+    if memory is None:
+        return _promotion_denied(
+            candidate_id=raw_memory_id,
+            reason="candidate_not_found",
+            review_state="missing",
+            memory_scope=None,
+            scope_key=None,
+            raw_source_ids=[],
+        )
+    if _is_reflection_candidate(memory):
+        return _promotion_denied(
+            candidate_id=memory.id,
+            reason="reflection_candidate_requires_reflection_promotion",
+            review_state=memory.review_state,
+            memory_scope=memory.memory_scope,
+            scope_key=memory.scope_key,
+            raw_source_ids=_raw_source_ids(memory),
+        )
+
+    raw_source_ids = [memory.id]
+    if memory.review_state == _PROMOTED_REVIEW_STATE or memory.metadata.get("promoted_entity_id"):
+        return _promotion_denied(
+            candidate_id=memory.id,
+            reason="candidate_already_promoted",
+            review_state=memory.review_state,
+            memory_scope=memory.memory_scope,
+            scope_key=memory.scope_key,
+            raw_source_ids=raw_source_ids,
+        )
+    if not raw_memory_recallable(memory):
+        return _promotion_denied(
+            candidate_id=memory.id,
+            reason="raw_memory_not_recallable",
+            review_state=memory.review_state,
+            memory_scope=memory.memory_scope,
+            scope_key=memory.scope_key,
+            raw_source_ids=raw_source_ids,
+        )
+
+    input_memories = [memory]
+    ownership_denial = _principal_denial(
+        input_memories,
+        candidate_id=memory.id,
+        principal_id=principal_id,
+        raw_source_ids=raw_source_ids,
+    )
+    if ownership_denial is not None:
+        return ownership_denial
+    source_scope_denial = _source_scope_denial(
+        input_memories,
+        candidate_id=memory.id,
+        principal_id=principal_id,
+        raw_source_ids=raw_source_ids,
+        accessible_projects=accessible_projects,
+    )
+    if source_scope_denial is not None:
+        return source_scope_denial
+
+    target_scope = _coerce_promotion_scope(promote_to_scope)
+    if target_scope is None:
+        return _promotion_denied(
+            candidate_id=memory.id,
+            reason="missing_promote_to_scope",
+            review_state=memory.review_state,
+            memory_scope=memory.memory_scope,
+            scope_key=memory.scope_key,
+            raw_source_ids=raw_source_ids,
+            metadata={"input_scopes": _scope_metadata(input_memories)},
+        )
+
+    target_scope_key = _resolve_promotion_scope_key(
+        target_scope=target_scope,
+        promote_to_scope_key=promote_to_scope_key,
+        project=project,
+        candidate_memory=memory,
+    )
+    promotion_candidate = _candidate_from_raw_memory(
+        memory,
+        target_scope=target_scope,
+        target_scope_key=target_scope_key,
+        domain=domain,
+    )
+    target_project = project or (
+        target_scope_key
+        if target_scope is MemoryScope.PROJECT
+        else _metadata_str(memory.metadata, "project_id")
+    )
+    return _ReflectionPromotionPlan(
+        candidate_memory=memory,
+        promotion_candidate=promotion_candidate,
+        target_scope=target_scope,
+        target_scope_key=target_scope_key,
+        target_project=target_project,
+        raw_source_ids=raw_source_ids,
+        input_memories=input_memories,
+    )
+
+
 def _resolve_memory_scope(
     memory_scope: MemoryScope | str | None,
     project: str | None,
@@ -1844,6 +2103,43 @@ def _candidate_from_review_memory(
     )
 
 
+def _candidate_from_raw_memory(
+    memory: RawMemory,
+    *,
+    target_scope: MemoryScope,
+    target_scope_key: str | None,
+    domain: str | None,
+) -> ReflectionCandidate:
+    metadata = {
+        **memory.metadata,
+        "capture_mode": "promote",
+        "imported_capture_id": memory.id,
+        "native_write_path": "raw_memory_promotion",
+        "promoted_capture_surface": "raw_memory_promotion",
+        "raw_source_ids": [memory.id],
+        "source_ids": [memory.id],
+        "suggested_memory_scope": target_scope.value,
+        "suggested_scope_key": target_scope_key,
+    }
+    resolved_domain = domain or _metadata_str(memory.metadata, "domain")
+    if resolved_domain:
+        metadata["domain"] = resolved_domain
+    return ReflectionCandidate(
+        kind=memory.entity_type or _metadata_str(memory.metadata, "remember_kind") or "episode",
+        title=memory.title,
+        content=memory.raw_content,
+        reason=_metadata_str(memory.metadata, "promotion_reason")
+        or "accepted raw memory for promotion",
+        confidence=_metadata_float(memory.metadata, "promotion_confidence", 1.0),
+        tags=list(memory.tags),
+        metadata=metadata,
+        raw_source_ids=[memory.id],
+        suggested_memory_scope=target_scope.value,
+        suggested_scope_key=target_scope_key,
+        review_state=memory.review_state,
+    )
+
+
 def _entity_type(kind: str) -> EntityType:
     try:
         return EntityType(kind)
@@ -1867,18 +2163,25 @@ def _entity_from_candidate(
     entity_id = _generate_id(entity_type.value, candidate.title, domain or "general")
     source_ids = _candidate_source_ids(candidate, source_id)
     primary_source_id = source_id or (source_ids[0] if source_ids else None)
+    native_write_path = _metadata_str(candidate.metadata, "native_write_path")
+    if not native_write_path:
+        native_write_path = "reflection_promotion"
+    capture_mode = _metadata_str(candidate.metadata, "capture_mode") or "reflect"
+    capture_surface = _metadata_str(candidate.metadata, "promoted_capture_surface")
+    if not capture_surface:
+        capture_surface = "reflection"
     metadata = {
         **candidate.metadata,
         "tags": list(candidate.tags),
         "organization_id": organization_id,
-        "capture_mode": "reflect",
-        "capture_surface": "reflection",
+        "capture_mode": capture_mode,
+        "capture_surface": capture_surface,
         "remember_kind": candidate.kind,
         "reflection_reason": candidate.reason,
         "reflection_confidence": candidate.confidence,
         "raw_source_ids": source_ids,
         "source_ids": source_ids,
-        "native_write_path": "reflection_promotion",
+        "native_write_path": native_write_path,
         **dict(policy_metadata),
     }
     if domain:
@@ -1911,6 +2214,7 @@ def _relationships_for_promotion(
     related_to: Sequence[str] | None,
     supersedes: Sequence[str] | None,
     raw_source_ids: Sequence[str] | None,
+    native_write_path: str = "reflection_promotion",
 ) -> list[Relationship]:
     relationships: list[Relationship] = []
     if project and project != entity_id:
@@ -1919,7 +2223,7 @@ def _relationships_for_promotion(
                 entity_id,
                 project,
                 RelationshipType.BELONGS_TO,
-                metadata={"native_write_path": "reflection_promotion"},
+                metadata={"native_write_path": native_write_path},
             )
         )
     if source_id and source_id != entity_id:
@@ -1928,7 +2232,7 @@ def _relationships_for_promotion(
                 entity_id,
                 source_id,
                 RelationshipType.DERIVED_FROM,
-                metadata={"native_write_path": "reflection_promotion", "source_id": source_id},
+                metadata={"native_write_path": native_write_path, "source_id": source_id},
             )
         )
     excluded_targets = {entity_id, project, source_id}
@@ -1940,7 +2244,7 @@ def _relationships_for_promotion(
                 entity_id,
                 related_id,
                 RelationshipType.RELATED_TO,
-                metadata={"native_write_path": "reflection_promotion"},
+                metadata={"native_write_path": native_write_path},
             )
         )
     for superseded_id in supersedes or ():
@@ -1954,7 +2258,7 @@ def _relationships_for_promotion(
                 superseded_id,
                 RelationshipType.SUPERSEDES,
                 metadata={
-                    "native_write_path": "reflection_promotion",
+                    "native_write_path": native_write_path,
                     "raw_source_ids": source_ids,
                     "source_id": source_ids[0] if source_ids else None,
                     "replacement_reason": "accepted_reflection_candidate",
@@ -1997,7 +2301,9 @@ __all__ = [
     "preview_memory_access",
     "preview_memory_correction",
     "preview_memory_share",
+    "preview_raw_memory_promotion",
     "preview_reflection_candidate_promotion",
+    "promote_raw_memory",
     "promote_reflection_candidate_review",
     "reflection_write_enabled",
     "write_mode_from_env",
