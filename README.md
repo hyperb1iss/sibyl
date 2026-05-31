@@ -23,7 +23,7 @@
     <img src="https://img.shields.io/github/v/release/hyperb1iss/sibyl?style=flat-square&logo=github&logoColor=white" alt="Latest Release">
   </a>
   <a href="https://github.com/hyperb1iss/sibyl/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/License-AGPL_3.0-blue?style=flat-square&logo=gnu&logoColor=white" alt="License">
+    <img src="https://img.shields.io/badge/License-Apache_2.0-blue?style=flat-square&logo=apache&logoColor=white" alt="License">
   </a>
 </p>
 
@@ -597,7 +597,7 @@ moon run :check           # Lint + typecheck + test
 
 ## License
 
-AGPL-3.0. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE).
 
 ---
 

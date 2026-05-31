@@ -75,7 +75,7 @@ class Sibyl < Formula
   homepage "https://github.com/hyperb1iss/sibyl"
   url "{cli.url}"
   sha256 "{cli.sha256}"
-  license "AGPL-3.0-only"
+  license "Apache-2.0"
   version "{release_version}"
 
   PYTHON_PACKAGE_VERSION = "{python_version}"

@@ -14,7 +14,7 @@ name = "sibyl-dev"
 dynamic = ["version"]
 description = "CLI for Sibyl knowledge graph and task workflow"
 readme = "README.md"
-license = "AGPL-3.0-only"
+license = "Apache-2.0"
 requires-python = ">=3.13"
 authors = [{ name = "Stefanie Jane", email = "stef@hyperbliss.tech" }]
 keywords = ["knowledge-graph", "tasks", "cli", "mcp"]
@@ -22,7 +22,7 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",
     "Typing :: Typed",

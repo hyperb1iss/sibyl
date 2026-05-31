@@ -83,5 +83,5 @@ Sibyl uses [Conventional Commits](https://www.conventionalcommits.org/):
 
 ## License
 
-Sibyl is licensed under **AGPL-3.0**. By contributing, you agree that your
+Sibyl is licensed under **Apache-2.0**. By contributing, you agree that your
 contributions are licensed under the same terms. See [LICENSE](LICENSE).
