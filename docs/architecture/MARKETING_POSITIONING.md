@@ -67,7 +67,7 @@ the proof that the wedge is real, not the first thing a visitor reads.
 
 ### 4. The flank: self-host free, the whole system
 
-**Self-host the whole system, free. No capability paywall. AGPL-3.0.**
+**Self-host the whole system, free. No capability paywall. Apache-2.0.**
 
 Self-hosting is the cluster's open flank, and it is wide open. Zep deprecated Community
 Edition (April 2025); Mem0 paywalls the graph at $249/mo; Supermemory paywalls self-host at
@@ -75,17 +75,19 @@ $399/mo; Honcho's "open source core" has no self-host docs; Graphon is demo-gate
 funded rival abandoned or paywalled the audience that wants to run their own memory. Sibyl
 runs the full system on a laptop, a Pi, or a $15 cloud box, with every feature.
 
-State the license accurately. **Everything Sibyl ships is AGPL-3.0-only today**: the server
-(`apps/api`), the CLI (`apps/cli`), and the core library (`packages/python/sibyl-core`) all
-declare `AGPL-3.0-only`. The only Apache-2.0 in the tree is the internal `apps/e2e` test
-harness, which is not a public SDK.
+State the license accurately. **Everything Sibyl ships is Apache-2.0**: the server
+(`apps/api`), the CLI (`apps/cli`), the core library (`packages/python/sibyl-core`), and the
+internal `apps/e2e` harness all declare `Apache-2.0`. One permissive license across the
+whole tree — no copyleft, no SDK-vs-server split — so a developer can self-host the server,
+script the CLI, or import the core with no AGPL objection to clear.
 
-**Open decision before launch.** The sibyl.ist copy currently claims "AGPL-3.0 server,
-Apache-2.0 SDK." That is not backed by the code. A permissive client/SDK license is a
-legitimate strategy: it lowers adoption friction and answers the real "I cannot put AGPL in
-my client code" objection. But the claim has to follow the code, not the reverse. Either
-relicense the SDK/core to Apache-2.0 deliberately, or correct the copy to AGPL-3.0. Do not
-ship the Apache claim while the license field says otherwise.
+**Do not lead with "more open source" as the differentiator.** The field is permissive too
+(Cognee is Apache-2.0, Hindsight is MIT), so "open" is table stakes, not a wedge. The
+ownable claim is the one no funded rival makes: **self-host the whole system free, with no
+capability paywall** — every feature on a laptop, not a stripped community edition. That is
+what separates Sibyl from the rivals who paywalled or killed self-hosting. (Relicensed from
+AGPL-3.0 to Apache-2.0 on 2026-05-31 to remove the enterprise adoption objection; the
+anti-strip-mining lever stays available later via dual-licensing if it is ever needed.)
 
 ### 5. The proof: one number, one run, everywhere
 
@@ -175,8 +177,7 @@ Consistency checklist before any launch surface ships:
 - [ ] Uses "cross-agent memory" as the category phrase.
 - [ ] Benchmark number is 96.96% R@5 / 98.90% R@10, cited to run `26304777971`, with the
       retrieval-vs-QA caveat.
-- [ ] License stated accurately: AGPL-3.0 today. Do not claim an Apache SDK unless the code
-      has been relicensed (see section 4).
+- [ ] License stated accurately: Apache-2.0 across the whole tree (server, CLI, core).
 - [ ] Self-host-free flank is loud, not buried.
 - [ ] Codemode / shell-native present as the how, not the headline.
 

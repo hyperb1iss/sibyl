@@ -128,8 +128,8 @@ it installs a thin Python CLI then secretly orchestrates Docker containers. v2 s
 
 PyPI has `sibyl-dev` 0.10.0 and `sibyl-core` 0.10.0 published. `sibyld` builds locally at `1.0.0rc1`
 but is **not published** despite the README telling users to `uv tool install sibyld`. `VERSION` is
-`1.0.0-rc.1`. `Formula/sibyl.rb` is 0.2.0 with `PLACEHOLDER_SHA256` on every resource and the wrong
-license (Apache-2.0 vs AGPL-3.0). `install.sh` hard-requires Docker, then installs only the CLI and
+`1.0.0-rc.1`. `Formula/sibyl.rb` is 0.2.0 with `PLACEHOLDER_SHA256` on every resource; its Apache-2.0 license
+now matches the relicensed tree. `install.sh` hard-requires Docker, then installs only the CLI and
 orchestrates containers pulled from `ghcr.io/hyperb1iss/sibyl-{api,web}:latest`. GHCR has public
 multi-arch `0.10.0`/`latest` images, but no `1.0.0-rc.1` tags yet. `setup-dev.sh` still references
 FalkorDB and PostgreSQL as "required databases." Three artifact sources, three different versions.

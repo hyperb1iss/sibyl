@@ -53,7 +53,7 @@ Sibyl's defensible position is the intersection of six properties. No competitor
 
 | Property                                                        | Sibyl | Notes                                                        |
 | --------------------------------------------------------------- | :---: | ------------------------------------------------------------ |
-| Self-hosted, open source                                        |   ✓   | AGPL-3.0. No mandatory cloud.                                |
+| Self-hosted, open source                                        |   ✓   | Apache-2.0. No mandatory cloud.                              |
 | Graph-native runtime (graph + vector + full-text + traversal)   |   ✓   | SurrealDB unified.                                           |
 | Physical tenant isolation (namespace-per-org, not filter-based) |   ✓   | SurrealDB namespace boundary.                                |
 | Source-preserving memory records                                |   ✓   | Session entities keep original content.                      |
