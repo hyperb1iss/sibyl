@@ -5,8 +5,8 @@ import { render, screen } from '@/test/utils';
 const hooks = vi.hoisted(() => ({
   useCreateEntity: vi.fn(),
   useHealth: vi.fn(),
+  useMe: vi.fn(),
   useOrgMetrics: vi.fn(),
-  useProjects: vi.fn(),
   useSessionBundle: vi.fn(),
   useStats: vi.fn(),
   useTelemetrySummary: vi.fn(),
@@ -83,12 +83,17 @@ describe('DashboardContent', () => {
       isLoading: false,
     });
     hooks.useStats.mockReturnValue({ data: initialStats });
-    hooks.useProjects.mockReturnValue({
+    hooks.useMe.mockReturnValue({
       data: {
-        entities: [
-          { id: 'proj_1', name: 'Alpha' },
-          { id: 'proj_2', name: 'Beta' },
-        ],
+        user: {
+          id: 'user_1',
+          github_id: null,
+          email: 'stef@hyperbliss.tech',
+          name: 'Stefanie Jane',
+          avatar_url: null,
+        },
+        organization: { id: 'org_1', slug: 'hyper', name: 'Hyperbliss' },
+        org_role: 'owner',
       },
     });
     hooks.useOrgMetrics.mockReturnValue({ data: orgMetrics });
@@ -211,6 +216,17 @@ describe('DashboardContent', () => {
     expect(screen.getByText('3 in progress')).toBeInTheDocument();
     expect(screen.getByText('40% complete')).toBeInTheDocument();
     expect(hooks.useTasks).not.toHaveBeenCalled();
+  });
+
+  it('greets the user by name with a live memory pulse hero', () => {
+    render(<DashboardContent initialStats={initialStats} />);
+
+    expect(screen.getByRole('heading', { level: 1, name: /stefanie/i })).toBeInTheDocument();
+    expect(screen.getByText('memories')).toBeInTheDocument();
+    expect(screen.getByText('in motion')).toBeInTheDocument();
+    expect(screen.getByText('shipped this week')).toBeInTheDocument();
+    // value binds from stats/orgMetrics; pulse "complete" must not collide with the task bar
+    expect(screen.getByText('40% complete')).toBeInTheDocument();
   });
 
   it('renders runtime performance telemetry on the overview page', () => {

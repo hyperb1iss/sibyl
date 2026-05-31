@@ -18,7 +18,6 @@ import {
   Database,
   EditPencil,
   FileText,
-  FolderKanban,
   Key,
   Layers,
   ListTodo,
@@ -32,11 +31,11 @@ import {
   Zap,
 } from '@/components/ui/icons';
 import type { StatsResponse, TelemetryDurationSummary } from '@/lib/api';
-import { formatUptime, getEntityColorVar } from '@/lib/constants';
+import { getEntityColorVar } from '@/lib/constants';
 import {
   useHealth,
+  useMe,
   useOrgMetrics,
-  useProjects,
   useSessionBundle,
   useStats,
   useTelemetrySummary,
@@ -242,13 +241,117 @@ function formatCount(summary: TelemetryDurationSummary | undefined, unit: string
   return `${summary?.count ?? 0} ${unit}`;
 }
 
+function greetingFor(hour: number): string {
+  if (hour < 5) return 'Still up';
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+type PulseMood = 'momentum' | 'busy' | 'milestone' | 'quiet' | 'fresh' | 'neutral';
+
+// Sibyl voice: cross-agent memory, the recall/remember/reflect loop, collective
+// intelligence, shell-native, dark-neon honesty. No "second brain", no hype.
+const PULSE_LINES: Record<PulseMood, readonly string[]> = {
+  momentum: [
+    'Sharper than you left it',
+    'The graph compounded your week',
+    'Your graph just got denser',
+    'Compounding faster than last week',
+    'Every session sharper than the last',
+  ],
+  busy: [
+    'Every agent feeding the same fire',
+    'The loop doesn’t sleep',
+    'Graph’s talking to itself right now',
+    'Your agents are writing history',
+    'One graph, maximum traffic',
+  ],
+  milestone: [
+    'Thousands of memories, still sharp',
+    'Your graph got serious',
+    'Scale that compounds',
+    'Graph’s grown teeth',
+    'You’ve built something here',
+  ],
+  quiet: [
+    'Good time to recall what matters',
+    'Reflect on what stuck',
+    'Silence is where patterns emerge',
+    'The loop’s waiting on you',
+    'Low tide, high clarity',
+  ],
+  fresh: [
+    'Graph’s listening for its first memory',
+    'The loop is ready',
+    'Shell-native, all yours, clean slate',
+    'Collective intelligence starts here',
+    'Your agents haven’t spoken yet',
+  ],
+  neutral: [
+    'One graph, every agent, still yours',
+    'Cross-agent memory in motion',
+    'Shell-native, self-hosted, yours',
+    'Recall, remember, reflect',
+    'Collective intelligence doesn’t sleep',
+    'Memory that survives the pivot',
+  ],
+};
+
+function pulseMood({
+  shipped,
+  doing,
+  totalEntities,
+}: {
+  shipped: number;
+  doing: number;
+  totalEntities: number;
+}): PulseMood {
+  if (totalEntities < 25) return 'fresh';
+  if (shipped >= 3) return 'momentum';
+  if (doing >= 8) return 'busy';
+  if (shipped === 0 && doing <= 1) return 'quiet';
+  if (totalEntities >= 2000) return 'milestone';
+  return 'neutral';
+}
+
+function formatNumber(value: number): string {
+  return value.toLocaleString('en-US');
+}
+
+function PulseStat({
+  icon: Icon,
+  tone,
+  value,
+  label,
+}: {
+  icon: IconComponent;
+  tone: string;
+  value: string | number;
+  label: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <Icon width={14} height={14} className={`${tone} shrink-0 sm:w-4 sm:h-4`} />
+      <span className="text-xs sm:text-sm text-sc-fg-muted">
+        <span className="text-sc-fg-primary font-medium" suppressHydrationWarning>
+          {value}
+        </span>{' '}
+        {label}
+      </span>
+    </div>
+  );
+}
+
 export function DashboardContent({ initialStats }: DashboardContentProps) {
   const [mounted, setMounted] = useState(false);
+  const [greetHour, setGreetHour] = useState(18);
+  const [pulseSeed, setPulseSeed] = useState(0);
   const { openCaptureMemory } = useCaptureMemory();
   const projectFilters = useProjectFilters();
   const { data: health, isLoading: healthLoading } = useHealth();
   const { data: stats } = useStats(initialStats);
-  const { data: projectsData } = useProjects();
+  const { data: me } = useMe();
   const { data: orgMetrics } = useOrgMetrics();
   const { data: telemetry } = useTelemetrySummary({ window_seconds: 900, rollup_limit: 120 });
   const { data: sessionBundle, isLoading: sessionBundleLoading } = useSessionBundle({
@@ -257,9 +360,11 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
     memory_limit: 2,
   });
 
-  // Avoid hydration mismatch - only show real status after mount
+  // Avoid hydration mismatch - greeting + live status resolve client-side after mount
   useEffect(() => {
     setMounted(true);
+    setGreetHour(new Date().getHours());
+    setPulseSeed(Math.floor(Math.random() * 997));
   }, []);
 
   // Calculate task stats in single pass
@@ -275,7 +380,6 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
     };
   }, [orgMetrics]);
 
-  const projectCount = projectsData?.entities?.length ?? 0;
   const apiTelemetry = telemetry?.summaries.api;
   const surrealTelemetry = telemetry?.summaries.surreal;
   const memoryTelemetry = telemetry?.summaries.memory;
@@ -312,6 +416,20 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
     return <FirstRunWelcome onCapture={() => openCaptureMemory('dashboard')} />;
   }
 
+  const firstName = me?.user?.name?.trim().split(/\s+/)[0] ?? null;
+  const greetWord = mounted ? greetingFor(greetHour) : 'Welcome back';
+  const heroGreeting = firstName ? `${greetWord}, ${firstName}` : greetWord;
+  const shippedThisWeek = orgMetrics?.tasks_completed_last_7d ?? 0;
+  const completionPct =
+    taskStats.total > 0 ? Math.round((taskStats.done / taskStats.total) * 100) : 0;
+  const heroMood = pulseMood({
+    shipped: shippedThisWeek,
+    doing: taskStats.doing,
+    totalEntities,
+  });
+  const moodLines = PULSE_LINES[heroMood];
+  const heroSubtitle = mounted ? moodLines[pulseSeed % moodLines.length] : PULSE_LINES.neutral[0];
+
   return (
     <div className="space-y-4 sm:space-y-6 animate-fade-in">
       {/* Welcome Banner - Shows for new users with few entities */}
@@ -320,17 +438,23 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
       {/* Hero Section - System Overview */}
       <div className="bg-gradient-to-br from-sc-bg-base via-sc-bg-elevated to-sc-purple/5 border border-sc-fg-subtle/20 rounded-xl p-4 sm:p-6 shadow-card">
         <div className="flex flex-col lg:flex-row gap-4 sm:gap-8 items-start lg:items-center justify-between">
-          {/* Left: Status & Welcome */}
+          {/* Left: Greeting & Memory Pulse */}
           <div className="flex-1 space-y-3 sm:space-y-4 min-w-0">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-sc-purple via-sc-magenta to-sc-coral flex items-center justify-center shadow-glow-purple shrink-0">
                 <Database width={20} height={20} className="text-sc-on-accent sm:w-6 sm:h-6" />
               </div>
               <div className="min-w-0">
-                <h1 className="text-xl sm:text-2xl font-bold text-sc-fg-primary truncate">
-                  Knowledge Oracle
+                <h1
+                  className="text-xl sm:text-2xl font-bold text-sc-fg-primary truncate"
+                  suppressHydrationWarning
+                >
+                  {heroGreeting}
                 </h1>
-                <div className="flex items-center gap-3 sm:gap-4 mt-1 flex-wrap">
+                <div className="flex items-center gap-2 sm:gap-3 mt-1 flex-wrap">
+                  <p className="text-xs sm:text-sm text-sc-fg-muted" suppressHydrationWarning>
+                    {heroSubtitle}
+                  </p>
                   {mounted && health?.graph_connected && (
                     <div className="flex items-center gap-1.5 text-xs sm:text-sm text-sc-fg-muted">
                       <div className="w-2 h-2 rounded-full bg-sc-green shadow-[0_0_8px_color-mix(in_oklch,var(--sc-green)_60%,transparent)] animate-pulse" />
@@ -349,39 +473,32 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
               </div>
             </div>
 
-            {/* Quick Stats Row */}
+            {/* Memory Pulse Row */}
             <div className="flex flex-wrap gap-3 sm:gap-6">
-              <div className="flex items-center gap-2">
-                <Clock width={14} height={14} className="text-sc-cyan shrink-0 sm:w-4 sm:h-4" />
-                <span className="text-xs sm:text-sm text-sc-fg-muted">
-                  Uptime:{' '}
-                  <span className="text-sc-fg-primary font-medium" suppressHydrationWarning>
-                    {formatUptime(mounted ? (health?.uptime_seconds ?? 0) : 0)}
-                  </span>
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <FolderKanban
-                  width={14}
-                  height={14}
-                  className="text-sc-purple shrink-0 sm:w-4 sm:h-4"
-                />
-                <span className="text-xs sm:text-sm text-sc-fg-muted">
-                  <span className="text-sc-fg-primary font-medium" suppressHydrationWarning>
-                    {projectCount}
-                  </span>{' '}
-                  Projects
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <ListTodo width={14} height={14} className="text-sc-coral shrink-0 sm:w-4 sm:h-4" />
-                <span className="text-xs sm:text-sm text-sc-fg-muted">
-                  <span className="text-sc-fg-primary font-medium" suppressHydrationWarning>
-                    {taskStats.total}
-                  </span>{' '}
-                  Tasks
-                </span>
-              </div>
+              <PulseStat
+                icon={Boxes}
+                tone="text-sc-cyan"
+                value={formatNumber(totalEntities)}
+                label="memories"
+              />
+              <PulseStat
+                icon={Play}
+                tone="text-sc-purple"
+                value={taskStats.doing}
+                label="in motion"
+              />
+              <PulseStat
+                icon={CheckCircle2}
+                tone="text-sc-green"
+                value={shippedThisWeek}
+                label="shipped this week"
+              />
+              <PulseStat
+                icon={TrendingUp}
+                tone="text-sc-coral"
+                value={`${completionPct}%`}
+                label="complete"
+              />
             </div>
           </div>
 
