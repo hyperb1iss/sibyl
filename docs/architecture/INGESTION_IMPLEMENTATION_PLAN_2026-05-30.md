@@ -421,6 +421,9 @@ the other plans** — listed here so the ingestion story declares its dependenci
 - **M7.2 — Bi-temporal as-of recall** (validity windows + contradiction invalidation). → **POST_GRAPHITI B4.**
 - **M7.3 — Write-time entity resolution** via the existing HNSW KNN primitive (replace batch-only dedup). → **DATA_MODEL W4.2.**
 - **M7.4 — Faceted browse UX** (source/person/date/label/scope) + one unified cross-source search; pin one authoritative LongMemEval run and reconcile the three in-repo number pairs.
+  - **Doc pin:** canonical LongMemEval-S claim is run `26304777971`, commit `36032a25`,
+    `96.96%` strict R@5 and `98.90%` R@10. Older `96.67%`/`98.68%` values remain only
+    as historical score-progression evidence in `docs/testing/longmemeval.md`.
 
 ---
 

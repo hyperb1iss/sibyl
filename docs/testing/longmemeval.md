@@ -191,6 +191,9 @@ caller passes `--allow-localhost` to the harness directly.
 These rows trace the live LongMemEval improvements that drove the latest result. Each is a real CI
 run; the artifact paths live under `gh run view <id>`.
 
+Only run `26304777971` is canonical for public claims. Earlier rows are historical progression
+evidence and should not be quoted as the latest Sibyl score.
+
 | Run         | Commit     |         H@5 |        R@5 |     NDCG@5 |        H@10 |       R@10 | Notes                     |
 | ----------- | ---------- | ----------: | ---------: | ---------: | ----------: | ---------: | ------------------------- |
 | 26137429505 | early      |      96.20% |     92.45% |     89.40% |      98.20% |     96.29% | early live quality gap    |
