@@ -631,6 +631,52 @@ async def test_recall_raw_returns_scoped_memories() -> None:
 
 
 @pytest.mark.asyncio
+async def test_recall_raw_forwards_import_metadata_filters() -> None:
+    org = _org()
+    http_request = _http_request()
+    occurred_after = datetime(2014, 1, 1, tzinfo=UTC)
+    occurred_before = datetime(2014, 12, 31, 23, 59, 59, tzinfo=UTC)
+    with (
+        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock(return_value=[])) as recall,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        await recall_raw(
+            RawMemoryRecallRequest(
+                query="surrealdb",
+                participants=["nova@example.com"],
+                labels=["email"],
+                thread_id="thread-1",
+                occurred_after=occurred_after,
+                occurred_before=occurred_before,
+                limit=5,
+            ),
+            http_request=http_request,
+            org=org,
+            ctx=_ctx(),
+        )
+
+    recall.assert_awaited_once_with(
+        organization_id=str(org.id),
+        principal_id="user-123",
+        query="surrealdb",
+        memory_scope="private",
+        scope_key=None,
+        agent_id=None,
+        project_id=None,
+        limit=5,
+        participants=["nova@example.com"],
+        labels=["email"],
+        thread_id="thread-1",
+        occurred_after=occurred_after,
+        occurred_before=occurred_before,
+    )
+    audit_details = audit.await_args.kwargs["details"]
+    assert audit_details["participants"] == ["nova@example.com"]
+    assert audit_details["labels"] == ["email"]
+    assert audit_details["thread_id"] == "thread-1"
+
+
+@pytest.mark.asyncio
 async def test_recall_raw_rate_limits_concurrent_member_recall() -> None:
     with (
         patch(

@@ -2125,6 +2125,25 @@ def recall_context(
     diary: bool = typer.Option(False, "--diary", help="Recall a private agent diary"),
     memory_scope: str = typer.Option("private", "--scope", help="Raw memory scope"),
     scope_key: str | None = typer.Option(None, "--scope-key", help="Project/team/shared scope key"),
+    participant: Annotated[
+        list[str] | None,
+        typer.Option("--participant", help="Filter raw imports by participant"),
+    ] = None,
+    label: Annotated[
+        list[str] | None,
+        typer.Option("--label", help="Filter raw imports by adapter label"),
+    ] = None,
+    thread_id: str | None = typer.Option(None, "--thread", help="Filter raw imports by thread"),
+    occurred_after: str | None = typer.Option(
+        None,
+        "--occurred-after",
+        help="Filter raw imports after an ISO timestamp",
+    ),
+    occurred_before: str | None = typer.Option(
+        None,
+        "--occurred-before",
+        help="Filter raw imports before an ISO timestamp",
+    ),
 ) -> None:
     """Recall a compact working context pack for an agent."""
     effective_project = project or (None if all_projects else resolve_project_from_cwd())
@@ -2137,6 +2156,17 @@ def recall_context(
                     error("Provide --agent when using --diary.")
                     raise typer.Exit(code=1)
                 if raw or diary:
+                    recall_kwargs: dict[str, Any] = {}
+                    if participant:
+                        recall_kwargs["participants"] = participant
+                    if label:
+                        recall_kwargs["labels"] = label
+                    if thread_id:
+                        recall_kwargs["thread_id"] = thread_id
+                    if occurred_after:
+                        recall_kwargs["occurred_after"] = occurred_after
+                    if occurred_before:
+                        recall_kwargs["occurred_before"] = occurred_before
                     data = await client.recall_raw_memory(
                         query=goal,
                         memory_scope=memory_scope,
@@ -2145,6 +2175,7 @@ def recall_context(
                         agent_id=agent if diary else None,
                         project_id=effective_project if diary else None,
                         limit=limit,
+                        **recall_kwargs,
                     )
                     if json_output:
                         print_json(data)

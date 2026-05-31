@@ -39,6 +39,23 @@ class RawMemoryRecallRequest(BaseModel):
     diary: bool = Field(default=False, description="Recall private agent diary entries")
     agent_id: str | None = Field(default=None, description="Agent identity to recall")
     project_id: str | None = Field(default=None, description="Project diary filter")
+    participants: list[str] = Field(
+        default_factory=list,
+        description="Participant identifiers to filter imported records",
+    )
+    labels: list[str] = Field(
+        default_factory=list,
+        description="Adapter labels/tags to filter imported records",
+    )
+    thread_id: str | None = Field(default=None, description="Imported thread identifier")
+    occurred_after: datetime | None = Field(
+        default=None,
+        description="Earliest source occurrence timestamp",
+    )
+    occurred_before: datetime | None = Field(
+        default=None,
+        description="Latest source occurrence timestamp",
+    )
     limit: int = Field(default=10, ge=1, le=50, description="Maximum memories to return")
 
 

@@ -1227,6 +1227,11 @@ class SibylClient:
         diary: bool = False,
         agent_id: str | None = None,
         project_id: str | None = None,
+        participants: list[str] | None = None,
+        labels: list[str] | None = None,
+        thread_id: str | None = None,
+        occurred_after: str | None = None,
+        occurred_before: str | None = None,
         limit: int = 10,
     ) -> dict[str, Any]:
         """Recall verbatim raw memories."""
@@ -1242,6 +1247,16 @@ class SibylClient:
             data["agent_id"] = agent_id
         if project_id:
             data["project_id"] = project_id
+        if participants:
+            data["participants"] = participants
+        if labels:
+            data["labels"] = labels
+        if thread_id:
+            data["thread_id"] = thread_id
+        if occurred_after:
+            data["occurred_after"] = occurred_after
+        if occurred_before:
+            data["occurred_before"] = occurred_before
         return await self._request("POST", "/memory/raw/recall", json=data)
 
     async def memory_audit(

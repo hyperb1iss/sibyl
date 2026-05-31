@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-from collections.abc import AsyncIterator, Iterable, Mapping
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -159,6 +159,15 @@ class RawMemory:
     score: float = 0.0
 
 
+@dataclass(frozen=True, slots=True)
+class _RawMemoryRecallFilters:
+    participants: tuple[str, ...] = ()
+    labels: tuple[str, ...] = ()
+    thread_id: str | None = None
+    occurred_after: str | None = None
+    occurred_before: str | None = None
+
+
 _RECALL_EXCLUDED_REVIEW_STATES = frozenset(
     {
         "archived",
@@ -249,6 +258,31 @@ def _normalize_records(result: object) -> list[SurrealRecord]:
     records: list[SurrealRecord] = []
     for item in result:
         records.extend(_normalize_records(item))
+    return records
+
+
+def _normalize_records_preserving_id(result: object) -> list[SurrealRecord]:
+    if result is None:
+        return []
+    if isinstance(result, dict):
+        payload = {str(key): value for key, value in result.items()}
+        if "result" in payload and ("status" in payload or "time" in payload):
+            return _normalize_records_preserving_id(payload.get("result"))
+        statements = payload.get("result")
+        if (
+            "status" not in payload
+            and isinstance(statements, list)
+            and statements
+            and all(isinstance(statement, dict) for statement in statements)
+        ):
+            return _normalize_records_preserving_id(statements[-1])
+        return [payload]
+    if not isinstance(result, list):
+        return []
+
+    records: list[SurrealRecord] = []
+    for item in result:
+        records.extend(_normalize_records_preserving_id(item))
     return records
 
 
@@ -897,6 +931,47 @@ def _memory_scope_where(
     return " AND ".join(clauses), params
 
 
+def _raw_memory_recall_where(
+    *,
+    organization_id: str,
+    principal_id: str,
+    memory_scope: MemoryScope,
+    scope_key: str | None,
+    agent_id: str | None = None,
+    project_id: str | None = None,
+    filters: _RawMemoryRecallFilters | None = None,
+) -> tuple[str, dict[str, object]]:
+    where_clause, params = _memory_scope_where(
+        organization_id=organization_id,
+        principal_id=principal_id,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+        agent_id=agent_id,
+        project_id=project_id,
+    )
+    clauses = [where_clause]
+    filters = filters or _RawMemoryRecallFilters()
+    if filters.participants:
+        clauses.append("metadata.participants CONTAINSANY $participants")
+        params["participants"] = list(filters.participants)
+    if filters.labels:
+        clauses.append("(tags CONTAINSANY $labels OR metadata.labels CONTAINSANY $labels)")
+        params["labels"] = list(filters.labels)
+    if filters.thread_id:
+        clauses.append(
+            "(metadata.thread_id = $thread_id "
+            "OR metadata.source_record_metadata.thread_id = $thread_id)"
+        )
+        params["thread_id"] = filters.thread_id
+    if filters.occurred_after:
+        clauses.append("metadata.occurred_at >= $occurred_after")
+        params["occurred_after"] = filters.occurred_after
+    if filters.occurred_before:
+        clauses.append("metadata.occurred_at <= $occurred_before")
+        params["occurred_before"] = filters.occurred_before
+    return " AND ".join(clauses), params
+
+
 async def _recall_raw_memory_lexical(
     client: SurrealContentClient,
     *,
@@ -907,15 +982,17 @@ async def _recall_raw_memory_lexical(
     scope_key: str | None,
     agent_id: str | None,
     project_id: str | None,
+    filters: _RawMemoryRecallFilters | None = None,
     limit: int,
 ) -> list[RawMemory]:
-    where_clause, params = _memory_scope_where(
+    where_clause, params = _raw_memory_recall_where(
         organization_id=organization_id,
         principal_id=principal_id,
         memory_scope=memory_scope,
         scope_key=scope_key,
         agent_id=agent_id,
         project_id=project_id,
+        filters=filters,
     )
     rows = await _select_many(
         client,
@@ -932,6 +1009,186 @@ async def _recall_raw_memory_lexical(
     return sorted(scored, key=lambda memory: (-memory.score, memory.captured_at or datetime.min))[
         :limit
     ]
+
+
+async def _recall_raw_memory_fulltext(
+    client: SurrealContentClient,
+    *,
+    where_clause: str,
+    params: Mapping[str, object],
+    query: str,
+    limit: int,
+) -> list[RawMemory]:
+    rows = await with_timeout(
+        _select_many_raw(
+            client,
+            "SELECT *, math::max([search::score(0), search::score(1)]) AS score "
+            f"FROM raw_captures WHERE {where_clause} "
+            "AND (title @0@ $search_query OR raw_content @1@ $search_query) "
+            "ORDER BY score DESC, captured_at DESC LIMIT $limit;",
+            **params,
+            search_query=query,
+            limit=limit * _LIFECYCLE_FILTER_OVERFETCH_FACTOR,
+        ),
+        timeout_seconds=_DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
+        operation_name="surreal_raw_memory_fulltext_recall",
+    )
+    return _recallable_memories([_raw_memory_from_record(row) for row in rows], limit=limit)
+
+
+async def _recall_raw_memory_vector(
+    client: SurrealContentClient,
+    *,
+    where_clause: str,
+    params: Mapping[str, object],
+    query_embedding: list[float],
+    limit: int,
+) -> list[RawMemory]:
+    candidate_limit = max(limit * _LIFECYCLE_FILTER_OVERFETCH_FACTOR, limit)
+    rows = await with_timeout(
+        _select_many_raw(
+            client,
+            "SELECT * FROM ("
+            "SELECT *, (1 - vector::distance::knn()) AS score "
+            f"FROM raw_captures WHERE {where_clause} "
+            f"AND embedding <|{candidate_limit}, 40|> $query_embedding"
+            ") ORDER BY score DESC, captured_at DESC LIMIT $candidate_limit;",
+            **params,
+            query_embedding=query_embedding,
+            candidate_limit=candidate_limit,
+        ),
+        timeout_seconds=_DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
+        operation_name="surreal_raw_memory_vector_recall",
+    )
+    return _recallable_memories([_raw_memory_from_record(row) for row in rows], limit=limit)
+
+
+async def _raw_memory_query_embedding(query: str) -> list[float] | None:
+    provider = _configured_raw_memory_embedding_provider()
+    if provider is None:
+        return None
+    try:
+        embeddings = await provider.embed_texts([query], input_kind="query")
+        return _embedding_vector_from_batch(embeddings, provider.metadata.dimensions)
+    except Exception:
+        return None
+
+
+def _python_raw_memory_rrf_scores(
+    result_lists: Sequence[Sequence[RawMemory]],
+    *,
+    k: float = 60.0,
+) -> dict[str, float]:
+    scores: dict[str, float] = {}
+    for memories in result_lists:
+        for rank, memory in enumerate(memories, start=1):
+            scores[memory.id] = scores.get(memory.id, 0.0) + (1.0 / (k + rank))
+    return scores
+
+
+async def _surreal_raw_memory_rrf_scores(
+    client: SurrealContentClient,
+    result_lists: Sequence[Sequence[RawMemory]],
+    *,
+    limit: int,
+    k: float = 60.0,
+) -> dict[str, float]:
+    rrf_inputs = [
+        [{"id": memory.id, "score": memory.score} for memory in memories]
+        for memories in result_lists
+    ]
+    if not any(rrf_inputs):
+        return {}
+    unique_count = len({memory.id for memories in result_lists for memory in memories})
+    try:
+        result = await client.execute_query(
+            "RETURN search::rrf($lists, $limit, $k);",
+            lists=rrf_inputs,
+            limit=max(int(limit), unique_count, 1),
+            k=k,
+        )
+    except Exception:
+        return {}
+    if _query_error(result) is not None:
+        return {}
+
+    scores: dict[str, float] = {}
+    for row in _normalize_records_preserving_id(result):
+        memory_id = _coerce_optional_str(row.get("id") or row.get("uuid") or row.get("record_id"))
+        raw_score = row.get("rrf_score", row.get("rff_score", row.get("fuse_score")))
+        if memory_id and isinstance(raw_score, int | float):
+            scores[memory_id] = float(raw_score)
+    return scores
+
+
+async def _fuse_raw_memory_results(
+    client: SurrealContentClient,
+    result_lists: Sequence[Sequence[RawMemory]],
+    *,
+    limit: int,
+) -> list[RawMemory]:
+    raw_lists = [list(results) for results in result_lists if results]
+    if not raw_lists:
+        return []
+    if len(raw_lists) == 1:
+        return raw_lists[0][:limit]
+
+    memory_by_id: dict[str, RawMemory] = {}
+    first_seen: dict[str, tuple[int, int]] = {}
+    for list_index, memories in enumerate(raw_lists):
+        for rank, memory in enumerate(memories, start=1):
+            memory_by_id.setdefault(memory.id, memory)
+            first_seen.setdefault(memory.id, (list_index, rank))
+
+    scores = await _surreal_raw_memory_rrf_scores(client, raw_lists, limit=limit)
+    if set(scores) != set(memory_by_id):
+        fallback_scores = _python_raw_memory_rrf_scores(raw_lists)
+        for memory_id, score in fallback_scores.items():
+            scores.setdefault(memory_id, score)
+
+    fused: list[RawMemory] = []
+    ranked_ids = sorted(
+        memory_by_id,
+        key=lambda memory_id: (-scores.get(memory_id, 0.0), first_seen[memory_id]),
+    )
+    for memory_id in ranked_ids[:limit]:
+        memory = memory_by_id[memory_id]
+        score = scores.get(memory_id, 0.0)
+        memory.score = score
+        fused.append(memory)
+    return fused
+
+
+def _raw_recall_filters(
+    *,
+    participants: Sequence[str] | None,
+    labels: Sequence[str] | None,
+    thread_id: str | None,
+    occurred_after: datetime | str | None,
+    occurred_before: datetime | str | None,
+) -> _RawMemoryRecallFilters:
+    return _RawMemoryRecallFilters(
+        participants=tuple(_normalized_filter_values(participants)),
+        labels=tuple(_normalized_filter_values(labels)),
+        thread_id=_coerce_optional_str(thread_id),
+        occurred_after=_datetime_filter_value(occurred_after),
+        occurred_before=_datetime_filter_value(occurred_before),
+    )
+
+
+def _normalized_filter_values(values: Sequence[str] | None) -> list[str]:
+    if values is None:
+        return []
+    return [value for item in values if (value := str(item).strip())]
+
+
+def _datetime_filter_value(value: datetime | str | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    text = str(value).strip()
+    return text or None
 
 
 async def remember_raw_memory(
@@ -1213,6 +1470,11 @@ async def recall_raw_memory(
     scope_key: str | None = None,
     agent_id: str | None = None,
     project_id: str | None = None,
+    participants: Sequence[str] | None = None,
+    labels: Sequence[str] | None = None,
+    thread_id: str | None = None,
+    occurred_after: datetime | str | None = None,
+    occurred_before: datetime | str | None = None,
     limit: int = 10,
 ) -> list[RawMemory]:
     normalized_query = query.strip()
@@ -1220,53 +1482,66 @@ async def recall_raw_memory(
         return []
 
     normalized_scope = _coerce_memory_scope(memory_scope)
-    where_clause, params = _memory_scope_where(
+    filters = _raw_recall_filters(
+        participants=participants,
+        labels=labels,
+        thread_id=thread_id,
+        occurred_after=occurred_after,
+        occurred_before=occurred_before,
+    )
+    where_clause, params = _raw_memory_recall_where(
         organization_id=organization_id,
         principal_id=principal_id,
         memory_scope=normalized_scope,
         scope_key=scope_key,
         agent_id=agent_id,
         project_id=project_id,
+        filters=filters,
     )
+    query_embedding = await _raw_memory_query_embedding(normalized_query)
     async with surreal_content_client() as client:
+        fulltext_memories: list[RawMemory] = []
+        vector_memories: list[RawMemory] = []
         try:
-            rows = await _select_many(
+            fulltext_memories = await _recall_raw_memory_fulltext(
                 client,
-                "SELECT *, math::max([search::score(0), search::score(1)]) AS score "
-                f"FROM raw_captures WHERE {where_clause} "
-                "AND (title @0@ $search_query OR raw_content @1@ $search_query) "
-                "ORDER BY score DESC, captured_at DESC LIMIT $limit;",
-                **params,
-                search_query=normalized_query,
-                limit=limit * _LIFECYCLE_FILTER_OVERFETCH_FACTOR,
-            )
-        except RuntimeError:
-            return await _recall_raw_memory_lexical(
-                client,
-                organization_id=organization_id,
-                principal_id=principal_id,
+                where_clause=where_clause,
+                params=params,
                 query=normalized_query,
-                memory_scope=normalized_scope,
-                scope_key=scope_key,
-                agent_id=agent_id,
-                project_id=project_id,
                 limit=limit,
             )
-    memories = _recallable_memories([_raw_memory_from_record(row) for row in rows], limit=limit)
-    if memories:
-        return memories
-
-    return await _recall_raw_memory_lexical(
-        client,
-        organization_id=organization_id,
-        principal_id=principal_id,
-        query=normalized_query,
-        memory_scope=normalized_scope,
-        scope_key=scope_key,
-        agent_id=agent_id,
-        project_id=project_id,
-        limit=limit,
-    )
+        except (RuntimeError, TimeoutError):
+            fulltext_memories = []
+        if query_embedding is not None:
+            try:
+                vector_memories = await _recall_raw_memory_vector(
+                    client,
+                    where_clause=where_clause,
+                    params=params,
+                    query_embedding=query_embedding,
+                    limit=limit,
+                )
+            except (RuntimeError, TimeoutError):
+                vector_memories = []
+        memories = await _fuse_raw_memory_results(
+            client,
+            [fulltext_memories, vector_memories],
+            limit=limit,
+        )
+        if memories:
+            return memories
+        return await _recall_raw_memory_lexical(
+            client,
+            organization_id=organization_id,
+            principal_id=principal_id,
+            query=normalized_query,
+            memory_scope=normalized_scope,
+            scope_key=scope_key,
+            agent_id=agent_id,
+            project_id=project_id,
+            filters=filters,
+            limit=limit,
+        )
 
 
 async def list_raw_memories_for_scope(

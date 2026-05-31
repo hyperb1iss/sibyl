@@ -213,6 +213,54 @@ def test_recall_command_can_render_raw_memories(
 
 @patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
 @patch("sibyl_cli.main.get_client")
+def test_recall_command_forwards_raw_metadata_filters(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.recall_raw_memory = AsyncMock(return_value={"memories": []})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "recall",
+            "surrealdb",
+            "--raw",
+            "--participant",
+            "nova@example.com",
+            "--label",
+            "email",
+            "--thread",
+            "thread-1",
+            "--occurred-after",
+            "2014-01-01T00:00:00+00:00",
+            "--occurred-before",
+            "2014-12-31T23:59:59+00:00",
+        ],
+    )
+
+    assert result.exit_code == 0
+    mock_client.recall_raw_memory.assert_awaited_once_with(
+        query="surrealdb",
+        memory_scope="private",
+        scope_key=None,
+        diary=False,
+        agent_id=None,
+        project_id=None,
+        limit=12,
+        participants=["nova@example.com"],
+        labels=["email"],
+        thread_id="thread-1",
+        occurred_after="2014-01-01T00:00:00+00:00",
+        occurred_before="2014-12-31T23:59:59+00:00",
+    )
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
 def test_recall_command_can_render_agent_diary(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,

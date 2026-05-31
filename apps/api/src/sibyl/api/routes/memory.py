@@ -416,6 +416,30 @@ def _validate_diary_request(*, diary: bool, agent_id: str | None, memory_scope: 
         raise HTTPException(status_code=400, detail="agent_id is required for diary memory")
 
 
+def _raw_recall_audit_details(
+    request: RawMemoryRecallRequest,
+    *,
+    result_count: int,
+) -> dict[str, object]:
+    details: dict[str, object] = {
+        "agent_id": request.agent_id,
+        "diary": request.diary,
+        "limit": request.limit,
+        "result_count": result_count,
+    }
+    if request.participants:
+        details["participants"] = list(request.participants)
+    if request.labels:
+        details["labels"] = list(request.labels)
+    if request.thread_id:
+        details["thread_id"] = request.thread_id
+    if request.occurred_after:
+        details["occurred_after"] = request.occurred_after.isoformat()
+    if request.occurred_before:
+        details["occurred_before"] = request.occurred_before.isoformat()
+    return details
+
+
 def _raw_memory_response(
     memory: RawMemory,
     *,
@@ -1662,6 +1686,17 @@ async def recall_raw(
             user_id=principal_id,
             organization_role=ctx.org_role,
         ):
+            recall_kwargs: dict[str, Any] = {}
+            if request.participants:
+                recall_kwargs["participants"] = request.participants
+            if request.labels:
+                recall_kwargs["labels"] = request.labels
+            if request.thread_id:
+                recall_kwargs["thread_id"] = request.thread_id
+            if request.occurred_after:
+                recall_kwargs["occurred_after"] = request.occurred_after
+            if request.occurred_before:
+                recall_kwargs["occurred_before"] = request.occurred_before
             memories = await recall_raw_memory(
                 organization_id=str(org.id),
                 principal_id=principal_id,
@@ -1671,6 +1706,7 @@ async def recall_raw(
                 agent_id=request.agent_id,
                 project_id=request.project_id,
                 limit=request.limit,
+                **recall_kwargs,
             )
         await _log_memory_audit(
             action="memory.recall",
@@ -1684,12 +1720,7 @@ async def recall_raw(
             derived_ids=[memory.id for memory in memories],
             policy_allowed=read_decision.allowed,
             policy_reason=read_decision.reason,
-            details={
-                "agent_id": request.agent_id,
-                "diary": request.diary,
-                "limit": request.limit,
-                "result_count": len(memories),
-            },
+            details=_raw_recall_audit_details(request, result_count=len(memories)),
         )
         response = RawMemoryRecallResponse(
             query=request.query,

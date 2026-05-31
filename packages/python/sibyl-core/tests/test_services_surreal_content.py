@@ -1091,6 +1091,134 @@ class TestSurrealContentHelpers:
         assert [memory.principal_id for memory in memories] == ["user-a"]
 
     @pytest.mark.asyncio
+    async def test_recall_raw_memory_filters_import_metadata_in_surreal(self) -> None:
+        fake_client = FakeClient(
+            [
+                _query_result(
+                    [
+                        {
+                            "uuid": "memory-1",
+                            "organization_id": "org-1",
+                            "source_id": "source-mail-1",
+                            "principal_id": "user-a",
+                            "memory_scope": "private",
+                            "title": "Mailbox thread",
+                            "raw_content": "Nova and Bliss discussed SurrealDB.",
+                            "metadata": {
+                                "participants": ["nova@example.com", "bliss@example.com"],
+                                "labels": ["mailbox", "email"],
+                                "occurred_at": "2014-06-01T00:00:00+00:00",
+                                "source_record_metadata": {"thread_id": "thread-1"},
+                            },
+                            "score": 0.87,
+                        }
+                    ]
+                )
+            ]
+        )
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        async def no_embedding(_query: str):
+            return None
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_service, "_raw_memory_query_embedding", no_embedding)
+            memories = await recall_raw_memory(
+                organization_id="org-1",
+                principal_id="user-a",
+                query="surrealdb",
+                participants=["nova@example.com"],
+                labels=["email"],
+                thread_id="thread-1",
+                occurred_after="2014-01-01T00:00:00+00:00",
+                occurred_before="2014-12-31T23:59:59+00:00",
+            )
+
+        query, params = fake_client.calls[0]
+        assert "metadata.participants CONTAINSANY $participants" in query
+        assert "metadata.labels CONTAINSANY $labels" in query
+        assert "metadata.source_record_metadata.thread_id = $thread_id" in query
+        assert "metadata.occurred_at >= $occurred_after" in query
+        assert "metadata.occurred_at <= $occurred_before" in query
+        assert params["participants"] == ["nova@example.com"]
+        assert params["labels"] == ["email"]
+        assert params["thread_id"] == "thread-1"
+        assert [memory.id for memory in memories] == ["memory-1"]
+
+    @pytest.mark.asyncio
+    async def test_recall_raw_memory_fuses_fulltext_and_vector_results(self) -> None:
+        fake_client = FakeClient(
+            [
+                _query_result(
+                    [
+                        {
+                            "uuid": "memory-lexical",
+                            "organization_id": "org-1",
+                            "source_id": "source-mail-1",
+                            "principal_id": "user-a",
+                            "memory_scope": "private",
+                            "title": "Mailbox thread",
+                            "raw_content": "SurrealDB appears in the exact text.",
+                            "score": 0.91,
+                        }
+                    ]
+                ),
+                _raw_query_result(
+                    [
+                        {
+                            "uuid": "memory-vector",
+                            "organization_id": "org-1",
+                            "source_id": "source-mail-2",
+                            "principal_id": "user-a",
+                            "memory_scope": "private",
+                            "title": "Semantic thread",
+                            "raw_content": "The graph database powered recall.",
+                            "score": 0.82,
+                        }
+                    ]
+                ),
+                _query_result(
+                    [
+                        {"id": "memory-vector", "rrf_score": 0.04},
+                        {"id": "memory-lexical", "rrf_score": 0.03},
+                    ]
+                ),
+            ]
+        )
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        async def query_embedding(_query: str):
+            return [1.0, 0.0]
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_service, "_raw_memory_query_embedding", query_embedding)
+            memories = await recall_raw_memory(
+                organization_id="org-1",
+                principal_id="user-a",
+                query="surrealdb graph",
+                limit=2,
+            )
+
+        assert [memory.id for memory in memories] == ["memory-vector", "memory-lexical"]
+        assert "search::rrf($lists, $limit, $k)" in fake_client.calls[2][0]
+        vector_query, vector_params = fake_client.calls[1]
+        assert "embedding <|8, 40|> $query_embedding" in vector_query
+        assert vector_params["query_embedding"] == [1.0, 0.0]
+        assert all(memory.score > 0 for memory in memories)
+
+    @pytest.mark.asyncio
     async def test_recall_raw_memory_filters_agent_diaries_explicitly(self) -> None:
         fake_client = FakeClient(
             [
