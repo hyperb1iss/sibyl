@@ -246,6 +246,7 @@ WHERE source_id = NONE
 
 
 ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS = """
+DEFINE FIELD IF NOT EXISTS parent_task_id ON entity TYPE option<string>;
 DEFINE FIELD OVERWRITE updated_at ON entity TYPE option<datetime>;
 UPDATE entity SET updated_at = type::datetime(updated_at)
     WHERE type::is::string(updated_at)
@@ -269,6 +270,8 @@ DEFINE INDEX OVERWRITE idx_entity_group_type_status_updated
 
 
 PARENT_TASK_CANONICALIZATION_DEFINITIONS = """
+DEFINE FIELD IF NOT EXISTS parent_task_id ON entity TYPE option<string>;
+
 UPDATE entity SET parent_task_id = epic_id
 WHERE entity_type = 'task'
     AND (parent_task_id = NONE OR parent_task_id = '')

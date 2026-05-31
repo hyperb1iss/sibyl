@@ -490,6 +490,9 @@ def test_entity_updated_at_datetime_migration_is_versioned() -> None:
     assert "DEFINE FIELD OVERWRITE updated_at ON entity TYPE option<datetime>" in (
         ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS
     )
+    assert "DEFINE FIELD IF NOT EXISTS parent_task_id ON entity TYPE option<string>" in (
+        ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS
+    )
     assert "type::datetime(updated_at)" in ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS
     assert "string::is::datetime(updated_at)" in ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS
     assert "!type::is::datetime(updated_at)" in ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS
@@ -552,6 +555,9 @@ def test_graph_index_prune_removes_constant_namespace_prefixes() -> None:
         assert f"DEFINE INDEX OVERWRITE {new_index}" in GRAPH_INDEX_PRUNE_DEFINITIONS
 
     assert "SET parent_task_id = epic_id" in PARENT_TASK_CANONICALIZATION_DEFINITIONS
+    assert "DEFINE FIELD IF NOT EXISTS parent_task_id ON entity TYPE option<string>" in (
+        PARENT_TASK_CANONICALIZATION_DEFINITIONS
+    )
     assert "SET parent_task_id = attributes.parent_task_id" in (
         PARENT_TASK_CANONICALIZATION_DEFINITIONS
     )
