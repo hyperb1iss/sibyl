@@ -3,6 +3,7 @@
 from sibyl_core.projection.memory import (
     MemoryProjectionBatchResult,
     MemoryProjectionResult,
+    ProjectedEntitySourceLink,
     ProjectedMemoryEntity,
     ProjectedMemoryFact,
     extract_projected_memory_entities,
@@ -15,6 +16,7 @@ from sibyl_core.projection.memory import (
 __all__ = [
     "MemoryProjectionBatchResult",
     "MemoryProjectionResult",
+    "ProjectedEntitySourceLink",
     "ProjectedMemoryEntity",
     "ProjectedMemoryFact",
     "extract_projected_memory_entities",

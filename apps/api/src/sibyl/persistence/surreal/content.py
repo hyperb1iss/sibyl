@@ -1306,12 +1306,22 @@ async def list_document_chunks(
     _session: object,
     *,
     document_id: UUID,
+    organization_id: UUID | str | None = None,
 ) -> list[DocumentChunk]:
+    params: dict[str, object] = {"document_id": str(document_id)}
+    if organization_id is not None:
+        params["organization_id"] = str(organization_id)
+        query = (
+            "SELECT * FROM document_chunks "
+            "WHERE document_id = $document_id AND organization_id = $organization_id;"
+        )
+    else:
+        query = "SELECT * FROM document_chunks WHERE document_id = $document_id;"
     async with surreal_content_client() as client:
         rows = await _select_many(
             client,
-            "SELECT * FROM document_chunks WHERE document_id = $document_id;",
-            document_id=str(document_id),
+            query,
+            **params,
         )
     chunks = [_chunk_from_record(row) for row in rows]
     return sorted(chunks, key=lambda chunk: chunk.chunk_index)

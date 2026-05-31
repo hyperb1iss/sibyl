@@ -132,13 +132,22 @@ async def test_extract_memory_entities_links_document_chunks(
 ) -> None:
     fake = FakeExtractor()
     document_id = uuid4()
+    organization_id = uuid4()
     chunk = DocumentChunkRecord(
         id=uuid4(),
         document_id=document_id,
-        organization_id=uuid4(),
+        organization_id=organization_id,
         source_id="source-1",
         chunk_index=0,
         content="SurrealDB 3.0 adds native RRF.",
+    )
+    other_chunk = DocumentChunkRecord(
+        id=uuid4(),
+        document_id=document_id,
+        organization_id=organization_id,
+        source_id="source-1",
+        chunk_index=1,
+        content="The second chunk talks about unrelated retrieval plumbing.",
     )
     saved_chunks: list[DocumentChunkRecord] = []
     entity_manager = SimpleNamespace(
@@ -158,9 +167,10 @@ async def test_extract_memory_entities_links_document_chunks(
     async def fake_session():
         yield None
 
-    async def fake_list_chunks(_session, *, document_id: object):
+    async def fake_list_chunks(_session, *, document_id: object, organization_id: object):
         assert str(document_id) == str(chunk.document_id)
-        return [chunk]
+        assert str(organization_id) == str(chunk.organization_id)
+        return [chunk, other_chunk]
 
     async def fake_save_chunks(_session, *, chunks):
         saved_chunks.extend(chunks)
@@ -180,10 +190,11 @@ async def test_extract_memory_entities_links_document_chunks(
                 "entity_type": "document",
                 "name": "Document",
                 "content": "SurrealDB 3.0 adds native RRF for graph retrieval.",
+                "organization_id": str(organization_id),
                 "metadata": {"document_id": str(document_id)},
             }
         ],
-        "org-123",
+        str(organization_id),
         created_source_ids=["session-created"],
         max_entities_per_source=4,
         max_source_chars=200,
@@ -196,6 +207,7 @@ async def test_extract_memory_entities_links_document_chunks(
     assert saved_chunks == [chunk]
     assert saved_chunks[0].has_entities
     assert saved_chunks[0].entity_ids == [created_entities[0].id]
+    assert other_chunk.entity_ids == []
 
 
 @pytest.mark.asyncio

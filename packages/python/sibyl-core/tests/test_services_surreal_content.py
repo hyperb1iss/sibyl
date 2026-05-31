@@ -1835,6 +1835,11 @@ class TestSurrealContentHelpers:
             )
 
         assert [memory.id for memory in memories] == ["current-memory"]
+        query, params = fake_client.calls[0]
+        assert "metadata.invalid_at" in query
+        assert "metadata.valid_to" in query
+        assert isinstance(params["as_of"], datetime)
+        assert isinstance(params["as_of_text"], str)
 
     def test_raw_memory_snippet_prefers_marked_title_over_plain_content(self) -> None:
         memory = _raw_memory_from_record(

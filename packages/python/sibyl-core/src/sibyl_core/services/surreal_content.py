@@ -7,7 +7,7 @@ import os
 import re
 from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Protocol, cast
 from uuid import uuid4
@@ -2514,6 +2514,12 @@ async def recall_raw_memory(
         occurred_before=occurred_before,
         as_of=as_of,
     )
+    effective_as_of = filters.as_of or datetime.now(UTC)
+    filters = replace(
+        filters,
+        as_of=effective_as_of,
+        as_of_text=filters.as_of_text or effective_as_of.isoformat(),
+    )
     where_clause, params = _raw_memory_recall_where(
         organization_id=organization_id,
         principal_id=principal_id,
@@ -2524,7 +2530,6 @@ async def recall_raw_memory(
         filters=filters,
     )
     query_embedding = await _raw_memory_query_embedding(normalized_query)
-    effective_as_of = filters.as_of or datetime.now(UTC)
     async with surreal_content_client() as client:
         fulltext_memories: list[RawMemory] = []
         vector_memories: list[RawMemory] = []
