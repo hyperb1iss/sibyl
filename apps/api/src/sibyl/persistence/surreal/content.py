@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncGenerator, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -33,6 +34,7 @@ from sibyl_core.backends.surreal.records import (
 )
 from sibyl_core.models import ChunkType, CrawlStatus, SourceType
 from sibyl_core.services.link_graph_status import LinkGraphSourceStatusData, LinkGraphStatusData
+from sibyl_core.utils.query import query_tokens
 
 _DEFAULT_BATCH_SIZE = 128
 _UPSERT_RECORD = {
@@ -61,6 +63,27 @@ _UPSERT_RECORD = {
         "WHERE uuid = $uuid AND organization_id = $organization_id;"
     ),
 }
+
+
+def _table_name_length(table: str) -> int:
+    return len(table)
+
+
+_CONTENT_DEBUG_TABLE_NAMES: tuple[str, ...] = tuple(
+    sorted(_UPSERT_RECORD.keys(), key=_table_name_length, reverse=True)
+)
+_CONTENT_DEBUG_TABLES: frozenset[str] = frozenset(_CONTENT_DEBUG_TABLE_NAMES)
+_CONTENT_DEBUG_TABLE_PATTERN = "|".join(re.escape(table) for table in _CONTENT_DEBUG_TABLE_NAMES)
+_CONTENT_DEBUG_SELECT_PATTERN = re.compile(
+    rf"\A\s*SELECT\b(?P<select>.*?)\bFROM\s+"
+    rf"(?P<table>{_CONTENT_DEBUG_TABLE_PATTERN})\b(?P<tail>.*)\Z",
+    re.IGNORECASE | re.DOTALL,
+)
+_CONTENT_DEBUG_BOUNDARY_PATTERN = re.compile(
+    r"\b(?:GROUP\s+BY|ORDER\s+BY|LIMIT|START|FETCH|TIMEOUT|PARALLEL|EXPLAIN)\b",
+    re.IGNORECASE,
+)
+_CONTENT_DEBUG_WHERE_PATTERN = re.compile(r"\bWHERE\b", re.IGNORECASE)
 type SurrealRecord = dict[str, object]
 
 
@@ -680,6 +703,73 @@ async def _select_one(
 ) -> SurrealRecord | None:
     rows = await _select_many(client, query, **params)
     return rows[0] if rows else None
+
+
+def _scope_content_debug_query(query: str) -> str:
+    stripped = query.strip()
+    if stripped.endswith(";"):
+        stripped = stripped[:-1].rstrip()
+    if ";" in stripped:
+        msg = "Content debug queries must use a single statement"
+        raise ValueError(msg)
+
+    tokens = [token.upper() for token in query_tokens(stripped)]
+    content_table_count = sum(token.lower() in _CONTENT_DEBUG_TABLES for token in tokens)
+    if content_table_count != 1:
+        msg = "Content debug queries must inspect one content table at a time"
+        raise ValueError(msg)
+    if tokens.count("SELECT") != 1 or tokens.count("FROM") != 1:
+        msg = "Content debug queries must use one SELECT ... FROM statement"
+        raise ValueError(msg)
+
+    match = _CONTENT_DEBUG_SELECT_PATTERN.match(stripped)
+    if match is None:
+        msg = "Content debug queries must select from a known content table"
+        raise ValueError(msg)
+
+    tail = match.group("tail")
+    prefix = stripped[: match.start("tail")]
+    boundary_match = _CONTENT_DEBUG_BOUNDARY_PATTERN.search(tail)
+    boundary_start = boundary_match.start() if boundary_match is not None else len(tail)
+    where_match = _CONTENT_DEBUG_WHERE_PATTERN.search(tail)
+
+    if where_match is not None and where_match.start() < boundary_start:
+        condition_start = where_match.end()
+        condition_boundary_match = _CONTENT_DEBUG_BOUNDARY_PATTERN.search(tail, condition_start)
+        condition_end = (
+            condition_boundary_match.start() if condition_boundary_match is not None else len(tail)
+        )
+        condition = tail[condition_start:condition_end].strip()
+        if not condition:
+            msg = "Content debug query WHERE clause cannot be empty"
+            raise ValueError(msg)
+        before_where = tail[: where_match.start()]
+        after_condition = tail[condition_end:].lstrip()
+        suffix = f" {after_condition}" if after_condition else ""
+        return (
+            f"{prefix}{before_where}WHERE ({condition}) "
+            "AND organization_id = $organization_id"
+            f"{suffix}"
+        )
+
+    before_boundary = tail[:boundary_start]
+    after_boundary = tail[boundary_start:].lstrip()
+    suffix = f" {after_boundary}" if after_boundary else ""
+    return f"{prefix}{before_boundary}WHERE organization_id = $organization_id{suffix}"
+
+
+async def execute_debug_query(
+    query: str,
+    *,
+    organization_id: str,
+    **params: object,
+) -> list[dict[str, object]]:
+    scoped_params = dict(params)
+    scoped_params["organization_id"] = organization_id
+    scoped_query = _scope_content_debug_query(query)
+    async with surreal_content_client() as client:
+        rows = await _select_many(client, scoped_query, **scoped_params)
+    return [dict(row) for row in rows]
 
 
 async def _select_scalar_count(client: SurrealContentClient, query: str, **params: object) -> int:

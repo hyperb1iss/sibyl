@@ -231,6 +231,112 @@ async def test_debug_query_uses_debug_runner_for_surrealql() -> None:
 
 
 @pytest.mark.asyncio
+async def test_admin_execute_debug_query_routes_content_tables_to_content_runtime() -> None:
+    content_execute = AsyncMock(return_value=[{"uuid": "raw-1"}])
+    graph_execute = AsyncMock(return_value=[])
+    query = "SELECT * FROM raw_captures WHERE organization_id = $group_id LIMIT $limit"
+
+    with (
+        patch("sibyl.persistence.content_runtime.execute_debug_query", content_execute),
+        patch("sibyl.persistence.graph_runtime.execute_debug_query", graph_execute),
+    ):
+        rows = await admin_routes.execute_debug_query(
+            query,
+            group_id="org-1",
+            limit=1,
+        )
+
+    assert rows == [{"uuid": "raw-1"}]
+    content_execute.assert_awaited_once_with(
+        query,
+        organization_id="org-1",
+        group_id="org-1",
+        org_id="org-1",
+        limit=1,
+    )
+    graph_execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_admin_execute_debug_query_routes_unscoped_content_queries() -> None:
+    content_execute = AsyncMock(return_value=[{"uuid": "raw-1"}])
+
+    with patch("sibyl.persistence.content_runtime.execute_debug_query", content_execute):
+        rows = await admin_routes.execute_debug_query(
+            "SELECT * FROM raw_captures LIMIT $limit",
+            group_id="org-1",
+            limit=1,
+        )
+
+    assert rows == [{"uuid": "raw-1"}]
+    content_execute.assert_awaited_once_with(
+        "SELECT * FROM raw_captures LIMIT $limit",
+        organization_id="org-1",
+        group_id="org-1",
+        org_id="org-1",
+        limit=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_admin_execute_debug_query_rejects_cross_content_table_reads() -> None:
+    content_execute = AsyncMock(return_value=[])
+
+    with (
+        patch("sibyl.persistence.content_runtime.execute_debug_query", content_execute),
+        pytest.raises(ValueError, match="one content table"),
+    ):
+        await admin_routes.execute_debug_query(
+            """
+            SELECT * FROM raw_captures
+            WHERE organization_id = $group_id
+              AND source_id IN (SELECT VALUE uuid FROM crawl_sources)
+            """,
+            group_id="org-1",
+        )
+
+    content_execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_admin_execute_debug_query_rejects_content_table_subqueries() -> None:
+    content_execute = AsyncMock(return_value=[])
+
+    with (
+        patch("sibyl.persistence.content_runtime.execute_debug_query", content_execute),
+        pytest.raises(ValueError, match="one content table"),
+    ):
+        await admin_routes.execute_debug_query(
+            """
+            SELECT *, (SELECT * FROM raw_captures) AS sibling_rows
+            FROM raw_captures
+            WHERE organization_id = $group_id
+            """,
+            group_id="org-1",
+        )
+
+    content_execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_debug_query_rejects_mismatched_scope_params() -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    request = DebugQueryRequest(
+        cypher="SELECT * FROM raw_captures WHERE organization_id = $group_id",
+        params={"group_id": "00000000-0000-0000-0000-000000000222"},
+    )
+
+    with (
+        patch("sibyl.api.routes.admin.execute_debug_query", AsyncMock()) as mock_execute,
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await debug_query(request=request, org=org)
+
+    assert exc_info.value.status_code == 400
+    mock_execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "query",
     [

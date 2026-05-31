@@ -54,7 +54,7 @@ from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole
 from sibyl_core.models import CrawlStatus, Entity
 from sibyl_core.models.entities import EntityType
 from sibyl_core.utils import fingerprint_text
-from sibyl_core.utils.query import upper_query_tokens
+from sibyl_core.utils.query import query_tokens, upper_query_tokens
 
 log = structlog.get_logger()
 
@@ -142,6 +142,18 @@ async def execute_debug_query(
     group_id: str,
     **params: object,
 ) -> list[dict[str, object]]:
+    if _debug_query_uses_content_runtime(cypher):
+        _validate_content_debug_query(cypher)
+        from sibyl.persistence.content_runtime import execute_debug_query as service
+
+        return await service(
+            cypher,
+            organization_id=group_id,
+            group_id=group_id,
+            org_id=group_id,
+            **params,
+        )
+
     from sibyl.persistence.graph_runtime import execute_debug_query as service
 
     return await service(cypher, group_id=group_id, **params)
@@ -684,10 +696,43 @@ async def backfill_project_records(
 
 # OWNER role only for debug queries
 _OWNER_ONLY = (OrganizationRole.OWNER,)
+_CONTENT_DEBUG_TABLES = {
+    "API_IDEMPOTENCY_RECORDS",
+    "CRAWL_SOURCES",
+    "CRAWLED_DOCUMENTS",
+    "DOCUMENT_CHUNKS",
+    "RAW_CAPTURES",
+    "SOURCE_IMPORTS",
+}
 
 
 def _query_tokens(query: str) -> set[str]:
     return upper_query_tokens(query)
+
+
+def _debug_query_uses_content_runtime(query: str) -> bool:
+    return bool(_query_tokens(query) & _CONTENT_DEBUG_TABLES)
+
+
+def _validate_content_debug_query(query: str) -> None:
+    content_table_tokens = [
+        token.upper() for token in query_tokens(query) if token.upper() in _CONTENT_DEBUG_TABLES
+    ]
+    if len(content_table_tokens) != 1:
+        msg = "Content debug queries must inspect one content table at a time"
+        raise ValueError(msg)
+
+
+def _debug_params_for_org(params: dict[str, Any], *, group_id: str) -> dict[str, Any]:
+    sanitized = dict(params)
+    for key in ("group_id", "organization_id", "org_id"):
+        supplied = sanitized.pop(key, None)
+        if supplied is not None and str(supplied) != group_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{key} must match the current organization",
+            )
+    return sanitized
 
 
 def _is_read_only(query: str) -> bool:
@@ -741,11 +786,13 @@ async def debug_query(
             detail="Surreal runtime debug queries must use read-only SurrealQL",
         )
 
+    group_id = str(org.id)
+    params = _debug_params_for_org(request.params, group_id=group_id)
     try:
         rows = await execute_debug_query(
             request.cypher,
-            group_id=str(org.id),
-            **request.params,
+            group_id=group_id,
+            **params,
         )
 
         return DebugQueryResponse(
