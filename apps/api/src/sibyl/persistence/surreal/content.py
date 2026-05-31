@@ -84,6 +84,43 @@ _CONTENT_DEBUG_BOUNDARY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _CONTENT_DEBUG_WHERE_PATTERN = re.compile(r"\bWHERE\b", re.IGNORECASE)
+
+
+def _content_debug_query_has_comment(query: str) -> bool:
+    index = 0
+    length = len(query)
+
+    while index < length:
+        char = query[index]
+        next_char = query[index + 1] if index + 1 < length else ""
+
+        if char in {"'", '"', "`"}:
+            quote = char
+            index += 1
+            while index < length:
+                current = query[index]
+                if current == "\\":
+                    index += 2
+                    continue
+                index += 1
+                if current == quote:
+                    break
+            continue
+
+        if char == "/" and next_char == "*":
+            return True
+
+        if (char == "-" and next_char == "-") or (char == "/" and next_char == "/"):
+            return True
+
+        if char == "#":
+            return True
+
+        index += 1
+
+    return False
+
+
 type SurrealRecord = dict[str, object]
 
 
@@ -712,6 +749,9 @@ def _scope_content_debug_query(query: str) -> str:
         stripped = stripped[:-1].rstrip()
     if ";" in stripped:
         msg = "Content debug queries must use a single statement"
+        raise ValueError(msg)
+    if _content_debug_query_has_comment(stripped):
+        msg = "Content debug queries cannot contain comments"
         raise ValueError(msg)
 
     tokens = [token.upper() for token in query_tokens(stripped)]
