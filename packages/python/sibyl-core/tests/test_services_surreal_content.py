@@ -1869,6 +1869,52 @@ class TestSurrealContentHelpers:
         assert all(memory.score > 0 for memory in memories)
 
     @pytest.mark.asyncio
+    async def test_recall_raw_memory_raises_when_vector_recall_fails(self) -> None:
+        fake_client = FakeClient(
+            [
+                _query_result(
+                    [
+                        {
+                            "uuid": "memory-lexical",
+                            "organization_id": "org-1",
+                            "source_id": "source-mail-1",
+                            "principal_id": "user-a",
+                            "memory_scope": "private",
+                            "title": "Mailbox thread",
+                            "raw_content": "SurrealDB appears in the exact text.",
+                            "score": 0.91,
+                        }
+                    ]
+                ),
+                _raw_error_result("HNSW vector index unavailable"),
+            ]
+        )
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        async def query_embedding(_query: str):
+            return [1.0, 0.0]
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_service, "_raw_memory_query_embedding", query_embedding)
+            with pytest.raises(RuntimeError, match="raw memory vector recall failed"):
+                await recall_raw_memory(
+                    organization_id="org-1",
+                    principal_id="user-a",
+                    query="surrealdb graph",
+                    limit=2,
+                )
+
+        assert len(fake_client.calls) == 2
+        vector_query, _vector_params = fake_client.calls[1]
+        assert "embedding <|8, 40|> $query_embedding" in vector_query
+
+    @pytest.mark.asyncio
     async def test_recall_raw_memory_filters_agent_diaries_explicitly(self) -> None:
         fake_client = FakeClient(
             [

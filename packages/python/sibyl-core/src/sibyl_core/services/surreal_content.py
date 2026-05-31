@@ -2515,8 +2515,8 @@ async def recall_raw_memory(
                     as_of=filters.as_of,
                     limit=limit,
                 )
-            except (RuntimeError, TimeoutError):
-                vector_memories = []
+            except (RuntimeError, TimeoutError) as exc:
+                raise RuntimeError("raw memory vector recall failed") from exc
         memories = await _fuse_raw_memory_results(
             client,
             [fulltext_memories, vector_memories],
