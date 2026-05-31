@@ -1306,6 +1306,25 @@ class TestSearchTool:
         graph_runtime.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_search_raw_memory_respects_api_key_memory_scope_grants(self) -> None:
+        search_module = import_module("sibyl_core.tools.search")
+        recall = AsyncMock(return_value=[])
+
+        with patch("sibyl_core.tools.search.recall_raw_memory", recall):
+            response = await search_module.search(
+                query="private memory",
+                types=["raw_memory"],
+                organization_id="org_123",
+                principal_id="user-123",
+                include_graph=False,
+                include_documents=False,
+                allowed_memory_scope_keys=set(),
+            )
+
+        assert response.total == 0
+        recall.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_search_source_filters_respect_include_documents_false(self) -> None:
         """Graph-only searches stay graph-only even with document source filters."""
         search_module = import_module("sibyl_core.tools.search")

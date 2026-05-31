@@ -754,6 +754,16 @@ async def search(
             # Types specified but document not included - skip document search
             search_documents = False
 
+    if search_raw_memory and allowed_memory_scope_keys is not None:
+        effective_scope_key = (
+            principal_id if memory_scope == "private" and not scope_key else scope_key
+        )
+        if (
+            memory_scope_policy_key(memory_scope, effective_scope_key)
+            not in allowed_memory_scope_keys
+        ):
+            search_raw_memory = False
+
     if (
         search_documents
         and search_graph
