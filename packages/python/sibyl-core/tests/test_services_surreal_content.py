@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from contextlib import asynccontextmanager
 
 import pytest
 
+from sibyl_core.embeddings.providers import EmbeddingMetadata
 from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.services.surreal_content import (
     MemoryScope,
@@ -16,6 +18,7 @@ from sibyl_core.services.surreal_content import (
     get_raw_memory_by_source_id,
     list_unlinked_document_chunks,
     load_search_scope,
+    raw_memory_embedding_text,
     recall_raw_memory,
     remember_raw_memory,
     remember_reflection_candidate_review,
@@ -71,6 +74,34 @@ class FakeClient:
 
     async def close(self) -> None:
         self.closed += 1
+
+
+class FakeEmbeddingProvider:
+    def __init__(self, embedding: list[float]) -> None:
+        self._metadata = EmbeddingMetadata(
+            provider="deterministic",
+            model="raw-test-v1",
+            dimensions=len(embedding),
+            cache_namespace="raw-test",
+            tokenizer_estimate_method="unit-test",
+        )
+        self._embedding = embedding
+        self.texts: list[str] = []
+        self.input_kinds: list[str] = []
+
+    @property
+    def metadata(self) -> EmbeddingMetadata:
+        return self._metadata
+
+    async def embed_texts(
+        self,
+        texts: Sequence[str],
+        *,
+        input_kind: str = "document",
+    ) -> list[list[float]]:
+        self.texts.extend(str(text) for text in texts)
+        self.input_kinds.append(str(input_kind))
+        return [list(self._embedding) for _text in texts]
 
 
 class TestSurrealContentHelpers:
@@ -787,6 +818,122 @@ class TestSurrealContentHelpers:
         assert saved_record["agent_id"] is None
         assert saved_record["project_id"] is None
         assert saved_record["review_state"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_remember_raw_memory_writes_embedding_when_provider_supplied(self) -> None:
+        embedding = [0.1, 0.2, 0.3]
+        embedding_metadata = {
+            "provider": "deterministic",
+            "model": "raw-test-v1",
+            "dimensions": 3,
+            "cache_namespace": "raw-test",
+            "tokenizer_estimate_method": "unit-test",
+            "text_version": "raw-capture-v1",
+            "normalize": True,
+            "input_kind_sensitive": True,
+        }
+        persisted_memory = {
+            "uuid": "memory-1",
+            "organization_id": "org-1",
+            "source_id": "source-email-1",
+            "principal_id": "user-bliss",
+            "memory_scope": "private",
+            "title": "Architecture note",
+            "raw_content": "Surreal stores raw memory before extraction.",
+            "embedding": embedding,
+            "metadata": {"embedding_metadata": embedding_metadata},
+        }
+        fake_client = FakeClient([_query_result([persisted_memory])])
+        provider = FakeEmbeddingProvider(embedding)
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            memory = await remember_raw_memory(
+                organization_id="org-1",
+                principal_id="user-bliss",
+                source_id="source-email-1",
+                title="Architecture note",
+                raw_content="Surreal stores raw memory before extraction.",
+                embedding_provider=provider,
+            )
+
+        saved_record = fake_client.calls[0][1]["record"]
+        assert provider.input_kinds == ["document"]
+        assert provider.texts == [
+            "Title: Architecture note\n\nSurreal stores raw memory before extraction."
+        ]
+        assert saved_record["embedding"] == embedding
+        assert saved_record["metadata"]["embedding_metadata"] == embedding_metadata
+        assert memory.embedding == embedding
+
+    @pytest.mark.asyncio
+    async def test_remember_raw_memory_auto_uses_configured_embedding_provider(self) -> None:
+        embedding = [0.4, 0.5, 0.6]
+        persisted_memory = {
+            "uuid": "memory-1",
+            "organization_id": "org-1",
+            "source_id": "source-email-1",
+            "principal_id": "user-bliss",
+            "memory_scope": "private",
+            "title": "Architecture note",
+            "raw_content": "Surreal stores raw memory before extraction.",
+            "embedding": embedding,
+            "metadata": {
+                "embedding_metadata": {
+                    "provider": "deterministic",
+                    "model": "raw-test-v1",
+                    "dimensions": 3,
+                    "cache_namespace": "raw-test",
+                    "tokenizer_estimate_method": "unit-test",
+                    "text_version": "raw-capture-v1",
+                    "normalize": True,
+                    "input_kind_sensitive": True,
+                }
+            },
+        }
+        fake_client = FakeClient([_query_result([persisted_memory])])
+        provider = FakeEmbeddingProvider(embedding)
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(
+                content_service,
+                "_configured_raw_memory_embedding_provider",
+                lambda: provider,
+            )
+            await remember_raw_memory(
+                organization_id="org-1",
+                principal_id="user-bliss",
+                source_id="source-email-1",
+                title="Architecture note",
+                raw_content="Surreal stores raw memory before extraction.",
+            )
+
+        saved_record = fake_client.calls[0][1]["record"]
+        assert provider.input_kinds == ["document"]
+        assert saved_record["embedding"] == embedding
+
+    def test_raw_memory_embedding_text_bounds_title_and_content_surface(self) -> None:
+        text = raw_memory_embedding_text(
+            title="Architecture note",
+            raw_content="x" * 13_000,
+        )
+
+        assert text.startswith("Title: Architecture note\n\n")
+        assert len(text) == 12_000
+        assert text.endswith("...[truncated for raw memory embedding]...")
 
     @pytest.mark.asyncio
     async def test_remember_reflection_candidate_review_stores_review_metadata(self) -> None:

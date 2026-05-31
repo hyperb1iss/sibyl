@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
 import re
 from collections.abc import AsyncIterator, Iterable, Mapping
 from contextlib import asynccontextmanager
@@ -14,6 +16,13 @@ from uuid import uuid4
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
 from sibyl_core.config import settings
+from sibyl_core.embeddings.providers import (
+    DeterministicEmbeddingProvider,
+    EmbeddingMetadata,
+    EmbeddingProvider,
+    EmbeddingProviderName,
+    create_embedding_provider,
+)
 from sibyl_core.models.reflection import (
     MemoryLifecycle,
     MemoryLifecycleState,
@@ -25,7 +34,14 @@ from sibyl_core.utils.resilience import with_timeout
 _DEFAULT_BATCH_SIZE = 128
 _DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS = 3.0
 _LIFECYCLE_FILTER_OVERFETCH_FACTOR = 4
+_RAW_MEMORY_EMBEDDING_TEXT_MAX_CHARS = 12_000
+_RAW_MEMORY_EMBEDDING_TEXT_TRUNCATION_MARKER = "\n...[truncated for raw memory embedding]..."
+_RAW_MEMORY_EMBEDDING_TEXT_VERSION = "raw-capture-v1"
+_RAW_MEMORY_EMBEDDING_AUTO = object()
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+")
+type _RawMemoryProviderCacheKey = tuple[EmbeddingProviderName, str, int, str]
+_raw_memory_embedding_provider: EmbeddingProvider | None = None
+_raw_memory_embedding_fingerprint: _RawMemoryProviderCacheKey | None = None
 _UPSERT_RECORD = {
     "crawl_sources": (
         "UPSERT crawl_sources CONTENT $record "
@@ -130,6 +146,7 @@ class RawMemory:
     title: str = ""
     raw_content: str = ""
     tags: list[str] = field(default_factory=list)
+    embedding: list[float] | None = None
     metadata: dict[str, object] = field(default_factory=dict)
     provenance: dict[str, object] = field(default_factory=dict)
     capture_surface: str | None = None
@@ -357,6 +374,138 @@ def _coerce_float_list(value: object | None) -> list[float] | None:
     return out
 
 
+def _embedding_vector_from_batch(
+    embeddings: Iterable[Iterable[float]],
+    dimensions: int,
+) -> list[float]:
+    first = next(iter(embeddings), None)
+    if first is None:
+        raise ValueError("embedding provider returned no vectors")
+    embedding = [float(value) for value in first]
+    if len(embedding) != dimensions:
+        raise ValueError(
+            f"embedding provider returned {len(embedding)} dimensions, expected {dimensions}"
+        )
+    return embedding
+
+
+def raw_memory_embedding_text(
+    *,
+    title: str,
+    raw_content: str,
+    max_chars: int = _RAW_MEMORY_EMBEDDING_TEXT_MAX_CHARS,
+) -> str:
+    title_text = title.strip()
+    content_text = raw_content.strip()
+    sections: list[str] = []
+    if title_text:
+        sections.append(f"Title: {title_text}")
+    if content_text:
+        sections.append(content_text)
+    text = "\n\n".join(sections).strip() or "[empty]"
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    marker = _RAW_MEMORY_EMBEDDING_TEXT_TRUNCATION_MARKER
+    if max_chars <= len(marker):
+        return text[:max_chars]
+    return f"{text[: max_chars - len(marker)]}{marker}"
+
+
+def _raw_memory_embedding_metadata(metadata: EmbeddingMetadata) -> dict[str, str | int | bool]:
+    payload = metadata.to_dict()
+    payload["text_version"] = _RAW_MEMORY_EMBEDDING_TEXT_VERSION
+    return payload
+
+
+def reset_raw_memory_embedding_provider_cache() -> None:
+    global _raw_memory_embedding_fingerprint, _raw_memory_embedding_provider
+    _raw_memory_embedding_provider = None
+    _raw_memory_embedding_fingerprint = None
+
+
+def _configured_raw_memory_embedding_provider() -> EmbeddingProvider | None:
+    global _raw_memory_embedding_fingerprint, _raw_memory_embedding_provider
+    dimensions = _raw_memory_embedding_dimensions()
+    if os.getenv("SIBYL_MOCK_LLM", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return DeterministicEmbeddingProvider(
+            EmbeddingMetadata(
+                provider="deterministic",
+                model="mock-llm-v1",
+                dimensions=dimensions,
+                cache_namespace="raw-memory-mock",
+                tokenizer_estimate_method="sha256",
+                text_version=_RAW_MEMORY_EMBEDDING_TEXT_VERSION,
+            )
+        )
+
+    provider_name = _raw_memory_embedding_provider_name()
+    model = _raw_memory_embedding_model(provider_name)
+    api_key = _raw_memory_embedding_api_key(provider_name)
+    if not api_key:
+        return None
+
+    fingerprint: _RawMemoryProviderCacheKey = (
+        provider_name,
+        model,
+        dimensions,
+        hashlib.sha256(api_key.encode()).hexdigest(),
+    )
+    if _raw_memory_embedding_provider is None or fingerprint != _raw_memory_embedding_fingerprint:
+        _raw_memory_embedding_provider = create_embedding_provider(
+            provider=provider_name,
+            model=model,
+            dimensions=dimensions,
+            cache_namespace="raw-memory",
+            api_key=api_key,
+            max_cache_size=2000,
+            tokenizer_estimate_method="provider-default",
+        )
+        _raw_memory_embedding_fingerprint = fingerprint
+    return _raw_memory_embedding_provider
+
+
+def _raw_memory_embedding_provider_name() -> EmbeddingProviderName:
+    provider = (os.getenv("SIBYL_EMBEDDING_PROVIDER") or settings.embedding_provider).strip()
+    if provider == "openai":
+        return "openai"
+    if provider == "gemini":
+        return "gemini"
+    raise ValueError(f"unsupported raw memory embedding provider: {provider}")
+
+
+def _raw_memory_embedding_model(provider: EmbeddingProviderName) -> str:
+    model = os.getenv("SIBYL_EMBEDDING_MODEL", "").strip()
+    if model:
+        return model
+    if provider == "gemini" and settings.embedding_model == "text-embedding-3-small":
+        return "gemini-embedding-2"
+    return settings.embedding_model
+
+
+def _raw_memory_embedding_dimensions() -> int:
+    dimensions = os.getenv("SIBYL_EMBEDDING_DIMENSIONS", "").strip()
+    if dimensions:
+        return int(dimensions)
+    return settings.embedding_dimensions
+
+
+def _raw_memory_embedding_api_key(provider: EmbeddingProviderName) -> str | None:
+    if provider == "gemini":
+        return (
+            os.getenv("SIBYL_GEMINI_API_KEY", "")
+            or os.getenv("GEMINI_API_KEY", "")
+            or os.getenv("GOOGLE_API_KEY", "")
+            or settings.gemini_api_key.get_secret_value()
+            or None
+        )
+    return (
+        os.getenv("SIBYL_OPENAI_API_KEY", "")
+        or os.getenv("OPENAI_API_KEY", "")
+        or settings.openai_api_key.get_secret_value()
+        or None
+    )
+
+
 def _coerce_memory_scope(value: object | None) -> MemoryScope:
     if isinstance(value, MemoryScope):
         return value
@@ -447,6 +596,7 @@ def _raw_memory_from_record(record: Mapping[str, object]) -> RawMemory:
         title=_coerce_str(record.get("title")),
         raw_content=_coerce_str(record.get("raw_content")),
         tags=_coerce_str_list(record.get("tags")),
+        embedding=_coerce_float_list(record.get("embedding")),
         metadata=metadata,
         provenance=_coerce_dict(record.get("provenance")),
         capture_surface=_coerce_optional_str(record.get("capture_surface")),
@@ -493,6 +643,7 @@ def _raw_memory_record(memory: RawMemory) -> SurrealRecord:
         "raw_content": memory.raw_content,
         "entity_type": memory.entity_type,
         "tags": list(memory.tags),
+        "embedding": list(memory.embedding) if memory.embedding is not None else None,
         "metadata": dict(memory.metadata),
         "provenance": dict(memory.provenance),
         "capture_surface": memory.capture_surface,
@@ -578,6 +729,31 @@ async def _replace_record(
     if created is None:
         raise RuntimeError(f"failed to persist {table} record {uuid}")
     return created
+
+
+async def _raw_memory_with_embedding(
+    memory: RawMemory,
+    embedding_provider: EmbeddingProvider | None,
+) -> RawMemory:
+    if embedding_provider is None or memory.embedding is not None:
+        return memory
+    embeddings = await embedding_provider.embed_texts(
+        [
+            raw_memory_embedding_text(
+                title=memory.title,
+                raw_content=memory.raw_content,
+            )
+        ],
+        input_kind="document",
+    )
+    memory.embedding = _embedding_vector_from_batch(
+        embeddings,
+        embedding_provider.metadata.dimensions,
+    )
+    metadata = dict(memory.metadata)
+    metadata["embedding_metadata"] = _raw_memory_embedding_metadata(embedding_provider.metadata)
+    memory.metadata = metadata
+    return memory
 
 
 def _value_batches(
@@ -769,6 +945,7 @@ async def remember_raw_memory(
     provenance: dict[str, object] | None = None,
     capture_surface: str | None = None,
     entity_type: str = "raw_memory",
+    embedding_provider: EmbeddingProvider | None | object = _RAW_MEMORY_EMBEDDING_AUTO,
 ) -> RawMemory:
     now = _utcnow()
     normalized_scope = _coerce_memory_scope(memory_scope)
@@ -793,6 +970,12 @@ async def remember_raw_memory(
         captured_at=now,
         created_at=now,
     )
+    provider = (
+        _configured_raw_memory_embedding_provider()
+        if embedding_provider is _RAW_MEMORY_EMBEDDING_AUTO
+        else cast("EmbeddingProvider | None", embedding_provider)
+    )
+    memory = await _raw_memory_with_embedding(memory, provider)
     async with surreal_content_client() as client:
         record = await _replace_record(
             client,
@@ -1541,10 +1724,12 @@ __all__ = [
     "list_source_ids_for_org",
     "list_unlinked_document_chunks",
     "load_search_scope",
+    "raw_memory_embedding_text",
     "raw_memory_recallable",
     "recall_raw_memory",
     "remember_raw_memory",
     "remember_reflection_candidate_review",
+    "reset_raw_memory_embedding_provider_cache",
     "resolve_raw_memory_prefix",
     "save_raw_memory",
     "search_document_chunks",

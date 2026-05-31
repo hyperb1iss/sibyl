@@ -6,6 +6,15 @@ from pathlib import Path
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def disable_raw_memory_auto_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "sibyl_core.services.surreal_content._configured_raw_memory_embedding_provider",
+        lambda: None,
+    )
+
+
 # =============================================================================
 # pytest hooks
 # =============================================================================

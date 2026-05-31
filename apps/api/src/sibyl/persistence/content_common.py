@@ -124,6 +124,7 @@ class RawCaptureRecord:
     review_state: str = "pending"
     entity_id: str | None = None
     tags: list[str] = field(default_factory=list)
+    embedding: object | None = None
     metadata: dict[str, object] = field(default_factory=dict)
     provenance: dict[str, object] = field(default_factory=dict)
     capture_surface: str | None = None

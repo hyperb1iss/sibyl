@@ -219,6 +219,7 @@ def test_raw_capture_record_preserves_first_class_lifecycle_fields() -> None:
         review_state="deferred",
         entity_id="note_123",
         tags=["raw"],
+        embedding=[0.1, 0.2, 0.3],
         metadata={"source": "manual"},
         provenance={"source_import_id": "import_123"},
         capture_surface="source_import",
@@ -238,6 +239,7 @@ def test_raw_capture_record_preserves_first_class_lifecycle_fields() -> None:
     assert record["agent_id"] == "agent_123"
     assert record["project_id"] == "project_123"
     assert record["review_state"] == "deferred"
+    assert record["embedding"] == [0.1, 0.2, 0.3]
     assert record["provenance"] == {"source_import_id": "import_123"}
     assert record["captured_at"] == captured_at
     assert record["deleted_at"] == deleted_at
@@ -247,6 +249,7 @@ def test_raw_capture_record_preserves_first_class_lifecycle_fields() -> None:
     assert round_tripped.memory_scope == "project"
     assert round_tripped.scope_key == "project_123"
     assert round_tripped.review_state == "deferred"
+    assert round_tripped.embedding == [0.1, 0.2, 0.3]
     assert round_tripped.provenance == {"source_import_id": "import_123"}
     assert round_tripped.captured_at == captured_at
     assert round_tripped.deleted_at == deleted_at

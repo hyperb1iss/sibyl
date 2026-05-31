@@ -32,8 +32,10 @@ async def reset_graph_runtime() -> None:
 
 def reset_document_embedding_runtime() -> None:
     from sibyl_core.services.document_search import reset_document_embedding_provider_cache
+    from sibyl_core.services.surreal_content import reset_raw_memory_embedding_provider_cache
 
     reset_document_embedding_provider_cache()
+    reset_raw_memory_embedding_provider_cache()
 
 
 async def _try_reset_graph_client(context: str) -> None:

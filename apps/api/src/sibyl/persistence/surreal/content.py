@@ -461,6 +461,7 @@ def _raw_capture_from_record(record: Mapping[str, object]) -> RawCaptureRecord:
         raw_content=_coerce_str(record.get("raw_content")),
         entity_type=_coerce_str(record.get("entity_type")),
         tags=_coerce_str_list(record.get("tags")),
+        embedding=_coerce_float_list(record.get("embedding")),
         metadata=metadata,
         provenance=_coerce_dict(record.get("provenance") or metadata.get("provenance")),
         capture_surface=_coerce_optional_str(record.get("capture_surface")),
@@ -502,6 +503,7 @@ def _raw_capture_record(capture: RawCaptureRecord) -> SurrealRecord:
         "raw_content": capture.raw_content,
         "entity_type": capture.entity_type,
         "tags": list(capture.tags or []),
+        "embedding": _serialize_value(capture.embedding),
         "metadata": metadata,
         "provenance": dict(
             capture.provenance or cast("Mapping[str, object]", metadata.get("provenance") or {})
