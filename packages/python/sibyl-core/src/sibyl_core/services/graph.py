@@ -4,13 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import time
-from collections import OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from difflib import SequenceMatcher
 from enum import Enum
 from typing import Any, cast
 
@@ -18,10 +15,9 @@ import structlog
 from surrealdb import RecordID
 
 from sibyl_core.backends.surreal.connection import _is_transient_connection_error
-from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
 from sibyl_core.backends.surreal.records import raise_on_error
-from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, bootstrap_schema
+from sibyl_core.backends.surreal.schema import bootstrap_schema
 from sibyl_core.config import settings
 from sibyl_core.embeddings.providers import (
     EmbeddingInputKind,
@@ -44,20 +40,50 @@ from sibyl_core.models.tasks import (
     TaskPriority,
     TaskStatus,
 )
+from sibyl_core.services import graph_client as _graph_client
+from sibyl_core.services.graph_search import (
+    bounded_similarity_score as _bounded_similarity_score,
+)
+from sibyl_core.services.graph_search import (
+    count_task_status as _count_task_status,
+)
+from sibyl_core.services.graph_search import (
+    entity_matches_list_filters as _entity_matches_list_filters,
+)
+from sibyl_core.services.graph_search import (
+    finalize_task_progress as _finalize_task_progress,
+)
+from sibyl_core.services.graph_search import (
+    lower_filter_values as _lower_filter_values,
+)
+from sibyl_core.services.graph_search import (
+    lower_sequence_values as _lower_sequence_values,
+)
+from sibyl_core.services.graph_search import (
+    merge_ranked_entity_results as _merge_ranked_entity_results,
+)
+from sibyl_core.services.graph_search import (
+    metadata_scalar as _metadata_scalar,
+)
+from sibyl_core.services.graph_search import (
+    new_task_progress as _new_task_progress,
+)
+from sibyl_core.services.graph_search import (
+    normalize_search_text as _normalize_search_text,
+)
+from sibyl_core.services.graph_search import (
+    row_score as _row_score,
+)
+from sibyl_core.services.graph_search import (
+    task_priority_rank as _task_priority_rank,
+)
+
+SurrealGraphClient = _graph_client.SurrealGraphClient
+_clients = _graph_client._clients
+_prepared_groups = _graph_client._prepared_groups
 
 type SurrealRecord = dict[str, object]
 
-_prepared_groups: set[str] = set()
-_prepare_lock = asyncio.Lock()
-_client_lock = asyncio.Lock()
-_clients: OrderedDict[str, SurrealGraphClient] = OrderedDict()
-_TASK_PRIORITY_ORDER = {
-    "critical": 0,
-    "high": 1,
-    "medium": 2,
-    "low": 3,
-    "someday": 4,
-}
 _ENTITY_LIST_FIELDS = "* OMIT content, embedding, name_embedding, attributes.content"
 _RELATED_ENTITY_PROJECTION_FIELDS = (
     ("id", "record_id"),
@@ -163,36 +189,6 @@ class GraphRuntime:
     client: SurrealGraphClient
     entity_manager: EntityManager
     relationship_manager: RelationshipManager
-
-
-class SurrealGraphClient(DedicatedSurrealClient):
-    """Dedicated SurrealDB graph client scoped to one organization namespace."""
-
-    def __init__(
-        self,
-        *,
-        group_id: str,
-        url: str,
-        username: str = "",
-        password: str = "",
-        token: str = "",
-        namespace_prefix: str = "org_",
-        database: str = "graph",
-    ) -> None:
-        self._group_id = group_id
-        super().__init__(
-            url=url,
-            username=username,
-            password=password,
-            token=token,
-            namespace=_namespace_for_group(namespace_prefix, group_id),
-            database=database,
-            client_kind="graph",
-        )
-
-    @property
-    def group_id(self) -> str:
-        return self._group_id
 
 
 class EntityManager:
@@ -1560,6 +1556,40 @@ class RelationshipManager:
         return len(rows)
 
 
+def _validate_native_embedding_dimensions(
+    embedding_provider: EmbeddingProvider | None,
+) -> None:
+    _graph_client.validate_native_embedding_dimensions(embedding_provider)
+
+
+async def get_surreal_graph_client(group_id: str) -> SurrealGraphClient:
+    # Compatibility callers patch graph.SurrealGraphClient, not graph_client.
+    original_client_type = _graph_client.SurrealGraphClient
+    _graph_client.SurrealGraphClient = SurrealGraphClient
+    try:
+        return await _graph_client.get_surreal_graph_client(group_id)
+    finally:
+        _graph_client.SurrealGraphClient = original_client_type
+
+
+async def close_graph_clients() -> None:
+    await _graph_client.close_graph_clients()
+
+
+async def prepare_graph_schema(client: SurrealGraphClient) -> None:
+    # Compatibility callers patch graph.bootstrap_schema, not graph_client.
+    original_bootstrap_schema = _graph_client.bootstrap_schema
+    _graph_client.bootstrap_schema = bootstrap_schema
+    try:
+        await _graph_client.prepare_graph_schema(client)
+    finally:
+        _graph_client.bootstrap_schema = original_bootstrap_schema
+
+
+def mark_graph_schema_dirty(group_id: str) -> None:
+    _graph_client.mark_graph_schema_dirty(group_id)
+
+
 async def get_surreal_graph_runtime(
     group_id: str,
     *,
@@ -1583,73 +1613,6 @@ async def get_surreal_graph_runtime(
             embedding_provider=embedding_provider,
         ),
     )
-
-
-def _validate_native_embedding_dimensions(
-    embedding_provider: EmbeddingProvider | None,
-) -> None:
-    if embedding_provider is None:
-        return
-    dimensions = embedding_provider.metadata.dimensions
-    if dimensions != EMBEDDING_DIM:
-        raise ValueError(
-            "native embedding provider dimensions "
-            f"({dimensions}) must match Surreal graph schema ({EMBEDDING_DIM})"
-        )
-
-
-async def get_surreal_graph_client(group_id: str) -> SurrealGraphClient:
-    evicted: list[SurrealGraphClient] = []
-    async with _client_lock:
-        client = _clients.get(group_id)
-        if client is None:
-            client = SurrealGraphClient(
-                group_id=group_id,
-                url=settings.resolved_surreal_url,
-                username=settings.surreal_username,
-                password=settings.surreal_password.get_secret_value(),
-                token=settings.surreal_token.get_secret_value(),
-                namespace_prefix=settings.surreal_namespace_prefix,
-                database=settings.surreal_database,
-            )
-            _clients[group_id] = client
-            while len(_clients) > settings.surreal_graph_client_cache_size:
-                evicted_group_id, evicted_client = _clients.popitem(last=False)
-                _prepared_groups.discard(evicted_group_id)
-                evicted.append(evicted_client)
-        else:
-            _clients.move_to_end(group_id)
-    if evicted:
-        await asyncio.gather(*(client.close() for client in evicted), return_exceptions=True)
-        return client
-    return client
-
-
-async def close_graph_clients() -> None:
-    async with _client_lock:
-        clients = list(_clients.values())
-        _clients.clear()
-        _prepared_groups.clear()
-    await asyncio.gather(*(client.close() for client in clients), return_exceptions=True)
-
-
-async def prepare_graph_schema(client: SurrealGraphClient) -> None:
-    group_id = client.group_id
-    if group_id in _prepared_groups:
-        return
-    async with _prepare_lock:
-        if group_id in _prepared_groups:
-            return
-        await bootstrap_schema(cast("Any", client))
-        _prepared_groups.add(group_id)
-
-
-def _namespace_for_group(prefix: str, group_id: str) -> str:
-    if not group_id:
-        msg = "group_id is required to resolve a SurrealDB namespace"
-        raise ValueError(msg)
-    sanitized = group_id.replace("-", "").lower()
-    return f"{prefix}{sanitized}"
 
 
 def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
@@ -1988,38 +1951,6 @@ def _row_embedding(value: object) -> list[float] | None:
     return embedding
 
 
-def _row_score(row: SurrealRecord) -> float:
-    score = row.get("score")
-    if isinstance(score, int | float):
-        return float(score)
-    return 1.0
-
-
-def _merge_ranked_entity_results(
-    ranked_lists: Sequence[tuple[Sequence[tuple[Entity, float]], float]],
-    *,
-    limit: int,
-    rrf_k: float = 60.0,
-) -> list[tuple[Entity, float]]:
-    scores: dict[str, float] = {}
-    entities: dict[str, Entity] = {}
-    original_scores: dict[str, float] = {}
-
-    for results, weight in ranked_lists:
-        for rank, (entity, score) in enumerate(results, start=1):
-            key = entity.id
-            scores[key] = scores.get(key, 0.0) + (weight / (rrf_k + rank))
-            original_scores[key] = max(original_scores.get(key, 0.0), score)
-            entities.setdefault(key, entity)
-
-    ordered = sorted(
-        scores,
-        key=lambda key: (scores[key], original_scores[key], entities[key].created_at, key),
-        reverse=True,
-    )
-    return [(entities[key], scores[key]) for key in ordered[: max(int(limit), 1)]]
-
-
 def _surreal_indexed_field_missing(field: str) -> str:
     return f"({field} IS NONE OR {field} = '')"
 
@@ -2030,169 +1961,6 @@ def _surreal_indexed_field_equals_or_missing(field: str) -> str:
 
 def _surreal_indexed_field_in_or_missing(field: str, param: str) -> str:
     return f"({field} IN ${param} OR {_surreal_indexed_field_missing(field)})"
-
-
-def _entity_matches_list_filters(
-    entity: Entity,
-    *,
-    project_id: str | None,
-    epic_id: str | None,
-    no_epic: bool,
-    parent_task_id: str | None = None,
-    status_values: Sequence[str],
-    priority_values: Sequence[str],
-    complexity_values: Sequence[str],
-    feature: str | None,
-    tag_values: Sequence[str],
-    include_archived: bool,
-) -> bool:
-    if project_id and _metadata_scalar(entity, "project_id") != project_id:
-        return False
-    entity_parent_task_id = _metadata_scalar(entity, "parent_task_id")
-    entity_epic_id = _metadata_scalar(entity, "epic_id")
-    entity_epic_alias = entity_parent_task_id or entity_epic_id
-    if epic_id and entity_epic_alias != epic_id and entity_epic_id != epic_id:
-        return False
-    if no_epic and (entity_parent_task_id or entity_epic_id):
-        return False
-    if parent_task_id and _metadata_scalar(entity, "parent_task_id") != parent_task_id:
-        return False
-    entity_status = _metadata_scalar(entity, "status")
-    if status_values and str(entity_status or "").lower() not in status_values:
-        return False
-    if not include_archived and str(entity_status or "").lower() == "archived":
-        return False
-    if (
-        priority_values
-        and str(_metadata_scalar(entity, "priority") or "").lower() not in priority_values
-    ):
-        return False
-    if (
-        complexity_values
-        and str(_metadata_scalar(entity, "complexity") or "").lower() not in complexity_values
-    ):
-        return False
-    if feature and str(_metadata_scalar(entity, "feature") or "").lower() != feature.lower():
-        return False
-    if tag_values:
-        entity_tags = _metadata_str_values(entity, "tags")
-        if not any(tag in entity_tags for tag in tag_values):
-            return False
-    return True
-
-
-def _metadata_scalar(entity: Entity, key: str) -> object | None:
-    return dict(entity.metadata or {}).get(key)
-
-
-def _metadata_str_values(entity: Entity, key: str) -> list[str]:
-    value = _metadata_scalar(entity, key)
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError:
-            return [value.lower()]
-        if isinstance(parsed, list):
-            return [str(item).lower() for item in parsed if str(item)]
-        return [value.lower()]
-    if isinstance(value, Iterable) and not isinstance(value, bytes | dict):
-        return [str(item).lower() for item in value if str(item)]
-    return []
-
-
-def _new_task_progress() -> dict[str, int]:
-    return {
-        "total_tasks": 0,
-        "completed_tasks": 0,
-        "in_progress_tasks": 0,
-        "blocked_tasks": 0,
-        "in_review_tasks": 0,
-    }
-
-
-def _count_task_progress(counters: dict[str, int], task: Entity) -> None:
-    _count_task_status(counters, _metadata_scalar(task, "status"))
-
-
-def _count_task_status(
-    counters: dict[str, int],
-    status: object | None,
-    *,
-    count: int = 1,
-) -> None:
-    if count <= 0:
-        return
-    counters["total_tasks"] += count
-    status_value = str(status or "").lower()
-    if status_value == "done":
-        counters["completed_tasks"] += count
-    elif status_value == "doing":
-        counters["in_progress_tasks"] += count
-    elif status_value == "blocked":
-        counters["blocked_tasks"] += count
-    elif status_value == "review":
-        counters["in_review_tasks"] += count
-
-
-def _finalize_task_progress(counters: dict[str, int]) -> dict[str, Any]:
-    total = counters["total_tasks"]
-    completed = counters["completed_tasks"]
-    return {
-        **counters,
-        "completion_pct": round((completed / total * 100) if total > 0 else 0, 1),
-    }
-
-
-def _lower_filter_values(value: str | None) -> list[str]:
-    if not value:
-        return []
-    return [part.strip().lower() for part in value.split(",") if part.strip()]
-
-
-def _task_priority_rank(task_info: dict[str, Any]) -> int:
-    return _TASK_PRIORITY_ORDER.get(str(task_info.get("priority") or "").lower(), 99)
-
-
-def _lower_sequence_values(values: Sequence[str] | None) -> list[str]:
-    return [str(value).strip().lower() for value in values or () if str(value).strip()]
-
-
-def _bounded_similarity_score(query: str, entity: Entity) -> float:
-    query_text = _normalize_search_text(query)
-    entity_text = _normalize_search_text(
-        " ".join(
-            part
-            for part in (
-                entity.name,
-                entity.description,
-                entity.content,
-                str(entity.metadata.get("summary") or ""),
-            )
-            if part
-        )
-    )
-    if not query_text or not entity_text:
-        return 0.0
-    if query_text in entity_text or entity_text in query_text:
-        return 1.0
-
-    query_tokens = set(_SEARCH_TOKEN_RE.findall(query_text))
-    entity_tokens = set(_SEARCH_TOKEN_RE.findall(entity_text))
-    if not query_tokens or not entity_tokens:
-        return 0.0
-
-    overlap = query_tokens & entity_tokens
-    jaccard = len(overlap) / len(query_tokens | entity_tokens)
-    coverage = len(overlap) / len(query_tokens)
-    sequence = SequenceMatcher(None, query_text[:1000], entity_text[:1000]).ratio()
-    return min(max(jaccard, coverage * 0.85, sequence * 0.9), 1.0)
-
-
-_SEARCH_TOKEN_RE = re.compile(r"[a-z0-9_]+")
-
-
-def _normalize_search_text(value: str) -> str:
-    return " ".join(_SEARCH_TOKEN_RE.findall(value.lower()))
 
 
 def relationship_from_surreal_row(row: Mapping[str, object]) -> Relationship:
@@ -2597,7 +2365,7 @@ async def _replace_entity(
     except Exception as exc:
         if not _is_transient_connection_error(exc):
             raise
-        _prepared_groups.discard(client.group_id)
+        mark_graph_schema_dirty(client.group_id)
         await prepare_graph_schema(client)
         result = await _execute_replace_entity_query(client, record)
     rows = normalize_records(result)
@@ -2625,7 +2393,7 @@ async def _replace_entities_bulk(
     except Exception as exc:
         if not _is_transient_connection_error(exc):
             raise
-        _prepared_groups.discard(client.group_id)
+        mark_graph_schema_dirty(client.group_id)
         await prepare_graph_schema(client)
         result = await _execute_replace_entities_bulk_query(client, records)
     return normalize_records(result)
@@ -2859,7 +2627,7 @@ async def _replace_relationships_bulk(
     except Exception as exc:
         if not _is_transient_connection_error(exc):
             raise
-        _prepared_groups.discard(client.group_id)
+        mark_graph_schema_dirty(client.group_id)
         await prepare_graph_schema(client)
         await client.execute_query(_RELATIONSHIP_BULK_UPSERT_QUERY, rows=rows)
     return written_ids
