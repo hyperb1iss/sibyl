@@ -59,8 +59,6 @@ class _EmbeddingWriteClient:
         if "INSERT INTO entity $rows ON DUPLICATE KEY UPDATE" in query:
             rows = cast("list[dict[str, object]]", params["rows"])
             return [{"uuid": row["uuid"], "name_embedding": row["name_embedding"]} for row in rows]
-        if "UPSERT entity" in query:
-            return [{"uuid": params["uuid"], "name_embedding": params["name_embedding"]}]
         if "RELATE $src->$rel->$tgt" in query:
             return [{"uuid": params["uuid"], "fact_embedding": params["fact_embedding"]}]
         return []
@@ -388,7 +386,8 @@ class _TransientEntityWriteClient:
         self.calls += 1
         if self.calls == 1:
             raise KeyError("c4ae8fd2-a34d-4f8f-8225-1fd0f7a91cf6")
-        return [{"uuid": params["uuid"], "name": params["name"]}]
+        rows = cast("list[dict[str, object]]", params["rows"])
+        return [{"uuid": rows[0]["uuid"], "name": rows[0]["name"]}]
 
 
 def test_native_embedding_dimension_validation_requires_schema_match() -> None:
@@ -501,9 +500,11 @@ async def test_native_entity_manager_generates_embeddings_with_native_provider()
     )
 
     assert created_id == "entity_embed"
-    write_params = client.calls[0][1]
-    assert len(cast(list[float], write_params["name_embedding"])) == 4
-    attributes = cast(dict[str, object], write_params["attributes"])
+    write_query, write_params = client.calls[0]
+    assert "INSERT INTO entity $rows ON DUPLICATE KEY UPDATE" in write_query
+    rows = cast("list[dict[str, object]]", write_params["rows"])
+    assert len(cast(list[float], rows[0]["name_embedding"])) == 4
+    attributes = cast(dict[str, object], rows[0]["attributes"])
     assert attributes["embedding_metadata"] == provider.metadata.to_dict()
 
 

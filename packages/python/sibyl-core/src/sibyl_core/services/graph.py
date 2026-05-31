@@ -2403,34 +2403,7 @@ async def _execute_replace_entity_query(
     client: SurrealGraphClient,
     record: SurrealRecord,
 ) -> object:
-    return await client.execute_query(
-        """
-        UPSERT entity SET
-            uuid = $uuid,
-            name = $name,
-            entity_type = $entity_type,
-            summary = $summary,
-            description = $description,
-            content = $content,
-            labels = $labels,
-            attributes = $attributes,
-            group_id = $group_id,
-            created_at = $created_at,
-            updated_at = $updated_at,
-            project_id = $project_id,
-            epic_id = $epic_id,
-            parent_task_id = $parent_task_id,
-            task_id = $task_id,
-            status = $status,
-            priority = $priority,
-            complexity = $complexity,
-            feature = $feature,
-            tags = $tags,
-            name_embedding = $name_embedding
-        WHERE uuid = $uuid;
-        """,
-        **record,
-    )
+    return await _execute_replace_entities_bulk_query(client, [record])
 
 
 async def _execute_replace_entities_bulk_query(
