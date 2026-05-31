@@ -220,19 +220,19 @@ CONTENT_HIGHLIGHT_SNIPPET_MIGRATION_DEFINITIONS = f"""
 {CONTENT_ANALYZER_DEFINITIONS}
 
 DEFINE INDEX OVERWRITE idx_crawl_sources_name_ft
-    ON crawl_sources FIELDS name FULLTEXT ANALYZER title_analyzer BM25 HIGHLIGHTS;
+    ON crawl_sources FIELDS name FULLTEXT ANALYZER title_analyzer BM25 HIGHLIGHTS CONCURRENTLY;
 DEFINE INDEX OVERWRITE idx_crawled_documents_title_ft
-    ON crawled_documents FIELDS title FULLTEXT ANALYZER title_analyzer BM25 HIGHLIGHTS;
+    ON crawled_documents FIELDS title FULLTEXT ANALYZER title_analyzer BM25 HIGHLIGHTS CONCURRENTLY;
 DEFINE INDEX OVERWRITE idx_crawled_documents_content_ft
-    ON crawled_documents FIELDS content FULLTEXT ANALYZER content_analyzer BM25 HIGHLIGHTS;
+    ON crawled_documents FIELDS content FULLTEXT ANALYZER content_analyzer BM25 HIGHLIGHTS CONCURRENTLY;
 DEFINE INDEX OVERWRITE idx_document_chunks_content_ft
-    ON document_chunks FIELDS content FULLTEXT ANALYZER content_analyzer BM25 HIGHLIGHTS;
+    ON document_chunks FIELDS content FULLTEXT ANALYZER content_analyzer BM25 HIGHLIGHTS CONCURRENTLY;
 DEFINE INDEX IF NOT EXISTS idx_document_chunks_code_ft
-    ON document_chunks FIELDS content FULLTEXT ANALYZER code_analyzer BM25 HIGHLIGHTS;
+    ON document_chunks FIELDS content FULLTEXT ANALYZER code_analyzer BM25 HIGHLIGHTS CONCURRENTLY;
 DEFINE INDEX OVERWRITE idx_raw_captures_title_ft
-    ON raw_captures FIELDS title FULLTEXT ANALYZER title_analyzer BM25 HIGHLIGHTS;
+    ON raw_captures FIELDS title FULLTEXT ANALYZER title_analyzer BM25 HIGHLIGHTS CONCURRENTLY;
 DEFINE INDEX OVERWRITE idx_raw_captures_content_ft
-    ON raw_captures FIELDS raw_content FULLTEXT ANALYZER content_analyzer BM25 HIGHLIGHTS;
+    ON raw_captures FIELDS raw_content FULLTEXT ANALYZER content_analyzer BM25 HIGHLIGHTS CONCURRENTLY;
 """
 
 CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS = f"""

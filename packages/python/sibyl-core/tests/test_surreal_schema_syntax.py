@@ -408,6 +408,21 @@ def test_content_highlight_snippets_and_code_analyzer_are_versioned() -> None:
     assert "DEFINE INDEX IF NOT EXISTS idx_document_chunks_code_ft" in (
         CONTENT_HIGHLIGHT_SNIPPET_MIGRATION_DEFINITIONS
     )
+    for index_name in (
+        "idx_crawl_sources_name_ft",
+        "idx_crawled_documents_title_ft",
+        "idx_crawled_documents_content_ft",
+        "idx_document_chunks_content_ft",
+        "idx_document_chunks_code_ft",
+        "idx_raw_captures_title_ft",
+        "idx_raw_captures_content_ft",
+    ):
+        assert any(
+            statement.startswith("DEFINE INDEX")
+            and index_name in statement
+            and statement.endswith("CONCURRENTLY;")
+            for statement in split_statements(CONTENT_HIGHLIGHT_SNIPPET_MIGRATION_DEFINITIONS)
+        )
     assert "SEARCH ANALYZER code_analyzer BM25 HIGHLIGHTS" in migration_sql
     assert "FULLTEXT ANALYZER" not in migration_sql
 
