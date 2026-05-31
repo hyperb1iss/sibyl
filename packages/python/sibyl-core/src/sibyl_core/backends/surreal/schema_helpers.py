@@ -36,6 +36,11 @@ def is_duplicate_unique_index_error(statement: str, error: Exception) -> bool:
     return "already contains" in str(error).lower()
 
 
+def is_missing_table_error(error: Exception) -> bool:
+    message = str(error).lower()
+    return "the table" in message and "does not exist" in message
+
+
 async def execute_schema_statement(
     execute_query: Callable[[str], Awaitable[object]],
     statement: str,

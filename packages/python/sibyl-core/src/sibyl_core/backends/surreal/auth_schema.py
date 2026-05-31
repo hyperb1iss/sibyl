@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from sibyl_core.auth import OrganizationRole, ProjectRole, ProjectVisibility
-from sibyl_core.backends.surreal.schema_helpers import split_statements
+from sibyl_core.backends.surreal.schema_helpers import is_missing_table_error, split_statements
 from sibyl_core.backends.surreal.schema_version import (
     SCHEMA_VERSION_TABLE,
     SchemaMigration,
@@ -682,6 +682,8 @@ async def _assert_auth_migrations_safe(client: SurrealAuthClient) -> None:
         scope="auth_schema_migration_version",
     )
     current_version = await get_schema_version(client.execute_query, name=AUTH_SCHEMA_NAME)
+    if current_version == 0 and not await _auth_tables_have_rows(client):
+        return
     if current_version < 4:
         enum_checks = (
             ("organization_members", "role", _AUTH_ORGANIZATION_ROLE_VALUES, True),
@@ -725,15 +727,20 @@ async def _first_invalid_enum_value(
 ) -> str | None:
     from sibyl_core.backends.surreal.records import normalize_records
 
-    rows = normalize_records(
-        await client.execute_query(
-            f"""
-            SELECT {field}
-            FROM {table}
-            GROUP BY {field};
-            """
+    try:
+        rows = normalize_records(
+            await client.execute_query(
+                f"""
+                SELECT {field}
+                FROM {table}
+                GROUP BY {field};
+                """
+            )
         )
-    )
+    except Exception as exc:
+        if is_missing_table_error(exc):
+            return None
+        raise
     allowed_values = set(allowed)
     for row in rows:
         value = row.get(field)
@@ -745,6 +752,40 @@ async def _first_invalid_enum_value(
         if normalized not in allowed_values:
             return normalized
     return None
+
+
+async def _auth_tables_have_rows(client: SurrealAuthClient) -> bool:
+    for table in AUTH_TABLES:
+        if await _table_has_rows(client, table=table):
+            return True
+    return False
+
+
+async def _table_has_rows(client: SurrealAuthClient, *, table: str) -> bool:
+    from sibyl_core.backends.surreal.records import normalize_records
+
+    try:
+        rows = normalize_records(
+            await client.execute_query(f"SELECT count() AS count FROM {table};")
+        )
+    except Exception as exc:
+        if is_missing_table_error(exc):
+            return False
+        raise
+    return any(_coerce_int(row.get("count")) > 0 for row in rows)
+
+
+def _coerce_int(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int | float):
+        return int(value)
+    if isinstance(value, str) and value:
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
 
 
 __all__ = [

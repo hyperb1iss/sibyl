@@ -92,10 +92,14 @@ class _RecordingSchemaClient:
             version = params.get("version")
             self.schema_version = int(version) if isinstance(version, int | str | float) else 0
         for table in tuple(self.missing_tables):
+            if f"FROM {table}" in stripped:
+                raise RuntimeError(f"The table '{table}' does not exist")
             if stripped.startswith(f"DELETE FROM {table}") or stripped.startswith(
                 f"UPDATE {table}"
             ):
                 raise RuntimeError(f"The table '{table}' does not exist")
+            if stripped.startswith(f"DEFINE TABLE IF NOT EXISTS {table}"):
+                self.missing_tables.discard(table)
             if stripped.startswith(f"DEFINE TABLE OVERWRITE {table}"):
                 self.missing_tables.discard(table)
         if self.duplicate_index_name and self.duplicate_index_name in statement:
@@ -928,6 +932,18 @@ async def test_auth_bootstrap_continues_after_duplicate_unique_index() -> None:
 
 
 @pytest.mark.asyncio
+async def test_auth_bootstrap_allows_fresh_database_without_tables() -> None:
+    client = _RecordingSchemaClient(missing_tables=set(AUTH_TABLES))
+
+    await bootstrap_auth_schema(client)  # type: ignore[arg-type]
+
+    assert client.schema_version == AUTH_SCHEMA_CURRENT_VERSION
+    assert any(
+        "DEFINE TABLE IF NOT EXISTS organization_members" in statement for statement in client.calls
+    )
+
+
+@pytest.mark.asyncio
 async def test_content_bootstrap_continues_after_duplicate_unique_index() -> None:
     client = _RecordingSchemaClient("idx_raw_captures_uuid")
     client._url = "ws://127.0.0.1:8000/rpc"
@@ -937,6 +953,19 @@ async def test_content_bootstrap_continues_after_duplicate_unique_index() -> Non
     assert any("idx_raw_captures_org" in statement for statement in client.calls)
     assert any(
         "DEFINE TABLE IF NOT EXISTS system_settings" in statement for statement in client.calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_content_bootstrap_allows_fresh_database_without_tables() -> None:
+    client = _RecordingSchemaClient(missing_tables=set(CONTENT_TABLES))
+    client._url = "ws://127.0.0.1:8000/rpc"
+
+    await bootstrap_content_schema(client)  # type: ignore[arg-type]
+
+    assert client.schema_version == CONTENT_SCHEMA_CURRENT_VERSION
+    assert any(
+        "DEFINE TABLE IF NOT EXISTS crawl_sources" in statement for statement in client.calls
     )
 
 
