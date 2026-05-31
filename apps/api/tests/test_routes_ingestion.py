@@ -11,6 +11,7 @@ from fastapi import HTTPException
 
 from sibyl.api.routes.ingestion import (
     _document_collections_from_captures,
+    _document_import_options,
     _resolve_route_import_source_uri,
     _resolve_route_import_source_uri_for_adapter,
     list_document_collections_route,
@@ -279,7 +280,6 @@ async def test_start_document_import_route_enqueues_url_import() -> None:
         target_scope_key="project_123",
         collection="docs",
         batch_size=25,
-        allow_private_network=True,
     )
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     ctx = SimpleNamespace(user_id="user-1")
@@ -317,7 +317,6 @@ async def test_start_document_import_route_enqueues_url_import() -> None:
             "target_memory_scope": "project",
             "target_scope_key": "project_123",
             "collection": "docs",
-            "allow_private_network": True,
         },
         batch_size=25,
         promotion_preview_approved=False,
@@ -330,6 +329,21 @@ async def test_start_document_import_route_enqueues_url_import() -> None:
         batch_size=25,
         promotion_preview_approved=False,
     )
+
+
+def test_document_import_request_ignores_private_network_bypass_option() -> None:
+    request = DocumentImportRequest(
+        kind="url",
+        source_uri="https://docs.example.com/page",
+        target_scope_key="project_123",
+        allow_private_network=True,
+    )
+
+    assert not hasattr(request, "allow_private_network")
+    assert _document_import_options(request) == {
+        "target_memory_scope": "project",
+        "target_scope_key": "project_123",
+    }
 
 
 @pytest.mark.asyncio

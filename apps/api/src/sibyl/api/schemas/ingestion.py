@@ -44,7 +44,6 @@ class DocumentImportRequest(BaseModel):
     target_scope_key: str = Field(..., min_length=1, max_length=500)
     batch_size: int = Field(default=100, ge=1, le=1000)
     promotion_preview_approved: bool = False
-    allow_private_network: bool = False
 
     @model_validator(mode="after")
     def validate_source(self) -> DocumentImportRequest:
