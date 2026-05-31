@@ -24,13 +24,14 @@ def _raw_memory(
     metadata: dict[str, object] | None = None,
     deleted_at: datetime | None = None,
     entity_id: str | None = None,
+    memory_scope: MemoryScope = MemoryScope.ORGANIZATION,
 ) -> RawMemory:
     return RawMemory(
         id=raw_id or str(uuid4()),
         organization_id=organization_id or str(uuid4()),
         source_id=source_id,
         principal_id="user-1",
-        memory_scope=MemoryScope.PRIVATE,
+        memory_scope=memory_scope,
         review_state=review_state,
         entity_id=entity_id,
         title="Imported note",
@@ -150,6 +151,31 @@ async def test_promote_raw_captures_writes_chunks_and_graph_entity(
 
 
 @pytest.mark.asyncio
+async def test_promote_raw_captures_skips_private_memories_without_materializing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_memory(memory_scope=MemoryScope.PRIVATE)
+
+    async def fail_save_memory(_memory: RawMemory) -> RawMemory:
+        raise AssertionError("private raw memories should not be marked or materialized")
+
+    monkeypatch.setattr(
+        raw_promotion,
+        "list_raw_memories_for_promotion",
+        _list_memories([memory]),
+    )
+    monkeypatch.setattr(raw_promotion, "EmbeddingService", _fake_embedder)
+    monkeypatch.setattr(raw_promotion, "save_raw_memory", fail_save_memory)
+
+    result = await raw_promotion.promote_raw_captures({}, memory.organization_id)
+
+    assert result["promoted_count"] == 0
+    assert result["skipped_scope_count"] == 1
+    assert result["failed_count"] == 0
+    assert result["document_ids"] == []
+
+
+@pytest.mark.asyncio
 async def test_promote_raw_captures_materializes_transcript_lineage_edges(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -217,7 +243,7 @@ async def test_promote_raw_captures_materializes_transcript_lineage_edges(
         assert organization_id == child.organization_id
         assert _kwargs["memory_scope"] is child.memory_scope
         assert _kwargs["scope_key"] == child.scope_key
-        assert _kwargs["principal_id"] == child.principal_id
+        assert _kwargs["principal_id"] is None
         return raw_by_source.get(source_id)
 
     class FakeEntityManager:
