@@ -50,6 +50,17 @@ IMAP_ADAPTER_VERSION = "1.0"
 _EMAIL_DEDUPE_IDENTITY = "email_message"
 _IMAP_SECRET_OPTION_KEYS = frozenset({"access_token", "oauth2_token", "password"})
 _IMAP_PASSWORD_ENV_PREFIX = "SIBYL_SOURCE_IMPORT_IMAP_"
+_IMAP_MAILBOX_CONTROL_ERROR = "IMAP mailbox must not contain control characters"
+
+
+def _has_control_char(value: str) -> bool:
+    return any(ord(char) < 0x20 or ord(char) == 0x7F for char in value)
+
+
+def _validate_imap_mailbox(mailbox: str) -> str:
+    if _has_control_char(mailbox):
+        raise ValueError(_IMAP_MAILBOX_CONTROL_ERROR)
+    return mailbox
 
 
 class ImapClient(Protocol):
@@ -1065,7 +1076,9 @@ def _imap_config(
         port = int(parsed_port)
     else:
         port = 993 if ssl else 143
-    mailbox = _optional_str(options.get("mailbox")) or unquote(parsed.path.lstrip("/")) or "INBOX"
+    mailbox = _validate_imap_mailbox(
+        _optional_str(options.get("mailbox")) or unquote(parsed.path.lstrip("/")) or "INBOX"
+    )
     username = _optional_str(options.get("username"))
     if username is None and parsed.username:
         username = unquote(parsed.username)

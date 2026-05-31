@@ -16,6 +16,7 @@ from sibyl_core.services.mailbox_adapter import (
     ImapSourceAdapter,
     MaildirSourceAdapter,
     MboxSourceAdapter,
+    _imap_config,
     ensure_mailbox_adapter_registered,
 )
 from sibyl_core.services.source_adapters import (
@@ -440,6 +441,22 @@ async def test_maildir_iter_records_skips_symlinked_entries(tmp_path: Path) -> N
     assert len(ingested) == 1
     assert ingested[0].adapter_record_id == "maildir-1@example.com"
     assert all("secret host data" not in record.body for record in ingested)
+
+
+def test_imap_config_rejects_encoded_mailbox_control_characters() -> None:
+    with pytest.raises(ValueError, match="control characters"):
+        _imap_config(
+            "imaps://127.0.0.1/INBOX%0D%0AA999%20SELECT%20Archive",
+            {"allow_private_network": True},
+        )
+
+
+def test_imap_config_rejects_option_mailbox_control_characters() -> None:
+    with pytest.raises(ValueError, match="control characters"):
+        _imap_config(
+            "imaps://127.0.0.1/INBOX",
+            {"allow_private_network": True, "mailbox": "INBOX\r\nA999 SELECT Archive"},
+        )
 
 
 @pytest.mark.asyncio

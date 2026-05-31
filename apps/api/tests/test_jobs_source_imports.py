@@ -636,6 +636,21 @@ async def test_start_source_import_rejects_imap_query_before_persist(source_uri:
 
 
 @pytest.mark.asyncio
+async def test_start_source_import_rejects_encoded_imap_control_path_before_persist() -> None:
+    with pytest.raises(ValueError, match="imap_source_uri_must_not_include_control_characters"):
+        await source_imports.start_source_import(
+            source_uri="imaps://mail.example.com/INBOX%0D%0AA999%20SELECT%20Archive",
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            adapter_name=IMAP_ADAPTER_NAME,
+            options={"username": "bliss"},
+        )
+
+    assert source_imports._SOURCE_IMPORT_RUNS == {}
+
+
+@pytest.mark.asyncio
 async def test_start_source_import_rejects_non_url_imap_source_before_persist() -> None:
     with pytest.raises(ValueError, match="imap_source_uri_must_use_tls"):
         await source_imports.start_source_import(
