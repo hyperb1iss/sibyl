@@ -319,6 +319,28 @@ def test_raw_memory_write_flags_sensitive_record_in_wider_manifest() -> None:
     assert payload.metadata["import_requires_promotion_preview"] is True
 
 
+def test_raw_memory_write_classifies_secret_records_as_sensitive() -> None:
+    manifest = _manifest(target_memory_scope="project", target_scope_key="project_123")
+    record = _record(manifest).model_copy(
+        update={"body": "Rotate AWS key AKIAIOSFODNN7EXAMPLE today"}
+    )
+
+    payload = raw_memory_write_from_source_record(
+        manifest=manifest,
+        record=record,
+        organization_id="org-1",
+        principal_id="user-1",
+    )
+
+    assert payload.metadata["contains_secret"] is True
+    assert payload.metadata["contains_pii"] is False
+    assert payload.metadata["contains_sensitive"] is True
+    assert payload.metadata["sensitivity_flags"] == ["api_key"]
+    assert payload.metadata["privacy_class"] == "sensitive"
+    assert payload.metadata["source_declared_privacy_class"] == "personal"
+    assert payload.metadata["import_requires_promotion_preview"] is True
+
+
 @pytest.mark.asyncio
 async def test_import_source_batch_uses_registered_adapter_contract() -> None:
     manifest = _manifest()
@@ -369,6 +391,94 @@ async def test_import_source_batch_uses_registered_adapter_contract() -> None:
     assert result.skipped_records[0].metadata["source_version"] == "v1"
     assert writes[0]["source_id"] == record.source_id
     assert writes[0]["capture_surface"] == "source_import"
+
+
+@pytest.mark.asyncio
+async def test_import_source_batch_writes_sensitivity_metadata() -> None:
+    manifest = _manifest()
+    record = _record(manifest).model_copy(update={"body": "Temporary verification code is 123456"})
+    adapter = FakeSourceAdapter([record])
+    writes: list[dict[str, object]] = []
+
+    async def fake_remember(**kwargs: object) -> RawMemory:
+        writes.append(dict(kwargs))
+        return RawMemory(
+            id="raw-1",
+            organization_id=str(kwargs["organization_id"]),
+            source_id=str(kwargs["source_id"]),
+            principal_id=str(kwargs["principal_id"]),
+            memory_scope=kwargs["memory_scope"],
+            scope_key=kwargs["scope_key"],
+            title=str(kwargs["title"]),
+            raw_content=str(kwargs["raw_content"]),
+            tags=list(kwargs["tags"]),
+            metadata=dict(kwargs["metadata"]),
+            provenance=dict(kwargs["provenance"]),
+            capture_surface=str(kwargs["capture_surface"]),
+            entity_type=str(kwargs["entity_type"]),
+            captured_at=datetime(2026, 5, 14, 12, 0, tzinfo=UTC),
+            created_at=datetime(2026, 5, 14, 12, 0, tzinfo=UTC),
+        )
+
+    result = await import_source_batch(
+        adapter,
+        manifest,
+        organization_id="org-1",
+        principal_id="user-1",
+        remember=fake_remember,
+    )
+
+    assert result.imported_count == 1
+    assert result.policy.privacy_class is SourcePrivacyClass.SENSITIVE
+    assert result.contains_secret is True
+    assert result.sensitivity_flags == ("two_factor_code",)
+    assert writes[0]["metadata"]["contains_secret"] is True
+    assert writes[0]["metadata"]["sensitivity_flags"] == ["two_factor_code"]
+
+
+@pytest.mark.asyncio
+async def test_import_source_batch_reports_effective_sensitive_policy() -> None:
+    manifest = _manifest(target_memory_scope="project", target_scope_key="project_123")
+    record = _record(manifest).model_copy(
+        update={"body": "Rotate AWS key AKIAIOSFODNN7EXAMPLE today"}
+    )
+    adapter = FakeSourceAdapter([record])
+    writes: list[dict[str, object]] = []
+
+    async def fake_remember(**kwargs: object) -> RawMemory:
+        writes.append(dict(kwargs))
+        return RawMemory(
+            id="raw-1",
+            organization_id=str(kwargs["organization_id"]),
+            source_id=str(kwargs["source_id"]),
+            principal_id=str(kwargs["principal_id"]),
+            memory_scope=kwargs["memory_scope"],
+            scope_key=kwargs["scope_key"],
+            title=str(kwargs["title"]),
+            raw_content=str(kwargs["raw_content"]),
+            tags=list(kwargs["tags"]),
+            metadata=dict(kwargs["metadata"]),
+            provenance=dict(kwargs["provenance"]),
+            capture_surface=str(kwargs["capture_surface"]),
+            entity_type=str(kwargs["entity_type"]),
+            captured_at=datetime(2026, 5, 14, 12, 0, tzinfo=UTC),
+            created_at=datetime(2026, 5, 14, 12, 0, tzinfo=UTC),
+        )
+
+    result = await import_source_batch(
+        adapter,
+        manifest,
+        organization_id="org-1",
+        principal_id="user-1",
+        promotion_preview_approved=True,
+        remember=fake_remember,
+    )
+
+    assert result.policy.privacy_class is SourcePrivacyClass.SENSITIVE
+    assert result.policy.requires_promotion_preview is True
+    assert result.contains_secret is True
+    assert result.sensitivity_flags == ("api_key",)
+    assert writes[0]["metadata"]["privacy_class"] == "sensitive"
 
 
 @pytest.mark.asyncio

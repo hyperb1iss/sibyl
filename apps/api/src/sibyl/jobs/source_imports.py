@@ -601,6 +601,12 @@ async def import_source_archive(
             "reasons": list(result.policy.reasons),
             "write_reason": policy_reason,
         },
+        "sensitivity": {
+            "contains_pii": result.contains_pii,
+            "contains_secret": result.contains_secret,
+            "contains_sensitive": result.contains_sensitive,
+            "sensitivity_flags": list(result.sensitivity_flags),
+        },
     }
     log.info(
         "source_import_archive_batch_complete",

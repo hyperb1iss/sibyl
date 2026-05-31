@@ -79,14 +79,18 @@ def _raw_memory_from_kwargs(kwargs: dict[str, object], *, raw_id: str) -> RawMem
     )
 
 
-def _write_mbox(path: Path) -> Path:
+def _write_mbox(
+    path: Path,
+    *,
+    body: str = "the job path imports raw mailbox records",
+) -> Path:
     message = EmailMessage()
     message["Message-ID"] = "<job-msg@example.com>"
     message["Subject"] = "Job import"
     message["Date"] = "Thu, 14 May 2026 12:34:00 -0700"
     message["From"] = "Bliss <bliss@example.com>"
     message["To"] = "Nova <nova@example.com>"
-    message.set_content("the job path imports raw mailbox records")
+    message.set_content(body)
     message.add_attachment(
         b"job attachment",
         maintype="text",
@@ -157,6 +161,34 @@ async def test_import_source_archive_imports_mbox_with_private_scope(tmp_path: P
     assert source_metadata["message_id"] == "job-msg@example.com"
     assert source_metadata["from"] == ["bliss@example.com"]
     assert writes[0]["metadata"]["attachment_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_import_source_archive_surfaces_sensitive_policy(tmp_path: Path) -> None:
+    mbox_path = _write_mbox(
+        tmp_path / "sensitive-job.mbox",
+        body="Rotate AWS key AKIAIOSFODNN7EXAMPLE before importing this archive",
+    )
+    writes: list[dict[str, object]] = []
+
+    async def fake_remember(**kwargs: object) -> RawMemory:
+        writes.append(dict(kwargs))
+        return _raw_memory_from_kwargs(dict(kwargs), raw_id=f"raw-{len(writes)}")
+
+    with patch("sibyl.jobs.source_imports.settings.source_import_dir", tmp_path):
+        result = await source_imports.import_source_archive(
+            {},
+            str(mbox_path),
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            remember=fake_remember,
+        )
+
+    assert result["policy"]["privacy_class"] == "sensitive"
+    assert result["sensitivity"]["contains_secret"] is True
+    assert result["sensitivity"]["sensitivity_flags"] == ["api_key"]
+    assert writes[0]["metadata"]["privacy_class"] == "sensitive"
 
 
 @pytest.mark.asyncio
@@ -251,6 +283,12 @@ def _source_import_result_payload(**overrides: object) -> dict[str, object]:
             "requires_promotion_preview": False,
             "reasons": ["privacy_default_scope"],
             "write_reason": "same_scope_write_allowed",
+        },
+        "sensitivity": {
+            "contains_pii": False,
+            "contains_secret": False,
+            "contains_sensitive": False,
+            "sensitivity_flags": [],
         },
     }
     values.update(overrides)

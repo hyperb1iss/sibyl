@@ -18,6 +18,7 @@ from sibyl_core.models.sources import (
     SourceSkippedRecord,
     SourceTransformBehavior,
 )
+from sibyl_core.services.sensitivity import classify_record
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory, remember_raw_memory
 
 _SCOPES_REQUIRING_KEY = {
@@ -39,6 +40,14 @@ _SCOPE_RANK = {
     MemoryScope.ORGANIZATION: 4,
     MemoryScope.SHARED: 5,
     MemoryScope.PUBLIC: 6,
+}
+_PRIVACY_CLASS_RANK = {
+    SourcePrivacyClass.PUBLIC: 0,
+    SourcePrivacyClass.ORGANIZATION: 1,
+    SourcePrivacyClass.PROJECT: 2,
+    SourcePrivacyClass.PERSONAL: 3,
+    SourcePrivacyClass.PRIVATE: 4,
+    SourcePrivacyClass.SENSITIVE: 5,
 }
 
 
@@ -135,6 +144,7 @@ class SourceRawMemoryWrite:
     tags: list[str]
     metadata: dict[str, object]
     provenance: dict[str, object]
+    policy: SourceImportPolicy | None = None
     capture_surface: str = "source_import"
     entity_type: str = "raw_memory"
 
@@ -160,6 +170,13 @@ class SourceImportResult:
     skipped_records: tuple[SourceSkippedRecord, ...]
     checkpoint: SourceImportCheckpoint | None
     policy: SourceImportPolicy
+    contains_pii: bool = False
+    contains_secret: bool = False
+    sensitivity_flags: tuple[str, ...] = ()
+
+    @property
+    def contains_sensitive(self) -> bool:
+        return self.contains_pii or self.contains_secret
 
 
 class SourceAdapterRegistry:
@@ -300,6 +317,32 @@ def source_import_policy(
     )
 
 
+def _merge_source_import_policy(
+    current: SourceImportPolicy,
+    update: SourceImportPolicy,
+) -> SourceImportPolicy:
+    privacy_class = _more_restrictive_privacy_class(current.privacy_class, update.privacy_class)
+    reasons = tuple(dict.fromkeys((*current.reasons, *update.reasons)))
+    return SourceImportPolicy(
+        privacy_class=privacy_class,
+        target_memory_scope=update.target_memory_scope,
+        target_scope_key=update.target_scope_key,
+        requires_promotion_preview=(
+            current.requires_promotion_preview or update.requires_promotion_preview
+        ),
+        reasons=reasons,
+    )
+
+
+def _more_restrictive_privacy_class(
+    current: SourcePrivacyClass,
+    update: SourcePrivacyClass,
+) -> SourcePrivacyClass:
+    if _PRIVACY_CLASS_RANK[update] > _PRIVACY_CLASS_RANK[current]:
+        return update
+    return current
+
+
 def plan_source_import(adapter: SourceAdapter, manifest: SourceImportManifest) -> SourceImportPlan:
     descriptor = adapter.descriptor
     if manifest.adapter_name != descriptor.name:
@@ -326,7 +369,9 @@ def raw_memory_write_from_source_record(
     organization_id: str,
     principal_id: str,
 ) -> SourceRawMemoryWrite:
-    policy = source_import_policy(manifest, privacy_class=record.privacy_class)
+    sensitivity = classify_record(record)
+    effective_privacy_class = sensitivity.privacy_class or record.privacy_class
+    policy = source_import_policy(manifest, privacy_class=effective_privacy_class)
     attachment_payload = [attachment.model_dump(mode="json") for attachment in record.attachments]
     occurred_at = record.occurred_at.isoformat() if record.occurred_at else None
     metadata_only = record.transform_behavior == SourceTransformBehavior.METADATA_ONLY
@@ -341,7 +386,7 @@ def raw_memory_write_from_source_record(
         "dedupe_key": record.dedupe_key,
         "import_requires_promotion_preview": policy.requires_promotion_preview,
         "import_policy_reasons": list(policy.reasons),
-        "privacy_class": record.privacy_class.value,
+        "privacy_class": effective_privacy_class.value,
         "source_adapter_version": manifest.adapter_version,
         "source_identity": manifest.source_identity,
         "source_import_metadata": dict(manifest.metadata),
@@ -354,6 +399,9 @@ def raw_memory_write_from_source_record(
         "transform_behavior": record.transform_behavior.value,
         "transform_version": record.transform_version or manifest.adapter_version,
     }
+    metadata.update(sensitivity.metadata())
+    if effective_privacy_class != record.privacy_class:
+        metadata["source_declared_privacy_class"] = record.privacy_class.value
     if occurred_at is not None:
         metadata["occurred_at"] = occurred_at
     if record.participants:
@@ -385,6 +433,7 @@ def raw_memory_write_from_source_record(
         tags=list(record.labels),
         metadata=metadata,
         provenance=provenance,
+        policy=policy,
     )
 
 
@@ -436,6 +485,10 @@ async def import_source_batch(
     attachment_count = 0
     extraction_pending_count = 0
     last_checkpoint = checkpoint
+    aggregate_policy = plan.policy
+    contains_pii = False
+    contains_secret = False
+    sensitivity_flags: list[str] = []
 
     async for batch in adapter.iter_records(
         plan.manifest,
@@ -456,9 +509,19 @@ async def import_source_batch(
                 principal_id=principal_id,
             )
             batch_payloads.append((record, payload))
+            payload_policy = payload.policy or plan.policy
+            aggregate_policy = _merge_source_import_policy(aggregate_policy, payload_policy)
+            contains_pii = contains_pii or payload.metadata.get("contains_pii") is True
+            contains_secret = contains_secret or payload.metadata.get("contains_secret") is True
+            payload_flags = payload.metadata.get("sensitivity_flags")
+            if not isinstance(payload_flags, list | tuple | set):
+                payload_flags = ()
+            for flag in payload_flags:
+                if isinstance(flag, str) and flag not in sensitivity_flags:
+                    sensitivity_flags.append(flag)
 
         if not promotion_preview_approved and any(
-            payload.metadata["import_requires_promotion_preview"] is True
+            (payload.policy or plan.policy).requires_promotion_preview
             for _, payload in batch_payloads
         ):
             msg = "source import requires promotion preview before wider visibility"
@@ -536,7 +599,10 @@ async def import_source_batch(
         duplicate_dedupe_keys=tuple(duplicate_dedupe_keys),
         skipped_records=tuple(skipped_records),
         checkpoint=last_checkpoint,
-        policy=plan.policy,
+        policy=aggregate_policy,
+        contains_pii=contains_pii,
+        contains_secret=contains_secret,
+        sensitivity_flags=tuple(sensitivity_flags),
     )
 
 
