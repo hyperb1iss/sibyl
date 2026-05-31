@@ -1933,6 +1933,121 @@ async def test_preview_memory_promotion_routes_imported_raw_memory() -> None:
 
 
 @pytest.mark.asyncio
+async def test_preview_memory_promotion_denies_raw_source_outside_api_key_memory_space() -> None:
+    org = _org()
+    ctx = _ctx()
+    ctx.api_key_memory_scope_keys = [api_key_memory_scope_key("project", "project_allowed")]
+    reflection_result = ReflectionPromotionPreview(
+        allowed=False,
+        candidate_id="raw-1",
+        reason="not_reflection_candidate",
+        review_state="pending",
+        memory_scope=MemoryScope.PRIVATE,
+        scope_key=None,
+        raw_source_ids=[],
+    )
+
+    with (
+        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
+        patch(
+            "sibyl.api.routes.memory.preview_reflection_candidate_promotion",
+            AsyncMock(return_value=reflection_result),
+        ),
+        patch(
+            "sibyl.api.routes.memory.get_raw_memory",
+            AsyncMock(
+                return_value=_memory(
+                    id="raw-1",
+                    memory_scope=MemoryScope.PROJECT,
+                    scope_key="project_secret",
+                    metadata={"project_id": "project_secret"},
+                )
+            ),
+        ),
+        patch("sibyl.api.routes.memory.preview_raw_memory_promotion", AsyncMock()) as raw_preview,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        pytest.raises(HTTPException) as exc,
+    ):
+        await preview_memory_promotion(
+            ReflectionPromotionRequest(
+                candidate_id="raw-1",
+                promote_to_scope="project",
+                promote_to_scope_key="project_allowed",
+                project="project_allowed",
+            ),
+            http_request=_http_request(),
+            org=org,
+            ctx=ctx,
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "api_key_memory_space_denied"
+    raw_preview.assert_not_awaited()
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["memory_scope"] == "project"
+    assert audit.await_args.kwargs["scope_key"] == "project_secret"
+    assert audit.await_args.kwargs["policy_reason"] == "api_key_memory_space_denied"
+
+
+@pytest.mark.asyncio
+async def test_promote_memory_denies_raw_target_outside_api_key_memory_space() -> None:
+    org = _org()
+    ctx = _ctx()
+    ctx.api_key_memory_scope_keys = [api_key_memory_scope_key("project", "project_allowed")]
+    reflection_result = ReflectionPromotionResult(
+        success=False,
+        candidate_id="raw-1",
+        promoted_id=None,
+        reason="not_reflection_candidate",
+        review_state="pending",
+        memory_scope=MemoryScope.PRIVATE,
+        scope_key=None,
+        raw_source_ids=[],
+    )
+
+    with (
+        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
+        patch(
+            "sibyl.api.routes.memory.promote_reflection_candidate_review",
+            AsyncMock(return_value=reflection_result),
+        ),
+        patch(
+            "sibyl.api.routes.memory.get_raw_memory",
+            AsyncMock(
+                return_value=_memory(
+                    id="raw-1",
+                    memory_scope=MemoryScope.PROJECT,
+                    scope_key="project_allowed",
+                    metadata={"project_id": "project_allowed"},
+                )
+            ),
+        ),
+        patch("sibyl.api.routes.memory.promote_raw_memory", AsyncMock()) as raw_promote,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        pytest.raises(HTTPException) as exc,
+    ):
+        await promote_memory(
+            ReflectionPromotionRequest(
+                candidate_id="raw-1",
+                promote_to_scope="project",
+                promote_to_scope_key="project_secret",
+                project="project_secret",
+            ),
+            http_request=_http_request(),
+            org=org,
+            ctx=ctx,
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "api_key_memory_space_denied"
+    raw_promote.assert_not_awaited()
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["memory_scope"] == "project"
+    assert audit.await_args.kwargs["scope_key"] == "project_secret"
+    assert audit.await_args.kwargs["policy_reason"] == "api_key_memory_space_denied"
+
+
+@pytest.mark.asyncio
 async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> None:
     org = _org()
     ctx = _ctx()

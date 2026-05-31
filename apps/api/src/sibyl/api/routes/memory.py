@@ -1315,6 +1315,97 @@ async def _accessible_projects_for_promotion(
     return {str(project_id) for project_id in accessible_projects or set()}
 
 
+def _promotion_target_scope(
+    request: ReflectionPromotionRequest,
+) -> tuple[str, str | None] | None:
+    if request.promote_to_scope is None:
+        return None
+    try:
+        target_scope = MemoryScope(request.promote_to_scope)
+    except ValueError:
+        return None
+    target_scope_key = request.promote_to_scope_key
+    if target_scope is MemoryScope.PROJECT:
+        target_scope_key = target_scope_key or request.project
+    return target_scope.value, target_scope_key
+
+
+async def _authorize_raw_promotion_api_key_scopes(
+    *,
+    ctx: AuthContext,
+    request: ReflectionPromotionRequest,
+    organization_id: str,
+    accessible_projects: set[str],
+    http_request: Request | None,
+    surface: str,
+) -> None:
+    allowed_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+    if allowed_scope_keys is None or not isinstance(
+        allowed_scope_keys, list | tuple | set | frozenset
+    ):
+        return
+
+    memory = await get_raw_memory(
+        organization_id=organization_id,
+        memory_id=request.candidate_id,
+    )
+    if memory is None:
+        return
+
+    checks: tuple[tuple[MemoryPolicyAction, str, str | None, str | None], ...] = (
+        (
+            MemoryPolicyAction.READ,
+            memory.memory_scope.value,
+            memory.scope_key,
+            _memory_project_id(memory),
+        ),
+    )
+    target_scope = _promotion_target_scope(request)
+    if target_scope is not None:
+        checks = (
+            *checks,
+            (MemoryPolicyAction.WRITE, target_scope[0], target_scope[1], request.project),
+        )
+
+    for action, memory_scope, scope_key, project_id in checks:
+        if _api_key_memory_scope_allowed(ctx, memory_scope=memory_scope, scope_key=scope_key):
+            continue
+        policy_context = MemoryPolicyContext(
+            actor_user_id=ctx.user_id,
+            organization_id=ctx.organization_id,
+            organization_role=ctx.org_role,
+            memory_space=memory_scope,
+            scope_key=scope_key,
+            project_id=project_id,
+            accessible_projects=accessible_projects,
+            source_surface=surface,
+        )
+        deny_decision = _api_key_memory_scope_denial(
+            action=action,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            policy_context=policy_context,
+        )
+        _log_policy_decision(ctx=ctx, decision=deny_decision, surface=surface)
+        await _log_memory_audit(
+            action="memory.policy_deny",
+            ctx=ctx,
+            request=http_request,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            project_id=project_id,
+            source_surface=surface,
+            source_ids=[request.candidate_id],
+            policy_allowed=False,
+            policy_reason=deny_decision.reason,
+            details={"policy_action": deny_decision.action.value},
+        )
+        raise HTTPException(
+            status_code=_policy_http_status(deny_decision.reason),
+            detail=deny_decision.reason,
+        )
+
+
 async def _accessible_projects_for_share_preview(
     *,
     ctx: AuthContext,
@@ -2168,6 +2259,14 @@ async def preview_memory_promotion(
         accessible_projects=accessible_projects,
     )
     if result.reason == "not_reflection_candidate":
+        await _authorize_raw_promotion_api_key_scopes(
+            ctx=ctx,
+            request=request,
+            organization_id=str(org.id),
+            accessible_projects=accessible_projects,
+            http_request=http_request,
+            surface="memory_promote_preview",
+        )
         result = await preview_raw_memory_promotion(
             raw_memory_id=request.candidate_id,
             organization_id=str(org.id),
@@ -2588,6 +2687,14 @@ async def promote_memory(
             accessible_projects=accessible_projects,
         )
         if result.reason == "not_reflection_candidate":
+            await _authorize_raw_promotion_api_key_scopes(
+                ctx=ctx,
+                request=request,
+                organization_id=str(org.id),
+                accessible_projects=accessible_projects,
+                http_request=http_request,
+                surface="memory_promote",
+            )
             result = await promote_raw_memory(
                 raw_memory_id=request.candidate_id,
                 organization_id=str(org.id),
