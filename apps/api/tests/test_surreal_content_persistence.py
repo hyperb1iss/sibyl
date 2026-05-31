@@ -56,6 +56,7 @@ from sibyl.persistence.surreal.system_settings import (
     save_system_setting,
 )
 from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
+from sibyl_core.backends.surreal.content_schema import EMBEDDING_DIM
 from sibyl_core.models import ChunkType, SourceType
 
 pytest.importorskip("surrealdb")
@@ -104,6 +105,19 @@ class _SequencedContentClient:
         return self.responses.pop(0)
 
 
+class _QueuedContentClient:
+    def __init__(self, responses: list[object]) -> None:
+        self.responses = responses
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **kwargs: object) -> object:
+        self.calls.append((query, kwargs))
+        response = self.responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        return response
+
+
 @pytest_asyncio.fixture
 async def surreal_content_client() -> SurrealContentClient:
     await surreal_content.close_shared_surreal_content_client()
@@ -144,6 +158,65 @@ async def test_surreal_content_replace_record_uses_single_upsert_statement() -> 
     assert params == {
         "uuid": str(source_id),
         "organization_id": record["organization_id"],
+        "record": record,
+    }
+
+
+@pytest.mark.asyncio
+async def test_surreal_content_replace_record_creates_when_upsert_matches_no_rows() -> None:
+    source_id = uuid4()
+    record = {
+        "uuid": str(source_id),
+        "organization_id": str(uuid4()),
+        "name": "Docs",
+    }
+    client = _QueuedContentClient([[], [record]])
+
+    saved = await surreal_content._replace_record(
+        client,
+        "crawl_sources",
+        uuid=source_id,
+        record=record,
+    )
+
+    assert saved["uuid"] == str(source_id)
+    assert len(client.calls) == 2
+    assert (
+        "UPSERT crawl_sources CONTENT $record "
+        "WHERE uuid = $uuid AND organization_id = $organization_id"
+    ) in client.calls[0][0]
+    assert "CREATE crawl_sources CONTENT $record" in client.calls[1][0]
+    assert client.calls[1][1] == {"record": record}
+
+
+@pytest.mark.asyncio
+async def test_surreal_content_replace_record_retries_scoped_upsert_on_create_conflict() -> None:
+    source_id = uuid4()
+    organization_id = str(uuid4())
+    record = {
+        "uuid": str(source_id),
+        "organization_id": organization_id,
+        "name": "Docs",
+    }
+    client = _QueuedContentClient([[], RuntimeError("unique conflict"), [record]])
+
+    saved = await surreal_content._replace_record(
+        client,
+        "crawl_sources",
+        uuid=source_id,
+        record=record,
+    )
+
+    assert saved["uuid"] == str(source_id)
+    assert len(client.calls) == 3
+    assert "CREATE crawl_sources CONTENT $record" in client.calls[1][0]
+    assert (
+        "UPSERT crawl_sources CONTENT $record "
+        "WHERE uuid = $uuid AND organization_id = $organization_id"
+    ) in client.calls[2][0]
+    assert client.calls[2][1] == {
+        "uuid": str(source_id),
+        "organization_id": organization_id,
         "record": record,
     }
 
@@ -1042,6 +1115,185 @@ async def test_content_schema_migration_rejects_invalid_enum_values() -> None:
 
         with pytest.raises(RuntimeError, match=r"crawl_sources\.source_type enum assertion"):
             await bootstrap_content_schema(client)
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_content_schema_migration_normalizes_legacy_enum_values() -> None:
+    client = SurrealContentClient(url="memory://")
+    now = datetime.now(UTC).replace(tzinfo=None)
+    source_id = str(uuid4())
+    capture_id = str(uuid4())
+    organization_id = str(uuid4())
+    try:
+        await client.execute_query(
+            "CREATE schema_version:content CONTENT $record;",
+            record={
+                "name": "content",
+                "version": 4,
+                "migrations": [
+                    {"version": 1, "name": "content_schema_bootstrap"},
+                    {"version": 2, "name": "content_source_url_org_scope"},
+                    {"version": 3, "name": "content_document_url_source_scope"},
+                    {"version": 4, "name": "content_child_scope_fields"},
+                ],
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+        await client.execute_query(
+            "CREATE crawl_sources CONTENT $record;",
+            record={
+                "uuid": source_id,
+                "organization_id": organization_id,
+                "name": "Local Docs",
+                "url": "file:///tmp/docs",
+                "source_type": "LOCAL",
+                "crawl_status": "PENDING",
+            },
+        )
+        await client.execute_query(
+            "CREATE raw_captures CONTENT $record;",
+            record={
+                "uuid": capture_id,
+                "organization_id": organization_id,
+                "title": "Legacy raw capture",
+                "raw_content": "remember me",
+                "entity_type": "episode",
+                "memory_scope": "PRIVATE",
+                "review_state": "PENDING",
+            },
+        )
+
+        await bootstrap_content_schema(client)
+
+        source_rows = _normalize_records(
+            await client.execute_query(
+                "SELECT * FROM crawl_sources WHERE uuid = $uuid LIMIT 1;",
+                uuid=source_id,
+            )
+        )
+        capture_rows = _normalize_records(
+            await client.execute_query(
+                "SELECT * FROM raw_captures WHERE uuid = $uuid LIMIT 1;",
+                uuid=capture_id,
+            )
+        )
+        version_rows = _normalize_records(
+            await client.execute_query(
+                "SELECT version FROM schema_version WHERE name = 'content' LIMIT 1;",
+            )
+        )
+        assert source_rows[0]["source_type"] == SourceType.LOCAL.value
+        assert source_rows[0]["crawl_status"] == "pending"
+        assert capture_rows[0]["memory_scope"] == "private"
+        assert capture_rows[0]["review_state"] == "pending"
+        assert version_rows[0]["version"] == 8
+
+        await client.execute_query(
+            "CREATE raw_captures CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "organization_id": organization_id,
+                "title": "Embedding capture",
+                "raw_content": "embedding should be accepted",
+                "entity_type": "episode",
+                "embedding": [0.0] * EMBEDDING_DIM,
+            },
+        )
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_content_schema_migration_backfills_legacy_raw_capture_defaults() -> None:
+    client = SurrealContentClient(url="memory://")
+    now = datetime.now(UTC).replace(tzinfo=None)
+    created_at = datetime(2026, 4, 15, 18, 53, 1, tzinfo=UTC).replace(tzinfo=None)
+    capture_id = str(uuid4())
+    organization_id = str(uuid4())
+    try:
+        await bootstrap_content_schema(client, reset=True)
+        await client.execute_query("REMOVE FIELD source_id ON raw_captures;")
+        await client.execute_query("REMOVE FIELD principal_id ON raw_captures;")
+        await client.execute_query("REMOVE FIELD provenance ON raw_captures;")
+        await client.execute_query("REMOVE FIELD captured_at ON raw_captures;")
+        await client.execute_query("REMOVE FIELD memory_scope ON raw_captures;")
+        await client.execute_query("REMOVE FIELD review_state ON raw_captures;")
+        await client.execute_query(
+            "CREATE raw_captures CONTENT $record;",
+            record={
+                "uuid": capture_id,
+                "organization_id": organization_id,
+                "source_id": None,
+                "principal_id": None,
+                "title": "Legacy raw capture",
+                "raw_content": "remember me",
+                "entity_type": "episode",
+                "provenance": None,
+                "created_at": created_at,
+                "captured_at": None,
+                "memory_scope": None,
+                "review_state": None,
+            },
+        )
+        await client.execute_query(
+            "DEFINE FIELD IF NOT EXISTS source_id ON raw_captures TYPE string DEFAULT '';"
+        )
+        await client.execute_query(
+            "DEFINE FIELD IF NOT EXISTS principal_id ON raw_captures TYPE string DEFAULT '';"
+        )
+        await client.execute_query(
+            "DEFINE FIELD IF NOT EXISTS provenance ON raw_captures TYPE object FLEXIBLE DEFAULT {};"
+        )
+        await client.execute_query(
+            "DEFINE FIELD IF NOT EXISTS captured_at ON raw_captures "
+            "TYPE datetime DEFAULT time::now();"
+        )
+        await client.execute_query(
+            "DEFINE FIELD IF NOT EXISTS memory_scope ON raw_captures TYPE string DEFAULT 'private';"
+        )
+        await client.execute_query(
+            "DEFINE FIELD IF NOT EXISTS review_state ON raw_captures TYPE string DEFAULT 'pending';"
+        )
+        await client.execute_query(
+            "UPSERT schema_version:content SET "
+            "name = 'content', "
+            "version = 4, "
+            "migrations = $migrations, "
+            "created_at = $now, "
+            "updated_at = $now;",
+            migrations=[
+                {"version": 1, "name": "content_schema_bootstrap"},
+                {"version": 2, "name": "content_source_url_org_scope"},
+                {"version": 3, "name": "content_document_url_source_scope"},
+                {"version": 4, "name": "content_child_scope_fields"},
+            ],
+            now=now,
+        )
+
+        await bootstrap_content_schema(client)
+
+        capture_rows = _normalize_records(
+            await client.execute_query(
+                "SELECT * FROM raw_captures WHERE uuid = $uuid LIMIT 1;",
+                uuid=capture_id,
+            )
+        )
+        version_rows = _normalize_records(
+            await client.execute_query(
+                "SELECT version FROM schema_version WHERE name = 'content' LIMIT 1;",
+            )
+        )
+        capture = capture_rows[0]
+        assert capture["source_id"] == ""
+        assert capture["principal_id"] == ""
+        assert capture["provenance"] == {}
+        assert capture["captured_at"] is not None
+        assert capture["memory_scope"] == "private"
+        assert capture["review_state"] == "pending"
+        assert version_rows[0]["version"] == 8
     finally:
         await client.close()
 

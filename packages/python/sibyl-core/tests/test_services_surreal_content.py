@@ -63,7 +63,10 @@ class FakeClient:
         merged = dict(params or {})
         merged.update(kwargs)
         self.calls.append((query, merged))
-        return self._responses.pop(0)
+        response = self._responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        return response
 
     async def execute_query_raw(
         self, query: str, params: dict[str, object] | None = None, **kwargs: object
@@ -151,6 +154,71 @@ class TestSurrealContentHelpers:
             "organization_id": "org-1",
             "record": record,
         }
+
+    @pytest.mark.asyncio
+    async def test_replace_record_creates_when_upsert_matches_no_rows(self) -> None:
+        record = {
+            "uuid": "src-1",
+            "organization_id": "org-1",
+            "name": "Docs",
+        }
+        fake_client = FakeClient([_query_result([]), _query_result([record])])
+
+        saved = await _replace_record(fake_client, "crawl_sources", uuid="src-1", record=record)
+
+        assert saved["uuid"] == "src-1"
+        assert len(fake_client.calls) == 2
+        assert (
+            "UPSERT crawl_sources CONTENT $record "
+            "WHERE uuid = $uuid AND organization_id = $organization_id"
+        ) in fake_client.calls[0][0]
+        assert "CREATE crawl_sources CONTENT $record" in fake_client.calls[1][0]
+        assert fake_client.calls[1][1] == {"record": record}
+
+    @pytest.mark.asyncio
+    async def test_replace_record_retries_scoped_upsert_when_create_conflicts(self) -> None:
+        record = {
+            "uuid": "src-1",
+            "organization_id": "org-1",
+            "name": "Docs",
+        }
+        fake_client = FakeClient(
+            [_query_result([]), RuntimeError("unique conflict"), _query_result([record])]
+        )
+
+        saved = await _replace_record(fake_client, "crawl_sources", uuid="src-1", record=record)
+
+        assert saved["uuid"] == "src-1"
+        assert len(fake_client.calls) == 3
+        assert "CREATE crawl_sources CONTENT $record" in fake_client.calls[1][0]
+        assert (
+            "UPSERT crawl_sources CONTENT $record "
+            "WHERE uuid = $uuid AND organization_id = $organization_id"
+        ) in fake_client.calls[2][0]
+        assert fake_client.calls[2][1] == {
+            "uuid": "src-1",
+            "organization_id": "org-1",
+            "record": record,
+        }
+
+    @pytest.mark.asyncio
+    async def test_replace_record_fails_closed_when_create_returns_no_rows(self) -> None:
+        record = {
+            "uuid": "src-1",
+            "organization_id": "org-1",
+            "name": "Docs",
+        }
+        fake_client = FakeClient([_query_result([]), _query_result([])])
+
+        with pytest.raises(RuntimeError, match="failed to persist crawl_sources record src-1"):
+            await _replace_record(fake_client, "crawl_sources", uuid="src-1", record=record)
+
+        assert len(fake_client.calls) == 2
+        assert (
+            "UPSERT crawl_sources CONTENT $record "
+            "WHERE uuid = $uuid AND organization_id = $organization_id"
+        ) in fake_client.calls[0][0]
+        assert "CREATE crawl_sources CONTENT $record" in fake_client.calls[1][0]
 
     @pytest.mark.asyncio
     async def test_replace_record_requires_org_scope(self) -> None:

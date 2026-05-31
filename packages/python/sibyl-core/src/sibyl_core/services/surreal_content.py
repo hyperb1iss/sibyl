@@ -760,12 +760,22 @@ async def _replace_record(
     )
     if rows:
         return rows[0]
-    created = await _select_one(
-        client, f"SELECT * FROM {table} WHERE uuid = $uuid LIMIT 1;", uuid=uuid
-    )
-    if created is None:
-        raise RuntimeError(f"failed to persist {table} record {uuid}")
-    return created
+    try:
+        rows = await _select_many(client, f"CREATE {table} CONTENT $record;", record=record)
+    except Exception as exc:
+        rows = await _select_many(
+            client,
+            _UPSERT_RECORD[table],
+            uuid=uuid,
+            organization_id=str(organization_id),
+            record=record,
+        )
+        if rows:
+            return rows[0]
+        raise RuntimeError(f"failed to persist {table} record {uuid}") from exc
+    if rows:
+        return rows[0]
+    raise RuntimeError(f"failed to persist {table} record {uuid}")
 
 
 async def _raw_memory_with_embedding(

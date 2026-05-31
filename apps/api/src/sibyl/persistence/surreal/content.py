@@ -788,20 +788,33 @@ async def _replace_record(
     if organization_id is None:
         msg = f"{table} record {uuid} requires organization_id"
         raise RuntimeError(msg)
-    result = await client.execute_query(
+    created = await _select_many(
+        client,
         _UPSERT_RECORD[table],
         uuid=str(uuid),
         organization_id=str(organization_id),
         record=record,
     )
-    error = _query_error(result)
-    if error is not None:
-        raise RuntimeError(error)
-    created = _normalize_records(result)
-    if not created:
+    if created:
+        return created[0]
+    try:
+        created = await _select_many(client, f"CREATE {table} CONTENT $record;", record=record)
+    except Exception as exc:
+        created = await _select_many(
+            client,
+            _UPSERT_RECORD[table],
+            uuid=str(uuid),
+            organization_id=str(organization_id),
+            record=record,
+        )
+        if created:
+            return created[0]
         msg = f"Failed to write {table} record {uuid}"
-        raise RuntimeError(msg)
-    return created[0]
+        raise RuntimeError(msg) from exc
+    if created:
+        return created[0]
+    msg = f"Failed to write {table} record {uuid}"
+    raise RuntimeError(msg)
 
 
 async def _load_sources_for_org(

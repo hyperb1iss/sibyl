@@ -110,6 +110,33 @@ DEFINE INDEX IF NOT EXISTS idx_document_chunks_org_document
 CONTENT_ENUM_ASSERTION_MIGRATION_DEFINITIONS = f"""
 UPDATE crawl_sources SET source_type = 'website' WHERE source_type = NONE OR source_type = '';
 UPDATE crawl_sources SET crawl_status = 'pending' WHERE crawl_status = NONE OR crawl_status = '';
+UPDATE raw_captures SET
+    source_id = source_id ?? '',
+    principal_id = principal_id ?? '',
+    title = title ?? '',
+    raw_content = raw_content ?? '',
+    entity_type = entity_type ?? '',
+    tags = tags ?? [],
+    metadata = metadata ?? {{}},
+    provenance = provenance ?? {{}},
+    captured_at = captured_at ?? created_at ?? time::now(),
+    created_at = created_at ?? captured_at ?? time::now(),
+    memory_scope = IF memory_scope = NONE OR memory_scope = '' THEN 'private' ELSE memory_scope END,
+    review_state = IF review_state = NONE OR review_state = '' THEN 'pending' ELSE review_state END
+WHERE source_id = NONE
+    OR principal_id = NONE
+    OR title = NONE
+    OR raw_content = NONE
+    OR entity_type = NONE
+    OR tags = NONE
+    OR metadata = NONE
+    OR provenance = NONE
+    OR captured_at = NONE
+    OR created_at = NONE
+    OR memory_scope = NONE
+    OR memory_scope = ''
+    OR review_state = NONE
+    OR review_state = '';
 UPDATE raw_captures SET memory_scope = 'private' WHERE memory_scope = NONE OR memory_scope = '';
 UPDATE raw_captures SET review_state = 'pending' WHERE review_state = NONE OR review_state = '';
 UPDATE source_imports SET status = 'pending' WHERE status = NONE OR status = '';
@@ -315,6 +342,7 @@ async def _assert_content_migrations_safe(client: SurrealContentClient) -> None:
                 "parent crawled_documents rows are missing"
             )
     if current_version < 5:
+        await _normalize_legacy_enum_values(client)
         enum_checks = (
             (
                 "crawl_sources",
@@ -342,6 +370,52 @@ async def _assert_content_migrations_safe(client: SurrealContentClient) -> None:
                     f"Cannot migrate {table}.{field} enum assertion: "
                     f"invalid existing value {invalid_value!r}"
                 )
+
+
+async def _normalize_legacy_enum_values(client: SurrealContentClient) -> None:
+    for value in SourceType:
+        await client.execute_query(
+            "UPDATE crawl_sources SET source_type = $normalized WHERE source_type = $legacy;",
+            legacy=value.value.upper(),
+            normalized=value.value,
+        )
+    for value in CrawlStatus:
+        await client.execute_query(
+            "UPDATE crawl_sources SET crawl_status = $normalized WHERE crawl_status = $legacy;",
+            legacy=value.value.upper(),
+            normalized=value.value,
+        )
+    for value in MemoryScope:
+        await client.execute_query(
+            "UPDATE raw_captures SET memory_scope = $normalized WHERE memory_scope = $legacy;",
+            legacy=value.value.upper(),
+            normalized=value.value,
+        )
+    for value in _CONTENT_REVIEW_STATE_VALUES:
+        await client.execute_query(
+            "UPDATE raw_captures SET review_state = $normalized WHERE review_state = $legacy;",
+            legacy=value.upper(),
+            normalized=value,
+        )
+    for value in MemoryScope:
+        await client.execute_query(
+            "UPDATE source_imports SET target_memory_scope = $normalized "
+            "WHERE target_memory_scope = $legacy;",
+            legacy=value.value.upper(),
+            normalized=value.value,
+        )
+    for value in _CONTENT_SOURCE_IMPORT_STATUS_VALUES:
+        await client.execute_query(
+            "UPDATE source_imports SET status = $normalized WHERE status = $legacy;",
+            legacy=value.upper(),
+            normalized=value,
+        )
+    for value in _CONTENT_BACKUP_STATUS_VALUES:
+        await client.execute_query(
+            "UPDATE backups SET status = $normalized WHERE status = $legacy;",
+            legacy=value.upper(),
+            normalized=value,
+        )
 
 
 async def _matching_rows(
