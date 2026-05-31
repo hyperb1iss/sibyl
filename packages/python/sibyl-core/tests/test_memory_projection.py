@@ -366,10 +366,93 @@ async def test_project_extracted_memory_entities_resolves_hnsw_duplicate_target(
     assert client.calls
     query, params = client.calls[0]
     assert query.count("name_embedding <|") == 1
+    assert "attributes.memory_scope = NONE" in query
+    assert "attributes.project_id = NONE" in query
     assert params["seed_embedding_0"] == [1.0, 0.0]
 
     relationships = relationship_manager.create_bulk.await_args.args[0]
     assert relationships[0].target_id == "topic_existing_samsung"
+
+
+@pytest.mark.asyncio
+async def test_project_extracted_memory_entities_does_not_resolve_across_private_scopes() -> None:
+    source = _document(
+        "The Apollo dossier mentions Samsung TV preferences.",
+        metadata={"memory_scope": "private", "principal_id": "attacker-user"},
+    )
+
+    class ScopedHnswClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+            self.calls.append((query, params))
+            if params.get("scope_0_principal_id") == "attacker-user":
+                return [{"status": "OK", "result": []}]
+            return [
+                {
+                    "status": "OK",
+                    "result": [
+                        {
+                            "seed_id": params["seed_id_0"],
+                            "uuid": "victim_private_projected",
+                            "name": "Samsung TV",
+                            "entity_type": "topic",
+                            "score": 0.99,
+                        }
+                    ],
+                }
+            ]
+
+    client = ScopedHnswClient()
+
+    async def prepare_entities(
+        entities: list[Entity],
+        *,
+        generate_embeddings: bool,
+    ) -> list[Entity]:
+        assert generate_embeddings is True
+        return [entity.model_copy(update={"embedding": [1.0, 0.0]}) for entity in entities]
+
+    entity_manager = SimpleNamespace(
+        _client=client,
+        _group_id="org-123",
+        prepare_entities_for_write=prepare_entities,
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda entities, **_: [entity.id for entity in entities]
+        ),
+    )
+    relationship_manager = SimpleNamespace(create_bulk=AsyncMock(return_value=(1, 0)))
+
+    result = await project_extracted_memory_entities(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        sources=[source],
+        group_id="org-123",
+        extractions_by_source_id={
+            source.id: [
+                ExtractedMemoryEntity(
+                    name="Samsung TV",
+                    entity_type="topic",
+                    summary="A television in a private dossier",
+                    evidence="The Apollo dossier mentions Samsung TV preferences.",
+                    confidence=0.92,
+                )
+            ]
+        },
+        generate_embeddings=True,
+    )
+
+    assert result.projected_entities == 1
+    entity_manager.create_direct_bulk.assert_awaited_once()
+    query, params = client.calls[0]
+    assert "attributes.memory_scope = $scope_0_memory_scope" in query
+    assert "attributes.principal_id = $scope_0_principal_id" in query
+    assert params["scope_0_memory_scope"] == "private"
+    assert params["scope_0_principal_id"] == "attacker-user"
+
+    relationships = relationship_manager.create_bulk.await_args.args[0]
+    assert relationships[0].target_id != "victim_private_projected"
 
 
 @pytest.mark.asyncio

@@ -631,7 +631,17 @@ async def _resolve_projected_entities(
     deduplicator = EntityDeduplicator(
         client=client,
         entity_manager=entity_manager,
-        config=DedupConfig(similarity_threshold=0.95, same_type_only=True),
+        config=DedupConfig(
+            similarity_threshold=0.95,
+            same_type_only=True,
+            scope_metadata_keys=(
+                "memory_scope",
+                "scope_key",
+                "project_id",
+                "principal_id",
+                "agent_id",
+            ),
+        ),
     )
     matches = await deduplicator.resolve_existing_entities(entities)
     return {entity_id: pair.entity2_id for entity_id, pair in matches.items()}
