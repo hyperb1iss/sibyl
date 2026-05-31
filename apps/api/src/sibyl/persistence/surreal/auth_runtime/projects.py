@@ -690,6 +690,52 @@ async def list_accessible_project_graph_ids(ctx) -> set[str]:
         return accessible
 
 
+async def list_accessible_delegated_scope_keys(ctx) -> set[str]:
+    """Return delegated memory scope keys the current principal may read."""
+    if ctx.organization is None:
+        return set()
+    async with _auth_client_scope() as client:
+        org_id = str(ctx.organization.id)
+        user_id = str(ctx.user.id)
+        raw_payload = await client.execute_query(
+            """
+                RETURN {
+                    spaces: (
+                        SELECT uuid, scope_key, created_at FROM memory_spaces
+                        WHERE organization_id = $organization_id
+                        AND memory_scope = 'delegated'
+                        AND state = 'active'
+                        ORDER BY created_at ASC
+                    ),
+                    memberships: (
+                        SELECT space_id, created_at FROM memory_space_members
+                        WHERE organization_id = $organization_id
+                        AND principal_type = 'user'
+                        AND principal_id = $user_id
+                        AND (expires_at = NONE OR expires_at > time::now())
+                        ORDER BY created_at ASC
+                    ),
+                };
+            """,
+            organization_id=org_id,
+            user_id=user_id,
+        )
+        payload = _record_payload(raw_payload)
+        spaces = _normalize_records(payload.get("spaces"))
+        memberships = _normalize_records(payload.get("memberships"))
+        member_space_ids = {
+            str(record.get("space_id"))
+            for record in memberships
+            if str(record.get("space_id") or "").strip()
+        }
+        return {
+            str(record.get("scope_key"))
+            for record in spaces
+            if str(record.get("uuid")) in member_space_ids
+            and str(record.get("scope_key") or "").strip()
+        }
+
+
 async def resolve_accessible_project_graph_ids(
     *,
     user_id: str,

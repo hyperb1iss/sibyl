@@ -15,6 +15,7 @@ from sibyl.api.routes.entities import (
 )
 from sibyl.api.schemas import RawCaptureReviewUpdate
 from sibyl.persistence.content_common import RawCaptureRecord
+from sibyl_core.auth.models import OrganizationRole
 
 
 def _org() -> MagicMock:
@@ -26,6 +27,8 @@ def _org() -> MagicMock:
 def _ctx(*, user_id: str) -> MagicMock:
     ctx = MagicMock()
     ctx.user_id = user_id
+    ctx.org_role = OrganizationRole.MEMBER
+    ctx.api_key_memory_scope_keys = None
     return ctx
 
 
