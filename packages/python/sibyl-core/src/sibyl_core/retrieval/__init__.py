@@ -11,6 +11,8 @@ Lexical search is served natively by SurrealDB FULLTEXT indexes, not by an
 in-process keyword index.
 """
 
+from importlib import import_module
+
 from sibyl_core.retrieval.candidates import (
     CandidateKind,
     CandidateScope,
@@ -46,23 +48,24 @@ from sibyl_core.retrieval.reranking import (
     cross_encoder_rerank,
     rerank_results,
 )
-from sibyl_core.retrieval.search import (
-    DEFAULT_FILTER_SELECTIVITY_THRESHOLD,
-    CandidateLimits,
-    RetrievalPlan,
-    RetrievalSignal,
-    RetrievalWeights,
-    ScopeSpec,
-    SearchFilter,
-    build_context_retrieval_plan,
-    context_search,
-)
 from sibyl_core.retrieval.temporal import (
     TemporalConfig,
     calculate_boost,
     temporal_boost,
     temporal_boost_single,
 )
+
+_SEARCH_EXPORTS = {
+    "DEFAULT_FILTER_SELECTIVITY_THRESHOLD",
+    "CandidateLimits",
+    "RetrievalPlan",
+    "RetrievalSignal",
+    "RetrievalWeights",
+    "ScopeSpec",
+    "SearchFilter",
+    "build_context_retrieval_plan",
+    "context_search",
+}
 
 __all__ = [
     "DEFAULT_FILTER_SELECTIVITY_THRESHOLD",
@@ -104,3 +107,12 @@ __all__ = [
     "temporal_boost_single",
     "weighted_score_merge",
 ]
+
+
+def __getattr__(name: str) -> object:
+    if name in _SEARCH_EXPORTS:
+        search = import_module("sibyl_core.retrieval.search")
+        value = getattr(search, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
