@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
 import structlog
@@ -564,9 +564,15 @@ def _is_imap_secret_option(option: object) -> bool:
     return any(marker in normalized for marker in _IMAP_SECRET_OPTION_MARKERS)
 
 
+def _has_control_char(value: str) -> bool:
+    return any(ord(char) < 0x20 or ord(char) == 0x7F for char in value)
+
+
 def _validate_source_import_uri(adapter_name: str, source_uri: str) -> None:
     if adapter_name != IMAP_ADAPTER_NAME:
         return
+    if _has_control_char(source_uri):
+        raise ValueError("imap_source_uri_must_not_include_control_characters")
     parsed = urlparse(source_uri)
     if parsed.scheme != "imaps":
         raise ValueError("imap_source_uri_must_use_tls")
@@ -576,6 +582,8 @@ def _validate_source_import_uri(adapter_name: str, source_uri: str) -> None:
         raise ValueError("imap_source_uri_must_not_include_query_or_fragment")
     if not parsed.hostname:
         raise ValueError("imap_source_uri_must_include_host")
+    if _has_control_char(unquote(parsed.path)):
+        raise ValueError("imap_source_uri_must_not_include_control_characters")
 
 
 def _ensure_builtin_source_adapters() -> None:
