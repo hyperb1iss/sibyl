@@ -28,6 +28,7 @@ from sibyl.persistence.graph_runtime import get_entity_graph_runtime
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.observability import elapsed_ms
 from sibyl_core.services.surreal_content import (
+    MemoryScope,
     RawMemory,
     list_raw_memories_for_promotion,
     raw_memory_recallable,
@@ -59,6 +60,7 @@ async def promote_raw_captures(
         "skipped_superseded_count": 0,
         "skipped_existing_count": 0,
         "skipped_review_count": 0,
+        "skipped_scoped_count": 0,
         "failed_count": 0,
         "chunk_count": 0,
         "raw_memory_ids": [],
@@ -98,6 +100,8 @@ async def promote_raw_captures(
             result["skipped_superseded_count"] += 1
         elif outcome["status"] == "skipped_existing":
             result["skipped_existing_count"] += 1
+        elif outcome["status"] == "skipped_scoped":
+            result["skipped_scoped_count"] += 1
         else:
             result["skipped_review_count"] += 1
 
@@ -114,7 +118,7 @@ async def _promote_one(
 ) -> dict[str, Any]:
     skip_status = _promotion_skip_status(memory, force=force)
     if skip_status is not None:
-        if skip_status in {"skipped_deleted", "skipped_superseded"}:
+        if skip_status in {"skipped_deleted", "skipped_superseded", "skipped_scoped"}:
             await _mark_skipped(memory, skip_status)
         return {"status": skip_status, "chunk_count": 0}
 
@@ -184,6 +188,22 @@ async def _promote_one(
         "chunk_count": len(saved_chunks),
         "entity_id": entity_id,
     }
+
+
+def _organization_visible_for_promotion(memory: RawMemory) -> bool:
+    return memory.memory_scope in {MemoryScope.ORGANIZATION, MemoryScope.PUBLIC}
+
+
+def _scope_metadata(memory: RawMemory) -> dict[str, str]:
+    metadata = {
+        "memory_scope": memory.memory_scope.value,
+        "principal_id": memory.principal_id,
+    }
+    if memory.scope_key is not None:
+        metadata["scope_key"] = memory.scope_key
+    if memory.project_id is not None:
+        metadata["project_id"] = memory.project_id
+    return metadata
 
 
 def _document_from_raw_memory(memory: RawMemory) -> CrawledDocumentRecord:
@@ -259,6 +279,8 @@ def _promotion_skip_status(memory: RawMemory, *, force: bool) -> str | None:
         return "skipped_existing"
     if not raw_memory_recallable(memory):
         return "skipped_review"
+    if not _organization_visible_for_promotion(memory):
+        return "skipped_scoped"
     return None
 
 
@@ -291,6 +313,7 @@ async def _upsert_document_entity(
             created_by=memory.created_by_user_id or memory.principal_id,
             metadata={
                 "created_by": "raw_promotion",
+                **_scope_metadata(memory),
                 "raw_memory_id": memory.id,
                 "source_id": memory.source_id,
                 "document_id": str(document.id),

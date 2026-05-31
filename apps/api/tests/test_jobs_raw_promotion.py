@@ -21,13 +21,18 @@ def _raw_memory(
     metadata: dict[str, object] | None = None,
     deleted_at: datetime | None = None,
     entity_id: str | None = None,
+    memory_scope: MemoryScope = MemoryScope.ORGANIZATION,
+    scope_key: str | None = None,
+    project_id: str | None = None,
 ) -> RawMemory:
     return RawMemory(
         id=raw_id or str(uuid4()),
         organization_id=organization_id or str(uuid4()),
         source_id=source_id,
         principal_id="user-1",
-        memory_scope=MemoryScope.PRIVATE,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+        project_id=project_id,
         review_state=review_state,
         entity_id=entity_id,
         title="Imported note",
@@ -128,11 +133,45 @@ async def test_promote_raw_captures_writes_chunks_and_graph_entity(
     assert all(chunk.embedding is not None for chunk in saved_chunks)
     assert created_entities[0][0].id == memory.id
     assert created_entities[0][0].entity_type.value == "document"
+    assert created_entities[0][0].metadata["memory_scope"] == "organization"
+    assert created_entities[0][0].metadata["principal_id"] == memory.principal_id
     assert created_entities[0][1] is False
     assert saved_memories[-1].entity_id == memory.id
     assert saved_memories[-1].metadata["raw_promotion_state"] == "promoted"
     assert saved_memories[-1].metadata["raw_promotion_chunk_count"] == len(saved_chunks)
     assert saved_memories[-1].metadata["source_extraction_state"] == "disabled"
+
+
+@pytest.mark.asyncio
+async def test_promote_raw_captures_skips_non_org_visible_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_memory(
+        memory_scope=MemoryScope.PRIVATE,
+        scope_key="user-1",
+        project_id="secret-project",
+    )
+    saved_memories = []
+
+    async def fake_save_memory(updated: RawMemory) -> RawMemory:
+        saved_memories.append(updated)
+        return updated
+
+    monkeypatch.setattr(
+        raw_promotion,
+        "list_raw_memories_for_promotion",
+        _list_memories([memory]),
+    )
+    monkeypatch.setattr(raw_promotion, "EmbeddingService", _fake_embedder)
+    monkeypatch.setattr(raw_promotion, "save_raw_memory", fake_save_memory)
+
+    result = await raw_promotion.promote_raw_captures({}, memory.organization_id)
+
+    assert result["promoted_count"] == 0
+    assert result["skipped_scoped_count"] == 1
+    assert result["failed_count"] == 0
+    assert saved_memories[-1].metadata["raw_promotion_state"] == "skipped_scoped"
+    assert saved_memories[-1].entity_id is None
 
 
 @pytest.mark.asyncio
