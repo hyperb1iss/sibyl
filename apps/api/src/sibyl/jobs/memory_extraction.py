@@ -232,10 +232,7 @@ async def extract_memory_entities(
         *(source.source.get("principal_id") for source in source_payloads),
         *(source.source.get("created_by_user_id") for source in source_payloads),
     )
-    organization_id = _first_non_empty(
-        *(source.source.get("organization_id") for source in source_payloads),
-        group_id,
-    )
+    organization_id = group_id
 
     errors: list[dict[str, str]] = []
     extractions: list[dict[str, Any]] = []
@@ -389,14 +386,18 @@ def _payload_document_id(payload: _SourcePayload) -> str | None:
     return str(value) if value else None
 
 
-def _payload_organization_id(payload: _SourcePayload, *, fallback: str) -> str:
+def _payload_organization_mismatches_group(payload: _SourcePayload, *, group_id: str) -> bool:
+    expected = str(group_id)
     metadata = payload.source.get("metadata")
+    candidates: list[str] = []
     if isinstance(metadata, dict):
         value = metadata.get("organization_id")
         if value:
-            return str(value)
+            candidates.append(str(value))
     value = payload.source.get("organization_id")
-    return str(value) if value else fallback
+    if value:
+        candidates.append(str(value))
+    return any(candidate != expected for candidate in candidates)
 
 
 def _projected_links(raw_links: object, raw_ids: object) -> list[_ProjectedEntityLink]:
@@ -498,7 +499,10 @@ async def _link_projected_entities_to_document_chunks(
             document_id = _payload_document_id(payload)
             if not links or not document_id:
                 continue
-            organization_id = _payload_organization_id(payload, fallback=group_id)
+            if _payload_organization_mismatches_group(payload, group_id=group_id):
+                errors.append(f"{payload.source_id}:organization_mismatch")
+                continue
+            organization_id = group_id
             try:
                 document_uuid = UUID(document_id)
             except ValueError:
