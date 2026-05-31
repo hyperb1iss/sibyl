@@ -53,6 +53,7 @@ EMBEDDING_DIM = core_config.graph_embedding_dimensions
 HNSW_EFC = core_config.graph_hnsw_efc
 HNSW_M = core_config.graph_hnsw_m
 _GRAPH_ENTITY_TYPE_VALUES = tuple(entity_type.value for entity_type in EntityType)
+_EMBEDDED_SURREAL_SCHEMES = ("memory://", "surrealkv://", "rocksdb://", "file://")
 
 
 def _surql_string_array(values: tuple[str, ...]) -> str:
@@ -421,6 +422,20 @@ GRAPH_SCHEMA_MIGRATIONS = (
 )
 
 
+def _graph_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
+    return tuple(
+        SchemaMigration(
+            version=migration.version,
+            name=migration.name,
+            statements=tuple(
+                render_surreal_compatible_sql(statement, url=url)
+                for statement in migration.statements
+            ),
+        )
+        for migration in GRAPH_SCHEMA_MIGRATIONS
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class EmbeddingVectorField:
     """A vector field whose dimension is baked into both its type and its HNSW index."""
@@ -665,9 +680,20 @@ async def _first_invalid_graph_enum_value(
 
 
 def render_fulltext_compatible_sql(sql: str, *, url: str) -> str:
-    if url.startswith(("memory://", "surrealkv://")):
+    if url.startswith(_EMBEDDED_SURREAL_SCHEMES):
         return sql.replace("FULLTEXT ANALYZER", "SEARCH ANALYZER")
     return sql
+
+
+def render_surreal_compatible_sql(sql: str, *, url: str) -> str:
+    rendered = render_fulltext_compatible_sql(sql, url=url)
+    if not url.startswith(_EMBEDDED_SURREAL_SCHEMES):
+        rendered = (
+            rendered.replace("type::is::string", "type::is_string")
+            .replace("type::is::datetime", "type::is_datetime")
+            .replace("string::is::datetime", "string::is_datetime")
+        )
+    return rendered
 
 
 async def bootstrap_schema(
@@ -696,7 +722,7 @@ async def bootstrap_schema(
             await _ensure_removed_graph_objects_empty(driver)
             await apply_schema_migrations(
                 driver.execute_query,
-                GRAPH_SCHEMA_MIGRATIONS,
+                _graph_schema_migrations(url=driver._url),
                 group_id=driver.group_id,
             )
             await _reconcile_embedding_dimension(driver)
@@ -705,9 +731,9 @@ async def bootstrap_schema(
 
     compatible_blocks = (
         ANALYZER_DEFINITIONS,
-        render_fulltext_compatible_sql(NODE_DEFINITIONS, url=driver._url),
+        render_surreal_compatible_sql(NODE_DEFINITIONS, url=driver._url),
         RELATION_EDGE_CLEANUP_DEFINITIONS,
-        render_fulltext_compatible_sql(EDGE_DEFINITIONS, url=driver._url),
+        render_surreal_compatible_sql(EDGE_DEFINITIONS, url=driver._url),
     )
     for block in compatible_blocks:
         await _execute_graph_schema_block(
@@ -717,7 +743,7 @@ async def bootstrap_schema(
         )
     await apply_schema_migrations(
         driver.execute_query,
-        GRAPH_SCHEMA_MIGRATIONS,
+        _graph_schema_migrations(url=driver._url),
         group_id=driver.group_id,
     )
     await _reconcile_embedding_dimension(driver)
@@ -788,8 +814,10 @@ __all__ = [
     "REMOVED_GRAPH_OBJECTS",
     "REMOVED_GRAPH_TABLES",
     "EmbeddingVectorField",
+    "_graph_schema_migrations",
     "bootstrap_schema",
     "drop_all_indexes",
     "rebuild_embedding_indexes_for_dimension",
     "render_fulltext_compatible_sql",
+    "render_surreal_compatible_sql",
 ]

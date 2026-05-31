@@ -44,8 +44,10 @@ from sibyl_core.backends.surreal.schema import (
     RELATION_ENDPOINT_SCHEMA_DEFINITIONS,
     REMOVED_GRAPH_EDGES,
     REMOVED_GRAPH_TABLES,
+    _graph_schema_migrations,
     bootstrap_schema,
     render_fulltext_compatible_sql,
+    render_surreal_compatible_sql,
 )
 from sibyl_core.backends.surreal.schema_helpers import split_statements
 from sibyl_core.backends.surreal.schema_version import (
@@ -424,8 +426,12 @@ async def test_auth_permissions_filter_record_users_by_org() -> None:
     assert hidden_keys == []
 
 
-def test_fulltext_indexes_render_with_embedded_search_syntax() -> None:
-    rendered = render_fulltext_compatible_sql(CONTENT_SCHEMA_DEFINITIONS, url="memory://")
+@pytest.mark.parametrize(
+    "url",
+    ("memory://", "surrealkv:///tmp/sibyl", "rocksdb:///tmp/sibyl", "file:///tmp/sibyl"),
+)
+def test_fulltext_indexes_render_with_embedded_search_syntax(url: str) -> None:
+    rendered = render_fulltext_compatible_sql(CONTENT_SCHEMA_DEFINITIONS, url=url)
 
     assert "SEARCH ANALYZER" in rendered
     assert "FULLTEXT ANALYZER" not in rendered
@@ -534,6 +540,43 @@ def test_entity_updated_at_datetime_migration_is_versioned() -> None:
     )
     assert "CONCURRENTLY" in ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS
     assert "DEFINE FIELD OVERWRITE updated_at ON entity TYPE option<datetime>" in migration_sql
+
+
+def test_graph_schema_renders_flat_type_predicates_for_server_runtime() -> None:
+    rendered = render_surreal_compatible_sql(
+        ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS,
+        url="ws://localhost:8000/rpc",
+    )
+
+    assert "type::is_string(updated_at)" in rendered
+    assert "string::is_datetime(updated_at)" in rendered
+    assert "!type::is_datetime(updated_at)" in rendered
+
+
+@pytest.mark.parametrize(
+    "url",
+    ("memory://", "surrealkv:///tmp/sibyl", "rocksdb:///tmp/sibyl", "file:///tmp/sibyl"),
+)
+def test_graph_schema_keeps_legacy_type_predicates_for_embedded_runtime(url: str) -> None:
+    rendered = render_surreal_compatible_sql(
+        ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS,
+        url=url,
+    )
+
+    assert "type::is::string(updated_at)" in rendered
+    assert "string::is::datetime(updated_at)" in rendered
+    assert "!type::is::datetime(updated_at)" in rendered
+
+
+def test_graph_schema_migrations_render_runtime_compatible_statements() -> None:
+    migration_sql = "\n".join(
+        statement
+        for migration in _graph_schema_migrations(url="ws://localhost:8000/rpc")
+        for statement in migration.statements
+    )
+
+    assert "type::is_string(updated_at)" in migration_sql
+    assert "type::is::string(updated_at)" not in migration_sql
 
 
 def test_graph_index_prune_removes_constant_namespace_prefixes() -> None:
