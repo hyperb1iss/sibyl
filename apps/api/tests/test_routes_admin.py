@@ -319,6 +319,65 @@ async def test_admin_execute_debug_query_rejects_content_table_subqueries() -> N
 
 
 @pytest.mark.asyncio
+async def test_admin_execute_debug_query_rejects_dynamic_content_tables() -> None:
+    content_execute = AsyncMock(return_value=[])
+    graph_execute = AsyncMock(return_value=[])
+
+    with (
+        patch("sibyl.persistence.content_runtime.execute_debug_query", content_execute),
+        patch("sibyl.persistence.graph_runtime.execute_debug_query", graph_execute),
+        pytest.raises(ValueError, match="literal content table"),
+    ):
+        await admin_routes.execute_debug_query(
+            'SELECT * FROM type::table("raw_captures") WHERE organization_id = $group_id',
+            group_id="org-1",
+        )
+
+    content_execute.assert_not_awaited()
+    graph_execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_admin_execute_debug_query_rejects_dynamic_content_tables_with_comments() -> None:
+    content_execute = AsyncMock(return_value=[])
+    graph_execute = AsyncMock(return_value=[])
+
+    with (
+        patch("sibyl.persistence.content_runtime.execute_debug_query", content_execute),
+        patch("sibyl.persistence.graph_runtime.execute_debug_query", graph_execute),
+        pytest.raises(ValueError, match="literal content table"),
+    ):
+        await admin_routes.execute_debug_query(
+            'SELECT * FROM type/*x*/::/*x*/table/*x*/("raw_captures")',
+            group_id="org-1",
+        )
+
+    content_execute.assert_not_awaited()
+    graph_execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_admin_execute_debug_query_ignores_dynamic_content_table_in_literals() -> None:
+    graph_execute = AsyncMock(return_value=[{"uuid": "entity-1"}])
+
+    with patch("sibyl.persistence.graph_runtime.execute_debug_query", graph_execute):
+        rows = await admin_routes.execute_debug_query(
+            """
+            SELECT *
+            FROM entity
+            WHERE note = 'type::table("raw_captures")'
+              AND comment = "type::table('crawl_sources')"
+              -- type::table("raw_captures")
+              /* type::table("crawl_sources") */
+            """,
+            group_id="org-1",
+        )
+
+    assert rows == [{"uuid": "entity-1"}]
+    graph_execute.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_debug_query_rejects_mismatched_scope_params() -> None:
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     request = DebugQueryRequest(

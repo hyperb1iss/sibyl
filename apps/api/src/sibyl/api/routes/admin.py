@@ -704,17 +704,156 @@ _CONTENT_DEBUG_TABLES = {
     "RAW_CAPTURES",
     "SOURCE_IMPORTS",
 }
+_CONTENT_DEBUG_TABLE_NAMES = {table.lower() for table in _CONTENT_DEBUG_TABLES}
 
 
 def _query_tokens(query: str) -> set[str]:
     return upper_query_tokens(query)
 
 
+def _skip_query_literal(query: str, index: int) -> int:
+    quote = query[index]
+    length = len(query)
+    index += 1
+
+    while index < length:
+        current = query[index]
+        if current == "\\":
+            index += 2
+            continue
+        if current == quote:
+            if index + 1 < length and query[index + 1] == quote:
+                index += 2
+                continue
+            index += 1
+            break
+        index += 1
+    return index
+
+
+def _skip_query_comment(query: str, index: int) -> int:
+    length = len(query)
+    next_char = query[index + 1] if index + 1 < length else ""
+    if query[index] == "/" and next_char == "*":
+        index += 2
+        while index + 1 < length and not (query[index] == "*" and query[index + 1] == "/"):
+            index += 1
+        return min(index + 2, length)
+    index += 2
+    while index < length and query[index] not in "\r\n":
+        index += 1
+    return index
+
+
+def _skip_query_separators(query: str, index: int) -> int:
+    length = len(query)
+    while index < length:
+        next_char = query[index + 1] if index + 1 < length else ""
+        if query[index].isspace():
+            index += 1
+            continue
+        if (
+            (query[index] == "/" and next_char == "*")
+            or (query[index] == "/" and next_char == "/")
+            or (query[index] == "-" and next_char == "-")
+        ):
+            index = _skip_query_comment(query, index)
+            continue
+        break
+    return index
+
+
+def _has_identifier_boundary(query: str, start: int, end: int) -> bool:
+    before = query[start - 1] if start > 0 else ""
+    after = query[end] if end < len(query) else ""
+    return not (before.isalnum() or before == "_") and not (after.isalnum() or after == "_")
+
+
+def _read_query_string_value(query: str, index: int) -> tuple[str, int] | None:
+    quote = query[index]
+    length = len(query)
+    value: list[str] = []
+    index += 1
+
+    while index < length:
+        current = query[index]
+        if current == "\\":
+            if index + 1 < length:
+                value.append(query[index + 1])
+                index += 2
+                continue
+            return None
+        if current == quote:
+            if index + 1 < length and query[index + 1] == quote:
+                value.append(quote)
+                index += 2
+                continue
+            index += 1
+            return "".join(value), index
+        index += 1
+        value.append(current)
+    return None
+
+
+def _query_has_dynamic_content_table(query: str) -> bool:
+    lower_query = query.lower()
+    index = 0
+    length = len(query)
+
+    while index < length:
+        char = query[index]
+        next_char = query[index + 1] if index + 1 < length else ""
+        if char in {"'", '"', "`"}:
+            index = _skip_query_literal(query, index)
+            continue
+        if (char == "/" and next_char == "*") or (char == "-" and next_char == "-"):
+            index = _skip_query_comment(query, index)
+            continue
+        if char == "/" and next_char == "/":
+            index = _skip_query_comment(query, index)
+            continue
+
+        if lower_query.startswith("type", index) and _has_identifier_boundary(
+            query, index, index + 4
+        ):
+            cursor = _skip_query_separators(query, index + 4)
+            if not lower_query.startswith("::", cursor):
+                index += 1
+                continue
+            cursor = _skip_query_separators(query, cursor + 2)
+            if not lower_query.startswith("table", cursor) or not _has_identifier_boundary(
+                query, cursor, cursor + 5
+            ):
+                index += 1
+                continue
+            cursor = _skip_query_separators(query, cursor + 5)
+            if cursor >= length or query[cursor] != "(":
+                index += 1
+                continue
+            cursor = _skip_query_separators(query, cursor + 1)
+            if cursor >= length or query[cursor] not in {"'", '"'}:
+                index += 1
+                continue
+            parsed = _read_query_string_value(query, cursor)
+            if parsed is not None and parsed[0].lower() in _CONTENT_DEBUG_TABLE_NAMES:
+                return True
+
+        index += 1
+
+    return False
+
+
 def _debug_query_uses_content_runtime(query: str) -> bool:
-    return bool(_query_tokens(query) & _CONTENT_DEBUG_TABLES)
+    return bool(
+        _query_tokens(query) & _CONTENT_DEBUG_TABLES or _query_has_dynamic_content_table(query)
+    )
 
 
 def _validate_content_debug_query(query: str) -> None:
+    if _query_has_dynamic_content_table(query):
+        msg = "Content debug queries must select from a literal content table"
+        raise ValueError(msg)
+
     content_table_tokens = [
         token.upper() for token in query_tokens(query) if token.upper() in _CONTENT_DEBUG_TABLES
     ]
