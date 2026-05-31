@@ -13,6 +13,7 @@ from sibyl.jobs import source_imports
 from sibyl.jobs.raw_promotion import promote_raw_captures
 from sibyl.jobs.worker import WorkerSettings
 from sibyl_core.models.sources import SourceRecord
+from sibyl_core.services.mailbox_adapter import IMAP_ADAPTER_NAME
 from sibyl_core.services.source_adapters import (
     SourceRawMemoryWrite,
     SourceRecordImportDecision,
@@ -324,6 +325,38 @@ async def test_duplicate_checker_looks_up_exact_dedupe_by_org_key() -> None:
     assert len(lookup_calls) == 1
     assert lookup_calls[0]["organization_id"] == "org-1"
     assert lookup_calls[0]["dedupe_key"] == "dedupe-msg-1"
+    assert lookup_calls[0]["principal_id"] is None
+    assert lookup_calls[0]["memory_scope"] is MemoryScope.PROJECT
+    assert lookup_calls[0]["scope_key"] == "project-7"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_checker_filters_private_dedupe_by_principal() -> None:
+    lookup_calls: list[dict[str, object]] = []
+
+    async def capture_lookup(**kwargs: object) -> RawMemory | None:
+        lookup_calls.append(dict(kwargs))
+        return None
+
+    checker = source_imports._default_duplicate_checker(
+        organization_id="org-1",
+        record_dedupe_keys={},
+        record_source_ids={},
+    )
+    with patch(
+        "sibyl.jobs.source_imports.get_raw_memory_by_dedupe_key",
+        AsyncMock(side_effect=capture_lookup),
+    ):
+        result = await checker(
+            record=_source_record(),
+            payload=_raw_memory_write(memory_scope=MemoryScope.PRIVATE),
+        )
+
+    assert result is None
+    assert len(lookup_calls) == 1
+    assert lookup_calls[0]["principal_id"] == "user-1"
+    assert lookup_calls[0]["memory_scope"] is MemoryScope.PRIVATE
+    assert lookup_calls[0]["scope_key"] is None
 
 
 @pytest.mark.asyncio
@@ -463,6 +496,187 @@ def test_document_url_import_bypasses_filesystem_root_resolution(tmp_path: Path)
         resolved = source_imports._resolve_import_source_uri_for_adapter("document_url", url)
 
     assert resolved == url
+
+
+def test_imap_import_bypasses_filesystem_root_resolution(tmp_path: Path) -> None:
+    import_root = tmp_path / "imports"
+    import_root.mkdir()
+    source_uri = "imaps://mail.example.com/INBOX"
+
+    with patch("sibyl.jobs.source_imports.settings.source_import_dir", import_root):
+        resolved = source_imports._resolve_import_source_uri_for_adapter(
+            IMAP_ADAPTER_NAME,
+            source_uri,
+        )
+
+    assert resolved == source_uri
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "option_name",
+    [
+        "access_token",
+        "api_key",
+        "client_secret",
+        "oauth2_token",
+        "password",
+        "refresh_token",
+        "token",
+    ],
+)
+async def test_start_source_import_rejects_persisted_imap_secrets(option_name: str) -> None:
+    with pytest.raises(
+        ValueError,
+        match="imap_credentials_not_allowed_in_source_import_options",
+    ):
+        await source_imports.start_source_import(
+            source_uri="imaps://mail.example.com/INBOX",
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            adapter_name=IMAP_ADAPTER_NAME,
+            options={"username": "bliss", option_name: "secret"},
+        )
+
+    assert source_imports._SOURCE_IMPORT_RUNS == {}
+
+
+@pytest.mark.asyncio
+async def test_start_source_import_rejects_imap_password_env_before_persist() -> None:
+    with pytest.raises(
+        ValueError,
+        match="imap_credentials_not_allowed_in_source_import_options",
+    ):
+        await source_imports.start_source_import(
+            source_uri="imaps://mail.example.com/INBOX",
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            adapter_name=IMAP_ADAPTER_NAME,
+            options={"username": "bliss", "password_env": "AWS_SECRET_ACCESS_KEY"},
+        )
+
+    assert source_imports._SOURCE_IMPORT_RUNS == {}
+
+
+@pytest.mark.asyncio
+async def test_start_source_import_rejects_unknown_imap_options_before_persist() -> None:
+    with pytest.raises(ValueError, match="imap_source_import_options_not_allowed"):
+        await source_imports.start_source_import(
+            source_uri="imaps://mail.example.com/INBOX",
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            adapter_name=IMAP_ADAPTER_NAME,
+            options={"username": "bliss", "host": "other.example.com"},
+        )
+
+    assert source_imports._SOURCE_IMPORT_RUNS == {}
+
+
+@pytest.mark.asyncio
+async def test_start_source_import_rejects_imap_private_network_override() -> None:
+    with pytest.raises(
+        ValueError,
+        match="imap_private_network_not_allowed_in_source_import_options",
+    ):
+        await source_imports.start_source_import(
+            source_uri="imaps://mail.example.com/INBOX",
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            adapter_name=IMAP_ADAPTER_NAME,
+            options={"username": "bliss", "allow_private_network": True},
+        )
+
+    assert source_imports._SOURCE_IMPORT_RUNS == {}
+
+
+@pytest.mark.asyncio
+async def test_start_source_import_rejects_imap_uri_password_before_persist() -> None:
+    with pytest.raises(ValueError, match="imap_source_uri_must_not_include_password"):
+        await source_imports.start_source_import(
+            source_uri="imaps://bliss:secret@mail.example.com/INBOX",
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            adapter_name=IMAP_ADAPTER_NAME,
+            options={"username": "bliss"},
+        )
+
+    assert source_imports._SOURCE_IMPORT_RUNS == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "source_uri",
+    [
+        "imaps://mail.example.com/INBOX?password=secret",
+        "imaps://mail.example.com/INBOX?refresh_token=secret",
+        "imaps://mail.example.com/INBOX#token=secret",
+    ],
+)
+async def test_start_source_import_rejects_imap_query_before_persist(source_uri: str) -> None:
+    with pytest.raises(ValueError, match="imap_source_uri_must_not_include_query_or_fragment"):
+        await source_imports.start_source_import(
+            source_uri=source_uri,
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            adapter_name=IMAP_ADAPTER_NAME,
+            options={"username": "bliss"},
+        )
+
+    assert source_imports._SOURCE_IMPORT_RUNS == {}
+
+
+@pytest.mark.asyncio
+async def test_start_source_import_rejects_non_url_imap_source_before_persist() -> None:
+    with pytest.raises(ValueError, match="imap_source_uri_must_use_tls"):
+        await source_imports.start_source_import(
+            source_uri="mail.example.com/INBOX?password=secret",
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            adapter_name=IMAP_ADAPTER_NAME,
+            options={"username": "bliss"},
+        )
+
+    assert source_imports._SOURCE_IMPORT_RUNS == {}
+
+
+@pytest.mark.asyncio
+async def test_start_source_import_rejects_plaintext_imap_before_persist() -> None:
+    with pytest.raises(ValueError, match="imap_source_uri_must_use_tls"):
+        await source_imports.start_source_import(
+            source_uri="imap://mail.example.com/INBOX",
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            adapter_name=IMAP_ADAPTER_NAME,
+            options={"username": "bliss"},
+        )
+
+    assert source_imports._SOURCE_IMPORT_RUNS == {}
+
+
+@pytest.mark.asyncio
+async def test_start_source_import_rejects_tls_disabled_imap_before_persist() -> None:
+    with pytest.raises(ValueError, match="imap_source_uri_must_use_tls"):
+        await source_imports.start_source_import(
+            source_uri="imaps://mail.example.com/INBOX",
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            adapter_name=IMAP_ADAPTER_NAME,
+            options={
+                "username": "bliss",
+                "ssl": False,
+            },
+        )
+
+    assert source_imports._SOURCE_IMPORT_RUNS == {}
 
 
 @pytest.mark.asyncio

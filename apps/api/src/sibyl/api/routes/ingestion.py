@@ -43,7 +43,7 @@ from sibyl.services.document_adapters import (
 )
 from sibyl_core.auth import AuthOrganization, OrganizationRole
 from sibyl_core.models.sources import SourceAdapterDescriptor
-from sibyl_core.services.mailbox_adapter import ensure_mailbox_adapter_registered
+from sibyl_core.services.mailbox_adapter import IMAP_ADAPTER_NAME, ensure_mailbox_adapter_registered
 from sibyl_core.services.source_adapters import list_source_adapters
 from sibyl_core.services.transcript_adapters import ensure_transcript_adapters_registered
 
@@ -67,6 +67,7 @@ _DOCUMENT_ADAPTERS_BY_KIND = {
     "url": DOCUMENT_URL_ADAPTER_NAME,
     "text": DOCUMENT_TEXT_ADAPTER_NAME,
 }
+_NON_PATH_SOURCE_ADAPTERS = {IMAP_ADAPTER_NAME}
 
 
 def _source_adapter_to_response(adapter: SourceAdapterDescriptor) -> SourceAdapterResponse:
@@ -159,6 +160,12 @@ def _resolve_route_import_source_uri(source_uri: str) -> str:
     except ValueError as exc:
         raise HTTPException(status_code=403, detail="source_import_path_denied") from exc
     return str(source_path)
+
+
+def _resolve_route_import_source_uri_for_adapter(adapter_name: str, source_uri: str) -> str:
+    if adapter_name in _NON_PATH_SOURCE_ADAPTERS:
+        return source_uri
+    return _resolve_route_import_source_uri(source_uri)
 
 
 def _document_source_uri(request: DocumentImportRequest) -> str:
@@ -291,7 +298,10 @@ async def start_source_import_route(
     try:
         principal_id = _current_principal_id(ctx)
         payload = await start_source_import(
-            source_uri=_resolve_route_import_source_uri(request.source_uri),
+            source_uri=_resolve_route_import_source_uri_for_adapter(
+                request.adapter_name,
+                request.source_uri,
+            ),
             organization_id=str(org.id),
             principal_id=principal_id,
             policy_context=policy_context,

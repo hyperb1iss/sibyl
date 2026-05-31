@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import structlog
@@ -20,7 +22,7 @@ from sibyl.services.document_adapters import (
 )
 from sibyl_core.auth import MemoryPolicyContext, authorize_memory_write
 from sibyl_core.models.sources import SourceImportCheckpoint, SourceRecord
-from sibyl_core.services.mailbox_adapter import ensure_mailbox_adapter_registered
+from sibyl_core.services.mailbox_adapter import IMAP_ADAPTER_NAME, ensure_mailbox_adapter_registered
 from sibyl_core.services.source_adapters import (
     RawMemoryRememberer,
     SourceRawMemoryWrite,
@@ -32,6 +34,7 @@ from sibyl_core.services.source_adapters import (
     plan_source_import,
 )
 from sibyl_core.services.surreal_content import (
+    MemoryScope,
     RawMemory,
     get_raw_memory,
     get_raw_memory_by_dedupe_key,
@@ -130,7 +133,21 @@ _SOURCE_IMPORT_RUNS: dict[str, SourceImportRun] = {}
 _NON_PATH_SOURCE_ADAPTERS = {
     DOCUMENT_TEXT_ADAPTER_NAME,
     DOCUMENT_URL_ADAPTER_NAME,
+    IMAP_ADAPTER_NAME,
 }
+_IMAP_PERSISTED_ALLOWED_OPTIONS = frozenset(
+    {"privacy_class", "target_memory_scope", "target_scope_key", "username"}
+)
+_IMAP_SECRET_OPTION_MARKERS = (
+    "api_key",
+    "bearer",
+    "credential",
+    "oauth",
+    "password",
+    "secret",
+    "token",
+)
+_IMAP_PERSISTED_PRIVILEGED_OPTIONS = frozenset({"allow_private_network"})
 
 
 def _store_run(run: SourceImportRun) -> None:
@@ -435,9 +452,15 @@ def _default_duplicate_checker(
             return SourceRecordImportDecision(
                 duplicate_raw_memory_id=record_dedupe_keys[record.dedupe_key]
             )
+        lookup_principal_id = (
+            payload.principal_id if payload.memory_scope is MemoryScope.PRIVATE else None
+        )
         existing_duplicate = await get_raw_memory_by_dedupe_key(
             organization_id=organization_id,
             dedupe_key=record.dedupe_key,
+            principal_id=lookup_principal_id,
+            memory_scope=payload.memory_scope,
+            scope_key=payload.scope_key,
         )
         if existing_duplicate is not None:
             return SourceRecordImportDecision(duplicate_raw_memory_id=existing_duplicate.id)
@@ -449,6 +472,9 @@ def _default_duplicate_checker(
         existing_source = await get_raw_memory_by_source_id(
             organization_id=organization_id,
             source_id=payload.source_id,
+            principal_id=lookup_principal_id,
+            memory_scope=payload.memory_scope,
+            scope_key=payload.scope_key,
         )
         if existing_source is not None:
             if str(existing_source.metadata.get("content_hash") or "") == record.content_hash:
@@ -511,6 +537,47 @@ def _resolve_import_source_uri_for_adapter(adapter_name: str, source_uri: str) -
     return _resolve_import_source_uri(source_uri)
 
 
+def _source_option_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _validate_source_import_options(adapter_name: str, options: Mapping[str, Any]) -> None:
+    if adapter_name != IMAP_ADAPTER_NAME:
+        return
+    if "ssl" in options and not _source_option_bool(options["ssl"]):
+        raise ValueError("imap_source_uri_must_use_tls")
+    disallowed_options = set(options) - _IMAP_PERSISTED_ALLOWED_OPTIONS
+    if _IMAP_PERSISTED_PRIVILEGED_OPTIONS.intersection(disallowed_options):
+        raise ValueError("imap_private_network_not_allowed_in_source_import_options")
+    if any(_is_imap_secret_option(option) for option in disallowed_options):
+        raise ValueError("imap_credentials_not_allowed_in_source_import_options")
+    if disallowed_options:
+        raise ValueError("imap_source_import_options_not_allowed")
+
+
+def _is_imap_secret_option(option: object) -> bool:
+    normalized = str(option).strip().lower().replace("-", "_")
+    return any(marker in normalized for marker in _IMAP_SECRET_OPTION_MARKERS)
+
+
+def _validate_source_import_uri(adapter_name: str, source_uri: str) -> None:
+    if adapter_name != IMAP_ADAPTER_NAME:
+        return
+    parsed = urlparse(source_uri)
+    if parsed.scheme != "imaps":
+        raise ValueError("imap_source_uri_must_use_tls")
+    if parsed.password:
+        raise ValueError("imap_source_uri_must_not_include_password")
+    if parsed.query or parsed.fragment:
+        raise ValueError("imap_source_uri_must_not_include_query_or_fragment")
+    if not parsed.hostname:
+        raise ValueError("imap_source_uri_must_include_host")
+
+
 def _ensure_builtin_source_adapters() -> None:
     ensure_mailbox_adapter_registered()
     ensure_transcript_adapters_registered()
@@ -535,11 +602,14 @@ async def import_source_archive(
 ) -> dict[str, Any]:
     """Import a bounded source archive batch into raw memory."""
     _ensure_builtin_source_adapters()
+    option_values = dict(options or {})
+    _validate_source_import_uri(adapter_name, source_uri)
+    _validate_source_import_options(adapter_name, option_values)
     source_uri = _resolve_import_source_uri_for_adapter(adapter_name, source_uri)
     adapter = get_source_adapter(adapter_name)
     manifest = await adapter.prepare_manifest(
         source_uri=source_uri,
-        options=options or {},
+        options=option_values,
     )
     plan = plan_source_import(adapter, manifest)
     context_payload = policy_context if policy_context is not None else ctx.get("policy_context")
@@ -662,13 +732,16 @@ async def start_source_import(
     batch_size: int = 100,
     promotion_preview_approved: bool = False,
 ) -> dict[str, Any]:
+    option_values = dict(options or {})
+    _validate_source_import_uri(adapter_name, source_uri)
+    _validate_source_import_options(adapter_name, option_values)
     run = SourceImportRun(
         import_id=f"source_import:{uuid4()}",
         organization_id=organization_id,
         principal_id=principal_id,
         source_uri=source_uri,
         adapter_name=adapter_name,
-        options=dict(options or {}),
+        options=option_values,
         policy_context=dict(policy_context),
         batch_size=batch_size,
         promotion_preview_approved=promotion_preview_approved,

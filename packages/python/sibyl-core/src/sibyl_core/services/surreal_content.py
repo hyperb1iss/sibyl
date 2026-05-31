@@ -1540,16 +1540,36 @@ async def get_raw_memory_by_dedupe_key(
     *,
     organization_id: str,
     dedupe_key: str,
+    principal_id: str | None = None,
+    memory_scope: MemoryScope | str | None = None,
+    scope_key: str | None = None,
 ) -> RawMemory | None:
+    filters = [
+        "organization_id = $organization_id",
+        "metadata.dedupe_key = $dedupe_key",
+    ]
+    params: dict[str, object] = {
+        "organization_id": organization_id,
+        "dedupe_key": dedupe_key,
+    }
+    if principal_id is not None:
+        filters.append("principal_id = $principal_id")
+        params["principal_id"] = principal_id
+    if memory_scope is not None:
+        filters.append("memory_scope = $memory_scope")
+        params["memory_scope"] = _coerce_memory_scope(memory_scope).value
+        if scope_key is None:
+            filters.append("scope_key IS NONE")
+        else:
+            filters.append("scope_key = $scope_key")
+            params["scope_key"] = scope_key
+
     async with surreal_content_client() as client:
         record = await _select_one(
             client,
-            "SELECT * FROM raw_captures "
-            "WHERE organization_id = $organization_id "
-            "AND metadata.dedupe_key = $dedupe_key "
+            f"SELECT * FROM raw_captures WHERE {' AND '.join(filters)} "
             "ORDER BY captured_at DESC LIMIT 1;",
-            organization_id=organization_id,
-            dedupe_key=dedupe_key,
+            **params,
         )
     return _raw_memory_from_record(record) if record is not None else None
 

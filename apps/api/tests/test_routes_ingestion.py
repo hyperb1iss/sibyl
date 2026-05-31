@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from sibyl.api.routes.ingestion import (
     _document_collections_from_captures,
     _resolve_route_import_source_uri,
+    _resolve_route_import_source_uri_for_adapter,
     list_document_collections_route,
     list_import_adapters,
     resume_source_import_route,
@@ -31,6 +32,7 @@ from sibyl_core.models.sources import (
     SourcePrivacyClass,
     SourceTransformBehavior,
 )
+from sibyl_core.services.mailbox_adapter import IMAP_ADAPTER_NAME
 from sibyl_core.services.source_adapters import clear_source_adapters
 
 
@@ -138,6 +140,14 @@ def test_source_import_route_rejects_paths_outside_import_root(
     assert exc.value.detail == "source_import_path_denied"
 
 
+def test_source_import_route_allows_imap_uri() -> None:
+    source_uri = "imaps://mail.example.com/INBOX"
+
+    resolved = _resolve_route_import_source_uri_for_adapter(IMAP_ADAPTER_NAME, source_uri)
+
+    assert resolved == source_uri
+
+
 @pytest.mark.asyncio
 async def test_start_source_import_route_enqueues_drain_without_inline_resume(
     tmp_path: Path,
@@ -213,6 +223,46 @@ async def test_start_source_import_route_enqueues_drain_without_inline_resume(
         batch_size=25,
         promotion_preview_approved=False,
     )
+
+
+@pytest.mark.asyncio
+async def test_start_source_import_route_passes_imap_uri_without_path_resolution() -> None:
+    policy_context = {
+        "actor_user_id": "user-1",
+        "organization_id": "00000000-0000-0000-0000-000000000111",
+        "memory_space": "private",
+        "scope_key": None,
+    }
+    request = SourceImportStartRequest(
+        source_uri="imaps://mail.example.com/INBOX",
+        adapter_name=IMAP_ADAPTER_NAME,
+        options={"username": "bliss"},
+        batch_size=25,
+    )
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    ctx = SimpleNamespace(user_id="user-1")
+
+    with (
+        patch(
+            "sibyl.api.routes.ingestion._source_import_policy_context",
+            AsyncMock(return_value=policy_context),
+        ),
+        patch(
+            "sibyl.api.routes.ingestion.start_source_import",
+            AsyncMock(return_value=_source_import_payload(adapter_name=IMAP_ADAPTER_NAME)),
+        ) as start,
+        patch(
+            "sibyl.jobs.queue.enqueue_source_import_drain",
+            AsyncMock(return_value="source_import_drain:source_import:run-1"),
+        ),
+    ):
+        response = await start_source_import_route(request, org=org, ctx=ctx)
+
+    assert response.adapter_name == IMAP_ADAPTER_NAME
+    start.assert_awaited_once()
+    call = start.await_args.kwargs
+    assert call["source_uri"] == "imaps://mail.example.com/INBOX"
+    assert call["options"]["username"] == "bliss"
 
 
 @pytest.mark.asyncio

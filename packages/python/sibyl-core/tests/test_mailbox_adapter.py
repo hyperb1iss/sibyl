@@ -8,10 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from sibyl_core.models.sources import SourcePrivacyClass
+from sibyl_core.models.sources import SourceImportCheckpoint, SourcePrivacyClass
 from sibyl_core.services.mailbox_adapter import (
+    IMAP_ADAPTER_NAME,
     MAILDIR_ADAPTER_NAME,
     MBOX_ADAPTER_NAME,
+    ImapSourceAdapter,
     MaildirSourceAdapter,
     MboxSourceAdapter,
     ensure_mailbox_adapter_registered,
@@ -82,6 +84,89 @@ def _message(
             filename="notes.txt",
         )
     return message
+
+
+class FakeImapClient:
+    def __init__(
+        self,
+        messages: dict[int, EmailMessage],
+        *,
+        fetch_failures: set[int] | None = None,
+        search_uids: list[int] | None = None,
+        uidvalidity: str = "123",
+    ) -> None:
+        self.messages = messages
+        self.fetch_failures = fetch_failures or set()
+        self.search_uids = search_uids
+        self.uidvalidity = uidvalidity
+        self.commands: list[tuple[str, tuple[object, ...]]] = []
+        self.readonly_selects: list[bool] = []
+        self.logged_out = False
+
+    def login(self, user: str, password: str) -> tuple[str, list[bytes]]:
+        self.commands.append(("LOGIN", (user, password)))
+        return "OK", [b"authenticated"]
+
+    def select(self, mailbox: str = "INBOX", readonly: bool = False) -> tuple[str, list[bytes]]:
+        self.commands.append(("SELECT", (mailbox, readonly)))
+        self.readonly_selects.append(readonly)
+        return "OK", [str(len(self.messages)).encode()]
+
+    def response(self, code: str) -> tuple[str, list[bytes]]:
+        self.commands.append(("RESPONSE", (code,)))
+        return code, [self.uidvalidity.encode()]
+
+    def uid(self, command: str, *args: object) -> tuple[str, list[object]]:
+        self.commands.append((f"UID {command}", args))
+        if command == "SEARCH":
+            start = int(str(args[-1]).split(":", 1)[0])
+            if self.search_uids is not None:
+                uids = [str(uid) for uid in self.search_uids]
+            else:
+                uids = [str(uid) for uid in sorted(self.messages) if uid >= start]
+            return "OK", [" ".join(uids).encode()]
+        if command == "FETCH":
+            uid = int(str(args[0]))
+            if uid in self.fetch_failures:
+                return "NO", [b"message vanished"]
+            return "OK", [(b"RFC822", self.messages[uid].as_bytes())]
+        return "BAD", [b"unsupported"]
+
+    def logout(self) -> tuple[str, list[bytes]]:
+        self.commands.append(("LOGOUT", ()))
+        self.logged_out = True
+        return "BYE", [b"logout"]
+
+
+class FakeImapServer:
+    def __init__(
+        self,
+        messages: dict[int, EmailMessage],
+        *,
+        fetch_failures: set[int] | None = None,
+        search_uids: list[int] | None = None,
+        uidvalidity: str = "123",
+    ) -> None:
+        self.messages = messages
+        self.fetch_failures = fetch_failures or set()
+        self.search_uids = search_uids
+        self.uidvalidity = uidvalidity
+        self.clients: list[FakeImapClient] = []
+
+    def factory(self, host: str, port: int, ssl: bool) -> FakeImapClient:
+        client = FakeImapClient(
+            self.messages,
+            fetch_failures=self.fetch_failures,
+            search_uids=self.search_uids,
+            uidvalidity=self.uidvalidity,
+        )
+        client.commands.append(("CONNECT", (host, port, ssl)))
+        self.clients.append(client)
+        return client
+
+    @property
+    def commands(self) -> list[tuple[str, tuple[object, ...]]]:
+        return [command for client in self.clients for command in client.commands]
 
 
 @pytest.mark.asyncio
@@ -357,12 +442,366 @@ async def test_maildir_iter_records_skips_symlinked_entries(tmp_path: Path) -> N
     assert all("secret host data" not in record.body for record in ingested)
 
 
+@pytest.mark.asyncio
+async def test_imap_manifest_uses_uidvalidity_and_private_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "SIBYL_SOURCE_IMPORT_IMAP_MAIL_EXAMPLE_COM_993_BLISS_PASSWORD",
+        "secret",
+    )
+    server = FakeImapServer({101: _message()})
+    adapter = ImapSourceAdapter(client_factory=server.factory)
+
+    manifest = await adapter.prepare_manifest(
+        source_uri="imaps://mail.example.com/INBOX",
+        options={"username": "bliss"},
+    )
+
+    assert manifest.adapter_name == IMAP_ADAPTER_NAME
+    assert manifest.adapter_version == "1.0"
+    assert manifest.source_identity == "imap://bliss@mail.example.com:993/INBOX"
+    assert manifest.source_uri == "imaps://bliss@mail.example.com:993/INBOX"
+    assert manifest.source_version == "uidvalidity:123"
+    assert manifest.target_memory_scope == "private"
+    assert manifest.metadata["mailbox_format"] == "imap"
+    assert manifest.metadata["message_count"] == 1
+    assert manifest.metadata["uidvalidity"] == "123"
+    assert "password" not in manifest.options
+    assert "password_env" not in manifest.options
+    assert all(select is True for client in server.clients for select in client.readonly_selects)
+
+
+@pytest.mark.asyncio
+async def test_imap_adapter_fetches_readonly_uid_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD", "secret")
+    server = FakeImapServer(
+        {
+            101: _message(message_id="imap-1@example.com", attachment=None),
+            102: _message(message_id="imap-2@example.com", attachment=None),
+        }
+    )
+    adapter = ImapSourceAdapter(client_factory=server.factory)
+    manifest = await adapter.prepare_manifest(
+        source_uri="imaps://mail.example.com/INBOX",
+        options={"username": "bliss", "password_env": "SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD"},
+    )
+
+    first_batch = await anext(adapter.iter_records(manifest, batch_size=1))
+    second_batch = await anext(
+        adapter.iter_records(
+            manifest,
+            checkpoint=first_batch.checkpoint,
+            batch_size=1,
+        )
+    )
+
+    assert [record.adapter_record_id for record in first_batch.records] == ["imap-1@example.com"]
+    assert first_batch.records[0].source_uri == f"{manifest.source_uri}#uid=101"
+    assert first_batch.records[0].metadata["uid"] == "101"
+    assert first_batch.checkpoint.cursor == "101"
+    assert first_batch.checkpoint.done is False
+    assert [record.adapter_record_id for record in second_batch.records] == ["imap-2@example.com"]
+    assert second_batch.checkpoint.cursor == "102"
+    assert second_batch.checkpoint.done is True
+    assert all(select is True for client in server.clients for select in client.readonly_selects)
+    commands = [command for command, _args in server.commands]
+    assert "UID SEARCH" in commands
+    assert "UID FETCH" in commands
+    assert "STORE" not in commands
+    assert "EXPUNGE" not in commands
+
+
+@pytest.mark.asyncio
+async def test_imap_uidvalidity_change_resets_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD", "secret")
+    server = FakeImapServer(
+        {101: _message(message_id="imap-reset@example.com", attachment=None)},
+        uidvalidity="456",
+    )
+    adapter = ImapSourceAdapter(client_factory=server.factory)
+    manifest = await adapter.prepare_manifest(
+        source_uri="imaps://mail.example.com/INBOX",
+        options={"username": "bliss", "password_env": "SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD"},
+    )
+    old_checkpoint = SourceImportCheckpoint(
+        cursor="999",
+        source_version="uidvalidity:123",
+        done=False,
+    )
+
+    batch = await anext(
+        adapter.iter_records(
+            manifest,
+            checkpoint=old_checkpoint,
+            batch_size=10,
+        )
+    )
+
+    search_args = [args for command, args in server.commands if command == "UID SEARCH"]
+    assert search_args[-1] == (None, "UID", "1:*")
+    assert batch.checkpoint.metadata["uidvalidity_reset"] is True
+    assert batch.records[0].metadata["uidvalidity"] == "456"
+
+
+@pytest.mark.asyncio
+async def test_imap_search_filters_stale_uids_after_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD", "secret")
+    server = FakeImapServer(
+        {
+            50: _message(message_id="stale@example.com", attachment=None),
+            101: _message(message_id="fresh@example.com", attachment=None),
+        },
+        search_uids=[50, 101],
+    )
+    adapter = ImapSourceAdapter(client_factory=server.factory)
+    manifest = await adapter.prepare_manifest(
+        source_uri="imaps://mail.example.com/INBOX",
+        options={"username": "bliss", "password_env": "SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD"},
+    )
+    checkpoint = SourceImportCheckpoint(
+        cursor="100",
+        source_version="uidvalidity:123",
+        done=True,
+    )
+
+    batch = await anext(adapter.iter_records(manifest, checkpoint=checkpoint, batch_size=10))
+
+    assert [record.adapter_record_id for record in batch.records] == ["fresh@example.com"]
+    assert batch.checkpoint.cursor == "101"
+    assert batch.checkpoint.done is True
+
+
+@pytest.mark.asyncio
+async def test_imap_fetch_failure_skips_uid_without_failing_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD", "secret")
+    server = FakeImapServer(
+        {
+            101: _message(message_id="ok@example.com", attachment=None),
+            102: _message(message_id="vanished@example.com", attachment=None),
+        },
+        fetch_failures={102},
+    )
+    adapter = ImapSourceAdapter(client_factory=server.factory)
+    manifest = await adapter.prepare_manifest(
+        source_uri="imaps://mail.example.com/INBOX",
+        options={"username": "bliss", "password_env": "SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD"},
+    )
+
+    batch = await anext(adapter.iter_records(manifest, batch_size=10))
+
+    assert [record.adapter_record_id for record in batch.records] == ["ok@example.com"]
+    assert len(batch.skipped) == 1
+    assert batch.skipped[0].adapter_record_id == "imap:102"
+    assert batch.skipped[0].reason == "message_fetch_failed"
+    assert batch.checkpoint.cursor == "102"
+    assert batch.checkpoint.records_skipped == 1
+
+
+@pytest.mark.asyncio
+async def test_imap_manifest_rejects_private_hosts_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD", "secret")
+    server = FakeImapServer({101: _message()})
+    adapter = ImapSourceAdapter(client_factory=server.factory)
+
+    with pytest.raises(ValueError, match="IMAP host is private"):
+        await adapter.prepare_manifest(
+            source_uri="imaps://127.0.0.1/INBOX",
+            options={
+                "username": "bliss",
+                "password_env": "SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD",
+            },
+        )
+
+    assert server.clients == []
+
+
+@pytest.mark.asyncio
+async def test_imap_manifest_rejects_hosts_resolving_private(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD", "secret")
+    monkeypatch.setattr(
+        "sibyl_core.services.mailbox_adapter._resolve_imap_host_addresses",
+        lambda host: ["10.0.0.42"],
+    )
+    server = FakeImapServer({101: _message()})
+    adapter = ImapSourceAdapter(client_factory=server.factory)
+
+    with pytest.raises(ValueError, match="IMAP host is private"):
+        await adapter.prepare_manifest(
+            source_uri="imaps://mail.private.example/INBOX",
+            options={
+                "username": "bliss",
+                "password_env": "SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD",
+            },
+        )
+
+    assert server.clients == []
+
+
+@pytest.mark.asyncio
+async def test_imap_manifest_rejects_non_global_hosts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD", "secret")
+    server = FakeImapServer({101: _message()})
+    adapter = ImapSourceAdapter(client_factory=server.factory)
+
+    with pytest.raises(ValueError, match="IMAP host is private"):
+        await adapter.prepare_manifest(
+            source_uri="imaps://100.64.0.1/INBOX",
+            options={
+                "username": "bliss",
+                "password_env": "SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD",
+            },
+        )
+
+    assert server.clients == []
+
+
+@pytest.mark.asyncio
+async def test_imap_manifest_pins_verified_connect_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD", "secret")
+    monkeypatch.setattr(
+        "sibyl_core.services.mailbox_adapter._resolve_imap_host_addresses",
+        lambda host: ["93.184.216.34"],
+    )
+    server = FakeImapServer({101: _message()})
+    adapter = ImapSourceAdapter(client_factory=server.factory)
+    adapter._pin_connect_host = True
+
+    manifest = await adapter.prepare_manifest(
+        source_uri="imaps://mail.example.com/INBOX",
+        options={
+            "username": "bliss",
+            "password_env": "SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD",
+        },
+    )
+
+    assert manifest.source_uri == "imaps://bliss@mail.example.com:993/INBOX"
+    assert server.clients[0].commands[0] == ("CONNECT", ("93.184.216.34", 993, True))
+
+
+@pytest.mark.asyncio
+async def test_imap_manifest_rejects_untrusted_password_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret")
+    server = FakeImapServer({101: _message()})
+    adapter = ImapSourceAdapter(client_factory=server.factory)
+
+    with pytest.raises(ValueError, match="SIBYL_SOURCE_IMPORT_IMAP"):
+        await adapter.prepare_manifest(
+            source_uri="imaps://mail.example.com/INBOX",
+            options={
+                "username": "bliss",
+                "password_env": "AWS_SECRET_ACCESS_KEY",
+            },
+        )
+
+    assert server.clients == []
+
+
+@pytest.mark.asyncio
+async def test_imap_manifest_rejects_plaintext_imap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD", "secret")
+    server = FakeImapServer({101: _message()})
+    adapter = ImapSourceAdapter(client_factory=server.factory)
+
+    with pytest.raises(ValueError, match="IMAP imports require TLS"):
+        await adapter.prepare_manifest(
+            source_uri="imap://mail.example.com/INBOX",
+            options={
+                "username": "bliss",
+                "password_env": "SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD",
+            },
+        )
+
+    assert server.clients == []
+
+
+@pytest.mark.asyncio
+async def test_imap_manifest_allows_private_hosts_when_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD", "secret")
+    server = FakeImapServer({101: _message()})
+    adapter = ImapSourceAdapter(client_factory=server.factory)
+
+    manifest = await adapter.prepare_manifest(
+        source_uri="imaps://127.0.0.1/INBOX",
+        options={
+            "allow_private_network": True,
+            "username": "bliss",
+            "password_env": "SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD",
+        },
+    )
+
+    assert manifest.source_uri == "imaps://bliss@127.0.0.1:993/INBOX"
+    assert server.clients[0].commands[0] == ("CONNECT", ("127.0.0.1", 993, True))
+
+
+@pytest.mark.asyncio
+async def test_imap_and_mbox_message_id_dedupe_converges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD", "secret")
+    message = _message(message_id="same-message@example.com", attachment=None)
+    mbox_path = _write_mbox(tmp_path / "mail.mbox", [message])
+    mbox_adapter = MboxSourceAdapter()
+    mbox_manifest = await mbox_adapter.prepare_manifest(source_uri=str(mbox_path))
+    mbox_batch = await anext(mbox_adapter.iter_records(mbox_manifest, batch_size=10))
+
+    server = FakeImapServer({101: message})
+    imap_adapter = ImapSourceAdapter(client_factory=server.factory)
+    imap_manifest = await imap_adapter.prepare_manifest(
+        source_uri="imaps://mail.example.com/INBOX",
+        options={"username": "bliss", "password_env": "SIBYL_SOURCE_IMPORT_IMAP_TEST_PASSWORD"},
+    )
+    imap_batch = await anext(imap_adapter.iter_records(imap_manifest, batch_size=10))
+
+    assert imap_batch.records[0].dedupe_key == mbox_batch.records[0].dedupe_key
+    assert imap_batch.records[0].source_id != mbox_batch.records[0].source_id
+
+
+@pytest.mark.asyncio
+async def test_gmail_labels_are_faceting_metadata(tmp_path: Path) -> None:
+    message = _message(message_id="gmail-labels@example.com", attachment=None)
+    message["X-Gmail-Labels"] = "Inbox, Important, Foo/Bar"
+    mbox_path = _write_mbox(tmp_path / "mail.mbox", [message])
+    adapter = MboxSourceAdapter()
+    manifest = await adapter.prepare_manifest(source_uri=str(mbox_path))
+
+    batch = await anext(adapter.iter_records(manifest, batch_size=10))
+
+    assert batch.records[0].metadata["gmail_labels"] == ["Inbox", "Important", "Foo/Bar"]
+    assert batch.records[0].labels == ["mailbox", "email", "Inbox", "Important", "Foo/Bar"]
+
+
 def test_ensure_mailbox_adapter_registers_once() -> None:
     ensure_mailbox_adapter_registered()
     ensure_mailbox_adapter_registered()
 
+    imap_adapter = get_source_adapter(IMAP_ADAPTER_NAME)
     mbox_adapter = get_source_adapter(MBOX_ADAPTER_NAME)
     maildir_adapter = get_source_adapter(MAILDIR_ADAPTER_NAME)
 
+    assert isinstance(imap_adapter, ImapSourceAdapter)
     assert isinstance(mbox_adapter, MboxSourceAdapter)
     assert isinstance(maildir_adapter, MaildirSourceAdapter)
