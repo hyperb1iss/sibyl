@@ -39,7 +39,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 7
+CONTENT_SCHEMA_CURRENT_VERSION = 8
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -157,6 +157,14 @@ DEFINE FIELD OVERWRITE review_state ON raw_captures TYPE string DEFAULT 'pending
     ASSERT $value IN {_surql_string_array(_CONTENT_REVIEW_STATE_VALUES)};
 """
 
+CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS = f"""
+DEFINE FIELD IF NOT EXISTS embedding ON raw_captures TYPE option<array<float, {EMBEDDING_DIM}>>;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_org_dedupe
+    ON raw_captures FIELDS organization_id, metadata.dedupe_key;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_embedding ON raw_captures FIELDS embedding
+    HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12;
+"""
+
 
 def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
     compatible_schema = render_fulltext_compatible_sql(
@@ -200,6 +208,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=7,
             name="content_review_state_deferred",
             statements=tuple(split_statements(CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=8,
+            name="content_raw_capture_ingestion_indexes",
+            statements=tuple(split_statements(CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS)),
         ),
     )
 

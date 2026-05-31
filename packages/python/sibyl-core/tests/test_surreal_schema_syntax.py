@@ -21,6 +21,7 @@ from sibyl_core.backends.surreal.auth_schema import (
 )
 from sibyl_core.backends.surreal.content_schema import (
     CONTENT_PERMISSION_MIGRATION_DEFINITIONS,
+    CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS,
     CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS,
     CONTENT_SCHEMA_CURRENT_VERSION,
     CONTENT_SCHEMA_DEFINITIONS,
@@ -293,6 +294,24 @@ def test_content_review_state_deferred_is_versioned() -> None:
     assert "content_review_state_deferred" in [migration.name for migration in migrations]
     assert (
         CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
+    )
+
+
+def test_content_raw_capture_ingestion_fields_are_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration_sql = "\n".join(
+        statement for migration in migrations for statement in migration.statements
+    )
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION == 8
+    assert "DEFINE FIELD IF NOT EXISTS embedding ON raw_captures" in (
+        CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS
+    )
+    assert "idx_raw_captures_org_dedupe" in (CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS)
+    assert "idx_raw_captures_embedding" in (CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS)
+    assert "content_raw_capture_ingestion_indexes" in [migration.name for migration in migrations]
+    assert (
+        CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
     )
 
 
@@ -815,6 +834,24 @@ async def test_content_bootstrap_skips_schema_when_version_is_current() -> None:
         "DEFINE TABLE IF NOT EXISTS crawl_sources" in statement for statement in client.calls
     )
     assert any("SELECT version FROM schema_version" in statement for statement in client.calls)
+
+
+@pytest.mark.asyncio
+async def test_content_bootstrap_applies_ingestion_migration_from_v7() -> None:
+    client = _RecordingSchemaClient(schema_version=7)
+
+    await bootstrap_content_schema(client)  # type: ignore[arg-type]
+
+    assert client.schema_version == CONTENT_SCHEMA_CURRENT_VERSION
+    assert not any(
+        "DEFINE TABLE IF NOT EXISTS crawl_sources" in statement for statement in client.calls
+    )
+    assert any(
+        "DEFINE FIELD IF NOT EXISTS embedding ON raw_captures" in statement
+        for statement in client.calls
+    )
+    assert any("idx_raw_captures_org_dedupe" in statement for statement in client.calls)
+    assert any("idx_raw_captures_embedding" in statement for statement in client.calls)
 
 
 @pytest.mark.asyncio

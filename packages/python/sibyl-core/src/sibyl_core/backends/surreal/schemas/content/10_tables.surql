@@ -112,6 +112,7 @@ DEFINE FIELD IF NOT EXISTS title ON raw_captures TYPE string DEFAULT '';
 DEFINE FIELD IF NOT EXISTS raw_content ON raw_captures TYPE string DEFAULT '';
 DEFINE FIELD IF NOT EXISTS entity_type ON raw_captures TYPE string DEFAULT '';
 DEFINE FIELD IF NOT EXISTS tags ON raw_captures TYPE array<string> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS embedding ON raw_captures TYPE option<array<float, {EMBEDDING_DIM}>>;
 DEFINE FIELD IF NOT EXISTS metadata ON raw_captures TYPE object FLEXIBLE DEFAULT {{}};
 DEFINE FIELD IF NOT EXISTS provenance ON raw_captures TYPE object FLEXIBLE DEFAULT {{}};
 DEFINE FIELD IF NOT EXISTS capture_surface ON raw_captures TYPE option<string>;
@@ -131,8 +132,11 @@ DEFINE INDEX IF NOT EXISTS idx_raw_captures_project ON raw_captures FIELDS organ
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_review ON raw_captures FIELDS organization_id, review_state;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_purge_after ON raw_captures FIELDS purge_after;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_entity_id ON raw_captures FIELDS entity_id;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_org_dedupe ON raw_captures FIELDS organization_id, metadata.dedupe_key;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_title_ft ON raw_captures FIELDS title FULLTEXT ANALYZER title_analyzer BM25;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_content_ft ON raw_captures FIELDS raw_content FULLTEXT ANALYZER content_analyzer BM25;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_embedding ON raw_captures FIELDS embedding
+    HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_captured_at ON raw_captures FIELDS captured_at;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_created_at ON raw_captures FIELDS created_at;
 
