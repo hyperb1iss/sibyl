@@ -27,7 +27,13 @@ if TYPE_CHECKING:
     from sibyl_core.backends.surreal.content_client import SurrealContentClient
 
 
+CONTENT_RELATION_TABLES = (
+    "derived_from",
+    "chunk_of",
+    "supersedes",
+)
 CONTENT_TABLES = (
+    *CONTENT_RELATION_TABLES,
     "crawl_sources",
     "crawled_documents",
     "document_chunks",
@@ -39,7 +45,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 8
+CONTENT_SCHEMA_CURRENT_VERSION = 9
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -177,6 +183,12 @@ ALTER TABLE IF EXISTS backup_settings PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 ALTER TABLE IF EXISTS backups PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
+ALTER TABLE IF EXISTS derived_from PERMISSIONS
+    FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
+ALTER TABLE IF EXISTS chunk_of PERMISSIONS
+    FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
+ALTER TABLE IF EXISTS supersedes PERMISSIONS
+    FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 """
 
 CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS = f"""
@@ -190,6 +202,47 @@ DEFINE INDEX IF NOT EXISTS idx_raw_captures_org_dedupe
     ON raw_captures FIELDS organization_id, metadata.dedupe_key;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_embedding ON raw_captures FIELDS embedding
     HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12;
+"""
+
+CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS = """
+DEFINE TABLE IF NOT EXISTS derived_from SCHEMAFULL TYPE RELATION IN raw_captures OUT source_imports ENFORCED;
+DEFINE FIELD IF NOT EXISTS uuid ON derived_from TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON derived_from TYPE string;
+DEFINE FIELD IF NOT EXISTS raw_memory_id ON derived_from TYPE string;
+DEFINE FIELD IF NOT EXISTS source_import_id ON derived_from TYPE string;
+DEFINE FIELD IF NOT EXISTS source_id ON derived_from TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at ON derived_from TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_derived_from_uuid ON derived_from FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_derived_from_org_raw ON derived_from FIELDS organization_id, raw_memory_id;
+DEFINE INDEX IF NOT EXISTS idx_derived_from_org_import ON derived_from FIELDS organization_id, source_import_id;
+ALTER TABLE IF EXISTS derived_from PERMISSIONS
+    FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
+
+DEFINE TABLE IF NOT EXISTS chunk_of SCHEMAFULL TYPE RELATION IN document_chunks OUT crawled_documents ENFORCED;
+DEFINE FIELD IF NOT EXISTS uuid ON chunk_of TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON chunk_of TYPE string;
+DEFINE FIELD IF NOT EXISTS chunk_id ON chunk_of TYPE string;
+DEFINE FIELD IF NOT EXISTS document_id ON chunk_of TYPE string;
+DEFINE FIELD IF NOT EXISTS source_id ON chunk_of TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at ON chunk_of TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_chunk_of_uuid ON chunk_of FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_chunk_of_org_chunk ON chunk_of FIELDS organization_id, chunk_id;
+DEFINE INDEX IF NOT EXISTS idx_chunk_of_org_document ON chunk_of FIELDS organization_id, document_id;
+ALTER TABLE IF EXISTS chunk_of PERMISSIONS
+    FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
+
+DEFINE TABLE IF NOT EXISTS supersedes SCHEMAFULL TYPE RELATION IN raw_captures OUT raw_captures ENFORCED;
+DEFINE FIELD IF NOT EXISTS uuid ON supersedes TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON supersedes TYPE string;
+DEFINE FIELD IF NOT EXISTS raw_memory_id ON supersedes TYPE string;
+DEFINE FIELD IF NOT EXISTS superseded_raw_memory_id ON supersedes TYPE string;
+DEFINE FIELD IF NOT EXISTS source_id ON supersedes TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at ON supersedes TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_supersedes_uuid ON supersedes FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_supersedes_org_raw ON supersedes FIELDS organization_id, raw_memory_id;
+DEFINE INDEX IF NOT EXISTS idx_supersedes_org_superseded ON supersedes FIELDS organization_id, superseded_raw_memory_id;
+ALTER TABLE IF EXISTS supersedes PERMISSIONS
+    FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 """
 
 
@@ -240,6 +293,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=8,
             name="content_raw_capture_ingestion_indexes",
             statements=tuple(split_statements(CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=9,
+            name="content_lineage_relation_tables",
+            statements=tuple(split_statements(CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS)),
         ),
     )
 
@@ -536,7 +594,9 @@ __all__ = [
     "CONTENT_CHILD_SCOPE_MIGRATION_DEFINITIONS",
     "CONTENT_DOCUMENT_URL_SCOPE_MIGRATION_DEFINITIONS",
     "CONTENT_ENUM_ASSERTION_MIGRATION_DEFINITIONS",
+    "CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS",
     "CONTENT_PERMISSION_MIGRATION_DEFINITIONS",
+    "CONTENT_RELATION_TABLES",
     "CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS",
     "CONTENT_SCHEMA_CURRENT_VERSION",
     "CONTENT_SCHEMA_DEFINITIONS",

@@ -7,7 +7,11 @@ from collections.abc import Sequence
 from contextlib import asynccontextmanager
 
 import pytest
+from surrealdb import AsyncSurreal
 
+from sibyl_core.backends.surreal.content_schema import (
+    CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS,
+)
 from sibyl_core.embeddings.providers import EmbeddingMetadata
 from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.services.surreal_content import (
@@ -20,6 +24,7 @@ from sibyl_core.services.surreal_content import (
     list_raw_memories_for_promotion,
     list_unlinked_document_chunks,
     load_search_scope,
+    materialize_content_lineage,
     raw_memory_embedding_text,
     recall_raw_memory,
     remember_raw_memories,
@@ -110,7 +115,304 @@ class FakeEmbeddingProvider:
         return [list(self._embedding) for _text in texts]
 
 
+class EmbeddedContentClient:
+    def __init__(self, db: AsyncSurreal) -> None:
+        self.db = db
+
+    async def execute_query(
+        self, query: str, params: dict[str, object] | None = None, **kwargs: object
+    ) -> object:
+        merged = dict(params or {})
+        merged.update(kwargs)
+        return await self.db.query(query, merged)
+
+    async def execute_query_raw(
+        self, query: str, params: dict[str, object] | None = None, **kwargs: object
+    ) -> object:
+        merged = dict(params or {})
+        merged.update(kwargs)
+        return await self.db.query_raw(query, merged)
+
+
 class TestSurrealContentHelpers:
+    @pytest.mark.asyncio
+    async def test_materialize_content_lineage_backfills_idempotent_edges(self) -> None:
+        db = AsyncSurreal("memory://")
+        try:
+            await db.use("content_lineage", "content")
+            await db.query(
+                """
+                DEFINE TABLE raw_captures SCHEMAFULL;
+                DEFINE FIELD uuid ON raw_captures TYPE string;
+                DEFINE FIELD organization_id ON raw_captures TYPE string;
+                DEFINE FIELD source_id ON raw_captures TYPE string DEFAULT '';
+                DEFINE FIELD metadata ON raw_captures TYPE object FLEXIBLE DEFAULT {};
+                DEFINE FIELD created_at ON raw_captures TYPE datetime DEFAULT time::now();
+
+                DEFINE TABLE source_imports SCHEMAFULL;
+                DEFINE FIELD uuid ON source_imports TYPE string;
+                DEFINE FIELD organization_id ON source_imports TYPE string;
+                DEFINE FIELD raw_memory_ids ON source_imports TYPE array<string> DEFAULT [];
+                DEFINE FIELD created_at ON source_imports TYPE datetime DEFAULT time::now();
+
+                DEFINE TABLE crawled_documents SCHEMAFULL;
+                DEFINE FIELD uuid ON crawled_documents TYPE string;
+                DEFINE FIELD organization_id ON crawled_documents TYPE string;
+                DEFINE FIELD created_at ON crawled_documents TYPE datetime DEFAULT time::now();
+
+                DEFINE TABLE document_chunks SCHEMAFULL;
+                DEFINE FIELD uuid ON document_chunks TYPE string;
+                DEFINE FIELD organization_id ON document_chunks TYPE string;
+                DEFINE FIELD source_id ON document_chunks TYPE string DEFAULT '';
+                DEFINE FIELD document_id ON document_chunks TYPE string;
+                DEFINE FIELD created_at ON document_chunks TYPE datetime DEFAULT time::now();
+                """
+            )
+            await db.query(CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS)
+            await db.query(
+                """
+                CREATE raw_captures CONTENT {
+                    uuid: 'raw-old-1',
+                    organization_id: 'org-1',
+                    source_id: 'source-old',
+                    metadata: {},
+                    created_at: time::now()
+                };
+                CREATE raw_captures CONTENT {
+                    uuid: 'raw-new-1',
+                    organization_id: 'org-1',
+                    source_id: 'source-new',
+                    metadata: { supersedes_raw_memory_id: 'raw-old-1' },
+                    created_at: time::now()
+                };
+                CREATE raw_captures CONTENT {
+                    uuid: 'raw-old-2',
+                    organization_id: 'org-1',
+                    source_id: 'source-old',
+                    metadata: {},
+                    created_at: time::now()
+                };
+                CREATE raw_captures CONTENT {
+                    uuid: 'raw-new-2',
+                    organization_id: 'org-1',
+                    source_id: 'source-new',
+                    metadata: { supersedes_raw_memory_id: 'raw-old-2' },
+                    created_at: time::now()
+                };
+                CREATE raw_captures CONTENT {
+                    uuid: 'raw-old-3',
+                    organization_id: 'org-1',
+                    source_id: 'source-old',
+                    metadata: {},
+                    created_at: time::now()
+                };
+                CREATE raw_captures CONTENT {
+                    uuid: 'raw-new-3',
+                    organization_id: 'org-1',
+                    source_id: 'source-new',
+                    metadata: { supersedes_raw_memory_id: 'raw-old-3' },
+                    created_at: time::now()
+                };
+                CREATE source_imports CONTENT {
+                    uuid: 'import-1',
+                    organization_id: 'org-1',
+                    raw_memory_ids: ['raw-new-1', 'raw-new-2', 'raw-new-3'],
+                    created_at: time::now()
+                };
+                CREATE crawled_documents CONTENT {
+                    uuid: 'doc-1',
+                    organization_id: 'org-1',
+                    created_at: time::now()
+                };
+                CREATE document_chunks CONTENT {
+                    uuid: 'chunk-1',
+                    organization_id: 'org-1',
+                    source_id: 'source-new',
+                    document_id: 'doc-1',
+                    created_at: time::now()
+                };
+                CREATE document_chunks CONTENT {
+                    uuid: 'chunk-2',
+                    organization_id: 'org-1',
+                    source_id: 'source-new',
+                    document_id: 'doc-1',
+                    created_at: time::now()
+                };
+                CREATE document_chunks CONTENT {
+                    uuid: 'chunk-3',
+                    organization_id: 'org-1',
+                    source_id: 'source-new',
+                    document_id: 'doc-1',
+                    created_at: time::now()
+                };
+                """
+            )
+
+            client = EmbeddedContentClient(db)
+            first = await materialize_content_lineage(
+                client,  # type: ignore[arg-type]
+                organization_id="org-1",
+                limit=2,
+            )
+            second = await materialize_content_lineage(
+                client,  # type: ignore[arg-type]
+                organization_id="org-1",
+                limit=2,
+            )
+            derived_from = await db.query(
+                "SELECT raw_memory_id, source_import_id FROM derived_from ORDER BY raw_memory_id;"
+            )
+            chunk_of = await db.query(
+                "SELECT chunk_id, document_id FROM chunk_of ORDER BY chunk_id;"
+            )
+            supersedes = await db.query(
+                "SELECT raw_memory_id, superseded_raw_memory_id FROM supersedes "
+                "ORDER BY raw_memory_id;"
+            )
+        finally:
+            await db.close()
+
+        assert first.derived_from == 2
+        assert first.chunk_of == 2
+        assert first.supersedes == 2
+        assert second.derived_from == 3
+        assert second.chunk_of == 3
+        assert second.supersedes == 3
+        assert derived_from == [
+            {"raw_memory_id": "raw-new-1", "source_import_id": "import-1"},
+            {"raw_memory_id": "raw-new-2", "source_import_id": "import-1"},
+            {"raw_memory_id": "raw-new-3", "source_import_id": "import-1"},
+        ]
+        assert chunk_of == [
+            {"chunk_id": "chunk-1", "document_id": "doc-1"},
+            {"chunk_id": "chunk-2", "document_id": "doc-1"},
+            {"chunk_id": "chunk-3", "document_id": "doc-1"},
+        ]
+        assert supersedes == [
+            {"raw_memory_id": "raw-new-1", "superseded_raw_memory_id": "raw-old-1"},
+            {"raw_memory_id": "raw-new-2", "superseded_raw_memory_id": "raw-old-2"},
+            {"raw_memory_id": "raw-new-3", "superseded_raw_memory_id": "raw-old-3"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_materialize_content_lineage_skips_missing_endpoints_without_consuming_limit(
+        self,
+    ) -> None:
+        db = AsyncSurreal("memory://")
+        try:
+            await db.use("content_lineage_missing_endpoints", "content")
+            await db.query(
+                """
+                DEFINE TABLE raw_captures SCHEMAFULL;
+                DEFINE FIELD uuid ON raw_captures TYPE string;
+                DEFINE FIELD organization_id ON raw_captures TYPE string;
+                DEFINE FIELD source_id ON raw_captures TYPE string DEFAULT '';
+                DEFINE FIELD metadata ON raw_captures TYPE object FLEXIBLE DEFAULT {};
+                DEFINE FIELD created_at ON raw_captures TYPE datetime DEFAULT time::now();
+
+                DEFINE TABLE source_imports SCHEMAFULL;
+                DEFINE FIELD uuid ON source_imports TYPE string;
+                DEFINE FIELD organization_id ON source_imports TYPE string;
+                DEFINE FIELD raw_memory_ids ON source_imports TYPE array<string> DEFAULT [];
+                DEFINE FIELD created_at ON source_imports TYPE datetime DEFAULT time::now();
+
+                DEFINE TABLE crawled_documents SCHEMAFULL;
+                DEFINE FIELD uuid ON crawled_documents TYPE string;
+                DEFINE FIELD organization_id ON crawled_documents TYPE string;
+                DEFINE FIELD created_at ON crawled_documents TYPE datetime DEFAULT time::now();
+
+                DEFINE TABLE document_chunks SCHEMAFULL;
+                DEFINE FIELD uuid ON document_chunks TYPE string;
+                DEFINE FIELD organization_id ON document_chunks TYPE string;
+                DEFINE FIELD source_id ON document_chunks TYPE string DEFAULT '';
+                DEFINE FIELD document_id ON document_chunks TYPE string;
+                DEFINE FIELD created_at ON document_chunks TYPE datetime DEFAULT time::now();
+                """
+            )
+            await db.query(CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS)
+            await db.query(
+                """
+                CREATE raw_captures CONTENT {
+                    uuid: 'raw-valid',
+                    organization_id: 'org-1',
+                    source_id: 'source-valid',
+                    metadata: {},
+                    created_at: time::now()
+                };
+                CREATE raw_captures CONTENT {
+                    uuid: 'raw-missing-superseded',
+                    organization_id: 'org-1',
+                    source_id: 'source-valid',
+                    metadata: { supersedes_raw_memory_id: 'raw-missing' },
+                    created_at: time::now()
+                };
+                CREATE raw_captures CONTENT {
+                    uuid: 'raw-old-valid',
+                    organization_id: 'org-1',
+                    source_id: 'source-valid',
+                    metadata: {},
+                    created_at: time::now()
+                };
+                CREATE raw_captures CONTENT {
+                    uuid: 'raw-new-valid',
+                    organization_id: 'org-1',
+                    source_id: 'source-valid',
+                    metadata: { supersedes_raw_memory_id: 'raw-old-valid' },
+                    created_at: time::now()
+                };
+                CREATE source_imports CONTENT {
+                    uuid: 'import-1',
+                    organization_id: 'org-1',
+                    raw_memory_ids: ['raw-missing', 'raw-valid'],
+                    created_at: time::now()
+                };
+                CREATE crawled_documents CONTENT {
+                    uuid: 'doc-valid',
+                    organization_id: 'org-1',
+                    created_at: time::now()
+                };
+                CREATE document_chunks CONTENT {
+                    uuid: 'chunk-missing-document',
+                    organization_id: 'org-1',
+                    source_id: 'source-valid',
+                    document_id: 'doc-missing',
+                    created_at: time::now()
+                };
+                CREATE document_chunks CONTENT {
+                    uuid: 'chunk-valid',
+                    organization_id: 'org-1',
+                    source_id: 'source-valid',
+                    document_id: 'doc-valid',
+                    created_at: time::now()
+                };
+                """
+            )
+
+            client = EmbeddedContentClient(db)
+            result = await materialize_content_lineage(
+                client,  # type: ignore[arg-type]
+                organization_id="org-1",
+                limit=1,
+            )
+            derived_from = await db.query(
+                "SELECT raw_memory_id, source_import_id FROM derived_from;"
+            )
+            chunk_of = await db.query("SELECT chunk_id, document_id FROM chunk_of;")
+            supersedes = await db.query(
+                "SELECT raw_memory_id, superseded_raw_memory_id FROM supersedes;"
+            )
+        finally:
+            await db.close()
+
+        assert result.derived_from == 1
+        assert result.chunk_of == 1
+        assert result.supersedes == 1
+        assert derived_from == [{"raw_memory_id": "raw-valid", "source_import_id": "import-1"}]
+        assert chunk_of == [{"chunk_id": "chunk-valid", "document_id": "doc-valid"}]
+        assert supersedes == [
+            {"raw_memory_id": "raw-new-valid", "superseded_raw_memory_id": "raw-old-valid"}
+        ]
+
     @pytest.mark.asyncio
     async def test_surreal_content_client_creates_per_context_client(self) -> None:
         first_client = FakeClient([])

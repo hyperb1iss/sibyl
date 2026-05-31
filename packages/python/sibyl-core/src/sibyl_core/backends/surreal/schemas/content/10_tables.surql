@@ -192,6 +192,42 @@ DEFINE INDEX IF NOT EXISTS idx_source_imports_org ON source_imports FIELDS organ
 DEFINE INDEX IF NOT EXISTS idx_source_imports_principal ON source_imports FIELDS organization_id, principal_id;
 DEFINE INDEX IF NOT EXISTS idx_source_imports_status ON source_imports FIELDS organization_id, status;
 
+DEFINE TABLE IF NOT EXISTS derived_from SCHEMAFULL TYPE RELATION IN raw_captures OUT source_imports ENFORCED;
+DEFINE FIELD IF NOT EXISTS uuid ON derived_from TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON derived_from TYPE string;
+DEFINE FIELD IF NOT EXISTS raw_memory_id ON derived_from TYPE string;
+DEFINE FIELD IF NOT EXISTS source_import_id ON derived_from TYPE string;
+DEFINE FIELD IF NOT EXISTS source_id ON derived_from TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at ON derived_from TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS idx_derived_from_uuid ON derived_from FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_derived_from_org_raw ON derived_from FIELDS organization_id, raw_memory_id;
+DEFINE INDEX IF NOT EXISTS idx_derived_from_org_import ON derived_from FIELDS organization_id, source_import_id;
+
+DEFINE TABLE IF NOT EXISTS chunk_of SCHEMAFULL TYPE RELATION IN document_chunks OUT crawled_documents ENFORCED;
+DEFINE FIELD IF NOT EXISTS uuid ON chunk_of TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON chunk_of TYPE string;
+DEFINE FIELD IF NOT EXISTS chunk_id ON chunk_of TYPE string;
+DEFINE FIELD IF NOT EXISTS document_id ON chunk_of TYPE string;
+DEFINE FIELD IF NOT EXISTS source_id ON chunk_of TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at ON chunk_of TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS idx_chunk_of_uuid ON chunk_of FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_chunk_of_org_chunk ON chunk_of FIELDS organization_id, chunk_id;
+DEFINE INDEX IF NOT EXISTS idx_chunk_of_org_document ON chunk_of FIELDS organization_id, document_id;
+
+DEFINE TABLE IF NOT EXISTS supersedes SCHEMAFULL TYPE RELATION IN raw_captures OUT raw_captures ENFORCED;
+DEFINE FIELD IF NOT EXISTS uuid ON supersedes TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON supersedes TYPE string;
+DEFINE FIELD IF NOT EXISTS raw_memory_id ON supersedes TYPE string;
+DEFINE FIELD IF NOT EXISTS superseded_raw_memory_id ON supersedes TYPE string;
+DEFINE FIELD IF NOT EXISTS source_id ON supersedes TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at ON supersedes TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS idx_supersedes_uuid ON supersedes FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_supersedes_org_raw ON supersedes FIELDS organization_id, raw_memory_id;
+DEFINE INDEX IF NOT EXISTS idx_supersedes_org_superseded ON supersedes FIELDS organization_id, superseded_raw_memory_id;
+
 DEFINE TABLE IF NOT EXISTS system_settings SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS key ON system_settings TYPE string;
 DEFINE FIELD IF NOT EXISTS value ON system_settings TYPE string DEFAULT '';

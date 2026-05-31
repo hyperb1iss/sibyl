@@ -20,8 +20,10 @@ from sibyl_core.backends.surreal.auth_schema import (
     bootstrap_auth_schema,
 )
 from sibyl_core.backends.surreal.content_schema import (
+    CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS,
     CONTENT_PERMISSION_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS,
+    CONTENT_RELATION_TABLES,
     CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS,
     CONTENT_SCHEMA_CURRENT_VERSION,
     CONTENT_SCHEMA_DEFINITIONS,
@@ -149,10 +151,16 @@ def test_flexible_object_fields_keep_server_accepted_token_order() -> None:
 
 def test_runtime_schemafull_tables_define_schemafull_without_redundant_alter() -> None:
     schema = "\n".join((AUTH_SCHEMA_DEFINITIONS, CONTENT_SCHEMA_DEFINITIONS))
-    tables = (*AUTH_TABLES, *CONTENT_TABLES)
+    tables = (
+        *AUTH_TABLES,
+        *(table for table in CONTENT_TABLES if table not in CONTENT_RELATION_TABLES),
+    )
 
     for table in tables:
         assert f"DEFINE TABLE IF NOT EXISTS {table} SCHEMAFULL;" in schema
+        assert f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;" not in schema
+    for table in CONTENT_RELATION_TABLES:
+        assert f"DEFINE TABLE IF NOT EXISTS {table} SCHEMAFULL TYPE RELATION" in schema
         assert f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;" not in schema
 
 
@@ -305,7 +313,7 @@ def test_content_raw_capture_ingestion_fields_are_versioned() -> None:
         statement for migration in migrations for statement in migration.statements
     )
 
-    assert CONTENT_SCHEMA_CURRENT_VERSION == 8
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 8
     assert "DEFINE FIELD IF NOT EXISTS embedding ON raw_captures" in (
         CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS
     )
@@ -315,6 +323,36 @@ def test_content_raw_capture_ingestion_fields_are_versioned() -> None:
     assert (
         CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
     )
+
+
+def test_content_lineage_relation_tables_are_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration_sql = "\n".join(
+        statement for migration in migrations for statement in migration.statements
+    )
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION == 9
+    assert "content_lineage_relation_tables" in [migration.name for migration in migrations]
+    for table in CONTENT_RELATION_TABLES:
+        assert f"DEFINE TABLE IF NOT EXISTS {table} SCHEMAFULL TYPE RELATION" in (
+            CONTENT_SCHEMA_DEFINITIONS
+        )
+        assert f"DEFINE TABLE IF NOT EXISTS {table} SCHEMAFULL TYPE RELATION" in (
+            CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS
+        )
+        assert f"ALTER TABLE IF EXISTS {table} PERMISSIONS" in (
+            CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS
+        )
+    assert "IN raw_captures OUT source_imports ENFORCED" in (
+        CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS
+    )
+    assert "IN document_chunks OUT crawled_documents ENFORCED" in (
+        CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS
+    )
+    assert "IN raw_captures OUT raw_captures ENFORCED" in (
+        CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS
+    )
+    assert CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
 
 
 @pytest.mark.asyncio
