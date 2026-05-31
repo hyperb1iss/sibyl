@@ -341,17 +341,17 @@ moon run hooks:install     # Optional Claude Code context hooks for repo dev
 ```
 
 The installed `/sibyl` skill is intentionally tiny. It points agents back to the installed CLI,
-which serves the full markdown skill packs for the exact Sibyl version on the machine. A single
-hook nudges the agent at session boundaries; everything else is the agent's job:
+which serves the full markdown skill packs for the exact Sibyl version on the machine. A single hook
+nudges the agent at session boundaries; everything else is the agent's job:
 
 | Hook             | Trigger        | Action                                                                |
 | ---------------- | -------------- | --------------------------------------------------------------------- |
 | **SessionStart** | Session begins | Prints a compact session bundle with active tasks and relevant memory |
 
 The agent is responsible for invoking the `sibyl` skill and calling `sibyl recall` /
-`sibyl context pack` for working memory. We previously shipped a per-prompt context-injection
-hook (`UserPromptSubmit`) but removed it: it substituted for skill invocation instead of
-prompting it, and agents stopped reaching for the CLI.
+`sibyl context pack` for working memory. We previously shipped a per-prompt context-injection hook
+(`UserPromptSubmit`) but removed it: it substituted for skill invocation instead of prompting it,
+and agents stopped reaching for the CLI.
 
 See [`skills/`](skills/) and [`hooks/`](hooks/) for implementation details.
 
@@ -391,8 +391,8 @@ See [`docs/guide/why-surreal.md`](docs/guide/why-surreal.md) for the rationale a
 
 ## 🧪 Benchmarks
 
-Sibyl reaches the LongMemEval-S retrieval ceiling on the live API path with no LLM extraction
-and no LLM reranking.
+Sibyl reaches the LongMemEval-S retrieval ceiling on the live API path with no LLM extraction and no
+LLM reranking.
 
 | Metric           | Value                                      |
 | ---------------- | ------------------------------------------ |
@@ -406,20 +406,21 @@ and no LLM reranking.
 | Embeddings       | OpenAI `text-embedding-3-small`, 1024 dims |
 | Tenant isolation | physical SurrealDB namespace per question  |
 
-The result is measured against the production `/api/search` surface in an ephemeral CI stack, not
-an offline notebook replay. Per-question physical tenant isolation, full artifact and diagnostics
+The result is measured against the production `/api/search` surface in an ephemeral CI stack, not an
+offline notebook replay. Per-question physical tenant isolation, full artifact and diagnostics
 published.
 
-`hit@5 = 100%` and strict `recall@5 = 96.67%` measure different things and we report both: hit
-asks "did *any* correct session land in the top 5", strict recall asks "did *every* correct
-session land for multi-answer questions". Many LongMemEval-S questions have multiple correct
-answer sessions, which is why these numbers diverge.
+`hit@5 = 100%` and strict `recall@5 = 96.67%` measure different things and we report both: hit asks
+"did _any_ correct session land in the top 5", strict recall asks "did _every_ correct session land
+for multi-answer questions". Many LongMemEval-S questions have multiple correct answer sessions,
+which is why these numbers diverge.
 
-A few comparisons that are *not* apples-to-apples are usually shown side by side in this space —
+A few comparisons that are _not_ apples-to-apples are usually shown side by side in this space —
 retrieval recall vs LLM-judged QA accuracy is the most common conflation. See
 [AI Memory Landscape](docs/testing/ai-memory-landscape.md) for the honest field positioning.
 
-- **Headline run:** [GitHub Actions run 26273942749](https://github.com/hyperb1iss/sibyl/actions/runs/26273942749)
+- **Headline run:**
+  [GitHub Actions run 26273942749](https://github.com/hyperb1iss/sibyl/actions/runs/26273942749)
 - **Full results doc:** [`docs/testing/longmemeval.md`](docs/testing/longmemeval.md)
 - **Methodology:** [`docs/testing/benchmark-methodology.md`](docs/testing/benchmark-methodology.md)
 - **Architecture:** [`docs/architecture/retrieval-system.md`](docs/architecture/retrieval-system.md)
@@ -506,12 +507,12 @@ Sibyl is **self-hosted and open source**. You own your data. It includes a full 
 system**, not just memory. It has a **web UI** for humans, not just APIs for machines. And it keeps
 knowledge, tasks, and docs connected in one graph instead of scattering them across tools.
 
-On retrieval quality: Sibyl reaches the LongMemEval-S retrieval ceiling
-(500/500 `hit@5`, 96.67% strict `recall@5`, 98.68% `recall@10`) on the live API path with no LLM
-extraction or LLM reranking. Many published "LongMemEval" numbers are end-to-end QA accuracy with
-an LLM judge, which is a different metric than retrieval recall — see
-[`docs/testing/ai-memory-landscape.md`](docs/testing/ai-memory-landscape.md) for honest
-side-by-side positioning.
+On retrieval quality: Sibyl reaches the LongMemEval-S retrieval ceiling (500/500 `hit@5`, 96.67%
+strict `recall@5`, 98.68% `recall@10`) on the live API path with no LLM extraction or LLM reranking.
+Many published "LongMemEval" numbers are end-to-end QA accuracy with an LLM judge, which is a
+different metric than retrieval recall — see
+[`docs/testing/ai-memory-landscape.md`](docs/testing/ai-memory-landscape.md) for honest side-by-side
+positioning.
 
 ### What LLM APIs do I need?
 
@@ -537,8 +538,8 @@ tracked inside the system itself.
   and synthesized without leaking scope.
 - **Memory Workspace OS:** automatic memory decisions become visible, explainable, correctable, and
   undoable from one product surface.
-- **Surreal-only closure:** Graphiti and Redis-required local assumptions leave the supported
-  runtime once native behavior has receipts.
+- **Surreal-only closure:** remaining legacy assumptions leave the supported runtime once native
+  behavior has receipts.
 - **1.0 evidence freeze:** release claims cite gates, artifacts, and install rehearsals.
 
 The graph gets smarter. The workflow gets sharper. See

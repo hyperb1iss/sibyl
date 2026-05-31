@@ -273,7 +273,7 @@ adding extra application-level locks around graph writes.
 
 - **Port 8000** for local SurrealDB
 - **Graph reset** for disposable local data uses `REMOVE NAMESPACE org_<uuid_hex>`
-- **Always query both labels:** `(n:Episodic OR n:Entity)`
+- **Query native records:** use the `entity` and `relates_to` tables for active graph data
 ```
 
 ### Knowledge Repository Pattern

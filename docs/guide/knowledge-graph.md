@@ -46,20 +46,20 @@ from sibyl_core.retrieval.search import context_search
 
 ## Node Types
 
-SurrealDB records use Sibyl entity and relationship types directly. Temporal records appear as
-`Episodic` nodes and structured records as `Entity` nodes.
+SurrealDB records use Sibyl entity and relationship types directly. Current runtime memories use
+`entity` records; legacy `Episodic`/`Entity` archive shapes remain readable for migration
+verification.
 
-### Episodic Nodes
+### Episode Entities
 
 Temporal learnings, raw captures, and reflection output:
 
 ```python
-# When you add knowledge via the CLI or MCP
 sibyl add "Redis insight" "Connection pool must be >= concurrent requests"
 # Creates source-grounded memory records that native retrieval can render
 ```
 
-### Entity Nodes
+### Entity Records
 
 Structured graph records and extracted entities:
 
@@ -278,14 +278,14 @@ manager = EntityManager(client, group_id="")
 manager = EntityManager(client, group_id=str(org.id))
 ```
 
-### 2. Handle Both Node Labels
+### 2. Query Native Entity Records
 
-```cypher
--- WRONG (misses Episodic nodes)
-MATCH (n:Entity) WHERE n.entity_type = 'pattern'
+```surql
+-- WRONG (scans every record before filtering)
+SELECT * FROM entity;
 
 -- RIGHT
-MATCH (n) WHERE (n:Episodic OR n:Entity) AND n.entity_type = 'pattern'
+SELECT * FROM entity WHERE entity_type = 'pattern';
 ```
 
 ### 3. Write Concurrency
@@ -324,7 +324,7 @@ REMOVE NAMESPACE org_<uuid_hex>;
 
 ### Missing Results
 
-1. Check both `Episodic` and `Entity` labels
+1. Confirm the record exists in the org namespace's `entity` table
 2. Verify org_id matches
 3. Check if entity_type filter is correct
 

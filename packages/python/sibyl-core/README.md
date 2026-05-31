@@ -1,7 +1,7 @@
 # sibyl-core
 
-Core library for Sibyl. Domain models, graph operations, retrieval algorithms, the AI
-substrate, and tool implementations. Shared foundation for the API server and CLI.
+Core library for Sibyl. Domain models, graph operations, retrieval algorithms, the AI substrate, and
+tool implementations. Shared foundation for the API server and CLI.
 
 ## Quick Reference
 
@@ -18,7 +18,7 @@ moon run core:test        # Pytest
 ## What's Here
 
 - **models/:** Domain entities (Task, Project, Epic, Source, reflection, synthesis)
-- **graph/:** SurrealDB graph managers plus legacy graph compatibility adapters
+- **graph/:** SurrealDB graph managers and native graph helpers
 - **backends/surreal/:** SurrealDB driver, schema, and per-table operations
 - **retrieval/:** Native context-pack retrieval, compatibility search, fusion, dedup
 - **ai/:** Native LLM substrate, model registry, providers, validation
@@ -90,8 +90,8 @@ results = await manager.search("authentication patterns", limit=20)
 
 ### Write Concurrency
 
-The SurrealDB driver serializes WebSocket operations per client, and org-scoped graph
-access should use cloned drivers.
+The SurrealDB driver serializes WebSocket operations per client, and org-scoped graph access should
+use cloned drivers.
 
 ```python
 # Direct writes go through the active graph backend
@@ -132,16 +132,15 @@ generator = Generator(surface=LLMSurface.SYNTHESIS)
 draft = await generator.generate("Summarize this context pack.", max_tokens=512)
 ```
 
-The substrate uses PydanticAI under `sibyl_core.ai`, with provider API keys passed
-through provider objects rather than mutating `os.environ`. `Extractor[T]` handles
-structured output and classified LLM errors. `Generator` handles text generation and
-streaming. Surface-specific config is resolved through an `LLMConfigSource` so the API
-can supply database-backed settings while core stays pure.
+The substrate uses PydanticAI under `sibyl_core.ai`, with provider API keys passed through provider
+objects rather than mutating `os.environ`. `Extractor[T]` handles structured output and classified
+LLM errors. `Generator` handles text generation and streaming. Surface-specific config is resolved
+through an `LLMConfigSource` so the API can supply database-backed settings while core stays pure.
 
 ## Entity Types
 
-Sibyl models a broad set of entity types so memory stays structured. The registry
-lives in `models/entities.py` and covers, among others:
+Sibyl models a broad set of entity types so memory stays structured. The registry lives in
+`models/entities.py` and covers, among others:
 
 - **Work:** `task`, `epic`, `project`, `milestone`
 - **Knowledge:** `pattern`, `episode`, `procedure`, `rule`, `guide`, `error_pattern`
@@ -187,17 +186,16 @@ SIBYL_GRAPH_EMBEDDING_MODEL=text-embedding-3-small
 SIBYL_GRAPH_EMBEDDING_DIMENSIONS=1024
 ```
 
-LLM settings are instance-wide. Environment variables win over database settings and
-mark individual fields as locked.
+LLM settings are instance-wide. Environment variables win over database settings and mark individual
+fields as locked.
 
-Gemini keys can also come from `GEMINI_API_KEY` or `GOOGLE_API_KEY`. Changing embedding
-provider, model, or dimensions requires re-embedding existing graph and document
-vectors before comparing old and new search results.
+Gemini keys can also come from `GEMINI_API_KEY` or `GOOGLE_API_KEY`. Changing embedding provider,
+model, or dimensions requires re-embedding existing graph and document vectors before comparing old
+and new search results.
 
-To add a first-class LLM provider, add a provider factory branch in
-`sibyl_core.ai.providers`, add registry entries in `sibyl_core.ai.registry`, extend
-`LLMProviderName` and the API DTOs, and add a live probe to
-`scripts/llm/verify_registry.py`.
+To add a first-class LLM provider, add a provider factory branch in `sibyl_core.ai.providers`, add
+registry entries in `sibyl_core.ai.registry`, extend `LLMProviderName` and the API DTOs, and add a
+live probe to `scripts/llm/verify_registry.py`.
 
 ## Key Patterns
 
@@ -207,15 +205,14 @@ To add a first-class LLM provider, add a provider factory branch in
 manager = EntityManager(client, group_id=str(org.id))
 ```
 
-**Node shapes:** Native retrieval queries direct Surreal records and projectable
-legacy `Episodic`/`Entity` records.
+**Node shapes:** Native retrieval queries direct Surreal records. Archive compatibility keeps old
+`Episodic`/`Entity` records readable without Graphiti.
 
-```cypher
-WHERE (n:Episodic OR n:Entity) AND n.entity_type = $type
+```surql
+SELECT * FROM entity WHERE entity_type = $type;
 ```
 
-**Creation paths:** direct native writes first, compatibility extraction when
-explicitly needed.
+**Creation paths:** direct native writes first, LLM-backed extraction when explicitly needed.
 
 ```python
 await manager.create_direct(entity)  # Native write path, no LLM
@@ -224,9 +221,9 @@ await manager.create(entity)         # Compatibility extraction path
 
 ## Legacy Compatibility
 
-Legacy Graphiti-shaped records remain readable through Sibyl-owned Surreal
-projection and archive code. The package no longer exposes a Graphiti
-compatibility extra or installs the Graphiti Core package.
+Legacy Graphiti-shaped records remain readable through Sibyl-owned Surreal projection and archive
+code. The package no longer exposes a Graphiti compatibility extra or installs the Graphiti Core
+package.
 
 ## Testing
 
@@ -247,6 +244,6 @@ moon run core:bench-live
 moon run core:bench-context
 ```
 
-`core:bench-live` probes the real `/api/search` path with CLI auth. `core:bench-context`
-probes `/api/context/pack`. Both benchmarks are read-only. Saved reports can be compared
-with `uv run python benchmarks/compare_eval_reports.py <baseline.json> <candidate.json>`.
+`core:bench-live` probes the real `/api/search` path with CLI auth. `core:bench-context` probes
+`/api/context/pack`. Both benchmarks are read-only. Saved reports can be compared with
+`uv run python benchmarks/compare_eval_reports.py <baseline.json> <candidate.json>`.

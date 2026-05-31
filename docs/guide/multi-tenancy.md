@@ -226,8 +226,8 @@ DEFINE TABLE organization_members SCHEMAFULL;
 flowchart TD
     DB[("SurrealDB Instance")]
     subgraph OrgA["Namespace · org_550e8400… (Org A)"]
-        A1["Entity nodes"]
-        A2["Episodic nodes"]
+        A1["Entity records"]
+        A2["Raw memories"]
         A3["Relationships"]
     end
     subgraph OrgB["Namespace · org_6fa459ea… (Org B)"]

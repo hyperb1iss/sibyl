@@ -24,9 +24,9 @@ operational surface was heavier than the product itself.
   retrieval doesn't have to fan out across stores.
 - **Fewer connection boundaries.** One driver, one auth model, one set of queries. The API and
   worker talk to the same WebSocket endpoint.
-- **Graphiti transition compatibility.** The SurrealDriver plugs into Graphiti during migration, so
-  explicitly named compatibility, compare, admin, and migration paths keep working while native
-  SurrealDB write coverage is retired deliberately.
+- **Archive compatibility.** Legacy Graphiti/Falkor exports restore through Sibyl-owned Surreal
+  projection and archive code, so old data remains recoverable without keeping Graphiti in the
+  supported runtime.
 
 ## Honest tradeoffs
 
