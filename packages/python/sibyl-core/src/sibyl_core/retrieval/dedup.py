@@ -518,16 +518,11 @@ class EntityDeduplicator:
                 )
                 return False
 
-            # Step 1: Redirect relationships from remove -> keep
-            await self._redirect_relationships(remove_id, keep_id)
-
-            # Step 2: Optionally merge metadata
             if merge_metadata and remove_entity.metadata:
                 merged_meta = {**remove_entity.metadata, **(keep_entity.metadata or {})}
-                # Keep entity's metadata takes precedence
                 await self.entity_manager.update(keep_id, {"metadata": merged_meta})
 
-            # Step 3: Delete the duplicate entity
+            await self._redirect_relationships(remove_id, keep_id)
             await self.entity_manager.delete(remove_id)
 
             # Remove from cached pairs
@@ -635,6 +630,8 @@ class EntityDeduplicator:
         from sibyl_core.models.entities import Relationship
 
         total_redirected = 0
+        replacements: list[Relationship] = []
+        previous_ids_by_replacement: dict[str, str] = {}
 
         for relationship in relationships:
             new_source_id = to_id if relationship.source_id == from_id else relationship.source_id
@@ -649,19 +646,42 @@ class EntityDeduplicator:
                 metadata=dict(relationship.metadata or {}),
             )
 
-            try:
-                await relationship_manager.create(replacement)
-                if relationship.id:
-                    await relationship_manager.delete(relationship.id)
-                total_redirected += 1
-            except Exception as e:
-                log.warning(
-                    "redirect_relationship_via_manager_failed",
-                    relationship_id=relationship.id,
-                    from_id=from_id,
-                    to_id=to_id,
-                    error=str(e),
+            replacements.append(replacement)
+            if relationship.id:
+                previous_ids_by_replacement[replacement.id] = relationship.id
+
+        try:
+            created_ids = await self._create_relationships_bulk(
+                relationship_manager,
+                replacements,
+            )
+            if created_ids is not None:
+                created_set = set(created_ids)
+                previous_ids = [
+                    previous_id
+                    for replacement_id, previous_id in previous_ids_by_replacement.items()
+                    if replacement_id in created_set
+                ]
+                deleted_count = await self._delete_relationship_ids(
+                    relationship_manager,
+                    previous_ids,
                 )
+                total_redirected = min(len(created_ids), deleted_count)
+            else:
+                for replacement in replacements:
+                    await relationship_manager.create(replacement)
+                    previous_id = previous_ids_by_replacement.get(replacement.id)
+                    if previous_id:
+                        await relationship_manager.delete(previous_id)
+                    total_redirected += 1
+        except Exception as e:
+            log.warning(
+                "redirect_relationships_via_manager_failed",
+                from_id=from_id,
+                to_id=to_id,
+                relationship_count=len(relationships),
+                error=str(e),
+            )
 
         log.debug(
             "relationships_redirected",
@@ -672,6 +692,43 @@ class EntityDeduplicator:
         )
 
         return total_redirected
+
+    async def _create_relationships_bulk(
+        self,
+        relationship_manager: Any,
+        relationships: list[Any],
+    ) -> list[str] | None:
+        create_direct_bulk = getattr(relationship_manager, "create_direct_bulk", None)
+        if not callable(create_direct_bulk):
+            return None
+        result = create_direct_bulk(relationships)
+        if inspect.isawaitable(result):
+            created_ids = await result
+        elif isinstance(result, list):
+            created_ids = result
+        else:
+            return None
+        return [str(created_id) for created_id in created_ids]
+
+    async def _delete_relationship_ids(
+        self,
+        relationship_manager: Any,
+        relationship_ids: list[str],
+    ) -> int:
+        if not relationship_ids:
+            return 0
+        delete_bulk = getattr(relationship_manager, "delete_bulk", None)
+        if callable(delete_bulk):
+            result = delete_bulk(relationship_ids)
+            if inspect.isawaitable(result):
+                return int(await result)
+            if isinstance(result, int):
+                return result
+        deleted = 0
+        for relationship_id in relationship_ids:
+            if await relationship_manager.delete(relationship_id):
+                deleted += 1
+        return deleted
 
     def _suggest_keep(
         self,

@@ -1,7 +1,7 @@
 """Tests for entity deduplication module."""
 
 import math
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -453,6 +453,10 @@ class TestEntityDeduplicator:
         )
         mock_relationship_manager.create = AsyncMock()
         mock_relationship_manager.delete = AsyncMock()
+        mock_relationship_manager.create_direct_bulk = AsyncMock(
+            side_effect=lambda relationships: [relationship.id for relationship in relationships]
+        )
+        mock_relationship_manager.delete_bulk = AsyncMock(return_value=2)
         dedup._get_relationship_manager = lambda: mock_relationship_manager  # type: ignore[method-assign]
 
         result = await dedup.merge_entities(keep_id="keep", remove_id="remove")
@@ -463,11 +467,18 @@ class TestEntityDeduplicator:
         mock_relationship_manager.get_for_entity.assert_awaited_once_with(
             "remove", direction="both"
         )
-        assert mock_relationship_manager.create.await_count == 2
-        assert mock_relationship_manager.delete.await_args_list == [
-            call("rel-out"),
-            call("rel-in"),
+        created_relationships = mock_relationship_manager.create_direct_bulk.await_args.args[0]
+        assert [relationship.source_id for relationship in created_relationships] == [
+            "keep",
+            "other",
         ]
+        assert [relationship.target_id for relationship in created_relationships] == [
+            "other",
+            "keep",
+        ]
+        mock_relationship_manager.delete_bulk.assert_awaited_once_with(["rel-out", "rel-in"])
+        mock_relationship_manager.create.assert_not_awaited()
+        mock_relationship_manager.delete.assert_not_awaited()
         # Pair should be removed from cache
         assert len(dedup._duplicate_pairs) == 0
 
@@ -508,6 +519,30 @@ class TestEntityDeduplicator:
         # Both unique keys should be present
         assert merged_metadata["keep_only"] == "data"
         assert merged_metadata["remove_only"] == "data"
+
+    @pytest.mark.asyncio
+    async def test_merge_entities_stops_before_redirect_when_metadata_update_fails(
+        self, dedup: EntityDeduplicator, mock_entity_manager: MagicMock
+    ) -> None:
+        """A failed metadata write must not leave relationship redirects half-applied."""
+        keep_entity = MagicMock()
+        keep_entity.metadata = {"keep": "data"}
+        remove_entity = MagicMock()
+        remove_entity.metadata = {"remove": "data"}
+
+        mock_entity_manager.get = AsyncMock(
+            side_effect=lambda eid: keep_entity if eid == "keep" else remove_entity
+        )
+        mock_entity_manager.update = AsyncMock(side_effect=RuntimeError("write failed"))
+        mock_relationship_manager = MagicMock()
+        mock_relationship_manager.get_for_entity = AsyncMock()
+        dedup._get_relationship_manager = lambda: mock_relationship_manager  # type: ignore[method-assign]
+
+        result = await dedup.merge_entities(keep_id="keep", remove_id="remove")
+
+        assert result is False
+        mock_relationship_manager.get_for_entity.assert_not_awaited()
+        mock_entity_manager.delete.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_merge_entities_no_metadata_merge(

@@ -1155,6 +1155,32 @@ class RelationshipManager:
         )
         return any(row.get("uuid") == relationship_id for row in rows)
 
+    async def delete_bulk(self, relationship_ids: Sequence[str]) -> int:
+        unique_ids = list(
+            dict.fromkeys(
+                relationship_id for relationship_id in relationship_ids if relationship_id
+            )
+        )
+        if not unique_ids:
+            return 0
+        rows = await _execute_graph_transaction(
+            self._client,
+            """
+            BEGIN TRANSACTION;
+            DELETE FROM relates_to
+            WHERE group_id = $group_id AND uuid IN $uuids
+            RETURN BEFORE;
+            DELETE FROM mentions
+            WHERE group_id = $group_id AND uuid IN $uuids
+            RETURN BEFORE;
+            COMMIT TRANSACTION;
+            """,
+            group_id=self._group_id,
+            uuids=unique_ids,
+        )
+        deleted = {str(row.get("uuid")) for row in rows if row.get("uuid") is not None}
+        return len(deleted & set(unique_ids))
+
     async def get(self, relationship_id: str) -> Relationship:
         row = await _select_one(
             self._client,
@@ -2361,13 +2387,13 @@ async def _replace_entity(
 ) -> SurrealRecord:
     record = _entity_record(entity, group_id=group_id)
     try:
-        result = await _execute_replace_entity_query(client, record)
+        result = await _execute_replace_entities_with_schema_retry(client, [record])
     except Exception as exc:
         if not _is_transient_connection_error(exc):
             raise
         mark_graph_schema_dirty(client.group_id)
         await prepare_graph_schema(client)
-        result = await _execute_replace_entity_query(client, record)
+        result = await _execute_replace_entities_with_schema_retry(client, [record])
     rows = normalize_records(result)
     if rows:
         return rows[0]
@@ -2389,13 +2415,13 @@ async def _replace_entities_bulk(
     if not records:
         return []
     try:
-        result = await _execute_replace_entities_bulk_query(client, records)
+        result = await _execute_replace_entities_with_schema_retry(client, records)
     except Exception as exc:
         if not _is_transient_connection_error(exc):
             raise
         mark_graph_schema_dirty(client.group_id)
         await prepare_graph_schema(client)
-        result = await _execute_replace_entities_bulk_query(client, records)
+        result = await _execute_replace_entities_with_schema_retry(client, records)
     return normalize_records(result)
 
 
@@ -2411,6 +2437,50 @@ async def _execute_replace_entities_bulk_query(
     records: Sequence[SurrealRecord],
 ) -> object:
     return await client.execute_query(_ENTITY_BULK_UPSERT_QUERY, rows=list(records))
+
+
+async def _execute_replace_entities_with_schema_retry(
+    client: SurrealGraphClient,
+    records: Sequence[SurrealRecord],
+) -> object:
+    try:
+        return await _execute_replace_entities_bulk_query(client, records)
+    except Exception as exc:
+        if not _is_legacy_updated_at_string_schema_error(exc):
+            raise
+        legacy_records = _records_with_legacy_updated_at_strings(records)
+        return await _execute_replace_entities_bulk_query(client, legacy_records)
+
+
+def _is_legacy_updated_at_string_schema_error(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return "coerce value for field `updated_at`" in message and (
+        "expected `none | string`" in message or "expected none | string" in message
+    )
+
+
+def _records_with_legacy_updated_at_strings(
+    records: Sequence[SurrealRecord],
+) -> list[SurrealRecord]:
+    converted: list[SurrealRecord] = []
+    for record in records:
+        patched = dict(record)
+        patched["updated_at"] = _legacy_updated_at_value(patched.get("updated_at"))
+        attributes = patched.get("attributes")
+        if isinstance(attributes, dict):
+            patched_attributes = dict(attributes)
+            patched_attributes["updated_at"] = _legacy_updated_at_value(
+                patched_attributes.get("updated_at")
+            )
+            patched["attributes"] = patched_attributes
+        converted.append(patched)
+    return converted
+
+
+def _legacy_updated_at_value(value: object) -> object:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
 
 
 def _entity_record(

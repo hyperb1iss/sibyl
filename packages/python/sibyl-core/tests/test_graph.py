@@ -358,6 +358,36 @@ async def test_replace_entity_retries_transient_surreal_query_id_keyerror(
 
 
 @pytest.mark.asyncio
+async def test_replace_entities_retries_legacy_updated_at_string_schema() -> None:
+    client = _LegacyUpdatedAtEntityWriteClient()
+    explicit_updated_at = datetime(2026, 5, 31, 2, 52, tzinfo=UTC)
+
+    rows = await graph_module._replace_entities_bulk(
+        cast("Any", client),
+        [
+            Entity(id="entity-legacy-one", entity_type=EntityType.SESSION, name="Legacy One"),
+            Entity(
+                id="entity-legacy-two",
+                entity_type=EntityType.SESSION,
+                name="Legacy Two",
+                updated_at=explicit_updated_at,
+            ),
+        ],
+        group_id=client.group_id,
+    )
+
+    assert [row["uuid"] for row in rows] == ["entity-legacy-one", "entity-legacy-two"]
+    assert len(client.calls) == 2
+    first_rows = cast("list[dict[str, object]]", client.calls[0][1]["rows"])
+    retry_rows = cast("list[dict[str, object]]", client.calls[1][1]["rows"])
+    assert all(isinstance(row["updated_at"], datetime) for row in first_rows)
+    assert all(isinstance(row["updated_at"], str) for row in retry_rows)
+    assert retry_rows[1]["updated_at"] == explicit_updated_at.isoformat()
+    retry_attributes = cast(dict[str, object], retry_rows[1]["attributes"])
+    assert retry_attributes["updated_at"] == explicit_updated_at.isoformat()
+
+
+@pytest.mark.asyncio
 async def test_graph_runtime_can_skip_schema_preparation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -388,6 +418,24 @@ class _TransientEntityWriteClient:
             raise KeyError("c4ae8fd2-a34d-4f8f-8225-1fd0f7a91cf6")
         rows = cast("list[dict[str, object]]", params["rows"])
         return [{"uuid": rows[0]["uuid"], "name": rows[0]["name"]}]
+
+
+class _LegacyUpdatedAtEntityWriteClient:
+    group_id = "org-legacy-updated-at"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        rows = cast("list[dict[str, object]]", params["rows"])
+        if len(self.calls) == 1:
+            msg = (
+                "Couldn't coerce value for field `updated_at` of `entity:abc`: "
+                "Expected `none | string` but found `d'2026-05-31T02:52:00Z'`"
+            )
+            raise RuntimeError(msg)
+        return [{"uuid": row["uuid"], "updated_at": row["updated_at"]} for row in rows]
 
 
 def test_native_embedding_dimension_validation_requires_schema_match() -> None:
@@ -504,7 +552,9 @@ async def test_native_entity_manager_generates_embeddings_with_native_provider()
     assert "INSERT INTO entity $rows ON DUPLICATE KEY UPDATE" in write_query
     rows = cast("list[dict[str, object]]", write_params["rows"])
     assert len(cast(list[float], rows[0]["name_embedding"])) == 4
+    assert isinstance(rows[0]["updated_at"], datetime)
     attributes = cast(dict[str, object], rows[0]["attributes"])
+    assert isinstance(attributes["updated_at"], datetime)
     assert attributes["embedding_metadata"] == provider.metadata.to_dict()
 
 
@@ -1648,6 +1698,61 @@ async def test_native_relationship_bulk_skips_edges_with_missing_endpoints() -> 
     assert {row["target_id"] for row in rows} == {"beta", "gamma"}
     assert all(row["in_uuid"] == "alpha" for row in rows)
     assert {row["out_uuid"] for row in rows} == {"beta", "gamma"}
+
+
+@pytest.mark.asyncio
+async def test_native_relationship_delete_bulk_removes_edges() -> None:
+    client = SurrealGraphClient(group_id="org-native-bulk-rel-delete", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        entity_manager = EntityManager(client, group_id=client.group_id)
+        relationship_manager = RelationshipManager(client, group_id=client.group_id)
+
+        for entity_id in ("alpha", "beta", "gamma"):
+            await entity_manager.create_direct(
+                Entity(
+                    id=entity_id,
+                    entity_type=EntityType.TOPIC,
+                    name=entity_id.title(),
+                    organization_id=client.group_id,
+                )
+            )
+        await relationship_manager.create_direct_bulk(
+            [
+                Relationship(
+                    id="rel_alpha_beta",
+                    source_id="alpha",
+                    target_id="beta",
+                    relationship_type=RelationshipType.RELATED_TO,
+                ),
+                Relationship(
+                    id="rel_alpha_gamma",
+                    source_id="alpha",
+                    target_id="gamma",
+                    relationship_type=RelationshipType.RELATED_TO,
+                ),
+            ]
+        )
+
+        deleted = await relationship_manager.delete_bulk(
+            ["rel_alpha_beta", "rel_alpha_gamma", "missing_rel"]
+        )
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT uuid
+                FROM relates_to
+                WHERE group_id = $group_id
+                ORDER BY uuid ASC;
+                """,
+                group_id=client.group_id,
+            )
+        )
+    finally:
+        await client.close()
+
+    assert deleted == 2
+    assert rows == []
 
 
 @pytest.mark.asyncio
