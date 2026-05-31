@@ -1,0 +1,139 @@
+{
+  "decision": {
+    "reason": "DiskANN is unavailable in this runtime: There was a problem with the database: Parse error: Unexpected token `an identifier`, expected Eof  --> [1:144]   | 1 | ...embedding DISKANN DIMENSION 16 DIST COSINE TYPE F32 DEGREE 16 L_BUILD 64;   |              ^^^^^^^; HNSW baseline recall was 0.000, so investigate the production scalar-prefilter KNN query shape separately.",
+    "recommendation": "keep_hnsw"
+  },
+  "generated_at": "2026-05-31T00:36:13.853359+00:00",
+  "index_definitions": {
+    "diskann": "DEFINE INDEX idx_vector_bench_run_20260530_smoke_diskann_embedding ON document_chunks_vector_bench_run_20260530_smoke_diskann FIELDS embedding DISKANN DIMENSION 16 DIST COSINE TYPE F32 DEGREE 16 L_BUILD 64;",
+    "hnsw": "DEFINE INDEX idx_vector_bench_run_20260530_smoke_hnsw_embedding ON document_chunks_vector_bench_run_20260530_smoke_hnsw FIELDS embedding HNSW DIMENSION 16 DIST COSINE TYPE F32 EFC 150 M 12;"
+  },
+  "results": {
+    "diskann": {
+      "disk_bytes": 193516,
+      "elapsed_ms": 37.80137491412461,
+      "error": "There was a problem with the database: Parse error: Unexpected token `an identifier`, expected Eof  --> [1:144]   | 1 | ...embedding DISKANN DIMENSION 16 DIST COSINE TYPE F32 DEGREE 16 L_BUILD 64;   |              ^^^^^^^  ",
+      "index": "diskann",
+      "index_definition": "DEFINE INDEX idx_vector_bench_run_20260530_smoke_diskann_embedding ON document_chunks_vector_bench_run_20260530_smoke_diskann FIELDS embedding DISKANN DIMENSION 16 DIST COSINE TYPE F32 DEGREE 16 L_BUILD 64;",
+      "supported": false,
+      "table": "document_chunks_vector_bench_run_20260530_smoke_diskann",
+      "url": "surrealkv://.moon/cache/surreal-vector-index-bench/20260530-smoke-final/diskann.skv"
+    },
+    "hnsw": {
+      "disk_bytes": 366288,
+      "elapsed_ms": 79.40483279526234,
+      "engine_version": null,
+      "index": "hnsw",
+      "index_build_ms": 23.08720792643726,
+      "index_definition": "DEFINE INDEX idx_vector_bench_run_20260530_smoke_hnsw_embedding ON document_chunks_vector_bench_run_20260530_smoke_hnsw FIELDS embedding HNSW DIMENSION 16 DIST COSINE TYPE F32 EFC 150 M 12;",
+      "insert_ms": 15.299374936148524,
+      "query_summary": {
+        "latency_ms": {
+          "avg": 2.1873331163078547,
+          "max": 2.800416899845004,
+          "min": 0.8768748957663774,
+          "p50": 2.3785829544067383,
+          "p95": 2.746300119906664
+        },
+        "query_count": 5,
+        "recall_at_k": 0.0,
+        "samples": [
+          {
+            "expected_count": 5,
+            "latency_ms": 2.800416899845004,
+            "query_index": 0,
+            "recall": 0.0,
+            "result_count": 0
+          },
+          {
+            "expected_count": 5,
+            "latency_ms": 0.8768748957663774,
+            "query_index": 1,
+            "recall": 0.0,
+            "result_count": 0
+          },
+          {
+            "expected_count": 5,
+            "latency_ms": 2.3785829544067383,
+            "query_index": 2,
+            "recall": 0.0,
+            "result_count": 0
+          },
+          {
+            "expected_count": 5,
+            "latency_ms": 2.529833000153303,
+            "query_index": 3,
+            "recall": 0.0,
+            "result_count": 0
+          },
+          {
+            "expected_count": 5,
+            "latency_ms": 2.3509578313678503,
+            "query_index": 4,
+            "recall": 0.0,
+            "result_count": 0
+          }
+        ]
+      },
+      "supported": true,
+      "table": "document_chunks_vector_bench_run_20260530_smoke_hnsw",
+      "table_info": {
+        "events": {},
+        "fields": {
+          "chunk_index": "DEFINE FIELD chunk_index ON document_chunks_vector_bench_run_20260530_smoke_hnsw TYPE int PERMISSIONS FULL",
+          "content": "DEFINE FIELD content ON document_chunks_vector_bench_run_20260530_smoke_hnsw TYPE string PERMISSIONS FULL",
+          "document_id": "DEFINE FIELD document_id ON document_chunks_vector_bench_run_20260530_smoke_hnsw TYPE string PERMISSIONS FULL",
+          "embedding": "DEFINE FIELD embedding ON document_chunks_vector_bench_run_20260530_smoke_hnsw TYPE array<float, 16> PERMISSIONS FULL",
+          "embedding[*]": "DEFINE FIELD embedding[*] ON document_chunks_vector_bench_run_20260530_smoke_hnsw TYPE float PERMISSIONS FULL",
+          "organization_id": "DEFINE FIELD organization_id ON document_chunks_vector_bench_run_20260530_smoke_hnsw TYPE string PERMISSIONS FULL",
+          "source_id": "DEFINE FIELD source_id ON document_chunks_vector_bench_run_20260530_smoke_hnsw TYPE string PERMISSIONS FULL",
+          "uuid": "DEFINE FIELD uuid ON document_chunks_vector_bench_run_20260530_smoke_hnsw TYPE string PERMISSIONS FULL"
+        },
+        "indexes": {
+          "idx_document_chunks_vector_bench_run_20260530_smoke_hnsw_org_source": "DEFINE INDEX idx_document_chunks_vector_bench_run_20260530_smoke_hnsw_org_source ON document_chunks_vector_bench_run_20260530_smoke_hnsw FIELDS organization_id, source_id",
+          "idx_vector_bench_run_20260530_smoke_hnsw_embedding": "DEFINE INDEX idx_vector_bench_run_20260530_smoke_hnsw_embedding ON document_chunks_vector_bench_run_20260530_smoke_hnsw FIELDS embedding HNSW DIMENSION 16 DIST COSINE TYPE F32 EFC 150 M 12 M0 24 LM 0.40242960438184466f"
+        },
+        "lives": {},
+        "tables": {}
+      },
+      "url": "surrealkv://.moon/cache/surreal-vector-index-bench/20260530-smoke-final/hnsw.skv"
+    }
+  },
+  "run_id": "20260530-smoke",
+  "schema_version": "sibyl-surreal-vector-index-bench-v1",
+  "source_notes": [
+    "DiskANN was introduced in SurrealDB 3.1 under the same KNN operator as HNSW.",
+    "The query shape mirrors Sibyl content retrieval org/source filters."
+  ],
+  "surreal": {
+    "database": "bench",
+    "engine_version": null,
+    "namespace": "sibyl_vector_bench",
+    "python_package_version": "2.0.0",
+    "url_mode": "embedded-surrealkv"
+  },
+  "workload": {
+    "batch_size": 250,
+    "candidate_limit": 25,
+    "content_bytes": 128,
+    "dimensions": 16,
+    "ef": 40,
+    "limit": 5,
+    "organization_filter": "org-primary",
+    "organization_ids": [
+      "org-primary",
+      "org-secondary",
+      "org-tertiary"
+    ],
+    "queries": 5,
+    "query_mode": "production_scalar_prefilter",
+    "rows": 180,
+    "seed": 20260530,
+    "source_filter": "source-primary",
+    "source_ids": [
+      "source-primary",
+      "source-docs",
+      "source-code"
+    ]
+  }
+}

@@ -223,6 +223,7 @@ tasks:
       - ~:inventory-test
       - ~:dev-script-test
       - ~:bench-gate-test
+      - ~:vector-index-bench-test
       - ~:multi-user-perf-test
       - ~:chaos-test
       - ~:storage-access-check
@@ -256,6 +257,7 @@ tasks:
       - ~:inventory-test
       - ~:dev-script-test
       - ~:bench-gate-test
+      - ~:vector-index-bench-test
       - ~:multi-user-perf-test
       - ~:chaos-test
       - ~:storage-access-test
@@ -602,6 +604,25 @@ tasks:
       - benchmarks/longmemeval_v2_official.py
       - benchmarks/longmemeval_v2_memory/**/*.py
       - benchmarks/results/ai-memory/*.json
+      - pyproject.toml
+
+  vector-index-bench:
+    command: uv run python -m tools.perf.surreal_vector_index
+    inputs:
+      - tools/perf/surreal_vector_index.py
+      - benchmarks/surreal_vector_index_bench.py
+      - pyproject.toml
+    outputs:
+      - benchmarks/results/surreal-vector/*.json
+    options:
+      cache: false
+
+  vector-index-bench-test:
+    command: uv run pytest tools/tests/test_surreal_vector_index.py -v
+    inputs:
+      - tools/perf/surreal_vector_index.py
+      - tools/tests/test_surreal_vector_index.py
+      - benchmarks/surreal_vector_index_bench.py
       - pyproject.toml
 
   multi-user-perf-test:
