@@ -215,7 +215,10 @@ def add_document_source(
     ] = None,
     allow_private_network: Annotated[
         bool,
-        typer.Option("--allow-private-network", help="Allow URL imports from private hosts"),
+        typer.Option(
+            "--allow-private-network",
+            help="Allow URL imports from private hosts (owners/admins only)",
+        ),
     ] = False,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output for scripting")

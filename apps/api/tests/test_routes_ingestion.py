@@ -25,6 +25,7 @@ from sibyl.api.schemas import (
 )
 from sibyl.config import settings
 from sibyl.persistence.content_common import RawCaptureRecord
+from sibyl_core.auth import OrganizationRole
 from sibyl_core.models.sources import (
     SourceAdapterCapability,
     SourceAdapterDescriptor,
@@ -232,7 +233,7 @@ async def test_start_document_import_route_enqueues_url_import() -> None:
         allow_private_network=True,
     )
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-    ctx = SimpleNamespace(user_id="user-1")
+    ctx = SimpleNamespace(user_id="user-1", org_role=OrganizationRole.ADMIN)
 
     with (
         patch(
@@ -280,6 +281,40 @@ async def test_start_document_import_route_enqueues_url_import() -> None:
         batch_size=25,
         promotion_preview_approved=False,
     )
+
+
+@pytest.mark.asyncio
+async def test_start_document_import_route_rejects_member_private_network_import() -> None:
+    policy_context = {
+        "actor_user_id": "user-1",
+        "organization_id": "00000000-0000-0000-0000-000000000111",
+        "memory_space": "project",
+        "scope_key": "project_123",
+    }
+    request = DocumentImportRequest(
+        kind="url",
+        source_uri="http://127.0.0.1/internal/metadata",
+        target_scope_key="project_123",
+        allow_private_network=True,
+    )
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    ctx = SimpleNamespace(user_id="user-1", org_role=OrganizationRole.MEMBER)
+
+    with (
+        patch(
+            "sibyl.api.routes.ingestion._source_import_policy_context",
+            AsyncMock(return_value=policy_context),
+        ),
+        patch("sibyl.api.routes.ingestion.start_source_import", AsyncMock()) as start,
+        patch("sibyl.jobs.queue.enqueue_source_import_drain", AsyncMock()) as enqueue,
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await start_document_import_route(request, org=org, ctx=ctx)
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "private_network_import_forbidden"
+    start.assert_not_awaited()
+    enqueue.assert_not_awaited()
 
 
 @pytest.mark.asyncio

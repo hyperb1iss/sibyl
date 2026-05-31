@@ -174,7 +174,11 @@ def _document_source_uri(request: DocumentImportRequest) -> str:
     return request.source_uri.strip()
 
 
-def _document_import_options(request: DocumentImportRequest) -> dict[str, object]:
+def _document_import_options(
+    request: DocumentImportRequest,
+    *,
+    allow_private_network: bool = False,
+) -> dict[str, object]:
     options: dict[str, object] = {
         "target_memory_scope": "project",
         "target_scope_key": request.target_scope_key,
@@ -185,9 +189,20 @@ def _document_import_options(request: DocumentImportRequest) -> dict[str, object
         options["text"] = request.text or ""
     if title := _optional_str(request.title):
         options["title"] = title
-    if request.allow_private_network:
+    if allow_private_network:
         options["allow_private_network"] = True
     return options
+
+
+def _authorized_private_network_import(
+    request: DocumentImportRequest,
+    ctx: AuthContext,
+) -> bool:
+    if not request.allow_private_network:
+        return False
+    if getattr(ctx, "org_role", None) in {OrganizationRole.OWNER, OrganizationRole.ADMIN}:
+        return True
+    raise HTTPException(status_code=403, detail="private_network_import_forbidden")
 
 
 def _capture_visible_to_projects(
@@ -325,7 +340,11 @@ async def start_document_import_route(
         memory_scope="project",
         scope_key=request.target_scope_key,
     )
-    options = _document_import_options(request)
+    allow_private_network = _authorized_private_network_import(request, ctx)
+    options = _document_import_options(
+        request,
+        allow_private_network=allow_private_network,
+    )
     try:
         principal_id = _current_principal_id(ctx)
         payload = await start_source_import(
