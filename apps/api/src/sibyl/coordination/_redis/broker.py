@@ -23,6 +23,7 @@ from sibyl.coordination.broker import (
     JobStatus,
     memory_extraction_job_id,
     memory_projection_job_id,
+    raw_capture_changefeed_job_id,
     raw_promotion_job_id,
 )
 from sibyl_core.observability import telemetry_registry
@@ -477,6 +478,37 @@ class RedisQueueBroker:
             return result.job_id
 
         log.info("Enqueued raw promotion", job_id=result.job_id, organization_id=organization_id)
+        return result.job_id
+
+    async def enqueue_raw_capture_changefeed_poll(
+        self,
+        organization_id: str,
+        *,
+        limit: int = 100,
+    ) -> str:
+        """Enqueue one raw capture changefeed poll for an organization."""
+        job_id = raw_capture_changefeed_job_id(organization_id)
+        result = await self._enqueue_unique(
+            "poll_raw_capture_changefeed",
+            organization_id,
+            job_id=job_id,
+            clear_result=True,
+            limit=limit,
+        )
+
+        if not result.created:
+            log.info(
+                "Raw capture changefeed poll already running",
+                job_id=job_id,
+                organization_id=organization_id,
+            )
+            return result.job_id
+
+        log.info(
+            "Enqueued raw capture changefeed poll",
+            job_id=result.job_id,
+            organization_id=organization_id,
+        )
         return result.job_id
 
     async def get_job_status(self, job_id: str) -> JobInfo:

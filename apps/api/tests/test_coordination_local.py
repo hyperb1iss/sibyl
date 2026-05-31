@@ -471,6 +471,44 @@ async def test_local_queue_broker_executes_raw_promotion() -> None:
 
 
 @pytest.mark.asyncio
+async def test_local_queue_broker_executes_raw_capture_changefeed_poll() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def poll_raw_capture_changefeed(
+        ctx: dict[str, object],
+        organization_id: str,
+        *,
+        limit: int = 100,
+    ) -> dict[str, object]:
+        calls.append(
+            (
+                organization_id,
+                {
+                    "limit": limit,
+                    "ctx_has_start_time": "start_time" in ctx,
+                },
+            )
+        )
+        return {"organization_id": organization_id, "status": "queued"}
+
+    broker = LocalQueueBroker(
+        functions={"poll_raw_capture_changefeed": poll_raw_capture_changefeed},
+        max_concurrency=1,
+        result_ttl_seconds=60,
+    )
+
+    await broker.startup()
+    job_id = await broker.enqueue_raw_capture_changefeed_poll("org-1", limit=25)
+    info = await _wait_for_job_status(broker, job_id, JobStatus.COMPLETE)
+
+    assert job_id.startswith("raw_capture_changefeed:")
+    assert info.result == {"organization_id": "org-1", "status": "queued"}
+    assert calls == [("org-1", {"limit": 25, "ctx_has_start_time": True})]
+
+    await broker.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_local_queue_broker_force_reruns_completed_job() -> None:
     calls: list[str] = []
 

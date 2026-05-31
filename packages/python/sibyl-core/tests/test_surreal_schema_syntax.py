@@ -22,6 +22,7 @@ from sibyl_core.backends.surreal.auth_schema import (
 from sibyl_core.backends.surreal.content_schema import (
     CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS,
     CONTENT_PERMISSION_MIGRATION_DEFINITIONS,
+    CONTENT_RAW_CAPTURE_CHANGEFEED_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS,
     CONTENT_RELATION_TABLES,
     CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS,
@@ -151,14 +152,20 @@ def test_flexible_object_fields_keep_server_accepted_token_order() -> None:
 
 def test_runtime_schemafull_tables_define_schemafull_without_redundant_alter() -> None:
     schema = "\n".join((AUTH_SCHEMA_DEFINITIONS, CONTENT_SCHEMA_DEFINITIONS))
+    content_tables = tuple(
+        table
+        for table in CONTENT_TABLES
+        if table not in CONTENT_RELATION_TABLES and table != "raw_captures"
+    )
     tables = (
         *AUTH_TABLES,
-        *(table for table in CONTENT_TABLES if table not in CONTENT_RELATION_TABLES),
+        *content_tables,
     )
 
     for table in tables:
         assert f"DEFINE TABLE IF NOT EXISTS {table} SCHEMAFULL;" in schema
         assert f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;" not in schema
+    assert "DEFINE TABLE IF NOT EXISTS raw_captures SCHEMAFULL CHANGEFEED 7d;" in schema
     for table in CONTENT_RELATION_TABLES:
         assert f"DEFINE TABLE IF NOT EXISTS {table} SCHEMAFULL TYPE RELATION" in schema
         assert f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;" not in schema
@@ -331,7 +338,7 @@ def test_content_lineage_relation_tables_are_versioned() -> None:
         statement for migration in migrations for statement in migration.statements
     )
 
-    assert CONTENT_SCHEMA_CURRENT_VERSION == 9
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 9
     assert "content_lineage_relation_tables" in [migration.name for migration in migrations]
     for table in CONTENT_RELATION_TABLES:
         assert f"DEFINE TABLE IF NOT EXISTS {table} SCHEMAFULL TYPE RELATION" in (
@@ -353,6 +360,32 @@ def test_content_lineage_relation_tables_are_versioned() -> None:
         CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS
     )
     assert CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
+
+
+def test_raw_capture_changefeed_cursor_is_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration_sql = "\n".join(
+        statement for migration in migrations for statement in migration.statements
+    )
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION == 10
+    assert "raw_capture_changefeed_cursor" in [migration.name for migration in migrations]
+    assert "DEFINE TABLE IF NOT EXISTS raw_captures SCHEMAFULL CHANGEFEED 7d;" in (
+        CONTENT_SCHEMA_DEFINITIONS
+    )
+    assert "ALTER TABLE IF EXISTS raw_captures CHANGEFEED 7d" in (
+        CONTENT_RAW_CAPTURE_CHANGEFEED_MIGRATION_DEFINITIONS
+    )
+    assert "DEFINE TABLE IF NOT EXISTS content_changefeed_cursors SCHEMAFULL" in (
+        CONTENT_SCHEMA_DEFINITIONS
+    )
+    assert "idx_content_changefeed_cursors_org_consumer" in (
+        CONTENT_RAW_CAPTURE_CHANGEFEED_MIGRATION_DEFINITIONS
+    )
+    assert (
+        CONTENT_RAW_CAPTURE_CHANGEFEED_MIGRATION_DEFINITIONS.strip().splitlines()[0]
+        in migration_sql
+    )
 
 
 @pytest.mark.asyncio

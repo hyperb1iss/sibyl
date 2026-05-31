@@ -81,6 +81,11 @@ def raw_promotion_job_id(
     return f"raw_promotion:{digest}"
 
 
+def raw_capture_changefeed_job_id(organization_id: str) -> str:
+    digest = sha256(organization_id.encode()).hexdigest()[:16]
+    return f"raw_capture_changefeed:{digest}"
+
+
 class QueueBroker(Protocol):
     """Backend contract for job queue coordination."""
 
@@ -197,6 +202,13 @@ class QueueBroker(Protocol):
         raw_memory_ids: list[str] | None = None,
         limit: int = 100,
         force: bool = False,
+    ) -> str: ...
+
+    async def enqueue_raw_capture_changefeed_poll(
+        self,
+        organization_id: str,
+        *,
+        limit: int = 100,
     ) -> str: ...
 
     async def get_job_status(self, job_id: str) -> JobInfo: ...

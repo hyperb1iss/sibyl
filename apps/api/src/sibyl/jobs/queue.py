@@ -34,6 +34,7 @@ __all__ = [
     "enqueue_memory_extraction",
     "enqueue_memory_projection",
     "enqueue_priority_decay",
+    "enqueue_raw_capture_changefeed_poll",
     "enqueue_raw_promotion",
     "enqueue_reflection_dream_cycle",
     "enqueue_source_import_drain",
@@ -241,6 +242,18 @@ async def enqueue_raw_promotion(
         raw_memory_ids=raw_memory_ids,
         limit=limit,
         force=force,
+    )
+
+
+async def enqueue_raw_capture_changefeed_poll(
+    organization_id: str,
+    *,
+    limit: int = 100,
+) -> str:
+    """Enqueue one raw capture changefeed poll for an organization."""
+    return await get_queue().enqueue_raw_capture_changefeed_poll(
+        organization_id,
+        limit=limit,
     )
 
 

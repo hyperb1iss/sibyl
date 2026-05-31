@@ -9,6 +9,7 @@ This is the worker entrypoint. Job implementations are in:
 - backup.py: run_backup, cleanup_old_backups
 - source_imports.py: import_source_archive, drain_source_import
 - raw_promotion.py: promote_raw_captures
+- raw_changefeed.py: poll_raw_capture_changefeed, poll_all_raw_capture_changefeeds
 """
 
 import time
@@ -37,6 +38,10 @@ from sibyl.jobs.entities import (
 )
 from sibyl.jobs.memory_extraction import extract_memory_entities
 from sibyl.jobs.privacy import purge_due_deleted_personal_memories
+from sibyl.jobs.raw_changefeed import (
+    poll_all_raw_capture_changefeeds,
+    poll_raw_capture_changefeed,
+)
 from sibyl.jobs.raw_promotion import promote_raw_captures
 from sibyl.jobs.reflection import run_reflection_dream_cycle, run_reflection_dream_cycle_all_orgs
 from sibyl.jobs.source_imports import drain_source_import, import_source_archive
@@ -244,6 +249,14 @@ def get_schedule_specs() -> list[ScheduleSpec]:
             minute=0,
         )
     )
+    if settings.raw_capture_changefeed_poll_enabled:
+        schedule_specs.append(
+            ScheduleSpec(
+                name="poll_all_raw_capture_changefeeds",
+                function=poll_all_raw_capture_changefeeds,
+                schedule_label="* * * * *",
+            )
+        )
 
     return schedule_specs
 
@@ -281,6 +294,8 @@ class WorkerSettings:
         import_source_archive,
         drain_source_import,
         promote_raw_captures,
+        poll_raw_capture_changefeed,
+        poll_all_raw_capture_changefeeds,
         # Consolidation jobs
         consolidate_org,
         consolidate_all_orgs,

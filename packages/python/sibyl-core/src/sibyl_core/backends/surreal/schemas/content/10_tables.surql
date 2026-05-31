@@ -97,7 +97,7 @@ DEFINE INDEX IF NOT EXISTS idx_document_chunks_content_ft ON document_chunks FIE
 DEFINE INDEX IF NOT EXISTS idx_document_chunks_embedding ON document_chunks FIELDS embedding
     HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12;
 
-DEFINE TABLE IF NOT EXISTS raw_captures SCHEMAFULL;
+DEFINE TABLE IF NOT EXISTS raw_captures SCHEMAFULL CHANGEFEED 7d;
 DEFINE FIELD IF NOT EXISTS uuid ON raw_captures TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON raw_captures TYPE string;
 DEFINE FIELD IF NOT EXISTS source_id ON raw_captures TYPE string DEFAULT '';
@@ -191,6 +191,23 @@ DEFINE INDEX IF NOT EXISTS idx_source_imports_uuid ON source_imports FIELDS uuid
 DEFINE INDEX IF NOT EXISTS idx_source_imports_org ON source_imports FIELDS organization_id;
 DEFINE INDEX IF NOT EXISTS idx_source_imports_principal ON source_imports FIELDS organization_id, principal_id;
 DEFINE INDEX IF NOT EXISTS idx_source_imports_status ON source_imports FIELDS organization_id, status;
+
+DEFINE TABLE IF NOT EXISTS content_changefeed_cursors SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS uuid ON content_changefeed_cursors TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON content_changefeed_cursors TYPE string;
+DEFINE FIELD IF NOT EXISTS table_name ON content_changefeed_cursors TYPE string;
+DEFINE FIELD IF NOT EXISTS consumer_name ON content_changefeed_cursors TYPE string;
+DEFINE FIELD IF NOT EXISTS versionstamp ON content_changefeed_cursors TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS metadata ON content_changefeed_cursors TYPE object FLEXIBLE DEFAULT {{}};
+DEFINE FIELD IF NOT EXISTS created_at ON content_changefeed_cursors TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS updated_at ON content_changefeed_cursors TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS idx_content_changefeed_cursors_uuid
+    ON content_changefeed_cursors FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_content_changefeed_cursors_org_consumer
+    ON content_changefeed_cursors FIELDS organization_id, table_name, consumer_name UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_content_changefeed_cursors_updated_at
+    ON content_changefeed_cursors FIELDS updated_at;
 
 DEFINE TABLE IF NOT EXISTS derived_from SCHEMAFULL TYPE RELATION IN raw_captures OUT source_imports ENFORCED;
 DEFINE FIELD IF NOT EXISTS uuid ON derived_from TYPE string;

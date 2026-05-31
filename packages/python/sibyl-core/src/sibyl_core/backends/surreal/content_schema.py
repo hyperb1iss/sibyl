@@ -40,12 +40,13 @@ CONTENT_TABLES = (
     "raw_captures",
     "api_idempotency_records",
     "source_imports",
+    "content_changefeed_cursors",
     "system_settings",
     "telemetry_rollups",
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 9
+CONTENT_SCHEMA_CURRENT_VERSION = 10
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -177,6 +178,8 @@ ALTER TABLE IF EXISTS api_idempotency_records PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 ALTER TABLE IF EXISTS source_imports PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
+ALTER TABLE IF EXISTS content_changefeed_cursors PERMISSIONS
+    FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 ALTER TABLE IF EXISTS system_settings PERMISSIONS NONE;
 ALTER TABLE IF EXISTS telemetry_rollups PERMISSIONS NONE;
 ALTER TABLE IF EXISTS backup_settings PERMISSIONS
@@ -188,6 +191,28 @@ ALTER TABLE IF EXISTS derived_from PERMISSIONS
 ALTER TABLE IF EXISTS chunk_of PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 ALTER TABLE IF EXISTS supersedes PERMISSIONS
+    FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
+"""
+
+CONTENT_RAW_CAPTURE_CHANGEFEED_MIGRATION_DEFINITIONS = """
+ALTER TABLE IF EXISTS raw_captures CHANGEFEED 7d;
+
+DEFINE TABLE IF NOT EXISTS content_changefeed_cursors SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS uuid ON content_changefeed_cursors TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON content_changefeed_cursors TYPE string;
+DEFINE FIELD IF NOT EXISTS table_name ON content_changefeed_cursors TYPE string;
+DEFINE FIELD IF NOT EXISTS consumer_name ON content_changefeed_cursors TYPE string;
+DEFINE FIELD IF NOT EXISTS versionstamp ON content_changefeed_cursors TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS metadata ON content_changefeed_cursors TYPE object FLEXIBLE DEFAULT {};
+DEFINE FIELD IF NOT EXISTS created_at ON content_changefeed_cursors TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS updated_at ON content_changefeed_cursors TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_content_changefeed_cursors_uuid
+    ON content_changefeed_cursors FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_content_changefeed_cursors_org_consumer
+    ON content_changefeed_cursors FIELDS organization_id, table_name, consumer_name UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_content_changefeed_cursors_updated_at
+    ON content_changefeed_cursors FIELDS updated_at;
+ALTER TABLE IF EXISTS content_changefeed_cursors PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 """
 
@@ -298,6 +323,13 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=9,
             name="content_lineage_relation_tables",
             statements=tuple(split_statements(CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=10,
+            name="raw_capture_changefeed_cursor",
+            statements=tuple(
+                split_statements(CONTENT_RAW_CAPTURE_CHANGEFEED_MIGRATION_DEFINITIONS)
+            ),
         ),
     )
 

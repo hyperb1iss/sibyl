@@ -56,7 +56,7 @@ from sibyl.persistence.surreal.system_settings import (
     save_system_setting,
 )
 from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
-from sibyl_core.backends.surreal.content_schema import EMBEDDING_DIM
+from sibyl_core.backends.surreal.content_schema import CONTENT_SCHEMA_CURRENT_VERSION, EMBEDDING_DIM
 from sibyl_core.models import ChunkType, SourceType
 
 pytest.importorskip("surrealdb")
@@ -1189,7 +1189,7 @@ async def test_content_schema_migration_normalizes_legacy_enum_values() -> None:
         assert source_rows[0]["crawl_status"] == "pending"
         assert capture_rows[0]["memory_scope"] == "private"
         assert capture_rows[0]["review_state"] == "pending"
-        assert version_rows[0]["version"] == 8
+        assert version_rows[0]["version"] == CONTENT_SCHEMA_CURRENT_VERSION
 
         await client.execute_query(
             "CREATE raw_captures CONTENT $record;",
@@ -1293,7 +1293,7 @@ async def test_content_schema_migration_backfills_legacy_raw_capture_defaults() 
         assert capture["captured_at"] is not None
         assert capture["memory_scope"] == "private"
         assert capture["review_state"] == "pending"
-        assert version_rows[0]["version"] == 8
+        assert version_rows[0]["version"] == CONTENT_SCHEMA_CURRENT_VERSION
     finally:
         await client.close()
 

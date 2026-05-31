@@ -10,6 +10,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from sibyl.jobs import source_imports
+from sibyl.jobs.raw_changefeed import (
+    poll_all_raw_capture_changefeeds,
+    poll_raw_capture_changefeed,
+)
 from sibyl.jobs.raw_promotion import promote_raw_captures
 from sibyl.jobs.worker import WorkerSettings
 from sibyl_core.models.sources import SourceRecord
@@ -1074,3 +1078,5 @@ def test_worker_settings_registers_source_import_job() -> None:
     assert source_imports.import_source_archive in WorkerSettings.functions
     assert source_imports.drain_source_import in WorkerSettings.functions
     assert promote_raw_captures in WorkerSettings.functions
+    assert poll_raw_capture_changefeed in WorkerSettings.functions
+    assert poll_all_raw_capture_changefeeds in WorkerSettings.functions

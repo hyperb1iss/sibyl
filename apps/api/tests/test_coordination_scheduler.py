@@ -30,6 +30,16 @@ def test_privacy_purge_job_is_scheduled_and_registered() -> None:
     )
 
 
+def test_raw_capture_changefeed_poll_is_scheduled_and_registered() -> None:
+    spec_names = {spec.name for spec in worker_module.get_schedule_specs()}
+
+    assert "poll_all_raw_capture_changefeeds" in spec_names
+    assert worker_module.poll_raw_capture_changefeed in worker_module.WorkerSettings.functions
+    assert worker_module.poll_all_raw_capture_changefeeds in (
+        worker_module.WorkerSettings.functions
+    )
+
+
 @pytest.mark.asyncio
 async def test_local_scheduler_logs_registered_jobs_on_startup(monkeypatch) -> None:
     log_schedule_specs = MagicMock()

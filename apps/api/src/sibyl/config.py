@@ -576,6 +576,10 @@ class Settings(BaseSettings):
         le=8192,
         description="Maximum output tokens for one memory extraction LLM call",
     )
+    raw_capture_changefeed_poll_enabled: bool = Field(
+        default=True,
+        description="Poll raw_captures CHANGEFEED and enqueue incremental promotion",
+    )
 
     # Knowledge repository configuration
     knowledge_repo_path: Path = Field(

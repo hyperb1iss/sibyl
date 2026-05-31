@@ -136,12 +136,20 @@ async def test_live_surreal_server_executes_3x_ingestion_primitives() -> None:
         changefeed_result = await client.execute_query_raw(
             """
             DEFINE TABLE live_changefeed_source CHANGEFEED 1d;
-            CREATE live_changefeed_source:first SET value = 'alpha';
+            CREATE live_changefeed_source:first SET
+                uuid = 'raw-live',
+                organization_id = 'org-live',
+                value = 'alpha';
             SHOW CHANGES FOR TABLE live_changefeed_source SINCE 0 LIMIT 10;
             """
         )
         changefeed_rows = [row for row in normalize_records(changefeed_result) if "changes" in row]
         assert any("live_changefeed_source" in str(row["changes"]) for row in changefeed_rows)
+        from sibyl.jobs.raw_changefeed import RawCaptureChangeRef, _raw_capture_refs_for_org
+
+        assert _raw_capture_refs_for_org(changefeed_rows, organization_id="org-live") == [
+            RawCaptureChangeRef(raw_memory_id="raw-live", organization_id="org-live")
+        ]
 
         await client.execute_query(
             """

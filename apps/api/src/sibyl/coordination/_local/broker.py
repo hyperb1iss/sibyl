@@ -21,6 +21,7 @@ from sibyl.coordination.broker import (
     JobStatus,
     memory_extraction_job_id,
     memory_projection_job_id,
+    raw_capture_changefeed_job_id,
     raw_promotion_job_id,
 )
 from sibyl.jobs.worker import WorkerSettings
@@ -427,6 +428,21 @@ class LocalQueueBroker:
             raw_memory_ids=raw_memory_ids,
             limit=limit,
             force=force,
+        )
+        return result.job_id
+
+    async def enqueue_raw_capture_changefeed_poll(
+        self,
+        organization_id: str,
+        *,
+        limit: int = 100,
+    ) -> str:
+        result = await self._enqueue_unique(
+            "poll_raw_capture_changefeed",
+            organization_id,
+            job_id=raw_capture_changefeed_job_id(organization_id),
+            clear_result=True,
+            limit=limit,
         )
         return result.job_id
 
