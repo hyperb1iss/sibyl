@@ -74,11 +74,18 @@ class ClaudeCodeJsonlAdapter:
         metadata_schema={
             "cwd": "string",
             "entrypoint": "string",
+            "agent_id": "string",
+            "forked_from": "string",
+            "forked_from_adapter_record_id": "string",
             "git_branch": "string",
             "is_compact_summary": "boolean",
+            "parent_adapter_record_id": "string",
             "parent_uuid": "string",
+            "prompt_id": "string",
             "role": "string",
             "session_id": "string",
+            "source_tool_assistant_adapter_record_id": "string",
+            "source_tool_assistant_uuid": "string",
             "turn_uuid": "string",
         },
         supports_incremental=True,
@@ -133,9 +140,13 @@ class CodexJsonlAdapter:
         metadata_schema={
             "call_id": "string",
             "cwd": "string",
+            "forked_from": "string",
+            "parent_uuid": "string",
             "role": "string",
             "session_id": "string",
+            "source_subagent": "string",
             "source_event_type": "string",
+            "thread_source": "object",
             "tool_name": "string",
         },
         supports_incremental=True,
@@ -288,6 +299,7 @@ def _parse_claude_transcripts(manifest: SourceImportManifest) -> _ParsedTranscri
                     labels=["agent_transcript", "claude_code", role],
                 )
             )
+    _attach_claude_lineage_adapter_record_ids(turns)
     return _ParsedTranscript(
         records=tuple(_records_from_turns(manifest, turns)),
         skipped=tuple(skipped),
@@ -304,6 +316,7 @@ def _parse_codex_transcripts(manifest: SourceImportManifest) -> _ParsedTranscrip
             continue
         session_id = file_path.stem
         cwd: str | None = None
+        session_metadata: dict[str, object] = {}
         pending_calls: dict[str, dict[str, object]] = {}
         emitted_tool_calls: set[str] = set()
         for line_index, raw_line in enumerate(file_path.open(encoding="utf-8", errors="replace")):
@@ -318,6 +331,7 @@ def _parse_codex_transcripts(manifest: SourceImportManifest) -> _ParsedTranscrip
             if obj.get("type") == "session_meta":
                 session_id = _optional_str(payload.get("id")) or session_id
                 cwd = _optional_str(payload.get("cwd"))
+                session_metadata = _codex_session_metadata(payload)
                 continue
             payload_type = payload.get("type")
             if payload_type == "message":
@@ -328,6 +342,7 @@ def _parse_codex_transcripts(manifest: SourceImportManifest) -> _ParsedTranscrip
                     line_index=line_index,
                     session_id=session_id,
                     cwd=cwd,
+                    session_metadata=session_metadata,
                     timestamp=obj.get("timestamp"),
                 )
                 if turn is not None:
@@ -343,6 +358,7 @@ def _parse_codex_transcripts(manifest: SourceImportManifest) -> _ParsedTranscrip
                             line_index=line_index,
                             session_id=session_id,
                             cwd=cwd,
+                            session_metadata=session_metadata,
                             timestamp=obj.get("timestamp"),
                         )
                     )
@@ -363,6 +379,7 @@ def _parse_codex_transcripts(manifest: SourceImportManifest) -> _ParsedTranscrip
                             line_index=line_index,
                             session_id=session_id,
                             cwd=cwd,
+                            session_metadata=session_metadata,
                             timestamp=obj.get("timestamp"),
                         )
                     )
@@ -381,6 +398,7 @@ def _parse_codex_transcripts(manifest: SourceImportManifest) -> _ParsedTranscrip
                             line_index=line_index,
                             session_id=session_id,
                             cwd=cwd,
+                            session_metadata=session_metadata,
                             timestamp=obj.get("timestamp"),
                         )
                     )
@@ -394,6 +412,7 @@ def _parse_codex_transcripts(manifest: SourceImportManifest) -> _ParsedTranscrip
                     line_index=-1,
                     session_id=session_id,
                     cwd=cwd,
+                    session_metadata=session_metadata,
                     timestamp=None,
                     fallback_call_id=call_id,
                 )
@@ -460,6 +479,7 @@ def _codex_message_turn(
     line_index: int,
     session_id: str,
     cwd: str | None,
+    session_metadata: Mapping[str, object] | None,
     timestamp: object,
 ) -> _TranscriptTurn | None:
     role = _optional_str(payload.get("role"))
@@ -482,6 +502,7 @@ def _codex_message_turn(
         source_uri=_line_uri(file_path, line_index),
         occurred_at=_parse_datetime(timestamp),
         metadata={
+            **_codex_record_metadata(session_metadata, payload),
             "content_types": content_types,
             "cwd": cwd,
             "line_index": line_index,
@@ -504,6 +525,7 @@ def _codex_agent_message_turn(
     line_index: int,
     session_id: str,
     cwd: str | None,
+    session_metadata: Mapping[str, object] | None,
     timestamp: object,
 ) -> _TranscriptTurn:
     message = _optional_str(payload.get("message")) or ""
@@ -521,6 +543,7 @@ def _codex_agent_message_turn(
         source_uri=_line_uri(file_path, line_index),
         occurred_at=_parse_datetime(timestamp),
         metadata={
+            **_codex_record_metadata(session_metadata, payload),
             "cwd": cwd,
             "line_index": line_index,
             "phase": _optional_str(payload.get("phase")),
@@ -544,6 +567,7 @@ def _codex_tool_turn(
     line_index: int,
     session_id: str,
     cwd: str | None,
+    session_metadata: Mapping[str, object] | None,
     timestamp: object,
     fallback_call_id: str | None = None,
 ) -> _TranscriptTurn:
@@ -569,6 +593,7 @@ def _codex_tool_turn(
         source_uri=_line_uri(file_path, line_index) if line_index >= 0 else str(file_path),
         occurred_at=_parse_datetime(timestamp),
         metadata={
+            **_codex_record_metadata(session_metadata, call, output),
             "call_id": call_id,
             "cwd": cwd,
             "line_index": line_index,
@@ -634,21 +659,96 @@ def _claude_metadata(
     line_index: int,
 ) -> dict[str, object]:
     return {
+        "agent_id": _optional_str(obj.get("agentId")),
         "content_types": list(content_types),
         "cwd": _optional_str(obj.get("cwd")),
         "entrypoint": _optional_str(obj.get("entrypoint")),
+        "forked_from": _optional_str(obj.get("forked_from"))
+        or _optional_str(obj.get("forkedFrom")),
         "git_branch": _optional_str(obj.get("gitBranch")),
         "is_compact_summary": bool(obj.get("isCompactSummary")),
         "is_sidechain": bool(obj.get("isSidechain")),
         "line_index": line_index,
         "parent_uuid": _optional_str(obj.get("parentUuid")),
+        "prompt_id": _optional_str(obj.get("promptId")),
         "role": _optional_str(obj.get("type")),
         "session_id": _optional_str(obj.get("sessionId")),
         "source_file": str(file_path),
         "source_platform": "claude_code",
+        "source_tool_assistant_uuid": _optional_str(obj.get("sourceToolAssistantUUID")),
         "turn_uuid": _optional_str(obj.get("uuid")),
         "user_type": _optional_str(obj.get("userType")),
     }
+
+
+def _attach_claude_lineage_adapter_record_ids(turns: Sequence[_TranscriptTurn]) -> None:
+    by_uuid = {
+        turn_uuid: turn.adapter_record_id
+        for turn in turns
+        if (turn_uuid := _optional_str(turn.metadata.get("turn_uuid")))
+    }
+    for turn in turns:
+        for source_key, target_key in (
+            ("parent_uuid", "parent_adapter_record_id"),
+            ("forked_from", "forked_from_adapter_record_id"),
+            (
+                "source_tool_assistant_uuid",
+                "source_tool_assistant_adapter_record_id",
+            ),
+        ):
+            reference = _optional_str(turn.metadata.get(source_key))
+            if reference and (adapter_record_id := by_uuid.get(reference)):
+                turn.metadata[target_key] = adapter_record_id
+
+
+def _codex_session_metadata(payload: Mapping[str, object]) -> dict[str, object]:
+    metadata: dict[str, object] = {}
+    source = _mapping_dict(payload.get("source"))
+    thread_source = _mapping_dict(payload.get("thread_source")) or _mapping_dict(
+        payload.get("threadSource")
+    )
+    if source:
+        metadata["source"] = source
+        if subagent := _optional_str(source.get("subagent")):
+            metadata["source_subagent"] = subagent
+    if thread_source:
+        metadata["thread_source"] = thread_source
+    metadata.update(_codex_lineage_metadata(payload, source, thread_source))
+    return metadata
+
+
+def _codex_record_metadata(
+    session_metadata: Mapping[str, object] | None,
+    *payloads: Mapping[str, object],
+) -> dict[str, object]:
+    metadata = dict(session_metadata or {})
+    metadata.update(_codex_lineage_metadata(*payloads, metadata))
+    return metadata
+
+
+def _codex_lineage_metadata(*payloads: Mapping[str, object]) -> dict[str, object]:
+    metadata: dict[str, object] = {}
+    for key in ("parent_uuid", "parentUuid"):
+        value = next(
+            (_optional_str(payload.get(key)) for payload in payloads if payload.get(key)), None
+        )
+        if value:
+            metadata["parent_uuid"] = value
+            break
+    for key in ("forked_from", "forkedFrom"):
+        value = next(
+            (_optional_str(payload.get(key)) for payload in payloads if payload.get(key)), None
+        )
+        if value:
+            metadata["forked_from"] = value
+            break
+    return metadata
+
+
+def _mapping_dict(value: object) -> dict[str, object]:
+    if isinstance(value, Mapping):
+        return {str(key): item for key, item in value.items()}
+    return {}
 
 
 def _content_text(value: object) -> tuple[str, list[str]]:

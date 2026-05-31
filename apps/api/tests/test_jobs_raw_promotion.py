@@ -8,6 +8,9 @@ from uuid import UUID, uuid4
 import pytest
 
 from sibyl.jobs import raw_promotion
+from sibyl_core.models.entities import RelationshipType
+from sibyl_core.models.sources import SourceImportManifest
+from sibyl_core.services.source_adapters import build_source_record_id
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 
 
@@ -57,6 +60,17 @@ def _list_memories(memories: list[RawMemory]):
         return memories
 
     return fake_list
+
+
+def _source_record_id(adapter_record_id: str) -> str:
+    return build_source_record_id(
+        manifest=SourceImportManifest(
+            adapter_name="claude_code_jsonl",
+            adapter_version="1.0",
+            source_identity="session-1",
+        ),
+        adapter_record_id=adapter_record_id,
+    )
 
 
 @pytest.mark.asyncio
@@ -133,6 +147,287 @@ async def test_promote_raw_captures_writes_chunks_and_graph_entity(
     assert saved_memories[-1].metadata["raw_promotion_state"] == "promoted"
     assert saved_memories[-1].metadata["raw_promotion_chunk_count"] == len(saved_chunks)
     assert saved_memories[-1].metadata["source_extraction_state"] == "disabled"
+
+
+@pytest.mark.asyncio
+async def test_promote_raw_captures_materializes_transcript_lineage_edges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    organization_id = str(uuid4())
+    parent_reply = _raw_memory(
+        organization_id=organization_id,
+        source_id=_source_record_id("session.jsonl:parent"),
+        entity_id="parent-reply-entity",
+    )
+    parent_fork = _raw_memory(
+        organization_id=organization_id,
+        source_id=_source_record_id("session.jsonl:fork"),
+        entity_id="parent-fork-entity",
+    )
+    parent_tool = _raw_memory(
+        organization_id=organization_id,
+        source_id=_source_record_id("session.jsonl:assistant"),
+        entity_id="parent-tool-entity",
+    )
+    child = _raw_memory(
+        organization_id=organization_id,
+        source_id=_source_record_id("subagents/worker.jsonl:child"),
+        metadata={
+            "adapter_name": "claude_code_jsonl",
+            "adapter_version": "1.0",
+            "adapter_record_id": "subagents/worker.jsonl:child",
+            "source_identity": "session-1",
+            "source_record_metadata": {
+                "forked_from": "fork",
+                "forked_from_adapter_record_id": "session.jsonl:fork",
+                "parent_adapter_record_id": "session.jsonl:parent",
+                "parent_uuid": "parent",
+                "source_tool_assistant_adapter_record_id": "session.jsonl:assistant",
+                "source_tool_assistant_uuid": "assistant",
+                "turn_uuid": "child",
+            },
+        },
+    )
+    raw_by_source = {
+        parent_reply.source_id: parent_reply,
+        parent_fork.source_id: parent_fork,
+        parent_tool.source_id: parent_tool,
+    }
+    saved_memories = []
+    created_relationships = []
+
+    @asynccontextmanager
+    async def fake_session():
+        yield None
+
+    async def fake_save_document(_session, *, document):
+        return document
+
+    async def fake_delete_chunks(_session, *, document_id, organization_id):
+        return 0
+
+    async def fake_save_chunks(_session, *, chunks):
+        return chunks
+
+    async def fake_save_memory(updated: RawMemory) -> RawMemory:
+        saved_memories.append(updated)
+        return updated
+
+    async def fake_get_raw_by_source_id(*, organization_id: str, source_id: str, **_kwargs):
+        assert organization_id == child.organization_id
+        assert _kwargs["memory_scope"] is child.memory_scope
+        assert _kwargs["scope_key"] == child.scope_key
+        assert _kwargs["principal_id"] == child.principal_id
+        return raw_by_source.get(source_id)
+
+    class FakeEntityManager:
+        async def create_direct(self, entity, *, generate_embedding: bool = False):
+            assert generate_embedding is False
+            return entity.id
+
+    class FakeRelationshipManager:
+        async def create_direct_bulk(self, relationships, *, generate_embeddings: bool = False):
+            assert generate_embeddings is False
+            created_relationships.extend(relationships)
+            return [relationship.id for relationship in relationships]
+
+    async def fake_graph_runtime(_group_id: str):
+        return SimpleNamespace(
+            entity_manager=FakeEntityManager(),
+            relationship_manager=FakeRelationshipManager(),
+        )
+
+    monkeypatch.setattr(
+        raw_promotion,
+        "list_raw_memories_for_promotion",
+        _list_memories([child]),
+    )
+    monkeypatch.setattr(raw_promotion, "EmbeddingService", _fake_embedder)
+    monkeypatch.setattr(raw_promotion, "get_content_read_session", fake_session)
+    monkeypatch.setattr(raw_promotion, "save_crawled_document_record", fake_save_document)
+    monkeypatch.setattr(raw_promotion, "delete_document_chunks_for_document", fake_delete_chunks)
+    monkeypatch.setattr(raw_promotion, "save_document_chunks", fake_save_chunks)
+    monkeypatch.setattr(raw_promotion, "get_entity_graph_runtime", fake_graph_runtime)
+    monkeypatch.setattr(raw_promotion, "get_raw_memory_by_source_id", fake_get_raw_by_source_id)
+    monkeypatch.setattr(raw_promotion, "save_raw_memory", fake_save_memory)
+    monkeypatch.setattr(raw_promotion.settings, "auto_extract_entities", False)
+
+    result = await raw_promotion.promote_raw_captures({}, child.organization_id)
+
+    assert result["promoted_count"] == 1
+    assert len(created_relationships) == 3
+    by_type = {
+        relationship.relationship_type: relationship for relationship in created_relationships
+    }
+    assert by_type[RelationshipType.REPLIES_TO].source_id == child.id
+    assert by_type[RelationshipType.REPLIES_TO].target_id == "parent-reply-entity"
+    assert by_type[RelationshipType.FORKED_FROM].source_id == child.id
+    assert by_type[RelationshipType.FORKED_FROM].target_id == "parent-fork-entity"
+    assert by_type[RelationshipType.SPAWNED_SUBAGENT].source_id == "parent-tool-entity"
+    assert by_type[RelationshipType.SPAWNED_SUBAGENT].target_id == child.id
+    assert saved_memories[-1].metadata["raw_promotion_lineage_edge_count"] == 3
+    assert saved_memories[-1].metadata["raw_promotion_lineage_missing_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_promote_raw_captures_repairs_missing_lineage_for_existing_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    organization_id = str(uuid4())
+    parent = _raw_memory(
+        organization_id=organization_id,
+        source_id=_source_record_id("session.jsonl:parent"),
+        entity_id="parent-entity",
+    )
+    child = _raw_memory(
+        organization_id=organization_id,
+        source_id=_source_record_id("session.jsonl:child"),
+        entity_id="child-entity",
+        metadata={
+            "adapter_name": "claude_code_jsonl",
+            "adapter_version": "1.0",
+            "adapter_record_id": "session.jsonl:child",
+            "raw_promotion_lineage_missing_count": 1,
+            "raw_promotion_state": "promoted",
+            "source_identity": "session-1",
+            "source_record_metadata": {
+                "parent_adapter_record_id": "session.jsonl:parent",
+                "parent_uuid": "parent",
+                "turn_uuid": "child",
+            },
+        },
+    )
+    saved_memories = []
+    created_relationships = []
+
+    async def fake_get_raw_by_source_id(*, source_id: str, **_kwargs):
+        assert source_id == parent.source_id
+        return parent
+
+    async def fake_save_memory(updated: RawMemory) -> RawMemory:
+        saved_memories.append(updated)
+        return updated
+
+    class FakeRelationshipManager:
+        async def create_direct_bulk(self, relationships, *, generate_embeddings: bool = False):
+            assert generate_embeddings is False
+            created_relationships.extend(relationships)
+            return [relationship.id for relationship in relationships]
+
+    async def fake_graph_runtime(_group_id: str):
+        return SimpleNamespace(relationship_manager=FakeRelationshipManager())
+
+    monkeypatch.setattr(
+        raw_promotion,
+        "list_raw_memories_for_promotion",
+        _list_memories([child]),
+    )
+    monkeypatch.setattr(raw_promotion, "EmbeddingService", _fake_embedder)
+    monkeypatch.setattr(raw_promotion, "get_entity_graph_runtime", fake_graph_runtime)
+    monkeypatch.setattr(raw_promotion, "get_raw_memory_by_source_id", fake_get_raw_by_source_id)
+    monkeypatch.setattr(raw_promotion, "save_raw_memory", fake_save_memory)
+
+    result = await raw_promotion.promote_raw_captures({}, child.organization_id)
+
+    assert result["promoted_count"] == 0
+    assert result["skipped_existing_count"] == 1
+    assert len(created_relationships) == 1
+    assert created_relationships[0].relationship_type is RelationshipType.REPLIES_TO
+    assert saved_memories[-1].metadata["raw_promotion_lineage_edge_count"] == 1
+    assert saved_memories[-1].metadata["raw_promotion_lineage_missing_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_promote_raw_captures_keeps_promotion_when_lineage_write_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    organization_id = str(uuid4())
+    parent = _raw_memory(
+        organization_id=organization_id,
+        source_id=_source_record_id("session.jsonl:parent"),
+        entity_id="parent-entity",
+    )
+    child = _raw_memory(
+        organization_id=organization_id,
+        source_id=_source_record_id("session.jsonl:child"),
+        metadata={
+            "adapter_name": "claude_code_jsonl",
+            "adapter_version": "1.0",
+            "adapter_record_id": "session.jsonl:child",
+            "source_identity": "session-1",
+            "source_record_metadata": {
+                "parent_adapter_record_id": "session.jsonl:parent",
+                "parent_uuid": "parent",
+                "turn_uuid": "child",
+            },
+        },
+    )
+    saved_memories = []
+
+    @asynccontextmanager
+    async def fake_session():
+        yield None
+
+    async def fake_save_document(_session, *, document):
+        return document
+
+    async def fake_delete_chunks(_session, *, document_id, organization_id):
+        return 0
+
+    async def fake_save_chunks(_session, *, chunks):
+        return chunks
+
+    async def fake_get_raw_by_source_id(*, source_id: str, **_kwargs):
+        assert source_id == parent.source_id
+        return parent
+
+    async def fake_save_memory(updated: RawMemory) -> RawMemory:
+        saved_memories.append(updated)
+        return updated
+
+    class FakeEntityManager:
+        async def create_direct(self, entity, *, generate_embedding: bool = False):
+            assert generate_embedding is False
+            return entity.id
+
+    class FakeRelationshipManager:
+        async def create_direct_bulk(self, relationships, *, generate_embeddings: bool = False):
+            assert relationships
+            assert generate_embeddings is False
+            raise RuntimeError("relationship backend unavailable")
+
+    async def fake_graph_runtime(_group_id: str):
+        return SimpleNamespace(
+            entity_manager=FakeEntityManager(),
+            relationship_manager=FakeRelationshipManager(),
+        )
+
+    monkeypatch.setattr(
+        raw_promotion,
+        "list_raw_memories_for_promotion",
+        _list_memories([child]),
+    )
+    monkeypatch.setattr(raw_promotion, "EmbeddingService", _fake_embedder)
+    monkeypatch.setattr(raw_promotion, "get_content_read_session", fake_session)
+    monkeypatch.setattr(raw_promotion, "save_crawled_document_record", fake_save_document)
+    monkeypatch.setattr(raw_promotion, "delete_document_chunks_for_document", fake_delete_chunks)
+    monkeypatch.setattr(raw_promotion, "save_document_chunks", fake_save_chunks)
+    monkeypatch.setattr(raw_promotion, "get_entity_graph_runtime", fake_graph_runtime)
+    monkeypatch.setattr(raw_promotion, "get_raw_memory_by_source_id", fake_get_raw_by_source_id)
+    monkeypatch.setattr(raw_promotion, "save_raw_memory", fake_save_memory)
+    monkeypatch.setattr(raw_promotion.settings, "auto_extract_entities", False)
+
+    result = await raw_promotion.promote_raw_captures({}, child.organization_id)
+
+    assert result["promoted_count"] == 1
+    assert result["failed_count"] == 0
+    assert saved_memories[-1].metadata["raw_promotion_state"] == "promoted"
+    assert saved_memories[-1].metadata["raw_promotion_lineage_edge_count"] == 0
+    assert saved_memories[-1].metadata["raw_promotion_lineage_missing_count"] == 1
+    assert (
+        "relationship backend unavailable"
+        in saved_memories[-1].metadata["raw_promotion_lineage_error"]
+    )
 
 
 @pytest.mark.asyncio

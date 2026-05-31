@@ -931,6 +931,9 @@ class TestSurrealContentHelpers:
         assert memories[0].entity_id == "document-1"
         query, params = fake_client.calls[0]
         assert "metadata.raw_promotion_state" in query
+        assert "metadata.raw_promotion_lineage_missing_count > 0" in query
+        assert "metadata.raw_promotion_lineage_missing_count = NONE" in query
+        assert "metadata.source_record_metadata.parent_uuid != NONE" in query
         assert params["organization_id"] == "org-1"
 
     @pytest.mark.asyncio

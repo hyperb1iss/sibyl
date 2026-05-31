@@ -60,6 +60,10 @@ async def test_claude_code_adapter_preserves_turn_metadata(tmp_path: Path) -> No
                 "sessionId": "session-1",
                 "timestamp": "2026-05-29T04:53:00.000Z",
                 "cwd": "/Users/bliss/dev/sibyl",
+                "agentId": "agent-1",
+                "forkedFrom": "turn-root",
+                "promptId": "prompt-1",
+                "sourceToolAssistantUUID": "turn-tool",
                 "message": {
                     "role": "assistant",
                     "content": [
@@ -83,6 +87,15 @@ async def test_claude_code_adapter_preserves_turn_metadata(tmp_path: Path) -> No
                     "content": [{"type": "tool_result", "content": "file contents"}],
                 },
             },
+            {
+                "type": "assistant",
+                "uuid": "sidechain-1",
+                "parentUuid": "turn-assistant-1",
+                "isSidechain": True,
+                "sessionId": "session-1",
+                "timestamp": "2026-05-29T04:53:02.000Z",
+                "message": {"role": "assistant", "content": "subagent reply"},
+            },
         ],
     )
     adapter = ClaudeCodeJsonlAdapter()
@@ -96,15 +109,22 @@ async def test_claude_code_adapter_preserves_turn_metadata(tmp_path: Path) -> No
     assert [record.adapter_record_id for record in batch.records] == [
         "session.jsonl:turn-user-1",
         "session.jsonl:turn-assistant-1",
+        "session.jsonl:sidechain-1",
     ]
     assistant = batch.records[1]
     assert assistant.source_type == "agent_transcript_turn"
     assert "adapter started" in assistant.body
     assert "Tool result" in assistant.body
+    assert assistant.metadata["agent_id"] == "agent-1"
+    assert assistant.metadata["forked_from"] == "turn-root"
     assert assistant.metadata["parent_uuid"] == "turn-user-1"
+    assert assistant.metadata["prompt_id"] == "prompt-1"
+    assert assistant.metadata["source_tool_assistant_uuid"] == "turn-tool"
     assert assistant.metadata["folded_tool_result_count"] == 1
     assert assistant.metadata["source_platform"] == "claude_code"
     assert assistant.occurred_at == datetime(2026, 5, 29, 4, 53, tzinfo=UTC)
+    sidechain = batch.records[2]
+    assert sidechain.metadata["parent_adapter_record_id"] == "session.jsonl:turn-assistant-1"
 
 
 @pytest.mark.asyncio
@@ -119,6 +139,11 @@ async def test_codex_adapter_pairs_tool_calls_and_resumes(tmp_path: Path) -> Non
                     "id": "session-1",
                     "timestamp": "2026-05-30T00:00:00Z",
                     "cwd": "/Users/bliss/dev/sibyl",
+                    "source": {"subagent": "review"},
+                    "thread_source": {
+                        "parent_uuid": "session-parent",
+                        "forked_from": "session-fork",
+                    },
                 },
             },
             {
@@ -127,6 +152,8 @@ async def test_codex_adapter_pairs_tool_calls_and_resumes(tmp_path: Path) -> Non
                 "payload": {
                     "type": "message",
                     "role": "user",
+                    "parent_uuid": "codex-parent",
+                    "forked_from": "codex-fork",
                     "content": [{"type": "input_text", "text": "ship it"}],
                 },
             },
@@ -170,11 +197,16 @@ async def test_codex_adapter_pairs_tool_calls_and_resumes(tmp_path: Path) -> Non
         "rollout-2026-05-30T00-00-00-session.jsonl:session-1:message:1",
         "rollout-2026-05-30T00-00-00-session.jsonl:session-1:tool:call-1",
     ]
+    assert first.records[0].metadata["parent_uuid"] == "codex-parent"
+    assert first.records[0].metadata["forked_from"] == "codex-fork"
     assert first.records[1].source_type == "agent_tool_call"
     assert first.records[1].metadata["tool_name"] == "exec_command"
     assert "clean" in first.records[1].body
     assert first.checkpoint.cursor == "2"
     assert second.records[0].body == "done"
+    assert second.records[0].metadata["source_subagent"] == "review"
+    assert second.records[0].metadata["parent_uuid"] == "session-parent"
+    assert second.records[0].metadata["forked_from"] == "session-fork"
     assert second.checkpoint.done is True
 
 

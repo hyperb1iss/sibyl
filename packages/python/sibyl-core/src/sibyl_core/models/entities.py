@@ -97,6 +97,9 @@ class RelationshipType(StrEnum):
     CRAWLED_FROM = "CRAWLED_FROM"  # Document -> Source
     CHILD_OF = "CHILD_OF"  # Document -> Document (page hierarchy)
     MENTIONS = "MENTIONS"  # Document -> Entity (extracted reference)
+    REPLIES_TO = "REPLIES_TO"  # Transcript turn -> parent turn
+    FORKED_FROM = "FORKED_FROM"  # Transcript branch -> fork source
+    SPAWNED_SUBAGENT = "SPAWNED_SUBAGENT"  # Parent agent turn -> subagent turn
 
     # Domain-general context relationships
     ABOUT = "ABOUT"  # Memory -> Domain/Topic

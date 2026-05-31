@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -26,16 +28,28 @@ from sibyl.persistence.content_runtime import (
     save_document_chunks,
 )
 from sibyl.persistence.graph_runtime import get_entity_graph_runtime
-from sibyl_core.models.entities import Entity, EntityType
+from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.models.sources import SourceImportManifest
 from sibyl_core.observability import elapsed_ms
+from sibyl_core.services.source_adapters import build_source_record_id
 from sibyl_core.services.surreal_content import (
     RawMemory,
+    get_raw_memory_by_source_id,
     list_raw_memories_for_promotion,
     raw_memory_recallable,
     save_raw_memory,
 )
 
 log = structlog.get_logger()
+
+
+@dataclass(frozen=True, slots=True)
+class _LineageReference:
+    relationship_type: RelationshipType
+    reference: str
+    metadata_key: str
+    adapter_record_id: str | None = None
+    parent_to_current: bool = False
 
 
 async def promote_raw_captures(
@@ -115,6 +129,11 @@ async def _promote_one(
 ) -> dict[str, Any]:
     skip_status = _promotion_skip_status(memory, force=force)
     if skip_status is not None:
+        if skip_status == "skipped_existing" and memory.entity_id:
+            lineage = await _safe_lineage_metadata(memory, entity_id=memory.entity_id)
+            if lineage:
+                memory.metadata = {**dict(memory.metadata), **lineage}
+                await save_raw_memory(memory)
         if skip_status in {"skipped_deleted", "skipped_superseded"}:
             await _mark_skipped(memory, skip_status)
         return {"status": skip_status, "chunk_count": 0}
@@ -181,6 +200,7 @@ async def _promote_one(
             entity_id=entity_id,
         )
     )
+    metadata.update(await _safe_lineage_metadata(memory, entity_id=entity_id))
     memory.metadata = metadata
     memory.entity_id = entity_id
     await save_raw_memory(memory)
@@ -306,6 +326,252 @@ async def _upsert_document_entity(
         generate_embedding=False,
     )
     return entity_id
+
+
+async def _lineage_metadata(memory: RawMemory, *, entity_id: str) -> dict[str, object]:
+    references = _lineage_references(memory)
+    if not references:
+        return {}
+
+    runtime = await get_entity_graph_runtime(memory.organization_id)
+    relationship_manager = getattr(runtime, "relationship_manager", None)
+    create_direct_bulk = getattr(relationship_manager, "create_direct_bulk", None)
+    if not callable(create_direct_bulk):
+        return {
+            "raw_promotion_lineage_edge_count": 0,
+            "raw_promotion_lineage_missing_count": len(references),
+            "raw_promotion_lineage_missing_reasons": ["relationship_manager_unavailable"],
+        }
+
+    relationships: list[Relationship] = []
+    missing_reasons: list[str] = []
+    for reference in references:
+        parent_source_id, parent_adapter_record_id = _lineage_parent_source_id(memory, reference)
+        if not parent_source_id:
+            missing_reasons.append(f"{reference.metadata_key}:missing_source_identity")
+            continue
+        parent = await _lineage_parent_memory(memory, source_id=parent_source_id)
+        if parent is None or not parent.entity_id:
+            missing_reasons.append(f"{reference.metadata_key}:missing_parent_entity")
+            continue
+        if parent.entity_id == entity_id:
+            missing_reasons.append(f"{reference.metadata_key}:self_reference")
+            continue
+        relationships.append(
+            _lineage_relationship(
+                memory,
+                entity_id=entity_id,
+                reference=reference,
+                parent=parent,
+                parent_source_id=parent_source_id,
+                parent_adapter_record_id=parent_adapter_record_id,
+            )
+        )
+
+    written_ids = await create_direct_bulk(relationships, generate_embeddings=False)
+    if len(written_ids) < len(relationships):
+        missing_reasons.append("relationship_endpoint_missing")
+    missing_count = len(references) - len(written_ids)
+    metadata: dict[str, object] = {
+        "raw_promotion_lineage_edge_count": len(written_ids),
+        "raw_promotion_lineage_missing_count": missing_count,
+    }
+    if written_ids:
+        metadata["raw_promotion_lineage_relationship_ids"] = list(written_ids)
+    if missing_reasons or len(written_ids) < len(relationships):
+        metadata["raw_promotion_lineage_missing_reasons"] = missing_reasons
+    return metadata
+
+
+async def _safe_lineage_metadata(memory: RawMemory, *, entity_id: str) -> dict[str, object]:
+    try:
+        return await _lineage_metadata(memory, entity_id=entity_id)
+    except Exception as exc:
+        log.warning("raw_capture_lineage_failed", raw_memory_id=memory.id, error=str(exc))
+        references = _lineage_references(memory)
+        return {
+            "raw_promotion_lineage_edge_count": 0,
+            "raw_promotion_lineage_missing_count": len(references),
+            "raw_promotion_lineage_error": str(exc),
+            "raw_promotion_lineage_failed_at": datetime.now(UTC).isoformat(),
+        }
+
+
+def _lineage_references(memory: RawMemory) -> list[_LineageReference]:
+    record_metadata = _source_record_metadata(memory)
+    references: list[_LineageReference] = []
+    parent_uuid = _metadata_text(record_metadata, "parent_uuid")
+    if parent_uuid:
+        references.append(
+            _LineageReference(
+                relationship_type=RelationshipType.REPLIES_TO,
+                reference=parent_uuid,
+                metadata_key="parent_uuid",
+                adapter_record_id=_metadata_text(record_metadata, "parent_adapter_record_id"),
+            )
+        )
+    forked_from = _metadata_text(record_metadata, "forked_from")
+    if forked_from:
+        references.append(
+            _LineageReference(
+                relationship_type=RelationshipType.FORKED_FROM,
+                reference=forked_from,
+                metadata_key="forked_from",
+                adapter_record_id=_metadata_text(record_metadata, "forked_from_adapter_record_id"),
+            )
+        )
+    source_tool_assistant_uuid = _metadata_text(record_metadata, "source_tool_assistant_uuid")
+    if source_tool_assistant_uuid:
+        references.append(
+            _LineageReference(
+                relationship_type=RelationshipType.SPAWNED_SUBAGENT,
+                reference=source_tool_assistant_uuid,
+                metadata_key="source_tool_assistant_uuid",
+                adapter_record_id=_metadata_text(
+                    record_metadata, "source_tool_assistant_adapter_record_id"
+                ),
+                parent_to_current=True,
+            )
+        )
+    elif bool(record_metadata.get("is_sidechain")) and parent_uuid:
+        references.append(
+            _LineageReference(
+                relationship_type=RelationshipType.SPAWNED_SUBAGENT,
+                reference=parent_uuid,
+                metadata_key="is_sidechain",
+                adapter_record_id=_metadata_text(record_metadata, "parent_adapter_record_id"),
+                parent_to_current=True,
+            )
+        )
+
+    unique: dict[tuple[RelationshipType, str, bool], _LineageReference] = {}
+    for reference in references:
+        unique[(reference.relationship_type, reference.reference, reference.parent_to_current)] = (
+            reference
+        )
+    return list(unique.values())
+
+
+def _lineage_parent_source_id(
+    memory: RawMemory,
+    reference: _LineageReference,
+) -> tuple[str | None, str | None]:
+    if reference.reference.startswith("source-record:"):
+        return reference.reference, None
+
+    adapter_name = _metadata_text(memory.metadata, "adapter_name") or _metadata_text(
+        memory.provenance, "source_adapter"
+    )
+    source_identity = _metadata_text(memory.metadata, "source_identity") or _metadata_text(
+        memory.provenance, "source_identity"
+    )
+    if not adapter_name or not source_identity:
+        return None, None
+
+    adapter_record_id = reference.adapter_record_id or _parent_adapter_record_id(
+        memory, reference.reference
+    )
+    manifest = SourceImportManifest(
+        adapter_name=adapter_name,
+        adapter_version=_metadata_text(memory.metadata, "adapter_version")
+        or _metadata_text(memory.provenance, "source_adapter_version")
+        or "unknown",
+        source_identity=source_identity,
+    )
+    return (
+        build_source_record_id(manifest=manifest, adapter_record_id=adapter_record_id),
+        adapter_record_id,
+    )
+
+
+async def _lineage_parent_memory(memory: RawMemory, *, source_id: str) -> RawMemory | None:
+    return await get_raw_memory_by_source_id(
+        organization_id=memory.organization_id,
+        source_id=source_id,
+        principal_id=memory.principal_id if memory.memory_scope.value == "private" else None,
+        memory_scope=memory.memory_scope,
+        scope_key=memory.scope_key,
+    )
+
+
+def _parent_adapter_record_id(memory: RawMemory, reference: str) -> str:
+    adapter_record_id = _metadata_text(memory.metadata, "adapter_record_id") or _metadata_text(
+        memory.provenance, "adapter_record_id"
+    )
+    if not adapter_record_id:
+        return reference
+    file_key = _adapter_file_key(adapter_record_id)
+    if file_key and reference.startswith(f"{file_key}:"):
+        return reference
+    if ".jsonl:" in reference:
+        return reference
+    if file_key:
+        return f"{file_key}:{reference}"
+    return reference
+
+
+def _adapter_file_key(adapter_record_id: str) -> str | None:
+    marker = ".jsonl:"
+    if marker in adapter_record_id:
+        return adapter_record_id.split(marker, 1)[0] + ".jsonl"
+    if ":" not in adapter_record_id:
+        return None
+    return adapter_record_id.split(":", 1)[0]
+
+
+def _lineage_relationship(
+    memory: RawMemory,
+    *,
+    entity_id: str,
+    reference: _LineageReference,
+    parent: RawMemory,
+    parent_source_id: str,
+    parent_adapter_record_id: str | None,
+) -> Relationship:
+    source_id, target_id = (
+        (parent.entity_id, entity_id)
+        if reference.parent_to_current
+        else (entity_id, parent.entity_id)
+    )
+    assert source_id is not None
+    assert target_id is not None
+    return Relationship(
+        id=str(
+            uuid5(
+                NAMESPACE_URL,
+                f"sibyl.raw_promotion.lineage:{memory.id}:"
+                f"{reference.relationship_type.value}:{parent_source_id}",
+            )
+        ),
+        relationship_type=reference.relationship_type,
+        source_id=source_id,
+        target_id=target_id,
+        metadata={
+            "adapter_record_id": memory.metadata.get("adapter_record_id"),
+            "lineage_key": reference.metadata_key,
+            "lineage_reference": reference.reference,
+            "parent_adapter_record_id": parent_adapter_record_id,
+            "parent_raw_memory_id": parent.id,
+            "parent_source_id": parent_source_id,
+            "raw_memory_id": memory.id,
+            "source_id": memory.source_id,
+        },
+    )
+
+
+def _source_record_metadata(memory: RawMemory) -> dict[str, object]:
+    value = memory.metadata.get("source_record_metadata")
+    if isinstance(value, Mapping):
+        return {str(key): item for key, item in value.items()}
+    return {}
+
+
+def _metadata_text(metadata: Mapping[str, object], key: str) -> str | None:
+    value = metadata.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 async def _source_extraction_metadata(

@@ -1449,7 +1449,14 @@ async def list_raw_memories_for_promotion(
             "AND deleted_at = NONE "
             "AND (metadata.raw_promotion_state = NONE "
             "OR metadata.raw_promotion_state = '' "
-            "OR metadata.raw_promotion_state = 'pending') "
+            "OR metadata.raw_promotion_state = 'pending' "
+            "OR (metadata.raw_promotion_state = 'promoted' "
+            "AND (metadata.raw_promotion_lineage_missing_count > 0 "
+            "OR (metadata.raw_promotion_lineage_missing_count = NONE "
+            "AND (metadata.source_record_metadata.parent_uuid != NONE "
+            "OR metadata.source_record_metadata.forked_from != NONE "
+            "OR metadata.source_record_metadata.source_tool_assistant_uuid != NONE "
+            "OR metadata.source_record_metadata.is_sidechain = true))))) "
             "ORDER BY captured_at ASC, uuid ASC LIMIT $limit;",
             organization_id=organization_id,
             limit=query_limit,
