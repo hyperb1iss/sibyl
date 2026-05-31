@@ -12,6 +12,7 @@ from sibyl_core.embeddings.providers import EmbeddingMetadata
 from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.services.surreal_content import (
     MemoryScope,
+    RawMemoryWrite,
     _replace_record,
     get_or_create_source,
     get_raw_memory_by_dedupe_key,
@@ -21,6 +22,7 @@ from sibyl_core.services.surreal_content import (
     load_search_scope,
     raw_memory_embedding_text,
     recall_raw_memory,
+    remember_raw_memories,
     remember_raw_memory,
     remember_reflection_candidate_review,
     search_document_chunks,
@@ -1041,6 +1043,144 @@ class TestSurrealContentHelpers:
         saved_record = fake_client.calls[0][1]["record"]
         assert provider.input_kinds == ["document"]
         assert saved_record["embedding"] == embedding
+
+    @pytest.mark.asyncio
+    async def test_remember_raw_memories_batches_embeddings_and_write(self) -> None:
+        embedding = [0.7, 0.8, 0.9]
+        persisted = [
+            {
+                "uuid": "memory-1",
+                "organization_id": "org-1",
+                "source_id": "source-email-1",
+                "principal_id": "user-bliss",
+                "memory_scope": "private",
+                "title": "First",
+                "raw_content": "first body",
+                "embedding": embedding,
+                "metadata": {"embedding_metadata": {"dimensions": 3}},
+            },
+            {
+                "uuid": "memory-2",
+                "organization_id": "org-1",
+                "source_id": "source-email-2",
+                "principal_id": "user-bliss",
+                "memory_scope": "private",
+                "title": "Second",
+                "raw_content": "second body",
+                "embedding": embedding,
+                "metadata": {"embedding_metadata": {"dimensions": 3}},
+            },
+        ]
+        fake_client = FakeClient([_query_result(persisted)])
+        provider = FakeEmbeddingProvider(embedding)
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            ids = iter(["memory-1", "memory-2"])
+            monkeypatch.setattr(content_service, "uuid4", lambda: next(ids))
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            memories = await remember_raw_memories(
+                [
+                    RawMemoryWrite(
+                        organization_id="org-1",
+                        principal_id="user-bliss",
+                        source_id="source-email-1",
+                        title="First",
+                        raw_content="first body",
+                    ),
+                    RawMemoryWrite(
+                        organization_id="org-1",
+                        principal_id="user-bliss",
+                        source_id="source-email-2",
+                        title="Second",
+                        raw_content="second body",
+                    ),
+                ],
+                embedding_provider=provider,
+            )
+
+        assert [memory.id for memory in memories] == ["memory-1", "memory-2"]
+        assert provider.input_kinds == ["document"]
+        assert provider.texts == ["Title: First\n\nfirst body", "Title: Second\n\nsecond body"]
+        query, params = fake_client.calls[0]
+        assert "INSERT INTO raw_captures $rows" in query
+        assert len(params["rows"]) == 2
+        assert [row["source_id"] for row in params["rows"]] == [
+            "source-email-1",
+            "source-email-2",
+        ]
+        assert all(row["embedding"] == embedding for row in params["rows"])
+
+    @pytest.mark.asyncio
+    async def test_remember_raw_memories_orders_shuffled_bulk_returns(self) -> None:
+        embedding = [0.7, 0.8, 0.9]
+        persisted = [
+            {
+                "uuid": "memory-2",
+                "organization_id": "org-1",
+                "source_id": "source-email-2",
+                "principal_id": "user-bliss",
+                "memory_scope": "private",
+                "title": "Second",
+                "raw_content": "second body",
+                "embedding": embedding,
+                "metadata": {"embedding_metadata": {"dimensions": 3}},
+            },
+            {
+                "uuid": "memory-1",
+                "organization_id": "org-1",
+                "source_id": "source-email-1",
+                "principal_id": "user-bliss",
+                "memory_scope": "private",
+                "title": "First",
+                "raw_content": "first body",
+                "embedding": embedding,
+                "metadata": {"embedding_metadata": {"dimensions": 3}},
+            },
+        ]
+        fake_client = FakeClient([_query_result(persisted)])
+        provider = FakeEmbeddingProvider(embedding)
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            ids = iter(["memory-1", "memory-2"])
+            monkeypatch.setattr(content_service, "uuid4", lambda: next(ids))
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            memories = await remember_raw_memories(
+                [
+                    RawMemoryWrite(
+                        organization_id="org-1",
+                        principal_id="user-bliss",
+                        source_id="source-email-1",
+                        title="First",
+                        raw_content="first body",
+                    ),
+                    RawMemoryWrite(
+                        organization_id="org-1",
+                        principal_id="user-bliss",
+                        source_id="source-email-2",
+                        title="Second",
+                        raw_content="second body",
+                    ),
+                ],
+                embedding_provider=provider,
+            )
+
+        assert [memory.id for memory in memories] == ["memory-1", "memory-2"]
+        assert [memory.source_id for memory in memories] == [
+            "source-email-1",
+            "source-email-2",
+        ]
 
     def test_raw_memory_embedding_text_bounds_title_and_content_surface(self) -> None:
         text = raw_memory_embedding_text(

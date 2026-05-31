@@ -56,6 +56,32 @@ _UPSERT_RECORD = {
         "WHERE uuid = $uuid AND organization_id = $organization_id;"
     ),
 }
+_RAW_MEMORY_BULK_UPSERT_QUERY = """
+INSERT INTO raw_captures $rows ON DUPLICATE KEY UPDATE
+    uuid = $input.uuid,
+    organization_id = $input.organization_id,
+    source_id = $input.source_id,
+    principal_id = $input.principal_id,
+    memory_scope = $input.memory_scope,
+    scope_key = $input.scope_key,
+    agent_id = $input.agent_id,
+    project_id = $input.project_id,
+    review_state = $input.review_state,
+    entity_id = $input.entity_id,
+    title = $input.title,
+    raw_content = $input.raw_content,
+    entity_type = $input.entity_type,
+    tags = $input.tags,
+    embedding = $input.embedding,
+    metadata = $input.metadata,
+    provenance = $input.provenance,
+    capture_surface = $input.capture_surface,
+    created_by_user_id = $input.created_by_user_id,
+    captured_at = $input.captured_at,
+    deleted_at = $input.deleted_at,
+    purge_after = $input.purge_after,
+    created_at = $input.created_at;
+"""
 AGENT_DIARY_CAPTURE_SURFACE = "agent_diary"
 type SurrealRecord = dict[str, object]
 
@@ -157,6 +183,22 @@ class RawMemory:
     purge_after: datetime | None = None
     created_at: datetime | None = None
     score: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class RawMemoryWrite:
+    organization_id: str
+    principal_id: str
+    source_id: str
+    raw_content: str
+    title: str = ""
+    memory_scope: MemoryScope | str = MemoryScope.PRIVATE
+    scope_key: str | None = None
+    tags: Sequence[str] | None = None
+    metadata: Mapping[str, object] | None = None
+    provenance: Mapping[str, object] | None = None
+    capture_surface: str | None = None
+    entity_type: str = "raw_memory"
 
 
 @dataclass(frozen=True, slots=True)
@@ -778,6 +820,76 @@ async def _replace_record(
     raise RuntimeError(f"failed to persist {table} record {uuid}")
 
 
+async def _replace_raw_memory_records_bulk(
+    client: SurrealContentClient,
+    records: Sequence[SurrealRecord],
+) -> list[SurrealRecord]:
+    if not records:
+        return []
+    for record in records:
+        if record.get("organization_id") is None:
+            uuid = record.get("uuid") or "<unknown>"
+            raise RuntimeError(f"raw_captures record {uuid} requires organization_id")
+    rows = await _select_many(
+        client,
+        _RAW_MEMORY_BULK_UPSERT_QUERY,
+        rows=list(records),
+    )
+    if len(rows) != len(records):
+        raise RuntimeError(
+            f"failed to persist raw_captures batch: {len(rows)} of {len(records)} returned"
+        )
+    return rows
+
+
+def _order_raw_memory_records_by_input(
+    memories: Sequence[RawMemory],
+    records: Sequence[SurrealRecord],
+) -> list[SurrealRecord]:
+    records_by_uuid: dict[str, SurrealRecord] = {}
+    for record in records:
+        uuid = str(record.get("uuid") or "")
+        if not uuid:
+            raise RuntimeError("raw_captures bulk returned a record without uuid")
+        if uuid in records_by_uuid:
+            raise RuntimeError(f"raw_captures bulk returned duplicate uuid {uuid}")
+        records_by_uuid[uuid] = record
+
+    ordered_records: list[SurrealRecord] = []
+    for memory in memories:
+        record = records_by_uuid.get(memory.id)
+        if record is None:
+            raise RuntimeError(f"raw_captures bulk omitted uuid {memory.id}")
+        ordered_records.append(record)
+    return ordered_records
+
+
+def _raw_memory_from_write(write: RawMemoryWrite, *, captured_at: datetime) -> RawMemory:
+    normalized_scope = _coerce_memory_scope(write.memory_scope)
+    _validate_raw_memory_scope(normalized_scope, write.scope_key)
+    metadata = dict(write.metadata or {})
+    return RawMemory(
+        id=str(uuid4()),
+        organization_id=write.organization_id,
+        source_id=write.source_id,
+        principal_id=write.principal_id,
+        memory_scope=normalized_scope,
+        scope_key=write.scope_key,
+        agent_id=_coerce_optional_str(metadata.get("agent_id")),
+        project_id=_coerce_optional_str(metadata.get("project_id")),
+        review_state=_coerce_str(metadata.get("review_state"), default="pending"),
+        entity_type=write.entity_type,
+        title=write.title,
+        raw_content=write.raw_content,
+        tags=list(write.tags or []),
+        metadata=metadata,
+        provenance=dict(write.provenance or {}),
+        capture_surface=write.capture_surface,
+        captured_at=captured_at,
+        created_at=captured_at,
+    )
+
+
 async def _raw_memory_with_embedding(
     memory: RawMemory,
     embedding_provider: EmbeddingProvider | None,
@@ -801,6 +913,41 @@ async def _raw_memory_with_embedding(
     metadata["embedding_metadata"] = _raw_memory_embedding_metadata(embedding_provider.metadata)
     memory.metadata = metadata
     return memory
+
+
+async def _raw_memories_with_embeddings(
+    memories: Sequence[RawMemory],
+    embedding_provider: EmbeddingProvider | None,
+) -> list[RawMemory]:
+    if embedding_provider is None:
+        return list(memories)
+    pending = [memory for memory in memories if memory.embedding is None]
+    if not pending:
+        return list(memories)
+
+    embeddings = await embedding_provider.embed_texts(
+        [
+            raw_memory_embedding_text(
+                title=memory.title,
+                raw_content=memory.raw_content,
+            )
+            for memory in pending
+        ],
+        input_kind="document",
+    )
+    if len(embeddings) != len(pending):
+        raise ValueError(
+            f"embedding provider returned {len(embeddings)} vectors for {len(pending)} raw memories"
+        )
+
+    dimensions = embedding_provider.metadata.dimensions
+    embedding_metadata = _raw_memory_embedding_metadata(embedding_provider.metadata)
+    for memory, embedding_values in zip(pending, embeddings, strict=True):
+        memory.embedding = _embedding_vector_from_batch([embedding_values], dimensions)
+        metadata = dict(memory.metadata)
+        metadata["embedding_metadata"] = embedding_metadata
+        memory.metadata = metadata
+    return list(memories)
 
 
 def _value_batches(
@@ -1217,28 +1364,22 @@ async def remember_raw_memory(
     entity_type: str = "raw_memory",
     embedding_provider: EmbeddingProvider | None | object = _RAW_MEMORY_EMBEDDING_AUTO,
 ) -> RawMemory:
-    now = _utcnow()
-    normalized_scope = _coerce_memory_scope(memory_scope)
-    _validate_raw_memory_scope(normalized_scope, scope_key)
-    memory = RawMemory(
-        id=str(uuid4()),
-        organization_id=organization_id,
-        source_id=source_id,
-        principal_id=principal_id,
-        memory_scope=normalized_scope,
-        scope_key=scope_key,
-        agent_id=_coerce_optional_str((metadata or {}).get("agent_id")),
-        project_id=_coerce_optional_str((metadata or {}).get("project_id")),
-        review_state=_coerce_str((metadata or {}).get("review_state"), default="pending"),
-        entity_type=entity_type,
-        title=title,
-        raw_content=raw_content,
-        tags=list(tags or []),
-        metadata=dict(metadata or {}),
-        provenance=dict(provenance or {}),
-        capture_surface=capture_surface,
-        captured_at=now,
-        created_at=now,
+    memory = _raw_memory_from_write(
+        RawMemoryWrite(
+            organization_id=organization_id,
+            principal_id=principal_id,
+            source_id=source_id,
+            raw_content=raw_content,
+            title=title,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            tags=tags,
+            metadata=metadata,
+            provenance=provenance,
+            capture_surface=capture_surface,
+            entity_type=entity_type,
+        ),
+        captured_at=_utcnow(),
     )
     provider = (
         _configured_raw_memory_embedding_provider()
@@ -1254,6 +1395,30 @@ async def remember_raw_memory(
             record=_raw_memory_record(memory),
         )
     return _raw_memory_from_record(record)
+
+
+async def remember_raw_memories(
+    writes: Sequence[RawMemoryWrite],
+    *,
+    embedding_provider: EmbeddingProvider | None | object = _RAW_MEMORY_EMBEDDING_AUTO,
+) -> list[RawMemory]:
+    if not writes:
+        return []
+    now = _utcnow()
+    memories = [_raw_memory_from_write(write, captured_at=now) for write in writes]
+    provider = (
+        _configured_raw_memory_embedding_provider()
+        if embedding_provider is _RAW_MEMORY_EMBEDDING_AUTO
+        else cast("EmbeddingProvider | None", embedding_provider)
+    )
+    memories = await _raw_memories_with_embeddings(memories, provider)
+    async with surreal_content_client() as client:
+        records = await _replace_raw_memory_records_bulk(
+            client,
+            [_raw_memory_record(memory) for memory in memories],
+        )
+    ordered_records = _order_raw_memory_records_by_input(memories, records)
+    return [_raw_memory_from_record(record) for record in ordered_records]
 
 
 async def remember_reflection_candidate_review(
@@ -2052,6 +2217,7 @@ __all__ = [
     "ContentSource",
     "MemoryScope",
     "RawMemory",
+    "RawMemoryWrite",
     "build_surreal_content_client",
     "get_or_create_source",
     "get_raw_memory",
@@ -2069,6 +2235,7 @@ __all__ = [
     "raw_memory_embedding_text",
     "raw_memory_recallable",
     "recall_raw_memory",
+    "remember_raw_memories",
     "remember_raw_memory",
     "remember_reflection_candidate_review",
     "reset_raw_memory_embedding_provider_cache",

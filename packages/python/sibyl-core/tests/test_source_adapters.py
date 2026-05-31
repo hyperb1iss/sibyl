@@ -19,6 +19,7 @@ from sibyl_core.models.sources import (
 )
 from sibyl_core.services.source_adapters import (
     SourceAdapterRegistry,
+    SourceRawMemoryWrite,
     SourceRecordImportDecision,
     build_source_content_hash,
     build_source_dedupe_key,
@@ -394,6 +395,218 @@ async def test_import_source_batch_uses_registered_adapter_contract() -> None:
 
 
 @pytest.mark.asyncio
+async def test_import_source_batch_uses_batch_rememberer_for_batch_writes() -> None:
+    manifest = _manifest()
+    records = [_record(manifest, record_id="message-1"), _record(manifest, record_id="message-2")]
+    adapter = FakeSourceAdapter(records)
+
+    class BatchRememberer:
+        def __init__(self) -> None:
+            self.payload_batches: list[list[SourceRawMemoryWrite]] = []
+
+        async def __call__(self, **_kwargs: object) -> RawMemory:
+            raise AssertionError("source imports should use the batch write path")
+
+        async def remember_many(
+            self,
+            payloads: list[SourceRawMemoryWrite],
+        ) -> list[RawMemory]:
+            payload_batch = list(payloads)
+            self.payload_batches.append(payload_batch)
+            return [
+                RawMemory(
+                    id=f"raw-{index}",
+                    organization_id=payload.organization_id,
+                    source_id=payload.source_id,
+                    principal_id=payload.principal_id,
+                    memory_scope=payload.memory_scope,
+                    scope_key=payload.scope_key,
+                    title=payload.title,
+                    raw_content=payload.raw_content,
+                    tags=list(payload.tags),
+                    metadata=dict(payload.metadata),
+                    provenance=dict(payload.provenance),
+                    capture_surface=payload.capture_surface,
+                    entity_type=payload.entity_type,
+                    captured_at=datetime(2026, 5, 14, 12, 0, tzinfo=UTC),
+                    created_at=datetime(2026, 5, 14, 12, 0, tzinfo=UTC),
+                )
+                for index, payload in enumerate(payload_batch, start=1)
+            ]
+
+    rememberer = BatchRememberer()
+
+    result = await import_source_batch(
+        adapter,
+        manifest,
+        organization_id="org-1",
+        principal_id="user-1",
+        batch_size=10,
+        remember=rememberer,
+    )
+
+    assert result.imported_count == 2
+    assert result.raw_memory_ids == ("raw-1", "raw-2")
+    assert len(rememberer.payload_batches) == 1
+    assert [payload.source_id for payload in rememberer.payload_batches[0]] == [
+        record.source_id for record in records
+    ]
+
+
+@pytest.mark.asyncio
+async def test_import_source_batch_skips_in_batch_duplicates_after_flush() -> None:
+    manifest = _manifest()
+    first = _record(manifest, record_id="message-1")
+    duplicate = _record(manifest, record_id="message-1")
+    adapter = FakeSourceAdapter([first, duplicate])
+
+    class BatchRememberer:
+        def __init__(self) -> None:
+            self.payload_batches: list[list[SourceRawMemoryWrite]] = []
+            self.next_id = 1
+
+        async def __call__(self, **_kwargs: object) -> RawMemory:
+            raise AssertionError("source imports should use the batch write path")
+
+        async def remember_many(
+            self,
+            payloads: list[SourceRawMemoryWrite],
+        ) -> list[RawMemory]:
+            payload_batch = list(payloads)
+            self.payload_batches.append(payload_batch)
+            memories: list[RawMemory] = []
+            for payload in payload_batch:
+                memory_id = f"raw-{self.next_id}"
+                self.next_id += 1
+                memories.append(
+                    RawMemory(
+                        id=memory_id,
+                        organization_id=payload.organization_id,
+                        source_id=payload.source_id,
+                        principal_id=payload.principal_id,
+                        memory_scope=payload.memory_scope,
+                        scope_key=payload.scope_key,
+                        title=payload.title,
+                        raw_content=payload.raw_content,
+                        tags=list(payload.tags),
+                        metadata=dict(payload.metadata),
+                        provenance=dict(payload.provenance),
+                        capture_surface=payload.capture_surface,
+                        entity_type=payload.entity_type,
+                        captured_at=datetime(2026, 5, 14, 12, 0, tzinfo=UTC),
+                        created_at=datetime(2026, 5, 14, 12, 0, tzinfo=UTC),
+                    )
+                )
+            return memories
+
+    rememberer = BatchRememberer()
+
+    result = await import_source_batch(
+        adapter,
+        manifest,
+        organization_id="org-1",
+        principal_id="user-1",
+        batch_size=10,
+        remember=rememberer,
+    )
+
+    assert result.imported_count == 1
+    assert result.dedupe_count == 1
+    assert result.raw_memory_ids == ("raw-1",)
+    assert len(rememberer.payload_batches) == 1
+    assert [payload.source_id for payload in rememberer.payload_batches[0]] == [first.source_id]
+    duplicate_skip = result.skipped_records[1]
+    assert duplicate_skip.reason == "duplicate_dedupe_key"
+    assert duplicate_skip.metadata["raw_memory_id"] == "raw-1"
+    assert duplicate_skip.metadata["source_id"] == first.source_id
+
+
+@pytest.mark.asyncio
+async def test_import_source_batch_supersedes_in_batch_source_updates() -> None:
+    manifest = _manifest()
+    first = _record(manifest, record_id="message-1")
+    changed_hash = build_source_content_hash("Subject", "Updated body")
+    changed = first.model_copy(
+        update={
+            "body": "Updated body",
+            "content_hash": changed_hash,
+            "dedupe_key": build_source_dedupe_key(
+                manifest=manifest,
+                adapter_record_id=first.adapter_record_id,
+                content_hash=changed_hash,
+            ).value,
+        }
+    )
+    adapter = FakeSourceAdapter([first, changed])
+    supersession_calls: list[dict[str, object]] = []
+
+    class BatchRememberer:
+        def __init__(self) -> None:
+            self.payload_batches: list[list[SourceRawMemoryWrite]] = []
+            self.next_id = 1
+
+        async def __call__(self, **_kwargs: object) -> RawMemory:
+            raise AssertionError("source imports should use the batch write path")
+
+        async def remember_many(
+            self,
+            payloads: list[SourceRawMemoryWrite],
+        ) -> list[RawMemory]:
+            payload_batch = list(payloads)
+            self.payload_batches.append(payload_batch)
+            memories: list[RawMemory] = []
+            for payload in payload_batch:
+                memory_id = f"raw-{self.next_id}"
+                self.next_id += 1
+                memories.append(
+                    RawMemory(
+                        id=memory_id,
+                        organization_id=payload.organization_id,
+                        source_id=payload.source_id,
+                        principal_id=payload.principal_id,
+                        memory_scope=payload.memory_scope,
+                        scope_key=payload.scope_key,
+                        title=payload.title,
+                        raw_content=payload.raw_content,
+                        tags=list(payload.tags),
+                        metadata=dict(payload.metadata),
+                        provenance=dict(payload.provenance),
+                        capture_surface=payload.capture_surface,
+                        entity_type=payload.entity_type,
+                        captured_at=datetime(2026, 5, 14, 12, 0, tzinfo=UTC),
+                        created_at=datetime(2026, 5, 14, 12, 0, tzinfo=UTC),
+                    )
+                )
+            return memories
+
+    async def supersession_handler(**kwargs: object) -> bool:
+        supersession_calls.append(dict(kwargs))
+        return True
+
+    rememberer = BatchRememberer()
+
+    result = await import_source_batch(
+        adapter,
+        manifest,
+        organization_id="org-1",
+        principal_id="user-1",
+        batch_size=10,
+        remember=rememberer,
+        supersession_handler=supersession_handler,
+    )
+
+    assert result.imported_count == 2
+    assert result.superseded_count == 1
+    assert result.raw_memory_ids == ("raw-1", "raw-2")
+    assert len(rememberer.payload_batches) == 2
+    assert len(supersession_calls) == 1
+    assert supersession_calls[0]["superseded_raw_memory_id"] == "raw-1"
+    memory = supersession_calls[0]["memory"]
+    assert isinstance(memory, RawMemory)
+    assert memory.id == "raw-2"
+
+
+@pytest.mark.asyncio
 async def test_import_source_batch_writes_sensitivity_metadata() -> None:
     manifest = _manifest()
     record = _record(manifest).model_copy(update={"body": "Temporary verification code is 123456"})
@@ -625,6 +838,67 @@ async def test_import_source_batch_invokes_supersession_handler_after_write() ->
     memory = supersession_calls[0]["memory"]
     assert isinstance(memory, RawMemory)
     assert memory.id == "raw-new"
+    assert supersession_calls[0]["superseded_raw_memory_id"] == "raw-old"
+
+
+@pytest.mark.asyncio
+async def test_import_source_batch_keeps_import_when_batch_supersession_fails() -> None:
+    manifest = _manifest()
+    record = _record(manifest)
+    adapter = FakeSourceAdapter([record])
+    supersession_calls: list[dict[str, object]] = []
+
+    class BatchRememberer:
+        async def __call__(self, **_kwargs: object) -> RawMemory:
+            raise AssertionError("source imports should use the batch write path")
+
+        async def remember_many(
+            self,
+            payloads: list[SourceRawMemoryWrite],
+        ) -> list[RawMemory]:
+            return [
+                RawMemory(
+                    id="raw-new",
+                    organization_id=payload.organization_id,
+                    source_id=payload.source_id,
+                    principal_id=payload.principal_id,
+                    memory_scope=payload.memory_scope,
+                    scope_key=payload.scope_key,
+                    title=payload.title,
+                    raw_content=payload.raw_content,
+                    tags=list(payload.tags),
+                    metadata=dict(payload.metadata),
+                    provenance=dict(payload.provenance),
+                    capture_surface=payload.capture_surface,
+                    entity_type=payload.entity_type,
+                    captured_at=datetime(2026, 5, 14, 12, 0, tzinfo=UTC),
+                    created_at=datetime(2026, 5, 14, 12, 0, tzinfo=UTC),
+                )
+                for payload in payloads
+            ]
+
+    async def duplicate_checker(**kwargs: object) -> SourceRecordImportDecision:
+        assert kwargs["record"] == record
+        return SourceRecordImportDecision(superseded_raw_memory_id="raw-old")
+
+    async def supersession_handler(**kwargs: object) -> bool:
+        supersession_calls.append(dict(kwargs))
+        return False
+
+    result = await import_source_batch(
+        adapter,
+        manifest,
+        organization_id="org-1",
+        principal_id="user-1",
+        remember=BatchRememberer(),
+        duplicate_checker=duplicate_checker,
+        supersession_handler=supersession_handler,
+    )
+
+    assert result.imported_count == 1
+    assert result.superseded_count == 0
+    assert result.raw_memory_ids == ("raw-new",)
+    assert len(supersession_calls) == 1
     assert supersession_calls[0]["superseded_raw_memory_id"] == "raw-old"
 
 
