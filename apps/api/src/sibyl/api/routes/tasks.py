@@ -331,7 +331,7 @@ async def _verify_epic_exists(entity_manager: Any, epic_id: str) -> None:
 
     try:
         epic = await entity_manager.get(epic_id)
-    except EntityNotFoundError as exc:
+    except (EntityNotFoundError, KeyError) as exc:
         raise HTTPException(
             status_code=404,
             detail=f"Epic not found: {epic_id}",
@@ -371,7 +371,7 @@ async def _maybe_start_epic(
 
     try:
         epic = await entity_manager.get(epic_id)
-    except EntityNotFoundError:
+    except (EntityNotFoundError, KeyError):
         log.warning(
             "Epic referenced by task no longer exists; skipping auto-start",
             epic_id=epic_id,

@@ -113,6 +113,41 @@ async def test_create_task_writes_relationships_concurrently() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_task_returns_404_when_native_epic_lookup_misses() -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
+    auth = SimpleNamespace()
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(side_effect=KeyError("epic-missing")),
+            create_direct=AsyncMock(),
+        ),
+        relationship_manager=SimpleNamespace(create=AsyncMock()),
+    )
+
+    with (
+        patch("sibyl.api.routes.tasks.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock(return_value=runtime)),
+        pytest.raises(HTTPException) as exc,
+    ):
+        await create_task(
+            http_request=_request(),
+            request=CreateTaskRequest(
+                title="Missing epic task",
+                project_id="project-1",
+                epic_id="epic-missing",
+            ),
+            org=org,
+            user=user,
+            auth=auth,
+        )
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Epic not found: epic-missing"
+    runtime.entity_manager.create_direct.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_create_task_replays_saved_idempotent_response() -> None:
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
