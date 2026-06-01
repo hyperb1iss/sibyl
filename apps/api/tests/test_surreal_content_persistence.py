@@ -1447,6 +1447,7 @@ async def test_content_archive_restore_preserves_embeddings_and_metadata(
                     "schedule": "0 2 * * *",
                     "retention_days": 30,
                     "include_database_dump": True,
+                    "include_postgres": None,
                     "include_graph": True,
                     "created_at": "2026-04-20T00:00:00+00:00",
                     "updated_at": "2026-04-20T00:00:00+00:00",
@@ -1460,6 +1461,7 @@ async def test_content_archive_restore_preserves_embeddings_and_metadata(
                     "status": "completed",
                     "size_bytes": 128,
                     "include_database_dump": True,
+                    "include_postgres": None,
                     "include_graph": True,
                     "created_at": "2026-04-20T00:00:00+00:00",
                     "updated_at": "2026-04-20T00:00:00+00:00",
@@ -1541,8 +1543,12 @@ async def test_content_archive_restore_preserves_embeddings_and_metadata(
     assert source_import_rows[0]["source_ids"] == ["source:docs:1"]
     assert source_import_rows[0]["raw_memory_by_source_id"] == {"source:docs:1": str(capture_id)}
     assert setting_rows[0]["is_secret"] is True
-    assert backup_setting_rows[0]["include_database_dump"] is True
-    assert backup_rows[0]["include_database_dump"] is True
+    assert backup_setting_rows[0]["include_database_dump"] is False
+    assert backup_setting_rows[0]["include_graph"] is True
+    assert "include_postgres" not in backup_setting_rows[0]
+    assert backup_rows[0]["include_database_dump"] is False
+    assert backup_rows[0]["include_graph"] is True
+    assert "include_postgres" not in backup_rows[0]
 
 
 @pytest.mark.asyncio
@@ -1845,6 +1851,90 @@ async def test_surreal_system_setting_helpers_round_trip(
 
 
 @pytest.mark.asyncio
+async def test_content_archive_clean_restore_scopes_to_payload_organization(
+    surreal_content_client: SurrealContentClient,
+) -> None:
+    org_a = str(uuid4())
+    org_b = str(uuid4())
+    old_capture_a = str(uuid4())
+    capture_b = str(uuid4())
+    restored_capture_a = str(uuid4())
+
+    await surreal_content_client.execute_query(
+        "CREATE system_settings CONTENT $record;",
+        record={"key": "global_setting", "value": "keep", "is_secret": False},
+    )
+    for org_id, capture_id, title in (
+        (org_a, old_capture_a, "old a"),
+        (org_b, capture_b, "keep b"),
+    ):
+        await surreal_content_client.execute_query(
+            "CREATE raw_captures CONTENT $record;",
+            record={
+                "uuid": capture_id,
+                "organization_id": org_id,
+                "source_id": f"source-{title}",
+                "principal_id": f"user-{title}",
+                "title": title,
+                "raw_content": title,
+            },
+        )
+
+    payload = {
+        "version": "1.0",
+        "created_at": "2026-06-01T00:00:00+00:00",
+        "organization_id": org_a,
+        "tables": {
+            "raw_captures": [
+                {
+                    "id": restored_capture_a,
+                    "organization_id": org_a,
+                    "source_id": "source-restored",
+                    "principal_id": "user-restored",
+                    "title": "restored a",
+                    "raw_content": "restored a",
+                }
+            ],
+            "system_settings": [],
+        },
+        "row_counts": {"raw_captures": 1, "system_settings": 0},
+        "total_rows": 1,
+    }
+
+    with (
+        patch.object(surreal_content_client, "close", AsyncMock()),
+        patch(
+            "sibyl.persistence.content_archive.build_surreal_content_client",
+            return_value=surreal_content_client,
+        ),
+    ):
+        result = await restore_content_archive_payload(payload, clean=True)
+
+    org_a_rows = _normalize_records(
+        await surreal_content_client.execute_query(
+            "SELECT * FROM raw_captures WHERE organization_id = $organization_id;",
+            organization_id=org_a,
+        )
+    )
+    org_b_rows = _normalize_records(
+        await surreal_content_client.execute_query(
+            "SELECT * FROM raw_captures WHERE organization_id = $organization_id;",
+            organization_id=org_b,
+        )
+    )
+    settings_rows = _normalize_records(
+        await surreal_content_client.execute_query(
+            "SELECT * FROM system_settings WHERE key = 'global_setting';",
+        )
+    )
+
+    assert result.success is True
+    assert [row["uuid"] for row in org_a_rows] == [restored_capture_a]
+    assert [row["uuid"] for row in org_b_rows] == [capture_b]
+    assert settings_rows[0]["value"] == "keep"
+
+
+@pytest.mark.asyncio
 async def test_content_archive_export_reads_from_surreal_backend(
     monkeypatch: pytest.MonkeyPatch,
     surreal_content_client: SurrealContentClient,
@@ -1919,6 +2009,89 @@ async def test_content_archive_export_reads_from_surreal_backend(
     assert payload["tables"]["source_imports"][0]["source_ids"] == ["source:export:1"]
     assert payload["tables"]["backup_settings"][0]["include_database_dump"] is False
     assert payload["tables"]["backups"][0]["include_database_dump"] is False
+    close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_content_archive_export_can_scope_to_one_organization(
+    monkeypatch: pytest.MonkeyPatch,
+    surreal_content_client: SurrealContentClient,
+) -> None:
+    org_a = str(uuid4())
+    org_b = str(uuid4())
+    await surreal_content_client.execute_query(
+        "CREATE system_settings CONTENT $record;",
+        record={
+            "key": "global_setting",
+            "value": "excluded",
+            "is_secret": False,
+        },
+    )
+    for org_id, suffix in ((org_a, "a"), (org_b, "b")):
+        await surreal_content_client.execute_query(
+            "CREATE raw_captures CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "organization_id": org_id,
+                "source_id": f"source-{suffix}",
+                "principal_id": f"user-{suffix}",
+                "title": f"raw {suffix}",
+                "raw_content": f"content {suffix}",
+            },
+        )
+        await surreal_content_client.execute_query(
+            "CREATE entity CONTENT $record;",
+            record={
+                "uuid": f"entity-{suffix}",
+                "organization_id": org_id,
+            },
+        )
+        await surreal_content_client.execute_query(
+            "CREATE api_idempotency_records CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "organization_id": org_id,
+                "principal_id": f"user-{suffix}",
+                "idempotency_key": f"key-{suffix}",
+                "method": "POST",
+                "path": "/api/test",
+                "request_hash": f"hash-{suffix}",
+                "response_status_code": 200,
+            },
+        )
+        await surreal_content_client.execute_query(
+            "CREATE backup_settings CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "organization_id": org_id,
+                "enabled": True,
+                "schedule": "0 2 * * *",
+                "retention_days": 30,
+                "include_database_dump": True,
+                "include_graph": False,
+            },
+        )
+
+    close = AsyncMock()
+    monkeypatch.setattr(
+        content_archive,
+        "build_surreal_content_client",
+        lambda: surreal_content_client,
+    )
+    monkeypatch.setattr(surreal_content_client, "close", close)
+
+    payload = await content_archive.export_content_archive_payload(organization_id=org_a)
+
+    assert payload["organization_id"] == org_a
+    assert payload["row_counts"]["system_settings"] == 0
+    assert payload["row_counts"]["raw_captures"] == 1
+    assert payload["row_counts"]["entity"] == 1
+    assert payload["row_counts"]["api_idempotency_records"] == 1
+    assert payload["row_counts"]["backup_settings"] == 1
+    assert payload["tables"]["raw_captures"][0]["organization_id"] == org_a
+    assert payload["tables"]["entity"][0]["uuid"] == "entity-a"
+    assert payload["tables"]["backup_settings"][0]["include_database_dump"] is False
+    assert payload["tables"]["backup_settings"][0]["include_graph"] is True
     close.assert_awaited_once()
 
 

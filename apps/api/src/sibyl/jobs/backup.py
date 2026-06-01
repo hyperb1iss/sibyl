@@ -2,7 +2,7 @@
 
 Creates timestamped, compressed backup archives containing:
 - SurrealDB auth and content snapshots when those runtimes are active
-- Graph export when requested
+- Graph export
 - Metadata JSON (checksums, counts, version info)
 """
 
@@ -74,28 +74,6 @@ class BackupResult:
     relationship_count: int
     duration_seconds: float
     error: str | None = None
-
-
-def _effective_include_database_dump(requested: bool | None = None) -> bool:
-    return resolve_backup_runtime_options(
-        store=settings.store,
-        auth_store=settings.auth_store,
-        include_database_dump=requested,
-    ).include_database_dump
-
-
-def _include_surreal_auth_snapshot() -> bool:
-    return resolve_backup_runtime_options(
-        store=settings.store,
-        auth_store=settings.auth_store,
-    ).include_auth_snapshot
-
-
-def _include_surreal_content_snapshot() -> bool:
-    return resolve_backup_runtime_options(
-        store=settings.store,
-        auth_store=settings.auth_store,
-    ).include_content_snapshot
 
 
 def _sha256_file(path: Path) -> str:
@@ -175,7 +153,7 @@ async def run_backup(  # noqa: PLR0915
         ctx: arq context
         organization_id: Organization UUID to backup
         include_database_dump: Ignored by active backups; retained for API compatibility
-        include_graph: Include graph export (default: True)
+        include_graph: Deprecated compatibility no-op; graph export is always included
         backup_id: Pre-generated backup ID (optional, for API-triggered backups)
 
     Returns:
@@ -188,12 +166,16 @@ async def run_backup(  # noqa: PLR0915
     started_at = datetime.now(UTC)
     backup_id = backup_id or generate_backup_id(organization_id)
     job_id = _backup_job_id(backup_id)
-    include_database_dump = _effective_include_database_dump(include_database_dump)
-    include_auth_snapshot = False
-    include_content_snapshot = False
-    if not organization_id:
-        include_auth_snapshot = _include_surreal_auth_snapshot()
-        include_content_snapshot = _include_surreal_content_snapshot()
+    options = resolve_backup_runtime_options(
+        store=settings.store,
+        auth_store=settings.auth_store,
+        include_database_dump=include_database_dump,
+        include_graph=include_graph,
+    )
+    include_database_dump = options.include_database_dump
+    include_graph = options.include_graph
+    include_auth_snapshot = options.include_auth_snapshot
+    include_content_snapshot = options.include_content_snapshot
 
     # Update DB to mark as in progress
     await _update_backup_db(backup_id, status="in_progress", started_at=started_at)
@@ -238,7 +220,7 @@ async def run_backup(  # noqa: PLR0915
             # Step 1: Surreal auth backup
             if include_auth_snapshot:
                 log.info("backup_auth_snapshot_start", backup_id=backup_id)
-                auth_payload = await export_auth_archive_payload()
+                auth_payload = await export_auth_archive_payload(organization_id=organization_id)
                 auth_file.write_text(
                     json.dumps(auth_payload, indent=2, default=str),
                     encoding="utf-8",
@@ -250,7 +232,9 @@ async def run_backup(  # noqa: PLR0915
             # Step 2: Surreal content backup
             if include_content_snapshot:
                 log.info("backup_content_snapshot_start", backup_id=backup_id)
-                content_payload = await export_content_archive_payload()
+                content_payload = await export_content_archive_payload(
+                    organization_id=organization_id
+                )
                 content_file.write_text(
                     json.dumps(content_payload, indent=2, default=str),
                     encoding="utf-8",
@@ -612,16 +596,19 @@ async def run_scheduled_backups(
             org_id = str(org_settings.organization_id)
             backup_id = generate_backup_id(org_id)
             backup = None
-            include_database_dump = _effective_include_database_dump(
-                resolve_object_database_dump(org_settings)
+            options = resolve_backup_runtime_options(
+                store=settings.store,
+                auth_store=settings.auth_store,
+                include_database_dump=resolve_object_database_dump(org_settings),
+                include_graph=org_settings.include_graph,
             )
 
             try:
                 backup = await create_backup_record(
                     org_id=org_settings.organization_id,
                     backup_id=backup_id,
-                    include_database_dump=include_database_dump,
-                    include_graph=org_settings.include_graph,
+                    include_database_dump=options.include_database_dump,
+                    include_graph=options.include_graph,
                     created_by_user_id=None,
                     triggered_by="scheduled",
                 )
@@ -630,8 +617,8 @@ async def run_scheduled_backups(
 
                 job_id = await enqueue_backup(
                     org_id,
-                    include_database_dump=include_database_dump,
-                    include_graph=org_settings.include_graph,
+                    include_database_dump=options.include_database_dump,
+                    include_graph=options.include_graph,
                     backup_id=backup_id,
                 )
 

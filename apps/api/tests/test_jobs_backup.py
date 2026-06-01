@@ -129,14 +129,14 @@ async def test_run_scheduled_backups_disables_postgres_in_fully_surreal_mode(
         org_id=org_id,
         backup_id=create_record.await_args.kwargs["backup_id"],
         include_database_dump=False,
-        include_graph=False,
+        include_graph=True,
         created_by_user_id=None,
         triggered_by="scheduled",
     )
     enqueue_backup.assert_awaited_once_with(
         str(org_id),
         include_database_dump=False,
-        include_graph=False,
+        include_graph=True,
         backup_id=enqueue_backup.await_args.kwargs["backup_id"],
     )
 
@@ -179,7 +179,7 @@ async def test_run_scheduled_backups_removes_orphan_record_when_queue_fails() ->
 
 
 @pytest.mark.asyncio
-async def test_run_backup_in_fully_surreal_mode_skips_runtime_snapshots_for_org_backups(
+async def test_run_backup_in_fully_surreal_mode_includes_org_runtime_snapshots(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
@@ -234,8 +234,8 @@ async def test_run_backup_in_fully_surreal_mode_skips_runtime_snapshots_for_org_
     assert result["database_dump_size_bytes"] == 0
     assert "pg_size_bytes" not in result
     assert result["job_id"] == "backup:backup_fixed"
-    export_auth.assert_not_awaited()
-    export_content.assert_not_awaited()
+    export_auth.assert_awaited_once_with(organization_id=org_id)
+    export_content.assert_awaited_once_with(organization_id=org_id)
     create_graph_backup.assert_awaited_once_with(organization_id=org_id)
     assert update_backup_db.await_count == 2
     broadcast.assert_any_await(
@@ -257,9 +257,7 @@ async def test_run_backup_in_fully_surreal_mode_skips_runtime_snapshots_for_org_
         names = set(archive.getnames())
         metadata = json.load(archive.extractfile("metadata.json"))
 
-    assert {"metadata.json", "graph.json"} <= names
-    assert "auth.json" not in names
-    assert "content.json" not in names
+    assert {"metadata.json", "auth.json", "content.json", "graph.json"} <= names
     assert "postgres.sql" not in names
     assert metadata["database_dump_tables"] == 0
     assert "pg_entities" not in metadata

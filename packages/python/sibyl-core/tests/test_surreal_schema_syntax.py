@@ -382,12 +382,28 @@ def test_content_entity_anchors_are_versioned() -> None:
         statement for migration in migrations for statement in migration.statements
     )
 
-    assert CONTENT_SCHEMA_CURRENT_VERSION == 13
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 13
     assert "entity" in CONTENT_TABLES
     assert "content_entity_anchors" in [migration.name for migration in migrations]
     assert "DEFINE TABLE IF NOT EXISTS entity SCHEMAFULL" in CONTENT_SCHEMA_DEFINITIONS
     assert "idx_content_entity_org_uuid" in CONTENT_SCHEMA_DEFINITIONS
     assert CONTENT_ENTITY_ANCHOR_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
+
+
+def test_content_backup_legacy_include_cleanup_is_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration_sql = "\n".join(
+        statement for migration in migrations for statement in migration.statements
+    )
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION == 14
+    assert "content_backup_full_org_archives" in [migration.name for migration in migrations]
+    assert "REMOVE FIELD IF EXISTS include_postgres ON TABLE backup_settings" in migration_sql
+    assert "REMOVE FIELD IF EXISTS include_postgres ON TABLE backups" in migration_sql
+    assert "DEFINE FIELD OVERWRITE include_database_dump ON backup_settings" in migration_sql
+    assert "UPDATE backup_settings SET include_database_dump = false, include_graph = true" in (
+        migration_sql
+    )
 
 
 def test_raw_capture_changefeed_cursor_is_versioned() -> None:

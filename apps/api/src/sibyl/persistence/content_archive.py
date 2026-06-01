@@ -59,6 +59,15 @@ _CONTENT_ARCHIVE_TABLE_SPECS = (
         create_sql="CREATE document_chunks CONTENT $record;",
     ),
     ContentArchiveTableSpec(
+        name="entity",
+        source_identity_field="id",
+        target_identity_field="uuid",
+        select_sql="SELECT * FROM entity ORDER BY id ASC;",
+        delete_by_identity_sql="DELETE FROM entity WHERE uuid = $identity;",
+        delete_all_sql="DELETE FROM entity;",
+        create_sql="CREATE entity CONTENT $record;",
+    ),
+    ContentArchiveTableSpec(
         name="raw_captures",
         source_identity_field="id",
         target_identity_field="uuid",
@@ -66,6 +75,15 @@ _CONTENT_ARCHIVE_TABLE_SPECS = (
         delete_by_identity_sql="DELETE FROM raw_captures WHERE uuid = $identity;",
         delete_all_sql="DELETE FROM raw_captures;",
         create_sql="CREATE raw_captures CONTENT $record;",
+    ),
+    ContentArchiveTableSpec(
+        name="api_idempotency_records",
+        source_identity_field="id",
+        target_identity_field="uuid",
+        select_sql="SELECT * FROM api_idempotency_records ORDER BY id ASC;",
+        delete_by_identity_sql="DELETE FROM api_idempotency_records WHERE uuid = $identity;",
+        delete_all_sql="DELETE FROM api_idempotency_records;",
+        create_sql="CREATE api_idempotency_records CONTENT $record;",
     ),
     ContentArchiveTableSpec(
         name="source_imports",
@@ -77,6 +95,51 @@ _CONTENT_ARCHIVE_TABLE_SPECS = (
         create_sql="CREATE source_imports CONTENT $record;",
     ),
     ContentArchiveTableSpec(
+        name="content_changefeed_cursors",
+        source_identity_field="id",
+        target_identity_field="uuid",
+        select_sql="SELECT * FROM content_changefeed_cursors ORDER BY id ASC;",
+        delete_by_identity_sql="DELETE FROM content_changefeed_cursors WHERE uuid = $identity;",
+        delete_all_sql="DELETE FROM content_changefeed_cursors;",
+        create_sql="CREATE content_changefeed_cursors CONTENT $record;",
+    ),
+    ContentArchiveTableSpec(
+        name="derived_from",
+        source_identity_field="id",
+        target_identity_field="uuid",
+        select_sql="SELECT * FROM derived_from ORDER BY id ASC;",
+        delete_by_identity_sql="DELETE FROM derived_from WHERE uuid = $identity;",
+        delete_all_sql="DELETE FROM derived_from;",
+        create_sql="CREATE derived_from CONTENT $record;",
+    ),
+    ContentArchiveTableSpec(
+        name="chunk_of",
+        source_identity_field="id",
+        target_identity_field="uuid",
+        select_sql="SELECT * FROM chunk_of ORDER BY id ASC;",
+        delete_by_identity_sql="DELETE FROM chunk_of WHERE uuid = $identity;",
+        delete_all_sql="DELETE FROM chunk_of;",
+        create_sql="CREATE chunk_of CONTENT $record;",
+    ),
+    ContentArchiveTableSpec(
+        name="supersedes",
+        source_identity_field="id",
+        target_identity_field="uuid",
+        select_sql="SELECT * FROM supersedes ORDER BY id ASC;",
+        delete_by_identity_sql="DELETE FROM supersedes WHERE uuid = $identity;",
+        delete_all_sql="DELETE FROM supersedes;",
+        create_sql="CREATE supersedes CONTENT $record;",
+    ),
+    ContentArchiveTableSpec(
+        name="extracted_into",
+        source_identity_field="id",
+        target_identity_field="uuid",
+        select_sql="SELECT * FROM extracted_into ORDER BY id ASC;",
+        delete_by_identity_sql="DELETE FROM extracted_into WHERE uuid = $identity;",
+        delete_all_sql="DELETE FROM extracted_into;",
+        create_sql="CREATE extracted_into CONTENT $record;",
+    ),
+    ContentArchiveTableSpec(
         name="system_settings",
         source_identity_field="key",
         target_identity_field="key",
@@ -84,6 +147,15 @@ _CONTENT_ARCHIVE_TABLE_SPECS = (
         delete_by_identity_sql="DELETE FROM system_settings WHERE key = $identity;",
         delete_all_sql="DELETE FROM system_settings;",
         create_sql="CREATE system_settings CONTENT $record;",
+    ),
+    ContentArchiveTableSpec(
+        name="telemetry_rollups",
+        source_identity_field="id",
+        target_identity_field="uuid",
+        select_sql="SELECT * FROM telemetry_rollups ORDER BY id ASC;",
+        delete_by_identity_sql="DELETE FROM telemetry_rollups WHERE uuid = $identity;",
+        delete_all_sql="DELETE FROM telemetry_rollups;",
+        create_sql="CREATE telemetry_rollups CONTENT $record;",
     ),
     ContentArchiveTableSpec(
         name="backup_settings",
@@ -112,6 +184,10 @@ _SELECT_SURREAL_TABLE_ROWS = {
     for spec in _CONTENT_ARCHIVE_TABLE_SPECS
 }
 _BACKUP_ARCHIVE_TABLES = frozenset({"backup_settings", "backups"})
+_GLOBAL_CONTENT_ARCHIVE_TABLES = frozenset({"system_settings", "telemetry_rollups"})
+_CONTENT_RELATION_ARCHIVE_TABLES = frozenset(
+    {"derived_from", "chunk_of", "supersedes", "extracted_into"}
+)
 
 
 @dataclass(frozen=True)
@@ -222,6 +298,14 @@ def _resolve_archive_database_dump_value(row: dict[str, object]) -> bool | None:
     return _coerce_archive_bool(row.get("include_database_dump"))
 
 
+def _normalize_backup_archive_flags(row: dict[str, object]) -> dict[str, object]:
+    normalized = dict(row)
+    normalized.pop("include_postgres", None)
+    normalized["include_database_dump"] = False
+    normalized["include_graph"] = True
+    return normalized
+
+
 def _normalize_content_archive_export_row(
     spec: ContentArchiveTableSpec,
     row: dict[str, object],
@@ -230,12 +314,7 @@ def _normalize_content_archive_export_row(
     if spec.name not in _BACKUP_ARCHIVE_TABLES:
         return normalized
 
-    include_database_dump = _resolve_archive_database_dump_value(normalized)
-    if include_database_dump is None:
-        return normalized
-
-    normalized["include_database_dump"] = include_database_dump
-    return normalized
+    return _normalize_backup_archive_flags(normalized)
 
 
 def _normalize_content_archive_restore_row(
@@ -246,23 +325,68 @@ def _normalize_content_archive_restore_row(
     if spec.name not in _BACKUP_ARCHIVE_TABLES:
         return normalized
 
-    include_database_dump = _resolve_archive_database_dump_value(normalized)
-    if include_database_dump is None:
-        normalized.pop("include_database_dump", None)
-        return normalized
-
-    normalized["include_database_dump"] = include_database_dump
-    return normalized
+    return _normalize_backup_archive_flags(normalized)
 
 
-async def _export_surreal_content_archive_payload() -> dict[str, object]:
+def _content_archive_export_query(
+    spec: ContentArchiveTableSpec,
+    organization_id: str | None,
+) -> tuple[str, dict[str, object]] | None:
+    if organization_id is None:
+        return _SELECT_SURREAL_TABLE_ROWS[spec.name], {}
+    if spec.name in _GLOBAL_CONTENT_ARCHIVE_TABLES:
+        return None
+    return (
+        f"SELECT * FROM {spec.name} WHERE organization_id = $organization_id;",  # noqa: S608
+        {"organization_id": organization_id},
+    )
+
+
+async def _clean_content_archive_rows(
+    client: SurrealContentClient,
+    organization_id: str | None,
+) -> None:
+    wipe_specs = sorted(
+        _CONTENT_ARCHIVE_TABLE_SPECS,
+        key=lambda spec: spec.name not in _CONTENT_RELATION_ARCHIVE_TABLES,
+    )
+    if organization_id is None:
+        wipe_sql = "\n".join(spec.delete_all_sql for spec in wipe_specs)
+        wipe_result = await client.execute_query_raw(
+            f"BEGIN TRANSACTION;\n{wipe_sql}\nCOMMIT TRANSACTION;",
+        )
+        _raise_on_error(wipe_result, query="restore_content_archive_payload:clean")
+        return
+
+    wipe_sql = "\n".join(
+        f"DELETE FROM {spec.name} WHERE organization_id = $organization_id;"  # noqa: S608
+        for spec in wipe_specs
+        if spec.name not in _GLOBAL_CONTENT_ARCHIVE_TABLES
+    )
+    wipe_result = await client.execute_query_raw(
+        f"BEGIN TRANSACTION;\n{wipe_sql}\nCOMMIT TRANSACTION;",
+        organization_id=organization_id,
+    )
+    _raise_on_error(wipe_result, query="restore_content_archive_payload:clean_org")
+
+
+async def _export_surreal_content_archive_payload(
+    organization_id: str | UUID | None = None,
+) -> dict[str, object]:
     tables: dict[str, list[dict[str, object]]] = {}
     row_counts: dict[str, int] = {}
     client = build_surreal_content_client()
 
     try:
+        org_id = str(organization_id) if organization_id is not None else None
         for spec in _CONTENT_ARCHIVE_TABLE_SPECS:
-            result = await client.execute_query(_SELECT_SURREAL_TABLE_ROWS[spec.name])
+            query = _content_archive_export_query(spec, org_id)
+            if query is None:
+                tables[spec.name] = []
+                row_counts[spec.name] = 0
+                continue
+            statement, params = query
+            result = await client.execute_query(statement, **params)
             error = _query_error(result)
             if error is not None:
                 raise RuntimeError(error)
@@ -284,16 +408,19 @@ async def _export_surreal_content_archive_payload() -> dict[str, object]:
     return {
         "version": CONTENT_ARCHIVE_VERSION,
         "created_at": datetime.now(UTC).isoformat(),
+        "organization_id": str(organization_id) if organization_id is not None else None,
         "tables": tables,
         "row_counts": row_counts,
         "total_rows": sum(row_counts.values()),
     }
 
 
-async def export_content_archive_payload() -> dict[str, object]:
+async def export_content_archive_payload(
+    organization_id: str | UUID | None = None,
+) -> dict[str, object]:
     """Export Surreal content/operations tables into a JSON-safe payload."""
 
-    return await _export_surreal_content_archive_payload()
+    return await _export_surreal_content_archive_payload(organization_id)
 
 
 async def restore_content_archive_payload(
@@ -307,6 +434,10 @@ async def restore_content_archive_payload(
     if not isinstance(raw_tables, dict):
         raise TypeError("content archive payload is missing a tables object")
     tables = {str(key): value for key, value in raw_tables.items()}
+    payload_org_id = payload.get("organization_id")
+    organization_id = str(payload_org_id).strip() if payload_org_id is not None else None
+    if organization_id == "":
+        organization_id = None
 
     client = build_surreal_content_client()
     tables_restored = 0
@@ -316,15 +447,7 @@ async def restore_content_archive_payload(
     try:
         await bootstrap_content_schema(client, reset=False)
         if clean:
-            # A clean restore replaces all existing data. Wipe rows in one
-            # transaction rather than dropping tables: REMOVE TABLE is
-            # non-transactional DDL, so a failure mid-drop would leave the
-            # namespace with missing tables on the DR path.
-            wipe_sql = "\n".join(spec.delete_all_sql for spec in _CONTENT_ARCHIVE_TABLE_SPECS)
-            wipe_result = await client.execute_query_raw(
-                f"BEGIN TRANSACTION;\n{wipe_sql}\nCOMMIT TRANSACTION;",
-            )
-            _raise_on_error(wipe_result, query="restore_content_archive_payload:clean")
+            await _clean_content_archive_rows(client, organization_id)
 
         for spec in _CONTENT_ARCHIVE_TABLE_SPECS:
             rows = tables.get(spec.name)
