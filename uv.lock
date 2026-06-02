@@ -3529,7 +3529,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.25" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5" },
-    { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.27" },
+    { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=1.0.4" },
     { name = "networkx", marker = "extra == 'graphrag'", specifier = ">=3.0" },
     { name = "networkx", marker = "extra == 'graphrag-leiden'", specifier = ">=3.0" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.13.0,<3" },
