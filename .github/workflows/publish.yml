@@ -474,7 +474,7 @@ jobs:
           test "$(find release-assets -maxdepth 1 -type f -name '*-cosign-receipt.json' | wc -l)" -eq 2
 
       - name: "◆ Update release with install instructions"
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag }}
           fail_on_unmatched_files: true
