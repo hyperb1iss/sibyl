@@ -406,7 +406,8 @@ async def promote_reflection_candidate_review(
         domain=domain,
         related_to=related_to,
         accessible_projects=accessible_projects,
-        source_id=plan.raw_source_ids[0] if plan.raw_source_ids else None,
+        native_source_id=plan.raw_source_ids[0] if plan.raw_source_ids else None,
+        lifecycle_source_id=plan.candidate_memory.id,
         lifecycle_reason="accepted_reflection_candidate",
     )
 
@@ -443,7 +444,8 @@ async def promote_raw_memory(
         domain=domain,
         related_to=related_to,
         accessible_projects=accessible_projects,
-        source_id=plan.candidate_memory.id,
+        native_source_id=plan.candidate_memory.id,
+        lifecycle_source_id=plan.candidate_memory.id,
         lifecycle_reason="accepted_raw_memory",
     )
 
@@ -558,7 +560,8 @@ async def _apply_promotion_plan(
     domain: str | None,
     related_to: Sequence[str] | None,
     accessible_projects: Iterable[str] | None,
-    source_id: str | None,
+    native_source_id: str | None,
+    lifecycle_source_id: str,
     lifecycle_reason: str,
 ) -> ReflectionPromotionResult:
     result = await persist_reflection_candidate(
@@ -567,7 +570,7 @@ async def _apply_promotion_plan(
         principal_id=principal_id,
         domain=domain or _metadata_str(plan.candidate_memory.metadata, "domain"),
         project=plan.target_project,
-        source_id=source_id,
+        source_id=native_source_id,
         related_to=related_to,
         accessible_projects=accessible_projects,
         memory_scope=plan.target_scope,
@@ -579,7 +582,7 @@ async def _apply_promotion_plan(
     return await _mark_promotion_plan_promoted(
         plan=plan,
         result=result,
-        source_id=source_id,
+        lifecycle_source_id=lifecycle_source_id,
         lifecycle_reason=lifecycle_reason,
     )
 
@@ -606,13 +609,13 @@ async def _mark_promotion_plan_promoted(
     *,
     plan: _ReflectionPromotionPlan,
     result: ReflectionWriteResult,
-    source_id: str | None,
+    lifecycle_source_id: str,
     lifecycle_reason: str,
 ) -> ReflectionPromotionResult:
     metadata = _promoted_candidate_metadata(
         plan=plan,
         result=result,
-        source_id=source_id,
+        lifecycle_source_id=lifecycle_source_id,
         lifecycle_reason=lifecycle_reason,
     )
     await save_raw_memory(
@@ -639,7 +642,7 @@ def _promoted_candidate_metadata(
     *,
     plan: _ReflectionPromotionPlan,
     result: ReflectionWriteResult,
-    source_id: str | None,
+    lifecycle_source_id: str,
     lifecycle_reason: str,
 ) -> dict[str, object]:
     promoted_id = result.response.id
@@ -658,7 +661,7 @@ def _promoted_candidate_metadata(
         metadata=metadata,
         promoted_entity_id=str(promoted_id),
         source_ids=plan.raw_source_ids,
-        source_id=source_id,
+        source_id=lifecycle_source_id,
         reason=lifecycle_reason,
         policy_metadata=result.metadata,
     )

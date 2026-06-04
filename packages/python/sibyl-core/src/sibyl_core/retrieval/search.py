@@ -328,7 +328,6 @@ async def context_search(
     raw_source, graph_sources = await _gather_candidate_sources(raw_task, graph_tasks)
     raw_candidates = list(raw_source.candidates)
     graph_candidate_lists = [list(source.candidates) for source in graph_sources]
-    candidate_source_metadata = _candidate_source_metadata((raw_source, *graph_sources))
 
     vector_plan = _vector_scoped_plan(
         search_plan,
@@ -342,16 +341,22 @@ async def context_search(
         embedding_provider=embedding_provider,
     )
     vector_candidate_lists = [vector_fetch.node_candidates, vector_fetch.edge_candidates]
-    graph_expansion_candidates = await _graph_expansion_candidates(
-        client=client,
-        plan=search_plan,
-        search_filter=search_filter,
-        seed_candidates=[
-            candidate
-            for source in [*graph_candidate_lists, *vector_candidate_lists]
-            for candidate in source
-        ],
-        limit=search_plan.candidate_limits.graph_expansion,
+    graph_expansion_source = await _gather_graph_expansion_source(
+        _graph_expansion_candidates(
+            client=client,
+            plan=search_plan,
+            search_filter=search_filter,
+            seed_candidates=[
+                candidate
+                for source in [*graph_candidate_lists, *vector_candidate_lists]
+                for candidate in source
+            ],
+            limit=search_plan.candidate_limits.graph_expansion,
+        )
+    )
+    graph_expansion_candidates = list(graph_expansion_source.candidates)
+    candidate_source_metadata = _candidate_source_metadata(
+        (raw_source, *graph_sources, graph_expansion_source)
     )
 
     source_lists = [
@@ -512,6 +517,13 @@ async def _gather_candidate_sources(
         for (signal, _task), result in zip(graph_tasks, gathered[1:], strict=True)
     ]
     return raw, graph
+
+
+async def _gather_graph_expansion_source(
+    task: Any,
+) -> CandidateSourceResult[RetrievalCandidate]:
+    (result,) = await asyncio.gather(task, return_exceptions=True)
+    return _candidate_source_result(RetrievalSignal.GRAPH_EXPANSION.value, result)
 
 
 def _candidate_source_result(

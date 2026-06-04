@@ -946,6 +946,11 @@ async def search(
 
                 except Exception as e:
                     log.warning("enhanced_search_failed_fallback", error_type=type(e).__name__)
+                    _record_source_failure(
+                        source_failures,
+                        source="graph_enhanced",
+                        error=e,
+                    )
 
             # Fall back to direct entity-manager search
             if query and not raw_results and not enhanced_search_exhausted:
@@ -998,6 +1003,11 @@ async def search(
                         )
                 except Exception as e:
                     log.warning("graph_exact_name_search_failed", error_type=type(e).__name__)
+                    _record_source_failure(
+                        source_failures,
+                        source="graph_exact_name",
+                        error=e,
+                    )
 
             if not query and graph_list_filters:
                 raw_results = await _list_graph_entities_for_filters(

@@ -928,8 +928,10 @@ async def test_promote_review_candidate_persists_native_record_and_marks_promote
     )
     findings = reflection_findings_from_metadata(saved[0].metadata)
     assert lifecycle.state == "promoted"
+    assert lifecycle.source_id == "candidate-1"
     assert lifecycle.derived_ids == ["decision_123"]
     assert findings[-1].kind == "promotion"
+    assert findings[-1].target_source_id == "candidate-1"
     assert findings[-1].related_source_ids == ["decision_123"]
 
 
@@ -1237,5 +1239,8 @@ async def test_promote_raw_memory_persists_native_record_and_marks_promoted(
         source_id="raw-1",
         review_state=saved[0].review_state,
     )
+    findings = reflection_findings_from_metadata(saved[0].metadata)
     assert lifecycle.state == "promoted"
+    assert lifecycle.source_id == "raw-1"
     assert lifecycle.derived_ids == ["episode_123"]
+    assert findings[-1].target_source_id == "raw-1"

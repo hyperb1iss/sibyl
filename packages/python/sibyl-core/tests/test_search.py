@@ -1014,6 +1014,63 @@ async def test_context_search_pushes_facet_types_into_graph_queries(
 
 
 @pytest.mark.asyncio
+async def test_context_search_reports_graph_expansion_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = build_context_retrieval_plan(
+        query="active task followup",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project="project_123",
+        accessible_projects={"project_123"},
+        limit=12,
+    )
+    candidate = RetrievalCandidate(
+        id="task-direct",
+        type="task",
+        name="Direct Task",
+        content="direct task context",
+        score=1.0,
+        source=None,
+        metadata={},
+        project_id="project_123",
+    )
+
+    class Runtime:
+        client = _FacetSearchClient()
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> Runtime:
+        return Runtime()
+
+    async def fake_node_fulltext(**_kwargs: object) -> list[RetrievalCandidate]:
+        return [candidate]
+
+    async def fake_graph_expansion(**_kwargs: object) -> list[RetrievalCandidate]:
+        raise RuntimeError("bfs unavailable")
+
+    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(search_module, "_node_fulltext_candidates", fake_node_fulltext)
+    monkeypatch.setattr(search_module, "_graph_expansion_candidates", fake_graph_expansion)
+
+    response = await search_module.context_search(
+        plan=plan,
+        types=["task"],
+        facet=ContextFacet.ACTIVE_WORK,
+        limit=3,
+        raw_memory_recall_fn=lambda **_kwargs: [],
+    )
+
+    assert [result.id for result in response.results] == ["task-direct"]
+    assert response.filters["candidate_source_degraded"] is True
+    assert response.filters["candidate_source_failure_count"] == 1
+    assert response.filters["candidate_source_failures"] == [
+        {"source": "graph_expansion", "error_type": "RuntimeError"}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_graph_expansion_skips_mentions_for_entity_seeds_and_limits_edges() -> None:
     plan = build_context_retrieval_plan(
         query="active task followup",
