@@ -22,6 +22,7 @@ from sibyl_core.embeddings.providers import (
     EmbeddingProviderName,
     create_embedding_provider,
 )
+from sibyl_core.memory_pipeline.lifecycle import raw_memory_lifecycle_recallable
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.models.reflection import (
     MemoryLifecycle,
@@ -419,41 +420,8 @@ class _RawMemoryRecallFilters:
     as_of_text: str | None = None
 
 
-_RECALL_EXCLUDED_REVIEW_STATES = frozenset(
-    {
-        "archived",
-        "deleted",
-        "hidden",
-        "redacted",
-        "superseded",
-    }
-)
-_RECALL_EXCLUDED_LIFECYCLE_STATES = frozenset(
-    {
-        "deleted",
-        "duplicate",
-        "hidden",
-        "redacted",
-        "sensitive",
-        "stale",
-        "superseded",
-        "wrong",
-    }
-)
-
-
 def raw_memory_recallable(memory: RawMemory) -> bool:
-    review_state = str(memory.review_state or "").strip().lower()
-    lifecycle_state = str(memory.metadata.get("lifecycle_state") or "").strip().lower()
-    if review_state in _RECALL_EXCLUDED_REVIEW_STATES:
-        return False
-    if lifecycle_state in _RECALL_EXCLUDED_LIFECYCLE_STATES:
-        return False
-    if memory.metadata.get("superseded_by_raw_memory_id"):
-        return False
-    if memory.metadata.get("superseded_by_source_id"):
-        return False
-    return not memory.metadata.get("duplicate_of_source_id")
+    return raw_memory_lifecycle_recallable(memory)
 
 
 def raw_memory_currently_recallable(memory: RawMemory) -> bool:
