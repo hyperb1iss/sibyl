@@ -5,7 +5,7 @@ Exposes 5 tools and 2 resources:
 - Resources: sibyl://health, sibyl://stats
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 from uuid import UUID
@@ -35,6 +35,7 @@ from sibyl_core.auth.memory_policy import (
     MemoryPolicyDecision,
     authorize_memory_write,
 )
+from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptureService
 from sibyl_core.services.surreal_content import MemoryScope
 
 log = structlog.get_logger()
@@ -517,38 +518,62 @@ async def _remember_mcp_memory(
         task_ids=task_ids,
         active_task=active_task,
     )
-    raw_memory = await remember_raw_memory(
-        organization_id=ctx.org_id,
-        principal_id=ctx.user_id,
-        source_id=f"mcp:remember:{kind}",
-        raw_content=content,
-        title=title,
-        memory_scope=memory_scope,
-        scope_key=project,
-        tags=tags,
-        metadata=dict(full_metadata),
-        provenance={
-            "remember_kind": kind,
-            "related_to": resolved_links or [],
-        },
-        capture_surface="mcp",
-    )
-    full_metadata["raw_memory_id"] = raw_memory.id
-    full_metadata["raw_source_id"] = raw_memory.source_id
-
-    result = await add(
+    capture_request = MemoryCaptureRequest(
         title=title,
         content=content,
         entity_type=kind,
-        category=domain,
+        domain=domain,
         tags=tags,
         related_to=resolved_links,
         metadata=full_metadata,
-        project=project,
+        provenance={"remember_kind": kind, "related_to": resolved_links or []},
+        source_id=f"mcp:remember:{kind}",
+        memory_scope=memory_scope,
+        scope_key=project,
+        capture_surface="mcp",
     )
-    payload = _to_dict(result)
-    payload["raw_memory_id"] = raw_memory.id
-    payload["raw_source_id"] = raw_memory.source_id
+
+    async def remember_raw(
+        request: MemoryCaptureRequest,
+    ) -> Mapping[str, Any]:
+        raw_memory = await remember_raw_memory(
+            organization_id=ctx.org_id,
+            principal_id=ctx.user_id,
+            source_id=request.source_id,
+            raw_content=request.content,
+            title=request.title,
+            memory_scope=request.memory_scope,
+            scope_key=request.scope_key,
+            tags=list(request.tags) if request.tags is not None else None,
+            metadata=dict(request.metadata),
+            provenance=dict(request.provenance),
+            capture_surface=request.capture_surface,
+        )
+        return {"id": raw_memory.id, "source_id": raw_memory.source_id}
+
+    async def create_graph_entity(
+        request: MemoryCaptureRequest,
+        graph_metadata: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        result = await add(
+            title=request.title,
+            content=request.content,
+            entity_type=request.entity_type,
+            category=request.domain,
+            tags=list(request.tags) if request.tags is not None else None,
+            related_to=list(request.related_to) if request.related_to is not None else None,
+            metadata=dict(graph_metadata),
+            project=project,
+        )
+        return _to_dict(result)
+
+    capture_result = await MemoryCaptureService(
+        remember_raw_memory=remember_raw,
+        create_graph_entity=create_graph_entity,
+    ).capture(capture_request)
+    payload = capture_result.to_payload()
+    if capture_result.raw_policy_reason is None:
+        payload.pop("raw_policy_reason", None)
     payload["policy_reason"] = write_decision.reason
     return payload
 
