@@ -399,69 +399,15 @@ async def promote_reflection_candidate_review(
     if isinstance(plan, ReflectionPromotionResult):
         return plan
 
-    result = await persist_reflection_candidate(
-        candidate=plan.promotion_candidate,
+    return await _apply_promotion_plan(
+        plan=plan,
         organization_id=organization_id,
         principal_id=principal_id,
-        domain=domain or _metadata_str(plan.candidate_memory.metadata, "domain"),
-        project=plan.target_project,
-        source_id=plan.raw_source_ids[0] if plan.raw_source_ids else None,
+        domain=domain,
         related_to=related_to,
         accessible_projects=accessible_projects,
-        memory_scope=plan.target_scope,
-        scope_key=plan.target_scope_key,
-        link_source_entity=False,
-    )
-    if not result.response.success:
-        return ReflectionPromotionResult(
-            success=False,
-            candidate_id=plan.candidate_memory.id,
-            promoted_id=None,
-            reason=_policy_denial_reason(result.metadata),
-            review_state=plan.candidate_memory.review_state,
-            memory_scope=plan.target_scope,
-            scope_key=plan.target_scope_key,
-            raw_source_ids=plan.raw_source_ids,
-            metadata=result.metadata,
-        )
-
-    promoted_at = datetime.now(UTC).isoformat()
-    metadata = {
-        **plan.candidate_memory.metadata,
-        **result.metadata,
-        "review_state": _PROMOTED_REVIEW_STATE,
-        "promoted_at": promoted_at,
-        "promoted_entity_id": result.response.id,
-        "promote_to_scope": plan.target_scope.value,
-        "promote_to_scope_key": plan.target_scope_key,
-        "raw_source_ids": plan.raw_source_ids,
-        "source_ids": plan.raw_source_ids,
-    }
-    metadata = _promotion_lifecycle_metadata(
-        metadata=metadata,
-        promoted_entity_id=str(result.response.id),
-        source_ids=plan.raw_source_ids,
-        source_id=plan.candidate_memory.id,
-        reason="accepted_reflection_candidate",
-        policy_metadata=result.metadata,
-    )
-    updated = replace(
-        plan.candidate_memory,
-        review_state=_PROMOTED_REVIEW_STATE,
-        metadata=metadata,
-    )
-    await save_raw_memory(updated)
-
-    return ReflectionPromotionResult(
-        success=True,
-        candidate_id=plan.candidate_memory.id,
-        promoted_id=result.response.id,
-        reason="promoted",
-        review_state=_PROMOTED_REVIEW_STATE,
-        memory_scope=plan.target_scope,
-        scope_key=plan.target_scope_key,
-        raw_source_ids=plan.raw_source_ids,
-        metadata=metadata,
+        source_id=plan.raw_source_ids[0] if plan.raw_source_ids else None,
+        lifecycle_reason="accepted_reflection_candidate",
     )
 
 
@@ -490,69 +436,15 @@ async def promote_raw_memory(
     if isinstance(plan, ReflectionPromotionResult):
         return plan
 
-    result = await persist_reflection_candidate(
-        candidate=plan.promotion_candidate,
+    return await _apply_promotion_plan(
+        plan=plan,
         organization_id=organization_id,
         principal_id=principal_id,
-        domain=domain or _metadata_str(plan.candidate_memory.metadata, "domain"),
-        project=plan.target_project,
-        source_id=plan.candidate_memory.id,
+        domain=domain,
         related_to=related_to,
         accessible_projects=accessible_projects,
-        memory_scope=plan.target_scope,
-        scope_key=plan.target_scope_key,
-        link_source_entity=False,
-    )
-    if not result.response.success:
-        return ReflectionPromotionResult(
-            success=False,
-            candidate_id=plan.candidate_memory.id,
-            promoted_id=None,
-            reason=_policy_denial_reason(result.metadata),
-            review_state=plan.candidate_memory.review_state,
-            memory_scope=plan.target_scope,
-            scope_key=plan.target_scope_key,
-            raw_source_ids=plan.raw_source_ids,
-            metadata=result.metadata,
-        )
-
-    promoted_at = datetime.now(UTC).isoformat()
-    metadata = {
-        **plan.candidate_memory.metadata,
-        **result.metadata,
-        "review_state": _PROMOTED_REVIEW_STATE,
-        "promoted_at": promoted_at,
-        "promoted_entity_id": result.response.id,
-        "promote_to_scope": plan.target_scope.value,
-        "promote_to_scope_key": plan.target_scope_key,
-        "raw_source_ids": plan.raw_source_ids,
-        "source_ids": plan.raw_source_ids,
-    }
-    metadata = _promotion_lifecycle_metadata(
-        metadata=metadata,
-        promoted_entity_id=str(result.response.id),
-        source_ids=plan.raw_source_ids,
         source_id=plan.candidate_memory.id,
-        reason="accepted_raw_memory",
-        policy_metadata=result.metadata,
-    )
-    updated = replace(
-        plan.candidate_memory,
-        review_state=_PROMOTED_REVIEW_STATE,
-        metadata=metadata,
-    )
-    await save_raw_memory(updated)
-
-    return ReflectionPromotionResult(
-        success=True,
-        candidate_id=plan.candidate_memory.id,
-        promoted_id=result.response.id,
-        reason="promoted",
-        review_state=_PROMOTED_REVIEW_STATE,
-        memory_scope=plan.target_scope,
-        scope_key=plan.target_scope_key,
-        raw_source_ids=plan.raw_source_ids,
-        metadata=metadata,
+        lifecycle_reason="accepted_raw_memory",
     )
 
 
@@ -655,6 +547,120 @@ async def preview_raw_memory_promotion(
         raw_source_ids=plan.raw_source_ids,
         policy_decisions=policy_decisions,
         metadata=metadata,
+    )
+
+
+async def _apply_promotion_plan(
+    *,
+    plan: _ReflectionPromotionPlan,
+    organization_id: str,
+    principal_id: str | None,
+    domain: str | None,
+    related_to: Sequence[str] | None,
+    accessible_projects: Iterable[str] | None,
+    source_id: str | None,
+    lifecycle_reason: str,
+) -> ReflectionPromotionResult:
+    result = await persist_reflection_candidate(
+        candidate=plan.promotion_candidate,
+        organization_id=organization_id,
+        principal_id=principal_id,
+        domain=domain or _metadata_str(plan.candidate_memory.metadata, "domain"),
+        project=plan.target_project,
+        source_id=source_id,
+        related_to=related_to,
+        accessible_projects=accessible_projects,
+        memory_scope=plan.target_scope,
+        scope_key=plan.target_scope_key,
+        link_source_entity=False,
+    )
+    if not result.response.success:
+        return _promotion_write_denied(plan=plan, result=result)
+    return await _mark_promotion_plan_promoted(
+        plan=plan,
+        result=result,
+        source_id=source_id,
+        lifecycle_reason=lifecycle_reason,
+    )
+
+
+def _promotion_write_denied(
+    *,
+    plan: _ReflectionPromotionPlan,
+    result: ReflectionWriteResult,
+) -> ReflectionPromotionResult:
+    return ReflectionPromotionResult(
+        success=False,
+        candidate_id=plan.candidate_memory.id,
+        promoted_id=None,
+        reason=_policy_denial_reason(result.metadata),
+        review_state=plan.candidate_memory.review_state,
+        memory_scope=plan.target_scope,
+        scope_key=plan.target_scope_key,
+        raw_source_ids=plan.raw_source_ids,
+        metadata=result.metadata,
+    )
+
+
+async def _mark_promotion_plan_promoted(
+    *,
+    plan: _ReflectionPromotionPlan,
+    result: ReflectionWriteResult,
+    source_id: str | None,
+    lifecycle_reason: str,
+) -> ReflectionPromotionResult:
+    metadata = _promoted_candidate_metadata(
+        plan=plan,
+        result=result,
+        source_id=source_id,
+        lifecycle_reason=lifecycle_reason,
+    )
+    await save_raw_memory(
+        replace(
+            plan.candidate_memory,
+            review_state=_PROMOTED_REVIEW_STATE,
+            metadata=metadata,
+        )
+    )
+    return ReflectionPromotionResult(
+        success=True,
+        candidate_id=plan.candidate_memory.id,
+        promoted_id=result.response.id,
+        reason="promoted",
+        review_state=_PROMOTED_REVIEW_STATE,
+        memory_scope=plan.target_scope,
+        scope_key=plan.target_scope_key,
+        raw_source_ids=plan.raw_source_ids,
+        metadata=metadata,
+    )
+
+
+def _promoted_candidate_metadata(
+    *,
+    plan: _ReflectionPromotionPlan,
+    result: ReflectionWriteResult,
+    source_id: str | None,
+    lifecycle_reason: str,
+) -> dict[str, object]:
+    promoted_id = result.response.id
+    metadata = {
+        **plan.candidate_memory.metadata,
+        **result.metadata,
+        "review_state": _PROMOTED_REVIEW_STATE,
+        "promoted_at": datetime.now(UTC).isoformat(),
+        "promoted_entity_id": promoted_id,
+        "promote_to_scope": plan.target_scope.value,
+        "promote_to_scope_key": plan.target_scope_key,
+        "raw_source_ids": plan.raw_source_ids,
+        "source_ids": plan.raw_source_ids,
+    }
+    return _promotion_lifecycle_metadata(
+        metadata=metadata,
+        promoted_entity_id=str(promoted_id),
+        source_ids=plan.raw_source_ids,
+        source_id=source_id,
+        reason=lifecycle_reason,
+        policy_metadata=result.metadata,
     )
 
 
