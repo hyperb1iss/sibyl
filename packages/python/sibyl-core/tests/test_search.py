@@ -1002,6 +1002,8 @@ async def test_context_search_pushes_facet_types_into_graph_queries(
     assert response.filters["vector_status"] == "empty"
     assert response.filters["vector_degraded"] is False
     assert response.filters["vector_candidate_count"] == 0
+    assert response.filters["candidate_source_degraded"] is False
+    assert response.filters["candidate_source_failure_count"] == 0
     assert client.calls
     assert all("FROM relates_to" not in query for query, _ in client.calls)
     assert all("FROM episode" not in query for query, _ in client.calls)
@@ -1172,6 +1174,30 @@ def test_vector_candidate_fetch_metadata_distinguishes_empty_and_failure() -> No
     assert failed.as_metadata()["vector_status"] == "embedding_failed"
     assert failed.as_metadata()["vector_degraded"] is True
     assert failed.as_metadata()["vector_failures"] == ["embedding:RuntimeError"]
+
+
+@pytest.mark.asyncio
+async def test_candidate_source_gather_reports_failures() -> None:
+    async def failing_raw_source() -> list[RetrievalCandidate]:
+        raise RuntimeError("raw source offline")
+
+    async def invalid_graph_source() -> object:
+        return object()
+
+    raw_source, graph_sources = await search_module._gather_candidate_sources(
+        failing_raw_source(),
+        [(RetrievalSignal.NODE_FULLTEXT, invalid_graph_source())],
+    )
+    metadata = search_module._candidate_source_metadata((raw_source, *graph_sources))
+
+    assert raw_source.degraded is True
+    assert graph_sources[0].degraded is True
+    assert metadata["candidate_source_degraded"] is True
+    assert metadata["candidate_source_failure_count"] == 2
+    assert metadata["candidate_source_failures"] == [
+        {"source": "raw_lexical", "error_type": "RuntimeError"},
+        {"source": "node_fulltext", "error_type": "invalid:object"},
+    ]
 
 
 @pytest.mark.asyncio

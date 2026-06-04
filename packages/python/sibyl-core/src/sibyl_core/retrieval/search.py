@@ -21,6 +21,7 @@ from sibyl_core.auth.memory_policy import (
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
 from sibyl_core.config import core_config
 from sibyl_core.embeddings.providers import EmbeddingMetadata, EmbeddingProvider
+from sibyl_core.memory_pipeline.retrieval import CandidateSourceResult
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.retrieval.candidates import (
     CandidateKind,
@@ -291,6 +292,7 @@ async def context_search(
     edge_sources_allowed = _edge_sources_allowed(requested_types)
     graph_tasks = [
         (
+            RetrievalSignal.NODE_FULLTEXT,
             _node_fulltext_candidates(
                 client=client,
                 plan=search_plan,
@@ -298,9 +300,10 @@ async def context_search(
                 limit=search_plan.candidate_limits.node_fulltext,
             )
             if node_sources_allowed
-            else _empty_candidate_source()
+            else _empty_candidate_source(),
         ),
         (
+            RetrievalSignal.EPISODE_FULLTEXT,
             _episode_fulltext_candidates(
                 client=client,
                 plan=search_plan,
@@ -308,9 +311,10 @@ async def context_search(
                 limit=search_plan.candidate_limits.episode_fulltext,
             )
             if episode_sources_allowed
-            else _empty_candidate_source()
+            else _empty_candidate_source(),
         ),
         (
+            RetrievalSignal.EDGE_FULLTEXT,
             _edge_fulltext_candidates(
                 client=client,
                 plan=search_plan,
@@ -318,10 +322,13 @@ async def context_search(
                 limit=search_plan.candidate_limits.edge_fulltext,
             )
             if edge_sources_allowed
-            else _empty_candidate_source()
+            else _empty_candidate_source(),
         ),
     ]
-    raw_candidates, graph_candidate_lists = await _gather_candidate_sources(raw_task, graph_tasks)
+    raw_source, graph_sources = await _gather_candidate_sources(raw_task, graph_tasks)
+    raw_candidates = list(raw_source.candidates)
+    graph_candidate_lists = [list(source.candidates) for source in graph_sources]
+    candidate_source_metadata = _candidate_source_metadata((raw_source, *graph_sources))
 
     vector_plan = _vector_scoped_plan(
         search_plan,
@@ -404,6 +411,7 @@ async def context_search(
             "project": search_plan.project,
             "retrieval_mode": "native",
             "fusion_backend": fusion_backend.value,
+            **candidate_source_metadata,
             **vector_fetch.as_metadata(),
         },
         graph_count=len([result for result in results if result.result_origin == "graph"]),
@@ -488,12 +496,56 @@ def _scope_decisions(
 
 async def _gather_candidate_sources(
     raw_task: Any,
-    graph_tasks: Sequence[Any],
-) -> tuple[list[RetrievalCandidate], list[list[RetrievalCandidate]]]:
-    gathered = await asyncio.gather(raw_task, *graph_tasks, return_exceptions=True)
-    raw = _candidate_list_or_empty(gathered[0])
-    graph = [_candidate_list_or_empty(result) for result in gathered[1:]]
+    graph_tasks: Sequence[tuple[RetrievalSignal, Any]],
+) -> tuple[
+    CandidateSourceResult[RetrievalCandidate],
+    list[CandidateSourceResult[RetrievalCandidate]],
+]:
+    gathered = await asyncio.gather(
+        raw_task,
+        *(task for _signal, task in graph_tasks),
+        return_exceptions=True,
+    )
+    raw = _candidate_source_result(RetrievalSignal.RAW_LEXICAL.value, gathered[0])
+    graph = [
+        _candidate_source_result(signal.value, result)
+        for (signal, _task), result in zip(graph_tasks, gathered[1:], strict=True)
+    ]
     return raw, graph
+
+
+def _candidate_source_result(
+    source: str,
+    result: object,
+) -> CandidateSourceResult[RetrievalCandidate]:
+    if isinstance(result, BaseException):
+        log.warning(
+            "retrieval_candidate_source_failed",
+            source=source,
+            error_type=type(result).__name__,
+        )
+        return CandidateSourceResult.failed(source, type(result).__name__)
+    if not isinstance(result, list):
+        log.warning(
+            "retrieval_candidate_source_invalid",
+            source=source,
+            result_type=type(result).__name__,
+        )
+        return CandidateSourceResult.failed(source, f"invalid:{type(result).__name__}")
+    return CandidateSourceResult.success(source, cast("list[RetrievalCandidate]", result))
+
+
+def _candidate_source_metadata(
+    sources: Sequence[CandidateSourceResult[RetrievalCandidate]],
+) -> dict[str, object]:
+    failures = [source.failure.as_metadata() for source in sources if source.failure is not None]
+    metadata: dict[str, object] = {
+        "candidate_source_degraded": bool(failures),
+        "candidate_source_failure_count": len(failures),
+    }
+    if failures:
+        metadata["candidate_source_failures"] = failures
+    return metadata
 
 
 def _candidate_list_or_empty(result: object) -> list[RetrievalCandidate]:
