@@ -19,6 +19,7 @@ from sibyl_core.auth.memory_policy import (
     memory_scope_policy_key,
 )
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
+from sibyl_core.backends.surreal.records import SurrealQueryError, query_error
 from sibyl_core.config import core_config
 from sibyl_core.embeddings.providers import EmbeddingMetadata, EmbeddingProvider
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceFailure, CandidateSourceResult
@@ -66,6 +67,15 @@ async def _get_read_only_graph_runtime(organization_id: str) -> Any:
 class FusionBackend(StrEnum):
     PYTHON_RRF = "python_rrf"
     SURREAL_RRF = "surreal_rrf"
+
+
+type FusedCandidate = tuple[RetrievalCandidate, float, dict[str, Any]]
+
+
+@dataclass(frozen=True, slots=True)
+class FusionExecutionResult:
+    candidates: list[FusedCandidate]
+    actual_backend: FusionBackend
 
 
 DEFAULT_FUSION_BACKEND = FusionBackend.PYTHON_RRF
@@ -386,7 +396,7 @@ async def context_search(
     ]
     fusion_backend = fusion_backend_from_env()
     fusion_failures: list[CandidateSourceFailure] = []
-    fused = await _fuse_candidates_for_plan(
+    fusion = await _fuse_candidates_for_plan(
         client=client,
         source_lists=filtered_lists,
         plan=search_plan,
@@ -394,6 +404,7 @@ async def context_search(
         fusion_backend=fusion_backend,
         fusion_failures=fusion_failures,
     )
+    fused = fusion.candidates
     if search_plan.query.strip():
         fused = _apply_query_coverage_to_fused(
             search_plan.query,
@@ -419,7 +430,7 @@ async def context_search(
             "retrieval_mode": "native",
             **_fusion_receipt_metadata(
                 requested_backend=fusion_backend,
-                fused=fused,
+                actual_backend=fusion.actual_backend,
                 failures=fusion_failures,
             ),
             **candidate_source_metadata,
@@ -569,17 +580,14 @@ def _candidate_source_metadata(
 def _fusion_receipt_metadata(
     *,
     requested_backend: FusionBackend,
-    fused: Sequence[tuple[RetrievalCandidate, float, Mapping[str, Any]]],
+    actual_backend: FusionBackend,
     failures: Sequence[CandidateSourceFailure],
 ) -> dict[str, object]:
-    actual_backend = requested_backend.value
-    if fused:
-        actual_backend = str(fused[0][2].get("fusion_backend") or actual_backend)
-    degraded = bool(failures) or actual_backend != requested_backend.value
+    degraded = bool(failures) or actual_backend is not requested_backend
     metadata: dict[str, object] = {
-        "fusion_backend": actual_backend,
+        "fusion_backend": actual_backend.value,
         "fusion_backend_requested": requested_backend.value,
-        "fusion_backend_actual": actual_backend,
+        "fusion_backend_actual": actual_backend.value,
         "fusion_degraded": degraded,
         "fusion_failure_count": len(failures),
     }
@@ -596,6 +604,17 @@ def _candidate_list_or_empty(result: object) -> list[RetrievalCandidate]:
 
 async def _empty_candidate_source() -> list[RetrievalCandidate]:
     return []
+
+
+async def _execute_query_records(
+    client: Any,
+    query: str,
+    **params: object,
+) -> list[dict[str, object]]:
+    result = await client.execute_query(query, **params)
+    if error := query_error(result):
+        raise SurrealQueryError(query, error)
+    return normalize_records(result)
 
 
 def _candidate_limits_for_limit(
@@ -743,34 +762,33 @@ async def _node_fulltext_candidates(
     if not search_query:
         return []
     filter_clauses, filter_params = _node_filter_clause(search_filter)
-    rows = normalize_records(
-        await client.execute_query(
-            """
-            SELECT *,
-                   math::max([
-                       search::score(0),
-                       search::score(1),
-                       search::score(2),
-                       search::score(3)
-                   ]) AS score
-            FROM entity
-            WHERE """
-            + _where_clause(["group_id = $group_id", *filter_clauses])
-            + """
-              AND (
-                  name @0@ $search_query
-                  OR summary @1@ $search_query
-                  OR description @2@ $search_query
-                  OR content @3@ $search_query
-              )
-            ORDER BY score DESC, created_at DESC, uuid DESC
-            LIMIT $limit;
-            """,
-            group_id=plan.organization_id,
-            search_query=search_query,
-            limit=max(int(limit), 1),
-            **filter_params,
-        )
+    rows = await _execute_query_records(
+        client,
+        """
+        SELECT *,
+               math::max([
+                   search::score(0),
+                   search::score(1),
+                   search::score(2),
+                   search::score(3)
+               ]) AS score
+        FROM entity
+        WHERE """
+        + _where_clause(["group_id = $group_id", *filter_clauses])
+        + """
+          AND (
+              name @0@ $search_query
+              OR summary @1@ $search_query
+              OR description @2@ $search_query
+              OR content @3@ $search_query
+          )
+        ORDER BY score DESC, created_at DESC, uuid DESC
+        LIMIT $limit;
+        """,
+        group_id=plan.organization_id,
+        search_query=search_query,
+        limit=max(int(limit), 1),
+        **filter_params,
     )
     return [
         _candidate_from_node_record(
@@ -794,20 +812,19 @@ async def _episode_fulltext_candidates(
     search_query = build_fulltext_query(plan.query)
     if not search_query:
         return []
-    rows = normalize_records(
-        await client.execute_query(
-            """
-            SELECT *, search::score(0) AS score
-            FROM episode
-            WHERE group_id = $group_id
-              AND content @0@ $search_query
-            ORDER BY score DESC, created_at DESC, uuid DESC
-            LIMIT $limit;
-            """,
-            group_id=plan.organization_id,
-            search_query=search_query,
-            limit=max(int(limit), 1),
-        )
+    rows = await _execute_query_records(
+        client,
+        """
+        SELECT *, search::score(0) AS score
+        FROM episode
+        WHERE group_id = $group_id
+          AND content @0@ $search_query
+        ORDER BY score DESC, created_at DESC, uuid DESC
+        LIMIT $limit;
+        """,
+        group_id=plan.organization_id,
+        search_query=search_query,
+        limit=max(int(limit), 1),
     )
     return [
         _candidate_from_episode_record(
@@ -832,23 +849,22 @@ async def _edge_fulltext_candidates(
     result_limit = max(int(limit), 1)
     match_limit = max(result_limit * EDGE_FULLTEXT_MATCH_HEADROOM, EDGE_FULLTEXT_MIN_MATCH_LIMIT)
     match_clauses, match_params = _edge_match_filter_clause(search_filter)
-    match_rows = normalize_records(
-        await client.execute_query(
-            """
-            SELECT uuid, created_at, search::score(0) AS score
-            FROM relates_to
-            WHERE """
-            + _where_clause(["group_id = $group_id", *match_clauses])
-            + """
-              AND fact @0@ $search_query
-            ORDER BY score DESC, created_at DESC, uuid DESC
-            LIMIT $match_limit;
-            """,
-            group_id=plan.organization_id,
-            search_query=search_query,
-            match_limit=match_limit,
-            **match_params,
-        )
+    match_rows = await _execute_query_records(
+        client,
+        """
+        SELECT uuid, created_at, search::score(0) AS score
+        FROM relates_to
+        WHERE """
+        + _where_clause(["group_id = $group_id", *match_clauses])
+        + """
+          AND fact @0@ $search_query
+        ORDER BY score DESC, created_at DESC, uuid DESC
+        LIMIT $match_limit;
+        """,
+        group_id=plan.organization_id,
+        search_query=search_query,
+        match_limit=match_limit,
+        **match_params,
     )
     match_scores: dict[str, float] = {}
     for row in match_rows:
@@ -868,17 +884,16 @@ async def _edge_fulltext_candidates(
         edge_types=search_filter.edge_types,
     )
     filter_clauses, filter_params = _edge_filter_clause(hydrate_filter)
-    rows = normalize_records(
-        await client.execute_query(
-            _edge_select()
-            + " WHERE "
-            + _where_clause(["uuid IN $match_uuids", "group_id = $group_id", *filter_clauses])
-            + " LIMIT $limit;",
-            match_uuids=match_uuids,
-            group_id=plan.organization_id,
-            limit=len(match_uuids),
-            **filter_params,
-        )
+    rows = await _execute_query_records(
+        client,
+        _edge_select()
+        + " WHERE "
+        + _where_clause(["uuid IN $match_uuids", "group_id = $group_id", *filter_clauses])
+        + " LIMIT $limit;",
+        match_uuids=match_uuids,
+        group_id=plan.organization_id,
+        limit=len(match_uuids),
+        **filter_params,
     )
     rows_by_uuid = {str(row["uuid"]): row for row in rows if row.get("uuid")}
     candidates = [
@@ -1032,29 +1047,28 @@ async def _node_vector_candidates(
     filter_clauses, filter_params = _node_filter_clause(search_filter)
     candidate_limit = max(int(limit), 1)
     knn_effort = _graph_knn_effort()
-    rows = normalize_records(
-        await client.execute_query(
-            """
-            SELECT *
-            FROM (
-                SELECT *,
-                       (1 - vector::distance::knn()) AS score
-                FROM entity
-                WHERE """
-            + _where_clause(["group_id = $group_id", *filter_clauses])
-            + f"""
-                  AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
-            )
-            WHERE score >= $min_score
-            ORDER BY score DESC, created_at DESC, uuid DESC
-            LIMIT $limit;
-            """,
-            group_id=plan.organization_id,
-            query_embedding=list(query_embedding),
-            min_score=plan.vector_min_score,
-            limit=candidate_limit,
-            **filter_params,
+    rows = await _execute_query_records(
+        client,
+        """
+        SELECT *
+        FROM (
+            SELECT *,
+                   (1 - vector::distance::knn()) AS score
+            FROM entity
+            WHERE """
+        + _where_clause(["group_id = $group_id", *filter_clauses])
+        + f"""
+              AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
         )
+        WHERE score >= $min_score
+        ORDER BY score DESC, created_at DESC, uuid DESC
+        LIMIT $limit;
+        """,
+        group_id=plan.organization_id,
+        query_embedding=list(query_embedding),
+        min_score=plan.vector_min_score,
+        limit=candidate_limit,
+        **filter_params,
     )
     return [
         _candidate_from_node_record(
@@ -1081,25 +1095,24 @@ async def _edge_vector_candidates(
     filter_clauses, filter_params = _edge_filter_clause(search_filter)
     candidate_limit = max(int(limit), 1)
     knn_effort = _graph_knn_effort()
-    rows = normalize_records(
-        await client.execute_query(
-            "SELECT * FROM ("
-            + _edge_select(extra="(1 - vector::distance::knn()) AS score")
-            + " WHERE "
-            + _where_clause(["group_id = $group_id", *filter_clauses])
-            + f"""
-              AND fact_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
-            )
-            WHERE score >= $min_score
-            ORDER BY score DESC, created_at DESC, uuid DESC
-            LIMIT $limit;
-            """,
-            group_id=plan.organization_id,
-            query_embedding=list(query_embedding),
-            min_score=plan.vector_min_score,
-            limit=candidate_limit,
-            **filter_params,
+    rows = await _execute_query_records(
+        client,
+        "SELECT * FROM ("
+        + _edge_select(extra="(1 - vector::distance::knn()) AS score")
+        + " WHERE "
+        + _where_clause(["group_id = $group_id", *filter_clauses])
+        + f"""
+          AND fact_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
         )
+        WHERE score >= $min_score
+        ORDER BY score DESC, created_at DESC, uuid DESC
+        LIMIT $limit;
+        """,
+        group_id=plan.organization_id,
+        query_embedding=list(query_embedding),
+        min_score=plan.vector_min_score,
+        limit=candidate_limit,
+        **filter_params,
     )
     return [
         _candidate_from_edge_record(
@@ -1324,20 +1337,19 @@ async def _mentioned_entity_uuids(
 ) -> list[str]:
     if not episode_uuids:
         return []
-    rows = normalize_records(
-        await client.execute_query(
-            """
-            SELECT target_id AS uuid
-            FROM mentions
-            WHERE source_id IN $episode_uuids
-              AND group_id = $group_id
-              AND out.group_id = $group_id
-            LIMIT $limit;
-            """,
-            episode_uuids=list(episode_uuids),
-            group_id=group_id,
-            limit=max(int(limit), 1),
-        )
+    rows = await _execute_query_records(
+        client,
+        """
+        SELECT target_id AS uuid
+        FROM mentions
+        WHERE source_id IN $episode_uuids
+          AND group_id = $group_id
+          AND out.group_id = $group_id
+        LIMIT $limit;
+        """,
+        episode_uuids=list(episode_uuids),
+        group_id=group_id,
+        limit=max(int(limit), 1),
     )
     return _dedupe_strings(_record_uuids(rows))
 
@@ -1351,20 +1363,19 @@ async def _relation_target_uuids(
 ) -> list[str]:
     if not source_uuids:
         return []
-    rows = normalize_records(
-        await client.execute_query(
-            """
-            SELECT target_id AS uuid
-            FROM relates_to
-            WHERE source_id IN $source_uuids
-              AND group_id = $group_id
-              AND out.group_id = $group_id
-            LIMIT $limit;
-            """,
-            source_uuids=list(source_uuids),
-            group_id=group_id,
-            limit=max(int(limit), 1),
-        )
+    rows = await _execute_query_records(
+        client,
+        """
+        SELECT target_id AS uuid
+        FROM relates_to
+        WHERE source_id IN $source_uuids
+          AND group_id = $group_id
+          AND out.group_id = $group_id
+        LIMIT $limit;
+        """,
+        source_uuids=list(source_uuids),
+        group_id=group_id,
+        limit=max(int(limit), 1),
     )
     return _dedupe_strings(_record_uuids(rows))
 
@@ -1380,16 +1391,15 @@ async def _hydrate_entity_records(
     if not uuids:
         return []
     filter_clauses, filter_params = _node_filter_clause(search_filter)
-    rows = normalize_records(
-        await client.execute_query(
-            "SELECT * FROM entity WHERE "
-            + _where_clause(["uuid IN $uuids", "group_id = $group_id", *filter_clauses])
-            + " LIMIT $limit;",
-            uuids=list(uuids),
-            group_id=group_id,
-            limit=max(int(limit), 1),
-            **filter_params,
-        )
+    rows = await _execute_query_records(
+        client,
+        "SELECT * FROM entity WHERE "
+        + _where_clause(["uuid IN $uuids", "group_id = $group_id", *filter_clauses])
+        + " LIMIT $limit;",
+        uuids=list(uuids),
+        group_id=group_id,
+        limit=max(int(limit), 1),
+        **filter_params,
     )
     rows_by_uuid = {str(row["uuid"]): row for row in rows if row.get("uuid")}
     return [rows_by_uuid[uuid] for uuid in uuids if uuid in rows_by_uuid]
@@ -1977,7 +1987,7 @@ async def _fuse_candidates_for_plan(
     limit: int,
     fusion_backend: FusionBackend | None = None,
     fusion_failures: list[CandidateSourceFailure] | None = None,
-) -> list[tuple[RetrievalCandidate, float, dict[str, Any]]]:
+) -> FusionExecutionResult:
     backend = fusion_backend or DEFAULT_FUSION_BACKEND
     if backend is FusionBackend.SURREAL_RRF:
         scores: dict[str, float] = {}
@@ -1997,14 +2007,26 @@ async def _fuse_candidates_for_plan(
                     )
                 )
         if scores:
-            return _rank_fused_candidates(
-                source_lists,
-                plan=plan,
-                limit=limit,
-                rrf_scores=scores,
-                backend=backend,
+            return FusionExecutionResult(
+                candidates=_rank_fused_candidates(
+                    source_lists,
+                    plan=plan,
+                    limit=limit,
+                    rrf_scores=scores,
+                    backend=backend,
+                ),
+                actual_backend=backend,
             )
-    return _fuse_candidates(source_lists, plan=plan, limit=limit)
+        if any(candidates for _signal, candidates in source_lists):
+            return FusionExecutionResult(
+                candidates=_fuse_candidates(source_lists, plan=plan, limit=limit),
+                actual_backend=FusionBackend.PYTHON_RRF,
+            )
+        return FusionExecutionResult(candidates=[], actual_backend=backend)
+    return FusionExecutionResult(
+        candidates=_fuse_candidates(source_lists, plan=plan, limit=limit),
+        actual_backend=FusionBackend.PYTHON_RRF,
+    )
 
 
 def _python_rrf_scores(
@@ -2043,13 +2065,12 @@ async def _surreal_rrf_scores(
     unique_candidate_count = len(
         {candidate.id for _signal, candidates in source_lists for candidate in candidates}
     )
-    rows = normalize_records(
-        await client.execute_query(
-            "RETURN search::rrf($lists, $limit, $k);",
-            lists=rrf_inputs,
-            limit=max(int(limit), unique_candidate_count, 1),
-            k=plan.weights.rrf_k,
-        )
+    rows = await _execute_query_records(
+        client,
+        "RETURN search::rrf($lists, $limit, $k);",
+        lists=rrf_inputs,
+        limit=max(int(limit), unique_candidate_count, 1),
+        k=plan.weights.rrf_k,
     )
 
     scores: dict[str, float] = {}

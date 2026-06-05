@@ -762,6 +762,11 @@ class _RrfOnlyFailingClient:
         return []
 
 
+class _SurrealErrorEnvelopeClient:
+    async def execute_query(self, _query: str, **_params: object) -> list[dict[str, object]]:
+        return [{"status": "ERR", "result": "fulltext index unavailable", "time": "1ms"}]
+
+
 @pytest.mark.asyncio
 async def test_surreal_rrf_backend_uses_database_fusion_scores() -> None:
     plan = build_context_retrieval_plan(
@@ -795,7 +800,7 @@ async def test_surreal_rrf_backend_uses_database_fusion_scores() -> None:
     )
     client = _RrfClient()
 
-    ranked = await search_module._fuse_candidates_for_plan(
+    fusion = await search_module._fuse_candidates_for_plan(
         client=client,
         source_lists=[
             (RetrievalSignal.NODE_FULLTEXT, [lexical, shared]),
@@ -805,7 +810,9 @@ async def test_surreal_rrf_backend_uses_database_fusion_scores() -> None:
         limit=2,
         fusion_backend=FusionBackend.SURREAL_RRF,
     )
+    ranked = fusion.candidates
 
+    assert fusion.actual_backend is FusionBackend.SURREAL_RRF
     assert [candidate.id for candidate, _, _ in ranked] == ["shared", "lexical"]
     query, params = client.calls[0]
     assert "search::rrf($lists, $limit, $k)" in query
@@ -837,7 +844,7 @@ async def test_surreal_rrf_backend_falls_back_to_python_rrf_on_error() -> None:
     )
     failures: list[search_module.CandidateSourceFailure] = []
 
-    ranked = await search_module._fuse_candidates_for_plan(
+    fusion = await search_module._fuse_candidates_for_plan(
         client=_FailingRrfClient(),
         source_lists=[(RetrievalSignal.NODE_FULLTEXT, [candidate])],
         plan=plan,
@@ -845,12 +852,93 @@ async def test_surreal_rrf_backend_falls_back_to_python_rrf_on_error() -> None:
         fusion_backend=FusionBackend.SURREAL_RRF,
         fusion_failures=failures,
     )
+    ranked = fusion.candidates
 
+    assert fusion.actual_backend is FusionBackend.PYTHON_RRF
     assert ranked[0][0].id == "candidate"
     assert ranked[0][2]["fusion_backend"] == "python_rrf"
     assert [failure.as_metadata() for failure in failures] == [
         {"source": "surreal_rrf", "error_type": "RuntimeError"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_surreal_rrf_empty_fallback_reports_actual_backend() -> None:
+    plan = build_context_retrieval_plan(
+        query="surreal rrf empty fallback",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project=None,
+        accessible_projects=None,
+    )
+    candidate = RetrievalCandidate(
+        id="candidate",
+        type="task",
+        name="Candidate",
+        content="Fallback result.",
+        score=0.9,
+        source=None,
+        metadata={},
+    )
+    failures: list[search_module.CandidateSourceFailure] = []
+
+    fusion = await search_module._fuse_candidates_for_plan(
+        client=_FailingRrfClient(),
+        source_lists=[(RetrievalSignal.NODE_FULLTEXT, [candidate])],
+        plan=plan,
+        limit=0,
+        fusion_backend=FusionBackend.SURREAL_RRF,
+        fusion_failures=failures,
+    )
+    metadata = search_module._fusion_receipt_metadata(
+        requested_backend=FusionBackend.SURREAL_RRF,
+        actual_backend=fusion.actual_backend,
+        failures=failures,
+    )
+
+    assert fusion.candidates == []
+    assert metadata["fusion_backend"] == "python_rrf"
+    assert metadata["fusion_backend_requested"] == "surreal_rrf"
+    assert metadata["fusion_backend_actual"] == "python_rrf"
+    assert metadata["fusion_degraded"] is True
+    assert metadata["fusion_failures"] == [{"source": "surreal_rrf", "error_type": "RuntimeError"}]
+
+
+@pytest.mark.asyncio
+async def test_candidate_source_reports_surreal_error_envelope() -> None:
+    plan = build_context_retrieval_plan(
+        query="active task followup",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project=None,
+        accessible_projects=None,
+    )
+
+    raw_source, graph_sources = await search_module._gather_candidate_sources(
+        search_module._empty_candidate_source(),
+        [
+            (
+                RetrievalSignal.NODE_FULLTEXT,
+                search_module._node_fulltext_candidates(
+                    client=_SurrealErrorEnvelopeClient(),
+                    plan=plan,
+                    search_filter=search_module.SearchFilter(),
+                    limit=3,
+                ),
+            )
+        ],
+    )
+
+    assert raw_source.failure is None
+    assert graph_sources[0].failure is not None
+    assert graph_sources[0].failure.as_metadata() == {
+        "source": "node_fulltext",
+        "error_type": "SurrealQueryError",
+    }
 
 
 @pytest.mark.asyncio
