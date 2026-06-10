@@ -316,7 +316,7 @@ class WorkerSettings:
     after_job_end = job_end
 
     # Worker settings
-    max_jobs = 3  # Max concurrent jobs
+    max_jobs = settings.resolved_worker_max_jobs
     job_timeout = 3600  # 1 hour timeout for crawl jobs
     keep_result = 86400  # Keep results for 24 hours
     poll_delay = 0.5  # Check for jobs every 0.5s

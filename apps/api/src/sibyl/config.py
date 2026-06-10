@@ -20,6 +20,7 @@ _log = structlog.get_logger()
 _JWT_KEY_FILE = Path.home() / ".sibyl" / "jwt.key"
 _EXTRA_OIDC_PROVIDER_NAMES = {"github", "google"}
 _EXTRA_OIDC_ISSUER_HOSTS = {"github.com", "accounts.google.com"}
+_EMBEDDED_SURREAL_SCHEMES = ("memory://", "surrealkv://", "rocksdb://", "file://")
 
 
 class OIDCProviderSettings(BaseModel):
@@ -592,6 +593,12 @@ class Settings(BaseSettings):
         le=10,
         description="Maximum concurrent LLM calls inside one memory extraction job",
     )
+    worker_max_jobs: int | None = Field(
+        default=None,
+        ge=1,
+        le=1024,
+        description="Override maximum concurrent background jobs; defaults to CPU and DB pool scale.",
+    )
     memory_extraction_max_tokens: int = Field(
         default=8192,
         ge=256,
@@ -685,6 +692,22 @@ class Settings(BaseSettings):
             "graph": self.surreal_graph_pool_size,
         }[client_kind]
         return override or self.surreal_pool_size
+
+    def effective_surreal_client_pool_size(
+        self, client_kind: Literal["auth", "content", "graph"]
+    ) -> int:
+        if self.resolved_surreal_url.startswith(_EMBEDDED_SURREAL_SCHEMES):
+            return 1
+        return self.surreal_client_pool_size(client_kind)
+
+    @property
+    def resolved_worker_max_jobs(self) -> int:
+        if self.worker_max_jobs is not None:
+            return self.worker_max_jobs
+
+        cpu_scaled = max(1, (os.cpu_count() or 1) * 2)
+        content_pool_size = self.effective_surreal_client_pool_size("content")
+        return min(max(3, cpu_scaled), content_pool_size)
 
     @property
     def fully_surreal(self) -> bool:

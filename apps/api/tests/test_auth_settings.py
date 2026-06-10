@@ -83,6 +83,71 @@ def test_settings_surreal_client_pool_size_prefers_client_kind_override() -> Non
     assert s.surreal_client_pool_size("graph") == 33
 
 
+def test_settings_worker_max_jobs_prefers_explicit_override() -> None:
+    s = Settings(_env_file=None, worker_max_jobs=17)
+
+    assert s.resolved_worker_max_jobs == 17
+
+
+def test_settings_worker_max_jobs_defaults_to_cpu_and_content_pool_scale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config_module.os, "cpu_count", lambda: 16)
+
+    s = Settings(_env_file=None, surreal_url="ws://surrealdb:8000/rpc", surreal_pool_size=8)
+
+    assert s.resolved_worker_max_jobs == 8
+
+
+def test_settings_worker_max_jobs_uses_content_pool_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config_module.os, "cpu_count", lambda: 16)
+
+    s = Settings(
+        _env_file=None,
+        surreal_url="ws://surrealdb:8000/rpc",
+        surreal_pool_size=64,
+        surreal_content_pool_size=20,
+    )
+
+    assert s.resolved_worker_max_jobs == 20
+
+
+def test_settings_worker_max_jobs_preserves_floor_without_exceeding_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config_module.os, "cpu_count", lambda: 1)
+
+    assert (
+        Settings(
+            _env_file=None,
+            surreal_url="ws://surrealdb:8000/rpc",
+            surreal_pool_size=8,
+        ).resolved_worker_max_jobs
+        == 3
+    )
+    assert (
+        Settings(
+            _env_file=None,
+            surreal_url="ws://surrealdb:8000/rpc",
+            surreal_pool_size=1,
+        ).resolved_worker_max_jobs
+        == 1
+    )
+
+
+def test_settings_worker_max_jobs_uses_effective_embedded_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config_module.os, "cpu_count", lambda: 16)
+
+    s = Settings(_env_file=None, surreal_url="", surreal_pool_size=8)
+
+    assert s.effective_surreal_client_pool_size("content") == 1
+    assert s.resolved_worker_max_jobs == 1
+
+
 def test_settings_store_rejects_removed_legacy_value(monkeypatch) -> None:
     monkeypatch.setenv("SIBYL_STORE", "legacy")
 
