@@ -77,17 +77,21 @@ manifests, and clean installs from published artifacts are post-publish checks.
 
 ## Prompt-To-Artifact Audit
 
-The latest core-review follow-through turned the review prompt into five repo artifacts:
+The core review prompt has repo-side artifacts for every execution wave:
 
-| Prompt thread                                       | Artifact commits | Verification receipt                                                                                                |
-| --------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Keep `sibyl-core` standalone                        | `42633f2f`       | Core boundary test prevents module-scope `sibyl` or `apps.api` imports from `sibyl_core`.                           |
-| Expose reactive SurrealDB capture signals           | `15844e0d`       | Raw capture live-query bridge tests cover subscription, event normalization, and degraded fallback behavior.        |
-| Move single-create embedding off the write path     | `1d963323`       | Async embedding projection tests cover pending payloads and backfill receipts.                                      |
-| Trainable reranking without losing replay receipts  | `12184328`       | Learned reranker replay tests cover out-of-fold training, feature attribution, and deterministic fallback behavior. |
-| Make graph-native retrieval signals visible in rank | `ddacb83b`       | Search tests preserve graph-expansion receipts, boost corroborated paths, and keep graph-only expansion demotion.   |
+| Wave | Prompt thread                            | Artifact commits                                                                               | Verification receipt                                                                                                                                                                          |
+| ---- | ---------------------------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Security hotfixes                        | `43610e4b`                                                                                     | Source-import SSRF, local crawler sandbox, global-admin settings/logs/telemetry, and security regression tests.                                                                               |
+| 1    | Safe fetch, offload, raw recall receipts | `361563f2`, `7073a356`, `dcc71881`                                                             | Shared `safe_fetch`, crawler route coverage, offloaded community/ranking work, and degraded raw-recall receipts.                                                                              |
+| 2    | Scale the throttles                      | `304fa073`, `1af72cfe`, `80cb7b4f`, `b3dcc91f`, `07278d89`, `9df482c4`, `51b89359`             | Configurable Surreal pools, worker concurrency, local queue drain/cancel receipts, scheduled jobs via broker, shared ASGI lifecycle, and shared warmed Surreal content client.                |
+| 3    | Correctness hardening                    | `2ff45f49`, `d653db98`, `47768ebe`, `2db70191`, `c6f61833`, `cc7bd43b`                         | Partial promotion/projection receipts, server-side entity MERGE, raw memory re-embedding, indexed hot lookups, trimmed projections, and parallel native search branches.                      |
+| 4    | Capability roadmap                       | `60b14bfd`, `a0ebda90`, `15844e0d`, `1d963323`, `12184328`, `ddacb83b`, `d2cf87ac`, `42633f2f` | Runtime-shape deletion, forgetting lifecycle, live raw-capture bridge, async embedding backfill, learned reranker replay, graph-native retrieval signals, and standalone-core boundary guard. |
 
-Release-only blockers after those artifacts are external/operator work: freeze the final candidate
+The storage-scaling decision is documented in the enterprise readiness data-plane section: Sibyl
+keeps single-node RocksDB as the v1 default, with explicit TiKV promotion criteria for scale,
+availability, or multi-region pressure.
+
+Release-only blockers after these artifacts are external/operator work: freeze the final candidate
 SHA, refresh same-SHA Nightly Regression and release dry-run receipts, dispatch Release only after
 explicit approval, and verify the published artifacts.
 
