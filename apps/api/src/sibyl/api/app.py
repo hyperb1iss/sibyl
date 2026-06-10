@@ -61,6 +61,7 @@ from sibyl.api.routes import (
 from sibyl.api.websocket import websocket_handler
 from sibyl.auth.middleware import AuthMiddleware
 from sibyl.config import settings
+from sibyl.runtime_services import RuntimeServices
 from sibyl.services.telemetry import schedule_runtime_rollup_persist
 from sibyl_core.observability import telemetry_registry
 
@@ -113,24 +114,6 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
             structlog.contextvars.clear_contextvars()
 
 
-async def _bootstrap_surreal_runtime_schemas() -> bool:
-    from sibyl.surreal_runtime_startup import bootstrap_surreal_runtime_schemas
-
-    return await bootstrap_surreal_runtime_schemas()
-
-
-async def _load_runtime_settings_from_db() -> list[str]:
-    from sibyl.services.settings import load_runtime_settings_from_db
-
-    return await load_runtime_settings_from_db()
-
-
-def _install_llm_config_source() -> None:
-    from sibyl.ai.llm.service import install_db_config_source
-
-    install_db_config_source()
-
-
 def _route_label(request: Request) -> str:
     route = request.scope.get("route")
     route_path = getattr(route, "path", None)
@@ -148,142 +131,14 @@ def _cookie_secure() -> bool:
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:  # noqa: PLR0915
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Run migrations, pre-warm graph client, and start coordination backends."""
-    coordination_backend = settings.resolved_coordination_backend
-
-    await _bootstrap_surreal_runtime_schemas()
-    await _load_runtime_settings_from_db()
-    _install_llm_config_source()
-    from sibyl.services.surreal_connectivity import (
-        initialize_shared_surreal_connectivity,
-        stop_surreal_connectivity_monitor,
-    )
-
-    await initialize_shared_surreal_connectivity()
-
-    broker_initialized = False
-    queue_backend = "unknown"
+    runtime_services = RuntimeServices(log=log)
+    await runtime_services.startup()
     try:
-        from sibyl.coordination.broker import get_broker, get_queue_backend
-
-        queue_backend = get_queue_backend()
-        await get_broker().startup()
-        broker_initialized = True
-        log.info(
-            "Coordination broker ready",
-            backend=coordination_backend,
-            queue_backend=queue_backend,
-        )
-    except Exception as e:
-        log.warning(
-            "Failed to initialize coordination broker",
-            backend=coordination_backend,
-            queue_backend=queue_backend,
-            error=str(e),
-        )
-
-    scheduler_initialized = False
-    try:
-        from sibyl.coordination.scheduler import get_scheduler
-
-        await get_scheduler().startup()
-        scheduler_initialized = True
-        log.info("Coordination scheduler ready", backend=coordination_backend)
-    except Exception as e:
-        log.warning(
-            "Failed to initialize coordination scheduler",
-            backend=coordination_backend,
-            error=str(e),
-        )
-
-    pubsub_initialized = False
-    try:
-        from sibyl.api.pubsub import init_pubsub
-        from sibyl.api.websocket import enable_pubsub, local_broadcast
-
-        await init_pubsub(local_broadcast)
-        enable_pubsub()
-        pubsub_initialized = True
-        log.info("Coordination event bus ready", backend=coordination_backend)
-    except Exception as e:
-        log.warning(
-            "Failed to initialize coordination event bus",
-            backend=coordination_backend,
-            error=str(e),
-        )
-
-    locks_initialized = False
-    try:
-        from sibyl.locks import init_locks
-
-        await init_locks()
-        locks_initialized = True
-        log.info("Coordination locks ready", backend=coordination_backend)
-    except Exception as e:
-        log.warning(
-            "Failed to initialize coordination locks",
-            backend=coordination_backend,
-            error=str(e),
-        )
-
-    try:
-        from sibyl.api.routes.admin import recover_stuck_sources
-
-        await recover_stuck_sources()
-    except Exception as e:
-        log.warning("Startup source recovery failed", error=str(e))
-
-    yield
-
-    if scheduler_initialized:
-        try:
-            from sibyl.coordination.scheduler import get_scheduler
-
-            await get_scheduler().shutdown()
-        except Exception as e:
-            log.debug("Scheduler shutdown error (expected during fast restarts)", error=str(e))
-
-    if broker_initialized:
-        try:
-            from sibyl.coordination.broker import get_broker
-
-            await get_broker().shutdown()
-        except Exception as e:
-            log.debug("Broker shutdown error (expected during fast restarts)", error=str(e))
-
-    await stop_surreal_connectivity_monitor()
-
-    try:
-        from sibyl.persistence.surreal.auth import close_shared_surreal_auth_client
-        from sibyl.persistence.surreal.content import close_shared_surreal_content_client
-        from sibyl_core.services.surreal_content import (
-            close_shared_surreal_content_client as close_core_surreal_content_client,
-        )
-
-        await close_shared_surreal_auth_client()
-        await close_shared_surreal_content_client()
-        await close_core_surreal_content_client()
-    except Exception as e:
-        log.debug("Shared Surreal client shutdown error", error=str(e))
-
-    if pubsub_initialized:
-        try:
-            from sibyl.api.pubsub import shutdown_pubsub
-            from sibyl.api.websocket import disable_pubsub
-
-            disable_pubsub()
-            await shutdown_pubsub()
-        except Exception as e:
-            log.debug("Pub/sub shutdown error (expected during fast restarts)", error=str(e))
-
-    if locks_initialized:
-        try:
-            from sibyl.locks import shutdown_locks
-
-            await shutdown_locks()
-        except Exception as e:
-            log.debug("Lock shutdown error (expected during fast restarts)", error=str(e))
+        yield
+    finally:
+        await runtime_services.shutdown()
 
 
 def create_api_app() -> FastAPI:  # noqa: PLR0915

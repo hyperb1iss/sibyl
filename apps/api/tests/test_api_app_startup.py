@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from sibyl import runtime_services as runtime_services_module
 from sibyl.api import app as api_app_module
 
 
@@ -32,10 +33,11 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     monkeypatch.setattr(api_app_module.settings, "store", "surreal")
     monkeypatch.setattr(api_app_module.settings, "auth_store", "surreal")
     monkeypatch.setattr(
-        api_app_module,
-        "_bootstrap_surreal_runtime_schemas",
+        runtime_services_module,
+        "bootstrap_surreal_runtime_schemas",
         bootstrap_surreal_runtime,
     )
+    monkeypatch.setattr(runtime_services_module, "install_llm_db_config_source", MagicMock())
     monkeypatch.setattr("sibyl.api.pubsub.init_pubsub", init_pubsub)
     monkeypatch.setattr("sibyl.api.pubsub.shutdown_pubsub", shutdown_pubsub)
     monkeypatch.setattr("sibyl.locks.init_locks", init_locks)
