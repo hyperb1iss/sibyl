@@ -510,6 +510,11 @@ def _candidate_feature_rows(
 ) -> list[dict[str, Any]]:
     query_tokens = set(_tokenize(query))
     max_original_score = max((candidate.score for candidate in candidates), default=0.0) or 1.0
+    coverage_features_by_rank = _query_coverage_features_by_original_rank(
+        query,
+        candidates,
+        intents,
+    )
     total = max(1, len(candidates) - 1)
     rows: list[dict[str, Any]] = []
     for candidate in candidates:
@@ -519,6 +524,12 @@ def _candidate_feature_rows(
             intents=intents,
             max_original_score=max_original_score,
             rank_span=total,
+        )
+        features.update(
+            coverage_features_by_rank.get(
+                candidate.original_rank,
+                _empty_query_coverage_features(),
+            )
         )
         rows.append(
             {
@@ -531,6 +542,51 @@ def _candidate_feature_rows(
             }
         )
     return rows
+
+
+def _query_coverage_features_by_original_rank(
+    query: str,
+    candidates: Sequence[_Candidate],
+    intents: _Intents,
+) -> dict[int, dict[str, float]]:
+    ranking = rank_by_query_coverage(
+        query,
+        [
+            QueryCoverageCandidate(
+                item=candidate.original_rank,
+                stable_id=f"{candidate.session_id}:{candidate.original_rank}",
+                text=candidate.text,
+                prior_score=candidate.score,
+                original_rank=candidate.original_rank,
+                timestamp=candidate.timestamp,
+            )
+            for candidate in candidates
+        ],
+        temporal_target=intents.target_date,
+    )
+    rank_span = max(1, len(ranking.ranked) - 1)
+    return {
+        int(ranked.item): {
+            "query_coverage_score": ranked.score,
+            "query_coverage_overlap": ranked.overlap,
+            "query_coverage_rank": float(index + 1),
+            "query_coverage_rank_score": 1.0 - (index / rank_span),
+            "query_coverage_applied": _bool_score(ranking.applied),
+            "query_coverage_changed": _bool_score(ranking.changed),
+        }
+        for index, ranked in enumerate(ranking.ranked)
+    }
+
+
+def _empty_query_coverage_features() -> dict[str, float]:
+    return {
+        "query_coverage_score": 0.0,
+        "query_coverage_overlap": 0.0,
+        "query_coverage_rank": 0.0,
+        "query_coverage_rank_score": 0.0,
+        "query_coverage_applied": 0.0,
+        "query_coverage_changed": 0.0,
+    }
 
 
 def _candidate_features(

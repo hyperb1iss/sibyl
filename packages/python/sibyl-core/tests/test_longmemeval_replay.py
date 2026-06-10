@@ -102,6 +102,9 @@ def test_rerank_feature_rows_label_answers_and_export_features() -> None:
     assert answer["features"]["provider_score"] == pytest.approx(0.8)
     assert answer["features"]["intent_preference"] == 1.0
     assert answer["features"]["preference_marker_count"] == 1.0
+    assert answer["features"]["query_coverage_applied"] == 1.0
+    assert answer["features"]["query_coverage_score"] > 0.0
+    assert answer["features"]["query_coverage_rank"] >= 1.0
     assert generic["features"]["generic_assistant_count"] == 1.0
     assert isinstance(answer["heuristic_score"], float)
 
