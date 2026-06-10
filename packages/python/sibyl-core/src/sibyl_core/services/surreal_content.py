@@ -128,6 +128,10 @@ _RAW_MEMORY_RECALL_FIELDS = ", ".join(
         "created_at",
     )
 )
+_DOCUMENT_CHUNK_SELECT = (
+    "uuid, organization_id, source_id, document_id, chunk_index, chunk_type, content, context, "
+    "heading_path, language, has_entities, entity_ids"
+)
 _DERIVED_FROM_LINEAGE_CANDIDATE_QUERY = """
     SELECT id, uuid, organization_id, raw_memory_ids, created_at
     FROM source_imports
@@ -1907,7 +1911,8 @@ async def _load_chunks_for_document_ids(
         rows.extend(
             await _select_many(
                 client,
-                "SELECT * FROM document_chunks WHERE document_id INSIDE $document_ids;",
+                f"SELECT {_DOCUMENT_CHUNK_SELECT} "
+                "FROM document_chunks WHERE document_id INSIDE $document_ids;",
                 document_ids=batch,
             )
         )

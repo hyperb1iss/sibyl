@@ -1116,6 +1116,67 @@ class TestSurrealContentHelpers:
         assert "source_name" not in source_params
 
     @pytest.mark.asyncio
+    async def test_load_search_scope_excludes_chunk_embeddings(self) -> None:
+        fake_client = FakeClient(
+            [
+                _query_result(
+                    [
+                        {
+                            "uuid": "src-1",
+                            "organization_id": "org-1",
+                            "name": "Docs",
+                            "url": "https://docs.example.com",
+                        }
+                    ]
+                ),
+                _query_result(
+                    [
+                        {
+                            "uuid": "doc-1",
+                            "organization_id": "org-1",
+                            "source_id": "src-1",
+                            "url": "https://docs.example.com/guide",
+                            "title": "Guide",
+                        }
+                    ]
+                ),
+                _query_result(
+                    [
+                        {
+                            "uuid": "chunk-1",
+                            "organization_id": "org-1",
+                            "source_id": "src-1",
+                            "document_id": "doc-1",
+                            "chunk_index": 0,
+                            "content": "alpha",
+                        }
+                    ]
+                ),
+            ]
+        )
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            _sources, _sources_by_id, _documents_by_id, chunks = await load_search_scope(
+                organization_id="org-1",
+                source_id="src-1",
+                source_name=None,
+            )
+
+        chunk_query, chunk_params = fake_client.calls[2]
+        assert [chunk.id for chunk in chunks] == ["chunk-1"]
+        assert "SELECT * FROM document_chunks" not in chunk_query
+        assert "embedding" not in chunk_query
+        assert "document_id INSIDE $document_ids" in chunk_query
+        assert chunk_params["document_ids"] == ["doc-1"]
+
+    @pytest.mark.asyncio
     async def test_search_document_chunks_reports_raw_statement_errors(self) -> None:
         fake_client = FakeClient(
             [

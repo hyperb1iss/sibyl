@@ -1053,7 +1053,7 @@ async def _load_chunks_for_document_ids(
         rows.extend(
             await _select_many(
                 client,
-                f"SELECT * FROM document_chunks WHERE {where_clause};",  # noqa: S608
+                f"SELECT {_DOCUMENT_CHUNK_SELECT} FROM document_chunks WHERE {where_clause};",  # noqa: S608
                 **params,
             )
         )

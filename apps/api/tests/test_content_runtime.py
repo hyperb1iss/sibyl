@@ -250,6 +250,71 @@ async def test_surreal_search_scope_source_id_takes_precedence_over_source_name(
 
 
 @pytest.mark.asyncio
+async def test_surreal_search_scope_excludes_chunk_embeddings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_id = uuid4()
+    document_id = uuid4()
+    org_id = uuid4()
+    fake_client = FakeSurrealClient(
+        [
+            _query_result(
+                [
+                    {
+                        "uuid": str(source_id),
+                        "organization_id": str(org_id),
+                        "name": "Docs",
+                        "url": "https://docs.example.com",
+                    }
+                ]
+            ),
+            _query_result(
+                [
+                    {
+                        "uuid": str(document_id),
+                        "organization_id": str(org_id),
+                        "source_id": str(source_id),
+                        "url": "https://docs.example.com/guide",
+                        "title": "Guide",
+                    }
+                ]
+            ),
+            _query_result(
+                [
+                    {
+                        "uuid": str(uuid4()),
+                        "organization_id": str(org_id),
+                        "source_id": str(source_id),
+                        "document_id": str(document_id),
+                        "chunk_index": 0,
+                        "content": "alpha",
+                    }
+                ]
+            ),
+        ]
+    )
+
+    @asynccontextmanager
+    async def fake_session():
+        yield fake_client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", fake_session)
+
+    _sources, _sources_by_id, _documents_by_id, chunks = await surreal_content._load_search_scope(
+        organization_id=org_id,
+        source_id=source_id,
+        source_name=None,
+    )
+
+    chunk_query, chunk_params = fake_client.calls[2]
+    assert len(chunks) == 1
+    assert "SELECT * FROM document_chunks" not in chunk_query
+    assert "embedding" not in chunk_query
+    assert "document_id = $document_1_0" in chunk_query
+    assert chunk_params["document_1_0"] == str(document_id)
+
+
+@pytest.mark.asyncio
 async def test_surreal_rag_search_uses_direct_knn_query(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
