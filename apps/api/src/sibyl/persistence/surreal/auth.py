@@ -10,7 +10,12 @@ from typing import Self, cast
 from uuid import UUID, uuid4
 
 from sibyl import config as config_module
-from sibyl.auth.passwords import PasswordError, hash_password, verify_password
+from sibyl.auth.passwords import (
+    PasswordError,
+    hash_password,
+    verify_password,
+    verify_password_timing_floor,
+)
 from sibyl.auth.primitives import slugify
 from sibyl.persistence.auth_common import (
     InvalidAuthClaimsError,
@@ -320,17 +325,31 @@ class SurrealUserRepository(_SurrealAuthRepository):
         return _user_from_record(created[0])
 
     async def authenticate_local(self, *, email: str, password: str) -> AuthUser | None:
+        if not password:
+            verify_password_timing_floor(
+                password,
+                iterations=config_module.settings.password_iterations,
+            )
+            return None
         record = await self._select_one(
             "SELECT * FROM users WHERE email = $email AND deleted_at = NONE LIMIT 1;",
             email=email.strip().lower(),
         )
         if record is None:
+            verify_password_timing_floor(
+                password,
+                iterations=config_module.settings.password_iterations,
+            )
             return None
         if (
             not record.get("password_salt")
             or not record.get("password_hash")
             or not record.get("password_iterations")
         ):
+            verify_password_timing_floor(
+                password,
+                iterations=config_module.settings.password_iterations,
+            )
             return None
         try:
             ok = verify_password(

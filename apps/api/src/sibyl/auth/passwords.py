@@ -7,8 +7,15 @@ from sibyl_core.auth.passwords import (
     hash_password,
     install_settings_provider,
     verify_password,
+    verify_password_timing_floor,
 )
 
 install_settings_provider(lambda: _config_module.settings)
 
-__all__ = ["PasswordError", "PasswordHash", "hash_password", "verify_password"]
+__all__ = [
+    "PasswordError",
+    "PasswordHash",
+    "hash_password",
+    "verify_password",
+    "verify_password_timing_floor",
+]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -132,6 +132,48 @@ async def test_surreal_user_repository_supports_local_and_github_users(
     assert github_user.github_id == 42
     assert github_user.email == "octonova@example.com"
     assert await repo.get_by_email("nova@example.com") == changed
+
+
+@pytest.mark.asyncio
+async def test_surreal_user_repository_burns_password_check_for_missing_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = SurrealUserRepository.from_client(_RecordingAuthClient([]))  # type: ignore[arg-type]
+    burn = MagicMock()
+    monkeypatch.setattr(surreal_auth, "verify_password_timing_floor", burn)
+
+    result = await repo.authenticate_local(
+        email="missing@example.com",
+        password="candidate-password",
+    )
+
+    assert result is None
+    burn.assert_called_once_with(
+        "candidate-password",
+        iterations=surreal_auth.config_module.settings.password_iterations,
+    )
+
+
+@pytest.mark.asyncio
+async def test_surreal_user_repository_burns_password_check_for_empty_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _RecordingAuthClient([])
+    repo = SurrealUserRepository.from_client(client)  # type: ignore[arg-type]
+    burn = MagicMock()
+    monkeypatch.setattr(surreal_auth, "verify_password_timing_floor", burn)
+
+    result = await repo.authenticate_local(
+        email="nova@example.com",
+        password="",
+    )
+
+    assert result is None
+    assert client.calls == []
+    burn.assert_called_once_with(
+        "",
+        iterations=surreal_auth.config_module.settings.password_iterations,
+    )
 
 
 @pytest.mark.asyncio

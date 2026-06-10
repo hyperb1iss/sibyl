@@ -71,3 +71,12 @@ def verify_password(password: str, *, salt_hex: str, hash_hex: str, iterations: 
         return False
     dk = pbkdf2_hmac("sha256", _peppered(password), salt, int(iterations), dklen=len(expected))
     return hmac.compare_digest(dk, expected)
+
+
+def verify_password_timing_floor(password: str, *, iterations: int | None = None) -> None:
+    verify_password(
+        password or "\0",
+        salt_hex="00" * 16,
+        hash_hex="00" * 32,
+        iterations=iterations or int(_settings().password_iterations),
+    )

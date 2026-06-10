@@ -11,7 +11,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import jwt
@@ -650,6 +650,19 @@ class TestPasswords:
         )
 
         assert result is False
+
+    def test_verify_password_timing_floor_burns_for_empty_password(
+        self, mock_sibyl_modules: MagicMock
+    ) -> None:
+        """verify_password_timing_floor always executes PBKDF2."""
+        pwd_module = self._import_passwords()
+
+        with patch.object(pwd_module, "pbkdf2_hmac", wraps=pwd_module.pbkdf2_hmac) as pbkdf2:
+            assert pwd_module.verify_password_timing_floor("", iterations=1) is None
+            assert pwd_module.verify_password_timing_floor("candidate", iterations=1) is None
+
+        assert pbkdf2.call_count == 2
+        assert [call.args[3] for call in pbkdf2.call_args_list] == [1, 1]
 
     def test_verify_password_malformed_hex_salt(self, mock_sibyl_modules: MagicMock) -> None:
         """verify_password returns False for malformed salt hex."""
