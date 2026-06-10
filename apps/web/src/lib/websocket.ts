@@ -132,7 +132,7 @@ export interface WebSocketEventPayloadMap {
 
 export type WebSocketEventType = keyof WebSocketEventPayloadMap;
 
-export const WEBSOCKET_EVENT_TYPES = [
+export const WEBSOCKET_BROADCAST_EVENT_TYPES = [
   'entity_created',
   'entity_updated',
   'entity_deleted',
@@ -143,8 +143,6 @@ export const WEBSOCKET_EVENT_TYPES = [
   'crawl_complete',
   'crawl_sync_complete',
   'health_update',
-  'heartbeat',
-  'connection_status',
   'permission_changed',
   'note_pending',
   'note_created',
@@ -155,12 +153,19 @@ export const WEBSOCKET_EVENT_TYPES = [
   'question_answered',
   'source_import_updated',
   'raw_capture_changed',
+] as const satisfies readonly WebSocketEventType[];
+
+export const WEBSOCKET_EVENT_TYPES = [
+  ...WEBSOCKET_BROADCAST_EVENT_TYPES,
+  'heartbeat',
+  'connection_status',
   'pong',
   'subscribed',
   'error',
 ] as const satisfies readonly WebSocketEventType[];
 
 const WEBSOCKET_EVENT_TYPE_SET = new Set<string>(WEBSOCKET_EVENT_TYPES);
+const WEBSOCKET_BROADCAST_EVENT_TYPE_SET = new Set<string>(WEBSOCKET_BROADCAST_EVENT_TYPES);
 
 export function isWebSocketEventType(event: string): event is WebSocketEventType {
   return WEBSOCKET_EVENT_TYPE_SET.has(event);
@@ -267,6 +272,7 @@ class WebSocketClient {
     this.ws.onopen = () => {
       this.reconnectAttempts = 0;
       this.setStatus('connected');
+      this.syncSubscriptions();
     };
 
     this.ws.onmessage = event => {
@@ -360,6 +366,7 @@ class WebSocketClient {
     }
     // Cast needed due to Map's loose internal typing
     handlers.add(handler as EventHandler<WebSocketEventType>);
+    this.syncSubscriptions();
 
     // Return unsubscribe function
     return () => this.off(event, handler);
@@ -371,6 +378,20 @@ class WebSocketClient {
     // Clean up empty Sets to prevent Map accumulation
     if (handlers?.size === 0) {
       this.handlers.delete(event);
+    }
+    this.syncSubscriptions();
+  }
+
+  private subscriptionTopics(): WebSocketEventType[] {
+    return [...this.handlers.keys()]
+      .filter(event => WEBSOCKET_BROADCAST_EVENT_TYPE_SET.has(event))
+      .sort();
+  }
+
+  private syncSubscriptions(): void {
+    const topics = this.subscriptionTopics();
+    if (topics.length > 0) {
+      this.send('subscribe', { topics });
     }
   }
 
