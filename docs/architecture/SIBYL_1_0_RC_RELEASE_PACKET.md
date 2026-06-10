@@ -15,10 +15,11 @@ Do not tag or publish until Bliss gives explicit release go-ahead.
 
 ## Decision Gate
 
-Ship now: ready after current external receipts are green and Bliss explicitly approves live
+Ship now: ready after final same-SHA external receipts are green and Bliss explicitly approves live
 dispatch. Not tagged or published.
 
-Smallest blocker: Bliss must explicitly approve the live release dispatch.
+Smallest blocker: refresh same-SHA Nightly Regression and release dry-run receipts for the final
+candidate SHA if it moved, then get Bliss's explicit live-dispatch approval.
 
 Residual release risk: Docker image startup, public PyPI pages, GitHub release body, container
 manifests, and clean installs from published artifacts are post-publish checks.
@@ -43,7 +44,7 @@ manifests, and clean installs from published artifacts are post-publish checks.
 | Package artifacts build                 | `moon run python-package-build` produced `sibyl-core`, `sibyl-dev`, and `sibyld` wheels and sdists           | Local pass             |
 | Package installs work                   | Clean isolated `uv tool install` for `sibyl-dev` and `sibyld`; both entrypoints report `1.0.0rc1`            | Local pass             |
 | Helm surface works                      | `helm lint charts/sibyl`; `helm template sibyl charts/sibyl` has no `graphiti`, `falkor`, or `postgres` hits | Local pass             |
-| Release cut is gated                    | Release dry-run runs `moon run :check` and validates same-SHA Nightly before skipped tag steps               | External dry-run pass  |
+| Release cut is gated                    | Release dry-run runs `moon run :check` and validates same-SHA Nightly before skipped tag steps               | Workflow guard + tests |
 | Publish dispatch is gated               | `.github/workflows/publish.yml` runs `moon run :check` before Python and Docker artifacts                    | Workflow guard + tests |
 | Rollback is ready                       | Roll back to `v0.10.0`; do not move tags; verify published artifacts before announcing RC                    | Operator action        |
 
@@ -52,9 +53,13 @@ manifests, and clean installs from published artifacts are post-publish checks.
 - `moon run :check` -> 49 completed (40 cached).
 - `moon run release-workflow-test` -> 10 passed.
 - `moon run bench-gate` -> gate passed.
-- `moon run bench-gate-test` -> 57 passed.
+- `moon run bench-gate-test` -> 58 passed.
+- Core review follow-through latest local gates: `moon run core:test -- tests/test_search.py -q` ->
+  1578 passed, 14 skipped; `moon run core:lint` -> all checks passed; `moon run core:typecheck` ->
+  all checks passed; `moon run bench-gate-test` -> 58 passed.
 - Current same-SHA PR CI, LongMemEval V2, Nightly Regression, and release dry-run receipts are
-  recorded in PR #159 and the latest release dry-run `rc-gate-receipt-*` artifact.
+  recorded in PR #159 and the latest release dry-run `rc-gate-receipt-*` artifact. If the candidate
+  SHA moves, refresh these receipts before live dispatch.
 - Release dry-run must show `rc_gate_conclusion=success`, `nightly_conclusion=success`, a
   `nightly_url` matching the same candidate SHA, and skipped tag, GitHub Release, publish dispatch,
   and artifact creation steps.
@@ -69,6 +74,22 @@ manifests, and clean installs from published artifacts are post-publish checks.
 - `moon run docs:build` -> build complete, with existing Rollup chunk and PURE annotation warnings.
 - `helm lint charts/sibyl` -> 1 chart linted, 0 failed.
 - Helm render -> 350 lines; no `graphiti`, `falkor`, or `postgres` references.
+
+## Prompt-To-Artifact Audit
+
+The latest core-review follow-through turned the review prompt into five repo artifacts:
+
+| Prompt thread                                       | Artifact commits | Verification receipt                                                                                                |
+| --------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Keep `sibyl-core` standalone                        | `42633f2f`       | Core boundary test prevents module-scope `sibyl` or `apps.api` imports from `sibyl_core`.                           |
+| Expose reactive SurrealDB capture signals           | `15844e0d`       | Raw capture live-query bridge tests cover subscription, event normalization, and degraded fallback behavior.        |
+| Move single-create embedding off the write path     | `1d963323`       | Async embedding projection tests cover pending payloads and backfill receipts.                                      |
+| Trainable reranking without losing replay receipts  | `12184328`       | Learned reranker replay tests cover out-of-fold training, feature attribution, and deterministic fallback behavior. |
+| Make graph-native retrieval signals visible in rank | `ddacb83b`       | Search tests preserve graph-expansion receipts, boost corroborated paths, and keep graph-only expansion demotion.   |
+
+Release-only blockers after those artifacts are external/operator work: freeze the final candidate
+SHA, refresh same-SHA Nightly Regression and release dry-run receipts, dispatch Release only after
+explicit approval, and verify the published artifacts.
 
 ## Release Dispatch Requirements
 
