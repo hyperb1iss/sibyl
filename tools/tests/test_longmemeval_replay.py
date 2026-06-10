@@ -106,3 +106,17 @@ def test_longmemeval_replay_cli_writes_feature_rows_jsonl(
     assert answer_row["question_id"] == "q1"
     assert answer_row["label"] == 1
     assert answer_row["features"]["provider_score"] == expected_provider_score
+
+
+def test_longmemeval_replay_cli_accepts_learned_strategy(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    module = _load_replay_module()
+    report_path = _write_replay_fixture(tmp_path)
+
+    assert module.main([str(report_path), "--strategy", "learned", "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["strategy"] == "learned"
+    assert "recall@1" in payload["overall"]

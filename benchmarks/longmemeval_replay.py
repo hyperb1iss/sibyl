@@ -126,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset", help="Override dataset path from report metadata")
     parser.add_argument(
         "--strategy",
-        choices=["identity", "heuristic", "coverage", "oracle"],
+        choices=["identity", "heuristic", "coverage", "learned", "oracle"],
         default="heuristic",
         help="Reranking strategy to apply",
     )

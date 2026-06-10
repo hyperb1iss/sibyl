@@ -19,6 +19,7 @@ to the fused order rather than raising. API-based reranking (Cohere) requires th
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
@@ -32,9 +33,14 @@ log = structlog.get_logger()
 
 __all__ = [
     "CrossEncoderConfig",
+    "FeatureRerankCandidate",
+    "FeatureRerankScoredCandidate",
+    "FeatureWeightedRerankModel",
     "RerankResult",
     "cross_encoder_rerank",
+    "fit_feature_weighted_reranker",
     "get_cross_encoder",
+    "rerank_by_feature_weights",
     "rerank_results",
 ]
 
@@ -77,6 +83,44 @@ class RerankResult:
     reranked_count: int
     model_name: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class FeatureWeightedRerankModel:
+    """Interpretable feature-weighted reranker artifact."""
+
+    name: str
+    weights: Mapping[str, float]
+    intercept: float = 0.0
+
+    def score(self, features: Mapping[str, float]) -> float:
+        return self.intercept + sum(
+            float(features.get(name, 0.0)) * weight for name, weight in self.weights.items()
+        )
+
+    def contributions(self, features: Mapping[str, float]) -> dict[str, float]:
+        return {
+            name: float(features.get(name, 0.0)) * weight
+            for name, weight in self.weights.items()
+            if features.get(name, 0.0)
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class FeatureRerankCandidate[T]:
+    item: T
+    features: Mapping[str, float]
+    original_rank: int
+    stable_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FeatureRerankScoredCandidate[T]:
+    item: T
+    score: float
+    original_rank: int
+    stable_id: str | None = None
+    feature_contributions: dict[str, float] = field(default_factory=dict)
 
 
 # Cache for cross-encoder model
@@ -153,6 +197,68 @@ def _extract_content(entity: Any) -> str:
         return str(name)
 
     return str(entity)
+
+
+def fit_feature_weighted_reranker(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    name: str = "feature-linear-v1",
+    features_key: str = "features",
+    label_key: str = "label",
+    min_abs_weight: float = 0.0,
+) -> FeatureWeightedRerankModel:
+    positive: list[Mapping[str, float]] = []
+    negative: list[Mapping[str, float]] = []
+    for row in rows:
+        features = row.get(features_key)
+        if not isinstance(features, Mapping):
+            continue
+        numeric = {
+            str(key): float(value)
+            for key, value in features.items()
+            if isinstance(value, int | float)
+        }
+        if int(row.get(label_key) or 0) > 0:
+            positive.append(numeric)
+        else:
+            negative.append(numeric)
+
+    if not positive or not negative:
+        return FeatureWeightedRerankModel(name=name, weights={})
+
+    feature_names = sorted(
+        {name for features in positive for name in features}
+        | {name for features in negative for name in features}
+    )
+    weights: dict[str, float] = {}
+    for feature_name in feature_names:
+        positive_mean = sum(features.get(feature_name, 0.0) for features in positive) / len(
+            positive
+        )
+        negative_mean = sum(features.get(feature_name, 0.0) for features in negative) / len(
+            negative
+        )
+        weight = positive_mean - negative_mean
+        if abs(weight) >= min_abs_weight:
+            weights[feature_name] = weight
+    return FeatureWeightedRerankModel(name=name, weights=weights)
+
+
+def rerank_by_feature_weights[T](
+    candidates: Sequence[FeatureRerankCandidate[T]],
+    model: FeatureWeightedRerankModel,
+) -> list[FeatureRerankScoredCandidate[T]]:
+    scored = [
+        FeatureRerankScoredCandidate(
+            item=candidate.item,
+            score=model.score(candidate.features),
+            original_rank=candidate.original_rank,
+            stable_id=candidate.stable_id,
+            feature_contributions=model.contributions(candidate.features),
+        )
+        for candidate in candidates
+    ]
+    return sorted(scored, key=lambda candidate: (-candidate.score, candidate.original_rank))
 
 
 def cross_encoder_rerank[T](

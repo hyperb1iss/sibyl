@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from sibyl_core.evals.longmemeval_replay import (
+    fit_longmemeval_rerank_model,
     load_longmemeval_replay_inputs,
     longmemeval_rerank_feature_rows,
     replay_longmemeval_report,
@@ -128,6 +129,42 @@ def test_rerank_feature_rows_match_heuristic_order() -> None:
     ]
 
     assert feature_order == reranked
+
+
+def test_learned_rerank_uses_feature_weight_model() -> None:
+    report = {
+        "dataset": {"corpus_text_policy": "user-and-assistant-turns-v1"},
+        "case_results": [_case_result()],
+    }
+    model = fit_longmemeval_rerank_model(report, [_entry()])
+
+    reranked = rerank_longmemeval_case(
+        _case_result(),
+        _entry(),
+        strategy="learned",
+        corpus_text_policy="user-and-assistant-turns-v1",
+        learned_model=model,
+    )
+
+    assert reranked[0] == "answer-session"
+
+
+def test_replay_learned_strategy_auto_fits_feature_model() -> None:
+    second_case = {
+        **_case_result(),
+        "case_index": 1,
+        "question_id": "q2",
+    }
+    report = {
+        "k_values": [1, 3],
+        "dataset": {"corpus_text_policy": "user-and-assistant-turns-v1"},
+        "case_results": [_case_result(), second_case],
+    }
+
+    summary = replay_longmemeval_report(report, [_entry(), _entry()], strategy="learned")
+
+    assert summary.strategy == "learned"
+    assert summary.overall["recall@1"] == 1.0
 
 
 def test_coverage_rerank_uses_query_terms_without_answer_oracle() -> None:

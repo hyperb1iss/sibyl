@@ -32,6 +32,7 @@ from sibyl_core.evals.longmemeval import (
 )
 from sibyl_core.evals.longmemeval_replay import (
     ReplaySummary,
+    fit_longmemeval_rerank_model,
     longmemeval_rerank_feature_rows,
     replay_longmemeval_report,
     replay_longmemeval_report_path,
@@ -110,6 +111,7 @@ __all__ = [
     "context_pack_from_dict",
     "dcg_at_k",
     "evaluate_context_pack",
+    "fit_longmemeval_rerank_model",
     "get_sample_context_pack_cases",
     "get_sample_queries",
     "iter_longmemeval_v2_trajectories",

@@ -22,9 +22,15 @@ from sibyl_core.retrieval.query_ranking import (
     QueryCoverageCandidate,
     rank_by_query_coverage,
 )
+from sibyl_core.retrieval.reranking import (
+    FeatureRerankCandidate,
+    FeatureWeightedRerankModel,
+    fit_feature_weighted_reranker,
+    rerank_by_feature_weights,
+)
 from sibyl_core.retrieval.temporal import parse_temporal_datetime, resolve_temporal_reference
 
-ReplayStrategy = Literal["identity", "heuristic", "coverage", "oracle"]
+ReplayStrategy = Literal["identity", "heuristic", "coverage", "learned", "oracle"]
 
 STOP_WORDS = {
     "a",
@@ -212,12 +218,11 @@ def replay_longmemeval_report(
     strategy: ReplayStrategy = "heuristic",
     k_values: Sequence[int] | None = None,
     corpus_text_policy: str | None = None,
+    learned_model: FeatureWeightedRerankModel | None = None,
 ) -> ReplaySummary:
     k_list = [int(value) for value in (k_values or report.get("k_values") or [5, 10])]
-    text_policy = corpus_text_policy or str(
-        _nested_get(report, ("dataset", "corpus_text_policy"))
-        or USER_AND_ASSISTANT_CORPUS_TEXT_POLICY
-    )
+    text_policy = _resolve_corpus_text_policy(report, corpus_text_policy)
+    auto_fit_learned = strategy == "learned" and learned_model is None
     case_results: list[dict[str, Any]] = []
     for case in report.get("case_results", []):
         if not isinstance(case, Mapping):
@@ -225,11 +230,20 @@ def replay_longmemeval_report(
         case_index = int(case["case_index"])
         entry = dataset[case_index]
         original_ranked = [str(session_id) for session_id in case.get("ranked_session_ids", [])]
+        case_learned_model = learned_model
+        if auto_fit_learned:
+            case_learned_model = fit_longmemeval_rerank_model(
+                report,
+                dataset,
+                corpus_text_policy=text_policy,
+                exclude_case_index=case_index,
+            )
         reranked = rerank_longmemeval_case(
             case,
             entry,
             strategy=strategy,
             corpus_text_policy=text_policy,
+            learned_model=case_learned_model,
         )
         answers = sorted(str(value) for value in case.get("answer_session_ids", []))
         metrics = score_longmemeval_ranking(reranked, answers, k_list)
@@ -281,9 +295,16 @@ def replay_longmemeval_report_path(
     dataset_path: str | Path | None = None,
     strategy: ReplayStrategy = "heuristic",
     k_values: Sequence[int] | None = None,
+    learned_model: FeatureWeightedRerankModel | None = None,
 ) -> ReplaySummary:
     report, dataset = load_longmemeval_replay_inputs(report_path, dataset_path=dataset_path)
-    return replay_longmemeval_report(report, dataset, strategy=strategy, k_values=k_values)
+    return replay_longmemeval_report(
+        report,
+        dataset,
+        strategy=strategy,
+        k_values=k_values,
+        learned_model=learned_model,
+    )
 
 
 def rerank_longmemeval_case(
@@ -292,6 +313,7 @@ def rerank_longmemeval_case(
     *,
     strategy: ReplayStrategy,
     corpus_text_policy: str,
+    learned_model: FeatureWeightedRerankModel | None = None,
 ) -> list[str]:
     ranked_session_ids = [
         str(session_id) for session_id in case_result.get("ranked_session_ids", [])
@@ -337,6 +359,12 @@ def rerank_longmemeval_case(
         question_type=str(case_result.get("question_type") or ""),
         reference_time=str(case_result.get("question_date") or ""),
     )
+    if strategy == "learned":
+        if learned_model is None:
+            msg = "learned LongMemEval replay requires a FeatureWeightedRerankModel"
+            raise ValueError(msg)
+        return _learned_feature_rerank(query, candidates, intents, learned_model)
+
     scored = _score_candidates(query, candidates, intents)
     if intents.multi_evidence:
         return _diversify_ranking(scored)
@@ -368,6 +396,31 @@ def longmemeval_rerank_feature_rows(
     return _candidate_feature_rows(query, candidates, intents, answers)
 
 
+def fit_longmemeval_rerank_model(
+    report: Mapping[str, Any],
+    dataset: Sequence[Mapping[str, Any]],
+    *,
+    corpus_text_policy: str | None = None,
+    exclude_case_index: int | None = None,
+) -> FeatureWeightedRerankModel:
+    text_policy = _resolve_corpus_text_policy(report, corpus_text_policy)
+    rows: list[dict[str, Any]] = []
+    for case in report.get("case_results", []):
+        if not isinstance(case, Mapping):
+            continue
+        case_index = int(case["case_index"])
+        if exclude_case_index is not None and case_index == exclude_case_index:
+            continue
+        rows.extend(
+            longmemeval_rerank_feature_rows(
+                case,
+                dataset[case_index],
+                corpus_text_policy=text_policy,
+            )
+        )
+    return fit_feature_weighted_reranker(rows, name="longmemeval-feature-linear-v1")
+
+
 def summary_to_dict(summary: ReplaySummary, *, include_cases: bool = False) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "strategy": summary.strategy,
@@ -391,6 +444,16 @@ def _dataset_path(report: Mapping[str, Any]) -> Path:
         msg = "LongMemEval report does not include dataset.path; pass --dataset explicitly"
         raise ValueError(msg)
     return Path(path)
+
+
+def _resolve_corpus_text_policy(
+    report: Mapping[str, Any],
+    corpus_text_policy: str | None,
+) -> str:
+    return corpus_text_policy or str(
+        _nested_get(report, ("dataset", "corpus_text_policy"))
+        or USER_AND_ASSISTANT_CORPUS_TEXT_POLICY
+    )
 
 
 def _nested_get(data: Mapping[str, Any], keys: Sequence[str]) -> Any:
@@ -500,6 +563,28 @@ def _score_candidates(
         for row, candidate in zip(feature_rows, candidates, strict=True)
     ]
     return sorted(scored, key=lambda item: (-item[0], item[1].original_rank))
+
+
+def _learned_feature_rerank(
+    query: str,
+    candidates: Sequence[_Candidate],
+    intents: _Intents,
+    model: FeatureWeightedRerankModel,
+) -> list[str]:
+    feature_rows = _candidate_feature_rows(query, candidates, intents, set())
+    ranked = rerank_by_feature_weights(
+        [
+            FeatureRerankCandidate(
+                item=str(row["session_id"]),
+                stable_id=str(row["session_id"]),
+                features=row["features"],
+                original_rank=int(row["original_rank"]),
+            )
+            for row in feature_rows
+        ],
+        model,
+    )
+    return [ranked_candidate.item for ranked_candidate in ranked]
 
 
 def _candidate_feature_rows(
