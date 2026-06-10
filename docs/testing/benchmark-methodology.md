@@ -112,8 +112,8 @@ The committed `benchmarks/results/ai-memory/longmemeval_sibyl_raw_20260513.json`
 using those numbers for a later release candidate.
 
 `benchmarks/results/ai-memory/manifest.json` records which AI memory benchmark artifacts are citable
-for the release and which suites are planned coverage only. The manifest is checked against the full
-JSON artifacts by `moon run bench-gate-test`.
+for the release and which suites are planned coverage only. The manifest is checked against full
+JSON artifacts or committed external archive manifests by `moon run bench-gate-test`.
 
 ## Threshold Gates
 
@@ -215,6 +215,8 @@ fixtures.
 - Keep the artifact JSON from `bench-live` whenever you cite a number in docs or PRs.
 - For AI memory benchmark and competitor claims, keep full raw artifacts plus overall metrics,
   per-slice metrics, corpus or dataset version, command, commit, runtime mode, and caveats.
+- If a full artifact is too large for git, keep a committed external archive manifest with the
+  archive location, digest, expiry, verification receipt, gate receipt, and exact summary fields.
 - If the live stack or auth context is unavailable, say so explicitly instead of substituting an
   offline result.
 

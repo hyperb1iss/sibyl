@@ -124,6 +124,58 @@ def _manifest_entry(report: dict[str, Any], artifact: str = "artifact.json") -> 
     }
 
 
+def _external_ai_memory_report(report: dict[str, Any] | None = None) -> dict[str, Any]:
+    external_report = _clone_report(report or _ai_memory_report(mode="hybrid"))
+    case_results = external_report["case_results"]
+    assert isinstance(case_results, list)
+    external_report["case_results"] = len(case_results)
+    external_report["external_artifact"] = {
+        "provider": "github-actions",
+        "repo": "hyperb1iss/sibyl",
+        "run_id": "123456789",
+        "run_url": "https://github.com/hyperb1iss/sibyl/actions/runs/123456789",
+        "job_name": "LongMemEval Live Full",
+        "artifact_name": "longmemeval-live-full-abc123",
+        "artifact_path": "longmemeval_live_full.json",
+        "sha256": "a" * 64,
+        "size_bytes": 7073488,
+        "archive_size_bytes": 933836,
+        "expires_at": "2026-08-20T18:21:29Z",
+        "verified_at": "2026-06-10T14:11:37Z",
+        "verification_command": "sha256sum artifact.json && wc -c artifact.json",
+        "verification_receipt": "sha256 aaaa; size 7073488",
+        "gate_profile": "ai-memory",
+        "gate_command": "moon run bench-gate -- artifact.json --profile ai-memory",
+        "gate_passed": True,
+        "gate_receipt": "Gate passed",
+    }
+    return external_report
+
+
+def _external_manifest_entry(
+    report: dict[str, Any],
+    external_artifact_manifest: str = "external/artifact-manifest.json",
+) -> dict[str, Any]:
+    return {
+        "suite": report["suite"],
+        "suite_version": report["suite_version"],
+        "mode": report["mode"],
+        "external_artifact_manifest": external_artifact_manifest,
+        "status": "citable",
+        "gate_profile": "ai-memory",
+        "sibyl_commit": report["sibyl_commit"],
+        "questions": report["total_questions"],
+        "case_results": report["case_results"],
+        "elapsed_seconds": report["elapsed_seconds"],
+        "dataset": report["dataset"],
+        "runtime": report["runtime"],
+        "overall": report["overall"],
+        "claim_boundary": report["claim_boundary"],
+        "repeat_count": report["repeat_count"],
+        "auth_manifest_id": report["auth_manifest_id"],
+    }
+
+
 def _write_ai_memory_manifest(
     tmp_path: Path,
     *,
@@ -588,9 +640,65 @@ def test_validate_ai_memory_manifest_rejects_citable_artifact_drift(tmp_path: Pa
     assert "artifact.json: manifest repeat_count does not match artifact" in failures
 
 
+def test_validate_ai_memory_manifest_accepts_external_artifact_manifest(
+    tmp_path: Path,
+) -> None:
+    report = _external_ai_memory_report()
+    entry = _external_manifest_entry(report)
+    external_path = tmp_path / "external" / "artifact-manifest.json"
+    external_path.parent.mkdir()
+    external_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({"citable": [entry]}), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == []
+
+
+def test_validate_ai_memory_manifest_rejects_external_artifact_manifest_drift(
+    tmp_path: Path,
+) -> None:
+    report = _external_ai_memory_report()
+    entry = _external_manifest_entry(report)
+    entry["overall"] = {"recall@5": 0.25}
+    entry["external_artifact_manifest"] = "external/drift.json"
+    external_path = tmp_path / "external" / "drift.json"
+    external_path.parent.mkdir()
+    external_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({"citable": [entry]}), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert "external/drift.json: manifest overall does not match artifact" in failures
+
+
+def test_validate_ai_memory_manifest_rejects_partial_external_artifact_summary(
+    tmp_path: Path,
+) -> None:
+    report = _external_ai_memory_report()
+    report["total_questions"] = 2
+    entry = _external_manifest_entry(report, external_artifact_manifest="external/partial.json")
+    external_path = tmp_path / "external" / "partial.json"
+    external_path.parent.mkdir()
+    external_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({"citable": [entry]}), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert "external/partial.json: case_results must equal total_questions" in failures
+
+
 def test_validate_ai_memory_manifest_rejects_planned_artifact_fields(tmp_path: Path) -> None:
     planned = [
         {"suite": "Future suite", "status": "planned", "artifact": "future.json"},
+        {
+            "suite": "Future external suite",
+            "status": "planned",
+            "external_artifact_manifest": "future.json",
+        },
         {"suite": "Mistagged suite", "status": "citable"},
     ]
     manifest_path = _write_ai_memory_manifest(tmp_path, planned=planned)
@@ -598,7 +706,8 @@ def test_validate_ai_memory_manifest_rejects_planned_artifact_fields(tmp_path: P
     failures = eval_gate.validate_ai_memory_manifest(manifest_path)
 
     assert "planned[0] must not include artifact" in failures
-    assert "planned[1] status is not 'planned'" in failures
+    assert "planned[1] must not include external_artifact_manifest" in failures
+    assert "planned[2] status is not 'planned'" in failures
 
 
 def test_validate_ai_memory_manifest_rejects_empty_citable_list(tmp_path: Path) -> None:
@@ -732,19 +841,34 @@ def test_ai_memory_manifest_tracks_full_citable_artifacts() -> None:
     assert citable
 
     for entry in citable:
-        artifact = manifest_path.parent / entry["artifact"]
-        assert artifact.exists()
-        report = eval_gate.load_report(artifact)
-        assert eval_gate.evaluate_report(report, profile="ai-memory") == []
+        if "artifact" in entry:
+            artifact = manifest_path.parent / entry["artifact"]
+            assert artifact.exists()
+            report = eval_gate.load_report(artifact)
+            assert eval_gate.evaluate_report(report, profile="ai-memory") == []
+            case_result_count = len(report["case_results"])
+        else:
+            artifact = manifest_path.parent / entry["external_artifact_manifest"]
+            assert artifact.exists()
+            report = eval_gate.load_report(artifact)
+            assert eval_gate.evaluate_external_ai_memory_report(report) == []
+            case_result_count = report["case_results"]
+            external_artifact = report["external_artifact"]
+            assert external_artifact["provider"] == "github-actions"
+            assert external_artifact["sha256"]
+            assert external_artifact["expires_at"]
+            assert external_artifact["verified_at"]
+            assert external_artifact["verification_receipt"]
+            assert external_artifact["gate_passed"] is True
         assert entry["status"] == "citable"
         assert entry["suite"] == report["suite"]
         assert entry["suite_version"] == report["suite_version"]
         assert entry["sibyl_commit"] == report["sibyl_commit"]
         assert entry["mode"] == report["mode"]
         assert entry["questions"] == report["total_questions"]
-        assert entry["case_results"] == len(report["case_results"])
+        assert entry["case_results"] == case_result_count
         assert entry["runtime"] == report["runtime"]
-        assert entry["dataset"]["evaluated_entries"] == report["dataset"]["evaluated_entries"]
+        assert entry["dataset"] == report["dataset"]
         for metric, expected in entry["overall"].items():
             assert report["overall"][metric] == pytest.approx(expected)
 
@@ -753,3 +877,4 @@ def test_ai_memory_manifest_tracks_full_citable_artifacts() -> None:
     for entry in planned:
         assert entry["status"] == "planned"
         assert "artifact" not in entry
+        assert "external_artifact_manifest" not in entry

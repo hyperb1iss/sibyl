@@ -91,6 +91,28 @@ _AI_MEMORY_RUNTIME_FIELDS = (
     "tokenizer_estimate_method",
 )
 _AI_MEMORY_DATASET_FIELDS = ("name", "corpus_hash")
+_AI_MEMORY_EXTERNAL_ARTIFACT_FIELDS = (
+    "provider",
+    "repo",
+    "run_id",
+    "run_url",
+    "job_name",
+    "artifact_name",
+    "artifact_path",
+    "sha256",
+    "size_bytes",
+    "archive_size_bytes",
+    "expires_at",
+    "verified_at",
+    "verification_command",
+    "verification_receipt",
+    "gate_profile",
+    "gate_command",
+    "gate_passed",
+    "gate_receipt",
+)
+SHA256_HEX_LENGTH = 64
+SHA256_HEX_CHARACTERS = frozenset("0123456789abcdef")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_AI_MEMORY_MANIFEST = REPO_ROOT / "benchmarks" / "results" / "ai-memory" / "manifest.json"
 LOWER_IS_BETTER_METRICS = frozenset(
@@ -212,14 +234,19 @@ def _is_present(value: Any) -> bool:
     return value not in (None, "", [], {})
 
 
-def _is_positive_integer(value: Any) -> bool:
+def _coerce_positive_integer(value: Any) -> int | None:
     if isinstance(value, bool):
-        return False
+        return None
     if isinstance(value, int):
-        return value > 0
+        return value if value > 0 else None
     if isinstance(value, str) and value.strip().isdigit():
-        return int(value) > 0
-    return False
+        parsed = int(value)
+        return parsed if parsed > 0 else None
+    return None
+
+
+def _is_positive_integer(value: Any) -> bool:
+    return _coerce_positive_integer(value) is not None
 
 
 def _validate_retrieval_mode(
@@ -468,6 +495,61 @@ def validate_ai_memory_record(report: dict[str, Any]) -> list[str]:
     return failures
 
 
+def _validate_external_artifact_metadata(report: dict[str, Any]) -> list[str]:
+    external_artifact = report.get("external_artifact")
+    if not isinstance(external_artifact, dict):
+        return ["missing non-empty field 'external_artifact'"]
+
+    failures = _validate_required_fields(
+        external_artifact,
+        path="external_artifact",
+        fields=_AI_MEMORY_EXTERNAL_ARTIFACT_FIELDS,
+    )
+    if external_artifact.get("provider") != "github-actions":
+        failures.append("external_artifact['provider'] must be 'github-actions'")
+    if external_artifact.get("gate_profile") != "ai-memory":
+        failures.append("external_artifact['gate_profile'] must be 'ai-memory'")
+    if external_artifact.get("gate_passed") is not True:
+        failures.append("external_artifact['gate_passed'] must be true")
+    if not _is_positive_integer(external_artifact.get("size_bytes")):
+        failures.append("external_artifact['size_bytes'] must be a positive integer")
+    if not _is_positive_integer(external_artifact.get("archive_size_bytes")):
+        failures.append("external_artifact['archive_size_bytes'] must be a positive integer")
+
+    sha256 = external_artifact.get("sha256")
+    normalized_sha256 = sha256.strip().lower() if isinstance(sha256, str) else ""
+    if len(normalized_sha256) != SHA256_HEX_LENGTH or any(
+        character not in SHA256_HEX_CHARACTERS for character in normalized_sha256
+    ):
+        failures.append("external_artifact['sha256'] must be a 64-character hex digest")
+
+    return failures
+
+
+def validate_external_ai_memory_record(report: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    failures.extend(_validate_ai_memory_header(report))
+    failures.extend(_validate_ai_memory_scope(report))
+    failures.extend(_validate_ai_memory_release_metadata(report))
+    failures.extend(_validate_ai_memory_summaries(report))
+    failures.extend(_validate_ai_memory_isolation(report))
+    failures.extend(_validate_ai_memory_per_slice_thresholds(report))
+    case_result_count = _coerce_positive_integer(report.get("case_results"))
+    total_question_count = _coerce_positive_integer(report.get("total_questions"))
+    if case_result_count is None:
+        failures.append("case_results must be a positive integer")
+    if total_question_count is None:
+        failures.append("total_questions must be a positive integer")
+    if (
+        case_result_count is not None
+        and total_question_count is not None
+        and case_result_count != total_question_count
+    ):
+        failures.append("case_results must equal total_questions")
+    failures.extend(_validate_external_artifact_metadata(report))
+    return failures
+
+
 def validate_context_pack_release_metadata(report: dict[str, Any]) -> list[str]:
     failures: list[str] = []
     label = report.get("label")
@@ -644,28 +726,25 @@ def evaluate_baseline_regressions(
     return failures
 
 
-def _validate_citable_manifest_entry(
+def evaluate_external_ai_memory_report(report: dict[str, Any]) -> list[str]:
+    try:
+        metrics = extract_metrics(report)
+    except TypeError:
+        metrics = {}
+    thresholds = build_thresholds(profile="ai-memory", minimums={}, maximums={})
+    failures = validate_external_ai_memory_record(report)
+    failures.extend(_validate_metric_thresholds(metrics, thresholds))
+    return failures
+
+
+def _validate_manifest_report_fields(
     entry: dict[str, Any],
+    report: dict[str, Any],
     *,
-    index: int,
-    manifest_path: Path,
+    case_result_count: int | None,
+    label: str,
 ) -> list[str]:
     failures: list[str] = []
-    artifact_name = entry.get("artifact")
-    if not isinstance(artifact_name, str) or not artifact_name.strip():
-        return [f"citable[{index}] missing non-empty artifact"]
-
-    artifact_path = manifest_path.parent / artifact_name
-    if not artifact_path.exists():
-        return [f"citable[{index}] artifact does not exist: {artifact_name}"]
-
-    report = load_report(artifact_path)
-    failures.extend(
-        f"{artifact_name}: {failure}" for failure in evaluate_report(report, profile="ai-memory")
-    )
-
-    case_results = report.get("case_results")
-    case_result_count = len(case_results) if isinstance(case_results, list) else None
     expected_pairs = (
         ("status", "citable"),
         ("gate_profile", "ai-memory"),
@@ -685,7 +764,77 @@ def _validate_citable_manifest_entry(
     )
     for field, expected in expected_pairs:
         if entry.get(field) != expected:
-            failures.append(f"{artifact_name}: manifest {field} does not match artifact")
+            failures.append(f"{label}: manifest {field} does not match artifact")
+    return failures
+
+
+def _validate_external_citable_manifest_entry(
+    entry: dict[str, Any],
+    *,
+    index: int,
+    manifest_path: Path,
+    manifest_name: str,
+) -> list[str]:
+    manifest_file = manifest_path.parent / manifest_name
+    if not manifest_file.exists():
+        return [f"citable[{index}] external artifact manifest does not exist: {manifest_name}"]
+
+    report = load_report(manifest_file)
+    failures = [
+        f"{manifest_name}: {failure}" for failure in evaluate_external_ai_memory_report(report)
+    ]
+    case_result_count = _coerce_positive_integer(report.get("case_results"))
+    failures.extend(
+        _validate_manifest_report_fields(
+            entry,
+            report,
+            case_result_count=case_result_count,
+            label=manifest_name,
+        )
+    )
+    return failures
+
+
+def _validate_citable_manifest_entry(
+    entry: dict[str, Any],
+    *,
+    index: int,
+    manifest_path: Path,
+) -> list[str]:
+    failures: list[str] = []
+    artifact_name = entry.get("artifact")
+    external_manifest_name = entry.get("external_artifact_manifest")
+    if _is_present(artifact_name) and _is_present(external_manifest_name):
+        return [f"citable[{index}] must not include both artifact and external_artifact_manifest"]
+    if isinstance(external_manifest_name, str) and external_manifest_name.strip():
+        return _validate_external_citable_manifest_entry(
+            entry,
+            index=index,
+            manifest_path=manifest_path,
+            manifest_name=external_manifest_name,
+        )
+    if not isinstance(artifact_name, str) or not artifact_name.strip():
+        return [f"citable[{index}] missing non-empty artifact or external_artifact_manifest"]
+
+    artifact_path = manifest_path.parent / artifact_name
+    if not artifact_path.exists():
+        return [f"citable[{index}] artifact does not exist: {artifact_name}"]
+
+    report = load_report(artifact_path)
+    failures.extend(
+        f"{artifact_name}: {failure}" for failure in evaluate_report(report, profile="ai-memory")
+    )
+
+    case_results = report.get("case_results")
+    case_result_count = len(case_results) if isinstance(case_results, list) else None
+    failures.extend(
+        _validate_manifest_report_fields(
+            entry,
+            report,
+            case_result_count=case_result_count,
+            label=artifact_name,
+        )
+    )
 
     return failures
 
@@ -702,6 +851,8 @@ def _validate_planned_manifest_entries(planned: Any) -> list[str]:
             failures.append(f"planned[{index}] status is not 'planned'")
         if "artifact" in entry:
             failures.append(f"planned[{index}] must not include artifact")
+        if "external_artifact_manifest" in entry:
+            failures.append(f"planned[{index}] must not include external_artifact_manifest")
     return failures
 
 
