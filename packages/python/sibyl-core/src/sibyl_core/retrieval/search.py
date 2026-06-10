@@ -78,6 +78,12 @@ _GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS = {
 }
 _GRAPH_EXPANSION_DEPTH_DECAY = 0.72
 _GRAPH_EXPANSION_FETCH_HEADROOM = 4
+_GRAPH_EXPANSION_METADATA_KEYS = (
+    "graph_expansion_depth",
+    "graph_expansion_relationship",
+    "graph_expansion_score",
+    "graph_expansion_community_id",
+)
 log = structlog.get_logger()
 
 
@@ -131,6 +137,7 @@ class RetrievalWeights:
     project_match_boost: float = 1.2
     direct_raw_source_boost: float = 1.4
     graph_expansion_only_boost: float = 0.45
+    graph_native_signal_boost_cap: float = 1.2
     freshness_boost_cap: float = 1.5
 
 
@@ -1895,10 +1902,7 @@ def _selected_record_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "invalid_at",
         "created_by",
         "modified_by",
-        "graph_expansion_depth",
-        "graph_expansion_relationship",
-        "graph_expansion_score",
-        "graph_expansion_community_id",
+        *_GRAPH_EXPANSION_METADATA_KEYS,
     ):
         value = row.get(key)
         if value is not None:
@@ -2391,9 +2395,12 @@ def _rank_fused_candidates(
         for rank, candidate in enumerate(candidates, start=1):
             score_by_id[candidate.id] = float(rrf_scores.get(candidate.id, 0.0))
             candidates_by_id.setdefault(candidate.id, candidate)
-            metadata_by_id[candidate.id]["sources"].append(signal.value)
-            metadata_by_id[candidate.id]["ranks"][signal.value] = rank
-            metadata_by_id[candidate.id]["original_scores"][signal.value] = candidate.score
+            fusion_metadata = metadata_by_id[candidate.id]
+            fusion_metadata["sources"].append(signal.value)
+            fusion_metadata["ranks"][signal.value] = rank
+            fusion_metadata["original_scores"][signal.value] = candidate.score
+            if signal is RetrievalSignal.GRAPH_EXPANSION:
+                _merge_graph_expansion_metadata(fusion_metadata, candidate)
 
     ranked: list[tuple[RetrievalCandidate, float, dict[str, Any]]] = []
     for candidate_id, score in score_by_id.items():
@@ -2416,10 +2423,29 @@ def _rank_fused_candidates(
             score *= graph_multiplier
             fusion_metadata["graph_expansion_only_demoted"] = True
             fusion_metadata["graph_expansion_only_multiplier"] = graph_multiplier
+        graph_signal_multiplier = _graph_native_signal_multiplier(
+            plan,
+            signals=fusion_metadata["sources"],
+            fusion_metadata=fusion_metadata,
+        )
+        if graph_signal_multiplier > 1.0:
+            score *= graph_signal_multiplier
+            fusion_metadata["graph_native_signal_boost"] = graph_signal_multiplier
         boosted = _boost_score(candidate, score, plan=plan)
         ranked.append((candidate, boosted, fusion_metadata))
     ranked.sort(key=lambda item: item[1], reverse=True)
     return ranked[:limit]
+
+
+def _merge_graph_expansion_metadata(
+    fusion_metadata: dict[str, Any],
+    candidate: RetrievalCandidate,
+) -> None:
+    metadata = candidate.metadata if isinstance(candidate.metadata, Mapping) else {}
+    for key in _GRAPH_EXPANSION_METADATA_KEYS:
+        value = metadata.get(key)
+        if value is not None:
+            fusion_metadata[key] = value
 
 
 def _candidate_query_text(candidate: RetrievalCandidate) -> str:
@@ -2487,6 +2513,30 @@ def _graph_expansion_only_multiplier(
     return max(min(plan.weights.graph_expansion_only_boost, 1.0), 0.0)
 
 
+def _graph_native_signal_multiplier(
+    plan: RetrievalPlan,
+    *,
+    signals: Sequence[str],
+    fusion_metadata: Mapping[str, Any],
+) -> float:
+    if RetrievalSignal.GRAPH_EXPANSION.value not in signals:
+        return 1.0
+    if set(signals) == {RetrievalSignal.GRAPH_EXPANSION.value}:
+        return 1.0
+    cap = max(plan.weights.graph_native_signal_boost_cap, 1.0)
+    raw_path_score = fusion_metadata.get("graph_expansion_score")
+    if not isinstance(raw_path_score, int | float):
+        raw_scores = fusion_metadata.get("original_scores")
+        if isinstance(raw_scores, Mapping):
+            raw_path_score = raw_scores.get(RetrievalSignal.GRAPH_EXPANSION.value)
+    if not isinstance(raw_path_score, int | float):
+        return 1.0
+    path_score = max(min(float(raw_path_score), 1.0), 0.0)
+    if path_score <= 0.0:
+        return 1.0
+    return min(1.0 + path_score * (cap - 1.0), cap)
+
+
 def _boost_score(
     candidate: RetrievalCandidate,
     score: float,
@@ -2541,6 +2591,16 @@ def _search_result_from_candidate(
         metadata["vector_only_demote_multiplier"] = fusion_metadata.get(
             "vector_only_demote_multiplier"
         )
+    if fusion_metadata.get("graph_expansion_only_demoted"):
+        metadata["graph_expansion_only_demoted"] = True
+        metadata["graph_expansion_only_multiplier"] = fusion_metadata.get(
+            "graph_expansion_only_multiplier"
+        )
+    if fusion_metadata.get("graph_native_signal_boost"):
+        metadata["graph_native_signal_boost"] = fusion_metadata.get("graph_native_signal_boost")
+    for key in _GRAPH_EXPANSION_METADATA_KEYS:
+        if key in fusion_metadata:
+            metadata[key] = fusion_metadata[key]
     if candidate.project_id:
         metadata["project_id"] = candidate.project_id
     if candidate.created_at:

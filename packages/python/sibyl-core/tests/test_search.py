@@ -101,6 +101,7 @@ def test_build_context_retrieval_plan_records_scopes_and_weights() -> None:
     assert plan.weights.project_match_boost == 1.2
     assert plan.weights.direct_raw_source_boost == 1.4
     assert plan.weights.graph_expansion_only_boost == 0.45
+    assert plan.weights.graph_native_signal_boost_cap == 1.2
     assert plan.weights.freshness_boost_cap == 1.5
     assert plan.filter_selectivity_threshold == DEFAULT_FILTER_SELECTIVITY_THRESHOLD
     assert RetrievalSignal.RAW_LEXICAL in plan.signals
@@ -769,6 +770,108 @@ def test_graph_expansion_only_sessions_demote_below_direct_hits() -> None:
     assert [candidate.id for candidate, _, _ in ranked] == ["direct", "graph-only"]
     assert ranked[1][2]["graph_expansion_only_demoted"] is True
     assert ranked[1][2]["graph_expansion_only_multiplier"] == 0.45
+
+
+def test_graph_path_metadata_survives_fusion_with_direct_hit() -> None:
+    plan = build_context_retrieval_plan(
+        query="surreal live query decision",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project="project_123",
+        accessible_projects={"project_123"},
+    )
+    direct_candidate = RetrievalCandidate(
+        id="shared",
+        type="task",
+        name="Shared Task",
+        content="Direct lexical task hit.",
+        score=1.0,
+        source=None,
+        metadata={},
+        project_id="project_123",
+    )
+    graph_candidate = RetrievalCandidate(
+        id="shared",
+        type="task",
+        name="Shared Task via path",
+        content="Same task reached through the decision graph.",
+        score=1.0,
+        source=None,
+        metadata={
+            "graph_expansion_depth": 1,
+            "graph_expansion_relationship": "DECIDES",
+            "graph_expansion_score": 1.0,
+        },
+        project_id="project_123",
+    )
+
+    [(candidate, score, fusion_metadata)] = search_module._fuse_candidates(
+        [
+            (RetrievalSignal.NODE_FULLTEXT, [direct_candidate]),
+            (RetrievalSignal.GRAPH_EXPANSION, [graph_candidate]),
+        ],
+        plan=plan,
+        limit=1,
+    )
+    result = search_module._search_result_from_candidate(
+        candidate,
+        score=score,
+        fusion_metadata=fusion_metadata,
+        include_content=True,
+    )
+
+    assert candidate is direct_candidate
+    assert fusion_metadata["graph_expansion_relationship"] == "DECIDES"
+    assert fusion_metadata["graph_native_signal_boost"] == pytest.approx(1.2)
+    assert result.metadata["graph_expansion_depth"] == 1
+    assert result.metadata["graph_expansion_relationship"] == "DECIDES"
+    assert result.metadata["graph_expansion_score"] == 1.0
+    assert result.metadata["graph_native_signal_boost"] == pytest.approx(1.2)
+
+
+def test_graph_native_signal_boost_skips_graph_only_hits() -> None:
+    plan = build_context_retrieval_plan(
+        query="surreal live query decision",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project="project_123",
+        accessible_projects={"project_123"},
+    )
+    graph_candidate = RetrievalCandidate(
+        id="graph-only",
+        type="task",
+        name="Graph-only Task",
+        content="Only reached through graph expansion.",
+        score=1.0,
+        source=None,
+        metadata={
+            "graph_expansion_depth": 1,
+            "graph_expansion_relationship": "DECIDES",
+            "graph_expansion_score": 1.0,
+        },
+        project_id="project_123",
+    )
+
+    [(candidate, score, fusion_metadata)] = search_module._fuse_candidates(
+        [(RetrievalSignal.GRAPH_EXPANSION, [graph_candidate])],
+        plan=plan,
+        limit=1,
+    )
+    result = search_module._search_result_from_candidate(
+        candidate,
+        score=score,
+        fusion_metadata=fusion_metadata,
+        include_content=True,
+    )
+
+    assert "graph_native_signal_boost" not in fusion_metadata
+    assert result.metadata["graph_expansion_only_demoted"] is True
+    assert result.metadata["graph_expansion_only_multiplier"] == 0.45
+    assert "graph_native_signal_boost" not in result.metadata
 
 
 class _RrfClient:
