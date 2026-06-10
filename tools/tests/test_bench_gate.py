@@ -10,6 +10,7 @@ from tools.bench import eval_gate
 EXPECTED_SUCCESS_AT_5 = 0.5
 EXPECTED_LATENCY_MS = 1200.0
 EXPECTED_MRR = 0.4
+ARGPARSE_USAGE_ERROR = 2
 RELEASE_METADATA = {
     "retrieval_mode": "native",
     "embedding_provider": "gemini",
@@ -94,6 +95,10 @@ def _ai_memory_report(mode: str = "raw") -> dict[str, Any]:
         "elapsed_seconds": 1.25,
         "claim_boundary": "Offline component retrieval baseline only.",
     }
+
+
+def _clone_report(report: dict[str, Any]) -> dict[str, Any]:
+    return json.loads(json.dumps(report))
 
 
 def _manifest_entry(report: dict[str, Any], artifact: str = "artifact.json") -> dict[str, Any]:
@@ -381,6 +386,100 @@ def test_evaluate_report_reports_threshold_and_metadata_failures() -> None:
     assert "metric 'mrr' below minimum 0.2500: 0.1000" in failures
 
 
+def test_evaluate_baseline_regressions_blocks_quality_drop() -> None:
+    baseline = _ai_memory_report()
+    candidate = _clone_report(baseline)
+    candidate["overall"]["recall@5"] = 0.98
+
+    failures = eval_gate.evaluate_baseline_regressions(
+        candidate,
+        baseline,
+        profile="ai-memory",
+        metrics=["recall@5"],
+    )
+
+    assert failures == [
+        "metric 'recall@5' regressed below baseline 1.0000 by 0.0200; allowed 0.0000"
+    ]
+
+
+def test_evaluate_baseline_regressions_honors_lower_is_better_tolerance() -> None:
+    baseline = {"metrics": {"success@5": 0.5, "latency_ms": 100.0}}
+    candidate = {"metrics": {"success@5": 0.5, "latency_ms": 125.0}}
+
+    failures = eval_gate.evaluate_baseline_regressions(
+        candidate,
+        baseline,
+        profile="smoke",
+        metrics=["latency_ms"],
+        max_regressions={"latency_ms": 20.0},
+    )
+
+    assert failures == [
+        "metric 'latency_ms' regressed above baseline 100.0000 by 25.0000; allowed 20.0000"
+    ]
+
+
+def test_evaluate_baseline_regressions_passes_with_named_tolerance() -> None:
+    baseline = _ai_memory_report()
+    candidate = _clone_report(baseline)
+    candidate["overall"]["ndcg@5"] = 0.99
+
+    failures = eval_gate.evaluate_baseline_regressions(
+        candidate,
+        baseline,
+        profile="ai-memory",
+        metrics=["ndcg@5"],
+        max_regressions={"ndcg@5": 0.02},
+    )
+
+    assert failures == []
+
+
+def test_evaluate_baseline_regressions_rejects_non_finite_tolerance() -> None:
+    baseline = _ai_memory_report()
+    candidate = _clone_report(baseline)
+    candidate["overall"]["recall@5"] = 0.1
+
+    failures = eval_gate.evaluate_baseline_regressions(
+        candidate,
+        baseline,
+        profile="ai-memory",
+        metrics=["recall@5"],
+        max_regressions={"recall@5": float("nan")},
+    )
+
+    assert "max regression for metric 'recall@5' must be finite" in failures
+
+
+def test_evaluate_baseline_regressions_rejects_non_finite_candidate_metric() -> None:
+    baseline = {"metrics": {"success@5": 0.5, "latency_ms": 100.0}}
+    candidate = {"metrics": {"success@5": float("nan"), "latency_ms": 100.0}}
+
+    failures = eval_gate.evaluate_baseline_regressions(
+        candidate,
+        baseline,
+        profile="smoke",
+        metrics=["success@5"],
+    )
+
+    assert failures == ["candidate missing metric 'success@5'"]
+
+
+def test_evaluate_baseline_regressions_rejects_unknown_metric_direction() -> None:
+    baseline = {"metrics": {"custom_quality": 1.0}}
+    candidate = {"metrics": {"custom_quality": 0.9}}
+
+    failures = eval_gate.evaluate_baseline_regressions(
+        candidate,
+        baseline,
+        profile="smoke",
+        metrics=["custom_quality"],
+    )
+
+    assert failures == ["metric 'custom_quality' has unknown regression direction"]
+
+
 def test_main_can_gate_ai_memory_record(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = tmp_path / "ai-memory.json"
     path.write_text(
@@ -511,6 +610,49 @@ def test_validate_ai_memory_manifest_rejects_empty_citable_list(tmp_path: Path) 
     assert failures == ["manifest missing non-empty citable list"]
 
 
+def test_validate_ai_memory_manifest_rejects_null_no_regression(tmp_path: Path) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["no_regression"] = None
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == ["no_regression must be a list"]
+
+
+def test_validate_ai_memory_manifest_enforces_no_regression_entries(tmp_path: Path) -> None:
+    baseline = _ai_memory_report()
+    candidate = _clone_report(baseline)
+    candidate["overall"]["ndcg@5"] = 0.95
+    (tmp_path / "baseline.json").write_text(json.dumps(baseline), encoding="utf-8")
+    (tmp_path / "candidate.json").write_text(json.dumps(candidate), encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "citable": [_manifest_entry(candidate, artifact="candidate.json")],
+                "no_regression": [
+                    {
+                        "candidate": "candidate.json",
+                        "baseline": "baseline.json",
+                        "profile": "ai-memory",
+                        "metrics": ["ndcg@5"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == [
+        "no_regression[0] candidate.json: metric 'ndcg@5' regressed below "
+        "baseline 1.0000 by 0.0500; allowed 0.0000"
+    ]
+
+
 def test_main_returns_nonzero_when_gate_fails(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -532,6 +674,53 @@ def test_main_returns_nonzero_when_gate_fails(
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "Gate failed" in captured.out
+
+
+def test_main_returns_nonzero_when_baseline_regresses(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    _write_report(
+        baseline_path,
+        metrics={"success@5": 0.50, "latency_ms": 100.0},
+    )
+    _write_report(
+        candidate_path,
+        metrics={"success@5": 0.49, "latency_ms": 100.0},
+    )
+
+    exit_code = eval_gate.main(
+        [
+            str(candidate_path),
+            "--profile",
+            "smoke",
+            "--baseline",
+            str(baseline_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Baseline comparison" in captured.out
+    assert "metric 'success@5' regressed below baseline" in captured.out
+
+
+def test_main_rejects_baseline_without_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    _write_report(
+        baseline_path,
+        metrics={"success@5": 0.50, "latency_ms": 100.0},
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        eval_gate.main(["--baseline", str(baseline_path)])
+
+    captured = capsys.readouterr()
+    assert exc.value.code == ARGPARSE_USAGE_ERROR
+    assert "--baseline options require a report argument" in captured.err
 
 
 def test_ai_memory_manifest_tracks_full_citable_artifacts() -> None:

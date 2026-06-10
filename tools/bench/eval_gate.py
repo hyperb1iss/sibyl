@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, TypeGuard, cast
 
 ProfileName = Literal["smoke", "acceptance", "context-pack", "ai-memory"]
+MetricDirection = Literal["higher", "lower"]
 
 
 @dataclass(frozen=True)
@@ -91,10 +93,45 @@ _AI_MEMORY_RUNTIME_FIELDS = (
 _AI_MEMORY_DATASET_FIELDS = ("name", "corpus_hash")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_AI_MEMORY_MANIFEST = REPO_ROOT / "benchmarks" / "results" / "ai-memory" / "manifest.json"
+LOWER_IS_BETTER_METRICS = frozenset(
+    (
+        "latency_ms",
+        "latency_p95_ms",
+        "elapsed_seconds",
+        "error_rate",
+        "avg_estimated_tokens",
+        "max_estimated_tokens",
+        "avg_markdown_chars",
+        "max_markdown_chars",
+        "leak_count",
+        "forbidden_term_matches",
+        "cross_question_result_count",
+        "timeout_count",
+        "skipped_case_count",
+    )
+)
+LOWER_IS_BETTER_SUFFIXES = ("_ms", "_seconds", "_count", "_chars", "_tokens")
+HIGHER_IS_BETTER_METRICS = frozenset(
+    (
+        "mrr",
+        "pass_rate",
+        "source_metadata_coverage",
+        "facet_order_match_rate",
+    )
+)
+HIGHER_IS_BETTER_PREFIXES = ("recall@", "ndcg@", "precision@", "success@")
 
 
 def load_report(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _is_finite_number(value: Any) -> TypeGuard[int | float]:
+    return (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    )
 
 
 def extract_metrics(report: dict[str, Any]) -> dict[str, float]:
@@ -107,11 +144,11 @@ def extract_metrics(report: dict[str, Any]) -> dict[str, float]:
 
     metrics: dict[str, float] = {}
     for key, value in metrics_section.items():
-        if isinstance(value, int | float):
+        if _is_finite_number(value):
             metrics[key] = float(value)
 
     elapsed_seconds = report.get("elapsed_seconds")
-    if isinstance(elapsed_seconds, int | float):
+    if _is_finite_number(elapsed_seconds):
         metrics["elapsed_seconds"] = float(elapsed_seconds)
 
     return metrics
@@ -238,9 +275,9 @@ def _validate_required_fields(
 def _has_case_metric(record: dict[str, Any]) -> bool:
     metrics = record.get("metrics")
     if _is_non_empty_mapping(metrics):
-        return any(isinstance(value, int | float) for value in metrics.values())
+        return any(_is_finite_number(value) for value in metrics.values())
     return any(
-        isinstance(value, int | float)
+        _is_finite_number(value)
         for key, value in record.items()
         if key.startswith(("recall@", "ndcg@", "precision@", "success@", "mrr"))
     )
@@ -353,8 +390,10 @@ def _validate_ai_memory_isolation(report: dict[str, Any]) -> list[str]:
     if not isinstance(overall, dict):
         return []
     cross_question_count = overall.get("cross_question_result_count")
-    if isinstance(cross_question_count, int | float) and cross_question_count > 0:
+    if _is_finite_number(cross_question_count) and cross_question_count > 0:
         return [f"overall cross_question_result_count must be 0.0000: {cross_question_count:.4f}"]
+    if _is_present(cross_question_count) and not _is_finite_number(cross_question_count):
+        return ["overall cross_question_result_count must be finite"]
     return []
 
 
@@ -378,15 +417,10 @@ def _validate_ai_memory_per_slice_thresholds(report: dict[str, Any]) -> list[str
                 slice_stats = type_counts.get(slice_name)
                 if isinstance(slice_stats, dict):
                     case_count = slice_stats.get("cases")
-                    if (
-                        isinstance(case_count, int | float)
-                        and case_count < AI_MEMORY_PER_SLICE_MIN_CASES
-                    ):
+                    if _is_finite_number(case_count) and case_count < AI_MEMORY_PER_SLICE_MIN_CASES:
                         continue
             metric_values = {
-                key: float(value)
-                for key, value in metrics.items()
-                if isinstance(value, int | float)
+                key: float(value) for key, value in metrics.items() if _is_finite_number(value)
             }
             slice_failures = _validate_metric_thresholds(
                 metric_values,
@@ -528,6 +562,88 @@ def _validate_metric_thresholds(
     return failures
 
 
+def _baseline_metric_names(
+    profile: ProfileName,
+    requested_metrics: list[str] | tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    if requested_metrics:
+        return tuple(dict.fromkeys(requested_metrics))
+    return tuple(PROFILE_THRESHOLDS[profile])
+
+
+def _validate_regression_tolerances(tolerances: dict[str, float]) -> list[str]:
+    failures: list[str] = []
+    for metric, value in sorted(tolerances.items()):
+        if not math.isfinite(value):
+            failures.append(f"max regression for metric {metric!r} must be finite")
+        elif value < 0:
+            failures.append(f"max regression for metric {metric!r} must be non-negative")
+    return failures
+
+
+def _metric_direction(metric: str, profile: ProfileName) -> MetricDirection | None:
+    threshold = PROFILE_THRESHOLDS[profile].get(metric)
+    if threshold is not None:
+        if threshold.maximum is not None and threshold.minimum is None:
+            return "lower"
+        if threshold.minimum is not None and threshold.maximum is None:
+            return "higher"
+
+    if metric in LOWER_IS_BETTER_METRICS or metric.endswith(LOWER_IS_BETTER_SUFFIXES):
+        return "lower"
+    if metric in HIGHER_IS_BETTER_METRICS or metric.startswith(HIGHER_IS_BETTER_PREFIXES):
+        return "higher"
+    return None
+
+
+def evaluate_baseline_regressions(
+    candidate_report: dict[str, Any],
+    baseline_report: dict[str, Any],
+    *,
+    profile: ProfileName,
+    metrics: list[str] | tuple[str, ...] | None = None,
+    max_regressions: dict[str, float] | None = None,
+) -> list[str]:
+    candidate_metrics = _extract_metrics_for_profile(candidate_report, profile)
+    baseline_metrics = _extract_metrics_for_profile(baseline_report, profile)
+    metric_names = _baseline_metric_names(profile, metrics)
+    tolerances = max_regressions or {}
+    failures = _validate_regression_tolerances(tolerances)
+
+    for metric in sorted(metric_names):
+        baseline = baseline_metrics.get(metric)
+        candidate = candidate_metrics.get(metric)
+        if baseline is None:
+            failures.append(f"baseline missing metric {metric!r}")
+            continue
+        if candidate is None:
+            failures.append(f"candidate missing metric {metric!r}")
+            continue
+
+        tolerance = tolerances.get(metric, 0.0)
+        direction = _metric_direction(metric, profile)
+        if direction is None:
+            failures.append(f"metric {metric!r} has unknown regression direction")
+            continue
+        if direction == "lower":
+            regression = candidate - baseline
+            if regression > tolerance:
+                failures.append(
+                    f"metric {metric!r} regressed above baseline {baseline:.4f} "
+                    f"by {regression:.4f}; allowed {tolerance:.4f}"
+                )
+            continue
+
+        regression = baseline - candidate
+        if regression > tolerance:
+            failures.append(
+                f"metric {metric!r} regressed below baseline {baseline:.4f} "
+                f"by {regression:.4f}; allowed {tolerance:.4f}"
+            )
+
+    return failures
+
+
 def _validate_citable_manifest_entry(
     entry: dict[str, Any],
     *,
@@ -589,6 +705,122 @@ def _validate_planned_manifest_entries(planned: Any) -> list[str]:
     return failures
 
 
+def _parse_manifest_metric_list(value: Any, *, path: str) -> tuple[list[str] | None, list[str]]:
+    if value is None:
+        return None, []
+    if not isinstance(value, list) or not value:
+        return None, [f"{path} must be a non-empty string list"]
+    metrics: list[str] = []
+    failures: list[str] = []
+    for index, metric in enumerate(value):
+        if not isinstance(metric, str) or not metric.strip():
+            failures.append(f"{path}[{index}] must be a non-empty string")
+            continue
+        metrics.append(metric.strip())
+    return metrics, failures
+
+
+def _parse_manifest_regression_tolerances(
+    value: Any,
+    *,
+    path: str,
+) -> tuple[dict[str, float], list[str]]:
+    if value is None:
+        return {}, []
+    if not isinstance(value, dict):
+        return {}, [f"{path} must be an object"]
+
+    tolerances: dict[str, float] = {}
+    failures: list[str] = []
+    for metric, raw_tolerance in value.items():
+        if not isinstance(metric, str) or not metric.strip():
+            failures.append(f"{path} contains a non-string metric key")
+            continue
+        if not _is_finite_number(raw_tolerance):
+            failures.append(f"{path}[{metric!r}] must be finite numeric")
+            continue
+        tolerances[metric.strip()] = float(raw_tolerance)
+    failures.extend(_validate_regression_tolerances(tolerances))
+    return tolerances, failures
+
+
+def _validate_no_regression_manifest_entries(
+    manifest: dict[str, Any],
+    manifest_path: Path,
+) -> list[str]:
+    if "no_regression" not in manifest:
+        return []
+    entries = manifest.get("no_regression")
+    if not isinstance(entries, list):
+        return ["no_regression must be a list"]
+
+    citable = manifest.get("citable")
+    citable_entries = citable if isinstance(citable, list) else []
+    citable_artifacts = {
+        entry.get("artifact") for entry in citable_entries if isinstance(entry, dict)
+    }
+    failures: list[str] = []
+    for index, entry in enumerate(entries):
+        prefix = f"no_regression[{index}]"
+        if not _is_mapping(entry):
+            failures.append(f"{prefix} is not an object")
+            continue
+
+        candidate_name = entry.get("candidate")
+        baseline_name = entry.get("baseline")
+        if not isinstance(candidate_name, str) or not candidate_name.strip():
+            failures.append(f"{prefix} missing non-empty candidate")
+        if not isinstance(baseline_name, str) or not baseline_name.strip():
+            failures.append(f"{prefix} missing non-empty baseline")
+        if isinstance(candidate_name, str) and candidate_name not in citable_artifacts:
+            failures.append(f"{prefix} candidate {candidate_name!r} is not citable")
+
+        profile_value = entry.get("profile", "ai-memory")
+        if not isinstance(profile_value, str) or profile_value not in PROFILE_THRESHOLDS:
+            failures.append(f"{prefix} has unsupported profile {profile_value!r}")
+            continue
+        profile = cast("ProfileName", profile_value)
+
+        metrics, metric_failures = _parse_manifest_metric_list(
+            entry.get("metrics"),
+            path=f"{prefix}.metrics",
+        )
+        tolerances, tolerance_failures = _parse_manifest_regression_tolerances(
+            entry.get("max_regression"),
+            path=f"{prefix}.max_regression",
+        )
+        failures.extend(metric_failures)
+        failures.extend(tolerance_failures)
+        if metric_failures or tolerance_failures:
+            continue
+        if not isinstance(candidate_name, str) or not isinstance(baseline_name, str):
+            continue
+
+        candidate_path = manifest_path.parent / candidate_name
+        baseline_path = manifest_path.parent / baseline_name
+        if not candidate_path.exists():
+            failures.append(f"{prefix} candidate does not exist: {candidate_name}")
+            continue
+        if not baseline_path.exists():
+            failures.append(f"{prefix} baseline does not exist: {baseline_name}")
+            continue
+
+        candidate_report = load_report(candidate_path)
+        baseline_report = load_report(baseline_path)
+        failures.extend(
+            f"{prefix} {candidate_name}: {failure}"
+            for failure in evaluate_baseline_regressions(
+                candidate_report,
+                baseline_report,
+                profile=profile,
+                metrics=metrics,
+                max_regressions=tolerances,
+            )
+        )
+
+    return failures
+
+
 def evaluate_report(
     report: dict[str, Any],
     *,
@@ -635,6 +867,7 @@ def validate_ai_memory_manifest(manifest_path: Path) -> list[str]:
             )
         )
 
+    failures.extend(_validate_no_regression_manifest_entries(manifest, manifest_path))
     failures.extend(_validate_planned_manifest_entries(manifest.get("planned")))
     return failures
 
@@ -683,6 +916,37 @@ def _print_thresholds(
         if threshold.maximum is not None:
             checks.append(f"<= {threshold.maximum:.4f}")
         _echo(f"  {metric}: {actual:.4f} ({', '.join(checks)})")
+
+
+def _print_baseline_comparison(
+    candidate_metrics: dict[str, float],
+    baseline_metrics: dict[str, float],
+    *,
+    profile: ProfileName,
+    requested_metrics: list[str] | tuple[str, ...] | None,
+    max_regressions: dict[str, float],
+) -> None:
+    _echo()
+    _echo("Baseline comparison")
+    for metric in sorted(_baseline_metric_names(profile, requested_metrics)):
+        baseline = baseline_metrics.get(metric)
+        candidate = candidate_metrics.get(metric)
+        if baseline is None or candidate is None:
+            _echo(f"  {metric}: missing")
+            continue
+        tolerance = max_regressions.get(metric, 0.0)
+        direction = _metric_direction(metric, profile)
+        if direction is None:
+            _echo(f"  {metric}: unknown regression direction")
+            continue
+        if direction == "lower":
+            regression = candidate - baseline
+            check = f"<= baseline + {tolerance:.4f}"
+        else:
+            regression = baseline - candidate
+            check = f">= baseline - {tolerance:.4f}"
+        status = "regressed" if regression > tolerance else "ok"
+        _echo(f"  {metric}: baseline {baseline:.4f}, candidate {candidate:.4f} ({check}; {status})")
 
 
 def _extract_metrics_for_profile(
@@ -736,19 +1000,49 @@ def main(argv: list[str] | None = None) -> int:
         metavar="KEY=VALUE",
         help="Require report metadata to include exact key/value pairs.",
     )
+    parser.add_argument(
+        "--baseline",
+        type=Path,
+        help="Saved baseline report JSON for no-regression comparison.",
+    )
+    parser.add_argument(
+        "--baseline-metric",
+        action="append",
+        default=[],
+        metavar="KEY",
+        help="Metric to compare against the baseline. Defaults to profile metrics.",
+    )
+    parser.add_argument(
+        "--max-regression",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Allowed absolute regression for a baseline metric. Defaults to zero.",
+    )
     args = parser.parse_args(argv)
 
     if args.report is None:
+        if args.baseline is not None or args.baseline_metric or args.max_regression:
+            parser.error("--baseline options require a report argument")
         return _gate_default_manifest()
+    if args.baseline is None and args.baseline_metric:
+        parser.error("--baseline-metric requires --baseline")
+    if args.baseline is None and args.max_regression:
+        parser.error("--max-regression requires --baseline")
 
     try:
         minimums = parse_kv_pairs(args.min_metric, value_kind="float")
         maximums = parse_kv_pairs(args.max_metric, value_kind="float")
         required_metadata = parse_kv_pairs(args.require_metadata, value_kind="string")
+        max_regressions = parse_kv_pairs(args.max_regression, value_kind="float")
     except ValueError as exc:
         parser.error(str(exc))
+    regression_tolerance_failures = _validate_regression_tolerances(max_regressions)
+    if regression_tolerance_failures:
+        parser.error("; ".join(regression_tolerance_failures))
 
     report = load_report(args.report)
+    baseline_report = load_report(args.baseline) if args.baseline is not None else None
     failures = evaluate_report(
         report,
         profile=args.profile,
@@ -756,6 +1050,16 @@ def main(argv: list[str] | None = None) -> int:
         maximums=maximums,
         required_metadata=required_metadata,
     )
+    if baseline_report is not None:
+        failures.extend(
+            evaluate_baseline_regressions(
+                report,
+                baseline_report,
+                profile=args.profile,
+                metrics=args.baseline_metric,
+                max_regressions=max_regressions,
+            )
+        )
 
     report_name = _report_name(report, args.report.stem)
     _echo()
@@ -768,6 +1072,15 @@ def main(argv: list[str] | None = None) -> int:
         maximums=maximums,
     )
     _print_thresholds(metrics, thresholds)
+    if baseline_report is not None:
+        baseline_metrics = _extract_metrics_for_profile(baseline_report, args.profile)
+        _print_baseline_comparison(
+            metrics,
+            baseline_metrics,
+            profile=args.profile,
+            requested_metrics=args.baseline_metric,
+            max_regressions=max_regressions,
+        )
 
     if failures:
         _echo()

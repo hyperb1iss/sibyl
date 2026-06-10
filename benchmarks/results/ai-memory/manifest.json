@@ -83,6 +83,20 @@
       "auth_manifest_id": "not-applicable:offline"
     }
   ],
+  "no_regression": [
+    {
+      "candidate": "longmemeval_sibyl_hybrid_20260513.json",
+      "baseline": "longmemeval_sibyl_raw_20260513.json",
+      "profile": "ai-memory",
+      "metrics": [
+        "recall@5",
+        "ndcg@5",
+        "recall@10",
+        "ndcg@10"
+      ],
+      "max_regression": {}
+    }
+  ],
   "planned": [
     {
       "suite": "Live Graphiti vs native Surreal",

@@ -167,6 +167,13 @@ Use `--require-metadata store=surreal` or other metadata filters when you need t
 produced the artifact. Use `--min-metric` and `--max-metric` to tighten a gate for a specific run
 without forking the script.
 
+Use `--baseline <report.json>` to make the gate fail on absolute regressions against a saved
+baseline report. By default, the comparison uses the selected profile's metrics and allows zero
+regression. Narrow the comparison with `--baseline-metric <metric>` and allow known measurement
+noise only by naming it explicitly with `--max-regression <metric>=<amount>`. Custom baseline
+metrics must have a known direction or an obvious lower-is-better suffix such as `_ms`, `_seconds`,
+`_count`, `_chars`, or `_tokens`; unknown names fail closed.
+
 ## Product Gates
 
 Post-v0.8 release claims use small product gates alongside benchmark gates. These do not replace the
@@ -235,8 +242,10 @@ Required record fields:
 - claim boundary: what the result supports and what stays unproven
 
 `moon run bench-gate` with no report argument gates the committed
-`benchmarks/results/ai-memory/manifest.json` ledger and every citable artifact it names. Use
-`moon run bench-gate -- <artifact>.json --profile ai-memory` for a single uncommitted artifact.
+`benchmarks/results/ai-memory/manifest.json` ledger, every citable artifact it names, and each
+manifest `no_regression` baseline comparison. Use
+`moon run bench-gate -- <artifact>.json --profile ai-memory --baseline <baseline>.json` for a single
+uncommitted artifact that needs the same no-regression policy.
 
 The canonical ledger for which rows are citable is
 `docs/_archive/SURREALDB_GRAPHITI_EXIT_BENCHMARK_EVIDENCE.md`. If a benchmark suite is missing from

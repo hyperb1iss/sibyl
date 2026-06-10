@@ -1,7 +1,7 @@
 # AI Memory Benchmark Results
 
-This directory is the citable result namespace for external AI memory benchmark
-artifacts. Files here should be full result records, not headline summaries.
+This directory is the citable result namespace for external AI memory benchmark artifacts. Files
+here should be full result records, not headline summaries.
 
 Current committed artifacts:
 
@@ -9,22 +9,22 @@ Current committed artifacts:
 - `longmemeval_sibyl_raw_20260513.json`
 - `longmemeval_sibyl_hybrid_20260513.json`
 
-`manifest.json` is the release ledger. Entries under `citable` must point to
-full artifacts in this directory and pass the `ai-memory` gate. Entries under
+`manifest.json` is the release ledger. Entries under `citable` must point to full artifacts in this
+directory and pass the `ai-memory` gate. Entries under `no_regression` compare citable artifacts
+against named baselines and fail the default `bench-gate` when a tracked metric drops. Entries under
 `planned` are not release-note evidence yet.
 
-Each citable artifact must include overall metrics, per-slice metrics, full
-per-case records, dataset provenance, command, commit, runtime mode, and
-caveats. Runtime metadata must name retrieval mode, embedding provider, model,
-dimensions, tokenizer method, repeat count, auth manifest ID, and corpus hash.
-Gate new artifacts before citing them:
+Each citable artifact must include overall metrics, per-slice metrics, full per-case records,
+dataset provenance, command, commit, runtime mode, and caveats. Runtime metadata must name retrieval
+mode, embedding provider, model, dimensions, tokenizer method, repeat count, auth manifest ID, and
+corpus hash. Gate new artifacts before citing them:
 
 ```bash
 moon run bench-gate -- benchmarks/results/ai-memory/<artifact>.json --profile ai-memory
 ```
 
-Run `moon run bench-gate` without arguments to validate the committed manifest
-and every citable artifact it names.
+Run `moon run bench-gate` without arguments to validate the committed manifest and every citable
+artifact it names, including no-regression baseline checks.
 
-Suites without full artifacts in this directory or in a named external archive
-manifest are planned coverage only.
+Suites without full artifacts in this directory or in a named external archive manifest are planned
+coverage only.
