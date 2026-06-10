@@ -137,6 +137,7 @@ tasks:
   bench-context:
     command: uv run python ../../../benchmarks/context_pack_eval.py
     inputs:
+    - /benchmarks/git_provenance.py
     - /benchmarks/context_pack_eval.py
     - /benchmarks/context_pack_cases.json
     - '@group(sources)'

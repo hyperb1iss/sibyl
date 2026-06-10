@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ruff: noqa: E402, PLR2004, S607, T201
+# ruff: noqa: E402, PLR0915, PLR2004, PLW3301, TRY301, T201
 """Run LongMemEval-S against the existing live `/api/search` surface."""
 
 from __future__ import annotations
@@ -9,7 +9,6 @@ import asyncio
 import hashlib
 import json
 import os
-import subprocess
 import sys
 import time
 from collections import defaultdict
@@ -23,7 +22,10 @@ from uuid import uuid4
 import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "benchmarks"))
 sys.path.insert(0, str(ROOT / "packages" / "python" / "sibyl-core" / "src"))
+
+from git_provenance import git_provenance
 
 from sibyl_core.config import settings
 from sibyl_core.evals.longmemeval import (
@@ -62,19 +64,6 @@ def _format_ms(value: Any) -> str:
     if not isinstance(value, int | float):
         return "n/a"
     return f"{value:.0f}ms"
-
-
-def _git_commit() -> str:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return "unknown"
-    return result.stdout.strip() or "unknown"
 
 
 def _sha256_file(path: Path) -> str:
@@ -219,9 +208,7 @@ def _graph_embedding_runtime_metadata() -> dict[str, Any]:
     timeout_seconds = (
         float(raw_timeout) if raw_timeout else settings.graph_embedding_timeout_seconds
     )
-    raw_search_timeout = os.environ.get(
-        "SIBYL_GRAPH_SEARCH_EMBEDDING_TIMEOUT_SECONDS", ""
-    ).strip()
+    raw_search_timeout = os.environ.get("SIBYL_GRAPH_SEARCH_EMBEDDING_TIMEOUT_SECONDS", "").strip()
     search_timeout_seconds = (
         float(raw_search_timeout)
         if raw_search_timeout
@@ -250,9 +237,7 @@ def _graph_embedding_runtime_metadata() -> dict[str, Any]:
         "embedding_model": model if api_key_present else "not-applicable",
         "embedding_dimensions": dimensions if api_key_present else 0,
         "embedding_timeout_seconds": timeout_seconds if api_key_present else 0.0,
-        "query_embedding_timeout_seconds": (
-            search_timeout_seconds if api_key_present else 0.0
-        ),
+        "query_embedding_timeout_seconds": (search_timeout_seconds if api_key_present else 0.0),
         "embedding_provider_configured": provider,
         "embedding_provider_status": "enabled" if api_key_present else "missing_key",
         "tokenizer_estimate_method": "provider-default" if api_key_present else "not-applicable",
@@ -1317,12 +1302,13 @@ def _build_live_report(
     )
     embedding_runtime = _graph_embedding_runtime_metadata()
 
+    provenance = git_provenance(ROOT)
     return {
         "schema_version": "longmemeval-live-v1",
         "suite": "LongMemEval-S live API",
         "suite_version": "live-api-search-v1",
         "generated_at": _now(),
-        "sibyl_commit": _git_commit(),
+        **provenance,
         "command": command,
         "mode": LIVE_RETRIEVAL_MODE,
         "runtime": {
@@ -1345,12 +1331,8 @@ def _build_live_report(
             "wait_for_memory_projection": wait_for_memory_projection,
             "auto_extract_entities_env": _env_flag("SIBYL_AUTO_EXTRACT_ENTITIES"),
             "wait_for_memory_extraction": wait_for_memory_extraction,
-            "memory_projection_consistency": (
-                "strong" if wait_for_memory_projection else "async"
-            ),
-            "memory_extraction_consistency": (
-                "strong" if wait_for_memory_extraction else "async"
-            ),
+            "memory_projection_consistency": ("strong" if wait_for_memory_projection else "async"),
+            "memory_extraction_consistency": ("strong" if wait_for_memory_extraction else "async"),
             "memory_enrichment_consistency": (
                 "strong"
                 if wait_for_memory_projection and wait_for_memory_extraction
@@ -1380,12 +1362,8 @@ def _build_live_report(
             "entity_content_projection_policy": ENTITY_CONTENT_PROJECTION_POLICY,
             "wait_for_memory_projection": wait_for_memory_projection,
             "wait_for_memory_extraction": wait_for_memory_extraction,
-            "memory_projection_consistency": (
-                "strong" if wait_for_memory_projection else "async"
-            ),
-            "memory_extraction_consistency": (
-                "strong" if wait_for_memory_extraction else "async"
-            ),
+            "memory_projection_consistency": ("strong" if wait_for_memory_projection else "async"),
+            "memory_extraction_consistency": ("strong" if wait_for_memory_extraction else "async"),
             "memory_enrichment_consistency": (
                 "strong"
                 if wait_for_memory_projection and wait_for_memory_extraction

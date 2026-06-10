@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ruff: noqa: B905, I001, PLC0415, PLR2004, S110, S607, SIM105, T201
+# ruff: noqa: B905, E402, I001, PLC0415, PLR2004, S110, SIM105, T201
 """
 Sibyl x LongMemEval Offline Baseline
 ====================================
@@ -28,7 +28,6 @@ import argparse
 import hashlib
 import json
 import re
-import subprocess
 import sys
 import time
 from collections import defaultdict
@@ -36,12 +35,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+ROOT = Path(__file__).resolve().parents[1]
+
 try:
     import chromadb
 except ModuleNotFoundError:
     chromadb = None
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "python" / "sibyl-core" / "src"))
+sys.path.insert(0, str(ROOT / "benchmarks"))
+sys.path.insert(0, str(ROOT / "packages" / "python" / "sibyl-core" / "src"))
+from git_provenance import git_provenance
 from sibyl_core.evals.longmemeval import (
     CORPUS_TEXT_POLICY,
     average_metric,
@@ -306,20 +309,6 @@ def _parse_temporal_reference(query: str, question_date):
     return None
 
 
-def _git_commit() -> str | None:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    commit = result.stdout.strip()
-    return commit or None
-
-
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -424,12 +413,13 @@ def run_benchmark(
     print(f"\n  Time: {elapsed:.1f}s ({elapsed / len(entries) * 1000:.0f}ms/question)")
     print(f"{'=' * 60}\n")
 
+    provenance = git_provenance(ROOT)
     return {
         "schema_version": "longmemeval-offline-v2",
         "suite": "LongMemEval-style offline",
         "suite_version": "offline-runner-v2",
         "generated_at": datetime.now(UTC).isoformat(),
-        "sibyl_commit": _git_commit(),
+        **provenance,
         "command": command,
         "mode": mode,
         "runtime": {
