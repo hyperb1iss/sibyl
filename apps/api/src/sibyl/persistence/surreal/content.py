@@ -63,6 +63,12 @@ _UPSERT_RECORD = {
         "WHERE uuid = $uuid AND organization_id = $organization_id;"
     ),
 }
+_CRAWL_SOURCE_FIELDS = (
+    "uuid, organization_id, name, url, source_type, description, crawl_depth, "
+    "include_patterns, exclude_patterns, respect_robots, crawl_status, "
+    "current_job_id, last_crawled_at, last_error, document_count, chunk_count, "
+    "total_tokens, tags, categories, favicon_url, created_at, updated_at"
+)
 
 
 def _table_name_length(table: str) -> int:
@@ -872,7 +878,8 @@ async def _load_sources_for_org(
 ) -> list[CrawlSource]:
     rows = await _select_many(
         client,
-        "SELECT * FROM crawl_sources WHERE organization_id = $organization_id;",
+        f"SELECT {_CRAWL_SOURCE_FIELDS} "  # noqa: S608
+        "FROM crawl_sources WHERE organization_id = $organization_id;",
         organization_id=str(organization_id),
     )
     sources = [_source_from_record(row) for row in rows]
@@ -981,7 +988,7 @@ async def _load_all_sources(
     rows = await _select_many(
         client,
         (
-            f"SELECT * FROM crawl_sources{where_clause} "  # noqa: S608
+            f"SELECT {_CRAWL_SOURCE_FIELDS} FROM crawl_sources{where_clause} "  # noqa: S608
             f"ORDER BY created_at DESC, uuid DESC{limit_clause};"
         ),
         **params,
@@ -1120,7 +1127,7 @@ async def _load_sources_for_search_scope(
     )
     rows = await _select_many(
         client,
-        f"SELECT * FROM crawl_sources WHERE {where_clause};",  # noqa: S608
+        f"SELECT {_CRAWL_SOURCE_FIELDS} FROM crawl_sources WHERE {where_clause};",  # noqa: S608
         **params,
     )
     sources = [_source_from_record(row) for row in rows]
@@ -1148,7 +1155,7 @@ async def list_crawl_sources_for_org(
         )
         rows = await _select_many(
             client,
-            f"SELECT * FROM crawl_sources WHERE {where_clause} "  # noqa: S608
+            f"SELECT {_CRAWL_SOURCE_FIELDS} FROM crawl_sources WHERE {where_clause} "  # noqa: S608
             "ORDER BY created_at DESC, uuid DESC LIMIT $limit;",
             **params,
             limit=max(limit, 0),

@@ -161,6 +161,8 @@ async def test_list_crawl_sources_for_org_filters_and_limits_in_surreal(
     assert "crawl_status = $status" in count_query
     assert count_params["organization_id"] == str(org_id)
     assert count_params["status"] == CrawlStatus.COMPLETED.value
+    assert "SELECT * FROM crawl_sources" not in page_query
+    assert "SELECT uuid, organization_id, name, url" in page_query
     assert "ORDER BY created_at DESC, uuid DESC LIMIT $limit" in page_query
     assert page_params["limit"] == 10
 
@@ -199,7 +201,9 @@ async def test_list_crawl_sources_pushes_status_and_limit_into_surreal(
 
     query, params = client.calls[0]
     assert [source.id for source in sources] == [source_id]
-    assert "SELECT * FROM crawl_sources WHERE crawl_status = $status" in query
+    assert "SELECT * FROM crawl_sources" not in query
+    assert "SELECT uuid, organization_id, name, url" in query
+    assert "FROM crawl_sources WHERE crawl_status = $status" in query
     assert "ORDER BY created_at DESC, uuid DESC LIMIT $limit" in query
     assert params["status"] == CrawlStatus.IN_PROGRESS.value
     assert params["limit"] == 25
