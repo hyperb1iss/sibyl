@@ -8,13 +8,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sibyl.jobs.entities import (
+    backfill_entity_embeddings,
     create_entity,
     create_learning_episode,
     create_learning_procedure,
     serialize_memory_policy_context,
 )
 from sibyl_core.auth import MemoryPolicyContext, OrganizationRole
-from sibyl_core.models.entities import Episode, Pattern, Procedure
+from sibyl_core.models.entities import (
+    Entity,
+    Episode,
+    Pattern,
+    Procedure,
+    Relationship,
+    RelationshipType,
+)
 from sibyl_core.models.tasks import Task, TaskStatus
 
 
@@ -110,6 +118,49 @@ class TestCreateEntityJob:
         )
         relationship_manager.create.assert_not_awaited()
         assert project_memory.await_args.kwargs["generate_embeddings"] is False
+
+
+class TestBackfillEntityEmbeddingsJob:
+    @pytest.mark.asyncio
+    async def test_backfills_entity_and_relationship_embeddings(self) -> None:
+        entity = Entity(
+            id="session-123",
+            entity_type="session",
+            name="Lexical session",
+            content="Persisted before embeddings were available.",
+        )
+        relationship = Relationship(
+            id="rel-session-project",
+            source_id="session-123",
+            target_id="project-1",
+            relationship_type=RelationshipType.RELATED_TO,
+        )
+        entity_manager = MagicMock()
+        entity_manager.create_direct_bulk = AsyncMock(return_value=["session-123"])
+        relationship_manager = MagicMock()
+        relationship_manager.create_direct_bulk = AsyncMock(return_value=["rel-session-project"])
+        runtime = SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+        )
+
+        with patch(
+            "sibyl.jobs.entities.get_surreal_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ):
+            result = await backfill_entity_embeddings(
+                {},
+                [entity.model_dump(mode="json")],
+                "org-1",
+                relationships=[relationship.model_dump(mode="json")],
+            )
+
+        assert result["entities"] == 1
+        assert result["relationships"] == 1
+        assert entity_manager.create_direct_bulk.await_args.kwargs["generate_embeddings"] is True
+        assert (
+            relationship_manager.create_direct_bulk.await_args.kwargs["generate_embeddings"] is True
+        )
 
 
 class TestCreateLearningEpisodeJob:

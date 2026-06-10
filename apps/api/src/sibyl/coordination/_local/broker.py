@@ -20,6 +20,7 @@ from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_LIMIT,
     JobInfo,
     JobStatus,
+    entity_embedding_job_id,
     memory_extraction_job_id,
     memory_projection_job_id,
     raw_capture_changefeed_job_id,
@@ -343,6 +344,27 @@ class LocalQueueBroker:
             max_source_chars=max_source_chars,
             max_concurrent=max_concurrent,
             max_tokens=max_tokens,
+        )
+        return result.job_id
+
+    async def enqueue_entity_embedding_backfill(
+        self,
+        entities_data: list[dict[str, Any]],
+        group_id: str,
+        *,
+        relationships: list[dict[str, Any]] | None = None,
+    ) -> str:
+        job_id = entity_embedding_job_id(
+            entities_data,
+            group_id,
+            relationships=relationships,
+        )
+        result = await self._enqueue_unique(
+            "backfill_entity_embeddings",
+            entities_data,
+            group_id,
+            job_id=job_id,
+            relationships=relationships,
         )
         return result.job_id
 

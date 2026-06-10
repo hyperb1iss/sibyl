@@ -43,6 +43,10 @@ class EntityBulkCreateRequest(BaseModel):
         max_length=128,
         description="Entities to create in one bounded batch",
     )
+    defer_embeddings: bool = Field(
+        default=False,
+        description="Persist lexical graph records first and queue embedding backfill",
+    )
 
 
 class EntityUpdate(BaseModel):

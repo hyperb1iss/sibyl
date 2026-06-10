@@ -29,6 +29,7 @@ from sibyl.jobs.backup import cleanup_old_backups, run_backup, run_scheduled_bac
 from sibyl.jobs.consolidation import consolidate_all_orgs, consolidate_org, priority_decay
 from sibyl.jobs.crawl import crawl_source, sync_all_sources, sync_source
 from sibyl.jobs.entities import (
+    backfill_entity_embeddings,
     create_entity,
     create_learning_episode,
     create_learning_procedure,
@@ -282,6 +283,7 @@ class WorkerSettings:
         sync_all_sources,
         # Entity jobs
         create_entity,
+        backfill_entity_embeddings,
         project_memory_batch,
         extract_memory_entities,
         create_learning_episode,

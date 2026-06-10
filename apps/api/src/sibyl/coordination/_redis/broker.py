@@ -21,6 +21,7 @@ from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_LIMIT,
     JobInfo,
     JobStatus,
+    entity_embedding_job_id,
     memory_extraction_job_id,
     memory_projection_job_id,
     raw_capture_changefeed_job_id,
@@ -310,6 +311,39 @@ class RedisQueueBroker:
             "Enqueued memory extraction job",
             job_id=result.job_id,
             sources=len(sources_data),
+        )
+        return result.job_id
+
+    async def enqueue_entity_embedding_backfill(
+        self,
+        entities_data: list[dict[str, Any]],
+        group_id: str,
+        *,
+        relationships: list[dict[str, Any]] | None = None,
+    ) -> str:
+        """Enqueue embedding backfill for lexically-created graph records."""
+        job_id = entity_embedding_job_id(
+            entities_data,
+            group_id,
+            relationships=relationships,
+        )
+        result = await self._enqueue_unique(
+            "backfill_entity_embeddings",
+            entities_data,
+            group_id,
+            job_id=job_id,
+            relationships=relationships,
+        )
+
+        if not result.created:
+            log.info("Entity embedding backfill job already exists", job_id=job_id)
+            return result.job_id
+
+        log.info(
+            "Enqueued entity embedding backfill",
+            job_id=result.job_id,
+            entities=len(entities_data),
+            relationships=len(relationships or ()),
         )
         return result.job_id
 

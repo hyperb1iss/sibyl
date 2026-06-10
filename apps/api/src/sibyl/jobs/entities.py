@@ -653,6 +653,55 @@ async def project_memory_batch(
     return result
 
 
+async def backfill_entity_embeddings(
+    ctx: dict[str, Any],  # noqa: ARG001
+    entities_data: list[dict[str, Any]],
+    group_id: str,
+    *,
+    relationships: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Generate native graph embeddings after a lexical-first write."""
+    from sibyl_core.models.entities import Entity, Relationship
+
+    runtime = await get_surreal_graph_runtime(
+        group_id,
+        embedding_provider=configured_embedding_provider(),
+    )
+    entities = [Entity.model_validate(entity_data) for entity_data in entities_data]
+    created_ids = await runtime.entity_manager.create_direct_bulk(
+        entities,
+        generate_embeddings=True,
+    )
+
+    relationship_ids: list[str] = []
+    if relationships:
+        relationship_models = [
+            Relationship.model_validate(relationship_data) for relationship_data in relationships
+        ]
+        create_direct_bulk = getattr(runtime.relationship_manager, "create_direct_bulk", None)
+        if callable(create_direct_bulk):
+            relationship_ids = list(
+                await create_direct_bulk(
+                    relationship_models,
+                    generate_embeddings=True,
+                )
+            )
+        else:
+            relationship_ids = [
+                await runtime.relationship_manager.create(relationship)
+                for relationship in relationship_models
+            ]
+
+    result = {
+        "entities": len(created_ids),
+        "relationships": len(relationship_ids),
+        "entity_ids": list(created_ids),
+        "relationship_ids": relationship_ids,
+    }
+    log.info("entity_embedding_backfill_complete", **result)
+    return result
+
+
 async def create_learning_episode(
     ctx: dict[str, Any],  # noqa: ARG001
     task_data: dict[str, Any],

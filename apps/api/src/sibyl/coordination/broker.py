@@ -71,6 +71,18 @@ def memory_extraction_job_id(
     return f"extract_memory:{digest}"
 
 
+def entity_embedding_job_id(
+    entities_data: list[dict[str, Any]],
+    group_id: str,
+    *,
+    relationships: list[dict[str, Any]] | None = None,
+) -> str:
+    entity_ids = [str(entity.get("id") or "") for entity in entities_data]
+    relationship_ids = [str(relationship.get("id") or "") for relationship in relationships or ()]
+    digest = sha256("|".join([group_id, *entity_ids, *relationship_ids]).encode()).hexdigest()[:16]
+    return f"embed_entities:{digest}"
+
+
 def raw_promotion_job_id(
     organization_id: str,
     *,
@@ -157,6 +169,14 @@ class QueueBroker(Protocol):
         max_source_chars: int = 12_000,
         max_concurrent: int = 2,
         max_tokens: int = 8192,
+    ) -> str: ...
+
+    async def enqueue_entity_embedding_backfill(
+        self,
+        entities_data: list[dict[str, Any]],
+        group_id: str,
+        *,
+        relationships: list[dict[str, Any]] | None = None,
     ) -> str: ...
 
     async def enqueue_create_learning_episode(
