@@ -1,7 +1,7 @@
 {
   "schema_version": "sibyl-ai-memory-benchmark-ledger-v1",
-  "updated_at": "2026-05-13",
-  "release_scope": "v0.7 Surreal-native default release gate",
+  "updated_at": "2026-06-10",
+  "release_scope": "v1.0.0-rc.1 Surreal-native default release gate",
   "artifact_policy": "Only citable entries may appear in release notes. Planned entries need full raw artifacts, per-slice metrics, per-case records, provenance, caveats, and a passing ai-memory gate before citation.",
   "citable": [
     {
@@ -81,6 +81,94 @@
       "claim_boundary": "Offline component retrieval baseline only; not live API runtime evidence.",
       "repeat_count": 1,
       "auth_manifest_id": "not-applicable:offline"
+    },
+    {
+      "suite": "LongMemEval-style offline",
+      "suite_version": "offline-runner-v2",
+      "mode": "raw",
+      "artifact": "longmemeval_sibyl_raw_rc1_20260610.json",
+      "status": "citable",
+      "gate_profile": "ai-memory",
+      "sibyl_commit": "e909f01dc265a2fd6cc06621c86a9717a9c1fc5a",
+      "questions": 500,
+      "case_results": 500,
+      "elapsed_seconds": 317.0199680328369,
+      "dataset": {
+        "name": "longmemeval_s_cleaned",
+        "path": ".moon/cache/benchmarks/longmemeval_s_cleaned.json",
+        "corpus_hash": "sha256:d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+        "corpus_text_policy": "user-turns-only-v1",
+        "total_entries": 500,
+        "evaluated_entries": 500,
+        "limit": null
+      },
+      "runtime": {
+        "runtime_mode": "offline",
+        "graph_engine": "none",
+        "store": "chromadb_ephemeral",
+        "retrieval_mode": "raw",
+        "embedding_provider": "chromadb",
+        "embedding_model": "chromadb_default",
+        "embedding_dimensions": 384,
+        "tokenizer_estimate_method": "chromadb_default"
+      },
+      "overall": {
+        "hit@5": 0.966,
+        "legacy_recall@5": 0.966,
+        "recall@5": 0.9171,
+        "ndcg@5": 0.8602550050845592,
+        "hit@10": 0.982,
+        "legacy_recall@10": 0.982,
+        "recall@10": 0.9616666666666667,
+        "ndcg@10": 0.8784525252706548
+      },
+      "claim_boundary": "Offline component retrieval baseline only; not live API runtime evidence.",
+      "repeat_count": 1,
+      "auth_manifest_id": "not-applicable:offline"
+    },
+    {
+      "suite": "LongMemEval-style offline",
+      "suite_version": "offline-runner-v2",
+      "mode": "hybrid",
+      "artifact": "longmemeval_sibyl_hybrid_rc1_20260610.json",
+      "status": "citable",
+      "gate_profile": "ai-memory",
+      "sibyl_commit": "e909f01dc265a2fd6cc06621c86a9717a9c1fc5a",
+      "questions": 500,
+      "case_results": 500,
+      "elapsed_seconds": 314.15375328063965,
+      "dataset": {
+        "name": "longmemeval_s_cleaned",
+        "path": ".moon/cache/benchmarks/longmemeval_s_cleaned.json",
+        "corpus_hash": "sha256:d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+        "corpus_text_policy": "user-turns-only-v1",
+        "total_entries": 500,
+        "evaluated_entries": 500,
+        "limit": null
+      },
+      "runtime": {
+        "runtime_mode": "offline",
+        "graph_engine": "none",
+        "store": "chromadb_ephemeral",
+        "retrieval_mode": "hybrid",
+        "embedding_provider": "chromadb",
+        "embedding_model": "chromadb_default",
+        "embedding_dimensions": 384,
+        "tokenizer_estimate_method": "chromadb_default"
+      },
+      "overall": {
+        "hit@5": 0.98,
+        "legacy_recall@5": 0.98,
+        "recall@5": 0.9405666666666668,
+        "ndcg@5": 0.910665795901335,
+        "hit@10": 0.992,
+        "legacy_recall@10": 0.992,
+        "recall@10": 0.9717,
+        "ndcg@10": 0.9239845476315237
+      },
+      "claim_boundary": "Offline component retrieval baseline only; not live API runtime evidence.",
+      "repeat_count": 1,
+      "auth_manifest_id": "not-applicable:offline"
     }
   ],
   "no_regression": [
@@ -88,12 +176,14 @@
       "candidate": "longmemeval_sibyl_hybrid_20260513.json",
       "baseline": "longmemeval_sibyl_raw_20260513.json",
       "profile": "ai-memory",
-      "metrics": [
-        "recall@5",
-        "ndcg@5",
-        "recall@10",
-        "ndcg@10"
-      ],
+      "metrics": ["recall@5", "ndcg@5", "recall@10", "ndcg@10"],
+      "max_regression": {}
+    },
+    {
+      "candidate": "longmemeval_sibyl_hybrid_rc1_20260610.json",
+      "baseline": "longmemeval_sibyl_raw_rc1_20260610.json",
+      "profile": "ai-memory",
+      "metrics": ["recall@5", "ndcg@5", "recall@10", "ndcg@10"],
       "max_regression": {}
     }
   ],

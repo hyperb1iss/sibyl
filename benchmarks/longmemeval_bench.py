@@ -456,6 +456,7 @@ def run_benchmark(
         "k_values": k_values,
         "total_questions": total,
         "overall": overall,
+        "claim_boundary": "Offline component retrieval baseline only; not live API runtime evidence.",
         "per_type": {
             qt: {metric: average_metric(results, metric) for metric in metric_names}
             for qt, results in results_by_type.items()
