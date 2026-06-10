@@ -61,6 +61,28 @@ def test_settings_store_defaults_to_surreal() -> None:
     assert s.resolved_coordination_backend == "local"
 
 
+def test_settings_surreal_client_pool_size_uses_default_for_each_client_kind() -> None:
+    s = Settings(_env_file=None, surreal_pool_size=12)
+
+    assert s.surreal_client_pool_size("auth") == 12
+    assert s.surreal_client_pool_size("content") == 12
+    assert s.surreal_client_pool_size("graph") == 12
+
+
+def test_settings_surreal_client_pool_size_prefers_client_kind_override() -> None:
+    s = Settings(
+        _env_file=None,
+        surreal_pool_size=12,
+        surreal_auth_pool_size=5,
+        surreal_content_pool_size=20,
+        surreal_graph_pool_size=33,
+    )
+
+    assert s.surreal_client_pool_size("auth") == 5
+    assert s.surreal_client_pool_size("content") == 20
+    assert s.surreal_client_pool_size("graph") == 33
+
+
 def test_settings_store_rejects_removed_legacy_value(monkeypatch) -> None:
     monkeypatch.setenv("SIBYL_STORE", "legacy")
 

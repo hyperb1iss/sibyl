@@ -70,6 +70,7 @@ def build_surreal_auth_client() -> SurrealAuthClient:
         token=config_module.settings.surreal_token.get_secret_value(),
         namespace=AUTH_NAMESPACE,
         database=AUTH_DATABASE,
+        pool_size=config_module.settings.surreal_client_pool_size("auth"),
     )
 
 

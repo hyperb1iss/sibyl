@@ -66,3 +66,25 @@ class TestCoreConfigEmbeddedStoreGuard:
         )
 
         assert config.resolved_surreal_url == "memory://"
+
+
+def test_surreal_client_pool_size_uses_default_for_each_client_kind() -> None:
+    config = CoreConfig(_env_file=None, surreal_pool_size=12)
+
+    assert config.surreal_client_pool_size("auth") == 12
+    assert config.surreal_client_pool_size("content") == 12
+    assert config.surreal_client_pool_size("graph") == 12
+
+
+def test_surreal_client_pool_size_prefers_client_kind_override() -> None:
+    config = CoreConfig(
+        _env_file=None,
+        surreal_pool_size=12,
+        surreal_auth_pool_size=5,
+        surreal_content_pool_size=20,
+        surreal_graph_pool_size=33,
+    )
+
+    assert config.surreal_client_pool_size("auth") == 5
+    assert config.surreal_client_pool_size("content") == 20
+    assert config.surreal_client_pool_size("graph") == 33

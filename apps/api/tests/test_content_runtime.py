@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from sibyl.persistence import content_common, content_runtime, settings_runtime
+from sibyl.persistence import content_archive, content_common, content_runtime, settings_runtime
 from sibyl.persistence.surreal import content as surreal_content
 
 
@@ -86,6 +86,42 @@ async def test_surreal_content_client_scope_reuses_shared_client(
         await surreal_content.close_shared_surreal_content_client()
 
     first.close.assert_awaited_once()
+
+
+def test_surreal_content_builder_uses_configured_pool_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeSurrealContentClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(surreal_content, "SurrealContentClient", FakeSurrealContentClient)
+    monkeypatch.setattr(surreal_content.config_module.settings, "surreal_pool_size", 8)
+    monkeypatch.setattr(surreal_content.config_module.settings, "surreal_content_pool_size", 21)
+
+    surreal_content.build_surreal_content_client()
+
+    assert captured["pool_size"] == 21
+
+
+def test_content_archive_builder_uses_configured_pool_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeSurrealContentClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(content_archive, "SurrealContentClient", FakeSurrealContentClient)
+    monkeypatch.setattr(content_archive.config_module.settings, "surreal_pool_size", 8)
+    monkeypatch.setattr(content_archive.config_module.settings, "surreal_content_pool_size", 21)
+
+    content_archive.build_surreal_content_client()
+
+    assert captured["pool_size"] == 21
 
 
 @pytest.mark.asyncio

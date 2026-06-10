@@ -335,6 +335,33 @@ async def test_graph_client_cache_evicts_oldest_client(
 
 
 @pytest.mark.asyncio
+async def test_graph_client_uses_configured_pool_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await graph_module.close_graph_clients()
+    captured: dict[str, object] = {}
+
+    class FakeNativeGraphClient:
+        def __init__(self, *, group_id: str, **kwargs: object) -> None:
+            captured.update(kwargs)
+            self.group_id = group_id
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(graph_module, "SurrealGraphClient", FakeNativeGraphClient)
+    monkeypatch.setattr(graph_module.settings, "surreal_pool_size", 8)
+    monkeypatch.setattr(graph_module.settings, "surreal_graph_pool_size", 34)
+
+    try:
+        await graph_module.get_surreal_graph_client("org-pool")
+    finally:
+        await graph_module.close_graph_clients()
+
+    assert captured["pool_size"] == 34
+
+
+@pytest.mark.asyncio
 async def test_replace_entity_retries_transient_surreal_query_id_keyerror(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

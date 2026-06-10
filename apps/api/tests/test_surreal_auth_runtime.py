@@ -152,6 +152,24 @@ async def test_surreal_auth_client_scope_reuses_shared_client(
     assert clients[0].closed is True
 
 
+def test_surreal_auth_builder_uses_configured_pool_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeSurrealAuthClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(surreal_auth, "SurrealAuthClient", FakeSurrealAuthClient)
+    monkeypatch.setattr(surreal_auth.config_module.settings, "surreal_pool_size", 8)
+    monkeypatch.setattr(surreal_auth.config_module.settings, "surreal_auth_pool_size", 13)
+
+    surreal_auth.build_surreal_auth_client()
+
+    assert captured["pool_size"] == 13
+
+
 def test_surreal_auth_runtime_exports_neutral_surface() -> None:
     assert "start_device_authorization" in surreal_auth_runtime.__all__
     assert "exchange_device_code" in surreal_auth_runtime.__all__

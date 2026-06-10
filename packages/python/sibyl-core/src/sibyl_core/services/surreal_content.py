@@ -523,6 +523,7 @@ def build_surreal_content_client() -> SurrealContentClient:
         username=settings.surreal_username,
         password=settings.surreal_password.get_secret_value(),
         token=settings.surreal_token.get_secret_value(),
+        pool_size=settings.surreal_client_pool_size("content"),
     )
 
 

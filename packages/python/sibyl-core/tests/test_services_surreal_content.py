@@ -482,6 +482,26 @@ class TestSurrealContentHelpers:
         assert first_client.closed == 1
         assert second_client.closed == 1
 
+    def test_build_surreal_content_client_uses_configured_pool_size(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        class FakeSurrealContentClient:
+            def __init__(self, **kwargs: object) -> None:
+                captured.update(kwargs)
+
+        from sibyl_core.services import surreal_content as content_service
+
+        monkeypatch.setattr(content_service, "SurrealContentClient", FakeSurrealContentClient)
+        monkeypatch.setattr(content_service.settings, "surreal_pool_size", 8)
+        monkeypatch.setattr(content_service.settings, "surreal_content_pool_size", 21)
+
+        content_service.build_surreal_content_client()
+
+        assert captured["pool_size"] == 21
+
     @pytest.mark.asyncio
     async def test_replace_record_uses_single_upsert_statement(self) -> None:
         record = {
