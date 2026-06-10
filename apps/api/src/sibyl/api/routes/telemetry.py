@@ -8,29 +8,26 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import PlainTextResponse
 
 from sibyl.api.schemas import TelemetrySummaryResponse
-from sibyl.auth.dependencies import require_org_role
 from sibyl.coordination import get_coordination_health
+from sibyl.persistence.operations_runtime import require_global_admin
 from sibyl.services.telemetry import (
     list_runtime_rollups,
     maybe_persist_runtime_rollup,
     runtime_summary,
 )
-from sibyl_core.auth import OrganizationRole
 from sibyl_core.observability import telemetry_registry
-
-_READ_ROLES = (
-    OrganizationRole.OWNER,
-    OrganizationRole.ADMIN,
-)
 
 router = APIRouter(
     prefix="/telemetry",
     tags=["telemetry"],
-    dependencies=[Depends(require_org_role(*_READ_ROLES))],
 )
 
 
-@router.get("/summary", response_model=TelemetrySummaryResponse)
+@router.get(
+    "/summary",
+    response_model=TelemetrySummaryResponse,
+    dependencies=[Depends(require_global_admin)],
+)
 async def telemetry_summary(
     window_seconds: int = Query(default=900, ge=60, le=86_400),
     rollup_limit: int = Query(default=120, ge=0, le=1_440),
@@ -53,7 +50,11 @@ async def telemetry_summary(
     return TelemetrySummaryResponse(**summary, rollups=rollups)
 
 
-@router.get("/prometheus", response_class=PlainTextResponse)
+@router.get(
+    "/prometheus",
+    response_class=PlainTextResponse,
+    dependencies=[Depends(require_global_admin)],
+)
 async def telemetry_prometheus() -> PlainTextResponse:
     """Return Prometheus-compatible runtime metrics."""
     return PlainTextResponse(

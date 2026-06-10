@@ -294,6 +294,46 @@ async def test_require_settings_owner_allows_setup_mode(
     assert await surreal_setup.require_settings_owner(_request()) is None
 
 
+@pytest.mark.asyncio
+async def test_require_global_admin_rejects_setup_mode_without_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        surreal_setup, "build_auth_context", AsyncMock(side_effect=HTTPException(401))
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_setup.require_global_admin(_request())
+
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("is_admin", "expected_status"),
+    [(True, None), (False, 403)],
+)
+async def test_require_global_admin_checks_user_admin_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    is_admin: bool,
+    expected_status: int | None,
+) -> None:
+    monkeypatch.setattr(
+        surreal_setup,
+        "build_auth_context",
+        AsyncMock(return_value=SimpleNamespace(user=SimpleNamespace(is_admin=is_admin))),
+    )
+
+    if expected_status is None:
+        assert await surreal_setup.require_global_admin(_request()) is None
+        return
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_setup.require_global_admin(_request())
+
+    assert exc_info.value.status_code == expected_status
+
+
 def test_surreal_setup_exports_neutral_runtime_surface() -> None:
     assert surreal_setup.__all__ == [
         "SetupStatus",
@@ -302,6 +342,7 @@ def test_surreal_setup_exports_neutral_runtime_surface() -> None:
         "build_surreal_auth_client",
         "get_setup_status",
         "is_setup_mode",
+        "require_global_admin",
         "require_settings_admin",
         "require_settings_owner",
         "require_setup_mode_or_admin",

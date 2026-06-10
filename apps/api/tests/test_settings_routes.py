@@ -28,7 +28,7 @@ async def test_get_settings_requires_admin_and_returns_masked_metadata(
         }
     }
 
-    monkeypatch.setattr(settings_routes, "require_settings_admin", AsyncMock())
+    monkeypatch.setattr(settings_routes, "require_settings_owner", AsyncMock())
     monkeypatch.setattr(settings_routes, "get_settings_service", lambda: service)
 
     response = await settings_routes.get_settings(_request())
@@ -42,7 +42,7 @@ async def test_get_settings_requires_admin_and_returns_masked_metadata(
 async def test_update_settings_uses_request_body_for_environment_updates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(settings_routes, "require_settings_admin", AsyncMock())
+    monkeypatch.setattr(settings_routes, "require_settings_owner", AsyncMock())
     monkeypatch.setattr(
         settings_routes, "_validate_openai_key", AsyncMock(return_value=(True, None))
     )
@@ -95,6 +95,23 @@ async def test_delete_setting_rejects_setup_mode(monkeypatch: pytest.MonkeyPatch
         await settings_routes.delete_setting(_request(), key="openai_api_key")
 
     assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_update_settings_uses_global_admin_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def reject_global_admin(_request: Request) -> None:
+        raise HTTPException(status_code=403, detail="Global admin required")
+
+    monkeypatch.setattr(settings_routes, "require_settings_owner", reject_global_admin)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await settings_routes.update_settings(
+            _request(),
+            body=settings_routes.UpdateSettingsRequest(openai_api_key="sk-openai-test"),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Global admin required"
 
 
 @pytest.mark.asyncio

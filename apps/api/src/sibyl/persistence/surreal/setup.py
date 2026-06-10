@@ -163,6 +163,13 @@ async def require_settings_owner(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Global admin required")
 
 
+async def require_global_admin(request: Request) -> None:
+    """Require a global admin without setup-mode bootstrap bypass."""
+    ctx = await build_auth_context(request, None)
+    if ctx.user.is_admin is not True:
+        raise HTTPException(status_code=403, detail="Global admin required")
+
+
 __all__ = [
     "SetupStatus",
     "SurrealOrganizationRepository",
@@ -170,6 +177,7 @@ __all__ = [
     "build_surreal_auth_client",
     "get_setup_status",
     "is_setup_mode",
+    "require_global_admin",
     "require_settings_admin",
     "require_settings_owner",
     "require_setup_mode_or_admin",
