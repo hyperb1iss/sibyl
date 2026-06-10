@@ -28,8 +28,8 @@ from tools.inventory.runtime_surface import (
     unclassified_legacy_term_records,
 )
 
-EXPECTED_ROUTER_COUNT = 28
-EXPECTED_HTTP_ROUTE_COUNT = 2
+EXPECTED_ROUTER_COUNT = 29
+EXPECTED_HTTP_ROUTE_COUNT = 3
 EXPECTED_WEBSOCKET_ROUTE_COUNT = 1
 EXPECTED_MCP_TOOL_COUNT = 11
 EXPECTED_MCP_RESOURCE_COUNT = 2
@@ -330,24 +330,12 @@ def test_graphiti_exit_inventory_documents_allowlist_ownership() -> None:
         assert allowed.criteria in normalized_inventory
 
 
-def test_graphiti_exit_inventory_classifies_each_ops_module() -> None:
-    inventory = GRAPHITI_EXIT_INVENTORY_PATH.read_text(encoding="utf-8")
+def test_graphiti_ops_modules_are_deleted() -> None:
     ops_paths = tuple(
         path.relative_to(REPO_ROOT).as_posix() for path in sorted(GRAPHITI_OPS_ROOT.glob("*.py"))
     )
 
-    assert ops_paths
-    for ops_path in ops_paths:
-        heading = f"#### `{ops_path}`"
-        assert heading in inventory
-        section = inventory.split(heading, maxsplit=1)[1].split("\n#### ", maxsplit=1)[0]
-        assert any(
-            f"- Classification: `{classification}`" in section
-            for classification in GRAPHITI_OPS_CLASSIFICATIONS
-        )
-        assert "- Owner:" in section
-        assert "- Removal condition:" in section
-        assert "- Verify:" in section
+    assert ops_paths == ()
 
 
 def test_graphiti_ops_imports_stay_in_named_compatibility_island() -> None:
@@ -368,41 +356,20 @@ def test_graphiti_ops_imports_stay_in_named_compatibility_island() -> None:
     assert offenders == []
 
 
-def test_legacy_graph_contract_test_island_is_named() -> None:
+def test_legacy_graph_contract_test_island_is_retired() -> None:
     root_moon = (REPO_ROOT / "moon.yml").read_text(encoding="utf-8")
     core_moon = (REPO_ROOT / "packages/python/sibyl-core/moon.yml").read_text(encoding="utf-8")
     api_moon = (REPO_ROOT / "apps/api/moon.yml").read_text(encoding="utf-8")
     root_pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     api_pyproject = (REPO_ROOT / "apps/api/pyproject.toml").read_text(encoding="utf-8")
-    inventory = GRAPHITI_EXIT_INVENTORY_PATH.read_text(encoding="utf-8")
 
-    assert "legacy-graph-contract-test:" in root_moon
-    assert "core:legacy-graph-contract-test" in root_moon
-    assert "api:legacy-graph-contract-test" in root_moon
-    assert "legacy_graph_contract:" in root_pyproject
-    assert "legacy_graph_contract:" in api_pyproject
-    assert '-m "not legacy_graph_contract"' in core_moon
-    assert "-m legacy_graph_contract" in core_moon
-    assert '-m "not legacy_graph_contract"' in api_moon
-    assert "-m legacy_graph_contract" in api_moon
-
-    for test_path in CORE_LEGACY_GRAPH_CONTRACT_TESTS:
-        assert f"--ignore={test_path}" in core_moon
-        assert f"      {test_path}" in core_moon
-        assert f"`packages/python/sibyl-core/{test_path}`" in inventory
-
-    for test_path in CORE_LEGACY_GRAPH_CONTRACT_MARKED_TESTS:
-        assert f"      {test_path}" in core_moon
-        assert f"`packages/python/sibyl-core/{test_path}`" in inventory
-
-    for test_path in API_LEGACY_GRAPH_CONTRACT_TESTS:
-        assert f"--ignore={test_path}" in api_moon
-        assert f"      {test_path}" in api_moon
-        assert f"`apps/api/{test_path}`" in inventory
-
-    for test_path in API_LEGACY_GRAPH_CONTRACT_MARKED_TESTS:
-        assert f"      {test_path}" in api_moon
-        assert f"`apps/api/{test_path}`" in inventory
+    assert "legacy-graph-contract-test" not in root_moon
+    assert "legacy-graph-contract-test" not in core_moon
+    assert "legacy-graph-contract-test" not in api_moon
+    assert "legacy_graph_contract" not in root_pyproject
+    assert "legacy_graph_contract" not in api_pyproject
+    assert "legacy_graph_contract" not in core_moon
+    assert "legacy_graph_contract" not in api_moon
 
 
 def test_graphiti_exit_inventory_tracks_no_graphiti_smoke_plan() -> None:
