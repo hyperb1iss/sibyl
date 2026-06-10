@@ -509,6 +509,31 @@ async def test_local_queue_broker_executes_raw_capture_changefeed_poll() -> None
 
 
 @pytest.mark.asyncio
+async def test_local_queue_broker_enqueues_scheduled_job_through_worker_pool() -> None:
+    calls: list[dict[str, object]] = []
+
+    async def scheduled_job(ctx: dict[str, object]) -> dict[str, object]:
+        calls.append(ctx)
+        return {"ok": True}
+
+    broker = LocalQueueBroker(
+        functions={"scheduled_job": scheduled_job},
+        max_concurrency=1,
+        result_ttl_seconds=60,
+    )
+
+    await broker.startup()
+    job_id = await broker.enqueue_scheduled_job("scheduled_job")
+    info = await _wait_for_job_status(broker, job_id, JobStatus.COMPLETE)
+
+    assert job_id == "scheduled:scheduled_job"
+    assert info.result == {"ok": True}
+    assert len(calls) == 1
+
+    await broker.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_local_queue_broker_force_reruns_completed_job() -> None:
     calls: list[str] = []
 

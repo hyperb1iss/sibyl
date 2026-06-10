@@ -70,8 +70,12 @@ async def test_local_scheduler_fires_matching_jobs_once_per_minute() -> None:
     calls: list[datetime] = []
 
     async def scheduled_job(ctx: dict[str, str]) -> None:
-        calls.append(datetime.fromisoformat(ctx["scheduled_for"]))
+        del ctx
+
+    async def enqueue_scheduled_job(spec: ScheduleSpec, current_minute: datetime) -> str:
+        calls.append(current_minute)
         fired.set()
+        return f"scheduled:{spec.name}"
 
     scheduler = LocalScheduler(
         schedule_specs=[
@@ -83,6 +87,7 @@ async def test_local_scheduler_fires_matching_jobs_once_per_minute() -> None:
         ],
         now=lambda: now["value"],
         tick_seconds=0.01,
+        enqueue_scheduled_job=enqueue_scheduled_job,
     )
 
     await scheduler.startup()
@@ -108,10 +113,13 @@ async def test_local_scheduler_skips_duplicate_slot_while_job_is_still_running()
 
     async def scheduled_job(ctx: dict[str, str]) -> None:
         del ctx
+
+    async def enqueue_scheduled_job(spec: ScheduleSpec, _current_minute: datetime) -> str:
         nonlocal calls
         calls += 1
         started.set()
         await release.wait()
+        return f"scheduled:{spec.name}"
 
     scheduler = LocalScheduler(
         schedule_specs=[
@@ -123,6 +131,7 @@ async def test_local_scheduler_skips_duplicate_slot_while_job_is_still_running()
         ],
         now=lambda: now["value"],
         tick_seconds=0.01,
+        enqueue_scheduled_job=enqueue_scheduled_job,
     )
 
     await scheduler.startup()

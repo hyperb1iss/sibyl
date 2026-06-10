@@ -511,6 +511,15 @@ class RedisQueueBroker:
         )
         return result.job_id
 
+    async def enqueue_scheduled_job(self, function: str) -> str:
+        """Enqueue a scheduled worker function through the broker."""
+        result = await self._enqueue_unique(
+            function,
+            job_id=f"scheduled:{function}",
+            clear_result=True,
+        )
+        return result.job_id
+
     async def get_job_status(self, job_id: str) -> JobInfo:
         """Get the status of a job."""
         pool = await self.get_pool()
