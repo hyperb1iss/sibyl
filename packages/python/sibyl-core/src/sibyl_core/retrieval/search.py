@@ -538,6 +538,20 @@ def _scope_decisions(
                 None,
             )
         )
+    elif accessible_projects:
+        for accessible_project in sorted(accessible_projects):
+            decisions.append(
+                (
+                    authorize_memory_read(
+                        principal_id=principal_id,
+                        memory_scope=MemoryScope.PROJECT,
+                        scope_key=accessible_project,
+                        accessible_projects=accessible_projects,
+                    ),
+                    accessible_project,
+                    None,
+                )
+            )
     if agent_id:
         # Agent diaries default to the project-less private scope, so a query
         # with no specific project must include project_id=None alongside any

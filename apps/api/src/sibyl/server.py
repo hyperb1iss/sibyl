@@ -287,7 +287,11 @@ async def _compile_mcp_context_pack(
     accessible_projects = await _resolve_mcp_project_scope(ctx, project)
     memory_scope = "project" if project else "private"
     scope_key = project
-    if not _mcp_memory_scope_allowed(ctx, memory_scope=memory_scope, scope_key=scope_key):
+    if not _mcp_context_pack_scope_allowed(
+        ctx,
+        project=project,
+        accessible_projects=accessible_projects,
+    ):
         _deny_mcp_api_key_memory_scope(
             ctx=ctx,
             action=MemoryPolicyAction.READ,
@@ -364,6 +368,30 @@ def _mcp_memory_scope_allowed(ctx: McpContext, *, memory_scope: str, scope_key: 
         return True
     effective_scope_key = ctx.user_id if memory_scope == MemoryScope.PRIVATE.value else scope_key
     return api_key_memory_scope_key(memory_scope, effective_scope_key) in set(allowed)
+
+
+def _mcp_context_pack_scope_allowed(
+    ctx: McpContext,
+    *,
+    project: str | None,
+    accessible_projects: set[str] | None,
+) -> bool:
+    if project:
+        return _mcp_memory_scope_allowed(
+            ctx, memory_scope=MemoryScope.PROJECT.value, scope_key=project
+        )
+    allowed = ctx.api_key_memory_scope_keys
+    if allowed is None:
+        return True
+    allowed_keys = set(allowed)
+    if _mcp_memory_scope_allowed(ctx, memory_scope=MemoryScope.PRIVATE.value, scope_key=None):
+        return True
+    if accessible_projects is None:
+        return False
+    return any(
+        api_key_memory_scope_key(MemoryScope.PROJECT.value, project_id) in allowed_keys
+        for project_id in accessible_projects
+    )
 
 
 def _deny_mcp_api_key_memory_scope(

@@ -236,6 +236,46 @@ async def test_compile_mcp_context_pack_denies_api_key_memory_scope_mismatch() -
 
 
 @pytest.mark.asyncio
+async def test_compile_mcp_context_pack_allows_unscoped_project_memory_grant() -> None:
+    ctx = McpContext(
+        org_id=str(uuid4()),
+        user_id="user-1",
+        scopes=["mcp"],
+        api_key_memory_scope_keys=[api_key_memory_scope_key("project", "project-a")],
+    )
+    compile_context = AsyncMock(return_value=_context_pack())
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.server._resolve_mcp_project_scope",
+            AsyncMock(return_value={"project-a", "project-b"}),
+        ) as resolve_scope,
+        patch("sibyl_core.tools.core.compile_context", compile_context),
+        patch("sibyl.api.context_audit.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        await _compile_mcp_context_pack(
+            goal="ship faster",
+            intent="build",
+            layer="wake",
+            domain="sibyl",
+            project=None,
+            agent_id="nova",
+            limit=8,
+            include_related=False,
+            related_limit=0,
+        )
+
+    resolve_scope.assert_awaited_once_with(ctx, None)
+    kwargs = compile_context.await_args.kwargs
+    assert kwargs["project"] is None
+    assert kwargs["accessible_projects"] == {"project-a", "project-b"}
+    assert kwargs["allowed_memory_scope_keys"] == {api_key_memory_scope_key("project", "project-a")}
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["memory_scope"] == "mixed"
+
+
+@pytest.mark.asyncio
 async def test_synthesis_mcp_plan_scopes_accessible_projects() -> None:
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
     synthesis_plan = AsyncMock(return_value={"run_id": "synthesis:1"})

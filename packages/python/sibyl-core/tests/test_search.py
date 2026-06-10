@@ -264,6 +264,36 @@ def test_build_context_retrieval_plan_keeps_granted_accessible_projects() -> Non
 
     assert plan.accessible_projects == frozenset({"project_123"})
     assert search_module._authorized_project_ids(plan) == ("project_123",)
+    assert [
+        (scope.memory_scope, scope.scope_key)
+        for scope in plan.scopes
+        if scope.memory_scope is MemoryScope.PROJECT
+    ] == [(MemoryScope.PROJECT, "project_123")]
+
+
+def test_build_context_retrieval_plan_adds_granted_unscoped_project_scope() -> None:
+    plan = build_context_retrieval_plan(
+        query="unscoped pack",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["raw_memory", "episode", "note"]},
+        principal_id="user-123",
+        project=None,
+        accessible_projects={"project_123", "project_456"},
+        allowed_memory_scope_keys={memory_scope_policy_key(MemoryScope.PROJECT, "project_123")},
+    )
+
+    assert [
+        (scope.memory_scope, scope.scope_key)
+        for scope in plan.scopes
+        if scope.memory_scope is MemoryScope.PROJECT
+    ] == [(MemoryScope.PROJECT, "project_123")]
+    assert MemoryScope.PRIVATE not in [scope.memory_scope for scope in plan.scopes]
+    excluded = [d for d in plan.denied_scopes if d.reason == "api_key_scope_excluded"]
+    assert {(d.memory_scope, d.scope_key) for d in excluded} == {
+        (MemoryScope.PRIVATE, None),
+        (MemoryScope.PROJECT, "project_456"),
+    }
 
 
 def test_build_context_retrieval_plan_keeps_all_accessible_projects_when_unscoped() -> None:
