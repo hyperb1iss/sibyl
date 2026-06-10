@@ -48,6 +48,7 @@ from sibyl.auth.api_key_common import api_key_memory_scope_key
 from sibyl.jobs import source_imports
 from sibyl.services.recall_limits import RecallConcurrencyLimitExceededError
 from sibyl_core.auth import OrganizationRole, ProjectRole
+from sibyl_core.memory_pipeline.retrieval import CandidateSourceResult
 from sibyl_core.services.memory import (
     MemoryAccessPreview,
     MemoryCorrectionPreview,
@@ -56,7 +57,7 @@ from sibyl_core.services.memory import (
     ReflectionPromotionPreview,
     ReflectionPromotionResult,
 )
-from sibyl_core.services.surreal_content import MemoryScope, RawMemory
+from sibyl_core.services.surreal_content import MemoryScope, RawMemory, RawMemoryRecallResult
 
 
 def _org() -> MagicMock:
@@ -638,6 +639,40 @@ async def test_recall_raw_returns_scoped_memories() -> None:
     assert [memory.id for memory in response.memories] == ["memory-1"]
     assert response.memories[0].snippet == "Sibyl stores <mark>raw memory</mark> before reflection."
     assert response.memories[0].policy_reason == "private_principal_bound"
+
+
+@pytest.mark.asyncio
+async def test_recall_raw_response_reports_degraded_sources() -> None:
+    org = _org()
+    raw_memory = _memory(
+        organization_id=str(org.id),
+        snippet="Sibyl stores <mark>raw memory</mark> before reflection.",
+    )
+    recall_result = RawMemoryRecallResult(
+        memories=(raw_memory,),
+        sources=(
+            CandidateSourceResult.failed("raw_fulltext", "RuntimeError"),
+            CandidateSourceResult.success("raw_lexical", [raw_memory]),
+        ),
+    )
+    with (
+        patch(
+            "sibyl.api.routes.memory.recall_raw_memory",
+            AsyncMock(return_value=recall_result),
+        ),
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+    ):
+        response = await recall_raw(
+            RawMemoryRecallRequest(query="raw memory", limit=5),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(),
+        )
+
+    assert [memory.id for memory in response.memories] == ["memory-1"]
+    assert response.source_degraded is True
+    assert response.source_failure_count == 1
+    assert response.source_failures == [{"source": "raw_fulltext", "error_type": "RuntimeError"}]
 
 
 @pytest.mark.asyncio

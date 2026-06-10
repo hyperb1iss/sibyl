@@ -31,6 +31,7 @@ from sibyl_core.services.surreal_content import (
     materialize_content_lineage,
     raw_memory_embedding_text,
     recall_raw_memory,
+    recall_raw_memory_with_sources,
     remember_raw_memories,
     remember_raw_memory,
     remember_reflection_candidate_review,
@@ -2124,6 +2125,56 @@ class TestSurrealContentHelpers:
                 },
             )
         ]
+
+    @pytest.mark.asyncio
+    async def test_recall_raw_memory_with_sources_reports_vector_failure(self) -> None:
+        fake_client = FakeClient(
+            [
+                _query_result(
+                    [
+                        {
+                            "uuid": "memory-lexical",
+                            "organization_id": "org-1",
+                            "source_id": "source-mail-1",
+                            "principal_id": "user-a",
+                            "memory_scope": "private",
+                            "title": "Mailbox thread",
+                            "raw_content": "SurrealDB appears in the exact text.",
+                            "score": 0.91,
+                        }
+                    ]
+                ),
+                _raw_error_result("HNSW vector index unavailable"),
+            ]
+        )
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        async def query_embedding(_query: str):
+            return [1.0, 0.0]
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_service, "_raw_memory_query_embedding", query_embedding)
+            result = await recall_raw_memory_with_sources(
+                organization_id="org-1",
+                principal_id="user-a",
+                query="surrealdb graph",
+                limit=2,
+            )
+
+        assert [memory.id for memory in result.memories] == ["memory-lexical"]
+        assert result.degraded is True
+        assert result.as_metadata() == {
+            "raw_recall_degraded": True,
+            "raw_recall_failure_count": 1,
+            "raw_recall_failures": [{"source": "raw_vector", "error_type": "RuntimeError"}],
+        }
+        assert len(fake_client.calls) == 2
 
     @pytest.mark.asyncio
     async def test_recall_raw_memory_falls_back_when_query_embedding_fails(self) -> None:

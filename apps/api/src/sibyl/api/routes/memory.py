@@ -105,10 +105,11 @@ from sibyl_core.services.surreal_content import (
     AGENT_DIARY_CAPTURE_SURFACE,
     MemoryScope,
     RawMemory,
+    RawMemoryRecallResult,
     get_raw_memory,
     get_raw_memory_by_source_id,
     list_reflection_candidate_reviews,
-    recall_raw_memory,
+    recall_raw_memory_with_sources as recall_raw_memory,
     remember_raw_memory,
     save_raw_memory,
 )
@@ -1795,7 +1796,7 @@ async def recall_raw(
                 recall_kwargs["occurred_before"] = request.occurred_before
             if request.as_of:
                 recall_kwargs["as_of"] = request.as_of
-            memories = await recall_raw_memory(
+            recall_result = await recall_raw_memory(
                 organization_id=str(org.id),
                 principal_id=principal_id,
                 query=request.query,
@@ -1806,6 +1807,12 @@ async def recall_raw(
                 limit=request.limit,
                 **recall_kwargs,
             )
+            if isinstance(recall_result, RawMemoryRecallResult):
+                memories = list(recall_result.memories)
+                source_failures = [failure.as_metadata() for failure in recall_result.failures]
+            else:
+                memories = recall_result
+                source_failures = []
         await _log_memory_audit(
             action="memory.recall",
             ctx=ctx,
@@ -1828,6 +1835,9 @@ async def recall_raw(
                 for memory in memories
             ],
             policy_reason=read_decision.reason,
+            source_degraded=bool(source_failures),
+            source_failure_count=len(source_failures),
+            source_failures=source_failures,
         )
         telemetry_registry().record_memory_operation(
             operation="recall_raw",

@@ -25,6 +25,7 @@ from sibyl_core.embeddings.providers import (
     create_embedding_provider,
 )
 from sibyl_core.memory_pipeline.lifecycle import raw_memory_lifecycle_recallable
+from sibyl_core.memory_pipeline.retrieval import CandidateSourceFailure, CandidateSourceResult
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.models.reflection import (
     MemoryLifecycle,
@@ -385,6 +386,34 @@ class RawMemory:
     created_at: datetime | None = None
     score: float = 0.0
     snippet: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RawMemoryRecallResult:
+    memories: tuple[RawMemory, ...]
+    sources: tuple[CandidateSourceResult[RawMemory], ...] = ()
+
+    @property
+    def failures(self) -> tuple[CandidateSourceFailure, ...]:
+        failures: list[CandidateSourceFailure] = []
+        for source in self.sources:
+            if source.failure is not None:
+                failures.append(source.failure)
+        return tuple(failures)
+
+    @property
+    def degraded(self) -> bool:
+        return bool(self.failures)
+
+    def as_metadata(self) -> dict[str, object]:
+        failures = [failure.as_metadata() for failure in self.failures]
+        metadata: dict[str, object] = {
+            "raw_recall_degraded": bool(failures),
+            "raw_recall_failure_count": len(failures),
+        }
+        if failures:
+            metadata["raw_recall_failures"] = failures
+        return metadata
 
 
 @dataclass(frozen=True, slots=True)
@@ -2497,7 +2526,7 @@ async def save_raw_memory(memory: RawMemory) -> RawMemory:
     return _raw_memory_from_record(record)
 
 
-async def recall_raw_memory(
+async def _recall_raw_memory_result(
     *,
     organization_id: str,
     principal_id: str,
@@ -2514,10 +2543,11 @@ async def recall_raw_memory(
     occurred_before: datetime | str | None = None,
     as_of: datetime | str | None = None,
     limit: int = 10,
-) -> list[RawMemory]:
+    raise_on_source_failure: bool,
+) -> RawMemoryRecallResult:
     normalized_query = query.strip()
     if not normalized_query or limit <= 0:
-        return []
+        return RawMemoryRecallResult(())
 
     normalized_scope = _coerce_memory_scope(memory_scope)
     filters = _raw_recall_filters(
@@ -2544,7 +2574,12 @@ async def recall_raw_memory(
         project_id=project_id,
         filters=filters,
     )
-    query_embedding = await _raw_memory_query_embedding(normalized_query)
+    source_results: list[CandidateSourceResult[RawMemory]] = []
+    query_embedding: list[float] | None = None
+    try:
+        query_embedding = await _raw_memory_query_embedding(normalized_query)
+    except Exception as exc:
+        source_results.append(CandidateSourceResult.failed("raw_vector", type(exc).__name__))
     async with surreal_content_client() as client:
         fulltext_memories: list[RawMemory] = []
         vector_memories: list[RawMemory] = []
@@ -2566,6 +2601,9 @@ async def recall_raw_memory(
                 error_type=type(exc).__name__,
             )
             fulltext_memories = []
+            source_results.append(CandidateSourceResult.failed("raw_fulltext", type(exc).__name__))
+        else:
+            source_results.append(CandidateSourceResult.success("raw_fulltext", fulltext_memories))
         if query_embedding is not None:
             try:
                 vector_memories = await _recall_raw_memory_vector(
@@ -2585,26 +2623,117 @@ async def recall_raw_memory(
                     error_type=type(exc).__name__,
                 )
                 vector_memories = []
+                source_results.append(
+                    CandidateSourceResult.failed("raw_vector", type(exc).__name__)
+                )
+            else:
+                source_results.append(CandidateSourceResult.success("raw_vector", vector_memories))
         memories = await _fuse_raw_memory_results(
             client,
             [fulltext_memories, vector_memories],
             limit=limit,
         )
         if memories:
-            return memories
-        return await _recall_raw_memory_lexical(
-            client,
-            organization_id=organization_id,
-            principal_id=principal_id,
-            query=normalized_query,
-            memory_scope=normalized_scope,
-            scope_key=scope_key,
-            agent_id=agent_id,
-            project_id=project_id,
-            filters=filters,
-            as_of=effective_as_of,
-            limit=limit,
-        )
+            return RawMemoryRecallResult(tuple(memories), tuple(source_results))
+        try:
+            lexical_memories = await _recall_raw_memory_lexical(
+                client,
+                organization_id=organization_id,
+                principal_id=principal_id,
+                query=normalized_query,
+                memory_scope=normalized_scope,
+                scope_key=scope_key,
+                agent_id=agent_id,
+                project_id=project_id,
+                filters=filters,
+                as_of=effective_as_of,
+                limit=limit,
+            )
+        except (RuntimeError, TimeoutError) as exc:
+            source_results.append(CandidateSourceResult.failed("raw_lexical", type(exc).__name__))
+            if raise_on_source_failure:
+                raise
+            lexical_memories = []
+        else:
+            source_results.append(CandidateSourceResult.success("raw_lexical", lexical_memories))
+        return RawMemoryRecallResult(tuple(lexical_memories), tuple(source_results))
+
+
+async def recall_raw_memory_with_sources(
+    *,
+    organization_id: str,
+    principal_id: str,
+    query: str,
+    memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
+    scope_key: str | None = None,
+    agent_id: str | None = None,
+    project_id: str | None = None,
+    source_ids: Sequence[str] | None = None,
+    participants: Sequence[str] | None = None,
+    labels: Sequence[str] | None = None,
+    thread_id: str | None = None,
+    occurred_after: datetime | str | None = None,
+    occurred_before: datetime | str | None = None,
+    as_of: datetime | str | None = None,
+    limit: int = 10,
+) -> RawMemoryRecallResult:
+    return await _recall_raw_memory_result(
+        organization_id=organization_id,
+        principal_id=principal_id,
+        query=query,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+        agent_id=agent_id,
+        project_id=project_id,
+        source_ids=source_ids,
+        participants=participants,
+        labels=labels,
+        thread_id=thread_id,
+        occurred_after=occurred_after,
+        occurred_before=occurred_before,
+        as_of=as_of,
+        limit=limit,
+        raise_on_source_failure=False,
+    )
+
+
+async def recall_raw_memory(
+    *,
+    organization_id: str,
+    principal_id: str,
+    query: str,
+    memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
+    scope_key: str | None = None,
+    agent_id: str | None = None,
+    project_id: str | None = None,
+    source_ids: Sequence[str] | None = None,
+    participants: Sequence[str] | None = None,
+    labels: Sequence[str] | None = None,
+    thread_id: str | None = None,
+    occurred_after: datetime | str | None = None,
+    occurred_before: datetime | str | None = None,
+    as_of: datetime | str | None = None,
+    limit: int = 10,
+) -> list[RawMemory]:
+    result = await _recall_raw_memory_result(
+        organization_id=organization_id,
+        principal_id=principal_id,
+        query=query,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+        agent_id=agent_id,
+        project_id=project_id,
+        source_ids=source_ids,
+        participants=participants,
+        labels=labels,
+        thread_id=thread_id,
+        occurred_after=occurred_after,
+        occurred_before=occurred_before,
+        as_of=as_of,
+        limit=limit,
+        raise_on_source_failure=True,
+    )
+    return list(result.memories)
 
 
 async def list_raw_memories_for_scope(
@@ -3103,6 +3232,7 @@ __all__ = [
     "ContentSource",
     "MemoryScope",
     "RawMemory",
+    "RawMemoryRecallResult",
     "RawMemoryWrite",
     "backfill_content_lineage",
     "build_surreal_content_client",
@@ -3125,6 +3255,7 @@ __all__ = [
     "raw_memory_embedding_text",
     "raw_memory_recallable",
     "recall_raw_memory",
+    "recall_raw_memory_with_sources",
     "remember_raw_memories",
     "remember_raw_memory",
     "remember_reflection_candidate_review",

@@ -12,6 +12,7 @@ from sibyl_core.embeddings.providers import (
     DeterministicEmbeddingProvider,
     EmbeddingMetadata,
 )
+from sibyl_core.memory_pipeline.retrieval import CandidateSourceResult
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.retrieval.candidates import CandidateKind, CandidateScope
 from sibyl_core.retrieval.search import (
@@ -24,7 +25,7 @@ from sibyl_core.retrieval.search import (
     coerce_fusion_backend,
     fusion_backend_from_env,
 )
-from sibyl_core.services.surreal_content import MemoryScope, RawMemory
+from sibyl_core.services.surreal_content import MemoryScope, RawMemory, RawMemoryRecallResult
 
 
 def test_fusion_backend_defaults_to_python_rrf() -> None:
@@ -918,7 +919,7 @@ async def test_candidate_source_reports_surreal_error_envelope() -> None:
         accessible_projects=None,
     )
 
-    raw_source, graph_sources = await search_module._gather_candidate_sources(
+    gathered = await search_module._gather_candidate_sources(
         search_module._empty_candidate_source(),
         [
             (
@@ -932,6 +933,7 @@ async def test_candidate_source_reports_surreal_error_envelope() -> None:
             )
         ],
     )
+    raw_source, graph_sources, _raw_failures, _raw_metadata = gathered
 
     assert raw_source.failure is None
     assert graph_sources[0].failure is not None
@@ -1171,6 +1173,66 @@ async def test_context_search_reports_graph_expansion_failure(
 
 
 @pytest.mark.asyncio
+async def test_context_search_reports_raw_recall_source_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = build_context_retrieval_plan(
+        query="mailbox surrealdb",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["raw_memory"]},
+        principal_id="user-123",
+        project=None,
+        accessible_projects=None,
+        limit=8,
+    )
+    raw_memory = RawMemory(
+        id="memory-1",
+        organization_id="org-123",
+        source_id="source-mail-1",
+        principal_id="user-123",
+        memory_scope=MemoryScope.PRIVATE,
+        title="Mailbox thread",
+        raw_content="SurrealDB recall notes",
+        score=0.91,
+    )
+
+    class Runtime:
+        client = _FacetSearchClient()
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> Runtime:
+        return Runtime()
+
+    async def fake_raw_recall(**_kwargs: object) -> RawMemoryRecallResult:
+        return RawMemoryRecallResult(
+            memories=(raw_memory,),
+            sources=(
+                CandidateSourceResult.failed("raw_fulltext", "RuntimeError"),
+                CandidateSourceResult.success("raw_lexical", [raw_memory]),
+            ),
+        )
+
+    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+
+    response = await search_module.context_search(
+        plan=plan,
+        types=["raw_memory"],
+        facet=ContextFacet.RECENT_MEMORY,
+        limit=3,
+        raw_memory_recall_fn=fake_raw_recall,
+    )
+
+    assert [result.id for result in response.results] == ["raw_memory:memory-1"]
+    assert response.filters["raw_recall_degraded"] is True
+    assert response.filters["raw_recall_failure_count"] == 1
+    assert response.filters["candidate_source_degraded"] is True
+    assert response.filters["candidate_source_failure_count"] == 1
+    assert response.filters["candidate_source_failures"] == [
+        {"source": "raw_fulltext", "error_type": "RuntimeError"}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_context_search_reports_surreal_rrf_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1402,10 +1464,11 @@ async def test_candidate_source_gather_reports_failures() -> None:
     async def invalid_graph_source() -> object:
         return object()
 
-    raw_source, graph_sources = await search_module._gather_candidate_sources(
+    gathered = await search_module._gather_candidate_sources(
         failing_raw_source(),
         [(RetrievalSignal.NODE_FULLTEXT, invalid_graph_source())],
     )
+    raw_source, graph_sources, _raw_failures, _raw_metadata = gathered
     metadata = search_module._candidate_source_metadata((raw_source, *graph_sources))
 
     assert raw_source.degraded is True
@@ -1658,7 +1721,7 @@ async def test_raw_candidates_sort_by_relevance_across_scopes() -> None:
             ),
         ]
 
-    candidates = await search_module._recall_raw_candidates(
+    raw_fetch = await search_module._recall_raw_candidates(
         plan=plan,
         facet=ContextFacet.RECENT_MEMORY,
         requested_types={"session", "episode", "note"},
@@ -1666,7 +1729,7 @@ async def test_raw_candidates_sort_by_relevance_across_scopes() -> None:
         recall_fn=fake_recall,
     )
 
-    assert [candidate.id for candidate in candidates] == [
+    assert [candidate.id for candidate in raw_fetch.candidates] == [
         "raw_memory:diary-1",
         "raw_memory:private-1",
         "raw_memory:private-2",
@@ -1719,7 +1782,7 @@ async def test_raw_candidates_filter_lifecycle_hidden_memory() -> None:
             ),
         ]
 
-    candidates = await search_module._recall_raw_candidates(
+    raw_fetch = await search_module._recall_raw_candidates(
         plan=plan,
         facet=ContextFacet.RECENT_MEMORY,
         requested_types={"session", "episode", "note"},
@@ -1727,7 +1790,7 @@ async def test_raw_candidates_filter_lifecycle_hidden_memory() -> None:
         recall_fn=fake_recall,
     )
 
-    assert [candidate.id for candidate in candidates] == ["raw_memory:visible-1"]
+    assert [candidate.id for candidate in raw_fetch.candidates] == ["raw_memory:visible-1"]
 
 
 class _EdgeFulltextClient:

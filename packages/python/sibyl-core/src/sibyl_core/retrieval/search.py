@@ -37,14 +37,15 @@ from sibyl_core.services.graph import get_surreal_graph_runtime, normalize_recor
 from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,
+    RawMemoryRecallResult,
     raw_memory_recallable,
-    recall_raw_memory,
+    recall_raw_memory_with_sources,
 )
 
 if TYPE_CHECKING:
     from sibyl_core.tools.responses import SearchResponse, SearchResult
 
-type RawMemoryRecallFn = Callable[..., Awaitable[list[RawMemory]]]
+type RawMemoryRecallFn = Callable[..., Awaitable[list[RawMemory] | RawMemoryRecallResult]]
 
 DEFAULT_FILTER_SELECTIVITY_THRESHOLD = 0.1
 EDGE_FULLTEXT_MATCH_HEADROOM = 8
@@ -76,6 +77,13 @@ type FusedCandidate = tuple[RetrievalCandidate, float, dict[str, Any]]
 class FusionExecutionResult:
     candidates: list[FusedCandidate]
     actual_backend: FusionBackend
+
+
+@dataclass(frozen=True, slots=True)
+class RawCandidateFetch:
+    candidates: list[RetrievalCandidate]
+    failures: tuple[CandidateSourceFailure, ...] = ()
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 DEFAULT_FUSION_BACKEND = FusionBackend.PYTHON_RRF
@@ -274,7 +282,7 @@ async def context_search(
     limit: int = 10,
     include_content: bool = True,
     embedding_provider: EmbeddingProvider | None = None,
-    raw_memory_recall_fn: RawMemoryRecallFn = recall_raw_memory,
+    raw_memory_recall_fn: RawMemoryRecallFn = recall_raw_memory_with_sources,
 ) -> SearchResponse:
     """Search context-pack candidates through native SurrealDB paths."""
 
@@ -335,7 +343,10 @@ async def context_search(
             else _empty_candidate_source(),
         ),
     ]
-    raw_source, graph_sources = await _gather_candidate_sources(raw_task, graph_tasks)
+    raw_source, graph_sources, raw_failures, raw_recall_metadata = await _gather_candidate_sources(
+        raw_task,
+        graph_tasks,
+    )
     raw_candidates = list(raw_source.candidates)
     graph_candidate_lists = [list(source.candidates) for source in graph_sources]
 
@@ -366,7 +377,8 @@ async def context_search(
     )
     graph_expansion_candidates = list(graph_expansion_source.candidates)
     candidate_source_metadata = _candidate_source_metadata(
-        (raw_source, *graph_sources, graph_expansion_source)
+        (raw_source, *graph_sources, graph_expansion_source),
+        extra_failures=raw_failures,
     )
 
     source_lists = [
@@ -435,6 +447,7 @@ async def context_search(
                 failures=fusion_failures,
             ),
             **candidate_source_metadata,
+            **raw_recall_metadata,
             **vector_fetch.as_metadata(),
         },
         graph_count=len([result for result in results if result.result_origin == "graph"]),
@@ -523,18 +536,31 @@ async def _gather_candidate_sources(
 ) -> tuple[
     CandidateSourceResult[RetrievalCandidate],
     list[CandidateSourceResult[RetrievalCandidate]],
+    tuple[CandidateSourceFailure, ...],
+    dict[str, object],
 ]:
     gathered = await asyncio.gather(
         raw_task,
         *(task for _signal, task in graph_tasks),
         return_exceptions=True,
     )
-    raw = _candidate_source_result(RetrievalSignal.RAW_LEXICAL.value, gathered[0])
+    raw_result = gathered[0]
+    raw_failures: tuple[CandidateSourceFailure, ...] = ()
+    raw_metadata: dict[str, object] = {}
+    if isinstance(raw_result, RawCandidateFetch):
+        raw = CandidateSourceResult.success(
+            RetrievalSignal.RAW_LEXICAL.value,
+            raw_result.candidates,
+        )
+        raw_failures = raw_result.failures
+        raw_metadata = raw_result.metadata
+    else:
+        raw = _candidate_source_result(RetrievalSignal.RAW_LEXICAL.value, raw_result)
     graph = [
         _candidate_source_result(signal.value, result)
         for (signal, _task), result in zip(graph_tasks, gathered[1:], strict=True)
     ]
-    return raw, graph
+    return raw, graph, raw_failures, raw_metadata
 
 
 async def _gather_graph_expansion_source(
@@ -567,14 +593,17 @@ def _candidate_source_result(
 
 def _candidate_source_metadata(
     sources: Sequence[CandidateSourceResult[RetrievalCandidate]],
+    *,
+    extra_failures: Sequence[CandidateSourceFailure] = (),
 ) -> dict[str, object]:
-    failures = [source.failure.as_metadata() for source in sources if source.failure is not None]
+    failures = [source.failure for source in sources if source.failure is not None]
+    failures.extend(extra_failures)
     metadata: dict[str, object] = {
         "candidate_source_degraded": bool(failures),
         "candidate_source_failure_count": len(failures),
     }
     if failures:
-        metadata["candidate_source_failures"] = failures
+        metadata["candidate_source_failures"] = [failure.as_metadata() for failure in failures]
     return metadata
 
 
@@ -717,13 +746,14 @@ async def _recall_raw_candidates(
     requested_types: set[str],
     limit: int,
     recall_fn: RawMemoryRecallFn,
-) -> list[RetrievalCandidate]:
+) -> RawCandidateFetch:
     if facet is not None and facet is not ContextFacet.RECENT_MEMORY:
-        return []
+        return RawCandidateFetch([])
     if requested_types and requested_types.isdisjoint(_RAW_MEMORY_CONTEXT_TYPES):
-        return []
+        return RawCandidateFetch([])
 
     candidates: list[RetrievalCandidate] = []
+    failures: list[CandidateSourceFailure] = []
     seen_ids: set[str] = set()
     for scope in plan.scopes:
         if scope.memory_scope not in {
@@ -742,14 +772,29 @@ async def _recall_raw_candidates(
             project_id=scope.project_id,
             limit=limit,
         )
-        for memory in recalled:
+        if isinstance(recalled, RawMemoryRecallResult):
+            memories = list(recalled.memories)
+            failures.extend(recalled.failures)
+        else:
+            memories = recalled
+        for memory in memories:
             if not raw_memory_recallable(memory):
                 continue
             if memory.id in seen_ids:
                 continue
             seen_ids.add(memory.id)
             candidates.append(_candidate_from_raw_memory(memory, scope))
-    return sorted(candidates, key=lambda candidate: candidate.score, reverse=True)
+    raw_metadata: dict[str, object] = {
+        "raw_recall_degraded": bool(failures),
+        "raw_recall_failure_count": len(failures),
+    }
+    if failures:
+        raw_metadata["raw_recall_failures"] = [failure.as_metadata() for failure in failures]
+    return RawCandidateFetch(
+        sorted(candidates, key=lambda candidate: candidate.score, reverse=True),
+        failures=tuple(failures),
+        metadata=raw_metadata,
+    )
 
 
 async def _node_fulltext_candidates(

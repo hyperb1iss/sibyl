@@ -1280,6 +1280,56 @@ class TestSearchTool:
         assert result.metadata["source_id"] == "source-mail-1"
 
     @pytest.mark.asyncio
+    async def test_search_raw_memory_reports_partial_recall_failure(self) -> None:
+        search_module = import_module("sibyl_core.tools.search")
+        from sibyl_core.memory_pipeline.retrieval import CandidateSourceResult
+        from sibyl_core.services.surreal_content import (
+            MemoryScope,
+            RawMemory,
+            RawMemoryRecallResult,
+        )
+
+        raw_memory = RawMemory(
+            id="memory-1",
+            organization_id="org_123",
+            source_id="source-mail-1",
+            principal_id="user-123",
+            memory_scope=MemoryScope.PRIVATE,
+            title="Mailbox thread",
+            raw_content="Nova and Bliss discussed SurrealDB.",
+            capture_surface="mailbox",
+            score=0.87,
+        )
+        recall = AsyncMock(
+            return_value=RawMemoryRecallResult(
+                memories=(raw_memory,),
+                sources=(
+                    CandidateSourceResult.failed("raw_fulltext", "RuntimeError"),
+                    CandidateSourceResult.success("raw_lexical", [raw_memory]),
+                ),
+            )
+        )
+
+        with patch("sibyl_core.tools.search.recall_raw_memory", recall):
+            response = await search_module.search(
+                query="surrealdb",
+                types=["raw_memory"],
+                organization_id="org_123",
+                principal_id="user-123",
+                include_graph=False,
+                include_documents=False,
+            )
+
+        assert response.total == 1
+        assert response.filters["raw_recall_degraded"] is True
+        assert response.filters["raw_recall_failure_count"] == 1
+        assert response.filters["search_source_degraded"] is True
+        assert response.filters["search_source_failure_count"] == 1
+        assert response.filters["search_source_failures"] == [
+            {"source": "raw_fulltext", "error_type": "RuntimeError"}
+        ]
+
+    @pytest.mark.asyncio
     async def test_search_raw_memory_type_skips_graph_and_documents(self) -> None:
         search_module = import_module("sibyl_core.tools.search")
         recall = AsyncMock(return_value=[])
