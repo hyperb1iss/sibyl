@@ -20,6 +20,7 @@ class RuntimeServices:
         self._scheduler_initialized = False
         self._pubsub_initialized = False
         self._locks_initialized = False
+        self._live_queries_initialized = False
 
     async def startup(self) -> None:
         self._coordination_backend = settings.resolved_coordination_backend
@@ -36,9 +37,11 @@ class RuntimeServices:
         await self._startup_scheduler()
         await self._startup_pubsub()
         await self._startup_locks()
+        await self._startup_live_queries()
         await self._recover_stuck_sources()
 
     async def shutdown(self) -> None:
+        await self._shutdown_live_queries()
         await self._shutdown_scheduler()
         await self._shutdown_broker()
         await self._stop_surreal_connectivity()
@@ -110,6 +113,16 @@ class RuntimeServices:
                 error=str(e),
             )
 
+    async def _startup_live_queries(self) -> None:
+        try:
+            from sibyl.services.raw_capture_live import start_raw_capture_live_query
+
+            self._live_queries_initialized = await start_raw_capture_live_query()
+            if self._live_queries_initialized:
+                self._log.info("Raw capture live query ready")
+        except Exception as e:
+            self._log.warning("Raw capture live query unavailable", error=str(e))
+
     async def _recover_stuck_sources(self) -> None:
         try:
             from sibyl.api.routes.admin import recover_stuck_sources
@@ -171,6 +184,17 @@ class RuntimeServices:
             await shutdown_pubsub()
         except Exception as e:
             self._log.debug("Pub/sub shutdown error", error=str(e))
+
+    async def _shutdown_live_queries(self) -> None:
+        if not self._live_queries_initialized:
+            return
+
+        try:
+            from sibyl.services.raw_capture_live import stop_raw_capture_live_query
+
+            await stop_raw_capture_live_query()
+        except Exception as e:
+            self._log.debug("Raw capture live query shutdown error", error=str(e))
 
     async def _shutdown_locks(self) -> None:
         if not self._locks_initialized:

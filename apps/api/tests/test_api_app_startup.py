@@ -74,3 +74,20 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     enable_pubsub.assert_called_once_with()
     disable_pubsub.assert_called_once_with()
     recover_stuck_sources.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_runtime_services_starts_and_stops_raw_capture_live_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start_live = AsyncMock(return_value=True)
+    stop_live = AsyncMock()
+    monkeypatch.setattr("sibyl.services.raw_capture_live.start_raw_capture_live_query", start_live)
+    monkeypatch.setattr("sibyl.services.raw_capture_live.stop_raw_capture_live_query", stop_live)
+    services = runtime_services_module.RuntimeServices(log=MagicMock())
+
+    await services._startup_live_queries()
+    await services._shutdown_live_queries()
+
+    start_live.assert_awaited_once()
+    stop_live.assert_awaited_once()

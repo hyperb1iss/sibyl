@@ -613,6 +613,16 @@ class Settings(BaseSettings):
         default=True,
         description="Poll raw_captures CHANGEFEED and enqueue incremental promotion",
     )
+    raw_capture_live_query_enabled: bool = Field(
+        default=False,
+        description="Use SurrealDB live queries for raw_captures realtime promotion hints",
+    )
+    raw_capture_live_query_retry_seconds: float = Field(
+        default=5.0,
+        ge=0.1,
+        le=300.0,
+        description="Seconds to wait before reconnecting the raw capture live query",
+    )
 
     # Knowledge repository configuration
     knowledge_repo_path: Path = Field(
