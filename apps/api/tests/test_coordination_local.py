@@ -619,6 +619,90 @@ async def test_local_queue_broker_cancels_queued_jobs_and_best_effort_running_jo
 
 
 @pytest.mark.asyncio
+async def test_local_queue_broker_shutdown_drains_jobs_before_stopping() -> None:
+    release_running = asyncio.Event()
+    running_started = asyncio.Event()
+    calls: list[str] = []
+
+    async def sync_source(
+        _ctx: dict[str, object],
+        source_id: str,
+        *,
+        _organization_id: str | None = None,
+    ) -> dict[str, object]:
+        calls.append(source_id)
+        if source_id == "source_running":
+            running_started.set()
+            await release_running.wait()
+        return {"source_id": source_id, "ok": True}
+
+    broker = LocalQueueBroker(
+        functions={"sync_source": sync_source},
+        max_concurrency=1,
+        result_ttl_seconds=60,
+        shutdown_grace_seconds=1.0,
+    )
+
+    await broker.startup()
+
+    running_job_id = await broker.enqueue_sync("source_running")
+    await running_started.wait()
+    queued_job_id = await broker.enqueue_sync("source_queued")
+
+    shutdown_task = asyncio.create_task(broker.shutdown())
+    await asyncio.sleep(0.02)
+    assert not shutdown_task.done()
+
+    release_running.set()
+    await asyncio.wait_for(shutdown_task, timeout=1.0)
+
+    running_info = await broker.get_job_status(running_job_id)
+    queued_info = await broker.get_job_status(queued_job_id)
+    assert running_info.status == JobStatus.COMPLETE
+    assert queued_info.status == JobStatus.COMPLETE
+    assert queued_info.result == {"source_id": "source_queued", "ok": True}
+    assert calls == ["source_running", "source_queued"]
+
+
+@pytest.mark.asyncio
+async def test_local_queue_broker_shutdown_cancels_after_grace_expires() -> None:
+    release = asyncio.Event()
+
+    async def sync_source(
+        _ctx: dict[str, object],
+        source_id: str,
+        *,
+        _organization_id: str | None = None,
+    ) -> dict[str, object]:
+        await release.wait()
+        return {"source_id": source_id, "ok": True}
+
+    broker = LocalQueueBroker(
+        functions={"sync_source": sync_source},
+        max_concurrency=1,
+        result_ttl_seconds=60,
+        shutdown_grace_seconds=0.01,
+    )
+
+    await broker.startup()
+
+    running_job_id = await broker.enqueue_sync("source_running")
+    await _wait_for_job_status(broker, running_job_id, JobStatus.IN_PROGRESS)
+    queued_job_id = await broker.enqueue_sync("source_queued")
+
+    await broker.shutdown()
+
+    running_info = await broker.get_job_status(running_job_id)
+    queued_info = await broker.get_job_status(queued_job_id)
+    assert running_info.status == JobStatus.CANCELLED
+    assert running_info.error == "cancelled"
+    assert queued_info.status == JobStatus.CANCELLED
+    assert queued_info.error == "shutdown"
+
+    release.set()
+
+
+@pytest.mark.asyncio
 async def test_local_queue_broker_preserves_learning_policy_context() -> None:
     calls: list[dict[str, object]] = []
 

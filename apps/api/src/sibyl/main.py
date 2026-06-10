@@ -238,6 +238,22 @@ def create_combined_app(  # noqa: PLR0915
         async with mcp.session_manager.run():
             yield
 
+        if scheduler_initialized:
+            try:
+                from sibyl.coordination.scheduler import get_scheduler
+
+                await get_scheduler().shutdown()
+            except Exception as e:
+                log.warning("Error shutting down scheduler", error=str(e))
+
+        if broker_initialized:
+            try:
+                from sibyl.coordination.broker import get_broker
+
+                await get_broker().shutdown()
+            except Exception as e:
+                log.warning("Error shutting down broker", error=str(e))
+
         await stop_surreal_connectivity_monitor()
 
         try:
@@ -272,22 +288,6 @@ def create_combined_app(  # noqa: PLR0915
                 await shutdown_locks()
             except Exception as e:
                 log.warning("Error shutting down locks", error=str(e))
-
-        if broker_initialized:
-            try:
-                from sibyl.coordination.broker import get_broker
-
-                await get_broker().shutdown()
-            except Exception as e:
-                log.warning("Error shutting down broker", error=str(e))
-
-        if scheduler_initialized:
-            try:
-                from sibyl.coordination.scheduler import get_scheduler
-
-                await get_scheduler().shutdown()
-            except Exception as e:
-                log.warning("Error shutting down scheduler", error=str(e))
 
         # Shutdown embedded worker if running
         if worker_task:

@@ -89,6 +89,14 @@ def test_settings_worker_max_jobs_prefers_explicit_override() -> None:
     assert s.resolved_worker_max_jobs == 17
 
 
+def test_settings_local_queue_shutdown_grace_seconds_can_override_default() -> None:
+    default = Settings(_env_file=None)
+    overridden = Settings(_env_file=None, local_queue_shutdown_grace_seconds=12.5)
+
+    assert default.local_queue_shutdown_grace_seconds == 30.0
+    assert overridden.local_queue_shutdown_grace_seconds == 12.5
+
+
 def test_settings_worker_max_jobs_defaults_to_cpu_and_content_pool_scale(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

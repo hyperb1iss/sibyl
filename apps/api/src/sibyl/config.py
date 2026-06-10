@@ -599,6 +599,12 @@ class Settings(BaseSettings):
         le=1024,
         description="Override maximum concurrent background jobs; defaults to CPU and DB pool scale.",
     )
+    local_queue_shutdown_grace_seconds: float = Field(
+        default=30.0,
+        ge=0.0,
+        le=3600.0,
+        description="Seconds local queue shutdown waits for in-process jobs to drain.",
+    )
     memory_extraction_max_tokens: int = Field(
         default=8192,
         ge=256,

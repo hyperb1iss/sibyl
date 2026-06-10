@@ -236,6 +236,22 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:  # noqa: PLR0915
 
     yield
 
+    if scheduler_initialized:
+        try:
+            from sibyl.coordination.scheduler import get_scheduler
+
+            await get_scheduler().shutdown()
+        except Exception as e:
+            log.debug("Scheduler shutdown error (expected during fast restarts)", error=str(e))
+
+    if broker_initialized:
+        try:
+            from sibyl.coordination.broker import get_broker
+
+            await get_broker().shutdown()
+        except Exception as e:
+            log.debug("Broker shutdown error (expected during fast restarts)", error=str(e))
+
     await stop_surreal_connectivity_monitor()
 
     try:
@@ -268,22 +284,6 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:  # noqa: PLR0915
             await shutdown_locks()
         except Exception as e:
             log.debug("Lock shutdown error (expected during fast restarts)", error=str(e))
-
-    if broker_initialized:
-        try:
-            from sibyl.coordination.broker import get_broker
-
-            await get_broker().shutdown()
-        except Exception as e:
-            log.debug("Broker shutdown error (expected during fast restarts)", error=str(e))
-
-    if scheduler_initialized:
-        try:
-            from sibyl.coordination.scheduler import get_scheduler
-
-            await get_scheduler().shutdown()
-        except Exception as e:
-            log.debug("Scheduler shutdown error (expected during fast restarts)", error=str(e))
 
 
 def create_api_app() -> FastAPI:  # noqa: PLR0915

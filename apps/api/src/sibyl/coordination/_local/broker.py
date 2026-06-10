@@ -15,6 +15,7 @@ import structlog
 from arq.connections import RedisSettings
 
 from sibyl.backup_ids import generate_backup_id
+from sibyl.config import settings
 from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_LIMIT,
     JobInfo,
@@ -79,6 +80,7 @@ class LocalQueueBroker:
         max_concurrency: int | None = None,
         result_ttl_seconds: int | None = None,
         recent_job_limit: int = RECENT_JOB_INDEX_LIMIT,
+        shutdown_grace_seconds: float | None = None,
     ) -> None:
         resolved_functions = functions or {
             function.__name__: function for function in WorkerSettings.functions
@@ -87,6 +89,11 @@ class LocalQueueBroker:
         self._max_concurrency = max_concurrency or WorkerSettings.max_jobs
         self._result_ttl = timedelta(seconds=result_ttl_seconds or WorkerSettings.keep_result)
         self._recent_job_limit = recent_job_limit
+        self._shutdown_grace_seconds = (
+            settings.local_queue_shutdown_grace_seconds
+            if shutdown_grace_seconds is None
+            else shutdown_grace_seconds
+        )
         self._queue: asyncio.Queue[str] | None = None
         self._workers: list[asyncio.Task[None]] = []
         self._jobs: dict[str, LocalJobRecord] = {}
@@ -112,29 +119,56 @@ class LocalQueueBroker:
             log.info("Local queue broker ready", workers=self._max_concurrency)
 
     async def shutdown(self) -> None:
-        """Stop local worker tasks and clear ephemeral state."""
+        """Stop accepting jobs, drain queued work, then stop local worker tasks."""
         async with self._lifecycle_lock:
+            queue = self._queue
             workers = self._workers
+            self._workers = []
+            self._queue = None
+
+        drained = True
+        if queue is not None:
+            try:
+                await asyncio.wait_for(queue.join(), timeout=self._shutdown_grace_seconds)
+            except TimeoutError:
+                drained = False
+                log.warning(
+                    "Local queue shutdown grace expired",
+                    grace_seconds=self._shutdown_grace_seconds,
+                    queue_depth=queue.qsize(),
+                    running_jobs=sum(
+                        1
+                        for record in self._jobs.values()
+                        if record.status == JobStatus.IN_PROGRESS
+                    ),
+                )
+
+        workers_cancelled = False
+        if not drained:
+            for worker in workers:
+                worker.cancel()
+            workers_cancelled = True
+
             running_tasks = [
                 record.running_task
                 for record in self._jobs.values()
                 if record.running_task is not None and not record.running_task.done()
             ]
-            self._workers = []
-            self._queue = None
-            self._ctx = {}
-            self._jobs.clear()
-            self._recent_job_ids.clear()
+            for task in running_tasks:
+                task.cancel()
+            if running_tasks:
+                await asyncio.gather(*running_tasks, return_exceptions=True)
+            if workers:
+                await asyncio.gather(*workers, return_exceptions=True)
+            self._mark_queued_jobs_cancelled(reason="shutdown")
 
-        for task in running_tasks:
-            task.cancel()
-        if running_tasks:
-            await asyncio.gather(*running_tasks, return_exceptions=True)
+        if not workers_cancelled:
+            for worker in workers:
+                worker.cancel()
+            if workers:
+                await asyncio.gather(*workers, return_exceptions=True)
 
-        for worker in workers:
-            worker.cancel()
-        if workers:
-            await asyncio.gather(*workers, return_exceptions=True)
+        self._ctx = {}
 
     async def health(self) -> dict[str, Any]:
         """Report local broker health."""
@@ -630,6 +664,7 @@ class LocalQueueBroker:
 
     async def _worker_loop(self, worker_index: int) -> None:
         queue = self._require_queue()
+        worker_task = asyncio.current_task()
 
         while True:
             job_id = await queue.get()
@@ -645,6 +680,8 @@ class LocalQueueBroker:
                     name=f"sibyl-local-job-{worker_index}-{job_id}",
                 )
                 await record.running_task
+                if worker_task is not None and worker_task.cancelling():
+                    raise asyncio.CancelledError
             finally:
                 if record is not None:
                     record.running_task = None
@@ -714,6 +751,24 @@ class LocalQueueBroker:
             (job_id for job_id in self._recent_job_ids if job_id not in expired),
             maxlen=self._recent_job_limit,
         )
+
+    def _mark_queued_jobs_cancelled(self, *, reason: str) -> None:
+        finish_time = datetime.now(UTC)
+        for record in self._jobs.values():
+            if record.status != JobStatus.QUEUED:
+                continue
+
+            record.status = JobStatus.CANCELLED
+            record.finish_time = finish_time
+            record.result = None
+            record.error = reason
+            record.expires_at = finish_time + self._result_ttl
+            self._record_recent_job(record.job_id)
+            telemetry_registry().record_job_finished(
+                function=record.function,
+                status="cancelled",
+                duration_ms=0,
+            )
 
     def _record_recent_job(self, job_id: str) -> None:
         with contextlib.suppress(ValueError):
