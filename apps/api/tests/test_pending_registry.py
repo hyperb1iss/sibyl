@@ -351,9 +351,11 @@ class TestEnqueueCreateEntityMarksPending:
                 entity_data={"id": "task_123", "name": "Test Task"},
                 entity_type="task",
                 group_id="org_456",
+                generate_embeddings=False,
             )
 
         assert job_id == "create_entity:task_123"
+        assert mock_pool.enqueue_job.call_args.kwargs["generate_embeddings"] is False
         mock_registry.mark_pending.assert_awaited_once_with(
             "task_123",
             "create_entity:task_123",

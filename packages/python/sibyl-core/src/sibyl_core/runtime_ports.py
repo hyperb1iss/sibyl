@@ -21,6 +21,7 @@ class QueuePort(Protocol):
         group_id: str,
         relationships: Sequence[Mapping[str, Any]] | None,
         auto_link_params: Mapping[str, Any],
+        generate_embeddings: bool = True,
     ) -> str: ...
 
     async def enqueue_update_task(

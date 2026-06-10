@@ -127,6 +127,7 @@ async def test_local_queue_broker_executes_local_jobs_and_reports_health() -> No
         group_id: str,
         relationships: list[dict[str, object]] | None = None,
         auto_link_params: dict[str, object] | None = None,
+        generate_embeddings: bool = True,
     ) -> dict[str, object]:
         calls.append(
             (
@@ -135,6 +136,7 @@ async def test_local_queue_broker_executes_local_jobs_and_reports_health() -> No
                 {
                     "relationships": relationships,
                     "auto_link_params": auto_link_params,
+                    "generate_embeddings": generate_embeddings,
                     "ctx_has_start_time": "start_time" in ctx,
                 },
             )
@@ -281,6 +283,7 @@ async def test_local_queue_broker_executes_local_jobs_and_reports_health() -> No
             {"id": "entity_123", "name": "Entity"},
             "task",
             "org_456",
+            generate_embeddings=False,
         )
         task_job_id = await broker.enqueue_update_task(
             "task_123",
@@ -344,6 +347,7 @@ async def test_local_queue_broker_executes_local_jobs_and_reports_health() -> No
         "run_reflection_dream_cycle",
     ]
     assert all(call[2]["ctx_has_start_time"] is True for call in calls)
+    assert calls[1][2]["generate_embeddings"] is False
 
     await broker.shutdown()
 

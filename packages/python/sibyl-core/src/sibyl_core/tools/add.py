@@ -616,6 +616,7 @@ async def add(
                     "technologies": technologies or languages or [],
                     "category": category,
                 },
+                generate_embeddings=True,
             )
             log.info("add_queued_for_arq", entity_id=entity_id, entity_type=entity_type)
 

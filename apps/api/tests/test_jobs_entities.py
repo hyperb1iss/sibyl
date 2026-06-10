@@ -8,12 +8,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sibyl.jobs.entities import (
+    create_entity,
     create_learning_episode,
     create_learning_procedure,
     serialize_memory_policy_context,
 )
 from sibyl_core.auth import MemoryPolicyContext, OrganizationRole
-from sibyl_core.models.entities import Episode, Procedure
+from sibyl_core.models.entities import Episode, Pattern, Procedure
 from sibyl_core.models.tasks import Task, TaskStatus
 
 
@@ -32,6 +33,83 @@ def _policy_payload(project_id: str = "proj-1", org_id: str = "org-1") -> dict[s
     )
     assert payload is not None
     return payload
+
+
+class TestCreateEntityJob:
+    @pytest.mark.asyncio
+    async def test_can_defer_entity_relationship_and_projection_embeddings(self) -> None:
+        entity = Pattern(
+            id="pattern-123",
+            name="Lexical first",
+            content="Persist text first and enrich vectors later.",
+        )
+        entity_manager = MagicMock()
+        entity_manager.create_direct = AsyncMock(return_value="pattern-123")
+        relationship_manager = MagicMock()
+        relationship_manager.create_direct_bulk = AsyncMock(return_value=["rel-1"])
+        relationship_manager.create = AsyncMock()
+        runtime = SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+        )
+        projection = SimpleNamespace(
+            errors=(),
+            extracted=0,
+            projected_entities=0,
+            relationships=0,
+            projection_state="complete",
+        )
+        extraction_enqueue = SimpleNamespace(
+            status="skipped",
+            reason="disabled",
+            job_ids=[],
+            queued_sources=0,
+            skipped_sources=1,
+        )
+
+        with (
+            patch("sibyl.jobs.entities.get_surreal_graph_runtime", AsyncMock(return_value=runtime)),
+            patch(
+                "sibyl.jobs.entities.project_memory_entity",
+                AsyncMock(return_value=projection),
+            ) as project_memory,
+            patch("sibyl.jobs.entities._safe_broadcast", AsyncMock()),
+            patch("sibyl.jobs.pending.clear_pending", AsyncMock()),
+            patch("sibyl.jobs.pending.process_pending_operations", AsyncMock(return_value=[])),
+            patch(
+                "sibyl_core.tools.conflicts.find_similar_entities",
+                AsyncMock(return_value=[]),
+            ),
+            patch(
+                "sibyl.jobs.memory_extraction.enqueue_memory_extraction_batches",
+                AsyncMock(return_value=extraction_enqueue),
+            ),
+        ):
+            result = await create_entity(
+                {},
+                entity.model_dump(mode="json"),
+                "pattern",
+                "org-1",
+                relationships=[
+                    {
+                        "id": "rel-1",
+                        "source_id": "pattern-123",
+                        "target_id": "project-1",
+                        "type": "BELONGS_TO",
+                    }
+                ],
+                generate_embeddings=False,
+            )
+
+        assert result["entity_id"] == "pattern-123"
+        assert result["relationships_created"] == 1
+        assert entity_manager.create_direct.await_args.kwargs["generate_embedding"] is False
+        assert (
+            relationship_manager.create_direct_bulk.await_args.kwargs["generate_embeddings"]
+            is False
+        )
+        relationship_manager.create.assert_not_awaited()
+        assert project_memory.await_args.kwargs["generate_embeddings"] is False
 
 
 class TestCreateLearningEpisodeJob:

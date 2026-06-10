@@ -102,6 +102,7 @@ async def enqueue_create_entity(
     group_id: str,
     relationships: list[dict[str, Any]] | None = None,
     auto_link_params: dict[str, Any] | None = None,
+    generate_embeddings: bool = True,
 ) -> str:
     """Enqueue an entity creation job."""
     return await get_queue().enqueue_create_entity(
@@ -111,6 +112,7 @@ async def enqueue_create_entity(
         group_id,
         relationships=relationships,
         auto_link_params=auto_link_params,
+        generate_embeddings=generate_embeddings,
     )
 
 

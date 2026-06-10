@@ -36,6 +36,7 @@ class ApiQueuePort:
         group_id: str,
         relationships: Sequence[Mapping[str, Any]] | None,
         auto_link_params: Mapping[str, Any],
+        generate_embeddings: bool = True,
     ) -> str:
         from sibyl.jobs.queue import enqueue_create_entity
 
@@ -46,6 +47,7 @@ class ApiQueuePort:
             group_id=group_id,
             relationships=[dict(relationship) for relationship in relationships or ()] or None,
             auto_link_params=dict(auto_link_params),
+            generate_embeddings=generate_embeddings,
         )
 
     async def enqueue_update_task(

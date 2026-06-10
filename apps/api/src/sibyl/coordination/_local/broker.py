@@ -259,6 +259,7 @@ class LocalQueueBroker:
         group_id: str,
         relationships: list[dict[str, Any]] | None = None,
         auto_link_params: dict[str, Any] | None = None,
+        generate_embeddings: bool = True,
     ) -> str:
         from sibyl.jobs.pending import mark_pending
 
@@ -271,6 +272,7 @@ class LocalQueueBroker:
             job_id=job_id,
             relationships=relationships,
             auto_link_params=auto_link_params,
+            generate_embeddings=generate_embeddings,
         )
 
         if result.created:

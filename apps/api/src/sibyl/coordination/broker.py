@@ -128,6 +128,7 @@ class QueueBroker(Protocol):
         group_id: str,
         relationships: list[dict[str, Any]] | None = None,
         auto_link_params: dict[str, Any] | None = None,
+        generate_embeddings: bool = True,
     ) -> str: ...
 
     async def enqueue_update_entity(
