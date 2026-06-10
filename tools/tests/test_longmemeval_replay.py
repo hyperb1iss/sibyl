@@ -16,11 +16,7 @@ def _load_replay_module() -> ModuleType:
     return module
 
 
-def test_longmemeval_replay_cli_prints_json_summary(
-    tmp_path: Path,
-    capsys,
-) -> None:
-    module = _load_replay_module()
+def _write_replay_fixture(tmp_path: Path) -> Path:
     dataset_path = tmp_path / "longmemeval.json"
     report_path = tmp_path / "report.json"
     dataset_path.write_text(
@@ -70,6 +66,15 @@ def test_longmemeval_replay_cli_prints_json_summary(
         ),
         encoding="utf-8",
     )
+    return report_path
+
+
+def test_longmemeval_replay_cli_prints_json_summary(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    module = _load_replay_module()
+    report_path = _write_replay_fixture(tmp_path)
 
     assert module.main([str(report_path), "--strategy", "oracle", "--json"]) == 0
 
@@ -77,3 +82,27 @@ def test_longmemeval_replay_cli_prints_json_summary(
     assert payload["strategy"] == "oracle"
     assert payload["baseline_overall"]["recall@1"] == 0.0
     assert payload["overall"]["recall@1"] == 1.0
+
+
+def test_longmemeval_replay_cli_writes_feature_rows_jsonl(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    module = _load_replay_module()
+    report_path = _write_replay_fixture(tmp_path)
+    output_path = tmp_path / "features.jsonl"
+
+    assert module.main([str(report_path), "--features-jsonl", str(output_path), "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    rows = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()]
+    answer_row = next(row for row in rows if row["session_id"] == "s2")
+    expected_row_count = 2
+    expected_provider_score = 0.9
+
+    assert payload["feature_rows"] == {"count": expected_row_count, "path": str(output_path)}
+    assert len(rows) == expected_row_count
+    assert answer_row["case_index"] == 0
+    assert answer_row["question_id"] == "q1"
+    assert answer_row["label"] == 1
+    assert answer_row["features"]["provider_score"] == expected_provider_score
