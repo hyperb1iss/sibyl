@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tarfile
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -16,6 +17,72 @@ from sibyl.jobs import backup as backup_jobs
 class _GraphBackupPayload:
     entities: list[dict[str, str]]
     relationships: list[dict[str, str]]
+
+
+@pytest.mark.asyncio
+async def test_backup_file_helpers_offload_blocking_io(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    calls: list[str] = []
+
+    async def fake_to_thread(func, /, *args, **kwargs):
+        calls.append(func.__name__)
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(backup_jobs.asyncio, "to_thread", fake_to_thread)
+
+    metadata_file = tmp_path / "metadata.json"
+    await backup_jobs._write_json_file_async(metadata_file, {"ok": True})
+    await backup_jobs._sha256_file_async(metadata_file)
+    archive_path = tmp_path / "sibyl_backup_test.tar.gz"
+    await backup_jobs._create_backup_archive_async(
+        archive_path,
+        [(metadata_file, "metadata.json", True)],
+    )
+
+    assert calls == [
+        "_write_json_file",
+        "_sha256_file",
+        "_create_backup_archive",
+    ]
+    assert archive_path.exists()
+
+
+def test_create_backup_archive_requires_metadata(tmp_path) -> None:
+    with pytest.raises(FileNotFoundError):
+        backup_jobs._create_backup_archive(
+            tmp_path / "sibyl_backup_test.tar.gz",
+            [(tmp_path / "metadata.json", "metadata.json", True)],
+        )
+
+
+@pytest.mark.asyncio
+async def test_cleanup_old_backups_offloads_archive_scan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    calls: list[str] = []
+
+    async def fake_to_thread(func, /, *args, **kwargs):
+        calls.append(func.__name__)
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(backup_jobs.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(backup_jobs.settings, "backup_dir", tmp_path)
+    monkeypatch.setattr(backup_jobs.settings, "backup_retention_days", 1)
+
+    archive = tmp_path / "sibyl_backup_old.tar.gz"
+    archive.write_bytes(b"old")
+    old_timestamp = 946684800
+    os.utime(archive, (old_timestamp, old_timestamp))
+
+    result = await backup_jobs.cleanup_old_backups({})
+
+    assert calls == ["_cleanup_old_backup_archives"]
+    assert result["deleted"] == 1
+    assert result["freed_bytes"] == 3
+    assert not archive.exists()
 
 
 @pytest.mark.asyncio

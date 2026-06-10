@@ -8,8 +8,10 @@ Creates timestamped, compressed backup archives containing:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import os
 import tarfile
 import tempfile
 from dataclasses import asdict, dataclass, field
@@ -83,6 +85,76 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: f.read(8192), b""):
             sha256.update(chunk)
     return sha256.hexdigest()
+
+
+def _write_json_file(path: Path, payload: object, *, default: Any | None = None) -> int:
+    path.write_text(
+        json.dumps(payload, indent=2, default=default),
+        encoding="utf-8",
+    )
+    return path.stat().st_size
+
+
+async def _write_json_file_async(
+    path: Path,
+    payload: object,
+    *,
+    default: Any | None = None,
+) -> int:
+    return await asyncio.to_thread(_write_json_file, path, payload, default=default)
+
+
+async def _sha256_file_async(path: Path) -> str:
+    return await asyncio.to_thread(_sha256_file, path)
+
+
+def _create_backup_archive(
+    archive_path: Path,
+    entries: list[tuple[Path, str, bool]],
+    *,
+    compresslevel: int = 6,
+) -> int:
+    with tarfile.open(archive_path, "w:gz", compresslevel=compresslevel) as tar:
+        for path, arcname, required in entries:
+            if required or path.exists():
+                tar.add(path, arcname=arcname)
+    return archive_path.stat().st_size
+
+
+async def _create_backup_archive_async(
+    archive_path: Path,
+    entries: list[tuple[Path, str, bool]],
+    *,
+    compresslevel: int = 6,
+) -> int:
+    return await asyncio.to_thread(
+        _create_backup_archive,
+        archive_path,
+        entries,
+        compresslevel=compresslevel,
+    )
+
+
+async def _replace_file_async(source: Path, target: Path) -> None:
+    await asyncio.to_thread(os.replace, source, target)
+
+
+def _cleanup_old_backup_archives(backup_dir: Path, cutoff: float) -> tuple[int, int]:
+    deleted = 0
+    freed_bytes = 0
+
+    for archive in backup_dir.glob("sibyl_backup_*.tar.gz"):
+        try:
+            if archive.stat().st_mtime < cutoff:
+                size = archive.stat().st_size
+                archive.unlink()
+                deleted += 1
+                freed_bytes += size
+                log.info("backup_deleted", path=str(archive), size_bytes=size)
+        except Exception as e:
+            log.warning("backup_delete_failed", path=str(archive), error=str(e))
+
+    return deleted, freed_bytes
 
 
 async def _safe_broadcast(event: str, data: dict[str, Any], *, org_id: str | None) -> None:
@@ -202,7 +274,7 @@ async def run_backup(  # noqa: PLR0915
         backup_dir.mkdir(parents=True, exist_ok=True)
 
         # Work in a temp directory
-        with tempfile.TemporaryDirectory(prefix="sibyl_backup_") as tmpdir:
+        with tempfile.TemporaryDirectory(prefix="sibyl_backup_", dir=backup_dir) as tmpdir:
             tmp_path = Path(tmpdir)
             auth_file = tmp_path / "auth.json"
             content_file = tmp_path / "content.json"
@@ -221,12 +293,8 @@ async def run_backup(  # noqa: PLR0915
             if include_auth_snapshot:
                 log.info("backup_auth_snapshot_start", backup_id=backup_id)
                 auth_payload = await export_auth_archive_payload(organization_id=organization_id)
-                auth_file.write_text(
-                    json.dumps(auth_payload, indent=2, default=str),
-                    encoding="utf-8",
-                )
-                auth_size = auth_file.stat().st_size
-                file_checksums["auth.json"] = _sha256_file(auth_file)
+                auth_size = await _write_json_file_async(auth_file, auth_payload, default=str)
+                file_checksums["auth.json"] = await _sha256_file_async(auth_file)
                 log.info("backup_auth_snapshot_complete", backup_id=backup_id, size_bytes=auth_size)
 
             # Step 2: Surreal content backup
@@ -235,12 +303,12 @@ async def run_backup(  # noqa: PLR0915
                 content_payload = await export_content_archive_payload(
                     organization_id=organization_id
                 )
-                content_file.write_text(
-                    json.dumps(content_payload, indent=2, default=str),
-                    encoding="utf-8",
+                content_size = await _write_json_file_async(
+                    content_file,
+                    content_payload,
+                    default=str,
                 )
-                content_size = content_file.stat().st_size
-                file_checksums["content.json"] = _sha256_file(content_file)
+                file_checksums["content.json"] = await _sha256_file_async(content_file)
                 log.info(
                     "backup_content_snapshot_complete",
                     backup_id=backup_id,
@@ -265,12 +333,12 @@ async def run_backup(  # noqa: PLR0915
 
                     # Write graph backup
                     backup_dict = dc_asdict(graph_result.backup_data)
-                    graph_file.write_text(
-                        json.dumps(backup_dict, indent=2, default=str),
-                        encoding="utf-8",
+                    graph_size = await _write_json_file_async(
+                        graph_file,
+                        backup_dict,
+                        default=str,
                     )
-                    graph_size = graph_file.stat().st_size
-                    file_checksums["graph.json"] = _sha256_file(graph_file)
+                    file_checksums["graph.json"] = await _sha256_file_async(graph_file)
 
                     log.info(
                         "backup_graph_complete",
@@ -295,27 +363,28 @@ async def run_backup(  # noqa: PLR0915
                 graph_relationships=relationship_count,
                 files=file_checksums,
             )
-            metadata_file.write_text(
-                json.dumps(asdict(metadata), indent=2),
-                encoding="utf-8",
-            )
+            await _write_json_file_async(metadata_file, asdict(metadata))
 
             # Step 5: Create tar.gz archive
             archive_name = f"sibyl_{backup_id}.tar.gz"
             archive_path = backup_dir / archive_name
+            archive_tmp_path = tmp_path / archive_name
 
             log.info("backup_archive_start", backup_id=backup_id, archive_path=str(archive_path))
 
-            with tarfile.open(archive_path, "w:gz", compresslevel=6) as tar:
-                tar.add(metadata_file, arcname="metadata.json")
-                if include_auth_snapshot and auth_file.exists():
-                    tar.add(auth_file, arcname="auth.json")
-                if include_content_snapshot and content_file.exists():
-                    tar.add(content_file, arcname="content.json")
-                if include_graph and graph_file.exists():
-                    tar.add(graph_file, arcname="graph.json")
-
-            archive_size = archive_path.stat().st_size
+            archive_entries = [(metadata_file, "metadata.json", True)]
+            if include_auth_snapshot:
+                archive_entries.append((auth_file, "auth.json", False))
+            if include_content_snapshot:
+                archive_entries.append((content_file, "content.json", False))
+            if include_graph:
+                archive_entries.append((graph_file, "graph.json", False))
+            archive_size = await _create_backup_archive_async(
+                archive_tmp_path,
+                archive_entries,
+                compresslevel=6,
+            )
+            await _replace_file_async(archive_tmp_path, archive_path)
             duration = time.time() - start_time
             completed_at = datetime.now(UTC)
 
@@ -417,19 +486,7 @@ async def cleanup_old_backups(
     if not backup_dir.exists():
         return {"deleted": 0, "freed_bytes": 0, "duration_seconds": 0}
 
-    deleted = 0
-    freed_bytes = 0
-
-    for archive in backup_dir.glob("sibyl_backup_*.tar.gz"):
-        try:
-            if archive.stat().st_mtime < cutoff:
-                size = archive.stat().st_size
-                archive.unlink()
-                deleted += 1
-                freed_bytes += size
-                log.info("backup_deleted", path=str(archive), size_bytes=size)
-        except Exception as e:
-            log.warning("backup_delete_failed", path=str(archive), error=str(e))
+    deleted, freed_bytes = await asyncio.to_thread(_cleanup_old_backup_archives, backup_dir, cutoff)
 
     duration = time.time() - start_time
 
