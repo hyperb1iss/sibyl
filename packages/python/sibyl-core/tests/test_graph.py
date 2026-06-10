@@ -337,6 +337,67 @@ class _SlowEmbeddingProvider:
         return [[0.1, 0.2, 0.3, 0.4]]
 
 
+class _CoordinatedSearchEmbeddingProvider:
+    metadata = EmbeddingMetadata(
+        provider="deterministic",
+        model="coordinated-unit-test",
+        dimensions=4,
+        cache_namespace="native-graph-test",
+        tokenizer_estimate_method="unit-test",
+    )
+
+    def __init__(
+        self, *, fulltext_started: asyncio.Event, embedding_started: asyncio.Event
+    ) -> None:
+        self._fulltext_started = fulltext_started
+        self._embedding_started = embedding_started
+
+    async def embed_texts(
+        self,
+        texts: list[str],
+        *,
+        input_kind: str = "document",
+    ) -> list[list[float]]:
+        del texts, input_kind
+        self._embedding_started.set()
+        await self._fulltext_started.wait()
+        return [[0.1, 0.2, 0.3, 0.4]]
+
+
+class _CoordinatedSearchClient:
+    group_id = "org-native"
+
+    def __init__(
+        self, *, fulltext_started: asyncio.Event, embedding_started: asyncio.Event
+    ) -> None:
+        self._fulltext_started = fulltext_started
+        self._embedding_started = embedding_started
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        if params.get("_query_label") == "entity.search.fulltext":
+            self._fulltext_started.set()
+            await self._embedding_started.wait()
+            return [
+                {
+                    "record_id": "entity:parallel_search",
+                    "uuid": "parallel_search",
+                    "name": "Parallel Search",
+                    "entity_type": "topic",
+                    "summary": "parallel search",
+                    "group_id": self.group_id,
+                    "attributes": {},
+                    "created_at": datetime.now(UTC),
+                    "updated_at": datetime.now(UTC),
+                    "score": 1.0,
+                }
+            ]
+        if params.get("_query_label") == "entity.search.vector":
+            return []
+        return []
+
+
 @pytest.mark.asyncio
 async def test_graph_client_cache_evicts_oldest_client(
     monkeypatch: pytest.MonkeyPatch,
@@ -791,6 +852,35 @@ async def test_native_entity_manager_search_uses_configured_knn_effort(
     await manager.search(query="configured vector effort", limit=5)
 
     assert any("name_embedding <|32, 88|> $query_embedding" in query for query, _ in client.calls)
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_search_overlaps_fulltext_and_vector_branches() -> None:
+    fulltext_started = asyncio.Event()
+    embedding_started = asyncio.Event()
+    client = _CoordinatedSearchClient(
+        fulltext_started=fulltext_started,
+        embedding_started=embedding_started,
+    )
+    provider = _CoordinatedSearchEmbeddingProvider(
+        fulltext_started=fulltext_started,
+        embedding_started=embedding_started,
+    )
+    manager = EntityManager(
+        cast(SurrealGraphClient, client),
+        group_id=client.group_id,
+        embedding_provider=provider,
+    )
+
+    results = await asyncio.wait_for(manager.search(query="parallel search", limit=5), timeout=1)
+
+    assert [entity.id for entity, _score in results] == ["parallel_search"]
+    assert fulltext_started.is_set()
+    assert embedding_started.is_set()
+    assert {params.get("_query_label") for _query, params in client.calls} == {
+        "entity.search.fulltext",
+        "entity.search.vector",
+    }
 
 
 @pytest.mark.asyncio

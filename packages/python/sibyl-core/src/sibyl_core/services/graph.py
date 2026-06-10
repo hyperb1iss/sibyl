@@ -357,9 +357,47 @@ class EntityManager:
         search_query = build_fulltext_query(query)
         if not search_query:
             return []
+        result_limit = max(int(limit), 1)
+
+        fulltext_results, vector_results = await asyncio.gather(
+            self._fulltext_search(
+                query=query,
+                search_query=search_query,
+                entity_types=entity_types,
+                limit=result_limit,
+            ),
+            self._vector_search(
+                query=query,
+                entity_types=entity_types,
+                limit=result_limit,
+            ),
+        )
+
+        results = _merge_ranked_entity_results(
+            [
+                (vector_results, 1.2),
+                (fulltext_results, 1.0),
+            ],
+            limit=result_limit,
+        )
+        if not results:
+            results = await self._fallback_text_search(
+                query=query,
+                entity_types=entity_types,
+                limit=limit,
+            )
+        return results
+
+    async def _fulltext_search(
+        self,
+        *,
+        query: str,
+        search_query: str,
+        entity_types: Sequence[EntityType] | None,
+        limit: int,
+    ) -> list[tuple[Entity, float]]:
         type_values = [entity_type.value for entity_type in entity_types or ()]
         type_clause = "AND entity_type IN $entity_types" if type_values else ""
-        result_limit = max(int(limit), 1)
         rows = normalize_records(
             await self._client.execute_query(
                 """
@@ -387,7 +425,7 @@ class EntityManager:
                 group_id=self._group_id,
                 search_query=search_query,
                 entity_types=type_values,
-                limit=result_limit,
+                limit=limit,
                 _query_label="entity.search.fulltext",
             )
         )
@@ -395,27 +433,7 @@ class EntityManager:
         for row in rows:
             entity = _entity_from_row(row)
             fulltext_results.append((entity, _bounded_similarity_score(query, entity)))
-
-        vector_results = await self._vector_search(
-            query=query,
-            entity_types=entity_types,
-            limit=result_limit,
-        )
-
-        results = _merge_ranked_entity_results(
-            [
-                (vector_results, 1.2),
-                (fulltext_results, 1.0),
-            ],
-            limit=result_limit,
-        )
-        if not results:
-            results = await self._fallback_text_search(
-                query=query,
-                entity_types=entity_types,
-                limit=limit,
-            )
-        return results
+        return fulltext_results
 
     async def _vector_search(
         self,
