@@ -64,6 +64,38 @@ class _EmbeddingWriteClient:
         return []
 
 
+class _EntityUpdatePatchClient:
+    group_id = "org-native"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        if "UPDATE entity MERGE $patch" not in query:
+            raise AssertionError("update should happen in one server-side write")
+        patch = cast("dict[str, object]", params["patch"])
+        attributes_patch = cast("dict[str, object]", patch["attributes"])
+        return [
+            {
+                "uuid": params["uuid"],
+                "name": patch.get("name", "Original"),
+                "entity_type": "task",
+                "description": patch.get("description", "Original description"),
+                "content": patch.get("content", "Original content"),
+                "group_id": params["group_id"],
+                "attributes": {
+                    "existing": "preserved",
+                    "metadata": json.dumps({"legacy": "preserved"}),
+                    **attributes_patch,
+                },
+                "created_at": datetime(2026, 1, 1, tzinfo=UTC),
+                "updated_at": patch["updated_at"],
+                "status": patch.get("status"),
+            }
+        ]
+
+
 class _TransactionDeleteClient:
     group_id = "org-native"
 
@@ -583,6 +615,37 @@ async def test_native_entity_manager_generates_embeddings_with_native_provider()
     attributes = cast(dict[str, object], rows[0]["attributes"])
     assert isinstance(attributes["updated_at"], datetime)
     assert attributes["embedding_metadata"] == provider.metadata.to_dict()
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_update_uses_server_side_merge() -> None:
+    client = _EntityUpdatePatchClient()
+    manager = EntityManager(cast("SurrealGraphClient", client), group_id=client.group_id)
+
+    updated = await manager.update(
+        "task-native",
+        {
+            "metadata": {"project_id": "project-native"},
+            "status": "done",
+            "title": "Updated task",
+        },
+    )
+
+    assert updated is not None
+    assert updated.name == "Updated task"
+    assert updated.metadata["existing"] == "preserved"
+    assert updated.metadata["legacy"] == "preserved"
+    assert updated.metadata["project_id"] == "project-native"
+    assert updated.metadata["status"] == "done"
+    query, params = client.calls[0]
+    assert "BEGIN TRANSACTION" in query
+    assert "UPDATE entity MERGE $patch" in query
+    assert "RETURN NONE" in query
+    assert len(client.calls) == 1
+    patch = cast("dict[str, object]", params["patch"])
+    attributes = cast("dict[str, object]", patch["attributes"])
+    assert patch["status"] == "done"
+    assert attributes["status"] == "done"
 
 
 @pytest.mark.asyncio
@@ -2007,6 +2070,7 @@ async def test_graph_writes_entities_and_relationships() -> None:
         assert updated is not None
         assert updated.name == "Updated Native Decision"
         assert updated.metadata["status"] == "done"
+        assert updated.metadata["source_ids"] == ["raw_123"]
 
         fetched_relationships = await relationship_manager.get_for_entity(
             "decision_native",
@@ -2374,6 +2438,65 @@ async def test_graph_writes_entities_and_relationships() -> None:
         )
         assert [rel.target_id for rel in redirected] == ["dedup_neighbor"]
         assert await relationship_manager.get_for_entity("dedup_remove", direction="both") == []
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_entity_update_recomputes_summary_after_server_side_merge() -> None:
+    client = SurrealGraphClient(group_id="org-native-summary-update", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        entity_manager = EntityManager(client, group_id=client.group_id)
+
+        await entity_manager.create_direct(
+            Entity(
+                id="summary_native",
+                entity_type=EntityType.TOPIC,
+                name="Original Summary Name",
+                description="",
+                organization_id=client.group_id,
+            )
+        )
+
+        renamed = await entity_manager.update(
+            "summary_native",
+            {"title": "Renamed Summary Name"},
+        )
+
+        assert renamed is not None
+        assert renamed.name == "Renamed Summary Name"
+        assert renamed.description == "Renamed Summary Name"
+
+        long_description = "Detailed summary source " * 30
+        described = await entity_manager.update(
+            "summary_native",
+            {"description": long_description},
+        )
+
+        assert described is not None
+        assert described.description == long_description.strip()
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT summary
+                FROM entity
+                WHERE group_id = $group_id AND uuid = "summary_native"
+                LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        assert rows[0]["summary"] == long_description[:500]
+
+        cleared = await entity_manager.update(
+            "summary_native",
+            {"description": ""},
+        )
+
+        assert cleared is not None
+        assert cleared.description == "Renamed Summary Name"
     finally:
         await client.close()
 
