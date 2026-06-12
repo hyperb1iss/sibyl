@@ -881,9 +881,8 @@ async def test_context_pack_to_markdown_renders_injection_shape(
     assert "Layer: recall" in markdown
     assert "## Active Work" in markdown
     assert "**Task** (task) `task-1`" in markdown
-    assert (
-        "_graph; src=task-source.md; project=project-123; updated=2026-04-20T10:30:00Z"
-    ) in markdown
+    assert "_src=task-source.md; project=project-123; updated=2026-04-20_" in markdown
+    assert "Why:" not in markdown
     assert "Hint:" in markdown
 
 
@@ -1193,3 +1192,103 @@ async def test_pack_items_keep_full_metadata_in_audit_mode(
     assert item.metadata.get("retrieval_signals") == ["node_vector"]
     assert item.metadata.get("candidate_kind") == "node"
     assert item.metadata.get("embedding_metadata") == {"provider": "openai"}
+
+
+def test_markdown_renderer_drops_redundant_provenance() -> None:
+    from sibyl_core.models.context import ContextPack, ContextSection
+
+    item = ContextItem(
+        id="task-1",
+        type="task",
+        name="Task",
+        content="Do the thing",
+        score=1.0,
+        facet=ContextFacet.ACTIVE_WORK,
+        reason="task can change what the agent should do next",
+        source="task-1",
+        quality=ContextItemQualityMetadata(
+            origin="graph",
+            source="task-1",
+            project_id="project-1",
+            updated_at="2026-05-12T10:51:38.001928+00:00",
+        ),
+        metadata={"status": "doing", "source_id": "task-1"},
+        related=[
+            ContextRelatedItem(
+                id="project-1",
+                type="project",
+                name="sibyl",
+                relationship="BELONGS_TO",
+                direction="outgoing",
+            ),
+            ContextRelatedItem(
+                id="task-2",
+                type="task",
+                name="Other task",
+                relationship="DEPENDS_ON",
+                direction="outgoing",
+            ),
+        ],
+    )
+    pack = ContextPack(
+        goal="ship",
+        intent=ContextIntent.BUILD,
+        query="ship",
+        domain=None,
+        project="project-1",
+        sections=[
+            ContextSection(facet=ContextFacet.ACTIVE_WORK, title="Active Work", items=[item])
+        ],
+        total_items=1,
+        layer=ContextLayer.RECALL,
+    )
+
+    markdown = context_pack_to_markdown(pack)
+
+    assert "**Task** (task · doing) `task-1`" in markdown
+    assert "src=" not in markdown
+    assert "project=" not in markdown
+    assert "_graph" not in markdown
+    assert "updated=2026-05-12_" in markdown or "updated=2026-05-12;" in markdown
+    assert "BELONGS_TO sibyl" not in markdown
+    assert "DEPENDS_ON Other task (task)" in markdown
+    assert "Why:" not in markdown
+
+
+def test_markdown_renderer_omits_related_line_when_only_project_edges() -> None:
+    from sibyl_core.models.context import ContextPack, ContextSection
+
+    item = ContextItem(
+        id="decision-1",
+        type="decision",
+        name="Decision",
+        content="We chose X",
+        score=1.0,
+        facet=ContextFacet.DECISIONS,
+        reason="decision records a choice",
+        source="decision-1",
+        metadata={"source_id": "decision-1"},
+        related=[
+            ContextRelatedItem(
+                id="project-1",
+                type="project",
+                name="sibyl",
+                relationship="BELONGS_TO",
+                direction="outgoing",
+            ),
+        ],
+    )
+    pack = ContextPack(
+        goal="ship",
+        intent=ContextIntent.BUILD,
+        query="ship",
+        domain=None,
+        project="project-1",
+        sections=[ContextSection(facet=ContextFacet.DECISIONS, title="Decisions", items=[item])],
+        total_items=1,
+        layer=ContextLayer.RECALL,
+    )
+
+    markdown = context_pack_to_markdown(pack)
+
+    assert "Related:" not in markdown

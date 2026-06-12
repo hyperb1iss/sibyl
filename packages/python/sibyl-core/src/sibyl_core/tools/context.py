@@ -588,19 +588,37 @@ def context_item_lifecycle_state(item: ContextItem) -> str | None:
     )
 
 
-def _quality_metadata_to_markdown(quality: Any) -> str:
+def _date_only(value: str | None) -> str | None:
+    if not value:
+        return None
+    if len(value) >= 10 and value[4:5] == "-" and value[7:8] == "-":
+        return value[:10]
+    return value
+
+
+def _quality_metadata_to_markdown(
+    quality: Any,
+    *,
+    item_id: str | None = None,
+    pack_project: str | None = None,
+) -> str:
+    """Render provenance that adds signal, skipping values the pack already states."""
+
     parts: list[str] = []
-    if origin := _quality_value(quality, "origin"):
+    origin = _quality_value(quality, "origin")
+    if origin and origin != "graph":
         parts.append(origin)
-    if source := _quality_value(quality, "source"):
+    source = _quality_value(quality, "source")
+    if source and source != item_id:
         parts.append(f"src={source}")
-    if project_id := _quality_value(quality, "project_id"):
+    project_id = _quality_value(quality, "project_id")
+    if project_id and project_id != pack_project:
         parts.append(f"project={project_id}")
-    if updated_at := _quality_value(quality, "updated_at"):
+    if updated_at := _date_only(_quality_value(quality, "updated_at")):
         parts.append(f"updated={updated_at}")
-    elif created_at := _quality_value(quality, "created_at"):
+    elif created_at := _date_only(_quality_value(quality, "created_at")):
         parts.append(f"created={created_at}")
-    if valid_at := _quality_value(quality, "valid_at"):
+    if valid_at := _date_only(_quality_value(quality, "valid_at")):
         parts.append(f"valid={valid_at}")
     if url := _quality_value(quality, "url"):
         parts.append(f"url={url}")
@@ -640,21 +658,35 @@ def context_pack_to_markdown(
         for item in section.items[:items_per_section]:
             if remaining <= 0:
                 break
-            type_label = f" ({item.type})" if item.type else ""
+            status = _compact_metadata_value(item.metadata.get("status"))
+            if item.type and status:
+                type_label = f" ({item.type} · {status})"
+            elif item.type:
+                type_label = f" ({item.type})"
+            else:
+                type_label = ""
             item_quality = getattr(item, "quality", item.metadata.get("quality", {}))
-            quality = _quality_metadata_to_markdown(item_quality)
+            quality = _quality_metadata_to_markdown(
+                item_quality,
+                item_id=item.id,
+                pack_project=pack.project,
+            )
             quality_label = f" _{quality}_" if quality else ""
             lines.append(f"- **{item.name}**{type_label} `{item.id}`{quality_label}")
-            if item.reason:
-                lines.append(f"  - Why: {item.reason}")
             if item.content:
                 lines.append(f"  - Memory: {_compact_text(item.content, max_content_chars)}")
             if include_related and item.related:
-                related = "; ".join(
-                    f"{candidate.relationship} {candidate.name} ({candidate.type})"
-                    for candidate in item.related[:3]
-                )
-                lines.append(f"  - Related: {related}")
+                related_entries = [
+                    candidate
+                    for candidate in item.related
+                    if not (candidate.relationship == "BELONGS_TO" and candidate.type == "project")
+                ]
+                if related_entries:
+                    related = "; ".join(
+                        f"{candidate.relationship} {candidate.name} ({candidate.type})"
+                        for candidate in related_entries[:3]
+                    )
+                    lines.append(f"  - Related: {related}")
             remaining -= 1
 
     if pack.usage_hint:
