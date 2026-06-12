@@ -3544,7 +3544,7 @@ requires-dist = [
     { name = "surrealdb", specifier = ">=2.0.0,<3.0" },
     { name = "tomli-w", specifier = ">=1.2.0" },
     { name = "typer", specifier = ">=0.20.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.38" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.48.0" },
 ]
 provides-extras = ["docs", "generator", "graphrag", "graphrag-leiden"]
 
