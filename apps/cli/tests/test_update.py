@@ -232,6 +232,41 @@ class TestUpdateFunctions:
         with patch("sibyl_cli.update.SIBYL_LOCAL_COMPOSE", tmp_path / "nonexistent.yml"):
             assert update_containers() is False
 
+    def test_update_containers_disables_default_env_file(self, tmp_path: Path) -> None:
+        """update_containers does not let Compose load a repo .env."""
+        from sibyl_cli.update import update_containers
+
+        compose = tmp_path / "docker-compose.yml"
+        compose.write_text("services: {}\n")
+        calls: list[list[str]] = []
+
+        def fake_run(cmd: list[str], **_: object) -> MagicMock:
+            calls.append(cmd)
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "api\n" if cmd[-2:] == ["ps", "-q"] else ""
+            return result
+
+        with (
+            patch("sibyl_cli.update.SIBYL_LOCAL_COMPOSE", compose),
+            patch("sibyl_cli.update.subprocess.run", side_effect=fake_run),
+        ):
+            assert update_containers() is True
+
+        compose_prefix = [
+            "docker",
+            "compose",
+            "-f",
+            str(compose),
+            "--env-file",
+            "/dev/null",
+        ]
+        assert calls == [
+            [*compose_prefix, "ps", "-q"],
+            [*compose_prefix, "pull"],
+            [*compose_prefix, "up", "-d"],
+        ]
+
     def test_update_skills_delegates_to_setup(self) -> None:
         """update_skills calls setup_agent_integration."""
         from sibyl_cli.update import update_skills

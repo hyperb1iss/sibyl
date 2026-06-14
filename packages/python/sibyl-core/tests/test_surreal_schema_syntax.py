@@ -25,6 +25,7 @@ from sibyl_core.backends.surreal.content_schema import (
     CONTENT_EXTRACTED_INTO_RELATION_MIGRATION_DEFINITIONS,
     CONTENT_HIGHLIGHT_SNIPPET_MIGRATION_DEFINITIONS,
     CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS,
+    CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS,
     CONTENT_PERMISSION_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_CHANGEFEED_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS,
@@ -382,12 +383,47 @@ def test_content_entity_anchors_are_versioned() -> None:
         statement for migration in migrations for statement in migration.statements
     )
 
-    assert CONTENT_SCHEMA_CURRENT_VERSION == 13
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 13
     assert "entity" in CONTENT_TABLES
     assert "content_entity_anchors" in [migration.name for migration in migrations]
     assert "DEFINE TABLE IF NOT EXISTS entity SCHEMAFULL" in CONTENT_SCHEMA_DEFINITIONS
     assert "idx_content_entity_org_uuid" in CONTENT_SCHEMA_DEFINITIONS
     assert CONTENT_ENTITY_ANCHOR_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
+
+
+def test_content_backup_legacy_include_cleanup_is_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration_sql = "\n".join(
+        statement for migration in migrations for statement in migration.statements
+    )
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 14
+    assert "content_backup_full_org_archives" in [migration.name for migration in migrations]
+    assert "REMOVE FIELD IF EXISTS include_postgres ON TABLE backup_settings" in migration_sql
+    assert "REMOVE FIELD IF EXISTS include_postgres ON TABLE backups" in migration_sql
+    assert "DEFINE FIELD OVERWRITE include_database_dump ON backup_settings" in migration_sql
+    assert "UPDATE backup_settings SET include_database_dump = false, include_graph = true" in (
+        migration_sql
+    )
+
+
+def test_content_lookup_indexes_are_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration_sql = "\n".join(
+        statement for migration in migrations for statement in migration.statements
+    )
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION == 15
+    assert "content_lookup_indexes" in [migration.name for migration in migrations]
+    for index_name in (
+        "idx_crawl_sources_org_uuid",
+        "idx_crawl_sources_org_status_created",
+        "idx_crawled_documents_org_uuid",
+        "idx_document_chunks_org_uuid",
+    ):
+        assert index_name in CONTENT_SCHEMA_DEFINITIONS
+        assert index_name in CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS
+        assert index_name in migration_sql
 
 
 def test_raw_capture_changefeed_cursor_is_versioned() -> None:

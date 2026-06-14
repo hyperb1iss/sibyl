@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from sibyl.api.event_types import WSEvent
 from sibyl.jobs import raw_changefeed
 
 
@@ -93,12 +94,14 @@ async def test_poll_raw_capture_changefeed_queues_changes_and_saves_cursor(
         ]
     )
     enqueue_raw_promotion = AsyncMock(return_value="raw_promotion:queued")
+    publish_event = AsyncMock()
     monkeypatch.setattr(raw_changefeed, "surreal_content_client", _client_context(client))
     monkeypatch.setattr(
         raw_changefeed.job_queue,
         "enqueue_raw_promotion",
         enqueue_raw_promotion,
     )
+    monkeypatch.setattr("sibyl.api.pubsub.publish_event", publish_event)
 
     result = await raw_changefeed.poll_raw_capture_changefeed(
         {},
@@ -123,6 +126,87 @@ async def test_poll_raw_capture_changefeed_queues_changes_and_saves_cursor(
         "raw_memory_count": 2,
         "promotion_job_id": "raw_promotion:queued",
     }
+    publish_event.assert_awaited_once_with(
+        WSEvent.RAW_CAPTURE_CHANGED,
+        {
+            "organization_id": "org-1",
+            "raw_memory_ids": ["raw-a", "raw-b"],
+            "promotion_job_id": "raw_promotion:queued",
+            "rows_seen": 2,
+            "previous_versionstamp": 0,
+            "next_versionstamp": 9,
+        },
+        org_id="org-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_raw_capture_changefeed_broadcast_payload_uses_org_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publish_event = AsyncMock()
+    monkeypatch.setattr("sibyl.api.pubsub.publish_event", publish_event)
+
+    await raw_changefeed._safe_broadcast_raw_capture_changed(
+        {
+            "organization_id": "org-1",
+            "changed_raw_memory_ids": ["raw-a", "raw-b"],
+            "promotion_job_id": "raw_promotion:queued",
+            "rows_seen": 2,
+            "previous_versionstamp": 3,
+            "next_versionstamp": 9,
+        }
+    )
+
+    publish_event.assert_awaited_once_with(
+        WSEvent.RAW_CAPTURE_CHANGED,
+        {
+            "organization_id": "org-1",
+            "raw_memory_ids": ["raw-a", "raw-b"],
+            "promotion_job_id": "raw_promotion:queued",
+            "rows_seen": 2,
+            "previous_versionstamp": 3,
+            "next_versionstamp": 9,
+        },
+        org_id="org-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_queue_raw_capture_changes_enqueues_promotion_and_broadcasts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    enqueue_raw_promotion = AsyncMock(return_value="raw_promotion:queued")
+    publish_event = AsyncMock()
+    monkeypatch.setattr(
+        raw_changefeed.job_queue,
+        "enqueue_raw_promotion",
+        enqueue_raw_promotion,
+    )
+    monkeypatch.setattr("sibyl.api.pubsub.publish_event", publish_event)
+
+    job_id = await raw_changefeed.queue_raw_capture_changes(
+        "org-1",
+        raw_memory_ids=["raw-a", "raw-b"],
+        rows_seen=2,
+    )
+
+    assert job_id == "raw_promotion:queued"
+    enqueue_raw_promotion.assert_awaited_once_with(
+        "org-1",
+        raw_memory_ids=["raw-a", "raw-b"],
+        limit=2,
+    )
+    publish_event.assert_awaited_once_with(
+        WSEvent.RAW_CAPTURE_CHANGED,
+        {
+            "organization_id": "org-1",
+            "raw_memory_ids": ["raw-a", "raw-b"],
+            "promotion_job_id": "raw_promotion:queued",
+            "rows_seen": 2,
+        },
+        org_id="org-1",
+    )
 
 
 @pytest.mark.asyncio

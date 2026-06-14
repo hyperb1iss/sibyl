@@ -225,8 +225,8 @@ jobs:
             .moon/cache
             apps/web/.next/cache
           key:
-            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock',
-            'apps/web/pnpm-lock.yaml') }}
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock', 'apps/web/pnpm-lock.yaml')
+            }}
           restore-keys: |
             moon-${{ runner.os }}-
 
@@ -330,8 +330,8 @@ jobs:
             .moon/cache
             apps/web/.next/cache
           key:
-            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock',
-            'apps/web/pnpm-lock.yaml') }}
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock', 'apps/web/pnpm-lock.yaml')
+            }}
           restore-keys: |
             moon-${{ runner.os }}-
 
@@ -402,8 +402,8 @@ jobs:
             .moon/cache
             apps/web/.next/cache
           key:
-            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock',
-            'apps/web/pnpm-lock.yaml') }}
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock', 'apps/web/pnpm-lock.yaml')
+            }}
           restore-keys: |
             moon-${{ runner.os }}-
 
@@ -485,9 +485,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: .moon/cache
-          key:
-            moon-live-${{ runner.os }}-${{ hashFiles('.prototools',
-            'uv.lock') }}
+          key: moon-live-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
           restore-keys: |
             moon-live-${{ runner.os }}-
 
@@ -556,8 +554,8 @@ jobs:
             .moon/cache
             apps/web/.next/cache
           key:
-            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock',
-            'apps/web/pnpm-lock.yaml') }}
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock', 'apps/web/pnpm-lock.yaml')
+            }}
           restore-keys: |
             moon-${{ runner.os }}-
 
@@ -648,7 +646,7 @@ jobs:
           tail -n 200 /tmp/sibyl-web.log || true
           echo ""
           echo "=== SurrealDB logs ==="
-          docker compose logs surrealdb || true
+          docker compose --env-file /dev/null logs surrealdb || true
 
   storybook:
     name: Storybook
@@ -675,8 +673,8 @@ jobs:
             .moon/cache
             apps/web/.next/cache
           key:
-            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock',
-            'apps/web/pnpm-lock.yaml') }}
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock', 'apps/web/pnpm-lock.yaml')
+            }}
           restore-keys: |
             moon-${{ runner.os }}-
 

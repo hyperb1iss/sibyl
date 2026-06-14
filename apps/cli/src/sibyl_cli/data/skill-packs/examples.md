@@ -7,7 +7,7 @@ Concrete examples showing the CLI in action.
 > - `sibyl task add` → Use `sibyl task create --title "..."`
 > - `-t "Title"` → Use `--title "..."` for task creation
 > - `jq '.[].title'` → Use `jq '.[].name'` (field is `name`)
-> - Not fetching full content → Use `sibyl entity show <id>` after search
+> - Not fetching full content → Use `sibyl show <id>` after search
 
 ---
 
@@ -28,7 +28,7 @@ sibyl search "redis connection"
 # Output includes ID like: episode:abc123-uuid-here
 
 # 2. Fetch full content by ID
-sibyl entity show "episode:abc123-uuid-here"
+sibyl show "episode:abc123-uuid-here"
 ```
 
 ### Search with Type Filter
@@ -180,7 +180,7 @@ sibyl entity list --type pattern --category security
 ### Show Entity
 
 ```bash
-sibyl entity show ptrn_a1b2c3d4e5f6
+sibyl show ptrn_a1b2c3d4e5f6
 ```
 
 ### Create Entity (Capture Learning)
@@ -286,7 +286,7 @@ A full feature implementation from start to finish:
 # 1. Research phase
 sibyl search "user authentication" --type pattern
 # Found pattern:abc123... - get full content
-sibyl entity show "pattern:abc123-uuid"
+sibyl show "pattern:abc123-uuid"
 
 sibyl search "OAuth implementation" --type episode
 

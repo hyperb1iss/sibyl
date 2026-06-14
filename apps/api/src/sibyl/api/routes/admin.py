@@ -874,28 +874,88 @@ def _debug_params_for_org(params: dict[str, Any], *, group_id: str) -> dict[str,
     return sanitized
 
 
-def _is_read_only(query: str) -> bool:
-    """Check if a graph query is read-only."""
-    dangerous = [
+_GRAPH_DEBUG_FORBIDDEN_TOKENS = frozenset(
+    {
         "ALTER",
+        "BEGIN",
+        "CALL",
+        "CANCEL",
+        "COMMIT",
         "CREATE",
         "DEFINE",
         "DELETE",
         "DROP",
+        "INFO",
         "INSERT",
+        "KILL",
+        "LIVE",
+        "MATCH",
         "MERGE",
         "REBUILD",
         "RELATE",
         "REMOVE",
+        "SLEEP",
         "SET",
+        "THROW",
+        "UNWIND",
+        "USE",
         "UPSERT",
         "UPDATE",
-    ]
-    return _query_tokens(query).isdisjoint(dangerous)
+    }
+)
+
+
+def _query_has_additional_statement(query: str) -> bool:
+    index = 0
+    length = len(query)
+    while index < length:
+        char = query[index]
+        next_char = query[index + 1] if index + 1 < length else ""
+        if char in {"'", '"', "`"}:
+            index = _skip_query_literal(query, index)
+            continue
+        if (char == "/" and next_char == "*") or (char == "-" and next_char == "-"):
+            index = _skip_query_comment(query, index)
+            continue
+        if char == "/" and next_char == "/":
+            index = _skip_query_comment(query, index)
+            continue
+        if char == ";":
+            return _skip_query_separators(query, index + 1) < length
+        index += 1
+    return False
+
+
+def _query_has_namespace_separator(query: str) -> bool:
+    index = 0
+    length = len(query)
+    while index < length:
+        char = query[index]
+        next_char = query[index + 1] if index + 1 < length else ""
+        if char in {"'", '"', "`"}:
+            index = _skip_query_literal(query, index)
+            continue
+        if (char == "/" and next_char == "*") or (char == "-" and next_char == "-"):
+            index = _skip_query_comment(query, index)
+            continue
+        if char == "/" and next_char == "/":
+            index = _skip_query_comment(query, index)
+            continue
+        if char == ":" and next_char == ":":
+            return True
+        index += 1
+    return False
 
 
 def _is_supported_debug_dialect(query: str) -> bool:
-    return _query_tokens(query).isdisjoint({"CALL", "MATCH", "UNWIND"})
+    tokens = [token.upper() for token in query_tokens(query)]
+    return (
+        bool(tokens)
+        and tokens[0] == "SELECT"
+        and not _query_has_additional_statement(query)
+        and not _query_has_namespace_separator(query)
+        and set(tokens).isdisjoint(_GRAPH_DEBUG_FORBIDDEN_TOKENS)
+    )
 
 
 @router.post(
@@ -914,15 +974,10 @@ async def debug_query(
 
     Requires organization OWNER role.
     """
-    if not _is_read_only(request.cypher):
-        raise HTTPException(
-            status_code=400,
-            detail="Only read-only queries allowed",
-        )
     if not _is_supported_debug_dialect(request.cypher):
         raise HTTPException(
             status_code=400,
-            detail="Surreal runtime debug queries must use read-only SurrealQL",
+            detail="Surreal runtime debug queries must use a single read-only SELECT",
         )
 
     group_id = str(org.id)

@@ -35,7 +35,7 @@ class SearchResponse:
     offset: int = 0
     has_more: bool = False
     # Client guidance - tells assistants and scripts how to get full content
-    usage_hint: str = "Results show previews. To get full content, use: sibyl entity show <id>"
+    usage_hint: str = "Results show previews. To get full content, use: sibyl show <id>"
 
 
 @dataclass
@@ -100,6 +100,7 @@ class AddResponse:
     message: str
     timestamp: datetime
     conflicts: list[ConflictWarning] = field(default_factory=list)
+    background_jobs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

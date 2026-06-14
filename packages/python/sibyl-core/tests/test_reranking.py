@@ -17,9 +17,12 @@ import pytest
 
 from sibyl_core.retrieval.reranking import (
     CrossEncoderConfig,
+    FeatureRerankCandidate,
     RerankResult,
     _extract_content,
     cross_encoder_rerank,
+    fit_feature_weighted_reranker,
+    rerank_by_feature_weights,
     rerank_results,
 )
 
@@ -78,6 +81,56 @@ class TestRerankResult:
             metadata={"reranking_skipped": "disabled"},
         )
         assert result.metadata["reranking_skipped"] == "disabled"
+
+
+class TestFeatureWeightedReranking:
+    """Test feature-weighted reranking helpers."""
+
+    def test_fit_feature_weights_from_labeled_rows(self) -> None:
+        rows = [
+            {
+                "label": 1,
+                "features": {"query_overlap": 1.0, "generic_assistant_count": 0.0},
+            },
+            {
+                "label": 0,
+                "features": {"query_overlap": 0.0, "generic_assistant_count": 1.0},
+            },
+        ]
+
+        model = fit_feature_weighted_reranker(rows, name="test-linear")
+
+        assert model.name == "test-linear"
+        assert model.weights["query_overlap"] > 0
+        assert model.weights["generic_assistant_count"] < 0
+
+    def test_rerank_by_feature_weights_preserves_interpretability(self) -> None:
+        model = fit_feature_weighted_reranker(
+            [
+                {"label": 1, "features": {"query_overlap": 1.0}},
+                {"label": 0, "features": {"query_overlap": 0.0}},
+            ]
+        )
+        candidates = [
+            FeatureRerankCandidate(
+                item="distractor",
+                stable_id="distractor",
+                original_rank=1,
+                features={"query_overlap": 0.0},
+            ),
+            FeatureRerankCandidate(
+                item="answer",
+                stable_id="answer",
+                original_rank=2,
+                features={"query_overlap": 1.0},
+            ),
+        ]
+
+        ranked = rerank_by_feature_weights(candidates, model)
+
+        assert ranked[0].item == "answer"
+        assert ranked[0].stable_id == "answer"
+        assert ranked[0].feature_contributions["query_overlap"] > 0
 
 
 # =============================================================================

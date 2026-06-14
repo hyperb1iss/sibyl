@@ -87,7 +87,7 @@ interface SearchResponse {
 }
 
 interface SearchResult {
-  id: string; // Entity/chunk ID, use with `sibyl entity show <id>`
+  id: string; // Entity/chunk ID, use with `sibyl show <id>`
   type: string; // Entity type or "document"
   name: string;
   content: string; // Truncated preview
@@ -136,7 +136,7 @@ interface SearchResult {
   "graph_count": 3,
   "document_count": 2,
   "has_more": false,
-  "usage_hint": "Results show previews. To get full content, use: sibyl entity show <id>"
+  "usage_hint": "Results show previews. To get full content, use: sibyl show <id>"
 }
 ```
 

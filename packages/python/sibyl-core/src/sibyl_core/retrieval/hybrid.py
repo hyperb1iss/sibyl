@@ -8,7 +8,8 @@ Implements a two-phase retrieval strategy:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, TypeVar
@@ -35,6 +36,27 @@ log = structlog.get_logger()
 
 T = TypeVar("T")
 MIN_PRIMARY_SEEDS_BEFORE_LINKING = 5
+DEFAULT_GRAPH_RELATIONSHIP_TYPE_WEIGHTS: Mapping[str, float] = {
+    "APPLIES_TO": 1.1,
+    "REQUIRES": 1.15,
+    "ENABLES": 1.15,
+    "BREAKS": 1.15,
+    "CONFLICTS_WITH": 1.1,
+    "SUPERSEDES": 1.1,
+    "BELONGS_TO": 1.2,
+    "CONTAINS": 1.1,
+    "DEPENDS_ON": 1.25,
+    "BLOCKS": 1.25,
+    "REFERENCES": 1.15,
+    "ENCOUNTERED": 1.1,
+    "IMPLEMENTED": 1.15,
+    "VALIDATED_BY": 1.15,
+    "USES_PROCEDURE": 1.15,
+    "DERIVED_FROM": 1.05,
+    "DOCUMENTED_IN": 1.0,
+    "RELATED_TO": 0.85,
+    "MENTIONS": 0.35,
+}
 
 
 def _require_group_id(group_id: str | None, operation: str) -> str:
@@ -152,6 +174,9 @@ class HybridConfig:
     apply_query_coverage_rerank: bool = True
     apply_query_entity_linking: bool = True
     graph_expansion_only_boost: float = 0.45
+    graph_relationship_type_weights: Mapping[str, float] = field(
+        default_factory=lambda: dict(DEFAULT_GRAPH_RELATIONSHIP_TYPE_WEIGHTS)
+    )
     reference_time: datetime | None = None
 
 
@@ -176,6 +201,20 @@ class HybridResult:
     def total(self) -> int:
         """Number of results."""
         return len(self.results)
+
+
+def _initial_reranking_receipt(config: HybridConfig) -> dict[str, Any]:
+    receipt: dict[str, Any] = {
+        "enabled": config.apply_reranking,
+        "applied": False,
+        "reranked_count": 0,
+    }
+    if config.apply_reranking:
+        receipt["requested_model"] = config.rerank_model
+        receipt["top_k"] = config.rerank_top_k
+    else:
+        receipt["reranking_skipped"] = "disabled"
+    return receipt
 
 
 @dataclass
@@ -271,6 +310,7 @@ async def graph_traversal(
     depth: int = 2,
     limit: int = 20,
     group_id: str | None = None,
+    relationship_type_weights: Mapping[str, float] | None = None,
 ) -> list[tuple[Any, float]]:
     """Traverse graph from seed entities.
 
@@ -302,6 +342,7 @@ async def graph_traversal(
             depth=depth,
             limit=limit,
             group_id=resolved_group_id,
+            relationship_type_weights=relationship_type_weights,
         )
     except Exception as e:
         log.warning("graph_traversal_failed", seeds=seed_ids, error=str(e))
@@ -315,6 +356,7 @@ async def _graph_traversal_via_relationship_manager(
     depth: int,
     limit: int,
     group_id: str,
+    relationship_type_weights: Mapping[str, float] | None,
 ) -> list[tuple[Entity, float]]:
     from sibyl_core.services.graph import (
         RelationshipManager,
@@ -325,6 +367,11 @@ async def _graph_traversal_via_relationship_manager(
         raise RuntimeError("Graph traversal requires a native graph client")
 
     relationship_manager = RelationshipManager(client, group_id=group_id)
+    effective_relationship_type_weights = (
+        DEFAULT_GRAPH_RELATIONSHIP_TYPE_WEIGHTS
+        if relationship_type_weights is None
+        else relationship_type_weights
+    )
 
     seed_id_set = {seed_id for seed_id in seed_ids if seed_id}
     frontier = [seed_id for seed_id in seed_ids if seed_id]
@@ -335,7 +382,6 @@ async def _graph_traversal_via_relationship_manager(
         if not frontier or len(results_by_id) >= limit:
             break
 
-        next_frontier: list[str] = []
         batch_method = getattr(type(relationship_manager), "get_related_entities_batch", None)
         if batch_method is not None:
             related_by_seed = await relationship_manager.get_related_entities_batch(
@@ -351,31 +397,40 @@ async def _graph_traversal_via_relationship_manager(
                     limit=max(limit * 2, 50),
                 )
 
+        tier_candidates: dict[str, tuple[Entity, float, int]] = {}
         for entity_id in frontier:
             related = related_by_seed.get(entity_id, [])
-            for entity, _relationship in related:
+            for entity, relationship in related:
                 if not entity.id or entity.id in seed_id_set or entity.id in visited:
                     continue
 
-                visited.add(entity.id)
-                score = 1.0 / (current_depth + 1)
-                results_by_id[entity.id] = (entity, score, current_depth)
-                next_frontier.append(entity.id)
+                score = _graph_relationship_score(
+                    relationship,
+                    depth=current_depth,
+                    relationship_type_weights=effective_relationship_type_weights,
+                )
+                existing = tier_candidates.get(entity.id)
+                if existing is None or score > existing[1]:
+                    tier_candidates[entity.id] = (entity, score, current_depth)
 
-                if len(results_by_id) >= limit:
-                    break
+        ordered_tier = sorted(
+            tier_candidates.values(),
+            key=lambda item: (-item[1], item[0].name.lower(), item[0].id),
+        )
+        remaining = max(limit - len(results_by_id), 0)
+        selected_tier = ordered_tier[:remaining]
+        for entity, score, candidate_depth in selected_tier:
+            results_by_id[entity.id] = (entity, score, candidate_depth)
+            visited.add(entity.id)
 
-            if len(results_by_id) >= limit:
-                break
-
-        frontier = next_frontier
+        frontier = [entity.id for entity, _score, _depth in selected_tier]
 
     if not results_by_id:
         return []
 
     ordered = sorted(
         results_by_id.values(),
-        key=lambda item: (item[2], item[0].name.lower(), item[0].id),
+        key=lambda item: (item[2], -item[1], item[0].name.lower(), item[0].id),
     )
     results = [(entity, score) for entity, score, _distance in ordered[:limit]]
     log.debug(
@@ -386,6 +441,46 @@ async def _graph_traversal_via_relationship_manager(
         strategy="relationship_manager",
     )
     return results
+
+
+def _graph_relationship_score(
+    relationship: Any,
+    *,
+    depth: int,
+    relationship_type_weights: Mapping[str, float] | None,
+) -> float:
+    distance_score = 1.0 / (depth + 1)
+    return (
+        distance_score
+        * _relationship_weight(relationship)
+        * _relationship_type_multiplier(relationship, relationship_type_weights)
+    )
+
+
+def _relationship_weight(relationship: Any) -> float:
+    weight = getattr(relationship, "weight", 1.0)
+    if isinstance(weight, int | float) and not isinstance(weight, bool):
+        return max(float(weight), 0.0)
+    return 1.0
+
+
+def _relationship_type_multiplier(
+    relationship: Any,
+    relationship_type_weights: Mapping[str, float] | None,
+) -> float:
+    if not relationship_type_weights:
+        return 1.0
+    relationship_type = getattr(relationship, "relationship_type", None)
+    key = str(getattr(relationship_type, "value", relationship_type) or "")
+    if not key:
+        return 1.0
+    sentinel = object()
+    multiplier = relationship_type_weights.get(key, sentinel)
+    if multiplier is sentinel:
+        multiplier = relationship_type_weights.get(key.upper(), sentinel)
+    if isinstance(multiplier, int | float) and not isinstance(multiplier, bool):
+        return max(float(multiplier), 0.0)
+    return 1.0
 
 
 async def hybrid_search(
@@ -421,6 +516,7 @@ async def hybrid_search(
     """
     if config is None:
         config = HybridConfig()
+    reranking_receipt = _initial_reranking_receipt(config)
 
     resolved_group_id = _resolve_group_id(entity_manager, group_id)
 
@@ -471,6 +567,7 @@ async def hybrid_search(
                 depth=config.graph_depth,
                 limit=limit * 2,
                 group_id=resolved_group_id,
+                relationship_type_weights=config.graph_relationship_type_weights,
             )
             graph_results = _filter_entity_results(graph_results, result_filter)
             if entity_types:
@@ -496,6 +593,8 @@ async def hybrid_search(
         list_names.append("graph")
 
     if not result_lists:
+        if config.apply_reranking:
+            reranking_receipt["reranking_skipped"] = "no_results"
         return HybridResult(
             results=[],
             metadata={
@@ -507,6 +606,8 @@ async def hybrid_search(
                 "vector_count": len(vector_results),
                 "link_count": len(link_results),
                 "graph_count": len(graph_results),
+                "reranking_applied": False,
+                "reranking": reranking_receipt,
             },
         )
 
@@ -548,6 +649,10 @@ async def hybrid_search(
             rerank_result = await rerank_results(query, merged, rerank_config)
             merged = rerank_result.results
             reranking_applied = rerank_result.reranked_count > 0
+            reranking_receipt.update(rerank_result.metadata)
+            reranking_receipt["applied"] = reranking_applied
+            reranking_receipt["reranked_count"] = rerank_result.reranked_count
+            reranking_receipt["model"] = rerank_result.model_name
             log.debug(
                 "reranking_complete",
                 reranked_count=rerank_result.reranked_count,
@@ -555,6 +660,7 @@ async def hybrid_search(
             )
         except Exception as e:
             log.warning("reranking_failed_continuing", error=str(e))
+            reranking_receipt["reranking_failed"] = type(e).__name__
 
     # Phase 5: Apply lightweight lexical boosting
     keyword_boost_applied = False
@@ -581,7 +687,8 @@ async def hybrid_search(
             merged,
             query_coverage_rerank_applied,
             query_coverage_refinement_applied,
-        ) = _apply_query_coverage_rerank(
+        ) = await asyncio.to_thread(
+            _apply_query_coverage_rerank,
             query,
             merged,
             temporal_target=temporal_target,
@@ -601,6 +708,7 @@ async def hybrid_search(
         "graph_count": len(graph_results),
         "merged_count": len(merged),
         "reranking_applied": reranking_applied,
+        "reranking": reranking_receipt,
         "keyword_boost_applied": keyword_boost_applied,
         "query_coverage_rerank_applied": query_coverage_rerank_applied,
         "query_coverage_refinement_applied": query_coverage_refinement_applied,

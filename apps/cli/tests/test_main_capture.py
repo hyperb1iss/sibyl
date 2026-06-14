@@ -1199,6 +1199,8 @@ def test_recall_command_outputs_markdown_context(
         limit=12,
         include_related=True,
         related_limit=3,
+        audit=False,
+        markdown_token_budget=None,
     )
     mock_resolve_project_from_cwd.assert_called_once_with()
 
@@ -1602,6 +1604,98 @@ def test_memory_inspect_command_outputs_json(mock_get_client: MagicMock) -> None
         entity_type="raw_memory",
     )
     mock_client.memory_inspect.assert_awaited_once_with("memory-1")
+
+
+@patch("sibyl_cli.main.get_client")
+def test_show_command_renders_explicit_raw_memory_reference(
+    mock_get_client: MagicMock,
+) -> None:
+    content = "alpha " * 80 + "TAIL_SENTINEL"
+    mock_client = MagicMock()
+    mock_client.resolve_id_prefix = AsyncMock(return_value={"matches": [{"id": "memory-1"}]})
+    mock_client.memory_inspect = AsyncMock(
+        return_value={
+            "id": "memory-1",
+            "source_id": "source-1",
+            "title": "Raw source",
+            "content_redacted": False,
+            "raw_content": content,
+            "derived_ids": [],
+            "audit_event_count": 0,
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    result = CliRunner().invoke(app, ["show", "raw_memory:memory-1"])
+
+    assert result.exit_code == 0
+    assert "Memory source" in result.stdout
+    assert "TAIL_SENTINEL" in result.stdout
+    assert "..." not in result.stdout
+    mock_client.resolve_id_prefix.assert_awaited_once_with(
+        "memory-1",
+        entity_type="raw_memory",
+    )
+    mock_client.memory_inspect.assert_awaited_once_with("memory-1")
+
+
+@patch("sibyl_cli.main.get_client")
+def test_show_command_falls_back_to_raw_memory_for_bare_id(
+    mock_get_client: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.resolve_id_prefix = AsyncMock(
+        side_effect=[
+            {"matches": []},
+            {"matches": [{"id": "memory-1"}]},
+        ]
+    )
+    mock_client.memory_inspect = AsyncMock(
+        return_value={
+            "id": "memory-1",
+            "source_id": "source-1",
+            "title": "Raw source",
+            "content_redacted": False,
+            "raw_content": "visible content",
+            "derived_ids": [],
+            "audit_event_count": 0,
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    result = CliRunner().invoke(app, ["show", "memory-1"])
+
+    assert result.exit_code == 0
+    assert "Memory source" in result.stdout
+    assert "visible content" in result.stdout
+    assert mock_client.resolve_id_prefix.await_args_list[0].kwargs == {"entity_type": None}
+    assert mock_client.resolve_id_prefix.await_args_list[1].kwargs == {"entity_type": "raw_memory"}
+    mock_client.get_entity.assert_not_called()
+    mock_client.memory_inspect.assert_awaited_once_with("memory-1")
+
+
+@patch("sibyl_cli.main.get_client")
+def test_show_command_renders_graph_entity(mock_get_client: MagicMock) -> None:
+    mock_client = MagicMock()
+    mock_client.get_entity = AsyncMock(
+        return_value={
+            "id": "episode_123456789abc",
+            "name": "Graph memory",
+            "entity_type": "episode",
+            "description": "short",
+            "content": "full graph content",
+            "metadata": {},
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    result = CliRunner().invoke(app, ["show", "episode_123456789abc"])
+
+    assert result.exit_code == 0
+    assert "Graph memory" in result.stdout
+    assert "full graph content" in result.stdout
+    mock_client.get_entity.assert_awaited_once_with("episode_123456789abc")
+    mock_client.memory_inspect.assert_not_called()
 
 
 @patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
@@ -2163,6 +2257,8 @@ def test_recall_command_can_request_agent_diary_context(
         limit=12,
         include_related=True,
         related_limit=3,
+        audit=False,
+        markdown_token_budget=None,
     )
     mock_resolve_project_from_cwd.assert_called_once_with()
 
@@ -2445,4 +2541,37 @@ def test_reflect_command_explicit_task_links_and_no_active_task(
     payload = mock_client.reflect.await_args.kwargs
     assert payload["related_to"] == ["plan_1", "task_1"]
     mock_client.explore.assert_not_called()
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_brief_command_prints_markdown_only(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.context_pack = AsyncMock(
+        return_value={
+            "goal": "fix the parser",
+            "markdown": "# Sibyl Context Pack: fix the parser\n\n## Active Work",
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["brief", "fix the parser"])
+
+    assert result.exit_code == 0
+    assert result.stdout.startswith("# Sibyl Context Pack: fix the parser")
+    mock_client.context_pack.assert_awaited_once_with(
+        goal="fix the parser",
+        intent="build",
+        layer="wake",
+        project="project_123",
+        limit=8,
+        include_related=False,
+        related_limit=0,
+        markdown_token_budget=1500,
+    )
     mock_resolve_project_from_cwd.assert_called_once_with()

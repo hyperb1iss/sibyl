@@ -209,6 +209,7 @@ async def extract_memory_entities(
             "extracted_entities": 0,
             "projected_entities": 0,
             "relationships": 0,
+            "projection_state": "complete",
             "estimated_input_tokens": 0,
             "errors": [],
             "projection_errors": [],
@@ -309,6 +310,7 @@ async def extract_memory_entities(
         "extracted_entities": extracted_entities,
         "projected_entities": projection["projected_entities"],
         "relationships": projection["relationships"],
+        "projection_state": projection["projection_state"],
         "linked_chunks": chunk_links["linked_chunks"],
         "estimated_input_tokens": estimated_input_tokens,
         "errors": errors,
@@ -553,6 +555,7 @@ async def _project_extracted_entities(
         return {
             "projected_entities": 0,
             "relationships": 0,
+            "projection_state": "complete",
             "projected_entity_ids_by_source_id": {},
             "projected_entity_links_by_source_id": {},
             "errors": [],
@@ -577,6 +580,7 @@ async def _project_extracted_entities(
         return {
             "projected_entities": projection.projected_entities,
             "relationships": projection.relationships,
+            "projection_state": projection.projection_state,
             "projected_entity_ids_by_source_id": projection.projected_entity_ids_by_source_id,
             "projected_entity_links_by_source_id": projection.projected_entity_links_by_source_id,
             "errors": list(projection.errors),
@@ -592,6 +596,7 @@ async def _project_extracted_entities(
         return {
             "projected_entities": 0,
             "relationships": 0,
+            "projection_state": "partial",
             "projected_entity_ids_by_source_id": {},
             "projected_entity_links_by_source_id": {},
             "errors": [str(exc)],

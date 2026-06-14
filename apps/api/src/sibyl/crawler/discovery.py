@@ -10,8 +10,9 @@ import re
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse
 
-import httpx
 import structlog
+
+from sibyl_core.network import decode_safe_fetch_body, normalize_safe_url, safe_fetch
 
 log = structlog.get_logger()
 
@@ -43,24 +44,18 @@ class DiscoveryService:
 
     def __init__(self, timeout: float = 10.0) -> None:
         self.timeout = timeout
-        self._client: httpx.AsyncClient | None = None
+        self._started = False
 
     async def __aenter__(self) -> DiscoveryService:
-        self._client = httpx.AsyncClient(
-            timeout=self.timeout,
-            follow_redirects=True,
-            headers={"User-Agent": "Sibyl/1.0 (AI Documentation Crawler)"},
-        )
+        self._started = True
         return self
 
     async def __aexit__(self, *args: object) -> None:
-        if self._client:
-            await self._client.aclose()
-            self._client = None
+        self._started = False
 
     def _get_base_url(self, url: str) -> str:
         """Extract base URL (scheme + host) from a URL."""
-        parsed = urlparse(url)
+        parsed = urlparse(normalize_safe_url(url))
         return f"{parsed.scheme}://{parsed.netloc}"
 
     def _classify_file(self, filename: str) -> str:
@@ -90,7 +85,7 @@ class DiscoveryService:
         Returns:
             DiscoveryResult if found, None otherwise
         """
-        if not self._client:
+        if not self._started:
             raise RuntimeError("DiscoveryService not started. Use 'async with'.")
 
         root = self._get_base_url(base_url)
@@ -99,7 +94,12 @@ class DiscoveryService:
             probe_url = urljoin(root + "/", filename)
 
             try:
-                response = await self._client.get(probe_url)
+                response = await safe_fetch(
+                    probe_url,
+                    timeout=self.timeout,
+                    user_agent="Sibyl/1.0 (AI Documentation Crawler)",
+                    accept="text/plain,text/xml,application/xml,*/*;q=0.1",
+                )
 
                 if response.status_code == 200:
                     # Validate content type - must be text, not HTML
@@ -112,7 +112,7 @@ class DiscoveryService:
                         )
                         continue
 
-                    content = response.text
+                    content = decode_safe_fetch_body(response.body, response.headers)
 
                     # Also reject if content looks like HTML
                     if content.strip().startswith(("<!DOCTYPE", "<html", "<!doctype")):
@@ -156,7 +156,7 @@ class DiscoveryService:
                         is_link_collection=is_link_collection,
                     )
 
-            except httpx.HTTPError as e:
+            except Exception as e:
                 log.debug("Discovery probe failed", url=probe_url, error=str(e))
                 continue
 

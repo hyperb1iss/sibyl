@@ -26,6 +26,13 @@ def test_empty_auth_token_disables_stored_auth(monkeypatch: pytest.MonkeyPatch) 
     assert "Authorization" not in client._default_headers()
 
 
+def test_invalid_refresh_token_message_is_recoverable() -> None:
+    assert (
+        client_module._is_refresh_revoked("Invalid refresh token: Signature verification failed")
+        is True
+    )
+
+
 @pytest.mark.asyncio
 async def test_refresh_skips_manual_auth_token() -> None:
     client = SibylClient(base_url="http://example.test/api", auth_token="manual")

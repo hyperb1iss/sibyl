@@ -1,5 +1,6 @@
 """Tests for the manage() tool."""
 
+from collections.abc import Generator
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -7,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sibyl_core.models.tasks import TaskStatus
+from sibyl_core.runtime_ports import install_audit_port, install_queue_port, reset_runtime_ports
 from sibyl_core.tasks.dependencies import CycleResult
 from sibyl_core.tools.manage import (
     ALL_ACTIONS,
@@ -34,6 +36,13 @@ POLICY_PAYLOAD = {
     "scope_key": "project-123",
     "source_surface": "mcp_manage",
 }
+
+
+@pytest.fixture(autouse=True)
+def reset_core_runtime_ports() -> Generator[None]:
+    reset_runtime_ports()
+    yield
+    reset_runtime_ports()
 
 
 class TestManageResponse:
@@ -402,6 +411,12 @@ class TestTaskWorkflowHandlers:
         mock_entity_manager.get = AsyncMock(return_value=task_entity)
         enqueue_episode = AsyncMock(return_value="episode-job-123")
         enqueue_procedure = AsyncMock(return_value="procedure-job-123")
+        install_queue_port(
+            SimpleNamespace(
+                enqueue_create_learning_episode=enqueue_episode,
+                enqueue_create_learning_procedure=enqueue_procedure,
+            )
+        )
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
@@ -411,8 +426,6 @@ class TestTaskWorkflowHandlers:
             ),
             patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine") as mock_workflow,
-            patch("sibyl.jobs.queue.enqueue_create_learning_episode", enqueue_episode),
-            patch("sibyl.jobs.queue.enqueue_create_learning_procedure", enqueue_procedure),
         ):
             mock_client.return_value = MagicMock()
             mock_engine = MagicMock()
@@ -453,12 +466,14 @@ class TestTaskWorkflowHandlers:
     @pytest.mark.asyncio
     async def test_complete_task_with_learnings_requires_policy_context(self) -> None:
         """complete_task should fail closed without a policy payload."""
+        audit = AsyncMock()
+        install_audit_port(SimpleNamespace(log_memory_audit_event=audit))
+
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
             patch("sibyl_core.tools.manage._entity_manager_factory"),
             patch("sibyl_core.tools.manage._relationship_manager_factory"),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine") as mock_workflow,
-            patch("sibyl.persistence.auth_runtime.log_memory_audit_event", AsyncMock()) as audit,
         ):
             mock_client.return_value = MagicMock()
             mock_engine = MagicMock()

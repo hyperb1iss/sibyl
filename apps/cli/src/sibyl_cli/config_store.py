@@ -1,7 +1,7 @@
 """CLI configuration store using TOML.
 
 Manages ~/.sibyl/config.toml for CLI-specific settings.
-Server settings stay in .env - this is just for the CLI client.
+Server settings come from process env or explicit deployment env files.
 
 Supports multiple named contexts, each with its own server URL,
 organization, and default project settings.

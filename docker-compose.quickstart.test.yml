@@ -1,5 +1,6 @@
 # Sibyl Quickstart - Test Instance Override
-# Use with: docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml up -d
+# Use with:
+#   docker compose --env-file /dev/null -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml up -d
 #
 # Ports offset by +10 from defaults to run alongside dev environment:
 #   API:      3344 (instead of 3334)
@@ -9,7 +10,7 @@
 services:
   api:
     container_name: sibyl-test-api
-    ports:
+    ports: !override
       - "3344:3334"
     environment:
       SIBYL_PUBLIC_URL: http://localhost:3347
@@ -19,21 +20,26 @@ services:
 
   web:
     container_name: sibyl-test-web
-    ports:
+    ports: !override
       - "3347:3337"
     environment:
       SIBYL_API_URL: http://api:3334/api
       NEXT_PUBLIC_API_URL: http://localhost:3344
+
+  secrets-init:
+    container_name: sibyl-test-secrets-init
 
   surreal-init:
     container_name: sibyl-test-surreal-init
 
   surrealdb:
     container_name: sibyl-test-surrealdb
-    ports:
+    ports: !override
       - "8010:8000"
 
 volumes:
+  sibyl_secrets:
+    name: sibyl_test_secrets
   sibyl_surreal:
     name: sibyl_test_surreal
 

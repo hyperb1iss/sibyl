@@ -63,7 +63,7 @@ Sibyl API (port 3334)
 **Required:**
 
 ```bash
-SIBYL_JWT_SECRET=...              # Auth (auto-generated in dev)
+SIBYL_JWT_SECRET=...              # Auth (required in production; dev auto-generates)
 SIBYL_ANTHROPIC_API_KEY=...       # Required when LLM provider=anthropic
 # SIBYL_OPENAI_API_KEY=sk-...     # Required when LLM provider=openai
 # SIBYL_GEMINI_API_KEY=...        # Required when LLM provider=gemini

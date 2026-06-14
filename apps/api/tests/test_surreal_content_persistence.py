@@ -57,7 +57,7 @@ from sibyl.persistence.surreal.system_settings import (
 )
 from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
 from sibyl_core.backends.surreal.content_schema import CONTENT_SCHEMA_CURRENT_VERSION, EMBEDDING_DIM
-from sibyl_core.models import ChunkType, SourceType
+from sibyl_core.models import ChunkType, CrawlStatus, SourceType
 
 pytest.importorskip("surrealdb")
 
@@ -116,6 +116,195 @@ class _QueuedContentClient:
         if isinstance(response, BaseException):
             raise response
         return response
+
+
+@pytest.mark.asyncio
+async def test_list_crawl_sources_for_org_filters_and_limits_in_surreal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    source_id = uuid4()
+    client = _QueuedContentClient(
+        [
+            [{"total": 2}],
+            [
+                {
+                    "uuid": str(source_id),
+                    "organization_id": str(org_id),
+                    "name": "Docs",
+                    "url": "https://docs.example.com",
+                    "crawl_status": CrawlStatus.COMPLETED.value,
+                }
+            ],
+        ]
+    )
+
+    @asynccontextmanager
+    async def fake_content_client():
+        yield client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", fake_content_client)
+
+    sources, total = await surreal_content.list_crawl_sources_for_org(
+        None,
+        organization_id=org_id,
+        status=CrawlStatus.COMPLETED,
+        limit=10,
+    )
+
+    count_query, count_params = client.calls[0]
+    page_query, page_params = client.calls[1]
+    assert total == 2
+    assert [source.id for source in sources] == [source_id]
+    assert "SELECT count() AS total FROM crawl_sources" in count_query
+    assert "organization_id = $organization_id" in count_query
+    assert "crawl_status = $status" in count_query
+    assert count_params["organization_id"] == str(org_id)
+    assert count_params["status"] == CrawlStatus.COMPLETED.value
+    assert "SELECT * FROM crawl_sources" not in page_query
+    assert "SELECT uuid, organization_id, name, url" in page_query
+    assert "ORDER BY created_at DESC, uuid DESC LIMIT $limit" in page_query
+    assert page_params["limit"] == 10
+
+
+@pytest.mark.asyncio
+async def test_list_crawl_sources_pushes_status_and_limit_into_surreal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    source_id = uuid4()
+    client = _QueuedContentClient(
+        [
+            [
+                {
+                    "uuid": str(source_id),
+                    "organization_id": str(org_id),
+                    "name": "Importing",
+                    "url": "https://docs.example.com/importing",
+                    "crawl_status": CrawlStatus.IN_PROGRESS.value,
+                }
+            ],
+        ]
+    )
+
+    @asynccontextmanager
+    async def fake_content_client():
+        yield client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", fake_content_client)
+
+    sources = await surreal_content.list_crawl_sources(
+        None,
+        status=CrawlStatus.IN_PROGRESS,
+        limit=25,
+    )
+
+    query, params = client.calls[0]
+    assert [source.id for source in sources] == [source_id]
+    assert "SELECT * FROM crawl_sources" not in query
+    assert "SELECT uuid, organization_id, name, url" in query
+    assert "FROM crawl_sources WHERE crawl_status = $status" in query
+    assert "ORDER BY created_at DESC, uuid DESC LIMIT $limit" in query
+    assert params["status"] == CrawlStatus.IN_PROGRESS.value
+    assert params["limit"] == 25
+
+
+@pytest.mark.asyncio
+async def test_resolve_document_entity_uses_targeted_chunk_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    source_id = uuid4()
+    document_id = uuid4()
+    chunk_id = uuid4()
+    next_chunk_id = uuid4()
+    next_heading_id = uuid4()
+    client = _QueuedContentClient(
+        [
+            [
+                {
+                    "uuid": str(chunk_id),
+                    "organization_id": str(org_id),
+                    "source_id": str(source_id),
+                    "document_id": str(document_id),
+                    "chunk_index": 3,
+                    "chunk_type": ChunkType.HEADING.value,
+                    "content": "Install",
+                    "heading_path": ["Guide", "Install"],
+                }
+            ],
+            [
+                {
+                    "uuid": str(document_id),
+                    "organization_id": str(org_id),
+                    "source_id": str(source_id),
+                    "url": "https://docs.example.com/install",
+                    "title": "Install Guide",
+                }
+            ],
+            [
+                {
+                    "uuid": str(source_id),
+                    "organization_id": str(org_id),
+                    "name": "Docs",
+                    "url": "https://docs.example.com",
+                }
+            ],
+            [
+                {
+                    "uuid": str(next_chunk_id),
+                    "organization_id": str(org_id),
+                    "source_id": str(source_id),
+                    "document_id": str(document_id),
+                    "chunk_index": 4,
+                    "chunk_type": ChunkType.TEXT.value,
+                    "content": "Run the installer.",
+                },
+                {
+                    "uuid": str(next_heading_id),
+                    "organization_id": str(org_id),
+                    "source_id": str(source_id),
+                    "document_id": str(document_id),
+                    "chunk_index": 5,
+                    "chunk_type": ChunkType.HEADING.value,
+                    "content": "Configure",
+                },
+            ],
+        ]
+    )
+
+    @asynccontextmanager
+    async def fake_content_client():
+        yield client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", fake_content_client)
+
+    result = await surreal_content.resolve_document_entity(
+        None,
+        organization_id=org_id,
+        entity_id=str(chunk_id),
+    )
+
+    assert result is not None
+    assert result.chunk_id == chunk_id
+    assert result.document_id == document_id
+    assert result.source_id == source_id
+    assert result.content == "Install\n\nRun the installer."
+    chunk_query, chunk_params = client.calls[0]
+    document_query, _document_params = client.calls[1]
+    source_query, _source_params = client.calls[2]
+    following_query, following_params = client.calls[3]
+    assert "FROM document_chunks" in chunk_query
+    assert "organization_id = $organization_id AND uuid = $chunk_id LIMIT 1" in chunk_query
+    assert "embedding" not in chunk_query
+    assert chunk_params["chunk_id"] == str(chunk_id)
+    assert "FROM crawled_documents" in document_query
+    assert "organization_id = $organization_id AND uuid = $document_id LIMIT 1" in document_query
+    assert "FROM crawl_sources" in source_query
+    assert "organization_id = $organization_id AND uuid = $source_id LIMIT 1" in source_query
+    assert "document_id = $document_id" in following_query
+    assert "chunk_index > $chunk_index" in following_query
+    assert following_params["document_id"] == str(document_id)
 
 
 @pytest_asyncio.fixture
@@ -1447,6 +1636,7 @@ async def test_content_archive_restore_preserves_embeddings_and_metadata(
                     "schedule": "0 2 * * *",
                     "retention_days": 30,
                     "include_database_dump": True,
+                    "include_postgres": None,
                     "include_graph": True,
                     "created_at": "2026-04-20T00:00:00+00:00",
                     "updated_at": "2026-04-20T00:00:00+00:00",
@@ -1460,6 +1650,7 @@ async def test_content_archive_restore_preserves_embeddings_and_metadata(
                     "status": "completed",
                     "size_bytes": 128,
                     "include_database_dump": True,
+                    "include_postgres": None,
                     "include_graph": True,
                     "created_at": "2026-04-20T00:00:00+00:00",
                     "updated_at": "2026-04-20T00:00:00+00:00",
@@ -1541,8 +1732,12 @@ async def test_content_archive_restore_preserves_embeddings_and_metadata(
     assert source_import_rows[0]["source_ids"] == ["source:docs:1"]
     assert source_import_rows[0]["raw_memory_by_source_id"] == {"source:docs:1": str(capture_id)}
     assert setting_rows[0]["is_secret"] is True
-    assert backup_setting_rows[0]["include_database_dump"] is True
-    assert backup_rows[0]["include_database_dump"] is True
+    assert backup_setting_rows[0]["include_database_dump"] is False
+    assert backup_setting_rows[0]["include_graph"] is True
+    assert "include_postgres" not in backup_setting_rows[0]
+    assert backup_rows[0]["include_database_dump"] is False
+    assert backup_rows[0]["include_graph"] is True
+    assert "include_postgres" not in backup_rows[0]
 
 
 @pytest.mark.asyncio
@@ -1845,6 +2040,90 @@ async def test_surreal_system_setting_helpers_round_trip(
 
 
 @pytest.mark.asyncio
+async def test_content_archive_clean_restore_scopes_to_payload_organization(
+    surreal_content_client: SurrealContentClient,
+) -> None:
+    org_a = str(uuid4())
+    org_b = str(uuid4())
+    old_capture_a = str(uuid4())
+    capture_b = str(uuid4())
+    restored_capture_a = str(uuid4())
+
+    await surreal_content_client.execute_query(
+        "CREATE system_settings CONTENT $record;",
+        record={"key": "global_setting", "value": "keep", "is_secret": False},
+    )
+    for org_id, capture_id, title in (
+        (org_a, old_capture_a, "old a"),
+        (org_b, capture_b, "keep b"),
+    ):
+        await surreal_content_client.execute_query(
+            "CREATE raw_captures CONTENT $record;",
+            record={
+                "uuid": capture_id,
+                "organization_id": org_id,
+                "source_id": f"source-{title}",
+                "principal_id": f"user-{title}",
+                "title": title,
+                "raw_content": title,
+            },
+        )
+
+    payload = {
+        "version": "1.0",
+        "created_at": "2026-06-01T00:00:00+00:00",
+        "organization_id": org_a,
+        "tables": {
+            "raw_captures": [
+                {
+                    "id": restored_capture_a,
+                    "organization_id": org_a,
+                    "source_id": "source-restored",
+                    "principal_id": "user-restored",
+                    "title": "restored a",
+                    "raw_content": "restored a",
+                }
+            ],
+            "system_settings": [],
+        },
+        "row_counts": {"raw_captures": 1, "system_settings": 0},
+        "total_rows": 1,
+    }
+
+    with (
+        patch.object(surreal_content_client, "close", AsyncMock()),
+        patch(
+            "sibyl.persistence.content_archive.build_surreal_content_client",
+            return_value=surreal_content_client,
+        ),
+    ):
+        result = await restore_content_archive_payload(payload, clean=True)
+
+    org_a_rows = _normalize_records(
+        await surreal_content_client.execute_query(
+            "SELECT * FROM raw_captures WHERE organization_id = $organization_id;",
+            organization_id=org_a,
+        )
+    )
+    org_b_rows = _normalize_records(
+        await surreal_content_client.execute_query(
+            "SELECT * FROM raw_captures WHERE organization_id = $organization_id;",
+            organization_id=org_b,
+        )
+    )
+    settings_rows = _normalize_records(
+        await surreal_content_client.execute_query(
+            "SELECT * FROM system_settings WHERE key = 'global_setting';",
+        )
+    )
+
+    assert result.success is True
+    assert [row["uuid"] for row in org_a_rows] == [restored_capture_a]
+    assert [row["uuid"] for row in org_b_rows] == [capture_b]
+    assert settings_rows[0]["value"] == "keep"
+
+
+@pytest.mark.asyncio
 async def test_content_archive_export_reads_from_surreal_backend(
     monkeypatch: pytest.MonkeyPatch,
     surreal_content_client: SurrealContentClient,
@@ -1919,6 +2198,89 @@ async def test_content_archive_export_reads_from_surreal_backend(
     assert payload["tables"]["source_imports"][0]["source_ids"] == ["source:export:1"]
     assert payload["tables"]["backup_settings"][0]["include_database_dump"] is False
     assert payload["tables"]["backups"][0]["include_database_dump"] is False
+    close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_content_archive_export_can_scope_to_one_organization(
+    monkeypatch: pytest.MonkeyPatch,
+    surreal_content_client: SurrealContentClient,
+) -> None:
+    org_a = str(uuid4())
+    org_b = str(uuid4())
+    await surreal_content_client.execute_query(
+        "CREATE system_settings CONTENT $record;",
+        record={
+            "key": "global_setting",
+            "value": "excluded",
+            "is_secret": False,
+        },
+    )
+    for org_id, suffix in ((org_a, "a"), (org_b, "b")):
+        await surreal_content_client.execute_query(
+            "CREATE raw_captures CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "organization_id": org_id,
+                "source_id": f"source-{suffix}",
+                "principal_id": f"user-{suffix}",
+                "title": f"raw {suffix}",
+                "raw_content": f"content {suffix}",
+            },
+        )
+        await surreal_content_client.execute_query(
+            "CREATE entity CONTENT $record;",
+            record={
+                "uuid": f"entity-{suffix}",
+                "organization_id": org_id,
+            },
+        )
+        await surreal_content_client.execute_query(
+            "CREATE api_idempotency_records CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "organization_id": org_id,
+                "principal_id": f"user-{suffix}",
+                "idempotency_key": f"key-{suffix}",
+                "method": "POST",
+                "path": "/api/test",
+                "request_hash": f"hash-{suffix}",
+                "response_status_code": 200,
+            },
+        )
+        await surreal_content_client.execute_query(
+            "CREATE backup_settings CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "organization_id": org_id,
+                "enabled": True,
+                "schedule": "0 2 * * *",
+                "retention_days": 30,
+                "include_database_dump": True,
+                "include_graph": False,
+            },
+        )
+
+    close = AsyncMock()
+    monkeypatch.setattr(
+        content_archive,
+        "build_surreal_content_client",
+        lambda: surreal_content_client,
+    )
+    monkeypatch.setattr(surreal_content_client, "close", close)
+
+    payload = await content_archive.export_content_archive_payload(organization_id=org_a)
+
+    assert payload["organization_id"] == org_a
+    assert payload["row_counts"]["system_settings"] == 0
+    assert payload["row_counts"]["raw_captures"] == 1
+    assert payload["row_counts"]["entity"] == 1
+    assert payload["row_counts"]["api_idempotency_records"] == 1
+    assert payload["row_counts"]["backup_settings"] == 1
+    assert payload["tables"]["raw_captures"][0]["organization_id"] == org_a
+    assert payload["tables"]["entity"][0]["uuid"] == "entity-a"
+    assert payload["tables"]["backup_settings"][0]["include_database_dump"] is False
+    assert payload["tables"]["backup_settings"][0]["include_graph"] is True
     close.assert_awaited_once()
 
 

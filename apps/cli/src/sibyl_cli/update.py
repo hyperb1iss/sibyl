@@ -256,8 +256,17 @@ def update_containers(restart: bool = True) -> bool:
     info("Pulling container images...")
 
     # Check if containers are running
+    compose_cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str(SIBYL_LOCAL_COMPOSE),
+        "--env-file",
+        "/dev/null",
+    ]
+
     ps_result = subprocess.run(
-        ["docker", "compose", "-f", str(SIBYL_LOCAL_COMPOSE), "ps", "-q"],
+        [*compose_cmd, "ps", "-q"],
         capture_output=True,
         text=True,
         check=False,
@@ -266,7 +275,7 @@ def update_containers(restart: bool = True) -> bool:
 
     # Pull new images
     result = subprocess.run(
-        ["docker", "compose", "-f", str(SIBYL_LOCAL_COMPOSE), "pull"],
+        [*compose_cmd, "pull"],
         capture_output=False,
         check=False,
     )
@@ -279,7 +288,7 @@ def update_containers(restart: bool = True) -> bool:
     if was_running and restart:
         info("Restarting containers with new images...")
         result = subprocess.run(
-            ["docker", "compose", "-f", str(SIBYL_LOCAL_COMPOSE), "up", "-d"],
+            [*compose_cmd, "up", "-d"],
             capture_output=False,
             check=False,
         )

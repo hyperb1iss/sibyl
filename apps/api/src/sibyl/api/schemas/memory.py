@@ -92,6 +92,12 @@ class RawMemoryRecallResponse(BaseModel):
     memories: list[RawMemoryResponse]
     limit: int
     policy_reason: str | None = Field(default=None, description="Memory policy decision reason")
+    source_degraded: bool = Field(default=False, description="Whether recall sources degraded")
+    source_failure_count: int = Field(default=0, description="Failed recall source count")
+    source_failures: list[dict[str, str]] = Field(
+        default_factory=list,
+        description="Recall source failures",
+    )
 
 
 class MemoryAuditEventResponse(BaseModel):

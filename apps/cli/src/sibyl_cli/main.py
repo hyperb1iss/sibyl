@@ -9,6 +9,7 @@ Server commands (serve, dev, db, generate, etc.) are in sibyl-server.
 import asyncio
 import re
 import sys
+from collections.abc import Mapping
 from importlib.metadata import version as pkg_version
 from os import environ
 from typing import Annotated, Any, cast
@@ -48,6 +49,7 @@ from sibyl_cli.docker import app as docker_app
 from sibyl_cli.doctor import doctor as doctor_cmd
 from sibyl_cli.document import docs_app
 from sibyl_cli.entity import app as entity_app
+from sibyl_cli.entity import print_entity_details
 from sibyl_cli.epic import app as epic_app
 from sibyl_cli.explore import app as explore_app
 from sibyl_cli.host import serve as serve_cmd
@@ -60,6 +62,11 @@ from sibyl_cli.local import app as local_app
 from sibyl_cli.local import start as up_cmd
 from sibyl_cli.local import stop as down_cmd
 from sibyl_cli.logs import app as logs_app
+from sibyl_cli.memory_display import (
+    inspect_raw_memory_source,
+    is_raw_memory_reference,
+    print_memory_source_inspect,
+)
 from sibyl_cli.org import app as org_app
 from sibyl_cli.pending import app as pending_writes_app
 from sibyl_cli.project import app as project_app
@@ -70,6 +77,7 @@ from sibyl_cli.state import set_context_override
 from sibyl_cli.task import app as task_app
 from sibyl_cli.task import list_tasks
 from sibyl_cli.update import app as update_app
+from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptureService
 from sibyl_core.models.context import ContextIntent
 from sibyl_core.models.entities import EntityType
 
@@ -249,7 +257,7 @@ def _derive_capture_title(content: str) -> str:
 def _should_emit_command_marker(ctx: typer.Context) -> bool:
     if environ.get("SIBYL_QUIET", "").lower() in QUIET_ENV_VALUES:
         return False
-    if ctx.invoked_subcommand in {None, "health"}:
+    if ctx.invoked_subcommand in {None, "health", "brief"}:
         return False
     return not any(arg in {"--json", "-j", "--help"} for arg in sys.argv[1:])
 
@@ -418,50 +426,67 @@ async def _write_memory_capture(
     raw_scope_key = scope_key
     if memory_scope == "project" and raw_scope_key is None:
         raw_scope_key = resolved_project
-    raw_memory = await client.remember_raw_memory(
+
+    request = MemoryCaptureRequest(
         title=title,
-        raw_content=content,
-        source_id=source_id,
-        memory_scope=memory_scope,
-        scope_key=raw_scope_key,
-        diary=False,
-        agent_id=None,
-        project_id=None,
+        content=content,
+        entity_type=kind,
+        domain=domain,
         tags=tags,
+        related_to=resolved_links,
+        languages=languages,
         metadata=metadata,
         provenance={
             "remember_kind": kind,
             "related_to": resolved_links or [],
         },
+        source_id=source_id,
+        memory_scope=memory_scope,
+        scope_key=raw_scope_key,
         capture_surface=surface,
-    )
-    raw_memory_id = raw_memory.get("id")
-    raw_source_id = raw_memory.get("source_id")
-    raw_policy_reason = raw_memory.get("policy_reason")
-    graph_metadata = dict(metadata)
-    if raw_memory_id:
-        graph_metadata["raw_memory_id"] = raw_memory_id
-    if raw_source_id:
-        graph_metadata["raw_source_id"] = raw_source_id
-    if raw_policy_reason:
-        graph_metadata["raw_policy_reason"] = raw_policy_reason
-
-    data = await client.create_entity(
-        name=title,
-        content=content,
-        entity_type=kind,
-        category=domain,
-        languages=languages,
-        tags=tags,
-        related_to=resolved_links,
-        metadata=graph_metadata,
-        sync=wait_searchable,
+        wait_searchable=wait_searchable,
         skip_conflicts=skip_conflicts,
     )
-    data["raw_memory_id"] = raw_memory_id
-    data["raw_source_id"] = raw_source_id
-    data["raw_policy_reason"] = raw_policy_reason
-    return data
+
+    async def remember_raw_memory(capture: MemoryCaptureRequest) -> dict[str, Any]:
+        return await client.remember_raw_memory(
+            title=capture.title,
+            raw_content=capture.content,
+            source_id=capture.source_id,
+            memory_scope=capture.memory_scope,
+            scope_key=capture.scope_key,
+            diary=capture.diary,
+            agent_id=capture.agent_id,
+            project_id=capture.project_id,
+            tags=list(capture.tags) if capture.tags is not None else None,
+            metadata=dict(capture.metadata),
+            provenance=dict(capture.provenance),
+            capture_surface=capture.capture_surface,
+        )
+
+    async def create_graph_entity(
+        capture: MemoryCaptureRequest,
+        graph_metadata: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await client.create_entity(
+            name=capture.title,
+            content=capture.content,
+            entity_type=capture.entity_type,
+            category=capture.domain,
+            languages=list(capture.languages) if capture.languages is not None else None,
+            tags=list(capture.tags) if capture.tags is not None else None,
+            related_to=list(capture.related_to) if capture.related_to is not None else None,
+            metadata=dict(graph_metadata),
+            sync=capture.wait_searchable,
+            skip_conflicts=capture.skip_conflicts,
+        )
+
+    service = MemoryCaptureService(
+        remember_raw_memory=remember_raw_memory,
+        create_graph_entity=create_graph_entity,
+    )
+    result = await service.capture(request)
+    return result.to_payload()
 
 
 def _print_memory_capture_result(
@@ -827,42 +852,6 @@ def _print_memory_audit_events(events: list[object]) -> None:
     console.print(table)
 
 
-def _print_memory_source_inspect(data: dict[str, object]) -> None:
-    console.print("\n[bold]Memory source[/bold]\n")
-    scope = str(data.get("memory_scope") or "")
-    if scope_key := data.get("scope_key"):
-        scope = f"{scope}:{scope_key}" if scope else str(scope_key)
-    policy = _format_policy_state(data.get("policy_allowed"))
-    if reason := data.get("policy_reason"):
-        policy = f"{policy} ({reason})"
-    content_state = "redacted" if data.get("content_redacted") else "visible"
-
-    table = create_table(None, "Field", "Value", expand=False)
-    table.add_row("ID", str(data.get("id") or ""))
-    table.add_row("Source", str(data.get("source_id") or ""))
-    table.add_row("Title", str(data.get("title") or ""))
-    table.add_row("Scope", scope)
-    table.add_row("Project", str(data.get("project_id") or ""))
-    table.add_row("Review", str(data.get("review_state") or ""))
-    promotion = data.get("promotion_state")
-    if isinstance(promotion, dict):
-        promotion_payload = cast("dict[str, object]", promotion)
-        table.add_row("Promotion", str(promotion_payload.get("state") or ""))
-    table.add_row("Corrections", _inspect_correction_count(data.get("correction_history")))
-    table.add_row("Entity type", str(data.get("entity_type") or ""))
-    table.add_row("Policy", policy)
-    table.add_row("Content", content_state)
-    table.add_row("Derived", _audit_id_summary(data.get("derived_ids")))
-    table.add_row("Audits", str(data.get("audit_event_count") or 0))
-    table.add_row("Actions", _inspect_action_summary(data.get("available_actions")))
-    console.print(table)
-
-    raw_content = data.get("raw_content")
-    if isinstance(raw_content, str) and raw_content:
-        console.print()
-        console.print(_format_search_preview(raw_content), soft_wrap=True)
-
-
 def _preview_state(value: object) -> str:
     return "allowed" if value is True else "denied"
 
@@ -893,25 +882,6 @@ def _preview_count(value: object) -> str:
     if isinstance(value, int) and not isinstance(value, bool):
         return str(value)
     return "0"
-
-
-def _inspect_correction_count(value: object) -> str:
-    if isinstance(value, list):
-        return str(len(value))
-    return "0"
-
-
-def _inspect_action_summary(value: object) -> str:
-    if not isinstance(value, list):
-        return "-"
-    names: list[str] = []
-    for item in value:
-        if not isinstance(item, dict):
-            continue
-        payload = cast("dict[str, object]", item)
-        if payload.get("available") is True:
-            names.append(str(payload.get("action")))
-    return ", ".join(names) if names else "-"
 
 
 def _preview_audit_id(data: dict[str, object]) -> str:
@@ -1237,6 +1207,58 @@ def main_callback(
 # ============================================================================
 
 
+async def _load_show_reference(client: Any, reference: str) -> tuple[str, dict[str, object]]:
+    if is_raw_memory_reference(reference):
+        return "raw_memory", await inspect_raw_memory_source(client, reference)
+
+    entity_error: SibylClientError | None = None
+    try:
+        resolved_id = await resolve_id_prefix(client, reference)
+        entity = await client.get_entity(resolved_id)
+        return "entity", cast("dict[str, object]", entity)
+    except SibylClientError as e:
+        if e.status_code != 404:
+            raise
+        entity_error = e
+
+    try:
+        return "raw_memory", await inspect_raw_memory_source(client, reference)
+    except SibylClientError as e:
+        if e.status_code == 404:
+            detail = f"No entity or raw memory matches: {reference}"
+            raise SibylClientError(detail, status_code=404, detail=detail) from entity_error
+        raise
+
+
+@app.command("show")
+def show_reference(
+    reference: Annotated[str, typer.Argument(help="Entity or raw memory ID")],
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
+    ] = False,
+) -> None:
+    """Show an entity or raw memory by ID."""
+
+    @run_async
+    async def _show() -> None:
+        try:
+            async with get_client() as client:
+                kind, data = await _load_show_reference(client, reference)
+
+            if json_out:
+                print_json(data)
+                return
+
+            if kind == "raw_memory":
+                print_memory_source_inspect(data, full_content=True)
+            else:
+                print_entity_details(data)
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    _show()
+
+
 @app.command()
 def health(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
@@ -1474,7 +1496,7 @@ def search(
 
                 hints = []
                 if has_entities:
-                    hints.append(f"[{NEON_CYAN}]sibyl entity show <id>[/{NEON_CYAN}]")
+                    hints.append(f"[{NEON_CYAN}]sibyl show <id>[/{NEON_CYAN}]")
                 if has_docs:
                     hints.append(f"[{NEON_CYAN}]sibyl crawl documents show <doc>[/{NEON_CYAN}]")
 
@@ -2170,6 +2192,55 @@ def synthesis_remember_command(
     run_synthesis_remember()
 
 
+@app.command("brief")
+def brief_context(
+    goal: str = typer.Argument(..., help="Subagent goal or task"),
+    intent: str = typer.Option(
+        "build",
+        "--intent",
+        "-i",
+        callback=_normalize_context_intent,
+        help=CONTEXT_INTENT_HELP,
+    ),
+    project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    all_projects: bool = typer.Option(False, "--all", "-a", help="Use all accessible projects"),
+    budget: int = typer.Option(
+        1500,
+        "--budget",
+        min=100,
+        max=8000,
+        help="Token budget for the rendered brief",
+    ),
+) -> None:
+    """One-shot lean context brief for injecting into a subagent prompt.
+
+    Prints wake-layer markdown only: no skill ceremony, no related-graph
+    expansion, no JSON envelope. Pipe or paste straight into a worker
+    agent's prompt.
+    """
+    effective_project = project or (None if all_projects else resolve_project_from_cwd())
+
+    @run_async
+    async def run_brief() -> None:
+        try:
+            async with get_client() as client:
+                pack = await client.context_pack(
+                    goal=goal,
+                    intent=intent,
+                    layer="wake",
+                    project=effective_project,
+                    limit=8,
+                    include_related=False,
+                    related_limit=0,
+                    markdown_token_budget=budget,
+                )
+            sys.stdout.write((pack.get("markdown") or "") + "\n")
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_brief()
+
+
 @app.command("recall")
 def recall_context(
     goal: str = typer.Argument(..., help="Agent goal or user task"),
@@ -2196,6 +2267,18 @@ def recall_context(
         help="Include one-hop related graph context",
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output full JSON"),
+    audit: bool = typer.Option(
+        False,
+        "--audit",
+        help="Include full retrieval metadata per item (for auditing noisy packs)",
+    ),
+    budget: int | None = typer.Option(
+        None,
+        "--budget",
+        min=100,
+        max=8000,
+        help="Cap rendered markdown at roughly this many tokens",
+    ),
     raw: bool = typer.Option(False, "--raw", help="Recall verbatim raw memories"),
     diary: bool = typer.Option(False, "--diary", help="Recall a private agent diary"),
     memory_scope: str = typer.Option("private", "--scope", help="Raw memory scope"),
@@ -2276,6 +2359,8 @@ def recall_context(
                     limit=limit,
                     include_related=related,
                     related_limit=3,
+                    audit=audit,
+                    markdown_token_budget=budget,
                 )
 
             if json_output:
@@ -2339,12 +2424,11 @@ def memory_inspect(
     async def run_memory_inspect() -> None:
         try:
             async with get_client() as client:
-                resolved_source_id = await resolve_raw_memory_id_prefix(client, source_id)
-                data = await client.memory_inspect(resolved_source_id)
+                data = await inspect_raw_memory_source(client, source_id)
             if json_output:
                 print_json(data)
                 return
-            _print_memory_source_inspect(cast("dict[str, object]", data))
+            print_memory_source_inspect(data)
         except SibylClientError as e:
             _handle_client_error(e)
 

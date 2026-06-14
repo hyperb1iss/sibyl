@@ -8,8 +8,8 @@ Token Types:
 from __future__ import annotations
 
 import secrets
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 import jwt
@@ -22,13 +22,25 @@ class JwtError(ValueError):
     """JWT validation or creation error."""
 
 
-def _settings() -> Any:
-    try:
-        return import_module("sibyl.config").settings
-    except ModuleNotFoundError:
-        from sibyl_core.config import settings
+_settings_provider: Callable[[], Any] | None = None
 
-        return settings
+
+def install_settings_provider(provider: Callable[[], Any]) -> None:
+    global _settings_provider
+    _settings_provider = provider
+
+
+def reset_settings_provider() -> None:
+    global _settings_provider
+    _settings_provider = None
+
+
+def _settings() -> Any:
+    if _settings_provider is not None:
+        return _settings_provider()
+    from sibyl_core.config import settings
+
+    return settings
 
 
 def _require_secret() -> str:

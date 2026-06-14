@@ -76,6 +76,28 @@ async def test_telemetry_prometheus_returns_text_payload() -> None:
     assert "sibyl_api_requests_total" in response.body.decode()
 
 
+def test_telemetry_prometheus_uses_global_admin_dependency() -> None:
+    route = next(
+        route for route in telemetry_routes.router.routes if route.path == "/telemetry/prometheus"
+    )
+
+    assert any(
+        dependency.dependency is telemetry_routes.require_global_admin
+        for dependency in route.dependencies
+    )
+
+
+def test_telemetry_summary_uses_global_admin_dependency() -> None:
+    route = next(
+        route for route in telemetry_routes.router.routes if route.path == "/telemetry/summary"
+    )
+
+    assert any(
+        dependency.dependency is telemetry_routes.require_global_admin
+        for dependency in route.dependencies
+    )
+
+
 @pytest.mark.asyncio
 async def test_root_metrics_requires_scrape_token(
     monkeypatch: pytest.MonkeyPatch,

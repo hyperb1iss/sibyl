@@ -113,7 +113,15 @@ def test_longmemeval_report_includes_full_case_records(
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(module, "_git_commit", lambda: "abc123")
+    monkeypatch.setattr(
+        module,
+        "git_provenance",
+        lambda _root: {
+            "sibyl_commit": "abc123",
+            "git_dirty": True,
+            "git_status": "dirty",
+        },
+    )
     monkeypatch.setattr(module, "retrieve_raw", lambda _entry: ([1, 0], ["s1", "s2"]))
 
     report = module.run_benchmark(
@@ -125,6 +133,8 @@ def test_longmemeval_report_includes_full_case_records(
 
     assert report["schema_version"] == "longmemeval-offline-v2"
     assert report["sibyl_commit"] == "abc123"
+    assert report["git_dirty"] is True
+    assert report["git_status"] == "dirty"
     assert report["command"] == ["longmemeval_bench.py", "fixture.json"]
     assert report["runtime"] == {
         "runtime_mode": "offline",

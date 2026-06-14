@@ -11,7 +11,7 @@ from uuid import UUID
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from sibyl import config as config_module
 from sibyl.api.rate_limit import limiter
@@ -107,6 +107,7 @@ BREAK_GLASS_REASON_TOO_LONG_DETAIL = {
 }
 BREAK_GLASS_MAX_WINDOW = timedelta(hours=4)
 BREAK_GLASS_REASON_MAX_LENGTH = 512
+ALLOWED_API_KEY_SCOPES = frozenset({"api:read", "api:write", "mcp"})
 
 
 class ApiKeyCreateRequest(BaseModel):
@@ -124,6 +125,18 @@ class ApiKeyCreateRequest(BaseModel):
     expires_days: int | None = Field(
         default=None, ge=1, le=365, description="Optional expiry in days"
     )
+
+    @field_validator("scopes")
+    @classmethod
+    def validate_scopes(cls, value: list[str]) -> list[str]:
+        scopes = list(dict.fromkeys(str(scope).strip() for scope in value if str(scope).strip()))
+        invalid_scopes = sorted(set(scopes) - ALLOWED_API_KEY_SCOPES)
+        if invalid_scopes:
+            joined = ", ".join(invalid_scopes)
+            raise ValueError(f"unsupported API key scopes: {joined}")
+        if not scopes:
+            raise ValueError("API key scopes must include at least one scope")
+        return scopes
 
 
 class MeUpdateRequest(BaseModel):

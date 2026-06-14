@@ -12,14 +12,13 @@ import structlog
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from sibyl.runtime_shape import resolve_coordination_backend
-
 _log = structlog.get_logger()
 
 # Persisted auto-generated JWT key (same pattern as settings.key in crypto.py)
 _JWT_KEY_FILE = Path.home() / ".sibyl" / "jwt.key"
 _EXTRA_OIDC_PROVIDER_NAMES = {"github", "google"}
 _EXTRA_OIDC_ISSUER_HOSTS = {"github.com", "accounts.google.com"}
+_EMBEDDED_SURREAL_SCHEMES = ("memory://", "surrealkv://", "rocksdb://", "file://")
 
 
 class OIDCProviderSettings(BaseModel):
@@ -121,8 +120,6 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="SIBYL_",
-        env_file=".env",
-        env_file_encoding="utf-8",
         extra="ignore",
     )
 
@@ -419,6 +416,30 @@ class Settings(BaseSettings):
         ge=0.0,
         description="Log SurrealDB queries at warning level when elapsed time exceeds this threshold.",
     )
+    surreal_pool_size: int = Field(
+        default=8,
+        ge=1,
+        le=256,
+        description="Default concurrent SurrealDB connections per dedicated client.",
+    )
+    surreal_auth_pool_size: int | None = Field(
+        default=None,
+        ge=1,
+        le=256,
+        description="Override SurrealDB auth client pool size; defaults to surreal_pool_size.",
+    )
+    surreal_content_pool_size: int | None = Field(
+        default=None,
+        ge=1,
+        le=256,
+        description="Override SurrealDB content client pool size; defaults to surreal_pool_size.",
+    )
+    surreal_graph_pool_size: int | None = Field(
+        default=None,
+        ge=1,
+        le=256,
+        description="Override SurrealDB graph client pool size; defaults to surreal_pool_size.",
+    )
 
     # LLM Provider configuration
     llm_provider: Literal["openai", "anthropic"] = Field(
@@ -570,6 +591,18 @@ class Settings(BaseSettings):
         le=10,
         description="Maximum concurrent LLM calls inside one memory extraction job",
     )
+    worker_max_jobs: int | None = Field(
+        default=None,
+        ge=1,
+        le=1024,
+        description="Override maximum concurrent background jobs; defaults to CPU and DB pool scale.",
+    )
+    local_queue_shutdown_grace_seconds: float = Field(
+        default=30.0,
+        ge=0.0,
+        le=3600.0,
+        description="Seconds local queue shutdown waits for in-process jobs to drain.",
+    )
     memory_extraction_max_tokens: int = Field(
         default=8192,
         ge=256,
@@ -579,6 +612,16 @@ class Settings(BaseSettings):
     raw_capture_changefeed_poll_enabled: bool = Field(
         default=True,
         description="Poll raw_captures CHANGEFEED and enqueue incremental promotion",
+    )
+    raw_capture_live_query_enabled: bool = Field(
+        default=False,
+        description="Use SurrealDB live queries for raw_captures realtime promotion hints",
+    )
+    raw_capture_live_query_retry_seconds: float = Field(
+        default=5.0,
+        ge=0.1,
+        le=300.0,
+        description="Seconds to wait before reconnecting the raw capture live query",
     )
 
     # Knowledge repository configuration
@@ -655,6 +698,31 @@ class Settings(BaseSettings):
             return f"surrealkv://{self.surreal_data_dir}"
         return "memory://"
 
+    def surreal_client_pool_size(self, client_kind: Literal["auth", "content", "graph"]) -> int:
+        """Return the configured pool size for a SurrealDB client kind."""
+        override = {
+            "auth": self.surreal_auth_pool_size,
+            "content": self.surreal_content_pool_size,
+            "graph": self.surreal_graph_pool_size,
+        }[client_kind]
+        return override or self.surreal_pool_size
+
+    def effective_surreal_client_pool_size(
+        self, client_kind: Literal["auth", "content", "graph"]
+    ) -> int:
+        if self.resolved_surreal_url.startswith(_EMBEDDED_SURREAL_SCHEMES):
+            return 1
+        return self.surreal_client_pool_size(client_kind)
+
+    @property
+    def resolved_worker_max_jobs(self) -> int:
+        if self.worker_max_jobs is not None:
+            return self.worker_max_jobs
+
+        cpu_scaled = max(1, (os.cpu_count() or 1) * 2)
+        content_pool_size = self.effective_surreal_client_pool_size("content")
+        return min(max(3, cpu_scaled), content_pool_size)
+
     @property
     def fully_surreal(self) -> bool:
         """Whether both the main store and auth runtime are fully Surreal-backed."""
@@ -663,9 +731,7 @@ class Settings(BaseSettings):
     @property
     def resolved_coordination_backend(self) -> Literal["local", "redis"]:
         """Resolve the active coordination backend for this runtime."""
-        return resolve_coordination_backend(
-            coordination_backend=self.coordination_backend,
-        )
+        return "redis" if self.coordination_backend == "redis" else "local"
 
 
 # Global settings instance

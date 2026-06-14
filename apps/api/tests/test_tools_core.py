@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
-from sibyl_core.models.entities import EntityType
+from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.services.graph_runtime import count_entities_by_type
 from sibyl_core.tools.core import (
     VALID_ENTITY_TYPES,
@@ -470,6 +470,90 @@ class TestAddWithHarness:
             # Check validation passes
             if result.success:
                 assert result.id is not None
+
+    @pytest.mark.asyncio
+    async def test_add_can_queue_lexical_first_create(self) -> None:
+        async with mock_tools():
+            queue_port = SimpleNamespace(
+                enqueue_create_entity=AsyncMock(return_value="create_entity:session_123"),
+            )
+
+            with patch("sibyl_core.tools.add.get_queue_port", return_value=queue_port):
+                result = await add(
+                    "Lexical first",
+                    "Persist text before vector enrichment.",
+                    entity_type="session",
+                    metadata={"organization_id": TEST_ORG_ID},
+                    generate_embeddings=False,
+                    check_conflicts=False,
+                )
+
+        assert result.success is True
+        assert queue_port.enqueue_create_entity.await_args.kwargs["generate_embeddings"] is False
+        assert result.background_jobs["embedding_backfill"]["status"] == "deferred"
+        assert result.background_jobs["embedding_backfill"]["queued_by"] == (
+            "create_entity:session_123"
+        )
+
+    @pytest.mark.asyncio
+    async def test_add_sync_deferred_embeddings_backfills_projection_payloads(self) -> None:
+        projected_entity = Entity(
+            id="topic_samsung_tv",
+            entity_type=EntityType.TOPIC,
+            name="Samsung TV",
+            content="Projected topic",
+        )
+        projected_relationship = Relationship(
+            id="rel_session_mentions_topic",
+            source_id="session_123",
+            target_id="topic_samsung_tv",
+            relationship_type=RelationshipType.MENTIONS,
+        )
+        projection = SimpleNamespace(
+            errors=(),
+            extracted=1,
+            projected_entities=1,
+            relationships=1,
+            projection_state="complete",
+            created_projected_entities=(projected_entity,),
+            created_projection_relationships=(projected_relationship,),
+        )
+
+        async with mock_tools():
+            queue_port = SimpleNamespace(
+                enqueue_entity_embedding_backfill=AsyncMock(return_value="embed-session-123"),
+            )
+
+            with (
+                patch("sibyl_core.tools.add.get_queue_port", return_value=queue_port),
+                patch("sibyl_core.tools.add._auto_discover_links", AsyncMock(return_value=[])),
+                patch(
+                    "sibyl_core.tools.add.project_memory_entity",
+                    AsyncMock(return_value=projection),
+                ),
+            ):
+                result = await add(
+                    "Lexical sync",
+                    "Persist text before vector enrichment.",
+                    entity_type="session",
+                    metadata={"organization_id": TEST_ORG_ID},
+                    generate_embeddings=False,
+                    check_conflicts=False,
+                    sync=True,
+                )
+
+        assert result.success is True
+        entities_payload, group_id = (
+            queue_port.enqueue_entity_embedding_backfill.await_args.kwargs["entities_data"],
+            queue_port.enqueue_entity_embedding_backfill.await_args.kwargs["group_id"],
+        )
+        assert group_id == TEST_ORG_ID
+        assert [entity["id"] for entity in entities_payload] == [result.id, "topic_samsung_tv"]
+        relationships_payload = queue_port.enqueue_entity_embedding_backfill.await_args.kwargs[
+            "relationships"
+        ]
+        assert relationships_payload[0]["id"] == "rel_session_mentions_topic"
+        assert result.background_jobs["embedding_backfill"]["queued_entities"] == 2
 
     @pytest.mark.asyncio
     async def test_add_pattern_type(self) -> None:

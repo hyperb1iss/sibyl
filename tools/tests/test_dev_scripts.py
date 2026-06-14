@@ -14,9 +14,15 @@ def _write_docker_stub(bin_dir: Path) -> None:
     docker.write_text(
         """#!/usr/bin/env bash
 set -euo pipefail
-if [[ "${1:-}" == "compose" && "${2:-}" == "ps" ]]; then
-  printf '{"Service":"postgres"}\\n'
-  exit 0
+if [[ "${1:-}" == "compose" ]]; then
+  shift
+  if [[ "${1:-}" == "--env-file" ]]; then
+    shift 2
+  fi
+  if [[ "${1:-}" == "ps" ]]; then
+    printf '{"Service":"postgres"}\\n'
+    exit 0
+  fi
 fi
 if [[ "${1:-}" == "volume" && "${2:-}" == "ls" ]]; then
   exit 0
@@ -204,6 +210,46 @@ main
 
     assert result.returncode == 0, result.stderr
     assert "extra_commands[@]: unbound variable" not in result.stderr
+
+
+def test_stop_dev_disables_default_compose_env_file(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker_args = tmp_path / "docker-args.txt"
+    docker = bin_dir / "docker"
+    docker.write_text(
+        """#!/usr/bin/env bash
+printf '%s\\n' "$@" > "$DOCKER_ARGS_LOG"
+exit 0
+""",
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "DOCKER_ARGS_LOG": str(docker_args),
+    }
+    bash = which("bash")
+    assert bash is not None
+
+    result = subprocess.run(  # noqa: S603
+        [bash, "tools/dev/stop-dev.sh"],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert docker_args.read_text(encoding="utf-8").splitlines() == [
+        "compose",
+        "--env-file",
+        "/dev/null",
+        "down",
+    ]
 
 
 def test_launch_command_uses_separate_process_group() -> None:

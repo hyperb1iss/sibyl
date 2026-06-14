@@ -190,7 +190,7 @@ class Topic(Entity):
 
 
 class Episode(Entity):
-    """A temporal knowledge episode (Graphiti concept)."""
+    """A temporal knowledge episode."""
 
     entity_type: EntityType = EntityType.EPISODE
     episode_type: str = Field(default="wisdom", description="Type of episode")

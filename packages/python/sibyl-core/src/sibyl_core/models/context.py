@@ -27,6 +27,7 @@ class ContextLayer(StrEnum):
 
 class ContextFacet(StrEnum):
     ACTIVE_WORK = "active_work"
+    PRIOR_ART = "prior_art"
     ARTIFACTS = "artifacts"
     CONSTRAINTS = "constraints"
     DECISIONS = "decisions"
