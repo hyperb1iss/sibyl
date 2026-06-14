@@ -36,8 +36,8 @@ dependencies = [
     "sibyl-core[crawler,embeddings,graph,graphrag,llm]",
     # Core Framework
     "fastapi>=0.115.0",
-    "mcp>=1.25",
-    "starlette>=0.41.0",
+    "mcp>=1.27.2",
+    "starlette>=1.3.1",
     "uvicorn[standard]>=0.38",
     # Database (server-only)
     "surrealdb>=2.0.0,<3.0",
@@ -46,13 +46,13 @@ dependencies = [
     "pyyaml>=6.0",
     # CLI & Output (server-side commands)
     "rich>=13.0",
-    "typer>=0.20.0",
+    "typer>=0.26.7",
     "tomli-w>=1.2.0",
     # Background Jobs (server-only)
     "arq>=0.26.3",
     "greenlet>=3.3.0",
     "slowapi>=0.1.9",
-    "google-genai>=2.0.1",
+    "google-genai>=2.8.0",
     "argon2-cffi>=25.1.0",
     "authlib>=1.7.2,<1.8",
     "pyjwt[crypto]>=2.13.0,<3",
