@@ -103,9 +103,9 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     assert "hyperb1iss/homebrew-tap" in workflow
     assert "HOMEBREW_TAP_TOKEN" in workflow
     assert (
-        "KSXGitHub/github-actions-deploy-aur@abe8ac26b51011c88be58c8809fd2ac674068ea5" in workflow
+        "KSXGitHub/github-actions-deploy-aur@da03e160361ce01bf087e790b6ffd196d7dccff7" in workflow
     )
-    assert "# v4.1.2" in workflow
+    assert "# v4.1.3" in workflow
     assert "AUR_SSH_KEY" in workflow
     assert workflow.index("gh-action-pypi-publish") < workflow.index("homebrew_formula.py")
     assert workflow.index("gh-action-pypi-publish") < workflow.index("aur_pkgbuild.py")
