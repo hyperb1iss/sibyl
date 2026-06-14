@@ -290,6 +290,12 @@ async def test_auth_archive_export_can_scope_to_one_organization(
     user_b = uuid4()
     api_key_a = uuid4()
     api_key_b = uuid4()
+    session_a = uuid4()
+    session_b = uuid4()
+    invitation_a = uuid4()
+    invitation_b = uuid4()
+    device_request_a = uuid4()
+    device_request_b = uuid4()
     project_a = uuid4()
     project_b = uuid4()
 
@@ -363,6 +369,51 @@ async def test_auth_archive_export_can_scope_to_one_organization(
                 "role": "owner",
             },
         )
+    for org_id, user_id, session_id, suffix in (
+        (org_a, user_a, session_a, "a"),
+        (org_b, user_b, session_b, "b"),
+    ):
+        await surreal_auth_client.execute_query(
+            "CREATE user_sessions CONTENT $record;",
+            record={
+                "uuid": str(session_id),
+                "organization_id": str(org_id),
+                "user_id": str(user_id),
+                "token_hash": f"{suffix}-session-token-hash",
+                "refresh_token_hash": f"{suffix}-refresh-token-hash",
+                "expires_at": datetime(2026, 4, 20, 1, 2, 3, tzinfo=UTC),
+            },
+        )
+    for org_id, creator_id, invitation_id, suffix in (
+        (org_a, user_a, invitation_a, "a"),
+        (org_b, user_b, invitation_b, "b"),
+    ):
+        await surreal_auth_client.execute_query(
+            "CREATE organization_invitations CONTENT $record;",
+            record={
+                "uuid": str(invitation_id),
+                "organization_id": str(org_id),
+                "invited_email": f"{suffix}@example.com",
+                "created_by_user_id": str(creator_id),
+                "token": f"{suffix}-invite-token",
+                "token_hash": f"{suffix}-invite-token-hash",
+            },
+        )
+    for org_id, user_id, request_id, suffix in (
+        (org_a, user_a, device_request_a, "a"),
+        (org_b, user_b, device_request_b, "b"),
+    ):
+        await surreal_auth_client.execute_query(
+            "CREATE device_authorization_requests CONTENT $record;",
+            record={
+                "uuid": str(request_id),
+                "organization_id": str(org_id),
+                "user_id": str(user_id),
+                "device_code_hash": f"{suffix}-device-code-hash",
+                "user_code": f"{suffix}-user-code",
+                "expires_at": datetime(2026, 4, 20, 1, 2, 3, tzinfo=UTC),
+            },
+        )
     for org_id, project_id, owner_id, slug in (
         (org_a, project_a, user_a, "project-a"),
         (org_b, project_b, user_b, "project-b"),
@@ -422,6 +473,22 @@ async def test_auth_archive_export_can_scope_to_one_organization(
     assert payload["tables"]["login_history"] == []
     assert payload["tables"]["oauth_connections"] == []
     assert [row["uuid"] for row in payload["tables"]["api_keys"]] == [str(api_key_a)]
+    assert payload["tables"]["api_keys"][0]["key_prefix"] == "ak_a"
+    assert "key_salt" not in payload["tables"]["api_keys"][0]
+    assert "key_hash" not in payload["tables"]["api_keys"][0]
+    assert [row["uuid"] for row in payload["tables"]["user_sessions"]] == [str(session_a)]
+    assert "token_hash" not in payload["tables"]["user_sessions"][0]
+    assert "refresh_token_hash" not in payload["tables"]["user_sessions"][0]
+    assert [row["uuid"] for row in payload["tables"]["organization_invitations"]] == [
+        str(invitation_a)
+    ]
+    assert "token" not in payload["tables"]["organization_invitations"][0]
+    assert "token_hash" not in payload["tables"]["organization_invitations"][0]
+    assert [row["uuid"] for row in payload["tables"]["device_authorization_requests"]] == [
+        str(device_request_a)
+    ]
+    assert "device_code_hash" not in payload["tables"]["device_authorization_requests"][0]
+    assert "user_code" not in payload["tables"]["device_authorization_requests"][0]
     assert [row["api_key_id"] for row in payload["tables"]["api_key_project_scopes"]] == [
         str(api_key_a)
     ]

@@ -209,6 +209,12 @@ _ORG_EXCLUDED_GLOBAL_USER_TABLES = frozenset(
         "oauth_connections",
     }
 )
+_ORG_SCOPED_REDACTED_FIELDS = {
+    "api_keys": frozenset({"key_salt", "key_hash"}),
+    "device_authorization_requests": frozenset({"device_code_hash", "user_code"}),
+    "organization_invitations": frozenset({"token", "token_hash"}),
+    "user_sessions": frozenset({"token_hash", "refresh_token_hash"}),
+}
 
 _AUTH_ORG_CLEAN_TABLES = (
     "organization_members",
@@ -311,10 +317,12 @@ async def _select_auth_rows(
     )
 
 
-def _redact_org_user_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+def _redact_auth_rows(
+    rows: list[dict[str, object]],
+    redacted_fields: frozenset[str],
+) -> list[dict[str, object]]:
     return [
-        {key: value for key, value in row.items() if key not in _ORG_USER_REDACTED_FIELDS}
-        for row in rows
+        {key: value for key, value in row.items() if key not in redacted_fields} for row in rows
     ]
 
 
@@ -404,6 +412,8 @@ async def _export_org_auth_tables(
             f"SELECT * FROM {table} WHERE organization_id = $organization_id ORDER BY id ASC;",  # noqa: S608
             organization_id=organization_id,
         )
+        if redacted_fields := _ORG_SCOPED_REDACTED_FIELDS.get(table):
+            tables[table] = _redact_auth_rows(tables[table], redacted_fields)
 
     team_ids = _row_ids(tables["teams"])
     tables["team_members"] = await _select_auth_rows_by_ids(
@@ -433,8 +443,9 @@ async def _export_org_auth_tables(
     # credentials and identity records are account-wide. Keep the member profile
     # rows needed to preserve org membership references, but never include global
     # credential or identity material in a scoped organization archive.
-    tables["users"] = _redact_org_user_rows(
-        await _select_auth_rows_by_ids(client, "users", "uuid", user_ids)
+    tables["users"] = _redact_auth_rows(
+        await _select_auth_rows_by_ids(client, "users", "uuid", user_ids),
+        _ORG_USER_REDACTED_FIELDS,
     )
     for table in _ORG_EXCLUDED_GLOBAL_USER_TABLES:
         tables[table] = []
