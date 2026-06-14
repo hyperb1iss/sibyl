@@ -33,6 +33,7 @@ from sibyl_core.models.sources import SourceImportManifest
 from sibyl_core.observability import elapsed_ms
 from sibyl_core.services.source_adapters import build_source_record_id
 from sibyl_core.services.surreal_content import (
+    MemoryScope,
     RawMemory,
     backfill_content_lineage,
     get_raw_memory_by_source_id,
@@ -75,6 +76,7 @@ async def promote_raw_captures(
         "skipped_superseded_count": 0,
         "skipped_existing_count": 0,
         "skipped_review_count": 0,
+        "skipped_scope_count": 0,
         "failed_count": 0,
         "chunk_count": 0,
         "raw_memory_ids": [],
@@ -114,6 +116,8 @@ async def promote_raw_captures(
             result["skipped_superseded_count"] += 1
         elif outcome["status"] == "skipped_existing":
             result["skipped_existing_count"] += 1
+        elif outcome["status"] == "skipped_scope":
+            result["skipped_scope_count"] += 1
         else:
             result["skipped_review_count"] += 1
 
@@ -295,11 +299,16 @@ def _chunk_strategy(memory: RawMemory) -> ChunkStrategy:
     return ChunkStrategy.SEMANTIC
 
 
+_PROMOTABLE_MEMORY_SCOPES = frozenset({MemoryScope.ORGANIZATION, MemoryScope.PUBLIC})
+
+
 def _promotion_skip_status(memory: RawMemory, *, force: bool) -> str | None:
     if memory.deleted_at is not None:
         return "skipped_deleted"
     if _raw_memory_superseded(memory):
         return "skipped_superseded"
+    if memory.memory_scope not in _PROMOTABLE_MEMORY_SCOPES:
+        return "skipped_scope"
     if not force and memory.metadata.get("raw_promotion_state") == "promoted" and memory.entity_id:
         return "skipped_existing"
     if not raw_memory_currently_recallable(memory):

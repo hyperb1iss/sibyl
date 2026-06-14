@@ -1338,7 +1338,7 @@ class TestSurrealContentHelpers:
                 "organization_id": "org-1",
                 "source_id": "source-email-1",
                 "principal_id": "user-bliss",
-                "memory_scope": "private",
+                "memory_scope": "organization",
                 "review_state": "pending",
                 "entity_id": "document-1",
                 "title": "Architecture note",
@@ -1350,7 +1350,7 @@ class TestSurrealContentHelpers:
                 "organization_id": "org-1",
                 "source_id": "source-email-2",
                 "principal_id": "user-bliss",
-                "memory_scope": "private",
+                "memory_scope": "organization",
                 "review_state": "superseded",
                 "title": "Old note",
                 "raw_content": "skip this",
@@ -1383,11 +1383,61 @@ class TestSurrealContentHelpers:
         assert [memory.id for memory in memories] == ["memory-1"]
         assert memories[0].entity_id == "document-1"
         query, params = fake_client.calls[0]
+        assert "memory_scope INSIDE $raw_promotion_visible_scopes" in query
         assert "metadata.raw_promotion_state" in query
         assert "metadata.raw_promotion_lineage_missing_count > 0" in query
         assert "metadata.raw_promotion_lineage_missing_count = NONE" in query
         assert "metadata.source_record_metadata.parent_uuid != NONE" in query
         assert params["organization_id"] == "org-1"
+        assert params["raw_promotion_visible_scopes"] == ["organization", "public"]
+
+    @pytest.mark.asyncio
+    async def test_list_raw_memories_for_promotion_excludes_private_raw_ids(self) -> None:
+        rows = [
+            {
+                "uuid": "memory-private",
+                "organization_id": "org-1",
+                "source_id": "source-private",
+                "principal_id": "user-bliss",
+                "memory_scope": "private",
+                "review_state": "pending",
+                "title": "Private note",
+                "raw_content": "do not promote",
+                "metadata": {},
+            },
+            {
+                "uuid": "memory-org",
+                "organization_id": "org-1",
+                "source_id": "source-org",
+                "principal_id": "user-bliss",
+                "memory_scope": "organization",
+                "review_state": "pending",
+                "title": "Org note",
+                "raw_content": "safe to promote",
+                "metadata": {},
+            },
+        ]
+        fake_client = FakeClient([_query_result(rows)])
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            memories = await list_raw_memories_for_promotion(
+                organization_id="org-1",
+                raw_memory_ids=["memory-private", "memory-org"],
+                limit=10,
+            )
+
+        assert [memory.id for memory in memories] == ["memory-org"]
+        query, params = fake_client.calls[0]
+        assert "memory_scope INSIDE $raw_promotion_visible_scopes" in query
+        assert params["raw_memory_ids"] == ["memory-private", "memory-org"]
+        assert params["raw_promotion_visible_scopes"] == ["organization", "public"]
 
     @pytest.mark.asyncio
     async def test_list_raw_memories_for_scope_filters_currently_invalidated(self) -> None:
