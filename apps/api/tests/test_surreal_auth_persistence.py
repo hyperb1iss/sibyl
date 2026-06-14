@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -331,13 +332,69 @@ async def test_auth_archive_export_can_scope_to_one_organization(
     user_b = uuid4()
     api_key_a = uuid4()
     api_key_b = uuid4()
+    session_a = uuid4()
+    session_b = uuid4()
+    invitation_a = uuid4()
+    invitation_b = uuid4()
+    device_request_a = uuid4()
+    device_request_b = uuid4()
     project_a = uuid4()
     project_b = uuid4()
 
     for user_id, email in ((user_a, "a@example.com"), (user_b, "b@example.com")):
         await surreal_auth_client.execute_query(
             "CREATE users CONTENT $record;",
-            record={"uuid": str(user_id), "email": email, "name": email},
+            record={
+                "uuid": str(user_id),
+                "email": email,
+                "name": email,
+                "password_salt": f"{email}-salt",
+                "password_hash": f"{email}-hash",
+                "password_iterations": 310000,
+            },
+        )
+    for user_id, email in ((user_a, "a@example.com"), (user_b, "b@example.com")):
+        await surreal_auth_client.execute_query(
+            "CREATE user_identity CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "provider_name": "oidc",
+                "issuer": "https://idp.example.com",
+                "subject": str(user_id),
+                "subject_key": f"oidc:{user_id}",
+                "user_id": str(user_id),
+                "email": email,
+            },
+        )
+        await surreal_auth_client.execute_query(
+            "CREATE password_reset_tokens CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "user_id": str(user_id),
+                "token_hash": f"{email}-reset-token-hash",
+                "expires_at": datetime(2026, 4, 20, 1, 2, 3, tzinfo=UTC),
+            },
+        )
+        await surreal_auth_client.execute_query(
+            "CREATE login_history CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "user_id": str(user_id),
+                "event_type": "login",
+                "success": True,
+                "ip_address": "192.0.2.10",
+            },
+        )
+        await surreal_auth_client.execute_query(
+            "CREATE oauth_connections CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "user_id": str(user_id),
+                "provider": "github",
+                "provider_user_id": str(user_id),
+                "access_token_encrypted": f"{email}-access-token",
+                "refresh_token_encrypted": f"{email}-refresh-token",
+            },
         )
     for org_id, slug in ((org_a, "org-a"), (org_b, "org-b")):
         await surreal_auth_client.execute_query(
@@ -352,6 +409,51 @@ async def test_auth_archive_export_can_scope_to_one_organization(
                 "organization_id": str(org_id),
                 "user_id": str(user_id),
                 "role": "owner",
+            },
+        )
+    for org_id, user_id, session_id, suffix in (
+        (org_a, user_a, session_a, "a"),
+        (org_b, user_b, session_b, "b"),
+    ):
+        await surreal_auth_client.execute_query(
+            "CREATE user_sessions CONTENT $record;",
+            record={
+                "uuid": str(session_id),
+                "organization_id": str(org_id),
+                "user_id": str(user_id),
+                "token_hash": f"{suffix}-session-token-hash",
+                "refresh_token_hash": f"{suffix}-refresh-token-hash",
+                "expires_at": datetime(2026, 4, 20, 1, 2, 3, tzinfo=UTC),
+            },
+        )
+    for org_id, creator_id, invitation_id, suffix in (
+        (org_a, user_a, invitation_a, "a"),
+        (org_b, user_b, invitation_b, "b"),
+    ):
+        await surreal_auth_client.execute_query(
+            "CREATE organization_invitations CONTENT $record;",
+            record={
+                "uuid": str(invitation_id),
+                "organization_id": str(org_id),
+                "invited_email": f"{suffix}@example.com",
+                "created_by_user_id": str(creator_id),
+                "token": f"{suffix}-invite-token",
+                "token_hash": f"{suffix}-invite-token-hash",
+            },
+        )
+    for org_id, user_id, request_id, suffix in (
+        (org_a, user_a, device_request_a, "a"),
+        (org_b, user_b, device_request_b, "b"),
+    ):
+        await surreal_auth_client.execute_query(
+            "CREATE device_authorization_requests CONTENT $record;",
+            record={
+                "uuid": str(request_id),
+                "organization_id": str(org_id),
+                "user_id": str(user_id),
+                "device_code_hash": f"{suffix}-device-code-hash",
+                "user_code": f"{suffix}-user-code",
+                "expires_at": datetime(2026, 4, 20, 1, 2, 3, tzinfo=UTC),
             },
         )
     for org_id, project_id, owner_id, slug in (
@@ -404,7 +506,31 @@ async def test_auth_archive_export_can_scope_to_one_organization(
     assert payload["organization_id"] == str(org_a)
     assert [row["uuid"] for row in payload["tables"]["organizations"]] == [str(org_a)]
     assert [row["uuid"] for row in payload["tables"]["users"]] == [str(user_a)]
+    assert payload["tables"]["users"][0]["email"] == "a@example.com"
+    assert "password_salt" not in payload["tables"]["users"][0]
+    assert "password_hash" not in payload["tables"]["users"][0]
+    assert "password_iterations" not in payload["tables"]["users"][0]
+    assert payload["tables"]["user_identity"] == []
+    assert payload["tables"]["password_reset_tokens"] == []
+    assert payload["tables"]["login_history"] == []
+    assert payload["tables"]["oauth_connections"] == []
     assert [row["uuid"] for row in payload["tables"]["api_keys"]] == [str(api_key_a)]
+    assert payload["tables"]["api_keys"][0]["key_prefix"] == "ak_a"
+    assert "key_salt" not in payload["tables"]["api_keys"][0]
+    assert "key_hash" not in payload["tables"]["api_keys"][0]
+    assert [row["uuid"] for row in payload["tables"]["user_sessions"]] == [str(session_a)]
+    assert "token_hash" not in payload["tables"]["user_sessions"][0]
+    assert "refresh_token_hash" not in payload["tables"]["user_sessions"][0]
+    assert [row["uuid"] for row in payload["tables"]["organization_invitations"]] == [
+        str(invitation_a)
+    ]
+    assert "token" not in payload["tables"]["organization_invitations"][0]
+    assert "token_hash" not in payload["tables"]["organization_invitations"][0]
+    assert [row["uuid"] for row in payload["tables"]["device_authorization_requests"]] == [
+        str(device_request_a)
+    ]
+    assert "device_code_hash" not in payload["tables"]["device_authorization_requests"][0]
+    assert "user_code" not in payload["tables"]["device_authorization_requests"][0]
     assert [row["api_key_id"] for row in payload["tables"]["api_key_project_scopes"]] == [
         str(api_key_a)
     ]
