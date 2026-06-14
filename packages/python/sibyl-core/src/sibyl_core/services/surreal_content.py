@@ -348,6 +348,10 @@ _SCOPES_REQUIRING_SCOPE_KEY = {
     MemoryScope.TEAM,
     MemoryScope.SHARED,
 }
+_RAW_PROMOTION_VISIBLE_SCOPES = (
+    MemoryScope.ORGANIZATION.value,
+    MemoryScope.PUBLIC.value,
+)
 
 
 @dataclass(slots=True)
@@ -2596,14 +2600,20 @@ async def list_raw_memories_for_promotion(
                         client,
                         "SELECT * FROM raw_captures "
                         "WHERE organization_id = $organization_id AND uuid INSIDE $raw_memory_ids "
+                        "AND memory_scope INSIDE $raw_promotion_visible_scopes "
                         "ORDER BY captured_at ASC, uuid ASC;",
                         organization_id=organization_id,
                         raw_memory_ids=batch,
+                        raw_promotion_visible_scopes=list(_RAW_PROMOTION_VISIBLE_SCOPES),
                     )
                 )
         memories = [_raw_memory_from_record(row) for row in rows]
         order = {memory_id: index for index, memory_id in enumerate(raw_memory_ids)}
-        return sorted(memories, key=lambda memory: order.get(memory.id, len(order)))[:limit]
+        return [
+            memory
+            for memory in sorted(memories, key=lambda memory: order.get(memory.id, len(order)))
+            if memory.memory_scope.value in _RAW_PROMOTION_VISIBLE_SCOPES
+        ][:limit]
 
     query_limit = limit * _LIFECYCLE_FILTER_OVERFETCH_FACTOR
     async with surreal_content_client() as client:
@@ -2611,6 +2621,7 @@ async def list_raw_memories_for_promotion(
             client,
             "SELECT * FROM raw_captures "
             "WHERE organization_id = $organization_id "
+            "AND memory_scope INSIDE $raw_promotion_visible_scopes "
             "AND deleted_at = NONE "
             "AND (metadata.raw_promotion_state = NONE "
             "OR metadata.raw_promotion_state = '' "
@@ -2624,13 +2635,16 @@ async def list_raw_memories_for_promotion(
             "OR metadata.source_record_metadata.is_sidechain = true))))) "
             "ORDER BY captured_at ASC, uuid ASC LIMIT $limit;",
             organization_id=organization_id,
+            raw_promotion_visible_scopes=list(_RAW_PROMOTION_VISIBLE_SCOPES),
             limit=query_limit,
         )
     memories = [_raw_memory_from_record(row) for row in rows]
     return [
         memory
         for memory in memories
-        if memory.deleted_at is None and raw_memory_currently_recallable(memory)
+        if memory.memory_scope.value in _RAW_PROMOTION_VISIBLE_SCOPES
+        and memory.deleted_at is None
+        and raw_memory_currently_recallable(memory)
     ][:limit]
 
 
