@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -35,9 +35,10 @@ from sibyl_core.services.source_adapters import build_source_record_id
 from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,
+    backfill_content_lineage,
     get_raw_memory_by_source_id,
     list_raw_memories_for_promotion,
-    raw_memory_recallable,
+    raw_memory_currently_recallable,
     save_raw_memory,
 )
 
@@ -121,7 +122,25 @@ async def promote_raw_captures(
             result["skipped_review_count"] += 1
 
     result["duration_ms"] = elapsed_ms(started_at)
+    if result["selected_count"]:
+        result["content_lineage"] = await _content_lineage_backfill(
+            organization_id=organization_id,
+            limit=max(limit, result["chunk_count"], result["selected_count"]),
+        )
     return result
+
+
+async def _content_lineage_backfill(
+    *,
+    organization_id: str,
+    limit: int,
+) -> dict[str, object]:
+    return asdict(
+        await backfill_content_lineage(
+            organization_id=organization_id,
+            limit=max(limit, 1),
+        )
+    )
 
 
 async def _promote_one(
@@ -292,7 +311,7 @@ def _promotion_skip_status(memory: RawMemory, *, force: bool) -> str | None:
         return "skipped_scope"
     if not force and memory.metadata.get("raw_promotion_state") == "promoted" and memory.entity_id:
         return "skipped_existing"
-    if not raw_memory_recallable(memory):
+    if not raw_memory_currently_recallable(memory):
         return "skipped_review"
     return None
 

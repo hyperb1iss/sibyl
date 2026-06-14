@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
+from sibyl import config as config_module
 from sibyl.config import Settings
 
 
@@ -33,6 +34,19 @@ def test_settings_auth_fallbacks(monkeypatch) -> None:
     assert s.github_client_secret.get_secret_value() == "csecret"
 
 
+def test_settings_ignores_project_dotenv_for_jwt_secret(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SIBYL_JWT_SECRET", raising=False)
+    monkeypatch.delenv("JWT_SECRET", raising=False)
+    monkeypatch.setattr(config_module, "_JWT_KEY_FILE", tmp_path / "jwt.key")
+    (tmp_path / ".env").write_text("SIBYL_JWT_SECRET=dotenv-secret\n")
+
+    s = Settings()
+
+    assert s.jwt_secret.get_secret_value() != "dotenv-secret"
+    assert (tmp_path / "jwt.key").exists()
+
+
 def test_settings_server_url_default() -> None:
     s = Settings(_env_file=None)
     assert s.server_url == "http://localhost:3334"
@@ -45,6 +59,101 @@ def test_settings_store_defaults_to_surreal() -> None:
     assert s.fully_surreal is True
     assert s.coordination_backend == "auto"
     assert s.resolved_coordination_backend == "local"
+
+
+def test_settings_surreal_client_pool_size_uses_default_for_each_client_kind() -> None:
+    s = Settings(_env_file=None, surreal_pool_size=12)
+
+    assert s.surreal_client_pool_size("auth") == 12
+    assert s.surreal_client_pool_size("content") == 12
+    assert s.surreal_client_pool_size("graph") == 12
+
+
+def test_settings_surreal_client_pool_size_prefers_client_kind_override() -> None:
+    s = Settings(
+        _env_file=None,
+        surreal_pool_size=12,
+        surreal_auth_pool_size=5,
+        surreal_content_pool_size=20,
+        surreal_graph_pool_size=33,
+    )
+
+    assert s.surreal_client_pool_size("auth") == 5
+    assert s.surreal_client_pool_size("content") == 20
+    assert s.surreal_client_pool_size("graph") == 33
+
+
+def test_settings_worker_max_jobs_prefers_explicit_override() -> None:
+    s = Settings(_env_file=None, worker_max_jobs=17)
+
+    assert s.resolved_worker_max_jobs == 17
+
+
+def test_settings_local_queue_shutdown_grace_seconds_can_override_default() -> None:
+    default = Settings(_env_file=None)
+    overridden = Settings(_env_file=None, local_queue_shutdown_grace_seconds=12.5)
+
+    assert default.local_queue_shutdown_grace_seconds == 30.0
+    assert overridden.local_queue_shutdown_grace_seconds == 12.5
+
+
+def test_settings_worker_max_jobs_defaults_to_cpu_and_content_pool_scale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config_module.os, "cpu_count", lambda: 16)
+
+    s = Settings(_env_file=None, surreal_url="ws://surrealdb:8000/rpc", surreal_pool_size=8)
+
+    assert s.resolved_worker_max_jobs == 8
+
+
+def test_settings_worker_max_jobs_uses_content_pool_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config_module.os, "cpu_count", lambda: 16)
+
+    s = Settings(
+        _env_file=None,
+        surreal_url="ws://surrealdb:8000/rpc",
+        surreal_pool_size=64,
+        surreal_content_pool_size=20,
+    )
+
+    assert s.resolved_worker_max_jobs == 20
+
+
+def test_settings_worker_max_jobs_preserves_floor_without_exceeding_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config_module.os, "cpu_count", lambda: 1)
+
+    assert (
+        Settings(
+            _env_file=None,
+            surreal_url="ws://surrealdb:8000/rpc",
+            surreal_pool_size=8,
+        ).resolved_worker_max_jobs
+        == 3
+    )
+    assert (
+        Settings(
+            _env_file=None,
+            surreal_url="ws://surrealdb:8000/rpc",
+            surreal_pool_size=1,
+        ).resolved_worker_max_jobs
+        == 1
+    )
+
+
+def test_settings_worker_max_jobs_uses_effective_embedded_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config_module.os, "cpu_count", lambda: 16)
+
+    s = Settings(_env_file=None, surreal_url="", surreal_pool_size=8)
+
+    assert s.effective_surreal_client_pool_size("content") == 1
+    assert s.resolved_worker_max_jobs == 1
 
 
 def test_settings_store_rejects_removed_legacy_value(monkeypatch) -> None:

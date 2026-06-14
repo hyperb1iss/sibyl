@@ -381,7 +381,7 @@ Smoke command:
 
 Smoke file:
 
-- `packages/python/sibyl-core/tests/test_no_graphiti_default_loop.py`
+- `packages/python/sibyl-core/tests/test_default_memory_loop.py`
 
 Default-loop cases:
 

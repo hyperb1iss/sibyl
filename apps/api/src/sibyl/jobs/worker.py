@@ -29,6 +29,7 @@ from sibyl.jobs.backup import cleanup_old_backups, run_backup, run_scheduled_bac
 from sibyl.jobs.consolidation import consolidate_all_orgs, consolidate_org, priority_decay
 from sibyl.jobs.crawl import crawl_source, sync_all_sources, sync_source
 from sibyl.jobs.entities import (
+    backfill_entity_embeddings,
     create_entity,
     create_learning_episode,
     create_learning_procedure,
@@ -110,8 +111,10 @@ async def startup(ctx: dict[str, Any]) -> None:
     await load_api_keys_from_db()
 
     from sibyl.ai.llm.service import install_db_config_source
+    from sibyl.core_runtime_ports import install_core_runtime_ports
 
     install_db_config_source()
+    install_core_runtime_ports()
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:  # noqa: ARG001
@@ -280,6 +283,7 @@ class WorkerSettings:
         sync_all_sources,
         # Entity jobs
         create_entity,
+        backfill_entity_embeddings,
         project_memory_batch,
         extract_memory_entities,
         create_learning_episode,
@@ -316,7 +320,7 @@ class WorkerSettings:
     after_job_end = job_end
 
     # Worker settings
-    max_jobs = 3  # Max concurrent jobs
+    max_jobs = settings.resolved_worker_max_jobs
     job_timeout = 3600  # 1 hour timeout for crawl jobs
     keep_result = 86400  # Keep results for 24 hours
     poll_delay = 0.5  # Check for jobs every 0.5s

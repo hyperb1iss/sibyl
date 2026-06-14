@@ -7,7 +7,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from starlette.applications import Starlette
 
-from sibyl import main as main_module
+from sibyl import (
+    main as main_module,
+    runtime_services as runtime_services_module,
+)
 
 
 class _FakeSessionManager:
@@ -36,6 +39,9 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     disable_pubsub = MagicMock()
     broker = SimpleNamespace(startup=AsyncMock(), shutdown=AsyncMock())
     scheduler = SimpleNamespace(startup=AsyncMock(), shutdown=AsyncMock())
+    recover_stuck_sources = AsyncMock(
+        return_value={"recovered": 0, "completed": 0, "reset_to_pending": 0}
+    )
     startup_events: list[str] = []
 
     async def bootstrap_surreal_runtime() -> bool:
@@ -47,9 +53,19 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     monkeypatch.setattr("sibyl.api.app.create_api_app", Starlette)
     monkeypatch.setattr("sibyl.server.create_mcp_server", lambda **_: _FakeMCPServer())
     monkeypatch.setattr(
-        main_module,
-        "_bootstrap_surreal_runtime_schemas",
+        runtime_services_module,
+        "bootstrap_surreal_runtime_schemas",
         bootstrap_surreal_runtime,
+    )
+    monkeypatch.setattr(
+        runtime_services_module,
+        "install_llm_db_config_source",
+        MagicMock(side_effect=lambda: startup_events.append("llm")),
+    )
+    monkeypatch.setattr(
+        runtime_services_module,
+        "install_core_runtime_ports",
+        MagicMock(side_effect=lambda: startup_events.append("core_ports")),
     )
     monkeypatch.setattr("sibyl.api.pubsub.init_pubsub", init_pubsub)
     monkeypatch.setattr("sibyl.api.pubsub.shutdown_pubsub", shutdown_pubsub)
@@ -59,13 +75,14 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     monkeypatch.setattr("sibyl.api.websocket.disable_pubsub", disable_pubsub)
     monkeypatch.setattr("sibyl.coordination.broker.get_broker", lambda: broker)
     monkeypatch.setattr("sibyl.coordination.scheduler.get_scheduler", lambda: scheduler)
+    monkeypatch.setattr("sibyl.api.routes.admin.recover_stuck_sources", recover_stuck_sources)
 
     app = main_module.create_combined_app()
 
     async with app.router.lifespan_context(app):
         pass
 
-    assert startup_events == ["surreal"]
+    assert startup_events == ["surreal", "llm", "core_ports"]
     init_pubsub.assert_awaited_once()
     init_locks.assert_awaited_once()
     shutdown_pubsub.assert_awaited_once()
@@ -76,3 +93,4 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     scheduler.shutdown.assert_awaited_once()
     enable_pubsub.assert_called_once_with()
     disable_pubsub.assert_called_once_with()
+    recover_stuck_sources.assert_awaited_once()

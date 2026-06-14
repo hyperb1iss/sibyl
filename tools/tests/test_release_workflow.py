@@ -21,6 +21,7 @@ PYTHON_RELEASE_PACKAGES = {
     "uv build --package sibyl-dev --out-dir dist/",
     "uv build --package sibyld --out-dir dist/",
 }
+PUBLISH_ENTRYPOINTS_REQUIRING_RC_GATE = 2
 
 
 def _root_task(task_id: str) -> dict[str, Any]:
@@ -63,14 +64,29 @@ def test_release_workflow_validates_before_tag_or_publish() -> None:
     workflow = (REPO_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
     candidate_index = workflow.index("Record candidate SHA")
+    rc_check_index = workflow.index("Run RC gate bundle")
+    nightly_index = workflow.index("Validate same-SHA Nightly Regression")
     assert candidate_index < workflow.index('git tag -a "v${{ steps.version.outputs.version }}"')
     assert candidate_index < workflow.index("gh workflow run publish.yml")
+    assert rc_check_index < workflow.index('git tag -a "v${{ steps.version.outputs.version }}"')
+    assert rc_check_index < workflow.index("gh workflow run publish.yml")
+    assert nightly_index < workflow.index('git tag -a "v${{ steps.version.outputs.version }}"')
+    assert nightly_index < workflow.index("gh workflow run publish.yml")
     assert 'git commit -m "🔖' not in workflow
-    assert "chore(release): prepare v${{ steps.version.outputs.version }}" in workflow
+    assert "chore(release): prepare v${{ steps.version.outputs.version }}" not in workflow
+    assert "Update version" not in workflow
+    assert "Commit version bump" not in workflow
     assert "No version commit, tag, release, or publish was created." in workflow
     assert "Build and checks passed. Ready to release." not in workflow
-    assert "moon run :check" not in workflow
-    assert "rc-gate-receipt" not in workflow
+    assert "moon run :check" in workflow
+    assert "nightly_run_id" in workflow
+    assert "if: ${{ !inputs.dry_run || inputs.nightly_run_id != '' }}" in workflow
+    assert 'gh run view "$NIGHTLY_RUN_ID"' in workflow
+    assert 'run.get("workflowName") != "Nightly Regression"' in workflow
+    assert 'run.get("headSha") != expected_sha' in workflow
+    assert "nightly_run_id is required for live releases." in workflow
+    assert "Release candidates must have VERSION pre-committed" in workflow
+    assert "rc-gate-receipt-${{ steps.candidate.outputs.sha }}" in workflow
     assert r"(-[a-zA-Z0-9.]+)?" in workflow
     assert "steps.version.outputs.needs_version_commit == 'true'" in workflow
     assert "from: ${{ steps.version.outputs.previous_tag }}" in workflow
@@ -93,10 +109,10 @@ def test_nightly_regression_uploads_candidate_sha_receipts() -> None:
 def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     workflow = (REPO_ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8")
 
-    assert "rc-gate:" not in workflow
+    assert "rc-gate:" in workflow
     assert "homebrew:" in workflow
     assert "aur:" in workflow
-    assert "moon run :check" not in workflow
+    assert "moon run :check" in workflow
     assert "moon run python-package-build" in workflow
     assert "tools/release/homebrew_formula.py" in workflow
     assert "tools/release/aur_pkgbuild.py" in workflow
@@ -109,7 +125,9 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     assert "AUR_SSH_KEY" in workflow
     assert workflow.index("gh-action-pypi-publish") < workflow.index("homebrew_formula.py")
     assert workflow.index("gh-action-pypi-publish") < workflow.index("aur_pkgbuild.py")
-    assert "needs: rc-gate" not in workflow
+    assert workflow.count("needs: rc-gate") == PUBLISH_ENTRYPOINTS_REQUIRING_RC_GATE
+    assert workflow.index("rc-gate:") < workflow.index("moon run python-package-build")
+    assert workflow.index("rc-gate:") < workflow.index("Docker: ${{ matrix.image }}")
     assert "install.sh | sh -s -- --version ${{ steps.version.outputs.version }}" in workflow
     assert (
         "install.sh | sh -s -- --remote --version ${{ steps.version.outputs.version }}" in workflow

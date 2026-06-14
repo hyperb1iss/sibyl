@@ -1,10 +1,11 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from sibyl.api.idempotency import idempotency_request_hash
-from sibyl.api.routes.entities import create_entity
+from sibyl.api.routes.entities import _raw_capture_visible_to_reader, create_entity
 from sibyl.api.schemas import EntityCreate, EntityResponse
 from sibyl.persistence.content_common import ApiIdempotencyRecord, RawCaptureRecord
 from sibyl_core.models.entities import EntityType
@@ -255,3 +256,81 @@ async def test_remember_capture_creates_raw_archive_record(monkeypatch: pytest.M
     assert archive.raw_content == "Use first-class context packs for agent injection."
     assert archive.entity_type == EntityType.DECISION.value
     assert archive.capture_surface == "cli"
+
+
+def _reader_ctx(
+    *,
+    user_id: str = "reader-1",
+    api_key_memory_scope_keys: set[str] | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        user_id=user_id,
+        organization_id="org-1",
+        org_role=None,
+        api_key_memory_scope_keys=api_key_memory_scope_keys,
+    )
+
+
+def test_raw_capture_visibility_denies_delegated_without_membership() -> None:
+    capture = RawCaptureRecord(
+        organization_id=uuid4(),
+        title="Delegated secret",
+        raw_content="sensitive delegated raw text",
+        entity_type=EntityType.EPISODE.value,
+        principal_id="owner-1",
+        memory_scope="delegated",
+        scope_key="agent:secret",
+    )
+
+    assert (
+        _raw_capture_visible_to_reader(
+            capture,
+            ctx=_reader_ctx(),
+            accessible_projects=set(),
+            accessible_delegations=set(),
+        )
+        is False
+    )
+
+
+def test_raw_capture_visibility_allows_delegated_membership() -> None:
+    capture = RawCaptureRecord(
+        organization_id=uuid4(),
+        title="Delegated note",
+        raw_content="delegated raw text",
+        entity_type=EntityType.EPISODE.value,
+        principal_id="owner-1",
+        memory_scope="delegated",
+        scope_key="agent:nova",
+    )
+
+    assert (
+        _raw_capture_visible_to_reader(
+            capture,
+            ctx=_reader_ctx(),
+            accessible_projects=set(),
+            accessible_delegations={"agent:nova"},
+        )
+        is True
+    )
+
+
+def test_raw_capture_visibility_denies_unknown_scope() -> None:
+    capture = RawCaptureRecord(
+        organization_id=uuid4(),
+        title="Unsupported",
+        raw_content="unsupported raw text",
+        entity_type=EntityType.EPISODE.value,
+        principal_id="owner-1",
+        memory_scope="organization",
+    )
+
+    assert (
+        _raw_capture_visible_to_reader(
+            capture,
+            ctx=_reader_ctx(),
+            accessible_projects=set(),
+            accessible_delegations=set(),
+        )
+        is False
+    )

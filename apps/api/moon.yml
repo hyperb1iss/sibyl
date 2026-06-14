@@ -56,32 +56,20 @@ tasks:
   # Testing (unit tests only - e2e tests are in apps/e2e)
   test:
     command:
-      uv run pytest
-      --ignore=tests/test_communities.py
-      --ignore=tests/test_e2e_workflows.py
-      --ignore=tests/test_graph_communities_lod.py
-      --ignore=tests/test_harness.py
+      uv run pytest --ignore=tests/test_communities.py --ignore=tests/test_e2e_workflows.py
+      --ignore=tests/test_graph_communities_lod.py --ignore=tests/test_harness.py
       --ignore=tests/test_tools_core.py
     inputs:
       - "@group(sources)"
       - "@group(tests)"
-    options:
-      envFile: .env
 
   extended-test:
     command:
-      uv run pytest
-      tests/test_communities.py
-      tests/test_e2e_workflows.py
-      tests/test_graph_communities_lod.py
-      tests/test_harness.py
-      tests/test_tools_core.py
-      -v
+      uv run pytest tests/test_communities.py tests/test_e2e_workflows.py
+      tests/test_graph_communities_lod.py tests/test_harness.py tests/test_tools_core.py -v
     inputs:
       - "@group(sources)"
       - "@group(tests)"
-    options:
-      envFile: .env
 
   memory-trust-rest-test:
     command: uv run pytest tests/test_routes_memory.py tests/test_surreal_auth_runtime.py -v
@@ -89,8 +77,6 @@ tasks:
       - "@group(sources)"
       - tests/test_routes_memory.py
       - tests/test_surreal_auth_runtime.py
-    options:
-      envFile: .env
 
   trust-control-auth-test:
     command:
@@ -102,8 +88,6 @@ tasks:
       - tests/test_routes_auth.py
       - tests/test_surreal_auth_runtime.py
       - tests/test_organization_runtime.py
-    options:
-      envFile: .env
 
   trust-control-rest-test:
     command: uv run pytest tests/test_routes_memory.py tests/test_routes_context.py -v
@@ -111,28 +95,23 @@ tasks:
       - "@group(sources)"
       - tests/test_routes_memory.py
       - tests/test_routes_context.py
-    options:
-      envFile: .env
 
   trust-control-mcp-test:
     command:
-      uv run pytest tests/test_server_accessible_projects.py
-      tests/test_auth_mcp_token_verifier.py tests/test_mcp_oauth_session_refresh.py
-      tests/test_mcp_oauth_multi_org_selection.py -v
+      uv run pytest tests/test_server_accessible_projects.py tests/test_auth_mcp_token_verifier.py
+      tests/test_mcp_oauth_session_refresh.py tests/test_mcp_oauth_multi_org_selection.py -v
     inputs:
       - "@group(sources)"
       - tests/test_server_accessible_projects.py
       - tests/test_auth_mcp_token_verifier.py
       - tests/test_mcp_oauth_session_refresh.py
       - tests/test_mcp_oauth_multi_org_selection.py
-    options:
-      envFile: .env
 
   trust-control-jobs-test:
     command:
       uv run pytest tests/test_jobs_entities.py tests/test_jobs_queue.py
-      tests/test_jobs_source_imports.py tests/test_routes_tasks.py
-      tests/test_tools_manage.py tests/test_coordination_local.py -v
+      tests/test_jobs_source_imports.py tests/test_routes_tasks.py tests/test_tools_manage.py
+      tests/test_coordination_local.py -v
     inputs:
       - "@group(sources)"
       - tests/test_jobs_entities.py
@@ -141,26 +120,20 @@ tasks:
       - tests/test_routes_tasks.py
       - tests/test_tools_manage.py
       - tests/test_coordination_local.py
-    options:
-      envFile: .env
 
   autonomy-test:
     command:
       uv run pytest
       tests/test_routes_memory.py::test_auto_review_reflection_candidate_promotes_safe_candidate
       tests/test_routes_memory.py::test_auto_review_reflection_candidate_dry_run_does_not_promote
-      tests/test_routes_memory.py::test_auto_review_reflection_candidate_routes_exceptions
-      -v
+      tests/test_routes_memory.py::test_auto_review_reflection_candidate_routes_exceptions -v
     inputs:
       - "@group(sources)"
       - tests/test_routes_memory.py
-    options:
-      envFile: .env
 
   reflection-quality-test:
     command:
-      uv run pytest tests/test_routes_context.py::TestReflectRoute
-      tests/test_jobs_reflection.py
+      uv run pytest tests/test_routes_context.py::TestReflectRoute tests/test_jobs_reflection.py
       tests/test_routes_memory.py::test_preview_reflection_promotion_verifies_project_target
       tests/test_routes_memory.py::test_auto_review_reflection_candidate_promotes_safe_candidate
       tests/test_routes_memory.py::test_auto_review_reflection_candidate_dry_run_does_not_promote
@@ -170,27 +143,19 @@ tasks:
       tests/test_routes_memory.py::test_inspect_memory_source_returns_metadata_and_visible_content
       tests/test_routes_memory.py::test_apply_memory_correction_returns_updated_review_state
       tests/test_routes_memory.py::test_promote_reflection_candidate_verifies_project_target
-      tests/test_routes_memory.py::test_promote_reflection_candidate_returns_policy_denial
-      -v
+      tests/test_routes_memory.py::test_promote_reflection_candidate_returns_policy_denial -v
     inputs:
       - "@group(sources)"
       - tests/test_jobs_reflection.py
       - tests/test_routes_context.py
       - tests/test_routes_memory.py
-    options:
-      envFile: .env
 
   auth-session-test:
     command:
-      uv run pytest
-      tests/test_surreal_auth_runtime.py
-      tests/test_auth_session_cache.py
-      tests/test_auth_mcp_token_verifier.py
-      tests/test_mcp_oauth_session_refresh.py
-      tests/test_mcp_oauth_multi_org_selection.py
-      tests/test_routes_auth.py
-      tests/test_users_routes.py::test_revoke_all_sessions_returns_revoked_count
-      -v
+      uv run pytest tests/test_surreal_auth_runtime.py tests/test_auth_session_cache.py
+      tests/test_auth_mcp_token_verifier.py tests/test_mcp_oauth_session_refresh.py
+      tests/test_mcp_oauth_multi_org_selection.py tests/test_routes_auth.py
+      tests/test_users_routes.py::test_revoke_all_sessions_returns_revoked_count -v
     inputs:
       - "@group(sources)"
       - tests/test_surreal_auth_runtime.py
@@ -200,13 +165,10 @@ tasks:
       - tests/test_mcp_oauth_multi_org_selection.py
       - tests/test_routes_auth.py
       - tests/test_users_routes.py
-    options:
-      envFile: .env
 
   overview-perf-test:
     command:
-      uv run pytest
-      tests/test_routes_admin.py::test_stats_uses_graph_stats_payload
+      uv run pytest tests/test_routes_admin.py::test_stats_uses_graph_stats_payload
       tests/test_metrics.py::TestGetOrgMetrics::test_org_metrics_uses_surreal_metric_task_fast_path
       tests/test_metrics.py::TestGetProjectSummaries::test_project_summaries_uses_surreal_metric_task_fast_path
       -v
@@ -214,14 +176,10 @@ tasks:
       - "@group(sources)"
       - tests/test_routes_admin.py
       - tests/test_metrics.py
-    options:
-      envFile: .env
 
   backup-restore-gate-test:
     command:
-      uv run pytest
-      tests/test_jobs_backup.py
-      tests/test_backups_routes.py
+      uv run pytest tests/test_jobs_backup.py tests/test_backups_routes.py
       tests/test_surreal_auth_persistence.py::test_auth_archive_restore_accepts_full_user_rows
       tests/test_surreal_content_persistence.py::test_content_archive_restore_preserves_embeddings_and_metadata
       tests/test_surreal_content_persistence.py::test_content_archive_export_reads_from_surreal_backend
@@ -232,8 +190,6 @@ tasks:
       - tests/test_backups_routes.py
       - tests/test_surreal_auth_persistence.py
       - tests/test_surreal_content_persistence.py
-    options:
-      envFile: .env
 
   memory-trust-context-test:
     command: uv run pytest tests/test_routes_context.py tests/test_routes_session.py -v
@@ -241,8 +197,6 @@ tasks:
       - "@group(sources)"
       - tests/test_routes_context.py
       - tests/test_routes_session.py
-    options:
-      envFile: .env
 
   context-quality-test:
     command:
@@ -254,8 +208,6 @@ tasks:
       - tests/test_routes_context.py
       - tests/test_routes_session.py
       - tests/test_server_accessible_projects.py
-    options:
-      envFile: .env
 
   workspace-trust-test:
     command:
@@ -266,28 +218,23 @@ tasks:
       - tests/test_routes_memory.py
       - tests/test_jobs_source_imports.py
       - tests/test_routes_jobs.py
-    options:
-      envFile: .env
 
   memory-trust-mcp-test:
     command:
-      uv run pytest tests/test_server_accessible_projects.py
-      tests/test_auth_mcp_token_verifier.py tests/test_mcp_oauth_session_refresh.py
-      tests/test_mcp_oauth_multi_org_selection.py -v
+      uv run pytest tests/test_server_accessible_projects.py tests/test_auth_mcp_token_verifier.py
+      tests/test_mcp_oauth_session_refresh.py tests/test_mcp_oauth_multi_org_selection.py -v
     inputs:
       - "@group(sources)"
       - tests/test_server_accessible_projects.py
       - tests/test_auth_mcp_token_verifier.py
       - tests/test_mcp_oauth_session_refresh.py
       - tests/test_mcp_oauth_multi_org_selection.py
-    options:
-      envFile: .env
 
   memory-trust-jobs-test:
     command:
-      uv run pytest tests/test_jobs_entities.py tests/test_jobs_queue.py tests/test_jobs_reflection.py
-      tests/test_routes_jobs.py tests/test_routes_tasks.py tests/test_tools_manage.py
-      tests/test_coordination_local.py -v
+      uv run pytest tests/test_jobs_entities.py tests/test_jobs_queue.py
+      tests/test_jobs_reflection.py tests/test_routes_jobs.py tests/test_routes_tasks.py
+      tests/test_tools_manage.py tests/test_coordination_local.py -v
     inputs:
       - "@group(sources)"
       - tests/test_jobs_entities.py
@@ -297,8 +244,6 @@ tasks:
       - tests/test_routes_tasks.py
       - tests/test_tools_manage.py
       - tests/test_coordination_local.py
-    options:
-      envFile: .env
 
   test-cov:
     command: uv run pytest --cov=src --cov-report=term-missing --cov-report=xml:coverage.xml
@@ -307,8 +252,6 @@ tasks:
       - "@group(tests)"
     outputs:
       - coverage.xml
-    options:
-      envFile: .env
 
   check:
     deps:
@@ -324,7 +267,6 @@ tasks:
       - tests/test_surreal_live_runtime.py
     options:
       cache: false
-      envFile: .env
       runInCI: true
 
   # Server
@@ -332,7 +274,6 @@ tasks:
     command: uv run sibyld serve
     preset: server
     options:
-      envFile: .env
       persistent: true
 
   # Worker
@@ -340,7 +281,6 @@ tasks:
     command: uv run sibyld worker
     preset: server
     options:
-      envFile: .env
       persistent: true
 
   # Dependencies

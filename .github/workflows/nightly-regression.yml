@@ -230,7 +230,7 @@ jobs:
           tail -n 200 /tmp/sibyl-worker.log || true
           echo ""
           echo "=== SurrealDB logs ==="
-          docker compose logs surrealdb || true
+          docker compose --env-file /dev/null logs surrealdb || true
 
   live-graph:
     name: Live Graph Regression

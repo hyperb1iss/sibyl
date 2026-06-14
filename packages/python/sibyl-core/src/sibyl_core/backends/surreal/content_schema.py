@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from sibyl_core.backends.surreal.schema import render_fulltext_compatible_sql
-from sibyl_core.backends.surreal.schema_helpers import split_statements
+from sibyl_core.backends.surreal.schema_helpers import is_missing_table_error, split_statements
 from sibyl_core.backends.surreal.schema_version import (
     SCHEMA_VERSION_TABLE,
     SchemaMigration,
@@ -31,9 +31,11 @@ CONTENT_RELATION_TABLES = (
     "derived_from",
     "chunk_of",
     "supersedes",
+    "extracted_into",
 )
 CONTENT_TABLES = (
     *CONTENT_RELATION_TABLES,
+    "entity",
     "crawl_sources",
     "crawled_documents",
     "document_chunks",
@@ -46,7 +48,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 11
+CONTENT_SCHEMA_CURRENT_VERSION = 15
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -192,6 +194,10 @@ ALTER TABLE IF EXISTS chunk_of PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 ALTER TABLE IF EXISTS supersedes PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
+ALTER TABLE IF EXISTS extracted_into PERMISSIONS
+    FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
+ALTER TABLE IF EXISTS entity PERMISSIONS
+    FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 """
 
 CONTENT_RAW_CAPTURE_CHANGEFEED_MIGRATION_DEFINITIONS = """
@@ -287,6 +293,70 @@ DEFINE INDEX IF NOT EXISTS idx_supersedes_org_raw ON supersedes FIELDS organizat
 DEFINE INDEX IF NOT EXISTS idx_supersedes_org_superseded ON supersedes FIELDS organization_id, superseded_raw_memory_id;
 ALTER TABLE IF EXISTS supersedes PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
+
+DEFINE TABLE IF NOT EXISTS extracted_into SCHEMAFULL TYPE RELATION IN entity OUT document_chunks;
+DEFINE FIELD IF NOT EXISTS uuid ON extracted_into TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON extracted_into TYPE string;
+DEFINE FIELD IF NOT EXISTS entity_id ON extracted_into TYPE string;
+DEFINE FIELD IF NOT EXISTS chunk_id ON extracted_into TYPE string;
+DEFINE FIELD IF NOT EXISTS document_id ON extracted_into TYPE string;
+DEFINE FIELD IF NOT EXISTS source_id ON extracted_into TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at ON extracted_into TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_extracted_into_uuid ON extracted_into FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_extracted_into_org_entity ON extracted_into FIELDS organization_id, entity_id;
+DEFINE INDEX IF NOT EXISTS idx_extracted_into_org_chunk ON extracted_into FIELDS organization_id, chunk_id;
+ALTER TABLE IF EXISTS extracted_into PERMISSIONS
+    FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
+"""
+
+CONTENT_EXTRACTED_INTO_RELATION_MIGRATION_DEFINITIONS = """
+DEFINE TABLE IF NOT EXISTS extracted_into SCHEMAFULL TYPE RELATION IN entity OUT document_chunks;
+DEFINE FIELD IF NOT EXISTS uuid ON extracted_into TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON extracted_into TYPE string;
+DEFINE FIELD IF NOT EXISTS entity_id ON extracted_into TYPE string;
+DEFINE FIELD IF NOT EXISTS chunk_id ON extracted_into TYPE string;
+DEFINE FIELD IF NOT EXISTS document_id ON extracted_into TYPE string;
+DEFINE FIELD IF NOT EXISTS source_id ON extracted_into TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at ON extracted_into TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_extracted_into_uuid ON extracted_into FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_extracted_into_org_entity ON extracted_into FIELDS organization_id, entity_id;
+DEFINE INDEX IF NOT EXISTS idx_extracted_into_org_chunk ON extracted_into FIELDS organization_id, chunk_id;
+ALTER TABLE IF EXISTS extracted_into PERMISSIONS
+    FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
+"""
+
+CONTENT_ENTITY_ANCHOR_MIGRATION_DEFINITIONS = """
+DEFINE TABLE IF NOT EXISTS entity SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS uuid ON entity TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON entity TYPE string;
+DEFINE FIELD IF NOT EXISTS created_at ON entity TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS updated_at ON entity TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_content_entity_uuid ON entity FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_content_entity_org_uuid ON entity FIELDS organization_id, uuid UNIQUE;
+ALTER TABLE IF EXISTS entity PERMISSIONS
+    FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
+"""
+
+CONTENT_BACKUP_LEGACY_INCLUDE_CLEANUP_DEFINITIONS = """
+REMOVE FIELD IF EXISTS include_postgres ON TABLE backup_settings;
+REMOVE FIELD IF EXISTS include_postgres ON TABLE backups;
+DEFINE FIELD OVERWRITE include_database_dump ON backup_settings TYPE option<bool>;
+DEFINE FIELD OVERWRITE include_database_dump ON backups TYPE option<bool>;
+DEFINE FIELD OVERWRITE include_graph ON backup_settings TYPE bool DEFAULT true;
+DEFINE FIELD OVERWRITE include_graph ON backups TYPE bool DEFAULT true;
+UPDATE backup_settings SET include_database_dump = false, include_graph = true;
+UPDATE backups SET include_database_dump = false, include_graph = true;
+"""
+
+CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS = """
+DEFINE INDEX IF NOT EXISTS idx_crawl_sources_org_uuid
+    ON crawl_sources FIELDS organization_id, uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_crawl_sources_org_status_created
+    ON crawl_sources FIELDS organization_id, crawl_status, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_crawled_documents_org_uuid
+    ON crawled_documents FIELDS organization_id, uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_document_chunks_org_uuid
+    ON document_chunks FIELDS organization_id, uuid UNIQUE;
 """
 
 
@@ -362,6 +432,28 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
                 )
             ),
         ),
+        SchemaMigration(
+            version=12,
+            name="content_extracted_into_relation_table",
+            statements=tuple(
+                split_statements(CONTENT_EXTRACTED_INTO_RELATION_MIGRATION_DEFINITIONS)
+            ),
+        ),
+        SchemaMigration(
+            version=13,
+            name="content_entity_anchors",
+            statements=tuple(split_statements(CONTENT_ENTITY_ANCHOR_MIGRATION_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=14,
+            name="content_backup_full_org_archives",
+            statements=tuple(split_statements(CONTENT_BACKUP_LEGACY_INCLUDE_CLEANUP_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=15,
+            name="content_lookup_indexes",
+            statements=tuple(split_statements(CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS)),
+        ),
     )
 
 
@@ -385,6 +477,8 @@ async def _assert_content_migrations_safe(client: SurrealContentClient) -> None:
         scope="content_schema_migration_version",
     )
     current_version = await get_schema_version(client.execute_query, name=CONTENT_SCHEMA_NAME)
+    if current_version == 0 and not await _content_tables_have_rows(client):
+        return
     if current_version < 2:
         duplicates = await _duplicate_count_rows(
             client,
@@ -495,44 +589,51 @@ async def _assert_content_migrations_safe(client: SurrealContentClient) -> None:
 
 async def _normalize_legacy_enum_values(client: SurrealContentClient) -> None:
     for value in SourceType:
-        await client.execute_query(
+        await _execute_optional_table_update(
+            client,
             "UPDATE crawl_sources SET source_type = $normalized WHERE source_type = $legacy;",
             legacy=value.value.upper(),
             normalized=value.value,
         )
     for value in CrawlStatus:
-        await client.execute_query(
+        await _execute_optional_table_update(
+            client,
             "UPDATE crawl_sources SET crawl_status = $normalized WHERE crawl_status = $legacy;",
             legacy=value.value.upper(),
             normalized=value.value,
         )
     for value in MemoryScope:
-        await client.execute_query(
+        await _execute_optional_table_update(
+            client,
             "UPDATE raw_captures SET memory_scope = $normalized WHERE memory_scope = $legacy;",
             legacy=value.value.upper(),
             normalized=value.value,
         )
     for value in _CONTENT_REVIEW_STATE_VALUES:
-        await client.execute_query(
+        await _execute_optional_table_update(
+            client,
             "UPDATE raw_captures SET review_state = $normalized WHERE review_state = $legacy;",
             legacy=value.upper(),
             normalized=value,
         )
     for value in MemoryScope:
-        await client.execute_query(
+        await _execute_optional_table_update(
+            client,
             "UPDATE source_imports SET target_memory_scope = $normalized "
             "WHERE target_memory_scope = $legacy;",
             legacy=value.value.upper(),
             normalized=value.value,
         )
     for value in _CONTENT_SOURCE_IMPORT_STATUS_VALUES:
-        await client.execute_query(
+        await _execute_optional_table_update(
+            client,
             "UPDATE source_imports SET status = $normalized WHERE status = $legacy;",
             legacy=value.upper(),
             normalized=value,
         )
     for value in _CONTENT_BACKUP_STATUS_VALUES:
-        await client.execute_query(
+        await _execute_optional_table_update(
+            client,
             "UPDATE backups SET status = $normalized WHERE status = $legacy;",
             legacy=value.upper(),
             normalized=value,
@@ -546,7 +647,12 @@ async def _matching_rows(
 ) -> list[dict[str, object]]:
     from sibyl_core.backends.surreal.records import normalize_records
 
-    return normalize_records(await client.execute_query(statement, **params))
+    try:
+        return normalize_records(await client.execute_query(statement, **params))
+    except Exception as exc:
+        if is_missing_table_error(exc):
+            return []
+        raise
 
 
 async def _missing_parent_reference(
@@ -637,6 +743,31 @@ async def _duplicate_count_rows(
     return [row for row in rows if _coerce_int(row.get("total")) > 1]
 
 
+async def _content_tables_have_rows(client: SurrealContentClient) -> bool:
+    for table in CONTENT_TABLES:
+        if await _table_has_rows(client, table=table):
+            return True
+    return False
+
+
+async def _table_has_rows(client: SurrealContentClient, *, table: str) -> bool:
+    rows = await _matching_rows(client, f"SELECT count() AS count FROM {table};")
+    return any(_coerce_int(row.get("count")) > 0 for row in rows)
+
+
+async def _execute_optional_table_update(
+    client: SurrealContentClient,
+    statement: str,
+    **params: object,
+) -> None:
+    try:
+        await client.execute_query(statement, **params)
+    except Exception as exc:
+        if is_missing_table_error(exc):
+            return
+        raise
+
+
 def _coerce_int(value: object) -> int:
     if isinstance(value, bool):
         return int(value)
@@ -654,11 +785,15 @@ def _coerce_int(value: object) -> int:
 
 __all__ = [
     "CONTENT_ANALYZER_DEFINITIONS",
+    "CONTENT_BACKUP_LEGACY_INCLUDE_CLEANUP_DEFINITIONS",
     "CONTENT_CHILD_SCOPE_MIGRATION_DEFINITIONS",
     "CONTENT_DOCUMENT_URL_SCOPE_MIGRATION_DEFINITIONS",
+    "CONTENT_ENTITY_ANCHOR_MIGRATION_DEFINITIONS",
     "CONTENT_ENUM_ASSERTION_MIGRATION_DEFINITIONS",
+    "CONTENT_EXTRACTED_INTO_RELATION_MIGRATION_DEFINITIONS",
     "CONTENT_HIGHLIGHT_SNIPPET_MIGRATION_DEFINITIONS",
     "CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS",
+    "CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS",
     "CONTENT_PERMISSION_MIGRATION_DEFINITIONS",
     "CONTENT_RELATION_TABLES",
     "CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS",

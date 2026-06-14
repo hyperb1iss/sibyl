@@ -31,6 +31,7 @@ from sibyl.api.schemas import (
     RelatedEntitySummary,
 )
 from sibyl.api.websocket import broadcast_event
+from sibyl.auth.api_key_common import api_key_memory_scope_key
 from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import (
@@ -42,6 +43,7 @@ from sibyl.persistence import content_runtime
 from sibyl.persistence.auth_runtime import (
     create_project_record,
     delete_project_record,
+    list_accessible_delegated_scope_keys,
     list_accessible_project_graph_ids,
     log_audit_event,
     update_project_record,
@@ -52,7 +54,8 @@ from sibyl.persistence.content_runtime import (
     get_content_read_session_dependency,
     save_raw_capture_record,
 )
-from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
+from sibyl_core.auth import AuthOrganization, MemoryPolicyContext, OrganizationRole, ProjectRole
+from sibyl_core.auth.memory_policy import authorize_memory_read
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.projection import extract_projected_memory_entities
 from sibyl_core.services import KnowledgeReadService
@@ -278,34 +281,97 @@ def _entity_response_from_bulk_create(
     )
 
 
-def _raw_capture_visible_to_reader(
-    capture: RawCaptureRecord,
-    *,
-    reader_user_id: str | None,
-    accessible_projects: set[str],
-) -> bool:
-    metadata = capture.metadata or {}
-    memory_scope = capture.memory_scope or str(metadata.get("memory_scope") or "private")
+def _capture_policy_value(value: object | None) -> str | None:
+    normalized = str(value or "").strip()
+    return normalized or None
 
+
+def _capture_memory_scope(capture: RawCaptureRecord) -> str:
+    metadata = capture.metadata or {}
+    return _capture_policy_value(capture.memory_scope or metadata.get("memory_scope")) or "private"
+
+
+def _capture_scope_key(capture: RawCaptureRecord, memory_scope: str) -> str | None:
+    metadata = capture.metadata or {}
+    if memory_scope == "private":
+        return _capture_policy_value(
+            capture.principal_id
+            or metadata.get("principal_id")
+            or (str(capture.created_by_user_id) if capture.created_by_user_id else "")
+        )
     if memory_scope == "project":
-        project_id = str(
+        return _capture_policy_value(
             capture.scope_key
             or capture.project_id
             or metadata.get("scope_key")
             or metadata.get("project_id")
-            or ""
-        ).strip()
-        return bool(project_id and project_id in accessible_projects)
+        )
+    return _capture_policy_value(capture.scope_key or metadata.get("scope_key"))
 
-    if memory_scope == "private":
-        owner = str(
-            capture.principal_id
-            or metadata.get("principal_id")
-            or (str(capture.created_by_user_id) if capture.created_by_user_id else "")
-        ).strip()
-        return bool(owner and reader_user_id and owner == reader_user_id)
 
-    return True
+def _raw_capture_api_key_scope_allowed(
+    *,
+    ctx: AuthContext,
+    memory_scope: str,
+    scope_key: str | None,
+) -> bool:
+    allowed_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+    if allowed_scope_keys is None:
+        return True
+    if not isinstance(allowed_scope_keys, list | tuple | set | frozenset):
+        return True
+    return api_key_memory_scope_key(memory_scope, scope_key) in {
+        str(scope_key) for scope_key in allowed_scope_keys
+    }
+
+
+def _api_key_delegated_scope_keys(ctx: AuthContext) -> set[str]:
+    allowed_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+    if not isinstance(allowed_scope_keys, list | tuple | set | frozenset):
+        return set()
+
+    prefix = api_key_memory_scope_key("delegated", "")
+    return {
+        scope_key[len(prefix) :]
+        for scope_key in (str(value) for value in allowed_scope_keys)
+        if scope_key.startswith(prefix) and scope_key != prefix
+    }
+
+
+def _raw_capture_visible_to_reader(
+    capture: RawCaptureRecord,
+    *,
+    ctx: AuthContext,
+    accessible_projects: set[str],
+    accessible_delegations: set[str],
+) -> bool:
+    reader_user_id = getattr(ctx, "user_id", None)
+    memory_scope = _capture_memory_scope(capture)
+    scope_key = _capture_scope_key(capture, memory_scope)
+
+    if memory_scope == "private" and scope_key != reader_user_id:
+        return False
+
+    if not _raw_capture_api_key_scope_allowed(
+        ctx=ctx,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+    ):
+        return False
+
+    policy_context = MemoryPolicyContext(
+        actor_user_id=reader_user_id,
+        organization_id=getattr(ctx, "organization_id", None),
+        organization_role=getattr(ctx, "org_role", None),
+        memory_space=memory_scope,
+        scope_key=scope_key,
+        project_id=scope_key if memory_scope == "project" else capture.project_id,
+        agent_id=capture.agent_id,
+        accessible_projects=accessible_projects,
+        accessible_delegations=accessible_delegations,
+        source_surface="entities_raw_capture",
+    )
+    return authorize_memory_read(policy_context=policy_context).allowed
 
 
 async def _list_all_entities_paginated(
@@ -410,6 +476,13 @@ def _entity_visible_to_reader(
 async def _accessible_project_ids_for_read(ctx: AuthContext) -> set[str]:
     accessible_projects = await list_accessible_project_graph_ids(ctx)
     return {str(project_id) for project_id in accessible_projects or set()}
+
+
+async def _accessible_delegation_scope_keys_for_read(ctx: AuthContext) -> set[str]:
+    accessible_delegations = await list_accessible_delegated_scope_keys(ctx)
+    return {
+        str(scope_key) for scope_key in accessible_delegations or set()
+    } | _api_key_delegated_scope_keys(ctx)
 
 
 async def _resolve_entity_list_project_filter(
@@ -838,6 +911,7 @@ async def list_raw_captures(
 ) -> RawCaptureListResponse:
     """List archived raw quick captures for the current organization."""
     accessible_projects = await _accessible_project_ids_for_read(ctx)
+    accessible_delegations = await _accessible_delegation_scope_keys_for_read(ctx)
     captures, has_more = await content_runtime.list_raw_captures(
         session,
         organization_id=org.id,
@@ -852,8 +926,9 @@ async def list_raw_captures(
         for capture in captures
         if _raw_capture_visible_to_reader(
             capture,
-            reader_user_id=getattr(ctx, "user_id", None),
+            ctx=ctx,
             accessible_projects=accessible_projects,
+            accessible_delegations=accessible_delegations,
         )
     ]
 
@@ -875,6 +950,7 @@ async def get_raw_capture(
 ) -> RawCaptureResponse:
     """Get a single archived raw quick capture."""
     accessible_projects = await _accessible_project_ids_for_read(ctx)
+    accessible_delegations = await _accessible_delegation_scope_keys_for_read(ctx)
     capture = await content_runtime.get_raw_capture(
         session,
         organization_id=org.id,
@@ -882,8 +958,9 @@ async def get_raw_capture(
     )
     if not capture or not _raw_capture_visible_to_reader(
         capture,
-        reader_user_id=getattr(ctx, "user_id", None),
+        ctx=ctx,
         accessible_projects=accessible_projects,
+        accessible_delegations=accessible_delegations,
     ):
         raise HTTPException(status_code=404, detail=f"Raw capture not found: {capture_id}")
 
@@ -905,6 +982,7 @@ async def update_raw_capture_review_state(
 ) -> RawCaptureResponse:
     """Update review-state metadata for a raw capture."""
     accessible_projects = await _accessible_project_ids_for_read(ctx)
+    accessible_delegations = await _accessible_delegation_scope_keys_for_read(ctx)
     existing = await content_runtime.get_raw_capture(
         session,
         organization_id=org.id,
@@ -912,8 +990,9 @@ async def update_raw_capture_review_state(
     )
     if not existing or not _raw_capture_visible_to_reader(
         existing,
-        reader_user_id=getattr(ctx, "user_id", None),
+        ctx=ctx,
         accessible_projects=accessible_projects,
+        accessible_delegations=accessible_delegations,
     ):
         raise HTTPException(status_code=404, detail=f"Raw capture not found: {capture_id}")
 
@@ -1313,8 +1392,12 @@ async def create_entities_bulk(
     ]
     created_ids = await runtime.entity_manager.create_direct_bulk(
         entities,
-        generate_embeddings=True,
+        generate_embeddings=not batch.defer_embeddings,
     )
+    persisted_entities = [
+        entity.model_copy(update={"id": created_id})
+        for entity, created_id in zip(entities, created_ids, strict=True)
+    ]
 
     relationships: list[Relationship] = []
     for created_id, entity in zip(created_ids, batch.entities, strict=True):
@@ -1331,9 +1414,46 @@ async def create_entities_bulk(
             ]
         )
     if relationships:
-        await runtime.relationship_manager.create_bulk(relationships)
+        create_direct_bulk = getattr(runtime.relationship_manager, "create_direct_bulk", None)
+        if callable(create_direct_bulk):
+            await create_direct_bulk(
+                relationships,
+                generate_embeddings=not batch.defer_embeddings,
+            )
+        else:
+            await runtime.relationship_manager.create_bulk(relationships)
 
     background_jobs: dict[str, Any] = {}
+    if batch.defer_embeddings:
+        try:
+            from sibyl.jobs.queue import enqueue_entity_embedding_backfill
+
+            embedding_job_id = await enqueue_entity_embedding_backfill(
+                [entity.model_dump(mode="json") for entity in persisted_entities],
+                group_id,
+                relationships=[
+                    relationship.model_dump(mode="json") for relationship in relationships
+                ],
+            )
+            log.info(
+                "bulk_entity_embedding_backfill_enqueued",
+                job_id=embedding_job_id,
+                entities=len(entities),
+                relationships=len(relationships),
+            )
+            background_jobs["embedding_backfill"] = {
+                "status": "queued",
+                "job_ids": [embedding_job_id],
+                "queued_entities": len(entities),
+                "queued_relationships": len(relationships),
+            }
+        except Exception as exc:
+            log.warning(
+                "bulk_entity_embedding_backfill_enqueue_failed",
+                entities=len(entities),
+                relationships=len(relationships),
+                error=str(exc),
+            )
     projection_sources: list[Entity] = []
     projection_source_ids: list[str] = []
     for source, created_id in zip(entities, created_ids, strict=True):
@@ -1529,6 +1649,7 @@ async def create_entity(
         # Sync for projects, async for everything else
         sync=is_sync,
         skip_conflicts=entity.skip_conflicts,
+        generate_embeddings=not entity.defer_embeddings,
     )
 
     if not result.success or not result.id:
@@ -1558,6 +1679,10 @@ async def create_entity(
             metadata=raw_capture_metadata,
         )
 
+    result_background_jobs = getattr(result, "background_jobs", {})
+    if not isinstance(result_background_jobs, dict):
+        result_background_jobs = {}
+
     # For async creation, return immediately with pending response.
     # Entity creation continues in the native background job path.
     if not is_sync:
@@ -1574,6 +1699,7 @@ async def create_entity(
             source_file=None,
             created_at=None,
             updated_at=None,
+            background_jobs=result_background_jobs,
         )
         # Broadcast pending creation event
         await broadcast_event(
@@ -1607,6 +1733,7 @@ async def create_entity(
         source_file=None,
         created_at=response_timestamp,
         updated_at=response_timestamp,
+        background_jobs=result_background_jobs,
     )
 
     # Broadcast creation event (scoped to org)

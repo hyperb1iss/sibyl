@@ -192,8 +192,6 @@ def _document_import_options(request: DocumentImportRequest) -> dict[str, object
         options["text"] = request.text or ""
     if title := _optional_str(request.title):
         options["title"] = title
-    if request.allow_private_network:
-        options["allow_private_network"] = True
     return options
 
 

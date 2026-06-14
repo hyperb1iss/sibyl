@@ -45,8 +45,9 @@ describe('SearchPage', () => {
     expect(apiServer.fetchSearchResults).toHaveBeenCalledWith({
       query: 'retry',
       limit: 50,
-      include_documents: false,
+      include_documents: true,
       include_graph: true,
+      include_raw_memory: true,
     });
     expect(searchContent).toHaveBeenCalledWith(
       expect.objectContaining({

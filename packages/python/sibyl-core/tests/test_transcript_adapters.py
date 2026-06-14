@@ -9,6 +9,7 @@ import pytest
 
 from sibyl_core.models.sources import SourcePrivacyClass
 from sibyl_core.services.source_adapters import (
+    SourceRecordImportDecision,
     clear_source_adapters,
     get_source_adapter,
     import_source_batch,
@@ -36,6 +37,59 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+class InMemoryRawMemoryRememberer:
+    def __init__(self) -> None:
+        self.memories: list[RawMemory] = []
+        self.by_dedupe_key: dict[str, RawMemory] = {}
+
+    async def __call__(self, **kwargs: object) -> RawMemory:
+        memory = RawMemory(
+            id=f"raw-{len(self.memories) + 1}",
+            organization_id=str(kwargs["organization_id"]),
+            source_id=str(kwargs["source_id"]),
+            principal_id=str(kwargs["principal_id"]),
+            memory_scope=kwargs["memory_scope"],
+            scope_key=kwargs["scope_key"],
+            title=str(kwargs["title"]),
+            raw_content=str(kwargs["raw_content"]),
+            tags=list(kwargs["tags"]),
+            metadata=dict(kwargs["metadata"]),
+            provenance=dict(kwargs["provenance"]),
+            capture_surface=str(kwargs["capture_surface"]),
+            entity_type=str(kwargs["entity_type"]),
+            captured_at=datetime(2026, 5, 31, 12, tzinfo=UTC),
+            created_at=datetime(2026, 5, 31, 12, tzinfo=UTC),
+        )
+        self.memories.append(memory)
+        self.by_dedupe_key[str(memory.metadata["dedupe_key"])] = memory
+        return memory
+
+    async def remember_many(self, payloads):
+        return [
+            await self(
+                organization_id=payload.organization_id,
+                principal_id=payload.principal_id,
+                source_id=payload.source_id,
+                raw_content=payload.raw_content,
+                title=payload.title,
+                memory_scope=payload.memory_scope,
+                scope_key=payload.scope_key,
+                tags=payload.tags,
+                metadata=payload.metadata,
+                provenance=payload.provenance,
+                capture_surface=payload.capture_surface,
+                entity_type=payload.entity_type,
+            )
+            for payload in payloads
+        ]
+
+    async def duplicate_checker(self, *, record, payload):
+        existing = self.by_dedupe_key.get(str(payload.metadata["dedupe_key"]))
+        if existing is None:
+            return None
+        return SourceRecordImportDecision(duplicate_raw_memory_id=existing.id)
 
 
 @pytest.mark.asyncio
@@ -436,6 +490,52 @@ async def test_transcript_import_writes_private_raw_records(tmp_path: Path) -> N
     metadata = writes[0]["metadata"]
     assert metadata["source_type"] == "agent_transcript_turn"
     assert metadata["source_record_metadata"]["source_platform"] == "claude_code"
+
+
+@pytest.mark.asyncio
+async def test_codex_dogfood_fixture_reimport_is_turn_level_idempotent() -> None:
+    fixture_dir = Path(__file__).parent / "fixtures" / "transcripts" / "codex_dogfood"
+    adapter = CodexJsonlAdapter()
+    manifest = await adapter.prepare_manifest(
+        source_uri=str(fixture_dir),
+        options={"source_identity": "dogfood:codex:sanitized"},
+    )
+    rememberer = InMemoryRawMemoryRememberer()
+
+    first = await import_source_batch(
+        adapter,
+        manifest,
+        organization_id="org-1",
+        principal_id="user-1",
+        remember=rememberer,
+        duplicate_checker=rememberer.duplicate_checker,
+    )
+    second = await import_source_batch(
+        adapter,
+        manifest,
+        organization_id="org-1",
+        principal_id="user-1",
+        remember=rememberer,
+        duplicate_checker=rememberer.duplicate_checker,
+    )
+
+    assert first.imported_count == 4
+    assert first.dedupe_count == 0
+    assert second.imported_count == 0
+    assert second.dedupe_count == 4
+    assert len(rememberer.memories) == 4
+    assert set(second.duplicate_dedupe_keys) == set(first.dedupe_keys)
+    skipped_source_ids = {str(record.metadata["source_id"]) for record in second.skipped_records}
+    assert skipped_source_ids == set(first.source_ids)
+    assert [
+        memory.metadata["source_record_metadata"]["source_platform"]
+        for memory in rememberer.memories
+    ] == [
+        "codex",
+        "codex",
+        "codex",
+        "codex",
+    ]
 
 
 @pytest.mark.asyncio

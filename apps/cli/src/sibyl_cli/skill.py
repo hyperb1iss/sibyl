@@ -37,6 +37,11 @@ SKILL_PACKS = {
         filename="core.md",
         description="Core Sibyl workflow, command contract, and agent rules",
     ),
+    "quick": SkillPack(
+        name="quick",
+        filename="quick.md",
+        description="Minimal agent rules and verb table for subagents (~500 tokens)",
+    ),
     "workflows": SkillPack(
         name="workflows",
         filename="workflows.md",

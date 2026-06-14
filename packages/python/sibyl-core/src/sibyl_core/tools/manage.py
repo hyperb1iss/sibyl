@@ -27,6 +27,12 @@ import structlog
 
 from sibyl_core.auth import MemoryPolicyContext, authorize_memory_write
 from sibyl_core.models.entities import EntityType
+from sibyl_core.runtime_ports import (
+    get_audit_port,
+    get_content_port,
+    get_graph_link_port,
+    get_queue_port,
+)
 from sibyl_core.services.crawl_sources import (
     _crawl_source_exists,
     _create_or_get_crawl_source,
@@ -136,9 +142,7 @@ async def get_graph_runtime(group_id: str) -> ManageGraphRuntime:
 
 
 def _get_content_read_session() -> Any:
-    from sibyl.persistence.content_runtime import get_content_read_session
-
-    return get_content_read_session()
+    return get_content_port().read_session()
 
 
 # =============================================================================
@@ -169,9 +173,7 @@ async def _log_task_learning_capture_denied(
     source_surface: str,
 ) -> None:
     try:
-        from sibyl.persistence.auth_runtime import log_memory_audit_event
-
-        await log_memory_audit_event(
+        await get_audit_port().log_memory_audit_event(
             action="memory.task_learning.manage_denied",
             user_id=user_id,
             organization_id=organization_id,
@@ -268,17 +270,13 @@ async def _enqueue_task_learning_jobs(
     organization_id: str,
     policy_payload: dict[str, Any],
 ) -> dict[str, str]:
-    from sibyl.jobs.queue import (
-        enqueue_create_learning_episode,
-        enqueue_create_learning_procedure,
-    )
-
-    episode_job_id = await enqueue_create_learning_episode(
+    queue = get_queue_port()
+    episode_job_id = await queue.enqueue_create_learning_episode(
         task_data,
         organization_id,
         policy_context=policy_payload,
     )
-    procedure_job_id = await enqueue_create_learning_procedure(
+    procedure_job_id = await queue.enqueue_create_learning_procedure(
         task_data,
         organization_id,
         policy_context=policy_payload,
@@ -746,9 +744,7 @@ async def _update_task(
                 message="organization_id required for async update",
             )
 
-        from sibyl.jobs.queue import enqueue_update_task
-
-        job_id = await enqueue_update_task(entity_id, updates, organization_id)
+        job_id = await get_queue_port().enqueue_update_task(entity_id, updates, organization_id)
         return ManageResponse(
             success=True,
             action="update_task",
@@ -1232,25 +1228,24 @@ async def _link_graph(
             },
         )
 
-    global GraphIntegrationService
-
-    if GraphIntegrationService is None:
-        from sibyl.crawler.graph_integration import (
-            GraphIntegrationService as _GraphIntegrationService,
-        )
-
-        GraphIntegrationService = _GraphIntegrationService
-
-    # Process chunks
     runtime = await get_graph_runtime(organization_id)
-    integration = GraphIntegrationService(
-        runtime.client,
-        organization_id,
-        create_new_entities=create_new_entities,
-    )
 
     source_name = source_id or "all_sources"
-    stats = await integration.process_chunks(list(chunks), source_name=source_name)
+    if GraphIntegrationService is not None:
+        integration = GraphIntegrationService(
+            runtime.client,
+            organization_id,
+            create_new_entities=create_new_entities,
+        )
+        stats = await integration.process_chunks(list(chunks), source_name=source_name)
+    else:
+        stats = await get_graph_link_port().process_chunks(
+            graph_client=runtime.client,
+            organization_id=organization_id,
+            chunks=list(chunks),
+            source_name=source_name,
+            create_new_entities=create_new_entities,
+        )
 
     message = f"Linked {stats.entities_linked} entities from {stats.chunks_processed} chunks"
     if stats.new_entities_created > 0:

@@ -24,8 +24,11 @@ DEFINE FIELD IF NOT EXISTS updated_at ON crawl_sources TYPE datetime DEFAULT tim
 
 DEFINE INDEX IF NOT EXISTS idx_crawl_sources_uuid ON crawl_sources FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_crawl_sources_org ON crawl_sources FIELDS organization_id;
+DEFINE INDEX IF NOT EXISTS idx_crawl_sources_org_uuid ON crawl_sources FIELDS organization_id, uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_crawl_sources_org_url ON crawl_sources FIELDS organization_id, url UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_crawl_sources_status ON crawl_sources FIELDS crawl_status;
+DEFINE INDEX IF NOT EXISTS idx_crawl_sources_org_status_created ON crawl_sources
+    FIELDS organization_id, crawl_status, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_crawl_sources_name_ft ON crawl_sources FIELDS name FULLTEXT ANALYZER title_analyzer BM25 HIGHLIGHTS;
 
 DEFINE TABLE IF NOT EXISTS crawled_documents SCHEMAFULL;
@@ -54,6 +57,8 @@ DEFINE FIELD IF NOT EXISTS created_at ON crawled_documents TYPE datetime DEFAULT
 DEFINE FIELD IF NOT EXISTS updated_at ON crawled_documents TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX IF NOT EXISTS idx_crawled_documents_uuid ON crawled_documents FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_crawled_documents_org_uuid ON crawled_documents
+    FIELDS organization_id, uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_crawled_documents_org_source ON crawled_documents
     FIELDS organization_id, source_id;
 DEFINE INDEX IF NOT EXISTS idx_crawled_documents_source ON crawled_documents FIELDS source_id;
@@ -84,6 +89,8 @@ DEFINE FIELD IF NOT EXISTS created_at ON document_chunks TYPE datetime DEFAULT t
 DEFINE FIELD IF NOT EXISTS updated_at ON document_chunks TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX IF NOT EXISTS idx_document_chunks_uuid ON document_chunks FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_document_chunks_org_uuid ON document_chunks
+    FIELDS organization_id, uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_document_chunks_org_source ON document_chunks
     FIELDS organization_id, source_id;
 DEFINE INDEX IF NOT EXISTS idx_document_chunks_org_source_entities ON document_chunks
@@ -97,6 +104,15 @@ DEFINE INDEX IF NOT EXISTS idx_document_chunks_content_ft ON document_chunks FIE
 DEFINE INDEX IF NOT EXISTS idx_document_chunks_code_ft ON document_chunks FIELDS content FULLTEXT ANALYZER code_analyzer BM25 HIGHLIGHTS;
 DEFINE INDEX IF NOT EXISTS idx_document_chunks_embedding ON document_chunks FIELDS embedding
     HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12;
+
+DEFINE TABLE IF NOT EXISTS entity SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS uuid ON entity TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON entity TYPE string;
+DEFINE FIELD IF NOT EXISTS created_at ON entity TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS updated_at ON entity TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS idx_content_entity_uuid ON entity FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_content_entity_org_uuid ON entity FIELDS organization_id, uuid UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS raw_captures SCHEMAFULL CHANGEFEED 7d;
 DEFINE FIELD IF NOT EXISTS uuid ON raw_captures TYPE string;
@@ -245,6 +261,19 @@ DEFINE FIELD IF NOT EXISTS created_at ON supersedes TYPE datetime DEFAULT time::
 DEFINE INDEX IF NOT EXISTS idx_supersedes_uuid ON supersedes FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_supersedes_org_raw ON supersedes FIELDS organization_id, raw_memory_id;
 DEFINE INDEX IF NOT EXISTS idx_supersedes_org_superseded ON supersedes FIELDS organization_id, superseded_raw_memory_id;
+
+DEFINE TABLE IF NOT EXISTS extracted_into SCHEMAFULL TYPE RELATION IN entity OUT document_chunks;
+DEFINE FIELD IF NOT EXISTS uuid ON extracted_into TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON extracted_into TYPE string;
+DEFINE FIELD IF NOT EXISTS entity_id ON extracted_into TYPE string;
+DEFINE FIELD IF NOT EXISTS chunk_id ON extracted_into TYPE string;
+DEFINE FIELD IF NOT EXISTS document_id ON extracted_into TYPE string;
+DEFINE FIELD IF NOT EXISTS source_id ON extracted_into TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at ON extracted_into TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS idx_extracted_into_uuid ON extracted_into FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_extracted_into_org_entity ON extracted_into FIELDS organization_id, entity_id;
+DEFINE INDEX IF NOT EXISTS idx_extracted_into_org_chunk ON extracted_into FIELDS organization_id, chunk_id;
 
 DEFINE TABLE IF NOT EXISTS system_settings SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS key ON system_settings TYPE string;

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
 from sibyl.config import settings
 from sibyl.jobs import memory_extraction
+from sibyl.persistence.content_common import DocumentChunkRecord
 from sibyl_core.models.memory_extraction import (
     ExtractedMemoryEntity,
     MemoryBatchEntityExtractionResult,
@@ -121,6 +124,154 @@ async def test_extract_memory_entities_runs_bounded_llm_extraction(
     assert "native RRF" not in fake.prompts[0]
     created_entities = entity_manager.create_direct_bulk.await_args.args[0]
     assert created_entities[0].metadata["projection_extractor"] == "llm"
+
+
+@pytest.mark.asyncio
+async def test_extract_memory_entities_links_document_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeExtractor()
+    document_id = uuid4()
+    organization_id = uuid4()
+    chunk = DocumentChunkRecord(
+        id=uuid4(),
+        document_id=document_id,
+        organization_id=organization_id,
+        source_id="source-1",
+        chunk_index=0,
+        content="SurrealDB 3.0 adds native RRF.",
+    )
+    other_chunk = DocumentChunkRecord(
+        id=uuid4(),
+        document_id=document_id,
+        organization_id=organization_id,
+        source_id="source-1",
+        chunk_index=1,
+        content="The second chunk talks about unrelated retrieval plumbing.",
+    )
+    saved_chunks: list[DocumentChunkRecord] = []
+    entity_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda entities, **_: [entity.id for entity in entities]
+        )
+    )
+    relationship_manager = SimpleNamespace(create_bulk=AsyncMock(return_value=(1, 0)))
+
+    async def fake_runtime(*_: object, **__: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+        )
+
+    @asynccontextmanager
+    async def fake_session():
+        yield None
+
+    async def fake_list_chunks(_session, *, document_id: object, organization_id: object):
+        assert str(document_id) == str(chunk.document_id)
+        assert str(organization_id) == str(chunk.organization_id)
+        return [chunk, other_chunk]
+
+    async def fake_save_chunks(_session, *, chunks):
+        saved_chunks.extend(chunks)
+        return chunks
+
+    monkeypatch.setattr(memory_extraction, "memory_batch_entity_extractor", lambda **_: fake)
+    monkeypatch.setattr(memory_extraction, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(memory_extraction, "get_content_read_session", fake_session)
+    monkeypatch.setattr(memory_extraction, "list_document_chunks", fake_list_chunks)
+    monkeypatch.setattr(memory_extraction, "save_document_chunks", fake_save_chunks)
+
+    result = await memory_extraction.extract_memory_entities(
+        {},
+        [
+            {
+                "id": "document-original",
+                "entity_type": "document",
+                "name": "Document",
+                "content": "SurrealDB 3.0 adds native RRF for graph retrieval.",
+                "organization_id": str(organization_id),
+                "metadata": {"document_id": str(document_id)},
+            }
+        ],
+        str(organization_id),
+        created_source_ids=["session-created"],
+        max_entities_per_source=4,
+        max_source_chars=200,
+        max_concurrent=1,
+        max_tokens=512,
+    )
+
+    created_entities = entity_manager.create_direct_bulk.await_args.args[0]
+    assert result["linked_chunks"] == 1
+    assert saved_chunks == [chunk]
+    assert saved_chunks[0].has_entities
+    assert saved_chunks[0].entity_ids == [created_entities[0].id]
+    assert other_chunk.entity_ids == []
+
+
+@pytest.mark.asyncio
+async def test_extract_memory_entities_rejects_cross_org_chunk_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeExtractor()
+    document_id = uuid4()
+    organization_id = uuid4()
+    other_organization_id = uuid4()
+    entity_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda entities, **_: [entity.id for entity in entities]
+        )
+    )
+    relationship_manager = SimpleNamespace(create_bulk=AsyncMock(return_value=(1, 0)))
+
+    async def fake_runtime(*_: object, **__: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+        )
+
+    @asynccontextmanager
+    async def fake_session():
+        yield None
+
+    async def fake_list_chunks(_session, *, document_id: object, organization_id: object):
+        raise AssertionError("cross-org payload must not query document chunks")
+
+    async def fake_save_chunks(_session, *, chunks):
+        raise AssertionError("cross-org payload must not write document chunks")
+
+    monkeypatch.setattr(memory_extraction, "memory_batch_entity_extractor", lambda **_: fake)
+    monkeypatch.setattr(memory_extraction, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(memory_extraction, "get_content_read_session", fake_session)
+    monkeypatch.setattr(memory_extraction, "list_document_chunks", fake_list_chunks)
+    monkeypatch.setattr(memory_extraction, "save_document_chunks", fake_save_chunks)
+
+    result = await memory_extraction.extract_memory_entities(
+        {},
+        [
+            {
+                "id": "document-original",
+                "entity_type": "document",
+                "name": "Document",
+                "content": "SurrealDB 3.0 adds native RRF for graph retrieval.",
+                "organization_id": str(other_organization_id),
+                "metadata": {
+                    "document_id": str(document_id),
+                    "organization_id": str(other_organization_id),
+                },
+            }
+        ],
+        str(organization_id),
+        created_source_ids=["session-created"],
+        max_entities_per_source=4,
+        max_source_chars=200,
+        max_concurrent=1,
+        max_tokens=512,
+    )
+
+    assert result["linked_chunks"] == 0
+    assert "session-created:organization_mismatch" in result["projection_errors"]
 
 
 @pytest.mark.asyncio

@@ -25,6 +25,7 @@ class SurrealGraphClient(DedicatedSurrealClient):
         token: str = "",
         namespace_prefix: str = "org_",
         database: str = "graph",
+        pool_size: int | None = None,
     ) -> None:
         self._group_id = group_id
         super().__init__(
@@ -35,6 +36,7 @@ class SurrealGraphClient(DedicatedSurrealClient):
             namespace=_namespace_for_group(namespace_prefix, group_id),
             database=database,
             client_kind="graph",
+            pool_size=pool_size,
         )
 
     @property
@@ -74,6 +76,7 @@ async def get_surreal_graph_client(group_id: str) -> SurrealGraphClient:
                 token=settings.surreal_token.get_secret_value(),
                 namespace_prefix=settings.surreal_namespace_prefix,
                 database=settings.surreal_database,
+                pool_size=settings.surreal_client_pool_size("graph"),
             )
             _clients[group_id] = client
             while len(_clients) > settings.surreal_graph_client_cache_size:

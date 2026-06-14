@@ -54,6 +54,7 @@ Capture knowledge and recall it back into agent context.
 | [`sibyl note`](./remember.md)     | Add a task note or capture a free note memory       |
 | [`sibyl add`](./add.md)           | Add knowledge with explicit title and content       |
 | [`sibyl search`](./search.md)     | Semantic search across graph and crawled docs       |
+| [`sibyl show`](./show.md)         | Show a graph entity or raw memory by ID             |
 | [`sibyl entity`](./entity.md)     | Generic entity CRUD operations                      |
 | [`sibyl explore`](./explore.md)   | Graph traversal and exploration                     |
 | [`sibyl archive`](./archive.md)   | Browse raw quick captures                           |

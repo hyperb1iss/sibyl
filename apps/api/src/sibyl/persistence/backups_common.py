@@ -20,7 +20,7 @@ class BackupSettingsRecord:
     enabled: bool = True
     schedule: str = "0 2 * * *"
     retention_days: int = 30
-    include_database_dump: bool = True
+    include_database_dump: bool = False
     include_graph: bool = True
     last_backup_at: datetime | None = None
     last_backup_id: str | None = None
@@ -45,7 +45,7 @@ class BackupRecord:
     filename: str | None = None
     file_path: str | None = None
     size_bytes: int = 0
-    include_database_dump: bool = True
+    include_database_dump: bool = False
     include_graph: bool = True
     entity_count: int = 0
     relationship_count: int = 0
@@ -92,11 +92,13 @@ def resolve_backup_runtime_options(
     store: str,
     auth_store: str,
     include_database_dump: bool | None = None,
-    include_graph: bool = True,
+    include_graph: bool | None = True,
 ) -> BackupRuntimeOptions:
     del include_database_dump
+    del include_graph
     database_dump_supported = False
     include_database_dump = False
+    include_graph = True
     include_auth_snapshot = auth_store == "surreal"
     include_content_snapshot = store == "surreal"
 

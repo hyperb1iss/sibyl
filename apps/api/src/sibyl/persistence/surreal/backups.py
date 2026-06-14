@@ -73,6 +73,14 @@ def _effective_include_database_dump(requested: bool | None = None) -> bool:
     ).include_database_dump
 
 
+def _effective_include_graph(requested: bool | None = None) -> bool:
+    return resolve_backup_runtime_options(
+        store=app_settings.store,
+        auth_store=app_settings.auth_store,
+        include_graph=requested,
+    ).include_graph
+
+
 def _record_include_database_dump(record: dict[str, object]) -> bool:
     requested_database_dump = resolve_mapping_database_dump(
         record,
@@ -86,6 +94,12 @@ def _record_include_database_dump(record: dict[str, object]) -> bool:
 def _backup_settings_from_record(record: dict[str, object]) -> BackupSettingsRecord:
     now = _utcnow()
     include_database_dump = _record_include_database_dump(record)
+    options = resolve_backup_runtime_options(
+        store=app_settings.store,
+        auth_store=app_settings.auth_store,
+        include_database_dump=include_database_dump,
+        include_graph=_coerce_bool(record.get("include_graph"), default=True),
+    )
     return BackupSettingsRecord(
         id=_coerce_uuid(record.get("uuid"), field_name="backup_settings.uuid"),
         organization_id=_coerce_uuid(
@@ -95,8 +109,8 @@ def _backup_settings_from_record(record: dict[str, object]) -> BackupSettingsRec
         enabled=_coerce_bool(record.get("enabled"), default=True),
         schedule=_coerce_str(record.get("schedule"), default="0 2 * * *"),
         retention_days=_coerce_int(record.get("retention_days"), default=30),
-        include_database_dump=include_database_dump,
-        include_graph=_coerce_bool(record.get("include_graph"), default=True),
+        include_database_dump=options.include_database_dump,
+        include_graph=options.include_graph,
         last_backup_at=_coerce_datetime(record.get("last_backup_at")),
         last_backup_id=_coerce_optional_str(record.get("last_backup_id")),
         created_at=_coerce_datetime(record.get("created_at")) or now,
@@ -105,15 +119,20 @@ def _backup_settings_from_record(record: dict[str, object]) -> BackupSettingsRec
 
 
 def _backup_settings_record(settings: BackupSettingsRecord) -> dict[str, object]:
-    include_database_dump = _effective_include_database_dump(settings.include_database_dump)
+    options = resolve_backup_runtime_options(
+        store=app_settings.store,
+        auth_store=app_settings.auth_store,
+        include_database_dump=settings.include_database_dump,
+        include_graph=settings.include_graph,
+    )
     return {
         "uuid": str(settings.id),
         "organization_id": str(settings.organization_id),
         "enabled": settings.enabled,
         "schedule": settings.schedule,
         "retention_days": settings.retention_days,
-        "include_database_dump": include_database_dump,
-        "include_graph": settings.include_graph,
+        "include_database_dump": options.include_database_dump,
+        "include_graph": options.include_graph,
         "last_backup_at": settings.last_backup_at,
         "last_backup_id": settings.last_backup_id,
         "created_at": settings.created_at,
@@ -124,6 +143,12 @@ def _backup_settings_record(settings: BackupSettingsRecord) -> dict[str, object]
 def _backup_from_record(record: dict[str, object]) -> BackupRecord:
     now = _utcnow()
     include_database_dump = _record_include_database_dump(record)
+    options = resolve_backup_runtime_options(
+        store=app_settings.store,
+        auth_store=app_settings.auth_store,
+        include_database_dump=include_database_dump,
+        include_graph=_coerce_bool(record.get("include_graph"), default=True),
+    )
     return BackupRecord(
         id=_coerce_uuid(record.get("uuid"), field_name="backups.uuid"),
         organization_id=_coerce_uuid(
@@ -135,8 +160,8 @@ def _backup_from_record(record: dict[str, object]) -> BackupRecord:
         filename=_coerce_optional_str(record.get("filename")),
         file_path=_coerce_optional_str(record.get("file_path")),
         size_bytes=_coerce_int(record.get("size_bytes")),
-        include_database_dump=include_database_dump,
-        include_graph=_coerce_bool(record.get("include_graph"), default=True),
+        include_database_dump=options.include_database_dump,
+        include_graph=options.include_graph,
         entity_count=_coerce_int(record.get("entity_count")),
         relationship_count=_coerce_int(record.get("relationship_count")),
         started_at=_coerce_datetime(record.get("started_at")),
@@ -151,7 +176,12 @@ def _backup_from_record(record: dict[str, object]) -> BackupRecord:
 
 
 def _backup_record(backup: BackupRecord) -> dict[str, object]:
-    include_database_dump = _effective_include_database_dump(backup.include_database_dump)
+    options = resolve_backup_runtime_options(
+        store=app_settings.store,
+        auth_store=app_settings.auth_store,
+        include_database_dump=backup.include_database_dump,
+        include_graph=backup.include_graph,
+    )
     return {
         "uuid": str(backup.id),
         "organization_id": str(backup.organization_id),
@@ -161,8 +191,8 @@ def _backup_record(backup: BackupRecord) -> dict[str, object]:
         "filename": backup.filename,
         "file_path": backup.file_path,
         "size_bytes": backup.size_bytes,
-        "include_database_dump": include_database_dump,
-        "include_graph": backup.include_graph,
+        "include_database_dump": options.include_database_dump,
+        "include_graph": options.include_graph,
         "entity_count": backup.entity_count,
         "relationship_count": backup.relationship_count,
         "started_at": backup.started_at,
@@ -249,7 +279,7 @@ async def get_backup_settings(org_id: UUID) -> BackupSettingsRecord:
     return await _save_backup_settings(
         BackupSettingsRecord(
             organization_id=org_id,
-            include_database_dump=_database_dump_supported(),
+            include_database_dump=_effective_include_database_dump(),
         )
     )
 
@@ -273,7 +303,7 @@ async def update_backup_settings(
     if include_database_dump is not None:
         settings.include_database_dump = _effective_include_database_dump(include_database_dump)
     if include_graph is not None:
-        settings.include_graph = include_graph
+        settings.include_graph = _effective_include_graph(include_graph)
     return await _save_backup_settings(settings)
 
 
@@ -293,7 +323,7 @@ async def create_backup_record(
             backup_id=backup_id,
             status=BackupStatus.PENDING.value,
             include_database_dump=_effective_include_database_dump(include_database_dump),
-            include_graph=include_graph,
+            include_graph=_effective_include_graph(include_graph),
             triggered_by=triggered_by,
             created_by_user_id=created_by_user_id,
         )

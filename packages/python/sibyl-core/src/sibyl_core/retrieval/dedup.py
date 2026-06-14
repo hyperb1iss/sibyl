@@ -34,12 +34,15 @@ class DedupConfig:
         batch_size: Number of entities to process per batch.
         same_type_only: Only compare entities of the same type.
         min_name_overlap: Minimum Jaccard similarity of names (extra filter).
+        scope_metadata_keys: Metadata fields that must match exactly when resolving
+            incoming entities against existing graph rows.
     """
 
     similarity_threshold: float = 0.95
     batch_size: int = 100
     same_type_only: bool = True
     min_name_overlap: float = 0.3
+    scope_metadata_keys: tuple[str, ...] = ()
 
 
 @dataclass
@@ -166,6 +169,25 @@ def _dedup_candidate_with_seed_from_row(
         return None
     entity_id, name, entity_type, score = candidate
     return seed_id, entity_id, name, entity_type, score
+
+
+def _append_scope_constraint_clauses(
+    clauses: list[str],
+    params: dict[str, Any],
+    scope_constraints: dict[str, object | None] | None,
+    *,
+    param_prefix: str,
+) -> None:
+    if not scope_constraints:
+        return
+    for key, value in scope_constraints.items():
+        field = f"attributes.{key}"
+        if value is None:
+            clauses.append(f"{field} = NONE")
+            continue
+        param_name = f"{param_prefix}_{key}"
+        clauses.append(f"{field} = ${param_name}")
+        params[param_name] = value
 
 
 @dataclass
@@ -334,10 +356,16 @@ class EntityDeduplicator:
             execute_query_raw = None
 
         seeds: list[tuple[str, str, str, list[float]]] = []
+        scope_constraints: dict[str, dict[str, object | None]] = {}
         for entity in entities:
             embedding = _float_list(entity.embedding)
             if entity.id and embedding:
                 seeds.append((entity.id, entity.name, entity.entity_type.value, embedding))
+                if self.config.scope_metadata_keys:
+                    metadata = entity.metadata if isinstance(entity.metadata, dict) else {}
+                    scope_constraints[entity.id] = {
+                        key: metadata.get(key) for key in self.config.scope_metadata_keys
+                    }
         if not seeds:
             return {}
 
@@ -350,6 +378,7 @@ class EntityDeduplicator:
                 seen_pairs=set(),
                 execute_query=execute_query,
                 execute_query_raw=execute_query_raw,
+                scope_constraints=scope_constraints,
             )
         except Exception as exc:
             log.warning(
@@ -373,6 +402,7 @@ class EntityDeduplicator:
         seen_pairs: set[tuple[str, str]],
         execute_query: Any,
         execute_query_raw: Any | None = None,
+        scope_constraints: dict[str, dict[str, object | None]] | None = None,
     ) -> list[DuplicatePair]:
         if not seeds:
             return []
@@ -390,6 +420,7 @@ class EntityDeduplicator:
                         candidate_limit=candidate_limit,
                         seen_pairs=seen_pairs,
                         execute_query=execute_query,
+                        scope_constraints=(scope_constraints or {}).get(seed[0]),
                     )
                 )
             return pairs
@@ -406,6 +437,7 @@ class EntityDeduplicator:
             seed_type_param = f"seed_type_{index}"
             seed_embedding_param = f"seed_embedding_{index}"
             limit_param = f"limit_{index}"
+            scope = (scope_constraints or {}).get(seed_id)
             clauses = [
                 "group_id = $group_id",
                 f"uuid != ${seed_id_param}",
@@ -415,6 +447,12 @@ class EntityDeduplicator:
                 clauses.append(f"entity_type = ${seed_type_param}")
             elif entity_types:
                 clauses.append("entity_type IN $entity_types")
+            _append_scope_constraint_clauses(
+                clauses,
+                params,
+                scope,
+                param_prefix=f"scope_{index}",
+            )
 
             params[seed_id_param] = seed_id
             params[seed_type_param] = seed_type
@@ -484,6 +522,7 @@ class EntityDeduplicator:
         candidate_limit: int,
         seen_pairs: set[tuple[str, str]],
         execute_query: Any,
+        scope_constraints: dict[str, object | None] | None = None,
     ) -> list[DuplicatePair]:
         seed_id, seed_name, seed_type, seed_embedding = seed
         clauses = [
@@ -504,6 +543,12 @@ class EntityDeduplicator:
             params["seed_type"] = seed_type
         elif entity_types:
             clauses.append("entity_type IN $entity_types")
+        _append_scope_constraint_clauses(
+            clauses,
+            params,
+            scope_constraints,
+            param_prefix="scope",
+        )
 
         knn_effort = max(1, int(settings.graph_knn_ef))
         rows = normalize_records(

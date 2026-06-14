@@ -91,22 +91,22 @@ describe('BackupsPage', () => {
     expect(screen.getByRole('heading', { name: 'Backups' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /create backup/i })).toBeInTheDocument();
     expect(screen.getByText('Scheduled Backups')).toBeInTheDocument();
-    expect(screen.getByText('Surreal Data Snapshot')).toBeInTheDocument();
+    expect(screen.getByText('Full Organization')).toBeInTheDocument();
     expect(screen.getByText('Archives (2)')).toBeInTheDocument();
     expect(screen.getByText('backup_123')).toBeInTheDocument();
     expect(screen.getByText('backup_124')).toBeInTheDocument();
     expect(screen.getByText('In Progress')).toBeInTheDocument();
   });
 
-  it('creates Surreal backups with the current archive contract', async () => {
+  it('creates full organization backups without include switches', async () => {
     const { user } = render(<BackupsPage />);
 
     await user.click(screen.getByRole('button', { name: /create backup/i }));
 
-    expect(screen.getAllByText('Surreal Data Snapshot').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('Full Surreal Archive')).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Auth, content, crawler data, sessions, API keys, and settings from SurrealDB'
+        'Auth, content, crawl data, API keys, settings, and the knowledge graph for this organization.'
       )
     ).toBeInTheDocument();
     expect(
@@ -117,13 +117,16 @@ describe('BackupsPage', () => {
 
     await user.click(screen.getByRole('button', { name: /start backup/i }));
 
-    expect(createBackupMutateAsync).toHaveBeenCalledWith({
-      include_database_dump: true,
-      include_graph: true,
-    });
+    expect(createBackupMutateAsync).toHaveBeenCalledWith({});
     const legacyDatabaseDumpKey = `include_${'postgres'}`;
     expect(createBackupMutateAsync).not.toHaveBeenCalledWith(
       expect.objectContaining({ [legacyDatabaseDumpKey]: expect.anything() })
+    );
+    expect(createBackupMutateAsync).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        include_database_dump: expect.anything(),
+        include_graph: expect.anything(),
+      })
     );
   });
 });

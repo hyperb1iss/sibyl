@@ -11,7 +11,11 @@ from sibyl.jobs import raw_promotion
 from sibyl_core.models.entities import RelationshipType
 from sibyl_core.models.sources import SourceImportManifest
 from sibyl_core.services.source_adapters import build_source_record_id
-from sibyl_core.services.surreal_content import MemoryScope, RawMemory
+from sibyl_core.services.surreal_content import (
+    ContentLineageBackfillResult,
+    MemoryScope,
+    RawMemory,
+)
 
 
 def _raw_memory(
@@ -61,6 +65,45 @@ def _list_memories(memories: list[RawMemory]):
         return memories
 
     return fake_list
+
+
+@pytest.fixture(autouse=True)
+def _stub_content_lineage_backfill(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_backfill_content_lineage(*, organization_id: str, limit: int):
+        assert organization_id
+        assert limit >= 1
+        return ContentLineageBackfillResult()
+
+    monkeypatch.setattr(raw_promotion, "backfill_content_lineage", fake_backfill_content_lineage)
+
+
+@pytest.mark.asyncio
+async def test_promote_raw_captures_fails_when_content_lineage_backfill_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_memory(
+        metadata={"raw_promotion_state": "promoted"},
+        entity_id="document-entity",
+    )
+
+    async def failing_backfill_content_lineage(*, organization_id: str, limit: int):
+        assert organization_id == memory.organization_id
+        assert limit >= 1
+        raise RuntimeError("content lineage unavailable")
+
+    monkeypatch.setattr(
+        raw_promotion,
+        "list_raw_memories_for_promotion",
+        _list_memories([memory]),
+    )
+    monkeypatch.setattr(
+        raw_promotion,
+        "backfill_content_lineage",
+        failing_backfill_content_lineage,
+    )
+
+    with pytest.raises(RuntimeError, match="content lineage unavailable"):
+        await raw_promotion.promote_raw_captures({}, memory.organization_id)
 
 
 def _source_record_id(adapter_record_id: str) -> str:
@@ -133,6 +176,12 @@ async def test_promote_raw_captures_writes_chunks_and_graph_entity(
     assert result["promoted_count"] == 1
     assert result["failed_count"] == 0
     assert result["chunk_count"] == len(saved_chunks)
+    assert result["content_lineage"] == {
+        "derived_from": 0,
+        "chunk_of": 0,
+        "supersedes": 0,
+        "extracted_into": 0,
+    }
     assert saved_documents[0].id == UUID(memory.id)
     assert saved_documents[0].source_id == memory.source_id
     assert deleted_documents == [(UUID(memory.id), UUID(memory.organization_id))]
@@ -583,3 +632,28 @@ async def test_promote_raw_captures_skips_deleted_and_superseded(
     assert result["skipped_deleted_count"] == 1
     assert result["skipped_superseded_count"] == 1
     assert saved_statuses == ["skipped_deleted", "skipped_superseded"]
+
+
+@pytest.mark.asyncio
+async def test_promote_raw_captures_skips_currently_invalidated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalidated = _raw_memory(
+        metadata={"invalid_at": "2020-01-01T00:00:00+00:00"},
+    )
+
+    async def fail_save_memory(_memory: RawMemory) -> RawMemory:
+        raise AssertionError("invalidated captures should not be rewritten")
+
+    monkeypatch.setattr(
+        raw_promotion,
+        "list_raw_memories_for_promotion",
+        _list_memories([invalidated]),
+    )
+    monkeypatch.setattr(raw_promotion, "EmbeddingService", _fake_embedder)
+    monkeypatch.setattr(raw_promotion, "save_raw_memory", fail_save_memory)
+
+    result = await raw_promotion.promote_raw_captures({}, invalidated.organization_id)
+
+    assert result["promoted_count"] == 0
+    assert result["skipped_review_count"] == 1

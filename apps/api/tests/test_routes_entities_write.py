@@ -107,6 +107,54 @@ async def test_create_project_routes_through_runtime_project_record() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_entity_can_defer_embeddings_to_background_backfill() -> None:
+    org = _org()
+    ctx = _ctx()
+    entity = EntityCreate(
+        name="Lexical first",
+        content="Persist immediately and backfill vectors after the write.",
+        entity_type=EntityType.SESSION,
+        defer_embeddings=True,
+    )
+    add_result = SimpleNamespace(
+        success=True,
+        id="session_new",
+        message="queued",
+        background_jobs={
+            "embedding_backfill": {
+                "status": "deferred",
+                "queued_by": "create_entity:session_new",
+                "queued_entities": 1,
+                "queued_relationships": 0,
+            }
+        },
+    )
+    runtime = SimpleNamespace(entity_manager=SimpleNamespace(get=AsyncMock()))
+
+    with (
+        patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)) as add,
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+    ):
+        response = await create_entity(
+            request=_request(),
+            entity=entity,
+            org=org,
+            ctx=ctx,
+            content_session=None,
+            sync=False,
+        )
+
+    assert response.id == "session_new"
+    assert response.background_jobs["embedding_backfill"]["status"] == "deferred"
+    add.assert_awaited_once()
+    assert add.await_args.kwargs["generate_embeddings"] is False
+
+
+@pytest.mark.asyncio
 async def test_create_entities_bulk_uses_runtime_bulk_create() -> None:
     org = _org()
     ctx = _ctx()
@@ -152,6 +200,80 @@ async def test_create_entities_bulk_uses_runtime_bulk_create() -> None:
     call = runtime.entity_manager.create_direct_bulk.await_args
     assert len(call.args[0]) == 2
     assert call.kwargs == {"generate_embeddings": True}
+
+
+@pytest.mark.asyncio
+async def test_create_entities_bulk_can_defer_embeddings_to_backfill_job() -> None:
+    org = _org()
+    ctx = _ctx()
+    batch = EntityBulkCreateRequest(
+        defer_embeddings=True,
+        entities=[
+            EntityCreate(
+                name="Session one",
+                content="lexical memory content",
+                entity_type=EntityType.SESSION,
+                skip_conflicts=True,
+                related_to=["pattern_existing"],
+            )
+        ],
+    )
+    entity_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(return_value=["session_one"]),
+        get=AsyncMock(return_value=SimpleNamespace(metadata={})),
+    )
+    relationship_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(return_value=["rel_session_one_related_to_pattern_existing"]),
+        create_bulk=AsyncMock(return_value=(0, 0)),
+    )
+    runtime = SimpleNamespace(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+    )
+    extraction_enqueue = SimpleNamespace(
+        status="skipped",
+        job_ids=(),
+        queued_sources=0,
+        skipped_sources=1,
+        queue_depth=0,
+        reason="disabled",
+    )
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "sibyl.jobs.queue.enqueue_entity_embedding_backfill",
+            AsyncMock(return_value="embed-entities-1"),
+        ) as enqueue_embeddings,
+        patch(
+            "sibyl.jobs.memory_extraction.enqueue_memory_extraction_batches",
+            AsyncMock(return_value=extraction_enqueue),
+        ),
+    ):
+        response = await create_entities_bulk(
+            batch=batch,
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    assert entity_manager.create_direct_bulk.await_args.kwargs == {"generate_embeddings": False}
+    assert relationship_manager.create_direct_bulk.await_args.kwargs["generate_embeddings"] is False
+    enqueue_embeddings.assert_awaited_once()
+    entities_payload, group_id = enqueue_embeddings.await_args.args
+    assert group_id == str(org.id)
+    assert entities_payload[0]["id"] == "session_one"
+    assert enqueue_embeddings.await_args.kwargs["relationships"][0]["id"] == (
+        "rel_session_one_related_to_pattern_existing"
+    )
+    jobs = response.background_jobs["embedding_backfill"]
+    assert jobs["status"] == "queued"
+    assert jobs["job_ids"] == ["embed-entities-1"]
+    assert jobs["queued_entities"] == 1
+    assert jobs["queued_relationships"] == 1
 
 
 @pytest.mark.asyncio

@@ -127,7 +127,33 @@ class TestDocumentSearch:
         scope_loader.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_search_documents_falls_back_to_surreal_scope(
+    async def test_search_documents_propagates_vector_search_failures(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(document_search_service.settings, "store", "surreal")
+
+        scope_loader = AsyncMock()
+        with (
+            patch(
+                "sibyl_core.services.document_search.search_document_chunks",
+                AsyncMock(side_effect=RuntimeError("index unavailable")),
+            ),
+            patch(
+                "sibyl_core.services.document_search.load_search_scope",
+                scope_loader,
+            ),
+            patch(
+                "sibyl_core.services.document_search._embed_text",
+                AsyncMock(return_value=[1.0, 0.0]),
+            ),
+            pytest.raises(RuntimeError, match="index unavailable"),
+        ):
+            await search_documents("alpha", organization_id="org-1", limit=5)
+
+        scope_loader.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_search_documents_falls_back_to_surreal_scope_without_embedding(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(document_search_service.settings, "store", "surreal")
@@ -184,7 +210,7 @@ class TestDocumentSearch:
             ),
             patch(
                 "sibyl_core.services.document_search._embed_text",
-                AsyncMock(return_value=[1.0, 0.0]),
+                AsyncMock(side_effect=RuntimeError("embedding unavailable")),
             ),
         ):
             results = await search_documents("alpha", organization_id="org-1", limit=5)
@@ -312,7 +338,7 @@ class TestDocumentSearch:
             ),
             patch(
                 "sibyl_core.services.document_search._embed_text",
-                AsyncMock(return_value=[1.0, 0.0]),
+                AsyncMock(side_effect=RuntimeError("embedding unavailable")),
             ),
         ):
             results = await search_documents("rareterm", organization_id="org-1", limit=5)

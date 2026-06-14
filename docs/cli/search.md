@@ -208,5 +208,5 @@ sibyl search "auth" --all
 - [`sibyl recall`](./recall.md) - Compile a working context pack for a goal
 - [`sibyl add`](./add.md) - Add new knowledge
 - [`sibyl explore related`](./explore.md) - Find related entities
-- [`sibyl entity show`](./entity.md) - View entity details
+- [`sibyl show`](./show.md) - View full graph entity or raw memory content
 - [`sibyl crawl documents`](./crawl.md) - Read crawled documents in full

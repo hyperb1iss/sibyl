@@ -325,7 +325,6 @@ function EditModal({
         <form onSubmit={handleSubmit}>
           <div className="relative">
             <input
-              // biome-ignore lint/a11y/noAutofocus: secret entry is the modal's sole purpose
               autoFocus
               type={showValue ? 'text' : 'password'}
               value={value}

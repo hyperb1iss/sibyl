@@ -51,11 +51,13 @@ def _policy_context(
     actor_user_id: str = "user-1",
     memory_space: str = "private",
     scope_key: str | None = None,
+    is_global_admin: bool = False,
 ) -> dict[str, object]:
     return {
         "actor_user_id": actor_user_id,
         "organization_id": organization_id,
         "organization_role": "member",
+        "is_global_admin": is_global_admin,
         "accessible_projects": [scope_key] if memory_space == "project" and scope_key else [],
         "accessible_delegations": [],
         "memory_space": memory_space,
@@ -598,6 +600,52 @@ async def test_start_source_import_rejects_imap_private_network_override() -> No
 
 
 @pytest.mark.asyncio
+async def test_start_source_import_rejects_document_url_private_network_override() -> None:
+    with pytest.raises(ValueError, match="source_import_private_network_not_allowed"):
+        await source_imports.start_source_import(
+            source_uri="https://docs.example.com/page",
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            adapter_name="document_url",
+            options={"target_scope_key": "project_123", "allow_private_network": True},
+        )
+
+    assert source_imports._SOURCE_IMPORT_RUNS == {}
+
+
+@pytest.mark.asyncio
+async def test_start_source_import_allows_false_document_url_private_network_flag() -> None:
+    payload = await source_imports.start_source_import(
+        source_uri="https://docs.example.com/page",
+        organization_id="org-1",
+        principal_id="user-1",
+        policy_context=_policy_context(),
+        adapter_name="document_url",
+        options={"target_scope_key": "project_123", "allow_private_network": False},
+    )
+
+    assert payload["adapter_name"] == "document_url"
+
+
+@pytest.mark.asyncio
+async def test_start_source_import_allows_document_url_private_network_for_global_admin() -> None:
+    payload = await source_imports.start_source_import(
+        source_uri="http://127.0.0.1:3337/docs",
+        organization_id="org-1",
+        principal_id="user-1",
+        policy_context=_policy_context(is_global_admin=True),
+        adapter_name="document_url",
+        options={"target_scope_key": "project_123", "allow_private_network": True},
+    )
+
+    assert payload["adapter_name"] == "document_url"
+    assert payload["status"] == source_imports.SourceImportStatus.PENDING.value
+    run = next(iter(source_imports._SOURCE_IMPORT_RUNS.values()))
+    assert run.options["allow_private_network"] is True
+
+
+@pytest.mark.asyncio
 async def test_start_source_import_rejects_imap_uri_password_before_persist() -> None:
     with pytest.raises(ValueError, match="imap_source_uri_must_not_include_password"):
         await source_imports.start_source_import(
@@ -625,6 +673,21 @@ async def test_start_source_import_rejects_imap_query_before_persist(source_uri:
     with pytest.raises(ValueError, match="imap_source_uri_must_not_include_query_or_fragment"):
         await source_imports.start_source_import(
             source_uri=source_uri,
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+            adapter_name=IMAP_ADAPTER_NAME,
+            options={"username": "bliss"},
+        )
+
+    assert source_imports._SOURCE_IMPORT_RUNS == {}
+
+
+@pytest.mark.asyncio
+async def test_start_source_import_rejects_encoded_imap_control_path_before_persist() -> None:
+    with pytest.raises(ValueError, match="imap_source_uri_must_not_include_control_characters"):
+        await source_imports.start_source_import(
+            source_uri="imaps://mail.example.com/INBOX%0D%0AA999%20SELECT%20Archive",
             organization_id="org-1",
             principal_id="user-1",
             policy_context=_policy_context(),
@@ -1080,3 +1143,47 @@ def test_worker_settings_registers_source_import_job() -> None:
     assert promote_raw_captures in WorkerSettings.functions
     assert poll_raw_capture_changefeed in WorkerSettings.functions
     assert poll_all_raw_capture_changefeeds in WorkerSettings.functions
+
+
+@pytest.mark.asyncio
+async def test_supersession_handler_refuses_cross_principal_or_scope_targets() -> None:
+    saved: list[RawMemory] = []
+    victim = RawMemory(
+        id="raw-victim",
+        organization_id="org-1",
+        source_id="msg-1",
+        principal_id="victim-user",
+        memory_scope=MemoryScope.PRIVATE,
+        metadata={"content_hash": "hash-old"},
+        review_state="accepted",
+    )
+    attacker = RawMemory(
+        id="raw-attacker",
+        organization_id="org-1",
+        source_id="msg-1",
+        principal_id="attacker-user",
+        memory_scope=MemoryScope.PRIVATE,
+        metadata={"content_hash": "hash-new"},
+    )
+
+    async def capture_save(memory: RawMemory) -> RawMemory:
+        saved.append(memory)
+        return memory
+
+    handler = source_imports._default_supersession_handler(organization_id="org-1")
+    with (
+        patch("sibyl.jobs.source_imports.get_raw_memory", AsyncMock(return_value=victim)),
+        patch("sibyl.jobs.source_imports.save_raw_memory", AsyncMock(side_effect=capture_save)),
+    ):
+        superseded = await handler(
+            record=_source_record(),
+            payload=_raw_memory_write(principal_id="attacker-user"),
+            memory=attacker,
+            superseded_raw_memory_id="raw-victim",
+        )
+
+    assert superseded is False
+    assert saved == []
+    assert victim.review_state == "accepted"
+    assert "superseded_by_raw_memory_id" not in victim.metadata
+    assert "supersedes_raw_memory_id" not in attacker.metadata

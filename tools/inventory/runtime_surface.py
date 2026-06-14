@@ -168,11 +168,6 @@ def _is_repo_pyproject(path: Path) -> bool:
     return not any(part in PYPROJECT_EXCLUDED_PARTS for part in relative_parts)
 
 
-PYPROJECT_PATHS = tuple(
-    sorted(path for path in REPO_ROOT.rglob("pyproject.toml") if _is_repo_pyproject(path))
-)
-
-
 @dataclass(frozen=True, slots=True)
 class HttpRoute:
     method: str
@@ -265,8 +260,10 @@ def legacy_term_allowlist_records(
 GRAPHITI_COMPATIBILITY_ALLOWLIST: tuple[GraphitiCompatibilityRecord, ...] = ()
 
 ARCHITECTURE_LEGACY_TERM_FILES = (
+    "docs/architecture/AUDIT_2026-05-28.md",
     "docs/architecture/PACKAGING_PLAN_2026-05-19.md",
     "docs/architecture/PERMISSION_SYSTEM_AUDIT.md",
+    "docs/architecture/INGESTION_IMPLEMENTATION_PLAN_2026-05-30.md",
     "docs/architecture/retrieval-system.md",
     "docs/architecture/SIBYL_1_0_ROADMAP.md",
     "docs/architecture/SIBYL_NORTHSTAR.md",
@@ -395,6 +392,13 @@ def git_index_paths() -> frozenset[str]:
 
 
 GIT_INDEX_PATHS = git_index_paths()
+PYPROJECT_PATHS = tuple(
+    sorted(
+        REPO_ROOT / path
+        for path in GIT_INDEX_PATHS
+        if Path(path).name == "pyproject.toml" and _is_repo_pyproject(REPO_ROOT / path)
+    )
+)
 LEGACY_TERM_ALLOWLIST = (
     LegacyTermAllowlistRecord(
         path="README.md",

@@ -747,6 +747,46 @@ class QueryCoverageResult[T]:
     changed: bool
 
 
+@dataclass(frozen=True)
+class _QueryCoverageQueryContext:
+    keywords: list[str]
+    query_terms: set[str]
+    query_fact_frames: tuple[FactFrame, ...]
+    is_preference_query: bool
+    is_personal_memory_query: bool
+    is_evidence_set_query: bool
+    suppress_fact_frame_rank_signal: bool
+
+
+def _build_query_coverage_context(
+    query: str,
+    *,
+    temporal_target: datetime | None,
+) -> _QueryCoverageQueryContext:
+    keywords = extract_keywords(query)
+    is_preference_query = _is_preference_query(query, set(keywords))
+    if is_preference_query:
+        focused_keywords = [
+            keyword for keyword in keywords if keyword not in _PREFERENCE_QUERY_SCAFFOLDING_TERMS
+        ]
+        if len(focused_keywords) >= 3:
+            keywords = focused_keywords
+    is_evidence_set_query = bool(_EVIDENCE_SET_QUERY_PATTERN.search(query.lower()))
+    return _QueryCoverageQueryContext(
+        keywords=keywords,
+        query_terms=set(keywords),
+        query_fact_frames=tuple(extract_query_fact_frames(query)),
+        is_preference_query=is_preference_query,
+        is_personal_memory_query=_is_personal_memory_query(query),
+        is_evidence_set_query=is_evidence_set_query,
+        suppress_fact_frame_rank_signal=(
+            is_evidence_set_query
+            or _is_multi_evidence_order_query(query)
+            or (_is_temporal_instruction_query(query) and temporal_target is None)
+        ),
+    )
+
+
 def should_accept_query_coverage_refinement[T](
     initial: QueryCoverageResult[T],
     refined: QueryCoverageResult[T],
@@ -806,33 +846,59 @@ def rank_items_by_query_coverage[T](
     Returns the re-ranked ``(item, score)`` pairs alongside whether ranking
     applied and whether the refinement pass was accepted.
     """
-    candidates = [
-        QueryCoverageCandidate(
-            item=item,
-            stable_id=id_fn(item),
-            text=text_fn(item),
-            prior_score=score,
-            original_rank=index + 1,
-            timestamp=timestamp_fn(item),
+    query_context = _build_query_coverage_context(query, temporal_target=temporal_target)
+    candidate_rows: list[tuple[T, float, str, str, Any, int]] = [
+        (
+            item,
+            score,
+            id_fn(item),
+            text_fn(item),
+            timestamp_fn(item),
+            index + 1,
         )
         for index, (item, score) in enumerate(items)
     ]
-    ranking = rank_by_query_coverage(query, candidates, temporal_target=temporal_target)
+    candidates = [
+        QueryCoverageCandidate(
+            item=item,
+            stable_id=stable_id,
+            text=text,
+            prior_score=score,
+            original_rank=original_rank,
+            timestamp=timestamp,
+        )
+        for item, score, stable_id, text, timestamp, original_rank in candidate_rows
+    ]
+    ranking = rank_by_query_coverage(
+        query,
+        candidates,
+        temporal_target=temporal_target,
+        query_context=query_context,
+    )
     if not ranking.applied:
         return list(items), False, False
 
+    original_values_by_item_id = {
+        id(item): (text, timestamp)
+        for item, _score, _stable_id, text, timestamp, _rank in candidate_rows
+    }
     refined_candidates = [
         QueryCoverageCandidate(
             item=ranked.item,
             stable_id=ranked.stable_id,
-            text=text_fn(ranked.item),
+            text=original_values_by_item_id[id(ranked.item)][0],
             prior_score=ranked.score,
             original_rank=index + 1,
-            timestamp=timestamp_fn(ranked.item),
+            timestamp=original_values_by_item_id[id(ranked.item)][1],
         )
         for index, ranked in enumerate(ranking.ranked)
     ]
-    refined = rank_by_query_coverage(query, refined_candidates, temporal_target=temporal_target)
+    refined = rank_by_query_coverage(
+        query,
+        refined_candidates,
+        temporal_target=temporal_target,
+        query_context=query_context,
+    )
     if should_accept_query_coverage_refinement(ranking, refined):
         return [(ranked.item, ranked.score) for ranked in refined.ranked], True, True
 
@@ -1115,17 +1181,16 @@ def rank_by_query_coverage[T](
     candidates: Sequence[QueryCoverageCandidate[T]],
     *,
     temporal_target: datetime | None = None,
+    query_context: _QueryCoverageQueryContext | None = None,
 ) -> QueryCoverageResult[T]:
-    keywords = extract_keywords(query)
-    is_preference_query = _is_preference_query(query, set(keywords))
-    is_personal_memory_query = _is_personal_memory_query(query)
-    is_evidence_set_query = bool(_EVIDENCE_SET_QUERY_PATTERN.search(query.lower()))
-    if is_preference_query:
-        focused_keywords = [
-            keyword for keyword in keywords if keyword not in _PREFERENCE_QUERY_SCAFFOLDING_TERMS
-        ]
-        if len(focused_keywords) >= 3:
-            keywords = focused_keywords
+    context = query_context or _build_query_coverage_context(
+        query,
+        temporal_target=temporal_target,
+    )
+    keywords = context.keywords
+    is_preference_query = context.is_preference_query
+    is_personal_memory_query = context.is_personal_memory_query
+    is_evidence_set_query = context.is_evidence_set_query
     if len(keywords) < 2 or len(candidates) < 2:
         return QueryCoverageResult(
             ranked=[
@@ -1142,13 +1207,9 @@ def rank_by_query_coverage[T](
             changed=False,
         )
 
-    query_terms = set(keywords)
-    query_fact_frames = extract_query_fact_frames(query)
-    suppress_fact_frame_rank_signal = (
-        is_evidence_set_query
-        or _is_multi_evidence_order_query(query)
-        or (_is_temporal_instruction_query(query) and temporal_target is None)
-    )
+    query_terms = context.query_terms
+    query_fact_frames = context.query_fact_frames
+    suppress_fact_frame_rank_signal = context.suppress_fact_frame_rank_signal
     token_rows: list[
         tuple[
             QueryCoverageCandidate[T],

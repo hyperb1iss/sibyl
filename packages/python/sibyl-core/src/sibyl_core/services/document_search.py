@@ -483,6 +483,8 @@ async def search_documents(
             "surreal_document_direct_search_failed",
             error_type=type(exc).__name__,
         )
+        if query_embedding is not None:
+            raise
         return await _search_documents_surreal_scan(
             query=query,
             organization_id=organization_id,

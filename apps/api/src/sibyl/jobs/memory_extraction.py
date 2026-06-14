@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
 import structlog
 
 from sibyl.config import settings
 from sibyl.jobs.queue import get_queue
+from sibyl.persistence.content_common import DocumentChunkRecord
+from sibyl.persistence.content_runtime import (
+    get_content_read_session,
+    list_document_chunks,
+    save_document_chunks,
+)
 from sibyl_core.ai.errors import LLMError
 from sibyl_core.ai.llm.budget import llm_budget_context
 from sibyl_core.ai.memory_extraction import (
@@ -46,6 +54,33 @@ class _SourcePayload:
     source: dict[str, Any]
     source_id: str
     char_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class _ProjectedEntityLink:
+    entity_id: str
+    name: str = ""
+    evidence: str = ""
+
+
+_LINK_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9'.-]*")
+_LINK_STOPWORDS = {
+    "about",
+    "after",
+    "also",
+    "because",
+    "before",
+    "from",
+    "have",
+    "into",
+    "that",
+    "their",
+    "there",
+    "these",
+    "this",
+    "those",
+    "with",
+}
 
 
 async def enqueue_memory_extraction_batches(
@@ -174,6 +209,7 @@ async def extract_memory_entities(
             "extracted_entities": 0,
             "projected_entities": 0,
             "relationships": 0,
+            "projection_state": "complete",
             "estimated_input_tokens": 0,
             "errors": [],
             "projection_errors": [],
@@ -197,10 +233,7 @@ async def extract_memory_entities(
         *(source.source.get("principal_id") for source in source_payloads),
         *(source.source.get("created_by_user_id") for source in source_payloads),
     )
-    organization_id = _first_non_empty(
-        *(source.source.get("organization_id") for source in source_payloads),
-        group_id,
-    )
+    organization_id = group_id
 
     errors: list[dict[str, str]] = []
     extractions: list[dict[str, Any]] = []
@@ -248,7 +281,16 @@ async def extract_memory_entities(
         extracted_by_source_id=extracted_by_source_id,
         max_entities_per_source=max_entities_per_source,
     )
-    projection_errors = list(projection["errors"])
+    chunk_links = await _link_projected_entities_to_document_chunks(
+        source_payloads,
+        group_id=group_id,
+        projected_entity_ids_by_source_id=projection["projected_entity_ids_by_source_id"],
+        projected_entity_links_by_source_id=projection["projected_entity_links_by_source_id"],
+    )
+    projection_errors = [
+        *list(projection["errors"]),
+        *list(chunk_links["errors"]),
+    ]
     has_errors = bool(errors or projection_errors)
     status = "ok" if not has_errors else "partial" if extractions else "error"
     duration_ms = elapsed_ms(started_at)
@@ -268,6 +310,8 @@ async def extract_memory_entities(
         "extracted_entities": extracted_entities,
         "projected_entities": projection["projected_entities"],
         "relationships": projection["relationships"],
+        "projection_state": projection["projection_state"],
+        "linked_chunks": chunk_links["linked_chunks"],
         "estimated_input_tokens": estimated_input_tokens,
         "errors": errors,
         "projection_errors": projection_errors,
@@ -334,6 +378,165 @@ def _batch_source_payloads(
     return batches
 
 
+def _payload_document_id(payload: _SourcePayload) -> str | None:
+    metadata = payload.source.get("metadata")
+    if isinstance(metadata, dict):
+        value = metadata.get("document_id")
+        if value:
+            return str(value)
+    value = payload.source.get("document_id")
+    return str(value) if value else None
+
+
+def _payload_organization_mismatches_group(payload: _SourcePayload, *, group_id: str) -> bool:
+    expected = str(group_id)
+    metadata = payload.source.get("metadata")
+    candidates: list[str] = []
+    if isinstance(metadata, dict):
+        value = metadata.get("organization_id")
+        if value:
+            candidates.append(str(value))
+    value = payload.source.get("organization_id")
+    if value:
+        candidates.append(str(value))
+    return any(candidate != expected for candidate in candidates)
+
+
+def _projected_links(raw_links: object, raw_ids: object) -> list[_ProjectedEntityLink]:
+    links: list[_ProjectedEntityLink] = []
+    raw_link_items = raw_links if isinstance(raw_links, list | tuple) else ()
+    for item in raw_link_items:
+        if isinstance(item, dict):
+            entity_id = str(item.get("entity_id") or "")
+            name = str(item.get("name") or "")
+            evidence = str(item.get("evidence") or "")
+        else:
+            entity_id = str(getattr(item, "entity_id", "") or "")
+            name = str(getattr(item, "name", "") or "")
+            evidence = str(getattr(item, "evidence", "") or "")
+        if entity_id:
+            links.append(_ProjectedEntityLink(entity_id=entity_id, name=name, evidence=evidence))
+    if links:
+        return links
+    raw_id_items = raw_ids if isinstance(raw_ids, list | tuple | set) else ()
+    return [
+        _ProjectedEntityLink(entity_id=str(entity_id)) for entity_id in raw_id_items if entity_id
+    ]
+
+
+def _normalized_link_text(value: str) -> str:
+    return " ".join(value.lower().split())
+
+
+def _link_tokens(value: str) -> set[str]:
+    return {
+        token.lower().strip("'.-")
+        for token in _LINK_TOKEN_RE.findall(value)
+        if len(token) >= 3 and token.lower().strip("'.-") not in _LINK_STOPWORDS
+    }
+
+
+def _chunk_link_text(chunk: DocumentChunkRecord) -> str:
+    return _normalized_link_text(
+        " ".join(
+            str(value)
+            for value in (getattr(chunk, "content", ""), getattr(chunk, "context", ""))
+            if value
+        )
+    )
+
+
+def _matching_chunks_for_link(
+    chunks: list[DocumentChunkRecord],
+    link: _ProjectedEntityLink,
+) -> list[DocumentChunkRecord]:
+    chunk_texts = [(chunk, _chunk_link_text(chunk)) for chunk in chunks]
+    for needle in (link.evidence, link.name):
+        normalized = _normalized_link_text(needle)
+        if not normalized:
+            continue
+        matches = [chunk for chunk, text in chunk_texts if normalized in text]
+        if matches:
+            return matches
+
+    tokens = _link_tokens(link.evidence)
+    if not tokens:
+        return []
+    scored = [(sum(1 for token in tokens if token in text), chunk) for chunk, text in chunk_texts]
+    best = max((score for score, _chunk in scored), default=0)
+    threshold = max(2, min(4, len(tokens)))
+    if best < threshold:
+        return []
+    return [chunk for score, chunk in scored if score == best]
+
+
+def _same_id(left: object, right: str) -> bool:
+    return str(left or "") == str(right)
+
+
+async def _link_projected_entities_to_document_chunks(
+    source_payloads: list[_SourcePayload],
+    *,
+    group_id: str,
+    projected_entity_ids_by_source_id: object,
+    projected_entity_links_by_source_id: object,
+) -> dict[str, object]:
+    if not isinstance(projected_entity_ids_by_source_id, dict):
+        return {"linked_chunks": 0, "errors": []}
+    links_by_source_id = (
+        projected_entity_links_by_source_id
+        if isinstance(projected_entity_links_by_source_id, dict)
+        else {}
+    )
+
+    linked_chunks = 0
+    errors: list[str] = []
+    async with get_content_read_session() as session:
+        for payload in source_payloads:
+            raw_entity_ids = projected_entity_ids_by_source_id.get(payload.source_id)
+            links = _projected_links(
+                links_by_source_id.get(payload.source_id),
+                raw_entity_ids,
+            )
+            document_id = _payload_document_id(payload)
+            if not links or not document_id:
+                continue
+            if _payload_organization_mismatches_group(payload, group_id=group_id):
+                errors.append(f"{payload.source_id}:organization_mismatch")
+                continue
+            organization_id = group_id
+            try:
+                document_uuid = UUID(document_id)
+            except ValueError:
+                errors.append(f"{payload.source_id}:invalid_document_id")
+                continue
+
+            chunks: list[DocumentChunkRecord] = await list_document_chunks(
+                session,
+                document_id=document_uuid,
+                organization_id=organization_id,
+            )
+            chunks = [
+                chunk
+                for chunk in chunks
+                if _same_id(getattr(chunk, "organization_id", None), organization_id)
+            ]
+            dirty_chunks: dict[str, DocumentChunkRecord] = {}
+            for link in links:
+                for chunk in _matching_chunks_for_link(chunks, link):
+                    next_entity_ids = list(dict.fromkeys([*chunk.entity_ids, link.entity_id]))
+                    if next_entity_ids == chunk.entity_ids and chunk.has_entities:
+                        continue
+                    chunk.entity_ids = next_entity_ids
+                    chunk.has_entities = bool(next_entity_ids)
+                    dirty_chunks[str(chunk.id)] = chunk
+            unique_dirty_chunks = list(dirty_chunks.values())
+            if unique_dirty_chunks:
+                saved_chunks = await save_document_chunks(session, chunks=unique_dirty_chunks)
+                linked_chunks += len(saved_chunks)
+    return {"linked_chunks": linked_chunks, "errors": errors}
+
+
 def _limited_entities(
     result: SourceMemoryExtraction,
     max_entities: int,
@@ -349,7 +552,14 @@ async def _project_extracted_entities(
     max_entities_per_source: int,
 ) -> dict[str, Any]:
     if not extracted_by_source_id:
-        return {"projected_entities": 0, "relationships": 0, "errors": []}
+        return {
+            "projected_entities": 0,
+            "relationships": 0,
+            "projection_state": "complete",
+            "projected_entity_ids_by_source_id": {},
+            "projected_entity_links_by_source_id": {},
+            "errors": [],
+        }
 
     try:
         sources = [Entity.model_validate(source.source) for source in source_payloads]
@@ -370,6 +580,9 @@ async def _project_extracted_entities(
         return {
             "projected_entities": projection.projected_entities,
             "relationships": projection.relationships,
+            "projection_state": projection.projection_state,
+            "projected_entity_ids_by_source_id": projection.projected_entity_ids_by_source_id,
+            "projected_entity_links_by_source_id": projection.projected_entity_links_by_source_id,
             "errors": list(projection.errors),
         }
     except Exception as exc:
@@ -383,6 +596,9 @@ async def _project_extracted_entities(
         return {
             "projected_entities": 0,
             "relationships": 0,
+            "projection_state": "partial",
+            "projected_entity_ids_by_source_id": {},
+            "projected_entity_links_by_source_id": {},
             "errors": [str(exc)],
         }
 

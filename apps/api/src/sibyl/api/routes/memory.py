@@ -12,6 +12,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from sibyl.api.decorators import handle_workflow_errors
+from sibyl.api.raw_capture_events import publish_raw_capture_changed
 from sibyl.api.schemas import (
     MemoryAuditEventResponse,
     MemoryAuditListResponse,
@@ -105,10 +106,11 @@ from sibyl_core.services.surreal_content import (
     AGENT_DIARY_CAPTURE_SURFACE,
     MemoryScope,
     RawMemory,
+    RawMemoryRecallResult,
     get_raw_memory,
     get_raw_memory_by_source_id,
     list_reflection_candidate_reviews,
-    recall_raw_memory,
+    recall_raw_memory_with_sources as recall_raw_memory,
     remember_raw_memory,
     save_raw_memory,
 )
@@ -1315,6 +1317,97 @@ async def _accessible_projects_for_promotion(
     return {str(project_id) for project_id in accessible_projects or set()}
 
 
+def _promotion_target_scope(
+    request: ReflectionPromotionRequest,
+) -> tuple[str, str | None] | None:
+    if request.promote_to_scope is None:
+        return None
+    try:
+        target_scope = MemoryScope(request.promote_to_scope)
+    except ValueError:
+        return None
+    target_scope_key = request.promote_to_scope_key
+    if target_scope is MemoryScope.PROJECT:
+        target_scope_key = target_scope_key or request.project
+    return target_scope.value, target_scope_key
+
+
+async def _authorize_raw_promotion_api_key_scopes(
+    *,
+    ctx: AuthContext,
+    request: ReflectionPromotionRequest,
+    organization_id: str,
+    accessible_projects: set[str],
+    http_request: Request | None,
+    surface: str,
+) -> None:
+    allowed_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+    if allowed_scope_keys is None or not isinstance(
+        allowed_scope_keys, list | tuple | set | frozenset
+    ):
+        return
+
+    memory = await get_raw_memory(
+        organization_id=organization_id,
+        memory_id=request.candidate_id,
+    )
+    if memory is None:
+        return
+
+    checks: tuple[tuple[MemoryPolicyAction, str, str | None, str | None], ...] = (
+        (
+            MemoryPolicyAction.READ,
+            memory.memory_scope.value,
+            memory.scope_key,
+            _memory_project_id(memory),
+        ),
+    )
+    target_scope = _promotion_target_scope(request)
+    if target_scope is not None:
+        checks = (
+            *checks,
+            (MemoryPolicyAction.WRITE, target_scope[0], target_scope[1], request.project),
+        )
+
+    for action, memory_scope, scope_key, project_id in checks:
+        if _api_key_memory_scope_allowed(ctx, memory_scope=memory_scope, scope_key=scope_key):
+            continue
+        policy_context = MemoryPolicyContext(
+            actor_user_id=ctx.user_id,
+            organization_id=ctx.organization_id,
+            organization_role=ctx.org_role,
+            memory_space=memory_scope,
+            scope_key=scope_key,
+            project_id=project_id,
+            accessible_projects=accessible_projects,
+            source_surface=surface,
+        )
+        deny_decision = _api_key_memory_scope_denial(
+            action=action,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            policy_context=policy_context,
+        )
+        _log_policy_decision(ctx=ctx, decision=deny_decision, surface=surface)
+        await _log_memory_audit(
+            action="memory.policy_deny",
+            ctx=ctx,
+            request=http_request,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            project_id=project_id,
+            source_surface=surface,
+            source_ids=[request.candidate_id],
+            policy_allowed=False,
+            policy_reason=deny_decision.reason,
+            details={"policy_action": deny_decision.action.value},
+        )
+        raise HTTPException(
+            status_code=_policy_http_status(deny_decision.reason),
+            detail=deny_decision.reason,
+        )
+
+
 async def _accessible_projects_for_share_preview(
     *,
     ctx: AuthContext,
@@ -1611,6 +1704,10 @@ async def remember_raw(
                 "tag_count": len(request.tags),
             },
         )
+        await publish_raw_capture_changed(
+            organization_id=memory.organization_id,
+            raw_memory_ids=[memory.id],
+        )
         response = _raw_memory_response(memory, policy_reason=write_decision.reason)
         telemetry_registry().record_memory_operation(
             operation="remember_raw",
@@ -1704,7 +1801,7 @@ async def recall_raw(
                 recall_kwargs["occurred_before"] = request.occurred_before
             if request.as_of:
                 recall_kwargs["as_of"] = request.as_of
-            memories = await recall_raw_memory(
+            recall_result = await recall_raw_memory(
                 organization_id=str(org.id),
                 principal_id=principal_id,
                 query=request.query,
@@ -1715,6 +1812,12 @@ async def recall_raw(
                 limit=request.limit,
                 **recall_kwargs,
             )
+            if isinstance(recall_result, RawMemoryRecallResult):
+                memories = list(recall_result.memories)
+                source_failures = [failure.as_metadata() for failure in recall_result.failures]
+            else:
+                memories = recall_result
+                source_failures = []
         await _log_memory_audit(
             action="memory.recall",
             ctx=ctx,
@@ -1737,6 +1840,9 @@ async def recall_raw(
                 for memory in memories
             ],
             policy_reason=read_decision.reason,
+            source_degraded=bool(source_failures),
+            source_failure_count=len(source_failures),
+            source_failures=source_failures,
         )
         telemetry_registry().record_memory_operation(
             operation="recall_raw",
@@ -2168,6 +2274,14 @@ async def preview_memory_promotion(
         accessible_projects=accessible_projects,
     )
     if result.reason == "not_reflection_candidate":
+        await _authorize_raw_promotion_api_key_scopes(
+            ctx=ctx,
+            request=request,
+            organization_id=str(org.id),
+            accessible_projects=accessible_projects,
+            http_request=http_request,
+            surface="memory_promote_preview",
+        )
         result = await preview_raw_memory_promotion(
             raw_memory_id=request.candidate_id,
             organization_id=str(org.id),
@@ -2588,6 +2702,14 @@ async def promote_memory(
             accessible_projects=accessible_projects,
         )
         if result.reason == "not_reflection_candidate":
+            await _authorize_raw_promotion_api_key_scopes(
+                ctx=ctx,
+                request=request,
+                organization_id=str(org.id),
+                accessible_projects=accessible_projects,
+                http_request=http_request,
+                surface="memory_promote",
+            )
             result = await promote_raw_memory(
                 raw_memory_id=request.candidate_id,
                 organization_id=str(org.id),

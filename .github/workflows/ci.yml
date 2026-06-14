@@ -225,8 +225,8 @@ jobs:
             .moon/cache
             apps/web/.next/cache
           key:
-            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock',
-            'apps/web/pnpm-lock.yaml') }}
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock', 'apps/web/pnpm-lock.yaml')
+            }}
           restore-keys: |
             moon-${{ runner.os }}-
 
@@ -330,8 +330,8 @@ jobs:
             .moon/cache
             apps/web/.next/cache
           key:
-            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock',
-            'apps/web/pnpm-lock.yaml') }}
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock', 'apps/web/pnpm-lock.yaml')
+            }}
           restore-keys: |
             moon-${{ runner.os }}-
 
@@ -402,8 +402,8 @@ jobs:
             .moon/cache
             apps/web/.next/cache
           key:
-            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock',
-            'apps/web/pnpm-lock.yaml') }}
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock', 'apps/web/pnpm-lock.yaml')
+            }}
           restore-keys: |
             moon-${{ runner.os }}-
 
@@ -434,6 +434,71 @@ jobs:
         with:
           files: apps/api/coverage.xml,apps/cli/coverage.xml,packages/python/sibyl-core/coverage.xml,apps/web/coverage.xml
           fail_ci_if_error: false
+
+  live-ingestion:
+    name: Live SurrealDB 3.x Ingestion
+    needs: changes
+    if: needs.changes.outputs.run_tests == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SIBYL_ENVIRONMENT: production
+      SIBYL_JWT_SECRET: test-secret-for-ci
+      SIBYL_STORE: surreal
+      SIBYL_AUTH_STORE: surreal
+      SIBYL_COORDINATION_BACKEND: local
+      SIBYL_SURREAL_URL: ws://localhost:8000/rpc
+      SIBYL_SURREAL_USERNAME: sibyl_ci
+      SIBYL_SURREAL_PASSWORD: sibyl_ci_password
+      SIBYL_OPENAI_API_KEY: sk-test-key
+      SIBYL_ANTHROPIC_API_KEY: sk-ant-test-key
+      SIBYL_MOCK_LLM: true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Start SurrealDB
+        uses: ./.github/actions/start-surrealdb
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt-dev
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6
+        with:
+          auto-install: true
+          auto-setup: true
+          cache-version: surreal-ci-v1
+
+      - name: Verify toolchain
+        run: |
+          chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
+          chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
+          moon --version
+          proto --version
+          uv --version
+
+      - name: Cache moon outputs
+        uses: actions/cache@v5
+        with:
+          path: .moon/cache
+          key: moon-live-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          restore-keys: |
+            moon-live-${{ runner.os }}-
+
+      - name: Cache uv
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/uv
+          key: uv-live-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-live-${{ runner.os }}-
+
+      - name: Run live ingestion primitives
+        run: moon run api:test-live
 
   e2e:
     name: E2E
@@ -489,8 +554,8 @@ jobs:
             .moon/cache
             apps/web/.next/cache
           key:
-            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock',
-            'apps/web/pnpm-lock.yaml') }}
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock', 'apps/web/pnpm-lock.yaml')
+            }}
           restore-keys: |
             moon-${{ runner.os }}-
 
@@ -581,7 +646,7 @@ jobs:
           tail -n 200 /tmp/sibyl-web.log || true
           echo ""
           echo "=== SurrealDB logs ==="
-          docker compose logs surrealdb || true
+          docker compose --env-file /dev/null logs surrealdb || true
 
   storybook:
     name: Storybook
@@ -608,8 +673,8 @@ jobs:
             .moon/cache
             apps/web/.next/cache
           key:
-            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock',
-            'apps/web/pnpm-lock.yaml') }}
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock', 'apps/web/pnpm-lock.yaml')
+            }}
           restore-keys: |
             moon-${{ runner.os }}-
 

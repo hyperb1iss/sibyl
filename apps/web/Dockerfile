@@ -7,7 +7,7 @@
 # Stage 1: Dependencies
 FROM node:24-alpine AS deps
 
-RUN corepack enable && corepack prepare pnpm@10.26.0 --activate
+RUN corepack enable && corepack prepare pnpm@11.5.2 --activate
 
 WORKDIR /app
 
@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 # Stage 2: Builder
 FROM node:24-alpine AS builder
 
-RUN corepack enable && corepack prepare pnpm@10.26.0 --activate
+RUN corepack enable && corepack prepare pnpm@11.5.2 --activate
 
 WORKDIR /app/apps/web
 

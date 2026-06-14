@@ -249,9 +249,12 @@ WHERE source_id = NONE
 ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS = """
 DEFINE FIELD IF NOT EXISTS parent_task_id ON entity TYPE option<string>;
 DEFINE FIELD OVERWRITE updated_at ON entity TYPE option<datetime>;
-UPDATE entity SET updated_at = type::datetime(updated_at)
+UPDATE (
+    SELECT VALUE id
+    FROM entity
     WHERE type::is::string(updated_at)
-        AND string::is::datetime(updated_at);
+        AND string::is::datetime(updated_at)
+) SET updated_at = type::datetime(updated_at);
 UPDATE entity SET updated_at = NONE
     WHERE updated_at != NONE
         AND !type::is::datetime(updated_at);

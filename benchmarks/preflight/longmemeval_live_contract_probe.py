@@ -201,6 +201,10 @@ def _source_semantics() -> dict[str, Any]:
     graph_source = ROOT / "packages/python/sibyl-core/src/sibyl_core/services/graph.py"
     context_tool = ROOT / "packages/python/sibyl-core/src/sibyl_core/tools/context.py"
     graph_start, graph_search = _extract_indented_block(graph_source, "    async def search(")
+    _fulltext_start, graph_fulltext_search = _extract_indented_block(
+        graph_source,
+        "    async def _fulltext_search(",
+    )
     _vector_start, graph_vector_search = _extract_indented_block(
         graph_source,
         "    async def _vector_search(",
@@ -209,7 +213,7 @@ def _source_semantics() -> dict[str, Any]:
         context_tool,
         "async def _compile_native_sections",
     )
-    graph_search_surface = "\n".join((graph_search, graph_vector_search))
+    graph_search_surface = "\n".join((graph_search, graph_fulltext_search, graph_vector_search))
     return {
         "api_search_graph_function": {
             "path": str(graph_source.relative_to(ROOT)),

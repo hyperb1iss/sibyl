@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from sibyl_core.models.sources import SourceImportCheckpoint, SourcePrivacyClass
+from sibyl_core.services import mailbox_adapter as mailbox_adapter_module
 from sibyl_core.services.mailbox_adapter import (
     IMAP_ADAPTER_NAME,
     MAILDIR_ADAPTER_NAME,
@@ -16,6 +17,7 @@ from sibyl_core.services.mailbox_adapter import (
     ImapSourceAdapter,
     MaildirSourceAdapter,
     MboxSourceAdapter,
+    _imap_config,
     ensure_mailbox_adapter_registered,
 )
 from sibyl_core.services.source_adapters import (
@@ -271,6 +273,51 @@ async def test_mbox_adapter_resumes_from_checkpoint(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_mbox_adapter_resumes_without_fetching_prior_messages(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    messages = [
+        _message(message_id="msg-1@example.com", attachment=None),
+        _message(message_id="msg-2@example.com", attachment=None),
+        _message(message_id="msg-3@example.com", attachment=None),
+    ]
+    fetched_keys: list[int] = []
+    mbox_path = tmp_path / "mail.mbox"
+    mbox_path.write_text("", encoding="utf-8")
+
+    class FakeMbox:
+        def __init__(self, _path: Path, *, create: bool = False) -> None:
+            assert create is False
+
+        def iterkeys(self) -> Iterator[int]:
+            return iter(range(len(messages)))
+
+        def get_message(self, key: int) -> EmailMessage:
+            fetched_keys.append(key)
+            return messages[key]
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(mailbox_adapter_module.mailbox, "mbox", FakeMbox)
+    adapter = MboxSourceAdapter()
+    manifest = await adapter.prepare_manifest(source_uri=str(mbox_path))
+    checkpoint = SourceImportCheckpoint(
+        cursor="2",
+        source_version=manifest.source_version,
+        done=False,
+    )
+
+    batch = await anext(adapter.iter_records(manifest, checkpoint=checkpoint, batch_size=1))
+
+    assert fetched_keys == [2]
+    assert [record.adapter_record_id for record in batch.records] == ["msg-3@example.com"]
+    assert batch.checkpoint.cursor is None
+    assert batch.checkpoint.done is True
+
+
+@pytest.mark.asyncio
 async def test_mbox_import_writes_private_source_records(tmp_path: Path) -> None:
     mbox_path = _write_mbox(tmp_path / "mail.mbox", [_message()])
     adapter = MboxSourceAdapter()
@@ -384,6 +431,54 @@ async def test_maildir_adapter_preserves_metadata_and_resumes(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_maildir_adapter_resumes_without_fetching_prior_messages(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    messages = {
+        "a": _message(message_id="maildir-1@example.com", attachment=None),
+        "b": _message(message_id="maildir-2@example.com", attachment=None),
+        "c": _message(message_id="maildir-3@example.com", attachment=None),
+    }
+    fetched_keys: list[str] = []
+    maildir_path = tmp_path / "maildir"
+    for name in ("cur", "new", "tmp"):
+        (maildir_path / name).mkdir(parents=True)
+
+    class FakeMaildir:
+        colon = ":"
+
+        def __init__(self, _path: Path, *, create: bool = False) -> None:
+            assert create is False
+
+        def keys(self) -> list[str]:
+            return list(messages)
+
+        def get_message(self, key: str) -> EmailMessage:
+            fetched_keys.append(key)
+            return messages[key]
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(mailbox_adapter_module.mailbox, "Maildir", FakeMaildir)
+    adapter = MaildirSourceAdapter()
+    manifest = await adapter.prepare_manifest(source_uri=str(maildir_path))
+    checkpoint = SourceImportCheckpoint(
+        cursor="2",
+        source_version=manifest.source_version,
+        done=False,
+    )
+
+    batch = await anext(adapter.iter_records(manifest, checkpoint=checkpoint, batch_size=1))
+
+    assert fetched_keys == ["c"]
+    assert [record.adapter_record_id for record in batch.records] == ["maildir-3@example.com"]
+    assert batch.checkpoint.cursor is None
+    assert batch.checkpoint.done is True
+
+
+@pytest.mark.asyncio
 async def test_maildir_manifest_rejects_symlinked_maildir_subdirectories(
     tmp_path: Path,
 ) -> None:
@@ -440,6 +535,22 @@ async def test_maildir_iter_records_skips_symlinked_entries(tmp_path: Path) -> N
     assert len(ingested) == 1
     assert ingested[0].adapter_record_id == "maildir-1@example.com"
     assert all("secret host data" not in record.body for record in ingested)
+
+
+def test_imap_config_rejects_encoded_mailbox_control_characters() -> None:
+    with pytest.raises(ValueError, match="control characters"):
+        _imap_config(
+            "imaps://127.0.0.1/INBOX%0D%0AA999%20SELECT%20Archive",
+            {"allow_private_network": True},
+        )
+
+
+def test_imap_config_rejects_option_mailbox_control_characters() -> None:
+    with pytest.raises(ValueError, match="control characters"):
+        _imap_config(
+            "imaps://127.0.0.1/INBOX",
+            {"allow_private_network": True, "mailbox": "INBOX\r\nA999 SELECT Archive"},
+        )
 
 
 @pytest.mark.asyncio

@@ -12,13 +12,12 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import AsyncIterable
+from collections.abc import AsyncIterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 from urllib.parse import urljoin, urlparse
 from uuid import UUID
 
-import httpx
 import structlog
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
@@ -42,11 +41,18 @@ from sibyl.persistence.content_runtime import (
     save_crawl_source_record,
 )
 from sibyl_core.models import CrawlStatus, SourceType
+from sibyl_core.network import (
+    SAFE_FETCH_MAX_BYTES,
+    decode_safe_fetch_body,
+    normalize_safe_url,
+    safe_fetch,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from crawl4ai import CrawlResult
+    from playwright.async_api import Request, Route
 
 log = structlog.get_logger()
 
@@ -63,6 +69,13 @@ _NAV_CRUFT_PATTERNS = [
     # Table of contents markers
     re.compile(r"^(?:Table of [Cc]ontents|Contents)\s*$", re.MULTILINE),
 ]
+_SAFE_BROWSER_USER_AGENT = "Sibyl/1.0 (AI Documentation Crawler)"
+_SAFE_BROWSER_HEADER_DENYLIST = {
+    "connection",
+    "content-length",
+    "host",
+    "transfer-encoding",
+}
 
 
 class SourceAlreadyExistsError(ValueError):
@@ -103,6 +116,45 @@ async def _save_source_update(source_id: UUID, **updates: object) -> CrawlSource
         return await save_crawl_source_record(session, source=source)
 
 
+def _browser_fulfill_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    return {
+        name: value
+        for name, value in headers.items()
+        if name.strip().lower() not in _SAFE_BROWSER_HEADER_DENYLIST
+    }
+
+
+async def _safe_browser_route(route: Route, request: Request) -> None:
+    method = request.method.upper()
+    if method not in {"GET", "HEAD"}:
+        await route.abort()
+        return
+
+    parsed = urlparse(request.url)
+    if parsed.scheme not in {"http", "https"}:
+        await route.abort()
+        return
+
+    try:
+        response = await safe_fetch(
+            request.url,
+            method=method,
+            headers=request.headers,
+            follow_redirects=False,
+            max_bytes=SAFE_FETCH_MAX_BYTES,
+            user_agent=_SAFE_BROWSER_USER_AGENT,
+            accept=request.headers.get("accept", "*/*"),
+        )
+        await route.fulfill(
+            status=response.status_code,
+            headers=_browser_fulfill_headers(response.headers),
+            body=response.body,
+        )
+    except Exception as exc:
+        log.warning("Blocked browser crawl request", url=request.url, error=str(exc))
+        await route.abort()
+
+
 class CrawlerService:
     """Service for crawling documentation sites and storing results.
 
@@ -126,6 +178,7 @@ class CrawlerService:
         """Start the crawler (initialize browser)."""
         if self._crawler is None:
             self._crawler = AsyncWebCrawler(config=self._browser_config)
+            self._install_safe_browser_fetcher()
             await self._crawler.start()
             log.info("Crawler service started")
 
@@ -141,6 +194,19 @@ class CrawlerService:
         log.warning("Restarting crawler after browser failure")
         await self.stop()
         await self.start()
+
+    def _install_safe_browser_fetcher(self) -> None:
+        if self._crawler is None:
+            return
+        strategy = getattr(self._crawler, "crawler_strategy", None)
+        if strategy is None or not hasattr(strategy, "set_hook"):
+            return
+
+        async def on_page_context_created(page, **kwargs: object) -> None:
+            del kwargs
+            await page.route("**/*", _safe_browser_route)
+
+        strategy.set_hook("on_page_context_created", on_page_context_created)
 
     def _is_browser_death(self, error: Exception) -> bool:
         """Check if an error indicates the browser has died."""
@@ -540,31 +606,40 @@ class CrawlerService:
             "/apple-touch-icon-precomposed.png",
         ]
 
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            # Try common paths first
-            for path in favicon_paths:
-                url = urljoin(origin, path)
-                try:
-                    response = await client.head(url)
-                    if response.status_code == 200:
-                        content_type = response.headers.get("content-type", "")
-                        if "image" in content_type or path.endswith((".ico", ".png")):
-                            log.debug("Found favicon", url=url)
-                            return url
-                except Exception:
-                    continue
-
-            # Try parsing HTML for link tags
+        for path in favicon_paths:
+            url = urljoin(origin, path)
             try:
-                response = await client.get(origin, timeout=15.0)
+                response = await safe_fetch(
+                    url,
+                    method="HEAD",
+                    timeout=10.0,
+                    user_agent="Sibyl/1.0",
+                    accept="image/*,*/*;q=0.1",
+                )
                 if response.status_code == 200:
-                    html = response.text
-                    favicon_url = self._extract_favicon_from_html(html, origin)
-                    if favicon_url:
-                        log.debug("Found favicon from HTML", url=favicon_url)
-                        return favicon_url
-            except Exception as e:
-                log.debug("Failed to fetch HTML for favicon", error=str(e))
+                    content_type = response.headers.get("content-type", "")
+                    if "image" in content_type or path.endswith((".ico", ".png")):
+                        log.debug("Found favicon", url=response.url)
+                        return response.url
+            except Exception:
+                continue
+
+        try:
+            response = await safe_fetch(
+                origin,
+                timeout=15.0,
+                user_agent="Sibyl/1.0",
+                accept="text/html,*/*;q=0.1",
+            )
+            if response.status_code == 200:
+                html = decode_safe_fetch_body(response.body, response.headers)
+                favicon_url = self._extract_favicon_from_html(html, origin)
+                if favicon_url:
+                    validated_url = normalize_safe_url(favicon_url)
+                    log.debug("Found favicon from HTML", url=validated_url)
+                    return validated_url
+        except Exception as e:
+            log.debug("Failed to fetch HTML for favicon", error=str(e))
 
         return None
 

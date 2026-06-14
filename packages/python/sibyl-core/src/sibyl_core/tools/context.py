@@ -35,11 +35,13 @@ SearchFn = Callable[..., Awaitable[SearchResponse]]
 RelatedFn = Callable[..., Awaitable[list[ContextRelatedItem]]]
 RelatedBatchFn = Callable[..., Awaitable[dict[str, list[ContextRelatedItem]]]]
 RawMemoryRecallFn = Callable[..., Awaitable[list[RawMemory]]]
+ActiveWorkFn = Callable[..., Awaitable[list["ContextItem"]]]
 
 log = structlog.get_logger()
 
 FACET_TITLES = {
     ContextFacet.ACTIVE_WORK: "Active Work",
+    ContextFacet.PRIOR_ART: "Prior Art",
     ContextFacet.ARTIFACTS: "Artifacts",
     ContextFacet.CONSTRAINTS: "Constraints",
     ContextFacet.DECISIONS: "Decisions",
@@ -54,6 +56,7 @@ FACET_TITLES = {
 
 FACET_TYPES = {
     ContextFacet.ACTIVE_WORK: ["task", "epic", "project"],
+    ContextFacet.PRIOR_ART: ["task", "epic"],
     ContextFacet.ARTIFACTS: ["artifact", "document", "source", "config_file"],
     ContextFacet.CONSTRAINTS: ["rule", "guide"],
     ContextFacet.DECISIONS: ["decision"],
@@ -75,6 +78,7 @@ INTENT_FACETS = {
         ContextFacet.CONSTRAINTS,
         ContextFacet.PROCEDURES,
         ContextFacet.GOTCHAS,
+        ContextFacet.PRIOR_ART,
         ContextFacet.ARTIFACTS,
         ContextFacet.RECENT_MEMORY,
     ],
@@ -85,6 +89,7 @@ INTENT_FACETS = {
         ContextFacet.DOMAIN,
         ContextFacet.CONSTRAINTS,
         ContextFacet.ACTIVE_WORK,
+        ContextFacet.PRIOR_ART,
     ],
     ContextIntent.IDEATE: [
         ContextFacet.IDEATION,
@@ -107,6 +112,7 @@ INTENT_FACETS = {
         ContextFacet.GOTCHAS,
         ContextFacet.ARTIFACTS,
         ContextFacet.ACTIVE_WORK,
+        ContextFacet.PRIOR_ART,
         ContextFacet.RECENT_MEMORY,
     ],
     ContextIntent.DEBUG: [
@@ -114,6 +120,7 @@ INTENT_FACETS = {
         ContextFacet.PROCEDURES,
         ContextFacet.ARTIFACTS,
         ContextFacet.ACTIVE_WORK,
+        ContextFacet.PRIOR_ART,
         ContextFacet.RECENT_MEMORY,
     ],
     ContextIntent.DECIDE: [
@@ -136,6 +143,7 @@ INTENT_FACETS = {
         ContextFacet.IDEATION,
         ContextFacet.DOMAIN,
         ContextFacet.PROCEDURES,
+        ContextFacet.PRIOR_ART,
         ContextFacet.RECENT_MEMORY,
     ],
 }
@@ -147,6 +155,13 @@ LAYER_LIMITS = {
 }
 
 
+_WORK_ITEM_TYPES = {"task", "epic"}
+# Tasks finish as "done"; epic container status derives to "completed".
+_PRIOR_WORK_STATUSES = {"done", "completed"}
+_DROPPED_WORK_STATUSES = {"archived"}
+_IN_FLIGHT_WORK_STATUSES = {"doing", "in_progress", "blocked", "review"}
+
+
 def _facet_for_type(entity_type: str, facets: list[ContextFacet]) -> ContextFacet:
     normalized_type = entity_type.lower()
     for facet in facets:
@@ -156,6 +171,27 @@ def _facet_for_type(entity_type: str, facets: list[ContextFacet]) -> ContextFace
         if fallback in facets:
             return fallback
     return facets[0]
+
+
+def _work_item_status(result: SearchResult) -> str | None:
+    metadata = result.metadata or {}
+    status = metadata.get("status")
+    if status is None:
+        return None
+    return str(getattr(status, "value", status)).lower() or None
+
+
+def _facet_for_result(result: SearchResult, facets: list[ContextFacet]) -> ContextFacet | None:
+    """Route a result to a facet, keeping completed work out of Active Work."""
+
+    normalized_type = (result.type or "").lower()
+    if normalized_type in _WORK_ITEM_TYPES:
+        status = _work_item_status(result)
+        if status in _DROPPED_WORK_STATUSES:
+            return None
+        if status in _PRIOR_WORK_STATUSES:
+            return ContextFacet.PRIOR_ART if ContextFacet.PRIOR_ART in facets else None
+    return _facet_for_type(normalized_type, facets)
 
 
 def _coerce_intent(intent: str | ContextIntent) -> ContextIntent:
@@ -204,6 +240,8 @@ def _reason_for(result: SearchResult, facet: ContextFacet) -> str:
     result_type = result.type or "memory"
     if facet == ContextFacet.ACTIVE_WORK:
         return f"{result_type} can change what the agent should do next"
+    if facet == ContextFacet.PRIOR_ART:
+        return f"completed {result_type} whose learnings may transfer to this goal"
     if facet == ContextFacet.DECISIONS:
         return f"{result_type} records a choice or rationale the agent should preserve"
     if facet == ContextFacet.IDEATION:
@@ -395,16 +433,88 @@ async def _default_related_items_batch(
     return related_by_seed
 
 
-def _item_from_result(result: SearchResult, facet: ContextFacet) -> ContextItem:
-    metadata = dict(result.metadata)
+_ITEM_METADATA_KEYS = (
+    "status",
+    "priority",
+    "complexity",
+    "lifecycle_state",
+    "review_state",
+    "tags",
+    "category",
+    "language",
+    "domain",
+    "visibility",
+    "kind",
+    "capture_mode",
+    "capture_surface",
+    "thread_id",
+    "label",
+    "project_id",
+    "epic_id",
+    "parent_task_id",
+    "created_at",
+    "updated_at",
+    "completed_at",
+    "occurred_at",
+    "valid_at",
+    "learnings",
+    "description",
+    # Policy and correction gates downstream (synthesis render filters) read
+    # these; dropping them silently disables defense-in-depth checks.
+    "memory_scope",
+    "principal_id",
+    "scope_key",
+    "redacted",
+    "superseded_by_source_id",
+    "duplicate_of_source_id",
+    "unresolved_claims",
+    "supported",
+    "claim",
+)
+
+
+def _lean_item_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Project full candidate metadata down to fields agents act on.
+
+    Retrieval plumbing (signal scores, candidate policy fields, embedding
+    provenance, double-serialized record copies) stays out of packs unless
+    the caller asks for an audit view.
+    """
+
+    lean: dict[str, Any] = {}
+    for key in _ITEM_METADATA_KEYS:
+        value = metadata.get(key)
+        if value is None or value == "" or value == [] or value == {}:
+            continue
+        lean[key] = value
+    return lean
+
+
+def _item_from_result(
+    result: SearchResult,
+    facet: ContextFacet,
+    *,
+    audit: bool = False,
+) -> ContextItem:
+    full_metadata = dict(result.metadata)
+    metadata = full_metadata if audit else _lean_item_metadata(full_metadata)
     quality = _quality_metadata_from_result(result)
     source = _compact_metadata_value(result.source) or quality.source or result.id
     metadata.setdefault("source_id", source)
+    content = result.content
+    if facet is ContextFacet.PRIOR_ART:
+        learnings = metadata.get("learnings")
+        if isinstance(learnings, str) and learnings.strip():
+            content = learnings.strip()
+    if not audit:
+        description = metadata.get("description")
+        if isinstance(description, str) and description.strip() == (content or "").strip():
+            metadata.pop("description", None)
     kwargs: dict[str, Any] = {
         "id": result.id,
         "type": result.type,
         "name": result.name,
-        "content": result.content,
+        "content": content,
         "score": result.score,
         "facet": facet,
         "reason": _reason_for(result, facet),
@@ -418,6 +528,81 @@ def _item_from_result(result: SearchResult, facet: ContextFacet) -> ContextItem:
     return ContextItem(**kwargs)
 
 
+def _item_sort_key(item: ContextItem) -> tuple[int, float]:
+    return (0 if item.metadata.get("active_lookup") else 1, -item.score)
+
+
+_LINEAGE_TYPE_RANK = {
+    "decision": 0,
+    "plan": 0,
+    "idea": 0,
+    "claim": 0,
+    "rule": 0,
+    "guide": 0,
+    "pattern": 0,
+    "error_pattern": 0,
+    "artifact": 0,
+    "task": 1,
+    "epic": 1,
+    "project": 1,
+    "procedure": 2,
+    "template": 2,
+    "tool": 2,
+    "document": 2,
+    "source": 2,
+    "config_file": 2,
+}
+_LINEAGE_DEFAULT_RANK = 3
+_PROCEDURE_NAME_PREFIX = "procedure: "
+
+
+def _lineage_key(item: ContextItem) -> str:
+    name = " ".join((item.name or "").strip().lower().split())
+    if name.startswith(_PROCEDURE_NAME_PREFIX):
+        name = name[len(_PROCEDURE_NAME_PREFIX) :]
+    return name
+
+
+def _lineage_rank(item: ContextItem) -> tuple[int, float]:
+    if item.metadata.get("active_lookup"):
+        return (-1, -item.score)
+    item_type = (item.type or "").lower()
+    if item_type in _WORK_ITEM_TYPES:
+        status = str(item.metadata.get("status") or "").lower()
+        if status in _IN_FLIGHT_WORK_STATUSES:
+            return (-1, -item.score)
+    type_rank = _LINEAGE_TYPE_RANK.get(item_type, _LINEAGE_DEFAULT_RANK)
+    return (type_rank, -item.score)
+
+
+def _dedupe_lineage(sections: list[ContextSection]) -> list[ContextSection]:
+    """Collapse derivation-lineage duplicates across sections.
+
+    The graph stores the same fact in multiple shapes: a raw memory and the
+    decision reflected from it, a task and its auto-generated procedure
+    mirror. ID-based dedup can't see these; name-stem grouping keeps the
+    most distilled shape (decision over task over procedure over raw).
+    """
+
+    winners: dict[str, ContextItem] = {}
+    for section in sections:
+        for item in section.items:
+            key = _lineage_key(item)
+            if not key:
+                continue
+            best = winners.get(key)
+            if best is None or _lineage_rank(item) < _lineage_rank(best):
+                winners[key] = item
+
+    kept = {id(item) for item in winners.values()}
+    deduped: list[ContextSection] = []
+    for section in sections:
+        items = [item for item in section.items if not _lineage_key(item) or id(item) in kept]
+        if items:
+            deduped.append(replace(section, items=items))
+    return deduped
+
+
 def _dedupe_sections(sections: list[ContextSection], limit: int) -> list[ContextSection]:
     seen: set[str] = set()
     remaining = limit
@@ -425,7 +610,7 @@ def _dedupe_sections(sections: list[ContextSection], limit: int) -> list[Context
 
     for section in sections:
         items: list[ContextItem] = []
-        for item in sorted(section.items, key=lambda candidate: candidate.score, reverse=True):
+        for item in sorted(section.items, key=_item_sort_key):
             if remaining <= 0:
                 break
             key = item.id or f"{item.type}:{item.name}"
@@ -491,23 +676,83 @@ def context_item_lifecycle_state(item: ContextItem) -> str | None:
     )
 
 
-def _quality_metadata_to_markdown(quality: Any) -> str:
+def _date_only(value: str | None) -> str | None:
+    if not value:
+        return None
+    if len(value) >= 10 and value[4:5] == "-" and value[7:8] == "-":
+        return value[:10]
+    return value
+
+
+def _quality_metadata_to_markdown(
+    quality: Any,
+    *,
+    item_id: str | None = None,
+    pack_project: str | None = None,
+) -> str:
+    """Render provenance that adds signal, skipping values the pack already states."""
+
     parts: list[str] = []
-    if origin := _quality_value(quality, "origin"):
+    origin = _quality_value(quality, "origin")
+    if origin and origin != "graph":
         parts.append(origin)
-    if source := _quality_value(quality, "source"):
+    source = _quality_value(quality, "source")
+    if source and source != item_id:
         parts.append(f"src={source}")
-    if project_id := _quality_value(quality, "project_id"):
+    project_id = _quality_value(quality, "project_id")
+    if project_id and project_id != pack_project:
         parts.append(f"project={project_id}")
-    if updated_at := _quality_value(quality, "updated_at"):
+    if updated_at := _date_only(_quality_value(quality, "updated_at")):
         parts.append(f"updated={updated_at}")
-    elif created_at := _quality_value(quality, "created_at"):
+    elif created_at := _date_only(_quality_value(quality, "created_at")):
         parts.append(f"created={created_at}")
-    if valid_at := _quality_value(quality, "valid_at"):
+    if valid_at := _date_only(_quality_value(quality, "valid_at")):
         parts.append(f"valid={valid_at}")
     if url := _quality_value(quality, "url"):
         parts.append(f"url={url}")
     return "; ".join(parts)
+
+
+_MARKDOWN_CHARS_PER_TOKEN = 4
+
+
+def _item_markdown_lines(
+    item: ContextItem,
+    *,
+    pack_project: str | None,
+    max_content_chars: int,
+    include_related: bool,
+) -> list[str]:
+    status = _compact_metadata_value(item.metadata.get("status"))
+    if item.type and status:
+        type_label = f" ({item.type} · {status})"
+    elif item.type:
+        type_label = f" ({item.type})"
+    else:
+        type_label = ""
+    item_quality = getattr(item, "quality", item.metadata.get("quality", {}))
+    quality = _quality_metadata_to_markdown(
+        item_quality,
+        item_id=item.id,
+        pack_project=pack_project,
+    )
+    quality_label = f" _{quality}_" if quality else ""
+    lines = [f"- **{item.name}**{type_label} `{item.id}`{quality_label}"]
+    if item.content and item.content.strip() != (item.name or "").strip():
+        lines.append(f"  - Memory: {_compact_text(item.content, max_content_chars)}")
+    if include_related and item.related:
+        related_entries = [
+            candidate
+            for candidate in item.related
+            if not (candidate.relationship == "BELONGS_TO" and candidate.type == "project")
+        ]
+        if related_entries:
+            related = "; ".join(
+                f"{candidate.relationship} {candidate.name} ({candidate.type})"
+                for candidate in related_entries[:3]
+            )
+            lines.append(f"  - Related: {related}")
+    return lines
 
 
 def context_pack_to_markdown(
@@ -517,12 +762,21 @@ def context_pack_to_markdown(
     items_per_section: int = 3,
     max_content_chars: int = 280,
     include_related: bool = True,
+    token_budget: int | None = None,
 ) -> str:
-    """Render a context pack as compact Markdown for agent injection."""
+    """Render a context pack as compact Markdown for agent injection.
+
+    token_budget caps the rendered size at roughly that many tokens
+    (chars/4 estimate); at least one item always renders so a tight
+    budget degrades to a minimal brief instead of an empty pack.
+    """
 
     max_items = max(1, min(max_items, 50))
     items_per_section = max(1, min(items_per_section, 10))
     max_content_chars = max(80, min(max_content_chars, 1200))
+    char_budget = (
+        max(400, token_budget * _MARKDOWN_CHARS_PER_TOKEN) if token_budget is not None else None
+    )
 
     lines = [
         f"# Sibyl Context Pack: {pack.goal}",
@@ -535,32 +789,38 @@ def context_pack_to_markdown(
     if pack.project:
         lines.append(f"Project: {pack.project}")
 
+    used = sum(len(line) + 1 for line in lines)
     remaining = max_items
+    emitted_items = 0
+    trimmed = False
     for section in pack.sections:
-        if remaining <= 0:
+        if remaining <= 0 or trimmed:
             break
-        lines.extend(["", f"## {section.title}"])
+        section_lines = ["", f"## {section.title}"]
+        section_emitted = False
         for item in section.items[:items_per_section]:
             if remaining <= 0:
                 break
-            type_label = f" ({item.type})" if item.type else ""
-            item_quality = getattr(item, "quality", item.metadata.get("quality", {}))
-            quality = _quality_metadata_to_markdown(item_quality)
-            quality_label = f" _{quality}_" if quality else ""
-            lines.append(f"- **{item.name}**{type_label} `{item.id}`{quality_label}")
-            if item.reason:
-                lines.append(f"  - Why: {item.reason}")
-            if item.content:
-                lines.append(f"  - Memory: {_compact_text(item.content, max_content_chars)}")
-            if include_related and item.related:
-                related = "; ".join(
-                    f"{candidate.relationship} {candidate.name} ({candidate.type})"
-                    for candidate in item.related[:3]
-                )
-                lines.append(f"  - Related: {related}")
+            item_lines = _item_markdown_lines(
+                item,
+                pack_project=pack.project,
+                max_content_chars=max_content_chars,
+                include_related=include_related,
+            )
+            block = [*section_lines, *item_lines] if not section_emitted else item_lines
+            block_chars = sum(len(line) + 1 for line in block)
+            if char_budget is not None and emitted_items > 0 and used + block_chars > char_budget:
+                trimmed = True
+                break
+            lines.extend(block)
+            used += block_chars
+            section_emitted = True
+            emitted_items += 1
             remaining -= 1
 
-    if pack.usage_hint:
+    if trimmed:
+        lines.extend(["", f"_Trimmed to ~{token_budget} tokens; raise --budget for more._"])
+    elif pack.usage_hint:
         lines.extend(["", f"_Hint: {pack.usage_hint}_"])
 
     return "\n".join(lines)
@@ -631,6 +891,7 @@ async def _compile_fallback_sections(
     organization_id: str,
     limit: int,
     search_fn: SearchFn,
+    audit: bool = False,
 ) -> list[ContextSection]:
     response = await search_fn(
         query=query,
@@ -649,8 +910,10 @@ async def _compile_fallback_sections(
     for result in response.results:
         if _is_synthetic_relationship_result(result):
             continue
-        facet = _facet_for_type(result.type or "", facets)
-        grouped[facet].append(_item_from_result(result, facet))
+        facet = _facet_for_result(result, facets)
+        if facet is None:
+            continue
+        grouped[facet].append(_item_from_result(result, facet, audit=audit))
 
     return [
         ContextSection(facet=facet, title=FACET_TITLES[facet], items=items)
@@ -679,19 +942,122 @@ def _sections_from_response(
     response: SearchResponse,
     *,
     facets: Sequence[ContextFacet],
+    audit: bool = False,
 ) -> list[ContextSection]:
     grouped: dict[ContextFacet, list[ContextItem]] = {facet: [] for facet in facets}
     for result in response.results:
         if _is_synthetic_relationship_result(result):
             continue
-        facet = _facet_for_type(result.type or "", list(facets))
-        grouped[facet].append(_item_from_result(result, facet))
+        facet = _facet_for_result(result, list(facets))
+        if facet is None:
+            continue
+        grouped[facet].append(_item_from_result(result, facet, audit=audit))
 
     return [
         ContextSection(facet=facet, title=FACET_TITLES[facet], items=items)
         for facet in facets
         if (items := grouped[facet])
     ]
+
+
+_ACTIVE_WORK_LOOKUP_STATUSES = "doing,blocked,review"
+_ACTIVE_WORK_LOOKUP_LIMIT = 5
+
+
+def _enum_value(value: Any) -> str:
+    return str(getattr(value, "value", value))
+
+
+def _item_from_active_entity(entity: Any) -> ContextItem:
+    entity_id = str(entity.id)
+    status = _enum_value(getattr(entity, "status", "") or "")
+    quality = ContextItemQualityMetadata(
+        origin="graph",
+        source=entity_id,
+        created_at=_compact_metadata_value(getattr(entity, "created_at", None)),
+        updated_at=_compact_metadata_value(getattr(entity, "updated_at", None)),
+        project_id=_compact_metadata_value(getattr(entity, "project_id", None)),
+    )
+    metadata: dict[str, Any] = {
+        "source_id": entity_id,
+        "active_lookup": True,
+        "status": status,
+        "priority": _enum_value(getattr(entity, "priority", "") or ""),
+    }
+    content = str(getattr(entity, "description", "") or getattr(entity, "content", "") or "")
+    reason = "task is currently in progress for this project"
+    if status == "blocked":
+        reason = "task is currently blocked for this project"
+    return ContextItem(
+        id=entity_id,
+        type=_enum_value(getattr(entity, "entity_type", "task")),
+        name=str(entity.name),
+        content=content,
+        score=0.0,
+        facet=ContextFacet.ACTIVE_WORK,
+        reason=reason,
+        source=entity_id,
+        quality=quality,
+        metadata=metadata,
+    )
+
+
+async def _default_active_work(
+    *,
+    organization_id: str,
+    project: str,
+    limit: int,
+) -> list[ContextItem]:
+    from sibyl_core.models.entities import EntityType
+
+    runtime = await get_graph_runtime(organization_id)
+    entities = await runtime.entity_manager.list_by_type(
+        EntityType.TASK,
+        limit=limit,
+        project_id=project,
+        status=_ACTIVE_WORK_LOOKUP_STATUSES,
+    )
+    return [_item_from_active_entity(entity) for entity in entities]
+
+
+def _merge_active_work(
+    sections: list[ContextSection],
+    active_items: list[ContextItem],
+    facets: Sequence[ContextFacet],
+) -> list[ContextSection]:
+    if not active_items:
+        return sections
+
+    existing_ids = {item.id for item in active_items}
+    merged: list[ContextSection] = []
+    inserted = False
+    facet_positions = {facet: index for index, facet in enumerate(facets)}
+    active_index = facet_positions.get(ContextFacet.ACTIVE_WORK, 0)
+    for section in sections:
+        if section.facet is ContextFacet.ACTIVE_WORK:
+            retained = [item for item in section.items if item.id not in existing_ids]
+            merged.append(replace(section, items=[*active_items, *retained]))
+            inserted = True
+            continue
+        if not inserted and facet_positions.get(section.facet, len(facet_positions)) > active_index:
+            merged.append(
+                ContextSection(
+                    facet=ContextFacet.ACTIVE_WORK,
+                    title=FACET_TITLES[ContextFacet.ACTIVE_WORK],
+                    items=list(active_items),
+                )
+            )
+            inserted = True
+        merged.append(section)
+    if not inserted:
+        merged.append(
+            ContextSection(
+                facet=ContextFacet.ACTIVE_WORK,
+                title=FACET_TITLES[ContextFacet.ACTIVE_WORK],
+                items=list(active_items),
+            )
+        )
+    return merged
 
 
 async def _compile_native_sections(
@@ -701,6 +1067,7 @@ async def _compile_native_sections(
     limit: int,
     per_facet_limit: int,
     raw_memory_recall_fn: RawMemoryRecallFn,
+    audit: bool = False,
 ) -> list[ContextSection]:
     search_limit = min(50, max(limit, per_facet_limit * len(facets)))
     response = await context_search(
@@ -712,7 +1079,7 @@ async def _compile_native_sections(
         embedding_provider=configured_embedding_provider(),
         raw_memory_recall_fn=raw_memory_recall_fn,
     )
-    return _sections_from_response(response, facets=facets)
+    return _sections_from_response(response, facets=facets, audit=audit)
 
 
 async def compile_context(
@@ -729,9 +1096,11 @@ async def compile_context(
     limit: int = 24,
     include_related: bool = False,
     related_limit: int = 3,
+    audit: bool = False,
     search_fn: SearchFn = default_search,
     related_fn: RelatedFn = _default_related_items,
     raw_memory_recall_fn: RawMemoryRecallFn = recall_raw_memory,
+    active_work_fn: ActiveWorkFn | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
 ) -> ContextPack:
     """Build a small, structured context pack for an agent goal."""
@@ -772,6 +1141,7 @@ async def compile_context(
             limit=limit,
             per_facet_limit=per_facet_limit,
             raw_memory_recall_fn=raw_memory_recall_fn,
+            audit=audit,
         )
     except Exception as exc:
         retrieval_failed = True
@@ -780,6 +1150,27 @@ async def compile_context(
             error_type=type(exc).__name__,
         )
 
+    if (
+        ContextFacet.ACTIVE_WORK in facets
+        and project
+        and (accessible_projects is None or project in accessible_projects)
+    ):
+        lookup = active_work_fn if active_work_fn is not None else _default_active_work
+        try:
+            active_items = await lookup(
+                organization_id=organization_id,
+                project=project,
+                limit=min(per_facet_limit, _ACTIVE_WORK_LOOKUP_LIMIT),
+            )
+        except Exception as exc:
+            active_items = []
+            log.warning(
+                "context_active_work_lookup_failed",
+                error_type=type(exc).__name__,
+            )
+        sections = _merge_active_work(sections, active_items, facets)
+
+    sections = _dedupe_lineage(sections)
     sections = _dedupe_sections(sections, limit)
     if not sections and retrieval_failed:
         sections = _dedupe_sections(
@@ -792,6 +1183,7 @@ async def compile_context(
                 organization_id=organization_id,
                 limit=limit,
                 search_fn=search_fn,
+                audit=audit,
             ),
             limit,
         )

@@ -1,4 +1,4 @@
-"""Graphiti-free SurrealDB graph helpers for native memory paths."""
+"""SurrealDB graph helpers for native memory paths."""
 
 from __future__ import annotations
 
@@ -116,6 +116,14 @@ _RELATED_ENTITY_PROJECTION_FIELDS = (
     ("created_by", "created_by"),
     ("modified_by", "modified_by"),
     ("source_file", "source_file"),
+)
+_ENTITY_SEARCH_PROJECTION_FIELDS = (
+    *_RELATED_ENTITY_PROJECTION_FIELDS,
+    ("content", "content"),
+)
+_ENTITY_SEARCH_FIELDS = ",\n                       ".join(
+    f"{field_name} AS {alias}" if field_name != alias else field_name
+    for field_name, alias in _ENTITY_SEARCH_PROJECTION_FIELDS
 )
 _ENTITY_BULK_UPSERT_QUERY = """
 INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
@@ -317,50 +325,35 @@ class EntityManager:
         if not updates:
             return await self.get(entity_id)
 
-        existing = await self.get(entity_id)
-        merged_metadata = {**(existing.metadata or {})}
-        update_metadata = updates.get("metadata")
-        if isinstance(update_metadata, dict):
-            merged_metadata.update(
-                {str(key): _jsonable(value) for key, value in update_metadata.items()}
-            )
-
-        excluded_keys = {
-            "content",
-            "description",
-            "embedding",
-            "metadata",
-            "name",
-            "source_file",
-            "title",
-        }
-        merged_metadata.update(
-            {
-                str(key): _jsonable(value)
-                for key, value in updates.items()
-                if key not in excluded_keys
-            }
+        patch = _entity_update_patch(updates, updated_at=datetime.now(UTC))
+        rows = await _execute_graph_transaction(
+            self._client,
+            """
+            BEGIN TRANSACTION;
+            UPDATE entity MERGE $patch
+            WHERE group_id = $group_id AND uuid = $uuid
+            RETURN NONE;
+            UPDATE entity SET
+                summary = IF description != NONE AND description != '' THEN
+                    string::slice(description, 0, 500)
+                ELSE
+                    name
+                END
+            WHERE group_id = $group_id AND uuid = $uuid
+            RETURN NONE;
+            SELECT *
+            FROM entity
+            WHERE group_id = $group_id AND uuid = $uuid
+            LIMIT 1;
+            COMMIT TRANSACTION;
+            """,
+            group_id=self._group_id,
+            uuid=entity_id,
+            patch=patch,
         )
-
-        source_file = updates.get("source_file", existing.source_file)
-        embedding = updates.get("embedding", existing.embedding)
-        updated = Entity(
-            id=existing.id,
-            entity_type=existing.entity_type,
-            name=str(updates.get("name") or updates.get("title") or existing.name),
-            description=str(updates.get("description", existing.description) or ""),
-            content=str(updates.get("content", existing.content) or ""),
-            organization_id=existing.organization_id,
-            created_by=existing.created_by,
-            modified_by=str(updates.get("modified_by") or existing.modified_by or "") or None,
-            metadata=merged_metadata,
-            created_at=existing.created_at,
-            updated_at=datetime.now(UTC),
-            source_file=str(source_file) if source_file else None,
-            embedding=embedding if isinstance(embedding, list) else None,
-        )
-        await _replace_entity(self._client, updated, group_id=self._group_id)
-        return updated
+        if not rows:
+            return None
+        return _entity_from_row(rows[0])
 
     async def search(
         self,
@@ -372,13 +365,52 @@ class EntityManager:
         search_query = build_fulltext_query(query)
         if not search_query:
             return []
+        result_limit = max(int(limit), 1)
+
+        fulltext_results, vector_results = await asyncio.gather(
+            self._fulltext_search(
+                query=query,
+                search_query=search_query,
+                entity_types=entity_types,
+                limit=result_limit,
+            ),
+            self._vector_search(
+                query=query,
+                entity_types=entity_types,
+                limit=result_limit,
+            ),
+        )
+
+        results = _merge_ranked_entity_results(
+            [
+                (vector_results, 1.2),
+                (fulltext_results, 1.0),
+            ],
+            limit=result_limit,
+        )
+        if not results:
+            results = await self._fallback_text_search(
+                query=query,
+                entity_types=entity_types,
+                limit=limit,
+            )
+        return results
+
+    async def _fulltext_search(
+        self,
+        *,
+        query: str,
+        search_query: str,
+        entity_types: Sequence[EntityType] | None,
+        limit: int,
+    ) -> list[tuple[Entity, float]]:
         type_values = [entity_type.value for entity_type in entity_types or ()]
         type_clause = "AND entity_type IN $entity_types" if type_values else ""
-        result_limit = max(int(limit), 1)
         rows = normalize_records(
             await self._client.execute_query(
-                """
-                SELECT *,
+                "SELECT "
+                + _ENTITY_SEARCH_FIELDS
+                + """,
                        math::max([
                            search::score(0),
                            search::score(1),
@@ -402,7 +434,7 @@ class EntityManager:
                 group_id=self._group_id,
                 search_query=search_query,
                 entity_types=type_values,
-                limit=result_limit,
+                limit=limit,
                 _query_label="entity.search.fulltext",
             )
         )
@@ -410,27 +442,7 @@ class EntityManager:
         for row in rows:
             entity = _entity_from_row(row)
             fulltext_results.append((entity, _bounded_similarity_score(query, entity)))
-
-        vector_results = await self._vector_search(
-            query=query,
-            entity_types=entity_types,
-            limit=result_limit,
-        )
-
-        results = _merge_ranked_entity_results(
-            [
-                (vector_results, 1.2),
-                (fulltext_results, 1.0),
-            ],
-            limit=result_limit,
-        )
-        if not results:
-            results = await self._fallback_text_search(
-                query=query,
-                entity_types=entity_types,
-                limit=limit,
-            )
-        return results
+        return fulltext_results
 
     async def _vector_search(
         self,
@@ -459,10 +471,11 @@ class EntityManager:
             )
             rows = normalize_records(
                 await self._client.execute_query(
-                    """
-                    SELECT *
-                    FROM (
-                        SELECT *,
+                    "SELECT *"
+                    " FROM ("
+                    "SELECT "
+                    + _ENTITY_SEARCH_FIELDS
+                    + """,
                                (1 - vector::distance::knn()) AS score
                         FROM entity
                         WHERE group_id = $group_id
@@ -506,8 +519,9 @@ class EntityManager:
         candidate_limit = min(max(int(limit) * 8, 50), 500)
         rows = normalize_records(
             await self._client.execute_query(
-                """
-                SELECT *
+                "SELECT "
+                + _ENTITY_SEARCH_FIELDS
+                + """
                 FROM entity
                 WHERE group_id = $group_id
                 """
@@ -543,8 +557,9 @@ class EntityManager:
         type_clause = "AND entity_type IN $entity_types" if type_values else ""
         rows = normalize_records(
             await self._client.execute_query(
-                """
-                SELECT *
+                "SELECT "
+                + _ENTITY_SEARCH_FIELDS
+                + """
                 FROM entity
                 WHERE group_id = $group_id
                   AND name = $name_query
@@ -2550,6 +2565,78 @@ def _entity_record(
         "tags": tags,
         "name_embedding": entity.embedding,
     }
+
+
+def _entity_update_patch(updates: Mapping[str, Any], *, updated_at: datetime) -> SurrealRecord:
+    metadata_patch = _entity_update_metadata_patch(updates)
+    attributes_patch: dict[str, object] = {
+        **metadata_patch,
+        "updated_at": updated_at,
+        "_direct_insert": True,
+    }
+    patch: SurrealRecord = {
+        "updated_at": updated_at,
+        "attributes": attributes_patch,
+    }
+
+    name = updates.get("name") or updates.get("title")
+    if name:
+        patch["name"] = str(name)
+    if "description" in updates:
+        description = str(updates.get("description") or "")
+        patch["description"] = description
+        attributes_patch["description"] = description
+    if "content" in updates:
+        patch["content"] = str(updates.get("content") or "")
+    if source_file := updates.get("source_file"):
+        source_file_text = str(source_file)
+        patch["source_file"] = source_file_text
+        attributes_patch["source_file"] = source_file_text
+    elif "source_file" in updates:
+        patch["source_file"] = None
+        attributes_patch["source_file"] = ""
+    if modified_by := updates.get("modified_by"):
+        patch["modified_by"] = str(modified_by)
+    if "embedding" in updates:
+        embedding = updates.get("embedding")
+        patch["name_embedding"] = embedding if isinstance(embedding, list) else None
+
+    for key in (
+        "project_id",
+        "epic_id",
+        "parent_task_id",
+        "task_id",
+        "status",
+        "priority",
+        "complexity",
+        "feature",
+    ):
+        if key in metadata_patch:
+            patch[key] = _metadata_str(metadata_patch, key)
+    if "tags" in metadata_patch:
+        patch["tags"] = _metadata_str_list(metadata_patch.get("tags")) or []
+    return patch
+
+
+def _entity_update_metadata_patch(updates: Mapping[str, Any]) -> dict[str, object]:
+    metadata: dict[str, object] = {}
+    update_metadata = updates.get("metadata")
+    if isinstance(update_metadata, Mapping):
+        metadata.update({str(key): _jsonable(value) for key, value in update_metadata.items()})
+
+    excluded_keys = {
+        "content",
+        "description",
+        "embedding",
+        "metadata",
+        "name",
+        "source_file",
+        "title",
+    }
+    metadata.update(
+        {str(key): _jsonable(value) for key, value in updates.items() if key not in excluded_keys}
+    )
+    return metadata
 
 
 async def _replace_relationship(

@@ -58,17 +58,17 @@ Object.defineProperty(window, 'matchMedia', {
 // (Radix Select's positioner) constructs them with `new`, which a plain vi.fn
 // implementation does not satisfy.
 class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
 }
 class IntersectionObserverStub {
   readonly root = null;
   readonly rootMargin = '';
   readonly thresholds = [];
-  observe() {}
-  unobserve() {}
-  disconnect() {}
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
   takeRecords() {
     return [];
   }

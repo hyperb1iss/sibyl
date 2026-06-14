@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
 import structlog
@@ -147,7 +147,7 @@ _IMAP_SECRET_OPTION_MARKERS = (
     "secret",
     "token",
 )
-_IMAP_PERSISTED_PRIVILEGED_OPTIONS = frozenset({"allow_private_network"})
+_SOURCE_IMPORT_PRIVILEGED_OPTIONS = frozenset({"allow_private_network"})
 
 
 def _store_run(run: SourceImportRun) -> None:
@@ -378,6 +378,7 @@ def _policy_context_from_payload(payload: dict[str, Any] | None) -> MemoryPolicy
         actor_user_id=payload.get("actor_user_id"),
         organization_id=payload.get("organization_id"),
         organization_role=payload.get("organization_role"),
+        is_global_admin=bool(payload.get("is_global_admin")),
         accessible_projects=payload.get("accessible_projects"),
         accessible_delegations=payload.get("accessible_delegations"),
         delegated_authority=payload.get("delegated_authority"),
@@ -402,6 +403,7 @@ def memory_policy_context_payload(context: MemoryPolicyContext) -> dict[str, Any
         "actor_user_id": context.actor_user_id,
         "organization_id": context.organization_id,
         "organization_role": role.value if hasattr(role, "value") else role,
+        "is_global_admin": context.is_global_admin,
         "accessible_projects": sorted(context.accessible_projects or []),
         "accessible_delegations": sorted(context.accessible_delegations or []),
         "delegated_authority": context.delegated_authority,
@@ -501,6 +503,13 @@ def _default_supersession_handler(*, organization_id: str) -> SourceRecordSupers
         )
         if superseded is None:
             return False
+        if (
+            superseded.principal_id != memory.principal_id
+            or superseded.memory_scope != memory.memory_scope
+            or superseded.scope_key != memory.scope_key
+            or superseded.source_id != memory.source_id
+        ):
+            return False
 
         superseded_metadata = dict(superseded.metadata)
         superseded_metadata["superseded_by_raw_memory_id"] = memory.id
@@ -545,14 +554,34 @@ def _source_option_bool(value: object) -> bool:
     return False
 
 
-def _validate_source_import_options(adapter_name: str, options: Mapping[str, Any]) -> None:
+def _source_import_allows_privileged_options(payload: Mapping[str, Any] | None) -> bool:
+    return bool(payload and payload.get("is_global_admin"))
+
+
+def _validate_source_import_options(
+    adapter_name: str,
+    options: Mapping[str, Any],
+    *,
+    policy_context: Mapping[str, Any] | None = None,
+) -> None:
+    privileged_options = {
+        option
+        for option in _SOURCE_IMPORT_PRIVILEGED_OPTIONS.intersection(options)
+        if _source_option_bool(options[option])
+    }
+    privileged_options_allowed = _source_import_allows_privileged_options(policy_context)
+    if privileged_options and not privileged_options_allowed:
+        if adapter_name == IMAP_ADAPTER_NAME and "allow_private_network" in privileged_options:
+            raise ValueError("imap_private_network_not_allowed_in_source_import_options")
+        raise ValueError("source_import_private_network_not_allowed")
     if adapter_name != IMAP_ADAPTER_NAME:
         return
     if "ssl" in options and not _source_option_bool(options["ssl"]):
         raise ValueError("imap_source_uri_must_use_tls")
-    disallowed_options = set(options) - _IMAP_PERSISTED_ALLOWED_OPTIONS
-    if _IMAP_PERSISTED_PRIVILEGED_OPTIONS.intersection(disallowed_options):
-        raise ValueError("imap_private_network_not_allowed_in_source_import_options")
+    allowed_options = set(_IMAP_PERSISTED_ALLOWED_OPTIONS)
+    if privileged_options_allowed:
+        allowed_options.update(_SOURCE_IMPORT_PRIVILEGED_OPTIONS)
+    disallowed_options = set(options) - allowed_options
     if any(_is_imap_secret_option(option) for option in disallowed_options):
         raise ValueError("imap_credentials_not_allowed_in_source_import_options")
     if disallowed_options:
@@ -564,9 +593,15 @@ def _is_imap_secret_option(option: object) -> bool:
     return any(marker in normalized for marker in _IMAP_SECRET_OPTION_MARKERS)
 
 
+def _has_control_char(value: str) -> bool:
+    return any(ord(char) < 0x20 or ord(char) == 0x7F for char in value)
+
+
 def _validate_source_import_uri(adapter_name: str, source_uri: str) -> None:
     if adapter_name != IMAP_ADAPTER_NAME:
         return
+    if _has_control_char(source_uri):
+        raise ValueError("imap_source_uri_must_not_include_control_characters")
     parsed = urlparse(source_uri)
     if parsed.scheme != "imaps":
         raise ValueError("imap_source_uri_must_use_tls")
@@ -576,6 +611,8 @@ def _validate_source_import_uri(adapter_name: str, source_uri: str) -> None:
         raise ValueError("imap_source_uri_must_not_include_query_or_fragment")
     if not parsed.hostname:
         raise ValueError("imap_source_uri_must_include_host")
+    if _has_control_char(unquote(parsed.path)):
+        raise ValueError("imap_source_uri_must_not_include_control_characters")
 
 
 def _ensure_builtin_source_adapters() -> None:
@@ -603,8 +640,13 @@ async def import_source_archive(
     """Import a bounded source archive batch into raw memory."""
     _ensure_builtin_source_adapters()
     option_values = dict(options or {})
+    context_payload = policy_context if policy_context is not None else ctx.get("policy_context")
     _validate_source_import_uri(adapter_name, source_uri)
-    _validate_source_import_options(adapter_name, option_values)
+    _validate_source_import_options(
+        adapter_name,
+        option_values,
+        policy_context=context_payload,
+    )
     source_uri = _resolve_import_source_uri_for_adapter(adapter_name, source_uri)
     adapter = get_source_adapter(adapter_name)
     manifest = await adapter.prepare_manifest(
@@ -612,7 +654,6 @@ async def import_source_archive(
         options=option_values,
     )
     plan = plan_source_import(adapter, manifest)
-    context_payload = policy_context if policy_context is not None else ctx.get("policy_context")
     policy_reason = _authorize_source_import(
         organization_id=organization_id,
         principal_id=principal_id,
@@ -734,7 +775,11 @@ async def start_source_import(
 ) -> dict[str, Any]:
     option_values = dict(options or {})
     _validate_source_import_uri(adapter_name, source_uri)
-    _validate_source_import_options(adapter_name, option_values)
+    _validate_source_import_options(
+        adapter_name,
+        option_values,
+        policy_context=policy_context,
+    )
     run = SourceImportRun(
         import_id=f"source_import:{uuid4()}",
         organization_id=organization_id,

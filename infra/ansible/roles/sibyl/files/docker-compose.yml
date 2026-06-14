@@ -31,7 +31,7 @@ services:
       - --user
       - ${SIBYL_SURREAL_USERNAME:-root}
       - --pass
-      - ${SIBYL_SURREAL_PASSWORD:?set SIBYL_SURREAL_PASSWORD in .env}
+      - ${SIBYL_SURREAL_PASSWORD:?set SIBYL_SURREAL_PASSWORD in the role env file}
       - rocksdb:///data/sibyl.db
     volumes:
       - surreal_data:/data
@@ -55,12 +55,14 @@ services:
       SIBYL_COORDINATION_BACKEND: auto
       SIBYL_SURREAL_URL: ws://surrealdb:8000/rpc
       SIBYL_SURREAL_USERNAME: ${SIBYL_SURREAL_USERNAME:-root}
-      SIBYL_SURREAL_PASSWORD: ${SIBYL_SURREAL_PASSWORD:?set SIBYL_SURREAL_PASSWORD in .env}
-      SIBYL_JWT_SECRET: ${SIBYL_JWT_SECRET:?set SIBYL_JWT_SECRET in .env}
-      SIBYL_SERVER_URL: https://${SIBYL_DOMAIN:?set SIBYL_DOMAIN in .env}
+      SIBYL_SURREAL_PASSWORD:
+        ${SIBYL_SURREAL_PASSWORD:?set SIBYL_SURREAL_PASSWORD in the role env file}
+      SIBYL_JWT_SECRET: ${SIBYL_JWT_SECRET:?set SIBYL_JWT_SECRET in the role env file}
+      SIBYL_SERVER_URL: https://${SIBYL_DOMAIN:?set SIBYL_DOMAIN in the role env file}
       SIBYL_FRONTEND_URL: https://${SIBYL_DOMAIN}/
-      SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY:?set SIBYL_OPENAI_API_KEY in .env}
-      SIBYL_ANTHROPIC_API_KEY: ${SIBYL_ANTHROPIC_API_KEY:?set SIBYL_ANTHROPIC_API_KEY in .env}
+      SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY:?set SIBYL_OPENAI_API_KEY in the role env file}
+      SIBYL_ANTHROPIC_API_KEY:
+        ${SIBYL_ANTHROPIC_API_KEY:?set SIBYL_ANTHROPIC_API_KEY in the role env file}
       SIBYL_LLM_PROVIDER: anthropic
       SIBYL_LLM_MODEL: claude-haiku-4-5
       SIBYL_LOCAL_AUTH_ENABLED: ${SIBYL_LOCAL_AUTH_ENABLED:-true}
@@ -87,7 +89,7 @@ services:
       backend:
         condition: service_healthy
     environment:
-      NEXT_PUBLIC_API_URL: https://${SIBYL_DOMAIN:?set SIBYL_DOMAIN in .env}
+      NEXT_PUBLIC_API_URL: https://${SIBYL_DOMAIN:?set SIBYL_DOMAIN in the role env file}
       SIBYL_API_URL: http://backend:3334/api
       SIBYL_BACKEND_URL: http://backend:3334
       NODE_ENV: production
@@ -114,11 +116,11 @@ services:
     # ahead of ufw, so a 0.0.0.0 bind would be public despite the
     # firewall; binding to the tailnet IP is what keeps this private.
     ports:
-      - "${SIBYL_BIND_IP:?set SIBYL_BIND_IP in .env}:80:80"
+      - "${SIBYL_BIND_IP:?set SIBYL_BIND_IP in the role env file}:80:80"
       - "${SIBYL_BIND_IP}:443:443"
     environment:
-      SIBYL_DOMAIN: ${SIBYL_DOMAIN:?set SIBYL_DOMAIN in .env}
-      CF_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
+      SIBYL_DOMAIN: ${SIBYL_DOMAIN:?set SIBYL_DOMAIN in the role env file}
+      CF_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in the role env file}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

@@ -47,7 +47,7 @@ docker_legacy_setup_detected() {
     return 1
   fi
 
-  compose_ps="$(docker compose ps -a --format json 2>/dev/null || true)"
+  compose_ps="$(docker compose --env-file /dev/null ps -a --format json 2>/dev/null || true)"
   if [[ "$compose_ps" == *'"Service":"falkordb"'* || "$compose_ps" == *'"Service":"postgres"'* ]]; then
     return 0
   fi
@@ -138,7 +138,7 @@ run_compose() {
     return 1
   fi
 
-  "${command[@]}" "$@"
+  "${command[@]}" --env-file /dev/null "$@"
 }
 
 surreal_runtime_data_detected() {

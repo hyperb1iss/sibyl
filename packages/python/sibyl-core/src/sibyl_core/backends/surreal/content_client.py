@@ -17,6 +17,7 @@ class SurrealContentClient(DedicatedSurrealClient):
         token: str = "",
         namespace: str = "sibyl_content",
         database: str = "content",
+        pool_size: int | None = None,
     ) -> None:
         super().__init__(
             url=url,
@@ -26,4 +27,5 @@ class SurrealContentClient(DedicatedSurrealClient):
             namespace=namespace,
             database=database,
             client_kind="content",
+            pool_size=pool_size,
         )

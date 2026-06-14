@@ -42,7 +42,7 @@ _COMPLETED_BACKUP_STATUS = "completed"
 def _backup_runtime_options(
     *,
     include_database_dump: bool | None,
-    include_graph: bool,
+    include_graph: bool | None,
 ) -> BackupRuntimeOptions:
     return resolve_backup_runtime_options(
         store=settings.store,
@@ -88,8 +88,14 @@ class BackupSettingsUpdate(BaseModel):
     enabled: bool | None = None
     schedule: str | None = Field(None, max_length=64)
     retention_days: int | None = Field(None, ge=1, le=365)
-    include_database_dump: bool | None = None
-    include_graph: bool | None = None
+    include_database_dump: bool | None = Field(
+        default=None,
+        description="Deprecated compatibility no-op; backups include the full org archive",
+    )
+    include_graph: bool | None = Field(
+        default=None,
+        description="Deprecated compatibility no-op; backups include the full org archive",
+    )
 
 
 class BackupSettingsResponse(BaseModel):
@@ -111,9 +117,12 @@ class CreateBackupRequest(BaseModel):
 
     include_database_dump: bool | None = Field(
         default=None,
-        description="Deprecated; active backups no longer create database dump sidecars",
+        description="Deprecated compatibility no-op; backups include the full org archive",
     )
-    include_graph: bool = Field(default=True, description="Include graph export")
+    include_graph: bool | None = Field(
+        default=None,
+        description="Deprecated compatibility no-op; backups include the full org archive",
+    )
 
 
 class CreateBackupResponse(BaseModel):
@@ -224,7 +233,7 @@ async def create_backup(
     Creates a compressed archive containing:
     - auth.json when auth runs on SurrealDB
     - content.json when content runs on SurrealDB
-    - graph.json when graph export is requested
+    - graph.json with the organization knowledge graph
     - metadata.json with checksums
 
     Returns a job ID that can be used to track progress.

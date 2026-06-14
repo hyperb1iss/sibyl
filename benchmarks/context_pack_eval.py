@@ -9,14 +9,15 @@ import asyncio
 import hashlib
 import json
 import os
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "benchmarks"))
 sys.path.insert(0, str(ROOT / "packages" / "python" / "sibyl-core" / "src"))
 sys.path.insert(0, str(ROOT / "apps" / "cli" / "src"))
+
+from git_provenance import git_provenance_metadata
 
 from sibyl_core.config import settings
 from sibyl_core.evals import ContextPackEvalReport, EvalConfig, run_context_pack_evaluation_cli
@@ -94,23 +95,6 @@ def _sha256_file(path: Path | None) -> str:
     return f"sha256:{digest.hexdigest()}"
 
 
-def _git_commit() -> str:
-    git = shutil.which("git")
-    if git is None:
-        return "unknown"
-    try:
-        result = subprocess.run(  # noqa: S603 - git path is resolved and args are fixed.
-            [git, "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            cwd=ROOT,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return "unknown"
-    return result.stdout.strip() or "unknown"
-
-
 def _auth_manifest_id(path: Path | None) -> str:
     path = _resolve_repo_path(path)
     if path is None:
@@ -140,10 +124,10 @@ def _benchmark_metadata(
         "dataset_name": _cases_dataset_name(cases_file),
         "corpus_hash": _sha256_file(cases_file),
         "auth_manifest_id": _auth_manifest_id(args.auth_manifest),
-        "sibyl_commit": _git_commit(),
         "runtime_mode": "live-api",
     }
     metadata.update(_parse_metadata(args.metadata))
+    metadata.update(git_provenance_metadata(ROOT))
     return metadata
 
 

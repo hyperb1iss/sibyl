@@ -63,6 +63,12 @@ _UPSERT_RECORD = {
         "WHERE uuid = $uuid AND organization_id = $organization_id;"
     ),
 }
+_CRAWL_SOURCE_FIELDS = (
+    "uuid, organization_id, name, url, source_type, description, crawl_depth, "
+    "include_patterns, exclude_patterns, respect_robots, crawl_status, "
+    "current_job_id, last_crawled_at, last_error, document_count, chunk_count, "
+    "total_tokens, tags, categories, favicon_url, created_at, updated_at"
+)
 
 
 def _table_name_length(table: str) -> int:
@@ -84,6 +90,43 @@ _CONTENT_DEBUG_BOUNDARY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _CONTENT_DEBUG_WHERE_PATTERN = re.compile(r"\bWHERE\b", re.IGNORECASE)
+
+
+def _content_debug_query_has_comment(query: str) -> bool:
+    index = 0
+    length = len(query)
+
+    while index < length:
+        char = query[index]
+        next_char = query[index + 1] if index + 1 < length else ""
+
+        if char in {"'", '"', "`"}:
+            quote = char
+            index += 1
+            while index < length:
+                current = query[index]
+                if current == "\\":
+                    index += 2
+                    continue
+                index += 1
+                if current == quote:
+                    break
+            continue
+
+        if char == "/" and next_char == "*":
+            return True
+
+        if (char == "-" and next_char == "-") or (char == "/" and next_char == "/"):
+            return True
+
+        if char == "#":
+            return True
+
+        index += 1
+
+    return False
+
+
 type SurrealRecord = dict[str, object]
 
 
@@ -95,6 +138,12 @@ def _is_uniqueness_error(error: str) -> bool:
 type RagSearchRow = tuple[DocumentChunk, CrawledDocument, str, UUID, float]
 type CodeSearchRow = tuple[DocumentChunk, CrawledDocument, UUID, str, float]
 type HybridSearchRow = tuple[DocumentChunk, CrawledDocument, str, UUID, float, float]
+
+_DOCUMENT_CHUNK_SELECT = (
+    "uuid, organization_id, source_id, document_id, chunk_index, chunk_type, content, context, "
+    "token_count, start_char, end_char, heading_path, language, is_complete, has_entities, "
+    "entity_ids, created_at, updated_at"
+)
 
 
 class RawExecuteQuery(Protocol):
@@ -122,6 +171,7 @@ def build_surreal_content_client() -> SurrealContentClient:
         username=config_module.settings.surreal_username,
         password=config_module.settings.surreal_password.get_secret_value(),
         token=config_module.settings.surreal_token.get_secret_value(),
+        pool_size=config_module.settings.surreal_client_pool_size("content"),
     )
 
 
@@ -713,6 +763,9 @@ def _scope_content_debug_query(query: str) -> str:
     if ";" in stripped:
         msg = "Content debug queries must use a single statement"
         raise ValueError(msg)
+    if _content_debug_query_has_comment(stripped):
+        msg = "Content debug queries cannot contain comments"
+        raise ValueError(msg)
 
     tokens = [token.upper() for token in query_tokens(stripped)]
     content_table_count = sum(token.lower() in _CONTENT_DEBUG_TABLES for token in tokens)
@@ -825,7 +878,8 @@ async def _load_sources_for_org(
 ) -> list[CrawlSource]:
     rows = await _select_many(
         client,
-        "SELECT * FROM crawl_sources WHERE organization_id = $organization_id;",
+        f"SELECT {_CRAWL_SOURCE_FIELDS} "  # noqa: S608
+        "FROM crawl_sources WHERE organization_id = $organization_id;",
         organization_id=str(organization_id),
     )
     sources = [_source_from_record(row) for row in rows]
@@ -915,10 +969,31 @@ async def _document_scopes_by_id(
     return scopes
 
 
-async def _load_all_sources(client: SurrealContentClient) -> list[CrawlSource]:
-    rows = await _select_many(client, "SELECT * FROM crawl_sources;")
-    sources = [_source_from_record(row) for row in rows]
-    return sorted(sources, key=lambda source: _sort_key(source.created_at), reverse=True)
+async def _load_all_sources(
+    client: SurrealContentClient,
+    *,
+    status: CrawlStatus | None = None,
+    limit: int | None = None,
+) -> list[CrawlSource]:
+    clauses: list[str] = []
+    params: dict[str, object] = {}
+    if status is not None:
+        clauses.append("crawl_status = $status")
+        params["status"] = status.value
+    where_clause = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    limit_clause = ""
+    if limit is not None:
+        limit_clause = " LIMIT $limit"
+        params["limit"] = max(limit, 0)
+    rows = await _select_many(
+        client,
+        (
+            f"SELECT {_CRAWL_SOURCE_FIELDS} FROM crawl_sources{where_clause} "  # noqa: S608
+            f"ORDER BY created_at DESC, uuid DESC{limit_clause};"
+        ),
+        **params,
+    )
+    return [_source_from_record(row) for row in rows]
 
 
 async def _load_documents_for_source_ids(
@@ -978,7 +1053,7 @@ async def _load_chunks_for_document_ids(
         rows.extend(
             await _select_many(
                 client,
-                f"SELECT * FROM document_chunks WHERE {where_clause};",  # noqa: S608
+                f"SELECT {_DOCUMENT_CHUNK_SELECT} FROM document_chunks WHERE {where_clause};",  # noqa: S608
                 **params,
             )
         )
@@ -1052,7 +1127,7 @@ async def _load_sources_for_search_scope(
     )
     rows = await _select_many(
         client,
-        f"SELECT * FROM crawl_sources WHERE {where_clause};",  # noqa: S608
+        f"SELECT {_CRAWL_SOURCE_FIELDS} FROM crawl_sources WHERE {where_clause};",  # noqa: S608
         **params,
     )
     sources = [_source_from_record(row) for row in rows]
@@ -1066,12 +1141,26 @@ async def list_crawl_sources_for_org(
     status: CrawlStatus | None = None,
     limit: int,
 ) -> tuple[list[CrawlSource], int]:
-    async with surreal_content_client() as client:
-        sources = await _load_sources_for_org(client, organization_id=organization_id)
-
+    clauses = ["organization_id = $organization_id"]
+    params: dict[str, object] = {"organization_id": str(organization_id)}
     if status is not None:
-        sources = [source for source in sources if source.crawl_status == status]
-    return list(sources[:limit]), len(sources)
+        clauses.append("crawl_status = $status")
+        params["status"] = status.value
+    where_clause = " AND ".join(clauses)
+    async with surreal_content_client() as client:
+        total = await _select_scalar_count(
+            client,
+            f"SELECT count() AS total FROM crawl_sources WHERE {where_clause} GROUP ALL;",  # noqa: S608
+            **params,
+        )
+        rows = await _select_many(
+            client,
+            f"SELECT {_CRAWL_SOURCE_FIELDS} FROM crawl_sources WHERE {where_clause} "  # noqa: S608
+            "ORDER BY created_at DESC, uuid DESC LIMIT $limit;",
+            **params,
+            limit=max(limit, 0),
+        )
+    return [_source_from_record(row) for row in rows], total
 
 
 async def get_org_crawl_source(
@@ -1196,13 +1285,7 @@ async def list_crawl_sources(
     limit: int | None = 50,
 ) -> list[CrawlSource]:
     async with surreal_content_client() as client:
-        sources = await _load_all_sources(client)
-
-    if status is not None:
-        sources = [source for source in sources if source.crawl_status == status]
-    if limit is None:
-        return list(sources)
-    return list(sources[:limit])
+        return await _load_all_sources(client, status=status, limit=limit)
 
 
 async def create_crawl_source_record(
@@ -1306,12 +1389,22 @@ async def list_document_chunks(
     _session: object,
     *,
     document_id: UUID,
+    organization_id: UUID | str | None = None,
 ) -> list[DocumentChunk]:
+    params: dict[str, object] = {"document_id": str(document_id)}
+    if organization_id is not None:
+        params["organization_id"] = str(organization_id)
+        query = (
+            "SELECT * FROM document_chunks "
+            "WHERE document_id = $document_id AND organization_id = $organization_id;"
+        )
+    else:
+        query = "SELECT * FROM document_chunks WHERE document_id = $document_id;"
     async with surreal_content_client() as client:
         rows = await _select_many(
             client,
-            "SELECT * FROM document_chunks WHERE document_id = $document_id;",
-            document_id=str(document_id),
+            query,
+            **params,
         )
     chunks = [_chunk_from_record(row) for row in rows]
     return sorted(chunks, key=lambda chunk: chunk.chunk_index)
@@ -1798,6 +1891,94 @@ async def save_api_idempotency_record(
     return _api_idempotency_from_record(saved)
 
 
+async def _load_document_entity_chunk(
+    client: SurrealContentClient,
+    *,
+    organization_id: UUID,
+    entity_id: str,
+) -> DocumentChunk | None:
+    try:
+        chunk_id = UUID(entity_id)
+    except ValueError:
+        normalized_prefix = entity_id.lower().replace("-", "")
+        if len(normalized_prefix) < 4 or any(
+            char not in "0123456789abcdef" for char in normalized_prefix
+        ):
+            return None
+        rows = await _select_many(
+            client,
+            f"SELECT {_DOCUMENT_CHUNK_SELECT} FROM document_chunks "  # noqa: S608
+            "WHERE organization_id = $organization_id;",
+            organization_id=str(organization_id),
+        )
+        for row in rows:
+            row_id = _coerce_str(row.get("uuid")).replace("-", "").lower()
+            if row_id.startswith(normalized_prefix):
+                return _chunk_from_record(row)
+        return None
+
+    record = await _select_one(
+        client,
+        f"SELECT {_DOCUMENT_CHUNK_SELECT} FROM document_chunks "  # noqa: S608
+        "WHERE organization_id = $organization_id AND uuid = $chunk_id LIMIT 1;",
+        organization_id=str(organization_id),
+        chunk_id=str(chunk_id),
+    )
+    return _chunk_from_record(record) if record is not None else None
+
+
+async def _load_document_entity_document(
+    client: SurrealContentClient,
+    *,
+    organization_id: UUID,
+    document_id: UUID,
+) -> CrawledDocument | None:
+    record = await _select_one(
+        client,
+        "SELECT * FROM crawled_documents "
+        "WHERE organization_id = $organization_id AND uuid = $document_id LIMIT 1;",
+        organization_id=str(organization_id),
+        document_id=str(document_id),
+    )
+    return _document_from_record(record) if record is not None else None
+
+
+async def _load_document_entity_source(
+    client: SurrealContentClient,
+    *,
+    organization_id: UUID,
+    source_id: UUID | str,
+) -> CrawlSource | None:
+    record = await _select_one(
+        client,
+        "SELECT * FROM crawl_sources "
+        "WHERE organization_id = $organization_id AND uuid = $source_id LIMIT 1;",
+        organization_id=str(organization_id),
+        source_id=str(source_id),
+    )
+    return _source_from_record(record) if record is not None else None
+
+
+async def _load_following_document_chunks(
+    client: SurrealContentClient,
+    *,
+    organization_id: UUID,
+    chunk: DocumentChunk,
+) -> list[DocumentChunk]:
+    rows = await _select_many(
+        client,
+        f"SELECT {_DOCUMENT_CHUNK_SELECT} FROM document_chunks "  # noqa: S608
+        "WHERE organization_id = $organization_id "
+        "AND document_id = $document_id "
+        "AND chunk_index > $chunk_index "
+        "ORDER BY chunk_index ASC, uuid ASC;",
+        organization_id=str(organization_id),
+        document_id=str(chunk.document_id),
+        chunk_index=chunk.chunk_index,
+    )
+    return [_chunk_from_record(row) for row in rows]
+
+
 async def resolve_document_entity(
     _session: object,
     *,
@@ -1805,51 +1986,39 @@ async def resolve_document_entity(
     entity_id: str,
 ) -> DocumentEntityRecord | None:
     async with surreal_content_client() as client:
-        sources = await _load_sources_for_org(client, organization_id=organization_id)
-        source_ids = {str(source.id) for source in sources}
-        documents = await _load_documents_for_source_ids(client, list(source_ids))
-        documents_by_id = {str(document.id): document for document in documents}
-        sources_by_id = {str(source.id): source for source in sources}
-        chunks = await _load_chunks_for_document_ids(client, list(documents_by_id))
-
-    chunk: DocumentChunk | None = None
-    try:
-        chunk_uuid = UUID(entity_id)
-        chunk = next((item for item in chunks if item.id == chunk_uuid), None)
-    except ValueError:
-        normalized_prefix = entity_id.lower().replace("-", "")
-        if len(normalized_prefix) >= 4 and all(
-            char in "0123456789abcdef" for char in normalized_prefix
-        ):
-            chunk = next(
-                (
-                    item
-                    for item in chunks
-                    if str(item.id).replace("-", "").lower().startswith(normalized_prefix)
-                ),
-                None,
+        chunk = await _load_document_entity_chunk(
+            client,
+            organization_id=organization_id,
+            entity_id=entity_id,
+        )
+        if chunk is None:
+            return None
+        document = await _load_document_entity_document(
+            client,
+            organization_id=organization_id,
+            document_id=chunk.document_id,
+        )
+        if document is None:
+            return None
+        source = await _load_document_entity_source(
+            client,
+            organization_id=organization_id,
+            source_id=document.source_id,
+        )
+        if source is None:
+            return None
+        following_chunks = (
+            await _load_following_document_chunks(
+                client,
+                organization_id=organization_id,
+                chunk=chunk,
             )
-
-    if chunk is None:
-        return None
-
-    document = documents_by_id.get(str(chunk.document_id))
-    if document is None:
-        return None
-    source = sources_by_id.get(str(document.source_id))
-    if source is None:
-        return None
+            if chunk.chunk_type == ChunkType.HEADING
+            else []
+        )
 
     content = chunk.content or ""
     if chunk.chunk_type == ChunkType.HEADING:
-        following_chunks = sorted(
-            [
-                item
-                for item in chunks
-                if item.document_id == chunk.document_id and item.chunk_index > chunk.chunk_index
-            ],
-            key=lambda item: item.chunk_index,
-        )
         section_parts = [content]
         for following_chunk in following_chunks:
             if following_chunk.chunk_type == ChunkType.HEADING:

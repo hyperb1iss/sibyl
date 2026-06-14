@@ -58,7 +58,9 @@ async def test_document_file_adapter_emits_project_normalized_record(tmp_path: P
 @pytest.mark.asyncio
 async def test_document_folder_adapter_uses_local_globbing_and_checkpoints(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("sibyl.crawler.local.settings.source_import_dir", tmp_path)
     (tmp_path / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
     nested = tmp_path / "nested"
     nested.mkdir()
@@ -158,6 +160,27 @@ async def test_document_url_adapter_rejects_private_hosts_by_default() -> None:
     with pytest.raises(ValueError, match="private"):
         await adapter.prepare_manifest(
             source_uri="http://127.0.0.1:3337/docs",
+            options={"target_scope_key": "project_123"},
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "source_uri",
+    [
+        "http://169.254.169.254/latest/meta-data",
+        "http://2130706433/docs",
+        "http://0x7f000001/docs",
+        "http://017700000001/docs",
+        "http://[::1]/docs",
+    ],
+)
+async def test_document_url_adapter_rejects_encoded_private_hosts(source_uri: str) -> None:
+    adapter = DocumentUrlAdapter(fetcher=AsyncMock())
+
+    with pytest.raises(ValueError, match="private"):
+        await adapter.prepare_manifest(
+            source_uri=source_uri,
             options={"target_scope_key": "project_123"},
         )
 

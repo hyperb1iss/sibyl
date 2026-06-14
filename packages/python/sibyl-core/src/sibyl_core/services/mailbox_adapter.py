@@ -50,6 +50,17 @@ IMAP_ADAPTER_VERSION = "1.0"
 _EMAIL_DEDUPE_IDENTITY = "email_message"
 _IMAP_SECRET_OPTION_KEYS = frozenset({"access_token", "oauth2_token", "password"})
 _IMAP_PASSWORD_ENV_PREFIX = "SIBYL_SOURCE_IMPORT_IMAP_"
+_IMAP_MAILBOX_CONTROL_ERROR = "IMAP mailbox must not contain control characters"
+
+
+def _has_control_char(value: str) -> bool:
+    return any(ord(char) < 0x20 or ord(char) == 0x7F for char in value)
+
+
+def _validate_imap_mailbox(mailbox: str) -> str:
+    if _has_control_char(mailbox):
+        raise ValueError(_IMAP_MAILBOX_CONTROL_ERROR)
+    return mailbox
 
 
 class ImapClient(Protocol):
@@ -148,50 +159,15 @@ class MboxSourceAdapter:
 
         path = _resolve_mbox_path(manifest.source_uri)
         start = int(checkpoint.cursor) if checkpoint and checkpoint.cursor else 0
-        batch_records: list[SourceRecord] = []
-        skipped: list[SourceSkippedRecord] = []
-        cursor = start
-        total_seen = start
-
-        mbox = mailbox.mbox(path, create=False)
-        try:
-            message_count = len(mbox)
-            for index, message in enumerate(mbox.itervalues()):
-                if index < start:
-                    continue
-                if len(batch_records) >= batch_size:
-                    break
-                cursor = index + 1
-                total_seen = cursor
-                try:
-                    batch_records.append(_record_from_message(manifest, message, index=index))
-                except Exception as exc:
-                    skipped.append(
-                        SourceSkippedRecord(
-                            adapter_record_id=f"mbox:{index}",
-                            source_uri=_message_source_uri(manifest, index),
-                            reason="message_parse_failed",
-                            metadata={"error": str(exc)},
-                        )
-                    )
-
-            done = cursor >= message_count
-            if batch_records or skipped or start < message_count:
-                yield SourceRecordBatch(
-                    records=batch_records,
-                    skipped=skipped,
-                    checkpoint=SourceImportCheckpoint(
-                        cursor=str(cursor) if not done else None,
-                        source_version=manifest.source_version,
-                        records_seen=total_seen,
-                        records_imported=len(batch_records),
-                        records_skipped=len(skipped),
-                        done=done,
-                        metadata={"source_uri": manifest.source_uri},
-                    ),
-                )
-        finally:
-            mbox.close()
+        batch = await asyncio.to_thread(
+            _read_mbox_batch,
+            manifest,
+            path,
+            start,
+            max(1, batch_size),
+        )
+        if batch is not None:
+            yield batch
 
 
 class MaildirSourceAdapter:
@@ -274,70 +250,136 @@ class MaildirSourceAdapter:
 
         path = _resolve_maildir_path(manifest.source_uri)
         start = int(checkpoint.cursor) if checkpoint and checkpoint.cursor else 0
-        batch_records: list[SourceRecord] = []
-        skipped: list[SourceSkippedRecord] = []
-        cursor = start
-        total_seen = start
+        batch = await asyncio.to_thread(
+            _read_maildir_batch,
+            manifest,
+            path,
+            start,
+            max(1, batch_size),
+        )
+        if batch is not None:
+            yield batch
 
-        maildir = mailbox.Maildir(path, create=False)
-        try:
-            symlinked_keys = _maildir_symlinked_keys(path, maildir.colon)
-            # iterating the mailbox yields messages, not keys, so .keys() is required
-            keys = sorted(
-                key
-                for key in maildir.keys()  # noqa: SIM118
-                if key not in symlinked_keys
-            )
-            message_count = len(keys)
-            for index, key in enumerate(keys):
-                if index < start:
-                    continue
-                if len(batch_records) >= batch_size:
-                    break
-                cursor = index + 1
-                total_seen = cursor
-                source_uri = _message_source_uri(manifest, index, mailbox_key=key)
-                try:
-                    message = maildir.get_message(key)
-                    batch_records.append(
-                        _record_from_message(
-                            manifest,
-                            message,
-                            index=index,
-                            source_uri=source_uri,
-                            extra_metadata={
-                                "mailbox_format": "maildir",
-                                "mailbox_key": key,
-                            },
-                        )
-                    )
-                except Exception as exc:
-                    skipped.append(
-                        SourceSkippedRecord(
-                            adapter_record_id=f"maildir:{key}",
-                            source_uri=source_uri,
-                            reason="message_parse_failed",
-                            metadata={"error": str(exc), "mailbox_key": key},
-                        )
-                    )
 
-            done = cursor >= message_count
-            if batch_records or skipped or start < message_count:
-                yield SourceRecordBatch(
-                    records=batch_records,
-                    skipped=skipped,
-                    checkpoint=SourceImportCheckpoint(
-                        cursor=str(cursor) if not done else None,
-                        source_version=manifest.source_version,
-                        records_seen=total_seen,
-                        records_imported=len(batch_records),
-                        records_skipped=len(skipped),
-                        done=done,
-                        metadata={"source_uri": manifest.source_uri},
-                    ),
+def _read_mbox_batch(
+    manifest: SourceImportManifest,
+    path: Path,
+    start: int,
+    batch_size: int,
+) -> SourceRecordBatch | None:
+    batch_records: list[SourceRecord] = []
+    skipped: list[SourceSkippedRecord] = []
+    cursor = start
+    total_seen = start
+
+    mbox = mailbox.mbox(path, create=False)
+    try:
+        keys = list(mbox.iterkeys())
+        message_count = len(keys)
+        for index, key in enumerate(keys[start : start + batch_size], start=start):
+            cursor = index + 1
+            total_seen = cursor
+            try:
+                message = mbox.get_message(key)
+                batch_records.append(_record_from_message(manifest, message, index=index))
+            except Exception as exc:
+                skipped.append(
+                    SourceSkippedRecord(
+                        adapter_record_id=f"mbox:{index}",
+                        source_uri=_message_source_uri(manifest, index),
+                        reason="message_parse_failed",
+                        metadata={"error": str(exc)},
+                    )
                 )
-        finally:
-            maildir.close()
+
+        done = cursor >= message_count
+        if not batch_records and not skipped and start >= message_count:
+            return None
+
+        return SourceRecordBatch(
+            records=batch_records,
+            skipped=skipped,
+            checkpoint=SourceImportCheckpoint(
+                cursor=str(cursor) if not done else None,
+                source_version=manifest.source_version,
+                records_seen=total_seen,
+                records_imported=len(batch_records),
+                records_skipped=len(skipped),
+                done=done,
+                metadata={"source_uri": manifest.source_uri},
+            ),
+        )
+    finally:
+        mbox.close()
+
+
+def _read_maildir_batch(
+    manifest: SourceImportManifest,
+    path: Path,
+    start: int,
+    batch_size: int,
+) -> SourceRecordBatch | None:
+    batch_records: list[SourceRecord] = []
+    skipped: list[SourceSkippedRecord] = []
+    cursor = start
+    total_seen = start
+
+    maildir = mailbox.Maildir(path, create=False)
+    try:
+        symlinked_keys = _maildir_symlinked_keys(path, maildir.colon)
+        keys = sorted(
+            key
+            for key in maildir.keys()  # noqa: SIM118
+            if key not in symlinked_keys
+        )
+        message_count = len(keys)
+        for index, key in enumerate(keys[start : start + batch_size], start=start):
+            cursor = index + 1
+            total_seen = cursor
+            source_uri = _message_source_uri(manifest, index, mailbox_key=key)
+            try:
+                message = maildir.get_message(key)
+                batch_records.append(
+                    _record_from_message(
+                        manifest,
+                        message,
+                        index=index,
+                        source_uri=source_uri,
+                        extra_metadata={
+                            "mailbox_format": "maildir",
+                            "mailbox_key": key,
+                        },
+                    )
+                )
+            except Exception as exc:
+                skipped.append(
+                    SourceSkippedRecord(
+                        adapter_record_id=f"maildir:{key}",
+                        source_uri=source_uri,
+                        reason="message_parse_failed",
+                        metadata={"error": str(exc), "mailbox_key": key},
+                    )
+                )
+
+        done = cursor >= message_count
+        if not batch_records and not skipped and start >= message_count:
+            return None
+
+        return SourceRecordBatch(
+            records=batch_records,
+            skipped=skipped,
+            checkpoint=SourceImportCheckpoint(
+                cursor=str(cursor) if not done else None,
+                source_version=manifest.source_version,
+                records_seen=total_seen,
+                records_imported=len(batch_records),
+                records_skipped=len(skipped),
+                done=done,
+                metadata={"source_uri": manifest.source_uri},
+            ),
+        )
+    finally:
+        maildir.close()
 
 
 class ImapSourceAdapter:
@@ -1065,7 +1107,9 @@ def _imap_config(
         port = int(parsed_port)
     else:
         port = 993 if ssl else 143
-    mailbox = _optional_str(options.get("mailbox")) or unquote(parsed.path.lstrip("/")) or "INBOX"
+    mailbox = _validate_imap_mailbox(
+        _optional_str(options.get("mailbox")) or unquote(parsed.path.lstrip("/")) or "INBOX"
+    )
     username = _optional_str(options.get("username"))
     if username is None and parsed.username:
         username = unquote(parsed.username)

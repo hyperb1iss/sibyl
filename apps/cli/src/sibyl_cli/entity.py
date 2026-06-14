@@ -4,7 +4,7 @@ Generic commands for all entity types: list, show, create, update, delete, relat
 All commands communicate with the REST API to ensure proper event broadcasting.
 """
 
-from typing import Annotated
+from typing import Annotated, cast
 
 import typer
 
@@ -25,6 +25,11 @@ from sibyl_cli.common import (
     truncate,
 )
 from sibyl_cli.id_resolution import resolve_id_prefix
+from sibyl_cli.memory_display import (
+    inspect_raw_memory_source,
+    is_raw_memory_reference,
+    print_memory_source_inspect,
+)
 from sibyl_core.models.entities import EntityType
 
 app = typer.Typer(
@@ -37,6 +42,54 @@ app = typer.Typer(
 ENTITY_TYPES = [e.value for e in EntityType]
 
 _handle_client_error = handle_client_error
+
+
+def print_entity_details(entity: dict[str, object]) -> None:
+    lines = [
+        f"[{ELECTRIC_PURPLE}]Name:[/{ELECTRIC_PURPLE}] {entity.get('name', '')}",
+        f"[{ELECTRIC_PURPLE}]Type:[/{ELECTRIC_PURPLE}] {entity.get('entity_type', '')}",
+        f"[{ELECTRIC_PURPLE}]ID:[/{ELECTRIC_PURPLE}] {entity.get('id', '')}",
+        "",
+        f"[{NEON_CYAN}]Description:[/{NEON_CYAN}]",
+        entity.get("description") or "[dim]No description[/dim]",
+    ]
+
+    content = entity.get("content", "")
+    if content and content != entity.get("description"):
+        lines.extend(
+            [
+                "",
+                f"[{NEON_CYAN}]Content:[/{NEON_CYAN}]",
+                content,
+            ]
+        )
+
+    meta = entity.get("metadata", {})
+    if isinstance(meta, dict) and meta:
+        lines.extend(["", f"[{CORAL}]Metadata:[/{CORAL}]"])
+        for k, v in list(meta.items())[:10]:
+            lines.append(f"  {k}: {truncate(str(v), 60)}")
+
+    related_entities = entity.get("related", [])
+    if isinstance(related_entities, list) and related_entities:
+        lines.extend(["", f"[{NEON_CYAN}]Related:[/{NEON_CYAN}]"])
+        for item in related_entities:
+            if not isinstance(item, dict):
+                continue
+            rel = cast("dict[str, object]", item)
+            direction = "→" if rel.get("direction") == "outgoing" else "←"
+            lines.append(
+                f"  [{CORAL}]{rel.get('relationship', '')}[/{CORAL}] {direction} "
+                f"[{ELECTRIC_PURPLE}]{rel.get('entity_type', '')}[/{ELECTRIC_PURPLE}]: "
+                f"{rel.get('name', '')} [{CORAL}]{rel.get('id', '')}[/{CORAL}]"
+            )
+
+    entity_type = entity.get("entity_type", "entity")
+    panel = create_panel(
+        "\n".join(str(line) for line in lines),
+        title=f"{entity_type.title()} Details",
+    )
+    console.print(panel)
 
 
 @app.command("list")
@@ -133,6 +186,14 @@ def show_entity(
         client = get_client()
 
         try:
+            if is_raw_memory_reference(entity_id):
+                data = await inspect_raw_memory_source(client, entity_id)
+                if json_out:
+                    print_json(data)
+                    return
+                print_memory_source_inspect(data, full_content=True)
+                return
+
             resolved_id = await resolve_id_prefix(client, entity_id)
             entity = await client.get_entity(resolved_id)
 
@@ -141,47 +202,7 @@ def show_entity(
                 print_json(entity)
                 return
 
-            # Table output
-            lines = [
-                f"[{ELECTRIC_PURPLE}]Name:[/{ELECTRIC_PURPLE}] {entity.get('name', '')}",
-                f"[{ELECTRIC_PURPLE}]Type:[/{ELECTRIC_PURPLE}] {entity.get('entity_type', '')}",
-                f"[{ELECTRIC_PURPLE}]ID:[/{ELECTRIC_PURPLE}] {entity.get('id', '')}",
-                "",
-                f"[{NEON_CYAN}]Description:[/{NEON_CYAN}]",
-                entity.get("description") or "[dim]No description[/dim]",
-            ]
-
-            content = entity.get("content", "")
-            if content and content != entity.get("description"):
-                lines.extend(
-                    [
-                        "",
-                        f"[{NEON_CYAN}]Content:[/{NEON_CYAN}]",
-                        content,
-                    ]
-                )
-
-            meta = entity.get("metadata", {})
-            if meta:
-                lines.extend(["", f"[{CORAL}]Metadata:[/{CORAL}]"])
-                for k, v in list(meta.items())[:10]:
-                    lines.append(f"  {k}: {truncate(str(v), 60)}")
-
-            # Show related entities
-            related_entities = entity.get("related", [])
-            if related_entities:
-                lines.extend(["", f"[{NEON_CYAN}]Related:[/{NEON_CYAN}]"])
-                for rel in related_entities:
-                    direction = "→" if rel.get("direction") == "outgoing" else "←"
-                    lines.append(
-                        f"  [{CORAL}]{rel.get('relationship', '')}[/{CORAL}] {direction} "
-                        f"[{ELECTRIC_PURPLE}]{rel.get('entity_type', '')}[/{ELECTRIC_PURPLE}]: "
-                        f"{rel.get('name', '')} [{CORAL}]{rel.get('id', '')}[/{CORAL}]"
-                    )
-
-            entity_type = entity.get("entity_type", "entity")
-            panel = create_panel("\n".join(lines), title=f"{entity_type.title()} Details")
-            console.print(panel)
+            print_entity_details(entity)
 
         except SibylClientError as e:
             _handle_client_error(e)

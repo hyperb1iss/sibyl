@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from sibyl_core.models.reflection import (
+    ReflectionCandidate,
     memory_lifecycle_from_metadata,
     reflection_findings_from_metadata,
 )
@@ -25,7 +27,7 @@ from sibyl_core.services.memory import (
     reflection_write_enabled,
     write_mode_from_env,
 )
-from sibyl_core.services.surreal_content import MemoryScope, RawMemory
+from sibyl_core.services.surreal_content import MemoryScope, RawMemory, _raw_memory_matches_as_of
 from sibyl_core.tools.responses import AddResponse
 
 
@@ -927,9 +929,297 @@ async def test_promote_review_candidate_persists_native_record_and_marks_promote
     )
     findings = reflection_findings_from_metadata(saved[0].metadata)
     assert lifecycle.state == "promoted"
+    assert lifecycle.source_id == "candidate-1"
     assert lifecycle.derived_ids == ["decision_123"]
     assert findings[-1].kind == "promotion"
+    assert findings[-1].target_source_id == "candidate-1"
     assert findings[-1].related_source_ids == ["decision_123"]
+
+
+@pytest.mark.asyncio
+async def test_persist_reflection_candidate_reports_partial_relationship_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = ReflectionCandidate(
+        kind="decision",
+        title="Decision: keep receipts honest",
+        content="Relationship writes can partially fail after entity promotion.",
+        reason="captures a reliability invariant",
+        confidence=0.9,
+        tags=["reflection", "decision"],
+    )
+
+    entity_manager = SimpleNamespace(create_direct=AsyncMock(return_value="decision_partial"))
+
+    async def create_relationships(relationships):
+        return (1, len(relationships) - 1)
+
+    relationship_manager = SimpleNamespace(create_bulk=AsyncMock(side_effect=create_relationships))
+    runtime = SimpleNamespace(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+    )
+
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", AsyncMock(return_value=runtime))
+
+    result = await memory_module.persist_reflection_candidate(
+        candidate=candidate,
+        organization_id="org-1",
+        principal_id="user-1",
+        related_to=["related_one", "related_two"],
+        memory_scope=MemoryScope.PRIVATE,
+    )
+
+    assert result.response.success
+    assert result.metadata["native_relationship_requested_count"] == 2
+    assert result.metadata["native_relationship_count"] == 1
+    assert result.metadata["native_relationship_failed_count"] == 1
+    assert result.metadata["promotion_state"] == "partial"
+    assert result.metadata["promotion_errors"] == ["1 promotion relationships failed"]
+
+
+@pytest.mark.asyncio
+async def test_promote_review_candidate_bounds_contradicted_source_for_as_of_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cutoff = "2026-02-01T00:00:00+00:00"
+    candidate = _raw_review_candidate(
+        metadata={
+            **_raw_review_candidate().metadata,
+            "raw_source_ids": ["source-new"],
+            "source_ids": ["source-new"],
+            "contradiction_source_ids": ["source-old"],
+            "valid_at": cutoff,
+        }
+    )
+    source = _raw_import_memory(id="source-new", metadata={"valid_at": cutoff})
+    contradicted = _raw_import_memory(
+        id="source-old",
+        metadata={
+            "valid_at": "2026-01-01T00:00:00+00:00",
+            "promoted_entity_id": "decision_old",
+        },
+        captured_at=datetime(2026, 1, 1, tzinfo=UTC),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    memories = {memory.id: memory for memory in (candidate, source, contradicted)}
+    saved: list[RawMemory] = []
+
+    class FakeEntityManager:
+        def __init__(self) -> None:
+            self.updated: list[tuple[str, dict[str, object]]] = []
+
+        async def create_direct(self, _entity):
+            return "decision_new"
+
+        async def get(self, entity_id: str):
+            if entity_id == "decision_old":
+                return SimpleNamespace(
+                    created_by="user-1",
+                    metadata={"valid_at": "2026-01-01T00:00:00+00:00"},
+                )
+            return None
+
+        async def update(self, entity_id: str, updates: dict[str, object]):
+            self.updated.append((entity_id, updates))
+            return SimpleNamespace(id=entity_id, metadata=updates.get("metadata", {}))
+
+    entity_manager = FakeEntityManager()
+    runtime = SimpleNamespace(
+        entity_manager=entity_manager,
+        relationship_manager=SimpleNamespace(
+            create_bulk=AsyncMock(return_value=(0, 0)),
+        ),
+    )
+
+    async def fake_get_raw_memory(*, organization_id: str, memory_id: str):
+        assert organization_id == "org-1"
+        return memories.get(memory_id)
+
+    async def fake_save_raw_memory(memory: RawMemory) -> RawMemory:
+        memories[memory.id] = memory
+        saved.append(memory)
+        return memory
+
+    monkeypatch.setattr(memory_module, "get_raw_memory", fake_get_raw_memory)
+    monkeypatch.setattr(memory_module, "save_raw_memory", fake_save_raw_memory)
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", AsyncMock(return_value=runtime))
+
+    result = await promote_reflection_candidate_review(
+        candidate_id="candidate-1",
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="private",
+    )
+
+    assert result.success
+    assert result.metadata is not None
+    assert result.metadata["invalidated_source_ids"] == ["source-old"]
+    assert result.metadata["invalidated_entity_ids"] == ["decision_old"]
+    invalidated = next(memory for memory in saved if memory.id == "source-old")
+    assert invalidated.metadata["invalid_at"] == cutoff
+    assert invalidated.metadata["valid_to"] == cutoff
+    assert invalidated.metadata["invalidated_by_entity_id"] == "decision_new"
+    assert _raw_memory_matches_as_of(
+        invalidated,
+        datetime(2026, 1, 15, tzinfo=UTC),
+    )
+    assert not _raw_memory_matches_as_of(
+        invalidated,
+        datetime(2026, 2, 2, tzinfo=UTC),
+    )
+    entity_id, entity_updates = entity_manager.updated[0]
+    assert entity_id == "decision_old"
+    entity_metadata = entity_updates["metadata"]
+    assert isinstance(entity_metadata, dict)
+    assert entity_metadata["valid_to"] == cutoff
+
+
+@pytest.mark.asyncio
+async def test_promote_review_candidate_skips_other_private_principal_invalidations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = _raw_review_candidate(
+        metadata={
+            **_raw_review_candidate().metadata,
+            "raw_source_ids": ["source-new"],
+            "source_ids": ["source-new"],
+            "contradiction_source_ids": ["source-foreign"],
+            "valid_at": "2026-02-01T00:00:00+00:00",
+        }
+    )
+    source = _raw_import_memory(id="source-new")
+    foreign = _raw_import_memory(
+        id="source-foreign",
+        principal_id="user-2",
+        metadata={"promoted_entity_id": "decision_foreign"},
+    )
+    memories = {memory.id: memory for memory in (candidate, source, foreign)}
+    saved: list[RawMemory] = []
+
+    class FakeEntityManager:
+        def __init__(self) -> None:
+            self.updated: list[tuple[str, dict[str, object]]] = []
+
+        async def create_direct(self, _entity):
+            return "decision_new"
+
+        async def get(self, entity_id: str):
+            return None
+
+        async def update(self, entity_id: str, updates: dict[str, object]):
+            self.updated.append((entity_id, updates))
+            return SimpleNamespace(id=entity_id, metadata=updates.get("metadata", {}))
+
+    entity_manager = FakeEntityManager()
+    runtime = SimpleNamespace(
+        entity_manager=entity_manager,
+        relationship_manager=SimpleNamespace(
+            create_bulk=AsyncMock(return_value=(0, 0)),
+        ),
+    )
+
+    async def fake_get_raw_memory(*, organization_id: str, memory_id: str):
+        assert organization_id == "org-1"
+        return memories.get(memory_id)
+
+    async def fake_save_raw_memory(memory: RawMemory) -> RawMemory:
+        memories[memory.id] = memory
+        saved.append(memory)
+        return memory
+
+    monkeypatch.setattr(memory_module, "get_raw_memory", fake_get_raw_memory)
+    monkeypatch.setattr(
+        memory_module,
+        "list_raw_memories_by_source_id",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(memory_module, "save_raw_memory", fake_save_raw_memory)
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", AsyncMock(return_value=runtime))
+
+    result = await promote_reflection_candidate_review(
+        candidate_id="candidate-1",
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="private",
+    )
+
+    assert result.success
+    assert result.metadata is not None
+    assert result.metadata["invalidated_source_ids"] == []
+    assert result.metadata["invalidation_skipped_source_ids"] == ["source-foreign"]
+    assert all(memory.id != "source-foreign" for memory in saved)
+    assert entity_manager.updated == []
+
+
+@pytest.mark.asyncio
+async def test_promote_review_candidate_skips_foreign_private_superseded_entity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = _raw_review_candidate(
+        metadata={
+            **_raw_review_candidate().metadata,
+            "raw_source_ids": ["source-new"],
+            "source_ids": ["source-new"],
+            "supersedes_entity_ids": ["decision_foreign"],
+            "valid_at": "2026-02-01T00:00:00+00:00",
+        }
+    )
+    source = _raw_import_memory(id="source-new")
+    memories = {memory.id: memory for memory in (candidate, source)}
+
+    class FakeEntityManager:
+        def __init__(self) -> None:
+            self.created_metadata: dict[str, object] | None = None
+            self.updated: list[tuple[str, dict[str, object]]] = []
+
+        async def create_direct(self, entity):
+            self.created_metadata = entity.metadata
+            return "decision_new"
+
+        async def get(self, entity_id: str):
+            if entity_id == "decision_foreign":
+                return SimpleNamespace(
+                    created_by="user-2",
+                    metadata={"memory_scope": "private"},
+                )
+            return None
+
+        async def update(self, entity_id: str, updates: dict[str, object]):
+            self.updated.append((entity_id, updates))
+            return SimpleNamespace(id=entity_id, metadata=updates.get("metadata", {}))
+
+    entity_manager = FakeEntityManager()
+    runtime = SimpleNamespace(
+        entity_manager=entity_manager,
+        relationship_manager=SimpleNamespace(
+            create_bulk=AsyncMock(return_value=(0, 0)),
+        ),
+    )
+
+    async def fake_get_raw_memory(*, organization_id: str, memory_id: str):
+        assert organization_id == "org-1"
+        return memories.get(memory_id)
+
+    monkeypatch.setattr(memory_module, "get_raw_memory", fake_get_raw_memory)
+    monkeypatch.setattr(
+        memory_module, "save_raw_memory", AsyncMock(side_effect=lambda memory: memory)
+    )
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", AsyncMock(return_value=runtime))
+
+    result = await promote_reflection_candidate_review(
+        candidate_id="candidate-1",
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="private",
+    )
+
+    assert result.success
+    assert result.metadata is not None
+    assert result.metadata["invalidated_entity_ids"] == []
+    assert entity_manager.created_metadata is not None
+    assert entity_manager.created_metadata.get("supersedes_entity_ids") == []
+    assert entity_manager.updated == []
 
 
 @pytest.mark.asyncio
@@ -992,5 +1282,8 @@ async def test_promote_raw_memory_persists_native_record_and_marks_promoted(
         source_id="raw-1",
         review_state=saved[0].review_state,
     )
+    findings = reflection_findings_from_metadata(saved[0].metadata)
     assert lifecycle.state == "promoted"
+    assert lifecycle.source_id == "raw-1"
     assert lifecycle.derived_ids == ["episode_123"]
+    assert findings[-1].target_source_id == "raw-1"

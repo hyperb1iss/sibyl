@@ -1,0 +1,6 @@
+{"type":"session_meta","timestamp":"2026-05-31T12:00:00Z","payload":{"id":"dogfood-session-1","timestamp":"2026-05-31T12:00:00Z","cwd":"/Users/bliss/dev/sibyl","source":{"subagent":"dogfood"},"thread_source":{"parent_uuid":"turn-root","forked_from":"ingestion-followups"}}}
+{"type":"response_item","timestamp":"2026-05-31T12:00:01Z","payload":{"type":"message","role":"user","parent_uuid":"turn-root","content":[{"type":"input_text","text":"address the ingestion follow-up gaps and keep the commits atomic"}]}}
+{"type":"response_item","timestamp":"2026-05-31T12:00:02Z","payload":{"type":"message","role":"assistant","parent_uuid":"turn-user-1","content":[{"type":"output_text","text":"i am wiring the content lineage call first, then i will verify the live SurrealDB lane."}]}}
+{"type":"response_item","timestamp":"2026-05-31T12:00:03Z","payload":{"type":"function_call","name":"exec_command","call_id":"call-status","arguments":"{\"cmd\":\"git status --short\"}"}}
+{"type":"response_item","timestamp":"2026-05-31T12:00:04Z","payload":{"type":"function_call_output","call_id":"call-status","output":" M packages/python/sibyl-core/src/sibyl_core/services/surreal_content.py"}}
+{"type":"event_msg","timestamp":"2026-05-31T12:00:05Z","payload":{"type":"agent_message","message":"lineage is verified; moving to CI hardening.","phase":"commentary"}}

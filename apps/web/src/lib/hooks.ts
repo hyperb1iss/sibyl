@@ -1256,6 +1256,13 @@ export function useRealtimeUpdates(isAuthenticated?: boolean) {
       }
     });
 
+    const unsubRawCaptureChanged = wsClient.on('raw_capture_changed', data => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.rawCaptures.all });
+      for (const rawMemoryId of data.raw_memory_ids) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.rawCaptures.detail(rawMemoryId) });
+      }
+    });
+
     // Cleanup on unmount
     return () => {
       unsubCreate();
@@ -1276,6 +1283,7 @@ export function useRealtimeUpdates(isAuthenticated?: boolean) {
       unsubNotePending();
       unsubNoteCreated();
       unsubSourceImportUpdated();
+      unsubRawCaptureChanged();
       wsClient.disconnect();
     };
   }, [queryClient, isAuthenticated]);

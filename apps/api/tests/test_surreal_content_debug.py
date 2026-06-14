@@ -32,3 +32,28 @@ def test_scope_content_debug_query_rejects_content_table_subqueries() -> None:
 
     with pytest.raises(ValueError, match="one content table"):
         content_persistence._scope_content_debug_query(query)
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SELECT * FROM raw_captures WHERE true) -- hides organization filter",
+        "SELECT * FROM raw_captures WHERE true) // hides organization filter",
+        "SELECT * FROM raw_captures WHERE true) /* hides organization filter */",
+        "SELECT * FROM raw_captures WHERE true) # hides organization filter",
+    ],
+)
+def test_scope_content_debug_query_rejects_comments(query: str) -> None:
+    with pytest.raises(ValueError, match="cannot contain comments"):
+        content_persistence._scope_content_debug_query(query)
+
+
+def test_scope_content_debug_query_allows_comment_markers_inside_strings() -> None:
+    query = "SELECT * FROM raw_captures WHERE text = '-- not a comment' LIMIT 5"
+
+    scoped = content_persistence._scope_content_debug_query(query)
+
+    assert (
+        scoped == "SELECT * FROM raw_captures WHERE (text = '-- not a comment') "
+        "AND organization_id = $organization_id LIMIT 5"
+    )

@@ -21,8 +21,11 @@ from sibyl_core.backends.surreal.auth_schema import (
 )
 from sibyl_core.backends.surreal.content_schema import (
     CONTENT_ANALYZER_DEFINITIONS,
+    CONTENT_ENTITY_ANCHOR_MIGRATION_DEFINITIONS,
+    CONTENT_EXTRACTED_INTO_RELATION_MIGRATION_DEFINITIONS,
     CONTENT_HIGHLIGHT_SNIPPET_MIGRATION_DEFINITIONS,
     CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS,
+    CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS,
     CONTENT_PERMISSION_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_CHANGEFEED_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS,
@@ -91,10 +94,14 @@ class _RecordingSchemaClient:
             version = params.get("version")
             self.schema_version = int(version) if isinstance(version, int | str | float) else 0
         for table in tuple(self.missing_tables):
+            if f"FROM {table}" in stripped:
+                raise RuntimeError(f"The table '{table}' does not exist")
             if stripped.startswith(f"DELETE FROM {table}") or stripped.startswith(
                 f"UPDATE {table}"
             ):
                 raise RuntimeError(f"The table '{table}' does not exist")
+            if stripped.startswith(f"DEFINE TABLE IF NOT EXISTS {table}"):
+                self.missing_tables.discard(table)
             if stripped.startswith(f"DEFINE TABLE OVERWRITE {table}"):
                 self.missing_tables.discard(table)
         if self.duplicate_index_name and self.duplicate_index_name in statement:
@@ -361,7 +368,62 @@ def test_content_lineage_relation_tables_are_versioned() -> None:
     assert "IN raw_captures OUT raw_captures ENFORCED" in (
         CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS
     )
+    assert "IN entity OUT document_chunks" in CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS
     assert CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
+    assert "content_extracted_into_relation_table" in [migration.name for migration in migrations]
+    assert (
+        CONTENT_EXTRACTED_INTO_RELATION_MIGRATION_DEFINITIONS.strip().splitlines()[0]
+        in migration_sql
+    )
+
+
+def test_content_entity_anchors_are_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration_sql = "\n".join(
+        statement for migration in migrations for statement in migration.statements
+    )
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 13
+    assert "entity" in CONTENT_TABLES
+    assert "content_entity_anchors" in [migration.name for migration in migrations]
+    assert "DEFINE TABLE IF NOT EXISTS entity SCHEMAFULL" in CONTENT_SCHEMA_DEFINITIONS
+    assert "idx_content_entity_org_uuid" in CONTENT_SCHEMA_DEFINITIONS
+    assert CONTENT_ENTITY_ANCHOR_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
+
+
+def test_content_backup_legacy_include_cleanup_is_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration_sql = "\n".join(
+        statement for migration in migrations for statement in migration.statements
+    )
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 14
+    assert "content_backup_full_org_archives" in [migration.name for migration in migrations]
+    assert "REMOVE FIELD IF EXISTS include_postgres ON TABLE backup_settings" in migration_sql
+    assert "REMOVE FIELD IF EXISTS include_postgres ON TABLE backups" in migration_sql
+    assert "DEFINE FIELD OVERWRITE include_database_dump ON backup_settings" in migration_sql
+    assert "UPDATE backup_settings SET include_database_dump = false, include_graph = true" in (
+        migration_sql
+    )
+
+
+def test_content_lookup_indexes_are_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration_sql = "\n".join(
+        statement for migration in migrations for statement in migration.statements
+    )
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION == 15
+    assert "content_lookup_indexes" in [migration.name for migration in migrations]
+    for index_name in (
+        "idx_crawl_sources_org_uuid",
+        "idx_crawl_sources_org_status_created",
+        "idx_crawled_documents_org_uuid",
+        "idx_document_chunks_org_uuid",
+    ):
+        assert index_name in CONTENT_SCHEMA_DEFINITIONS
+        assert index_name in CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS
+        assert index_name in migration_sql
 
 
 def test_raw_capture_changefeed_cursor_is_versioned() -> None:
@@ -397,7 +459,7 @@ def test_content_highlight_snippets_and_code_analyzer_are_versioned() -> None:
     )
     migration_names = [migration.name for migration in migrations]
 
-    assert CONTENT_SCHEMA_CURRENT_VERSION == 11
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 12
     assert "DEFINE ANALYZER IF NOT EXISTS code_analyzer" in CONTENT_ANALYZER_DEFINITIONS
     assert "idx_document_chunks_code_ft" in CONTENT_SCHEMA_DEFINITIONS
     assert "HIGHLIGHTS" in CONTENT_SCHEMA_DEFINITIONS
@@ -642,6 +704,17 @@ def test_entity_updated_at_datetime_migration_is_versioned() -> None:
     )
     assert "DEFINE FIELD IF NOT EXISTS parent_task_id ON entity TYPE option<string>" in (
         ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS
+    )
+    migration_statements = split_statements(ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS)
+    assert any(
+        statement.startswith("UPDATE (\n")
+        and "SELECT VALUE id" in statement
+        and "SET updated_at = type::datetime(updated_at)" in statement
+        for statement in migration_statements
+    )
+    assert not any(
+        statement.startswith("UPDATE entity SET updated_at = type::datetime")
+        for statement in migration_statements
     )
     assert "type::datetime(updated_at)" in ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS
     assert "string::is::datetime(updated_at)" in ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS
@@ -921,6 +994,18 @@ async def test_auth_bootstrap_continues_after_duplicate_unique_index() -> None:
 
 
 @pytest.mark.asyncio
+async def test_auth_bootstrap_allows_fresh_database_without_tables() -> None:
+    client = _RecordingSchemaClient(missing_tables=set(AUTH_TABLES))
+
+    await bootstrap_auth_schema(client)  # type: ignore[arg-type]
+
+    assert client.schema_version == AUTH_SCHEMA_CURRENT_VERSION
+    assert any(
+        "DEFINE TABLE IF NOT EXISTS organization_members" in statement for statement in client.calls
+    )
+
+
+@pytest.mark.asyncio
 async def test_content_bootstrap_continues_after_duplicate_unique_index() -> None:
     client = _RecordingSchemaClient("idx_raw_captures_uuid")
     client._url = "ws://127.0.0.1:8000/rpc"
@@ -930,6 +1015,19 @@ async def test_content_bootstrap_continues_after_duplicate_unique_index() -> Non
     assert any("idx_raw_captures_org" in statement for statement in client.calls)
     assert any(
         "DEFINE TABLE IF NOT EXISTS system_settings" in statement for statement in client.calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_content_bootstrap_allows_fresh_database_without_tables() -> None:
+    client = _RecordingSchemaClient(missing_tables=set(CONTENT_TABLES))
+    client._url = "ws://127.0.0.1:8000/rpc"
+
+    await bootstrap_content_schema(client)  # type: ignore[arg-type]
+
+    assert client.schema_version == CONTENT_SCHEMA_CURRENT_VERSION
+    assert any(
+        "DEFINE TABLE IF NOT EXISTS crawl_sources" in statement for statement in client.calls
     )
 
 

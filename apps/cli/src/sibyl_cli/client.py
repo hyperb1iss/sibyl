@@ -228,7 +228,11 @@ def _is_refresh_revoked(message: str | None) -> bool:
     if not message:
         return False
     normalized = message.lower()
-    return "session not found" in normalized or "revoked" in normalized
+    return (
+        "session not found" in normalized
+        or "revoked" in normalized
+        or "invalid refresh token" in normalized
+    )
 
 
 # Read-like POSTs (search, recall, context-pack assembly) carry no durable
@@ -1750,6 +1754,8 @@ class SibylClient:
         limit: int = 24,
         include_related: bool = True,
         related_limit: int = 3,
+        audit: bool = False,
+        markdown_token_budget: int | None = None,
     ) -> dict[str, Any]:
         """Compile a structured context pack for an agent goal."""
         data: dict[str, Any] = {
@@ -1759,6 +1765,7 @@ class SibylClient:
             "limit": limit,
             "include_related": include_related,
             "related_limit": related_limit,
+            "audit": audit,
         }
         if domain:
             data["domain"] = domain
@@ -1766,6 +1773,8 @@ class SibylClient:
             data["project"] = project
         if agent_id:
             data["agent_id"] = agent_id
+        if markdown_token_budget is not None:
+            data["markdown_token_budget"] = markdown_token_budget
         return await self._request("POST", "/context/pack", json=data)
 
     async def reflect(

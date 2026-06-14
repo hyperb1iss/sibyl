@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 
 from sibyl_core.evals.longmemeval_replay import (
+    fit_longmemeval_rerank_model,
     load_longmemeval_replay_inputs,
+    longmemeval_rerank_feature_rows,
     replay_longmemeval_report,
     rerank_longmemeval_case,
     summary_to_dict,
@@ -82,6 +84,87 @@ def test_heuristic_rerank_preserves_candidate_set() -> None:
     )
 
     assert sorted(reranked) == sorted(_case_result()["ranked_session_ids"])
+
+
+def test_rerank_feature_rows_label_answers_and_export_features() -> None:
+    rows = longmemeval_rerank_feature_rows(
+        _case_result(),
+        _entry(),
+        corpus_text_policy="user-and-assistant-turns-v1",
+    )
+
+    by_session = {row["session_id"]: row for row in rows}
+    answer = by_session["answer-session"]
+    generic = by_session["generic-session"]
+
+    assert answer["label"] == 1
+    assert generic["label"] == 0
+    assert answer["prior_score"] == pytest.approx(0.8)
+    assert answer["features"]["provider_score"] == pytest.approx(0.8)
+    assert answer["features"]["intent_preference"] == 1.0
+    assert answer["features"]["preference_marker_count"] == 1.0
+    assert answer["features"]["query_coverage_applied"] == 1.0
+    assert answer["features"]["query_coverage_score"] > 0.0
+    assert answer["features"]["query_coverage_rank"] >= 1.0
+    assert generic["features"]["generic_assistant_count"] == 1.0
+    assert isinstance(answer["heuristic_score"], float)
+
+
+def test_rerank_feature_rows_match_heuristic_order() -> None:
+    rows = longmemeval_rerank_feature_rows(
+        _case_result(),
+        _entry(),
+        corpus_text_policy="user-and-assistant-turns-v1",
+    )
+    reranked = rerank_longmemeval_case(
+        _case_result(),
+        _entry(),
+        strategy="heuristic",
+        corpus_text_policy="user-and-assistant-turns-v1",
+    )
+
+    feature_order = [
+        row["session_id"]
+        for row in sorted(rows, key=lambda row: (-row["heuristic_score"], row["original_rank"]))
+    ]
+
+    assert feature_order == reranked
+
+
+def test_learned_rerank_uses_feature_weight_model() -> None:
+    report = {
+        "dataset": {"corpus_text_policy": "user-and-assistant-turns-v1"},
+        "case_results": [_case_result()],
+    }
+    model = fit_longmemeval_rerank_model(report, [_entry()])
+
+    reranked = rerank_longmemeval_case(
+        _case_result(),
+        _entry(),
+        strategy="learned",
+        corpus_text_policy="user-and-assistant-turns-v1",
+        learned_model=model,
+    )
+
+    assert reranked[0] == "answer-session"
+
+
+def test_replay_learned_strategy_auto_fits_feature_model() -> None:
+    second_case = {
+        **_case_result(),
+        "case_index": 1,
+        "question_id": "q2",
+    }
+    report = {
+        "k_values": [1, 3],
+        "dataset": {"corpus_text_policy": "user-and-assistant-turns-v1"},
+        "case_results": [_case_result(), second_case],
+    }
+
+    summary = replay_longmemeval_report(report, [_entry(), _entry()], strategy="learned")
+
+    assert summary.strategy == "learned"
+    assert summary.overall["recall@1"] == 1.0
 
 
 def test_coverage_rerank_uses_query_terms_without_answer_oracle() -> None:

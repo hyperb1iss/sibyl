@@ -14,6 +14,7 @@ For single-pod deployments, broadcasts work locally without Redis.
 """
 
 import asyncio
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -22,6 +23,7 @@ import structlog
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from sibyl import config as config_module
+from sibyl.api.event_types import WSEvent
 from sibyl.auth.http import extract_bearer_token
 from sibyl.auth.jwt import JwtError, verify_access_token
 from sibyl.persistence.auth_runtime import validate_access_session
@@ -42,6 +44,7 @@ class Connection:
     last_activity: datetime | None = None
     last_heartbeat_sent_at: datetime | None = None
     pending_pong: bool = False
+    topics: frozenset[str] | None = None
 
 
 class ConnectionManager:
@@ -105,9 +108,15 @@ class ConnectionManager:
         # Filter connections by org
         async with self._lock:
             if org_id:
-                connections = [c for c in self.active_connections if c.org_id == org_id]
+                connections = [
+                    c
+                    for c in self.active_connections
+                    if c.org_id == org_id and _connection_accepts_event(c, event)
+                ]
             else:
-                connections = list(self.active_connections)
+                connections = [
+                    c for c in self.active_connections if _connection_accepts_event(c, event)
+                ]
 
         disconnected = []
         for conn in connections:
@@ -152,6 +161,20 @@ class ConnectionManager:
                 conn.last_heartbeat_sent_at = None
                 conn.pending_pong = False
                 break
+
+    async def subscribe(self, websocket: WebSocket, topics: object) -> list[str]:
+        """Restrict a connection to specific broadcast event topics.
+
+        An empty topic list clears the filter, preserving the legacy all-events
+        behavior for clients that do not negotiate topics.
+        """
+        normalized_topics = _normalize_subscription_topics(topics)
+        async with self._lock:
+            for conn in self.active_connections:
+                if conn.websocket == websocket:
+                    conn.topics = frozenset(normalized_topics) if normalized_topics else None
+                    break
+        return normalized_topics
 
     async def _prepare_heartbeat_batch(
         self,
@@ -305,6 +328,18 @@ def disable_pubsub() -> None:
     log.info("websocket_pubsub_disabled")
 
 
+def _connection_accepts_event(conn: Connection, event: str) -> bool:
+    return conn.topics is None or event in conn.topics
+
+
+def _normalize_subscription_topics(topics: object) -> list[str]:
+    if isinstance(topics, str) or not isinstance(topics, Iterable):
+        return []
+    valid_topics = {event.value for event in WSEvent}
+    normalized = {topic for topic in topics if isinstance(topic, str) and topic in valid_topics}
+    return sorted(normalized)
+
+
 async def _extract_org_from_token(websocket: WebSocket) -> str | None:
     """Extract organization ID from a verified access token.
 
@@ -374,9 +409,7 @@ async def websocket_handler(websocket: WebSocket) -> None:
                     # Client responding to server heartbeat
                     manager.mark_activity(websocket)
                 elif msg_type == "subscribe":
-                    # For now, all clients receive all events
-                    # Future: implement topic-based filtering
-                    topics = data.get("topics", [])
+                    topics = await manager.subscribe(websocket, data.get("topics", []))
                     await manager.send_personal(websocket, "subscribed", {"topics": topics})
                 else:
                     await manager.send_personal(

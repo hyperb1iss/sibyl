@@ -68,8 +68,8 @@ explicitly replaying a retained `postgres.sql` archive during rehearsal or rollb
 
 Legacy `episode` nodes and `mentions` edges are archive compatibility records. They are restored
 only so older Graphiti/Falkor exports can round-trip and verify. Current runtime memory uses
-`entity(entity_type='episode')` plus normal `relates_to` edges, and live graph stats do not count the
-archive-only tables.
+`entity(entity_type='episode')` plus normal `relates_to` edges, and live graph stats do not count
+the archive-only tables.
 
 ### 3. Verify
 

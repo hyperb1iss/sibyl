@@ -10,7 +10,12 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from sibyl import config as config_module
-from sibyl.auth.passwords import PasswordError, hash_password, verify_password
+from sibyl.auth.passwords import (
+    PasswordError,
+    hash_password,
+    verify_password,
+    verify_password_timing_floor,
+)
 from sibyl.auth.session_cache import access_session_cache
 from sibyl.persistence.auth_common import UserNotFoundError
 from sibyl.persistence.content_runtime import soft_delete_private_raw_captures_for_user
@@ -121,6 +126,12 @@ async def _load_user_update_records(
 
 
 async def authenticate_local_user(*, email: str, password: str):
+    if not password:
+        verify_password_timing_floor(
+            password,
+            iterations=config_module.settings.password_iterations,
+        )
+        return None
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
         record = await repo.select_one(
@@ -128,8 +139,16 @@ async def authenticate_local_user(*, email: str, password: str):
             email=email.strip().lower(),
         )
         if record is None:
+            verify_password_timing_floor(
+                password,
+                iterations=config_module.settings.password_iterations,
+            )
             return None
         if not record.get("password_salt") or not record.get("password_hash"):
+            verify_password_timing_floor(
+                password,
+                iterations=config_module.settings.password_iterations,
+            )
             return None
         ok = verify_password(
             password,

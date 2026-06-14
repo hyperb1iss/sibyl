@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from hashlib import sha256
-from ipaddress import ip_address
+from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlparse, urlunsplit
+from urllib.parse import urljoin, urlparse
 from uuid import UUID
 
 from sibyl.crawler.local import LocalFileCrawler
-from sibyl.crawler.service import CrawlerService
 from sibyl.ingestion.parser import MarkdownParser
 from sibyl.persistence.content_common import CrawledDocumentRecord, CrawlSourceRecord
 from sibyl_core.models.sources import (
@@ -23,6 +22,12 @@ from sibyl_core.models.sources import (
     SourceRecordBatch,
     SourceTransformBehavior,
     SourceType,
+)
+from sibyl_core.network import (
+    SAFE_FETCH_MAX_BYTES,
+    decode_safe_fetch_body,
+    normalize_safe_url,
+    safe_fetch,
 )
 from sibyl_core.services.source_adapters import (
     build_source_content_hash,
@@ -48,6 +53,7 @@ DOCUMENT_METADATA_SCHEMA = {
 _DOCUMENT_ORGANIZATION_ID = UUID("00000000-0000-0000-0000-000000000000")
 _MARKDOWN_SUFFIXES = {".md", ".markdown", ".mdx", ".template"}
 _LOCAL_CRAWLER_SUFFIXES = {".md", ".template"}
+_DOCUMENT_URL_MAX_BYTES = SAFE_FETCH_MAX_BYTES
 
 type DocumentFetcher = Callable[[str], Awaitable[CrawledDocumentRecord]]
 
@@ -167,7 +173,7 @@ class DocumentUrlAdapter:
     )
 
     def __init__(self, fetcher: DocumentFetcher | None = None) -> None:
-        self._fetcher = fetcher or _fetch_url_document
+        self._fetcher = fetcher
 
     async def prepare_manifest(
         self,
@@ -317,13 +323,20 @@ async def _load_folder_records(manifest: SourceImportManifest) -> tuple[SourceRe
 
 async def _load_url_records(
     manifest: SourceImportManifest,
-    fetcher: DocumentFetcher,
+    fetcher: DocumentFetcher | None,
 ) -> tuple[SourceRecord, ...]:
+    allow_private_network = _bool_option(manifest.options.get("allow_private_network"))
     url = _normalize_document_url(
         str(manifest.source_uri or manifest.source_identity),
-        allow_private_network=_bool_option(manifest.options.get("allow_private_network")),
+        allow_private_network=allow_private_network,
     )
-    document = await fetcher(url)
+    if fetcher is not None:
+        document = await fetcher(url)
+    else:
+        document = await _fetch_url_document(
+            url,
+            allow_private_network=allow_private_network,
+        )
     return (_record_from_document(manifest, document, adapter_record_id=url),)
 
 
@@ -458,11 +471,163 @@ def _record_from_document(
     )
 
 
-async def _fetch_url_document(url: str) -> CrawledDocumentRecord:
-    source = _document_crawl_source(url, None)
-    async with CrawlerService() as crawler:
-        result = await crawler.crawl_page(url)
-        return crawler.result_to_document(result, source)
+async def _fetch_url_document(
+    url: str,
+    *,
+    allow_private_network: bool = False,
+) -> CrawledDocumentRecord:
+    page = await safe_fetch(
+        url,
+        allow_private_network=allow_private_network,
+        max_bytes=_DOCUMENT_URL_MAX_BYTES,
+        user_agent="Sibyl document importer",
+        accept="text/html,text/markdown,text/plain;q=0.9,*/*;q=0.1",
+    )
+    raw_content = _decode_document_body(page.body, page.headers)
+    content, title, headings, links = _document_content_from_response(
+        raw_content,
+        page.url,
+        page.headers,
+    )
+    content_hash = sha256(content.encode()).hexdigest()
+    parsed = urlparse(page.url)
+    depth = len([part for part in parsed.path.split("/") if part])
+    word_count = len(content.split()) if content else 0
+    return CrawledDocumentRecord(
+        source_id=sha256(page.url.encode()).hexdigest(),
+        organization_id=_DOCUMENT_ORGANIZATION_ID,
+        url=page.url,
+        title=title,
+        raw_content=raw_content[:100000],
+        content=content,
+        content_hash=content_hash,
+        depth=depth,
+        word_count=word_count,
+        token_count=word_count * 4 // 3,
+        has_code=False,
+        is_index=_is_index_document_url(page.url, content),
+        headings=headings[:50],
+        links=links[:200],
+        code_languages=[],
+        http_status=page.status_code,
+    )
+
+
+def _decode_document_body(body: bytes, headers: Mapping[str, str]) -> str:
+    return decode_safe_fetch_body(body, headers, max_bytes=_DOCUMENT_URL_MAX_BYTES)
+
+
+def _document_content_from_response(
+    raw_content: str,
+    url: str,
+    headers: Mapping[str, str],
+) -> tuple[str, str, list[str], list[str]]:
+    content_type = headers.get("content-type", "").lower()
+    if "html" not in content_type and not raw_content.lstrip().startswith("<"):
+        title = _title_from_document_url(url)
+        return raw_content, title, [], []
+
+    extractor = _DocumentHtmlExtractor(base_url=url)
+    extractor.feed(raw_content)
+    content = extractor.content()
+    title = extractor.title or _title_from_document_url(url)
+    return content, title[:512], extractor.headings, extractor.links
+
+
+def _title_from_document_url(url: str) -> str:
+    parsed = urlparse(url)
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if path_parts:
+        return path_parts[-1].replace("-", " ").replace("_", " ").title()[:512]
+    return parsed.hostname or "Untitled"
+
+
+def _is_index_document_url(url: str, content: str) -> bool:
+    parsed = urlparse(url)
+    path = parsed.path.rstrip("/")
+    if path.endswith(("/index", "/readme", "")) or path in ("/docs", "/documentation"):
+        return True
+    word_count = len(content.split())
+    return bool(word_count and content.count("http") / word_count > 0.1)
+
+
+class _DocumentHtmlExtractor(HTMLParser):
+    _SKIP_TAGS = {"script", "style", "nav", "footer", "aside", "header", "form"}
+    _BLOCK_TAGS = {"article", "br", "div", "li", "main", "p", "section", "tr"}
+    _HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+
+    def __init__(self, *, base_url: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self._base_url = base_url
+        self._skip_depth = 0
+        self._in_title = False
+        self._heading_parts: list[str] | None = None
+        self._title_parts: list[str] = []
+        self._text_parts: list[str] = []
+        self.headings: list[str] = []
+        self.links: list[str] = []
+
+    @property
+    def title(self) -> str:
+        return " ".join(part for part in self._title_parts if part).strip()
+
+    def content(self) -> str:
+        lines = []
+        for line in " ".join(self._text_parts).splitlines():
+            normalized = " ".join(line.split())
+            if normalized:
+                lines.append(normalized)
+        return "\n".join(lines)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag in self._SKIP_TAGS:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+        if tag == "title":
+            self._in_title = True
+            return
+        if tag in self._HEADING_TAGS:
+            self._heading_parts = []
+        if tag == "a":
+            href = dict(attrs).get("href")
+            if href:
+                self.links.append(urljoin(self._base_url, href))
+        if tag in self._BLOCK_TAGS:
+            self._text_parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in self._SKIP_TAGS and self._skip_depth:
+            self._skip_depth -= 1
+            return
+        if self._skip_depth:
+            return
+        if tag == "title":
+            self._in_title = False
+            return
+        if tag in self._HEADING_TAGS and self._heading_parts is not None:
+            heading = " ".join(self._heading_parts).strip()
+            if heading:
+                self.headings.append(heading[:200])
+                self._text_parts.append(f"\n# {heading}\n")
+            self._heading_parts = None
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        text = " ".join(data.split())
+        if not text:
+            return
+        if self._in_title:
+            self._title_parts.append(text)
+            return
+        if self._heading_parts is not None:
+            self._heading_parts.append(text)
+            return
+        self._text_parts.append(text)
 
 
 def _document_crawl_source(
@@ -562,50 +727,7 @@ def _source_path_metadata(url: str) -> str | None:
 
 
 def _normalize_document_url(source_uri: str, *, allow_private_network: bool = False) -> str:
-    parsed = urlparse(source_uri.strip())
-    scheme = parsed.scheme.lower()
-    if scheme not in {"http", "https"} or not parsed.netloc:
-        msg = f"Document URL must be http(s): {source_uri}"
-        raise ValueError(msg)
-    host = parsed.hostname
-    if not host:
-        msg = f"Document URL must include a host: {source_uri}"
-        raise ValueError(msg)
-    host = host.lower()
-    try:
-        port = parsed.port
-    except ValueError as exc:
-        msg = f"Document URL port is invalid: {source_uri}"
-        raise ValueError(msg) from exc
-    if not allow_private_network:
-        _reject_private_document_host(host)
-    netloc_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
-    if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
-        netloc_host = f"{netloc_host}:{port}"
-    path = parsed.path or ""
-    if path != "/":
-        path = path.rstrip("/")
-    return urlunsplit((scheme, netloc_host, path, parsed.query, ""))
-
-
-def _reject_private_document_host(host: str) -> None:
-    blocked_hostnames = {"localhost"}
-    if host in blocked_hostnames or host.endswith(".localhost") or host.endswith(".local"):
-        msg = f"Document URL host is private: {host}"
-        raise ValueError(msg)
-    try:
-        address = ip_address(host.strip("[]"))
-    except ValueError:
-        return
-    if (
-        address.is_loopback
-        or address.is_private
-        or address.is_link_local
-        or address.is_unspecified
-        or address.is_reserved
-    ):
-        msg = f"Document URL host is private: {host}"
-        raise ValueError(msg)
+    return normalize_safe_url(source_uri, allow_private_network=allow_private_network)
 
 
 def _bool_option(value: object) -> bool:

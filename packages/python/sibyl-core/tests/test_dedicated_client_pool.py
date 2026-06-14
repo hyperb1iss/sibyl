@@ -50,6 +50,48 @@ def _install_overlap_surreal(monkeypatch, tracker: _ConcurrencyTracker) -> list[
     return clients
 
 
+def _install_live_surreal(monkeypatch) -> list[Any]:
+    clients: list[Any] = []
+
+    class FakeAsyncSurreal:
+        def __init__(self, url: str) -> None:
+            self.url = url
+            self.closed = False
+            self.killed: object | None = None
+            self.live_args: tuple[str, bool] | None = None
+            clients.append(self)
+
+        async def signin(self, credentials: dict[str, str]) -> None:
+            self.credentials = credentials
+
+        async def use(self, namespace: str, database: str) -> None:
+            self.namespace = namespace
+            self.database = database
+
+        async def live(self, table: str, *, diff: bool = False) -> str:
+            self.live_args = (table, diff)
+            return "live-query-id"
+
+        async def subscribe_live(self, query_uuid: object):
+            async def notifications():
+                yield {
+                    "uuid": "raw-a",
+                    "organization_id": "org-1",
+                    "query_uuid": query_uuid,
+                }
+
+            return notifications()
+
+        async def kill(self, query_uuid: object) -> None:
+            self.killed = query_uuid
+
+        async def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    return clients
+
+
 @pytest.mark.asyncio
 async def test_two_reads_on_one_client_overlap_in_flight(monkeypatch) -> None:
     tracker = _ConcurrencyTracker()
@@ -100,6 +142,46 @@ async def test_embedded_url_collapses_to_single_connection(monkeypatch) -> None:
     await asyncio.gather(*(client.execute_query("SELECT * FROM crawl_sources;") for _ in range(6)))
 
     assert len(clients) == 1
+
+
+@pytest.mark.asyncio
+async def test_live_table_subscribes_kills_and_closes_connection(monkeypatch) -> None:
+    clients = _install_live_surreal(monkeypatch)
+    client = DedicatedSurrealClient(
+        url="ws://localhost:8000/rpc",
+        username="root",
+        password="root",
+        namespace="sibyl_content",
+        database="content",
+    )
+
+    async with client.live_table("raw_captures", diff=True) as notifications:
+        seen = [notification async for notification in notifications]
+
+    assert seen == [
+        {
+            "uuid": "raw-a",
+            "organization_id": "org-1",
+            "query_uuid": "live-query-id",
+        }
+    ]
+    assert len(clients) == 1
+    assert clients[0].live_args == ("raw_captures", True)
+    assert clients[0].killed == "live-query-id"
+    assert clients[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_live_table_rejects_non_websocket_urls() -> None:
+    client = DedicatedSurrealClient(
+        url="memory://",
+        namespace="sibyl_content",
+        database="content",
+    )
+
+    with pytest.raises(RuntimeError, match="WebSocket URL"):
+        async with client.live_table("raw_captures"):
+            pass
 
 
 @pytest.mark.asyncio
