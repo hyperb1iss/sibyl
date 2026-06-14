@@ -301,8 +301,8 @@ Search results include:
 | `source`        | Source file or URL          |
 | `result_origin` | "graph" or "document"       |
 
-::: tip Get Full Content Search results show previews. Use `sibyl entity show <id>` to get full
-content. :::
+::: tip Get Full Content Search results show previews. Use `sibyl show <id>` to get full content.
+:::
 
 ## Performance Considerations
 

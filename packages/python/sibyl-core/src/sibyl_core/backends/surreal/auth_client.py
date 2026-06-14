@@ -17,6 +17,7 @@ class SurrealAuthClient(DedicatedSurrealClient):
         token: str = "",
         namespace: str = "sibyl_auth",
         database: str = "auth",
+        pool_size: int | None = None,
     ) -> None:
         super().__init__(
             url=url,
@@ -26,4 +27,5 @@ class SurrealAuthClient(DedicatedSurrealClient):
             namespace=namespace,
             database=database,
             client_kind="auth",
+            pool_size=pool_size,
         )

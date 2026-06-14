@@ -41,7 +41,7 @@ tasks:
 
   dev-api:
     script: |
-      docker compose up -d surrealdb
+      docker compose --env-file /dev/null up -d surrealdb
       sleep 1
       uv run --directory apps/api sibyld serve --reload
     env:
@@ -69,15 +69,15 @@ tasks:
   # Docker
   # ==========================================================================
   docker-up:
-    command: docker compose up -d
+    command: docker compose --env-file /dev/null up -d
     preset: server
 
   docker-down:
-    command: docker compose down
+    command: docker compose --env-file /dev/null down
     preset: server
 
   docker-logs:
-    command: docker compose logs -f
+    command: docker compose --env-file /dev/null logs -f
     preset: server
     options:
       persistent: true
@@ -87,12 +87,7 @@ tasks:
   # ==========================================================================
   quickstart:
     script: |
-      if [ ! -f .env.quickstart ]; then
-        echo "⚠️  Create .env.quickstart with your API keys first"
-        echo "   cp .env.quickstart.example .env.quickstart"
-        exit 1
-      fi
-      docker compose -f docker-compose.quickstart.yml --env-file .env.quickstart up -d
+      docker compose --env-file /dev/null -f docker-compose.quickstart.yml up -d
       echo ""
       echo "🔮 Sibyl quickstart running!"
       echo "   Web UI:   http://localhost:${SIBYL_WEB_PORT:-3337}"
@@ -101,11 +96,11 @@ tasks:
     preset: server
 
   quickstart-stop:
-    command: docker compose -f docker-compose.quickstart.yml down
+    command: docker compose --env-file /dev/null -f docker-compose.quickstart.yml down
     preset: server
 
   quickstart-logs:
-    command: docker compose -f docker-compose.quickstart.yml logs -f
+    command: docker compose --env-file /dev/null -f docker-compose.quickstart.yml logs -f
     preset: server
     options:
       persistent: true
@@ -113,11 +108,7 @@ tasks:
   # Test instance (runs alongside dev on different ports)
   quickstart-test:
     script: |
-      if [ ! -f .env.quickstart ]; then
-        echo "⚠️  Create .env.quickstart with your API keys first"
-        exit 1
-      fi
-      docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml --env-file .env.quickstart up -d
+      docker compose --env-file /dev/null -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml up -d
       echo ""
       echo "🧪 Sibyl TEST instance running (separate from dev)!"
       echo "   Web UI:    http://localhost:3347"
@@ -126,19 +117,21 @@ tasks:
     preset: server
 
   quickstart-test-stop:
-    command:
-      docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml down
+    command: >-
+      docker compose --env-file /dev/null -f docker-compose.quickstart.yml -f
+      docker-compose.quickstart.test.yml down
     preset: server
 
   quickstart-test-logs:
-    command:
-      docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml logs -f
+    command: >-
+      docker compose --env-file /dev/null -f docker-compose.quickstart.yml -f
+      docker-compose.quickstart.test.yml logs -f
     preset: server
     options:
       persistent: true
 
   quickstart-pull:
-    command: docker compose -f docker-compose.quickstart.yml pull
+    command: docker compose --env-file /dev/null -f docker-compose.quickstart.yml pull
     preset: server
 
   # ==========================================================================
@@ -590,13 +583,16 @@ tasks:
 
   bench-gate-test:
     command:
-      uv run pytest tools/tests/test_bench_gate.py tools/tests/test_longmemeval_bench.py
+      uv run pytest tools/tests/test_benchmark_git_provenance.py tools/tests/test_bench_gate.py
+      tools/tests/test_context_pack_eval_script.py tools/tests/test_longmemeval_bench.py
       tools/tests/test_longmemeval_live.py tools/tests/test_longmemeval_replay.py
       tools/tests/test_longmemeval_v2_probe.py tools/tests/test_longmemeval_v2_official.py -v
     inputs:
       - tools/**/*.py
       - .github/workflows/eval.yml
       - .github/workflows/longmemeval-v2.yml
+      - benchmarks/context_pack_eval.py
+      - benchmarks/git_provenance.py
       - benchmarks/longmemeval_bench.py
       - benchmarks/longmemeval_live.py
       - benchmarks/longmemeval_replay.py
@@ -1073,9 +1069,9 @@ tasks:
   # E2E Testing
   # ==========================================================================
   e2e-up:
-    command: docker compose -f compose.e2e.yml up -d
+    command: docker compose --env-file /dev/null -f compose.e2e.yml up -d
     preset: server
 
   e2e-down:
-    command: docker compose -f compose.e2e.yml down -v
+    command: docker compose --env-file /dev/null -f compose.e2e.yml down -v
     preset: server

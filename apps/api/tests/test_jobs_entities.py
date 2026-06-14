@@ -8,12 +8,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sibyl.jobs.entities import (
+    backfill_entity_embeddings,
+    create_entity,
     create_learning_episode,
     create_learning_procedure,
     serialize_memory_policy_context,
 )
 from sibyl_core.auth import MemoryPolicyContext, OrganizationRole
-from sibyl_core.models.entities import Episode, Procedure
+from sibyl_core.models.entities import (
+    Entity,
+    EntityType,
+    Episode,
+    Pattern,
+    Procedure,
+    Relationship,
+    RelationshipType,
+)
 from sibyl_core.models.tasks import Task, TaskStatus
 
 
@@ -32,6 +42,159 @@ def _policy_payload(project_id: str = "proj-1", org_id: str = "org-1") -> dict[s
     )
     assert payload is not None
     return payload
+
+
+class TestCreateEntityJob:
+    @pytest.mark.asyncio
+    async def test_can_defer_entity_relationship_and_projection_embeddings(self) -> None:
+        entity = Pattern(
+            id="pattern-123",
+            name="Lexical first",
+            content="Persist text first and enrich vectors later.",
+        )
+        entity_manager = MagicMock()
+        entity_manager.create_direct = AsyncMock(return_value="pattern-123")
+        relationship_manager = MagicMock()
+        relationship_manager.create_direct_bulk = AsyncMock(return_value=["rel-1"])
+        relationship_manager.create = AsyncMock()
+        runtime = SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+        )
+        projection = SimpleNamespace(
+            errors=(),
+            extracted=0,
+            projected_entities=0,
+            relationships=0,
+            projection_state="complete",
+            created_projected_entities=(
+                Entity(
+                    id="topic-samsung-tv",
+                    entity_type=EntityType.TOPIC,
+                    name="Samsung TV",
+                    content="Projected topic",
+                ),
+            ),
+            created_projection_relationships=(
+                Relationship(
+                    id="rel-pattern-123-mentions-topic",
+                    source_id="pattern-123",
+                    target_id="topic-samsung-tv",
+                    relationship_type=RelationshipType.MENTIONS,
+                ),
+            ),
+        )
+        extraction_enqueue = SimpleNamespace(
+            status="skipped",
+            reason="disabled",
+            job_ids=[],
+            queued_sources=0,
+            skipped_sources=1,
+        )
+
+        with (
+            patch("sibyl.jobs.entities.get_surreal_graph_runtime", AsyncMock(return_value=runtime)),
+            patch(
+                "sibyl.jobs.entities.project_memory_entity",
+                AsyncMock(return_value=projection),
+            ) as project_memory,
+            patch("sibyl.jobs.entities._safe_broadcast", AsyncMock()),
+            patch("sibyl.jobs.pending.clear_pending", AsyncMock()),
+            patch("sibyl.jobs.pending.process_pending_operations", AsyncMock(return_value=[])),
+            patch(
+                "sibyl_core.tools.conflicts.find_similar_entities",
+                AsyncMock(return_value=[]),
+            ),
+            patch(
+                "sibyl.jobs.memory_extraction.enqueue_memory_extraction_batches",
+                AsyncMock(return_value=extraction_enqueue),
+            ),
+            patch(
+                "sibyl.jobs.queue.enqueue_entity_embedding_backfill",
+                AsyncMock(return_value="embed-pattern-123"),
+            ) as enqueue_backfill,
+        ):
+            result = await create_entity(
+                {},
+                entity.model_dump(mode="json"),
+                "pattern",
+                "org-1",
+                relationships=[
+                    {
+                        "id": "rel-1",
+                        "source_id": "pattern-123",
+                        "target_id": "project-1",
+                        "type": "BELONGS_TO",
+                    }
+                ],
+                generate_embeddings=False,
+            )
+
+        assert result["entity_id"] == "pattern-123"
+        assert result["relationships_created"] == 1
+        assert entity_manager.create_direct.await_args.kwargs["generate_embedding"] is False
+        assert (
+            relationship_manager.create_direct_bulk.await_args.kwargs["generate_embeddings"]
+            is False
+        )
+        relationship_manager.create.assert_not_awaited()
+        assert project_memory.await_args.kwargs["generate_embeddings"] is False
+        assert result["embedding_backfill_job_id"] == "embed-pattern-123"
+        enqueue_backfill.assert_awaited_once()
+        entities_payload, group_id = enqueue_backfill.await_args.args
+        assert group_id == "org-1"
+        assert entities_payload[0]["id"] == "pattern-123"
+        assert entities_payload[1]["id"] == "topic-samsung-tv"
+        assert {
+            relationship["id"]
+            for relationship in enqueue_backfill.await_args.kwargs["relationships"]
+        } == {
+            "rel-1",
+            "rel-pattern-123-mentions-topic",
+        }
+
+
+class TestBackfillEntityEmbeddingsJob:
+    @pytest.mark.asyncio
+    async def test_backfills_entity_and_relationship_embeddings(self) -> None:
+        entity = Entity(
+            id="session-123",
+            entity_type="session",
+            name="Lexical session",
+            content="Persisted before embeddings were available.",
+        )
+        relationship = Relationship(
+            id="rel-session-project",
+            source_id="session-123",
+            target_id="project-1",
+            relationship_type=RelationshipType.RELATED_TO,
+        )
+        entity_manager = MagicMock()
+        entity_manager.create_direct_bulk = AsyncMock(return_value=["session-123"])
+        relationship_manager = MagicMock()
+        relationship_manager.create_direct_bulk = AsyncMock(return_value=["rel-session-project"])
+        runtime = SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+        )
+
+        with patch(
+            "sibyl.jobs.entities.get_surreal_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ):
+            result = await backfill_entity_embeddings(
+                {},
+                [entity.model_dump(mode="json")],
+                "org-1",
+                relationships=[relationship.model_dump(mode="json")],
+            )
+
+        assert result["entities"] == 1
+        assert result["relationships"] == 1
+        assert entity_manager.create_direct_bulk.await_args.kwargs["generate_embeddings"] is True
+        assert (
+            relationship_manager.create_direct_bulk.await_args.kwargs["generate_embeddings"] is True
+        )
 
 
 class TestCreateLearningEpisodeJob:

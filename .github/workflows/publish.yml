@@ -18,10 +18,55 @@ env:
 
 jobs:
   # =========================================================================
+  # RC Gate: direct publish dispatches must prove the tagged checkout first
+  # =========================================================================
+  rc-gate:
+    name: "◇ RC Gate"
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      - name: "◆ Checkout"
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: "◇ Install system dependencies"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt-dev
+
+      - name: "◇ Setup moonrepo toolchain"
+        uses: moonrepo/setup-toolchain@v0.6
+        with:
+          auto-install: true
+          auto-setup: true
+          cache-version: publish-rc-gate-v1
+
+      - name: "◇ Verify toolchain"
+        run: |
+          chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
+          chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
+          moon --version
+          proto --version
+          uv --version
+
+      - name: "◇ Install Node dependencies"
+        run: cd apps/web && pnpm install --frozen-lockfile
+
+      - name: "◇ Sync Python workspace"
+        run: uv sync --locked --all-packages
+
+      - name: "◇ Run RC gate bundle"
+        run: moon run :check
+
+  # =========================================================================
   # Python: build + publish to PyPI
   # =========================================================================
   python:
     name: "◆ Python: Build & Publish"
+    needs: rc-gate
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -180,6 +225,7 @@ jobs:
   # =========================================================================
   docker-build:
     name: "△ Docker: ${{ matrix.image }} (${{ matrix.platform }})"
+    needs: rc-gate
     runs-on: ${{ matrix.platform == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 30
     permissions:

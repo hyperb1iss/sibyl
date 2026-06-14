@@ -1,8 +1,8 @@
 # Sibyl Development Data Services
 #
 # To run multiple instances, use different project names and ports:
-#   COMPOSE_PROJECT_NAME=sibyl-test SIBYL_SURREAL_PORT=8010 docker compose up -d surrealdb
-#   COMPOSE_PROJECT_NAME=sibyl-redis SIBYL_REDIS_PORT=6391 docker compose --profile redis up -d surrealdb redis
+#   COMPOSE_PROJECT_NAME=sibyl-test SIBYL_SURREAL_PORT=8010 docker compose --env-file /dev/null up -d surrealdb
+#   COMPOSE_PROJECT_NAME=sibyl-redis SIBYL_REDIS_PORT=6391 docker compose --env-file /dev/null --profile redis up -d surrealdb redis
 #
 # Or use a separate env file:
 #   docker compose --env-file .env.test up -d

@@ -5,7 +5,7 @@ Exposes 5 tools and 2 resources:
 - Resources: sibyl://health, sibyl://stats
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 from uuid import UUID
@@ -35,6 +35,7 @@ from sibyl_core.auth.memory_policy import (
     MemoryPolicyDecision,
     authorize_memory_write,
 )
+from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptureService
 from sibyl_core.services.surreal_content import MemoryScope
 
 log = structlog.get_logger()
@@ -275,6 +276,8 @@ async def _compile_mcp_context_pack(
     limit: int,
     include_related: bool,
     related_limit: int,
+    audit: bool = False,
+    markdown_token_budget: int | None = None,
 ) -> dict[str, Any]:
     from sibyl_core.tools.core import (
         compile_context as _compile_context,
@@ -286,7 +289,11 @@ async def _compile_mcp_context_pack(
     accessible_projects = await _resolve_mcp_project_scope(ctx, project)
     memory_scope = "project" if project else "private"
     scope_key = project
-    if not _mcp_memory_scope_allowed(ctx, memory_scope=memory_scope, scope_key=scope_key):
+    if not _mcp_context_pack_scope_allowed(
+        ctx,
+        project=project,
+        accessible_projects=accessible_projects,
+    ):
         _deny_mcp_api_key_memory_scope(
             ctx=ctx,
             action=MemoryPolicyAction.READ,
@@ -314,6 +321,7 @@ async def _compile_mcp_context_pack(
                 limit=limit,
                 include_related=include_related,
                 related_limit=related_limit,
+                audit=audit,
                 organization_id=ctx.org_id,
                 allowed_memory_scope_keys=set(ctx.api_key_memory_scope_keys)
                 if ctx.api_key_memory_scope_keys is not None
@@ -322,7 +330,7 @@ async def _compile_mcp_context_pack(
     except RecallConcurrencyLimitExceededError as exc:
         raise ValueError("recall_concurrency_limit_exceeded") from exc
     payload = context_pack_to_dict(pack)
-    payload["markdown"] = context_pack_to_markdown(pack)
+    payload["markdown"] = context_pack_to_markdown(pack, token_budget=markdown_token_budget)
     await log_context_pack_audit(
         user_id=ctx.user_id,
         organization_id=ctx.org_id,
@@ -363,6 +371,30 @@ def _mcp_memory_scope_allowed(ctx: McpContext, *, memory_scope: str, scope_key: 
         return True
     effective_scope_key = ctx.user_id if memory_scope == MemoryScope.PRIVATE.value else scope_key
     return api_key_memory_scope_key(memory_scope, effective_scope_key) in set(allowed)
+
+
+def _mcp_context_pack_scope_allowed(
+    ctx: McpContext,
+    *,
+    project: str | None,
+    accessible_projects: set[str] | None,
+) -> bool:
+    if project:
+        return _mcp_memory_scope_allowed(
+            ctx, memory_scope=MemoryScope.PROJECT.value, scope_key=project
+        )
+    allowed = ctx.api_key_memory_scope_keys
+    if allowed is None:
+        return True
+    allowed_keys = set(allowed)
+    if _mcp_memory_scope_allowed(ctx, memory_scope=MemoryScope.PRIVATE.value, scope_key=None):
+        return True
+    if accessible_projects is None:
+        return False
+    return any(
+        api_key_memory_scope_key(MemoryScope.PROJECT.value, project_id) in allowed_keys
+        for project_id in accessible_projects
+    )
 
 
 def _deny_mcp_api_key_memory_scope(
@@ -517,38 +549,62 @@ async def _remember_mcp_memory(
         task_ids=task_ids,
         active_task=active_task,
     )
-    raw_memory = await remember_raw_memory(
-        organization_id=ctx.org_id,
-        principal_id=ctx.user_id,
-        source_id=f"mcp:remember:{kind}",
-        raw_content=content,
-        title=title,
-        memory_scope=memory_scope,
-        scope_key=project,
-        tags=tags,
-        metadata=dict(full_metadata),
-        provenance={
-            "remember_kind": kind,
-            "related_to": resolved_links or [],
-        },
-        capture_surface="mcp",
-    )
-    full_metadata["raw_memory_id"] = raw_memory.id
-    full_metadata["raw_source_id"] = raw_memory.source_id
-
-    result = await add(
+    capture_request = MemoryCaptureRequest(
         title=title,
         content=content,
         entity_type=kind,
-        category=domain,
+        domain=domain,
         tags=tags,
         related_to=resolved_links,
         metadata=full_metadata,
-        project=project,
+        provenance={"remember_kind": kind, "related_to": resolved_links or []},
+        source_id=f"mcp:remember:{kind}",
+        memory_scope=memory_scope,
+        scope_key=project,
+        capture_surface="mcp",
     )
-    payload = _to_dict(result)
-    payload["raw_memory_id"] = raw_memory.id
-    payload["raw_source_id"] = raw_memory.source_id
+
+    async def remember_raw(
+        request: MemoryCaptureRequest,
+    ) -> Mapping[str, Any]:
+        raw_memory = await remember_raw_memory(
+            organization_id=ctx.org_id,
+            principal_id=ctx.user_id,
+            source_id=request.source_id,
+            raw_content=request.content,
+            title=request.title,
+            memory_scope=request.memory_scope,
+            scope_key=request.scope_key,
+            tags=list(request.tags) if request.tags is not None else None,
+            metadata=dict(request.metadata),
+            provenance=dict(request.provenance),
+            capture_surface=request.capture_surface,
+        )
+        return {"id": raw_memory.id, "source_id": raw_memory.source_id}
+
+    async def create_graph_entity(
+        request: MemoryCaptureRequest,
+        graph_metadata: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        result = await add(
+            title=request.title,
+            content=request.content,
+            entity_type=request.entity_type,
+            category=request.domain,
+            tags=list(request.tags) if request.tags is not None else None,
+            related_to=list(request.related_to) if request.related_to is not None else None,
+            metadata=dict(graph_metadata),
+            project=project,
+        )
+        return _to_dict(result)
+
+    capture_result = await MemoryCaptureService(
+        remember_raw_memory=remember_raw,
+        create_graph_entity=create_graph_entity,
+    ).capture(capture_request)
+    payload = capture_result.to_payload()
+    if capture_result.raw_policy_reason is None:
+        payload.pop("raw_policy_reason", None)
     payload["policy_reason"] = write_decision.reason
     return payload
 
@@ -1270,7 +1326,7 @@ def _register_tools(mcp: FastMCP) -> None:
 
         IMPORTANT FOR AGENTS:
         - Results contain PREVIEWS only (truncated content)
-        - To get FULL content, use: sibyl entity show <id>
+        - To get FULL content, use: sibyl show <id>
         - Do NOT try to read URLs directly - content is stored in Sibyl
         - The 'id' field is the entity/chunk ID to fetch full content
 
@@ -1297,10 +1353,10 @@ def _register_tools(mcp: FastMCP) -> None:
 
         Returns:
             Search results with:
-            - id: Entity/chunk ID (use with 'sibyl entity show <id>' for full content)
+            - id: Entity/chunk ID (use with 'sibyl show <id>' for full content)
             - type: Entity type (pattern, rule, task, document, etc.)
             - name: Title/name of the result
-            - content: PREVIEW only - truncated, use entity show for full content
+            - content: PREVIEW only - truncated, use show for full content
             - score: Relevance score (0-1)
             - source: Source name for documentation results
             - result_origin: "graph" or "document" indicating data source
@@ -1315,7 +1371,7 @@ def _register_tools(mcp: FastMCP) -> None:
 
             # Get full content of a result
             # 1. search("OAuth") -> returns results with IDs
-            # 2. sibyl entity show <id> -> returns full content
+            # 2. sibyl show <id> -> returns full content
         """
         from sibyl_core.tools.core import search as _search
 
@@ -1369,6 +1425,8 @@ def _register_tools(mcp: FastMCP) -> None:
         limit: int = 24,
         include_related: bool = True,
         related_limit: int = 3,
+        audit: bool = False,
+        markdown_token_budget: int | None = None,
     ) -> dict[str, Any]:
         """Compile a precise context pack for an agent goal.
 
@@ -1392,6 +1450,9 @@ def _register_tools(mcp: FastMCP) -> None:
             limit: Maximum total context items, clamped to 1-50.
             include_related: Include one-hop related graph context.
             related_limit: Related items per selected context item.
+            audit: Include full retrieval metadata per item for pack auditing.
+            markdown_token_budget: Cap rendered markdown at roughly this many
+                tokens for small-context consumers.
         """
         return await _compile_mcp_context_pack(
             goal=goal,
@@ -1403,6 +1464,8 @@ def _register_tools(mcp: FastMCP) -> None:
             limit=limit,
             include_related=include_related,
             related_limit=related_limit,
+            audit=audit,
+            markdown_token_budget=markdown_token_budget,
         )
 
     # =========================================================================

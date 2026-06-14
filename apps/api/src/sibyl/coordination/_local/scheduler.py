@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -12,6 +12,7 @@ import structlog
 from sibyl.jobs.worker import ScheduleSpec, get_schedule_specs, log_schedule_specs
 
 log = structlog.get_logger()
+type ScheduledEnqueuer = Callable[[ScheduleSpec, datetime], Awaitable[str]]
 
 
 class LocalScheduler:
@@ -23,10 +24,12 @@ class LocalScheduler:
         schedule_specs: list[ScheduleSpec] | None = None,
         now: Callable[[], datetime] | None = None,
         tick_seconds: float = 30.0,
+        enqueue_scheduled_job: ScheduledEnqueuer | None = None,
     ) -> None:
         self._schedule_specs = schedule_specs or get_schedule_specs()
         self._now = now or (lambda: datetime.now(UTC))
         self._tick_seconds = tick_seconds
+        self._enqueue_scheduled_job = enqueue_scheduled_job or _enqueue_scheduled_job
         self._runner: asyncio.Task[None] | None = None
         self._active_jobs: dict[str, asyncio.Task[Any]] = {}
         self._last_fired: dict[str, datetime] = {}
@@ -95,8 +98,8 @@ class LocalScheduler:
             log.info(
                 "Scheduled job started", job=spec.name, scheduled_for=current_minute.isoformat()
             )
-            await spec.function({"scheduled_for": current_minute.isoformat()})
-            log.info("Scheduled job complete", job=spec.name)
+            job_id = await self._enqueue_scheduled_job(spec, current_minute)
+            log.info("Scheduled job enqueued", job=spec.name, job_id=job_id)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -127,3 +130,9 @@ def _matches_field(field: int | set[int] | None, value: int) -> bool:
     if isinstance(field, set):
         return value in field
     return field == value
+
+
+async def _enqueue_scheduled_job(spec: ScheduleSpec, _current_minute: datetime) -> str:
+    from sibyl.coordination.broker import get_broker
+
+    return await get_broker().enqueue_scheduled_job(spec.name)

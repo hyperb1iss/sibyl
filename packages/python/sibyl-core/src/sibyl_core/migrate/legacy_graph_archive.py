@@ -1,4 +1,4 @@
-"""Archive compatibility for legacy Graphiti/Falkor episode payloads."""
+"""Archive compatibility for legacy graph episode payloads."""
 
 from __future__ import annotations
 

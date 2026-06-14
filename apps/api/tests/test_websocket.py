@@ -108,6 +108,59 @@ class TestConnectionManagerOrgScoping:
         assert not ws1.send_json.called
 
     @pytest.mark.asyncio
+    async def test_broadcast_respects_topic_subscriptions(
+        self,
+        manager: ConnectionManager,
+    ) -> None:
+        """Subscribed connections should only receive matching event topics."""
+        ws_all = MagicMock()
+        ws_all.send_json = AsyncMock()
+        ws_raw = MagicMock()
+        ws_raw.send_json = AsyncMock()
+        ws_entity = MagicMock()
+        ws_entity.send_json = AsyncMock()
+
+        manager.active_connections = [
+            Connection(websocket=ws_all, org_id="org_a"),
+            Connection(
+                websocket=ws_raw,
+                org_id="org_a",
+                topics=frozenset({"raw_capture_changed"}),
+            ),
+            Connection(
+                websocket=ws_entity,
+                org_id="org_a",
+                topics=frozenset({"entity_updated"}),
+            ),
+        ]
+
+        await manager.broadcast("raw_capture_changed", {"raw_memory_ids": ["raw-a"]}, "org_a")
+
+        assert ws_all.send_json.called
+        assert ws_raw.send_json.called
+        assert not ws_entity.send_json.called
+
+    @pytest.mark.asyncio
+    async def test_subscribe_normalizes_supported_topics(
+        self,
+        manager: ConnectionManager,
+    ) -> None:
+        """Subscribe should store valid broadcast topics and ignore unknowns."""
+        ws = MagicMock()
+        manager.active_connections = [Connection(websocket=ws, org_id="org_a")]
+
+        topics = await manager.subscribe(
+            ws,
+            ["raw_capture_changed", "entity_updated", "raw_capture_changed", "surprise", 1],
+        )
+
+        assert topics == ["entity_updated", "raw_capture_changed"]
+        assert manager.active_connections[0].topics == frozenset(topics)
+
+        assert await manager.subscribe(ws, []) == []
+        assert manager.active_connections[0].topics is None
+
+    @pytest.mark.asyncio
     async def test_heartbeat_does_not_hold_lock_while_sending(
         self,
         manager: ConnectionManager,

@@ -4,8 +4,8 @@
 # ============================================================================
 #
 # Quick Start:
-#   1. Copy .env.example to .env and configure secrets
-#   2. docker compose -f docker-compose.prod.yml up -d
+#   1. Copy .env.example to ~/.sibyl/prod.env and configure secrets
+#   2. docker compose --env-file ~/.sibyl/prod.env -f docker-compose.prod.yml up -d
 #   3. Visit http://localhost:3337
 #
 # Default mode is fully Surreal. Legacy imports are file-based migration flows
@@ -44,15 +44,18 @@ services:
       SIBYL_COORDINATION_BACKEND: ${SIBYL_COORDINATION_BACKEND:-auto}
       # SurrealDB (primary)
       SIBYL_SURREAL_URL: ws://surrealdb:8000/rpc
-      SIBYL_SURREAL_USERNAME: ${SIBYL_SURREAL_USERNAME:?Set SIBYL_SURREAL_USERNAME in .env}
-      SIBYL_SURREAL_PASSWORD: ${SIBYL_SURREAL_PASSWORD:?Set SIBYL_SURREAL_PASSWORD in .env}
+      SIBYL_SURREAL_USERNAME:
+        ${SIBYL_SURREAL_USERNAME:?Set SIBYL_SURREAL_USERNAME in the environment}
+      SIBYL_SURREAL_PASSWORD:
+        ${SIBYL_SURREAL_PASSWORD:?Set SIBYL_SURREAL_PASSWORD in the environment}
       # Auth (REQUIRED)
-      SIBYL_JWT_SECRET: ${SIBYL_JWT_SECRET:?Set SIBYL_JWT_SECRET in .env}
+      SIBYL_JWT_SECRET: ${SIBYL_JWT_SECRET:?Set SIBYL_JWT_SECRET in the environment}
       SIBYL_SERVER_URL: ${SIBYL_SERVER_URL:-http://localhost:3334}
       # OpenAI (REQUIRED for embeddings)
-      SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY:?Set SIBYL_OPENAI_API_KEY in .env}
+      SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY:?Set SIBYL_OPENAI_API_KEY in the environment}
       # Anthropic (REQUIRED for entity extraction and agents)
-      SIBYL_ANTHROPIC_API_KEY: ${SIBYL_ANTHROPIC_API_KEY:?Set SIBYL_ANTHROPIC_API_KEY in .env}
+      SIBYL_ANTHROPIC_API_KEY:
+        ${SIBYL_ANTHROPIC_API_KEY:?Set SIBYL_ANTHROPIC_API_KEY in the environment}
       SIBYL_LLM_PROVIDER: anthropic
       SIBYL_LLM_MODEL: claude-haiku-4-5
       # Server config
@@ -114,10 +117,13 @@ services:
       SIBYL_REDIS_HOST: ${SIBYL_REDIS_HOST:-redis}
       SIBYL_REDIS_PORT: 6379
       SIBYL_SURREAL_URL: ws://surrealdb:8000/rpc
-      SIBYL_SURREAL_USERNAME: ${SIBYL_SURREAL_USERNAME:?Set SIBYL_SURREAL_USERNAME in .env}
-      SIBYL_SURREAL_PASSWORD: ${SIBYL_SURREAL_PASSWORD:?Set SIBYL_SURREAL_PASSWORD in .env}
-      SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY:?Set SIBYL_OPENAI_API_KEY in .env}
-      SIBYL_ANTHROPIC_API_KEY: ${SIBYL_ANTHROPIC_API_KEY:?Set SIBYL_ANTHROPIC_API_KEY in .env}
+      SIBYL_SURREAL_USERNAME:
+        ${SIBYL_SURREAL_USERNAME:?Set SIBYL_SURREAL_USERNAME in the environment}
+      SIBYL_SURREAL_PASSWORD:
+        ${SIBYL_SURREAL_PASSWORD:?Set SIBYL_SURREAL_PASSWORD in the environment}
+      SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY:?Set SIBYL_OPENAI_API_KEY in the environment}
+      SIBYL_ANTHROPIC_API_KEY:
+        ${SIBYL_ANTHROPIC_API_KEY:?Set SIBYL_ANTHROPIC_API_KEY in the environment}
       SIBYL_LLM_PROVIDER: anthropic
       SIBYL_LLM_MODEL: claude-haiku-4-5
     restart: unless-stopped
@@ -159,9 +165,9 @@ services:
         "--log",
         "info",
         "--user",
-        "${SIBYL_SURREAL_USERNAME:?Set SIBYL_SURREAL_USERNAME in .env}",
+        "${SIBYL_SURREAL_USERNAME:?Set SIBYL_SURREAL_USERNAME in the environment}",
         "--pass",
-        "${SIBYL_SURREAL_PASSWORD:?Set SIBYL_SURREAL_PASSWORD in .env}",
+        "${SIBYL_SURREAL_PASSWORD:?Set SIBYL_SURREAL_PASSWORD in the environment}",
         "rocksdb:///data/sibyl.db",
       ]
     ports:

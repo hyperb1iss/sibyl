@@ -6,6 +6,8 @@ import asyncio
 import contextlib
 import logging
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import cast
 
 from sibyl_core.backends.surreal.connection import (
@@ -147,6 +149,10 @@ class DedicatedSurrealClient:
     def database(self) -> str:
         return self._database
 
+    @property
+    def supports_live_queries(self) -> bool:
+        return self._url.startswith(("ws://", "wss://"))
+
     def _new_connection(self) -> _PooledConnection:
         return _PooledConnection(
             url=self._url,
@@ -225,6 +231,23 @@ class DedicatedSurrealClient:
             raise
         finally:
             self._available.put_nowait(connection)
+
+    @asynccontextmanager
+    async def live_table(
+        self, table: str, *, diff: bool = False
+    ) -> AsyncIterator[AsyncIterator[object]]:
+        if not self.supports_live_queries:
+            raise RuntimeError("SurrealDB live queries require a WebSocket URL")
+
+        connection = self._new_connection()
+        client = await connection.connect()
+        query_uuid = await client.live(table, diff=diff)
+        try:
+            yield await client.subscribe_live(query_uuid)
+        finally:
+            with contextlib.suppress(Exception):
+                await client.kill(query_uuid)
+            await connection.close()
 
     async def _execute(
         self,

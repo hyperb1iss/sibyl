@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from sibyl import runtime_services as runtime_services_module
 from sibyl.api import app as api_app_module
 
 
@@ -32,9 +33,19 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     monkeypatch.setattr(api_app_module.settings, "store", "surreal")
     monkeypatch.setattr(api_app_module.settings, "auth_store", "surreal")
     monkeypatch.setattr(
-        api_app_module,
-        "_bootstrap_surreal_runtime_schemas",
+        runtime_services_module,
+        "bootstrap_surreal_runtime_schemas",
         bootstrap_surreal_runtime,
+    )
+    monkeypatch.setattr(
+        runtime_services_module,
+        "install_llm_db_config_source",
+        MagicMock(side_effect=lambda: startup_events.append("llm")),
+    )
+    monkeypatch.setattr(
+        runtime_services_module,
+        "install_core_runtime_ports",
+        MagicMock(side_effect=lambda: startup_events.append("core_ports")),
     )
     monkeypatch.setattr("sibyl.api.pubsub.init_pubsub", init_pubsub)
     monkeypatch.setattr("sibyl.api.pubsub.shutdown_pubsub", shutdown_pubsub)
@@ -51,7 +62,7 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     async with app.router.lifespan_context(app):
         pass
 
-    assert startup_events == ["surreal"]
+    assert startup_events == ["surreal", "llm", "core_ports"]
     init_pubsub.assert_awaited_once()
     init_locks.assert_awaited_once()
     shutdown_pubsub.assert_awaited_once()
@@ -63,3 +74,20 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     enable_pubsub.assert_called_once_with()
     disable_pubsub.assert_called_once_with()
     recover_stuck_sources.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_runtime_services_starts_and_stops_raw_capture_live_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start_live = AsyncMock(return_value=True)
+    stop_live = AsyncMock()
+    monkeypatch.setattr("sibyl.services.raw_capture_live.start_raw_capture_live_query", start_live)
+    monkeypatch.setattr("sibyl.services.raw_capture_live.stop_raw_capture_live_query", stop_live)
+    services = runtime_services_module.RuntimeServices(log=MagicMock())
+
+    await services._startup_live_queries()
+    await services._shutdown_live_queries()
+
+    start_live.assert_awaited_once()
+    stop_live.assert_awaited_once()

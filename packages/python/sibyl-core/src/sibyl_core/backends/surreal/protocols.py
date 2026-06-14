@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Protocol
 
 type QueryParams = dict[str, object]
@@ -17,6 +18,12 @@ class SurrealClient(Protocol):
     async def query(self, query: str, vars: QueryParams | None = None) -> object: ...
 
     async def query_raw(self, query: str, params: QueryParams | None = None) -> object: ...
+
+    async def live(self, table: str, *, diff: bool = False) -> object: ...
+
+    async def subscribe_live(self, query_uuid: object) -> AsyncIterator[object]: ...
+
+    async def kill(self, query_uuid: object) -> object: ...
 
     async def close(self) -> None: ...
 

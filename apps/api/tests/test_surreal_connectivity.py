@@ -28,6 +28,7 @@ async def test_warm_shared_surreal_clients_warms_auth_and_content(
 ) -> None:
     auth = FakeDedicatedClient()
     content = FakeDedicatedClient()
+    core_content = FakeDedicatedClient()
 
     async def auth_client() -> FakeDedicatedClient:
         return auth
@@ -35,13 +36,18 @@ async def test_warm_shared_surreal_clients_warms_auth_and_content(
     async def content_client() -> FakeDedicatedClient:
         return content
 
+    async def core_content_client() -> FakeDedicatedClient:
+        return core_content
+
     monkeypatch.setattr(surreal_connectivity, "_auth_client", auth_client)
     monkeypatch.setattr(surreal_connectivity, "_content_client", content_client)
+    monkeypatch.setattr(surreal_connectivity, "_core_content_client", core_content_client)
 
     await surreal_connectivity.warm_shared_surreal_clients()
 
     assert auth.warmed == 1
     assert content.warmed == 1
+    assert core_content.warmed == 1
 
 
 @pytest.mark.asyncio
@@ -71,6 +77,7 @@ async def test_surreal_connectivity_monitor_pings_clients(
 ) -> None:
     auth = FakeDedicatedClient()
     content = FakeDedicatedClient()
+    core_content = FakeDedicatedClient()
 
     async def auth_client() -> FakeDedicatedClient:
         return auth
@@ -78,15 +85,19 @@ async def test_surreal_connectivity_monitor_pings_clients(
     async def content_client() -> FakeDedicatedClient:
         return content
 
+    async def core_content_client() -> FakeDedicatedClient:
+        return core_content
+
     monkeypatch.setattr(surreal_connectivity, "_auth_client", auth_client)
     monkeypatch.setattr(surreal_connectivity, "_content_client", content_client)
+    monkeypatch.setattr(surreal_connectivity, "_core_content_client", core_content_client)
     monkeypatch.setattr(surreal_connectivity, "_CHECK_INTERVAL_SECONDS", 0.001)
     monkeypatch.setattr(surreal_connectivity, "_monitor_task", None)
 
     surreal_connectivity.start_surreal_connectivity_monitor()
     try:
         for _ in range(50):
-            if auth.pings and content.pings:
+            if auth.pings and content.pings and core_content.pings:
                 break
             await asyncio.sleep(0.001)
     finally:
@@ -94,6 +105,7 @@ async def test_surreal_connectivity_monitor_pings_clients(
 
     assert auth.pings >= 1
     assert content.pings >= 1
+    assert core_content.pings >= 1
 
 
 @pytest.mark.asyncio
@@ -102,6 +114,7 @@ async def test_surreal_connectivity_monitor_keeps_running_after_ping_failure(
 ) -> None:
     auth = FakeDedicatedClient()
     content = FakeDedicatedClient()
+    core_content = FakeDedicatedClient()
     auth.fail_ping = True
 
     async def auth_client() -> FakeDedicatedClient:
@@ -110,11 +123,17 @@ async def test_surreal_connectivity_monitor_keeps_running_after_ping_failure(
     async def content_client() -> FakeDedicatedClient:
         return content
 
+    async def core_content_client() -> FakeDedicatedClient:
+        return core_content
+
     monkeypatch.setattr(surreal_connectivity, "_auth_client", auth_client)
     monkeypatch.setattr(surreal_connectivity, "_content_client", content_client)
+    monkeypatch.setattr(surreal_connectivity, "_core_content_client", core_content_client)
 
     await surreal_connectivity._ping_client("auth", auth_client)
     await surreal_connectivity._ping_client("content", content_client)
+    await surreal_connectivity._ping_client("core_content", core_content_client)
 
     assert auth.pings == 1
     assert content.pings == 1
+    assert core_content.pings == 1

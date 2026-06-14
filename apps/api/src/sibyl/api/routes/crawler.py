@@ -13,7 +13,6 @@ from datetime import UTC, datetime
 from urllib.parse import urlparse
 from uuid import UUID
 
-import httpx
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -62,6 +61,7 @@ from sibyl.persistence.content_runtime import (
 )
 from sibyl_core.auth import AuthOrganization, OrganizationRole
 from sibyl_core.models import CrawlStatus, SourceType
+from sibyl_core.network import decode_safe_fetch_body, safe_fetch
 
 log = structlog.get_logger()
 
@@ -298,12 +298,24 @@ async def preview_url(url: str) -> dict[str, str | None]:
         if not parsed.scheme or not parsed.netloc:
             raise HTTPException(status_code=400, detail="Invalid URL")
 
-        # Fetch the page
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            response = await client.get(url, headers={"User-Agent": "Sibyl/1.0"})
-            response.raise_for_status()
+        response = await safe_fetch(
+            url,
+            max_bytes=50_000,
+            timeout=10.0,
+            user_agent="Sibyl/1.0",
+            accept="text/html,*/*;q=0.1",
+        )
+        if response.status_code >= 400:
+            log.warning("URL preview failed", url=url, status=response.status_code)
+            return {
+                "url": url,
+                "title": None,
+                "suggested_name": parsed.netloc,
+                "domain": parsed.netloc,
+                "error": f"HTTP {response.status_code}",
+            }
 
-        html = response.text[:50000]  # Only check first 50KB
+        html = decode_safe_fetch_body(response.body, response.headers, max_bytes=50_000)[:50000]
 
         # Extract title
         title_match = re.search(r"<title[^>]*>([^<]+)</title>", html, re.IGNORECASE)
@@ -327,15 +339,6 @@ async def preview_url(url: str) -> dict[str, str | None]:
             "domain": parsed.netloc,
         }
 
-    except httpx.HTTPStatusError as e:
-        log.warning("URL preview failed", url=url, status=e.response.status_code)
-        return {
-            "url": url,
-            "title": None,
-            "suggested_name": urlparse(url).netloc,
-            "domain": urlparse(url).netloc,
-            "error": f"HTTP {e.response.status_code}",
-        }
     except Exception as e:
         log.warning("URL preview failed", url=url, error=str(e))
         return {

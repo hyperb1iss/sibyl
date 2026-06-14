@@ -1259,6 +1259,25 @@ async def test_create_api_key_uses_runtime_helper(monkeypatch: pytest.MonkeyPatc
     )
 
 
+def test_api_key_create_request_normalizes_scopes() -> None:
+    body = auth_routes.ApiKeyCreateRequest(
+        name="CLI",
+        scopes=[" mcp ", "api:read", "mcp"],
+    )
+
+    assert body.scopes == ["mcp", "api:read"]
+
+
+def test_api_key_create_request_rejects_unknown_scopes() -> None:
+    with pytest.raises(ValueError, match="unsupported API key scopes: admin"):
+        auth_routes.ApiKeyCreateRequest(name="CLI", scopes=["mcp", "admin"])
+
+
+def test_api_key_create_request_rejects_empty_scopes() -> None:
+    with pytest.raises(ValueError, match="API key scopes must include at least one scope"):
+        auth_routes.ApiKeyCreateRequest(name="CLI", scopes=[" "])
+
+
 @pytest.mark.asyncio
 async def test_revoke_api_key_rejects_missing_org(monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = _ctx(include_org=False)

@@ -11,6 +11,7 @@ from typing import Any
 
 import structlog
 
+from sibyl.api.raw_capture_events import publish_raw_capture_changed
 from sibyl.config import settings
 from sibyl.jobs import queue as job_queue
 from sibyl.persistence.surreal.content import surreal_content_client
@@ -71,10 +72,12 @@ async def poll_raw_capture_changefeed(
         raw_memory_ids = [ref.raw_memory_id for ref in changed_refs]
         promotion_job_id: str | None = None
         if raw_memory_ids:
-            promotion_job_id = await job_queue.enqueue_raw_promotion(
+            promotion_job_id = await queue_raw_capture_changes(
                 organization_id,
                 raw_memory_ids=raw_memory_ids,
-                limit=len(raw_memory_ids),
+                rows_seen=len(rows),
+                previous_versionstamp=cursor.versionstamp,
+                next_versionstamp=next_versionstamp,
             )
         if next_versionstamp > cursor.versionstamp:
             await _save_cursor(
@@ -238,6 +241,51 @@ async def _execute_records(client: Any, query: str, **params: object) -> list[di
     return [dict(row) for row in normalize_records(await client.execute_query(query, **params))]
 
 
+async def _safe_broadcast_raw_capture_changed(result: Mapping[str, object]) -> None:
+    organization_id = _optional_str(result.get("organization_id"))
+    raw_memory_ids = result.get("changed_raw_memory_ids")
+    if not organization_id or not isinstance(raw_memory_ids, list):
+        return
+    await publish_raw_capture_changed(
+        organization_id=organization_id,
+        raw_memory_ids=raw_memory_ids,
+        promotion_job_id=result.get("promotion_job_id"),
+        rows_seen=result.get("rows_seen"),
+        previous_versionstamp=result.get("previous_versionstamp"),
+        next_versionstamp=result.get("next_versionstamp"),
+    )
+
+
+async def queue_raw_capture_changes(
+    organization_id: str,
+    *,
+    raw_memory_ids: Iterable[object],
+    rows_seen: object | None = None,
+    previous_versionstamp: object | None = None,
+    next_versionstamp: object | None = None,
+) -> str | None:
+    raw_memory_id_values = [str(raw_memory_id) for raw_memory_id in raw_memory_ids if raw_memory_id]
+    if not organization_id or not raw_memory_id_values:
+        return None
+
+    promotion_job_id = await job_queue.enqueue_raw_promotion(
+        organization_id,
+        raw_memory_ids=raw_memory_id_values,
+        limit=len(raw_memory_id_values),
+    )
+    await _safe_broadcast_raw_capture_changed(
+        {
+            "organization_id": organization_id,
+            "changed_raw_memory_ids": raw_memory_id_values,
+            "promotion_job_id": promotion_job_id,
+            "rows_seen": rows_seen,
+            "previous_versionstamp": previous_versionstamp,
+            "next_versionstamp": next_versionstamp,
+        }
+    )
+    return promotion_job_id
+
+
 def _raw_capture_refs_for_org(
     rows: Iterable[Mapping[str, object]],
     *,
@@ -247,7 +295,7 @@ def _raw_capture_refs_for_org(
     seen: set[str] = set()
     for row in rows:
         for payload in _change_payloads(row.get("changes")):
-            ref = _raw_capture_ref(payload)
+            ref = raw_capture_ref_from_payload(payload)
             if ref is None or ref.organization_id != organization_id:
                 continue
             if ref.raw_memory_id in seen:
@@ -272,7 +320,7 @@ def _change_payloads(value: object) -> Iterable[Mapping[str, object]]:
             yield from _change_payloads(item)
 
 
-def _raw_capture_ref(payload: Mapping[str, object]) -> RawCaptureChangeRef | None:
+def raw_capture_ref_from_payload(payload: Mapping[str, object]) -> RawCaptureChangeRef | None:
     organization_id = _optional_str(payload.get("organization_id"))
     raw_memory_id = _optional_str(payload.get("uuid")) or _raw_capture_uuid_from_record_id(
         payload.get("id")
@@ -327,4 +375,6 @@ __all__ = [
     "RawCaptureChangefeedCursor",
     "poll_all_raw_capture_changefeeds",
     "poll_raw_capture_changefeed",
+    "queue_raw_capture_changes",
+    "raw_capture_ref_from_payload",
 ]

@@ -21,6 +21,10 @@ on:
         required: false
         type: boolean
         default: false
+      nightly_run_id:
+        description: "Successful Nightly Regression run ID for the candidate SHA"
+        required: false
+        default: ""
 
 permissions:
   actions: write
@@ -151,25 +155,12 @@ jobs:
           echo "needs_version_commit=$NEEDS_VERSION_COMMIT" >> $GITHUB_OUTPUT
           echo "Releasing: $CURRENT → $VERSION"
 
-      - name: "△ Update version → ${{ steps.version.outputs.version }}"
+      - name: "◇ Enforce precommitted release candidate"
         if: ${{ !inputs.dry_run && steps.version.outputs.needs_version_commit == 'true' }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          echo "$VERSION" > VERSION
-          python - <<'PY'
-          from pathlib import Path
-
-          version = Path("VERSION").read_text().strip()
-          chart = Path("charts/sibyl/Chart.yaml")
-          lines = chart.read_text().splitlines()
-          for index, line in enumerate(lines):
-              if line.startswith("version: "):
-                  lines[index] = f"version: {version}"
-              elif line.startswith("appVersion: "):
-                  lines[index] = f'appVersion: "{version}"'
-          chart.write_text("\n".join(lines) + "\n")
-          PY
-          echo "Updated VERSION to $VERSION"
+          echo "::error::Release candidates must have VERSION pre-committed before dispatch."
+          echo "::error::Commit the version bump, run same-SHA CI and Nightly Regression, then dispatch Release with nightly_run_id."
+          exit 1
 
       - name: "◈ Generate release notes"
         if: ${{ !inputs.dry_run }}
@@ -184,31 +175,107 @@ jobs:
           model: claude-opus-4-8
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 
-      - name: "◆ Commit version bump"
-        if: ${{ !inputs.dry_run && steps.version.outputs.needs_version_commit == 'true' }}
-        run: |
-          git add VERSION
-          git add charts/sibyl/Chart.yaml
-          git commit \
-            -m "chore(release): prepare v${{ steps.version.outputs.version }}" \
-            -m "Update repository and chart versions before tagging the candidate."
-
-      - name: "◇ Validate release commit message"
-        if: ${{ !inputs.dry_run && steps.version.outputs.needs_version_commit == 'true' }}
-        run: |
-          git log -1 --format=%B | awk '
-            length($0) > 72 && $0 !~ /^(Co-Authored-By:|https?:\/\/)/ {
-              print "over 72 chars: " $0
-              bad=1
-            }
-            END { exit bad }
-          '
-
       - name: "◇ Record candidate SHA"
         id: candidate
         run: |
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: "◇ Run RC gate bundle"
+        id: rc_check
+        run: moon run :check
+
+      - name: "◇ Validate same-SHA Nightly Regression"
+        if: ${{ !inputs.dry_run || inputs.nightly_run_id != '' }}
+        id: nightly
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NIGHTLY_RUN_ID: ${{ inputs.nightly_run_id }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$NIGHTLY_RUN_ID" ]]; then
+            echo "::error::nightly_run_id is required for live releases."
+            exit 1
+          fi
+
+          nightly_json="$(
+            gh run view "$NIGHTLY_RUN_ID" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json conclusion,headSha,status,url,workflowName
+          )"
+          export NIGHTLY_JSON="$nightly_json"
+
+          python - <<'PY'
+          import json
+          import os
+          import sys
+
+          run = json.loads(os.environ["NIGHTLY_JSON"])
+          expected_sha = os.environ["CANDIDATE_SHA"]
+          failures: list[str] = []
+
+          if run.get("workflowName") != "Nightly Regression":
+              failures.append("run is not a Nightly Regression workflow")
+          if run.get("status") != "completed":
+              failures.append(f"run is not completed: {run.get('status')}")
+          if run.get("conclusion") != "success":
+              failures.append(f"run conclusion is not success: {run.get('conclusion')}")
+          if run.get("headSha") != expected_sha:
+              failures.append(
+                  f"run SHA {run.get('headSha')} does not match candidate {expected_sha}"
+              )
+
+          if failures:
+              for failure in failures:
+                  print(f"::error::{failure}")
+              sys.exit(1)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"url={run['url']}", file=output)
+          PY
+
+      - name: "◇ Record RC gate receipt"
+        if: always()
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          VERSION: ${{ steps.version.outputs.version }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+          RC_CHECK_CONCLUSION: ${{ steps.rc_check.conclusion }}
+          NIGHTLY_RUN_ID: ${{ inputs.nightly_run_id }}
+          NIGHTLY_URL: ${{ steps.nightly.outputs.url }}
+          NIGHTLY_CONCLUSION: ${{ steps.nightly.conclusion }}
+        run: |
+          mkdir -p .moon/cache/release
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          receipt = {
+              "version": os.environ["VERSION"],
+              "candidate_sha": os.environ["CANDIDATE_SHA"],
+              "dry_run": os.environ["DRY_RUN"].lower() == "true",
+              "rc_gate_command": "moon run :check",
+              "rc_gate_conclusion": os.environ["RC_CHECK_CONCLUSION"],
+              "nightly_run_id": os.environ["NIGHTLY_RUN_ID"],
+              "nightly_url": os.environ["NIGHTLY_URL"],
+              "nightly_conclusion": os.environ["NIGHTLY_CONCLUSION"],
+          }
+          Path(".moon/cache/release/rc-gate-receipt.json").write_text(
+              json.dumps(receipt, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: "► Upload RC gate receipt"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc-gate-receipt-${{ steps.candidate.outputs.sha }}
+          path: .moon/cache/release/rc-gate-receipt.json
+          if-no-files-found: error
 
       - name: "◆ Create and push tag"
         if: ${{ !inputs.dry_run }}
@@ -238,6 +305,10 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- Candidate SHA: \`${{ steps.candidate.outputs.sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Previous release: \`${{ steps.version.outputs.previous_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- RC gate: \`${{ steps.rc_check.conclusion }}\`" >> $GITHUB_STEP_SUMMARY
+          if [[ -n "${{ steps.nightly.outputs.url }}" ]]; then
+            echo "- Nightly Regression: ${{ steps.nightly.outputs.url }}" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
           if [[ "${{ inputs.dry_run }}" == "true" ]]; then
             echo "No version commit, tag, release, or publish was created." >> $GITHUB_STEP_SUMMARY

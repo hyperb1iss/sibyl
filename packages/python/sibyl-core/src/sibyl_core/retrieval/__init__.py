@@ -5,7 +5,7 @@ This module provides advanced retrieval strategies:
 - fusion: Reciprocal Rank Fusion for merging results
 - hybrid: Combined vector + graph traversal
 - dedup: Entity deduplication via embeddings
-- reranking: Cross-encoder reranking (optional, requires the `reranking` extra)
+- reranking: Feature-weighted and cross-encoder reranking
 
 Lexical search is served natively by SurrealDB FULLTEXT indexes, not by an
 in-process keyword index.
@@ -44,8 +44,13 @@ from sibyl_core.retrieval.hybrid import (
 )
 from sibyl_core.retrieval.reranking import (
     CrossEncoderConfig,
+    FeatureRerankCandidate,
+    FeatureRerankScoredCandidate,
+    FeatureWeightedRerankModel,
     RerankResult,
     cross_encoder_rerank,
+    fit_feature_weighted_reranker,
+    rerank_by_feature_weights,
     rerank_results,
 )
 from sibyl_core.retrieval.temporal import (
@@ -77,6 +82,9 @@ __all__ = [
     "DedupConfig",
     "DuplicatePair",
     "EntityDeduplicator",
+    "FeatureRerankCandidate",
+    "FeatureRerankScoredCandidate",
+    "FeatureWeightedRerankModel",
     "FusionConfig",
     "HybridConfig",
     "HybridResult",
@@ -96,9 +104,11 @@ __all__ = [
     "cosine_similarity",
     "cross_encoder_rerank",
     "find_duplicates",
+    "fit_feature_weighted_reranker",
     "get_deduplicator",
     "hybrid_search",
     "merge_candidate_signals",
+    "rerank_by_feature_weights",
     "rerank_results",
     "rrf_merge",
     "rrf_merge_with_metadata",

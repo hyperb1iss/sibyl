@@ -48,7 +48,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 13
+CONTENT_SCHEMA_CURRENT_VERSION = 15
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -337,6 +337,28 @@ ALTER TABLE IF EXISTS entity PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 """
 
+CONTENT_BACKUP_LEGACY_INCLUDE_CLEANUP_DEFINITIONS = """
+REMOVE FIELD IF EXISTS include_postgres ON TABLE backup_settings;
+REMOVE FIELD IF EXISTS include_postgres ON TABLE backups;
+DEFINE FIELD OVERWRITE include_database_dump ON backup_settings TYPE option<bool>;
+DEFINE FIELD OVERWRITE include_database_dump ON backups TYPE option<bool>;
+DEFINE FIELD OVERWRITE include_graph ON backup_settings TYPE bool DEFAULT true;
+DEFINE FIELD OVERWRITE include_graph ON backups TYPE bool DEFAULT true;
+UPDATE backup_settings SET include_database_dump = false, include_graph = true;
+UPDATE backups SET include_database_dump = false, include_graph = true;
+"""
+
+CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS = """
+DEFINE INDEX IF NOT EXISTS idx_crawl_sources_org_uuid
+    ON crawl_sources FIELDS organization_id, uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_crawl_sources_org_status_created
+    ON crawl_sources FIELDS organization_id, crawl_status, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_crawled_documents_org_uuid
+    ON crawled_documents FIELDS organization_id, uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_document_chunks_org_uuid
+    ON document_chunks FIELDS organization_id, uuid UNIQUE;
+"""
+
 
 def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
     compatible_schema = render_fulltext_compatible_sql(
@@ -421,6 +443,16 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=13,
             name="content_entity_anchors",
             statements=tuple(split_statements(CONTENT_ENTITY_ANCHOR_MIGRATION_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=14,
+            name="content_backup_full_org_archives",
+            statements=tuple(split_statements(CONTENT_BACKUP_LEGACY_INCLUDE_CLEANUP_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=15,
+            name="content_lookup_indexes",
+            statements=tuple(split_statements(CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS)),
         ),
     )
 
@@ -753,6 +785,7 @@ def _coerce_int(value: object) -> int:
 
 __all__ = [
     "CONTENT_ANALYZER_DEFINITIONS",
+    "CONTENT_BACKUP_LEGACY_INCLUDE_CLEANUP_DEFINITIONS",
     "CONTENT_CHILD_SCOPE_MIGRATION_DEFINITIONS",
     "CONTENT_DOCUMENT_URL_SCOPE_MIGRATION_DEFINITIONS",
     "CONTENT_ENTITY_ANCHOR_MIGRATION_DEFINITIONS",
@@ -760,6 +793,7 @@ __all__ = [
     "CONTENT_EXTRACTED_INTO_RELATION_MIGRATION_DEFINITIONS",
     "CONTENT_HIGHLIGHT_SNIPPET_MIGRATION_DEFINITIONS",
     "CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS",
+    "CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS",
     "CONTENT_PERMISSION_MIGRATION_DEFINITIONS",
     "CONTENT_RELATION_TABLES",
     "CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS",

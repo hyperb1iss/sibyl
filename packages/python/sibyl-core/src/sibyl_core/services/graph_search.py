@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable, Sequence
-from difflib import SequenceMatcher
 from typing import Any
 
 from sibyl_core.models.entities import Entity
@@ -206,8 +205,7 @@ def bounded_similarity_score(query: str, entity: Entity) -> float:
     overlap = query_tokens & entity_tokens
     jaccard = len(overlap) / len(query_tokens | entity_tokens)
     coverage = len(overlap) / len(query_tokens)
-    sequence = SequenceMatcher(None, query_text[:1000], entity_text[:1000]).ratio()
-    return min(max(jaccard, coverage * 0.85, sequence * 0.9), 1.0)
+    return min(max(jaccard, coverage * 0.85), 1.0)
 
 
 def normalize_search_text(value: str) -> str:

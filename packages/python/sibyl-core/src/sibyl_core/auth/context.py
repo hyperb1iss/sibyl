@@ -30,6 +30,7 @@ class MemoryPolicyContext:
     actor_user_id: str | None
     organization_id: str | None = None
     organization_role: OrganizationRole | str | None = None
+    is_global_admin: bool = False
     accessible_projects: frozenset[str] | None = None
     accessible_delegations: frozenset[str] | None = None
     delegated_authority: str | None = None
@@ -47,6 +48,7 @@ class MemoryPolicyContext:
             "organization_role",
             coerce_organization_role(self.organization_role),
         )
+        object.__setattr__(self, "is_global_admin", bool(self.is_global_admin))
         object.__setattr__(
             self,
             "accessible_projects",
@@ -136,6 +138,7 @@ class AuthContext:
             actor_user_id=self.user_id,
             organization_id=self.organization_id,
             organization_role=self.org_role,
+            is_global_admin=self.user.is_admin,
             accessible_projects=_frozen_string_set(accessible_projects),
             accessible_delegations=_frozen_string_set(accessible_delegations),
             delegated_authority=delegated_authority,

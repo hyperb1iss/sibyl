@@ -259,7 +259,7 @@ jobs:
           tail -n 200 /tmp/sibyl-worker.log || true
           echo ""
           echo "=== SurrealDB logs ==="
-          docker compose logs surrealdb || true
+          docker compose --env-file /dev/null logs surrealdb || true
 
   longmemeval-live-smoke:
     name: LongMemEval Live Smoke
@@ -421,8 +421,8 @@ jobs:
           cp .moon/cache/evals/longmemeval_live_smoke.json "$diagnostics/longmemeval_live_smoke.json" || true
           cp /tmp/sibyld.log "$diagnostics/sibyld.log" || true
           cp /tmp/sibyl-worker.log "$diagnostics/sibyl-worker.log" || true
-          docker compose ps -a > "$diagnostics/docker-compose-ps.txt" 2>&1 || true
-          container_id="$(docker compose ps -q surrealdb || true)"
+          docker compose --env-file /dev/null ps -a > "$diagnostics/docker-compose-ps.txt" 2>&1 || true
+          container_id="$(docker compose --env-file /dev/null ps -q surrealdb || true)"
           if [[ -n "$container_id" ]]; then
             docker inspect "$container_id" \
               --format 'restartCount={{.RestartCount}} oomKilled={{.State.OOMKilled}} exitCode={{.State.ExitCode}} error={{.State.Error}} startedAt={{.State.StartedAt}} finishedAt={{.State.FinishedAt}}' \
@@ -430,7 +430,7 @@ jobs:
             docker stats --no-stream "$container_id" \
               > "$diagnostics/surrealdb-stats.txt" 2>&1 || true
           fi
-          docker compose logs surrealdb > "$diagnostics/surrealdb.log" 2>&1 || true
+          docker compose --env-file /dev/null logs surrealdb > "$diagnostics/surrealdb.log" 2>&1 || true
 
       - name: Upload LongMemEval live smoke diagnostics
         if: always()
@@ -450,7 +450,7 @@ jobs:
           tail -n 200 /tmp/sibyl-worker.log || true
           echo ""
           echo "=== SurrealDB logs ==="
-          docker compose logs surrealdb || true
+          docker compose --env-file /dev/null logs surrealdb || true
 
   longmemeval-live-full:
     name: LongMemEval Live Full
@@ -613,8 +613,8 @@ jobs:
           cp .moon/cache/evals/longmemeval_live_full.json "$diagnostics/longmemeval_live_full.json" || true
           cp /tmp/sibyld.log "$diagnostics/sibyld.log" || true
           cp /tmp/sibyl-worker.log "$diagnostics/sibyl-worker.log" || true
-          docker compose ps -a > "$diagnostics/docker-compose-ps.txt" 2>&1 || true
-          container_id="$(docker compose ps -q surrealdb || true)"
+          docker compose --env-file /dev/null ps -a > "$diagnostics/docker-compose-ps.txt" 2>&1 || true
+          container_id="$(docker compose --env-file /dev/null ps -q surrealdb || true)"
           if [[ -n "$container_id" ]]; then
             docker inspect "$container_id" \
               --format 'restartCount={{.RestartCount}} oomKilled={{.State.OOMKilled}} exitCode={{.State.ExitCode}} error={{.State.Error}} startedAt={{.State.StartedAt}} finishedAt={{.State.FinishedAt}}' \
@@ -622,7 +622,7 @@ jobs:
             docker stats --no-stream "$container_id" \
               > "$diagnostics/surrealdb-stats.txt" 2>&1 || true
           fi
-          docker compose logs surrealdb > "$diagnostics/surrealdb.log" 2>&1 || true
+          docker compose --env-file /dev/null logs surrealdb > "$diagnostics/surrealdb.log" 2>&1 || true
 
       - name: Upload LongMemEval live full diagnostics
         if: always()
@@ -642,10 +642,10 @@ jobs:
           tail -n 200 /tmp/sibyl-worker.log || true
           echo ""
           echo "=== Docker status ==="
-          docker compose ps -a || true
+          docker compose --env-file /dev/null ps -a || true
           echo ""
           echo "=== SurrealDB container state ==="
-          container_id="$(docker compose ps -q surrealdb || true)"
+          container_id="$(docker compose --env-file /dev/null ps -q surrealdb || true)"
           if [[ -n "$container_id" ]]; then
             docker inspect "$container_id" \
               --format 'restartCount={{.RestartCount}} oomKilled={{.State.OOMKilled}} exitCode={{.State.ExitCode}} error={{.State.Error}} startedAt={{.State.StartedAt}} finishedAt={{.State.FinishedAt}}' \
@@ -654,4 +654,4 @@ jobs:
           fi
           echo ""
           echo "=== SurrealDB logs ==="
-          docker compose logs surrealdb || true
+          docker compose --env-file /dev/null logs surrealdb || true

@@ -24,8 +24,11 @@ DEFINE FIELD IF NOT EXISTS updated_at ON crawl_sources TYPE datetime DEFAULT tim
 
 DEFINE INDEX IF NOT EXISTS idx_crawl_sources_uuid ON crawl_sources FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_crawl_sources_org ON crawl_sources FIELDS organization_id;
+DEFINE INDEX IF NOT EXISTS idx_crawl_sources_org_uuid ON crawl_sources FIELDS organization_id, uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_crawl_sources_org_url ON crawl_sources FIELDS organization_id, url UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_crawl_sources_status ON crawl_sources FIELDS crawl_status;
+DEFINE INDEX IF NOT EXISTS idx_crawl_sources_org_status_created ON crawl_sources
+    FIELDS organization_id, crawl_status, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_crawl_sources_name_ft ON crawl_sources FIELDS name FULLTEXT ANALYZER title_analyzer BM25 HIGHLIGHTS;
 
 DEFINE TABLE IF NOT EXISTS crawled_documents SCHEMAFULL;
@@ -54,6 +57,8 @@ DEFINE FIELD IF NOT EXISTS created_at ON crawled_documents TYPE datetime DEFAULT
 DEFINE FIELD IF NOT EXISTS updated_at ON crawled_documents TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX IF NOT EXISTS idx_crawled_documents_uuid ON crawled_documents FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_crawled_documents_org_uuid ON crawled_documents
+    FIELDS organization_id, uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_crawled_documents_org_source ON crawled_documents
     FIELDS organization_id, source_id;
 DEFINE INDEX IF NOT EXISTS idx_crawled_documents_source ON crawled_documents FIELDS source_id;
@@ -84,6 +89,8 @@ DEFINE FIELD IF NOT EXISTS created_at ON document_chunks TYPE datetime DEFAULT t
 DEFINE FIELD IF NOT EXISTS updated_at ON document_chunks TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX IF NOT EXISTS idx_document_chunks_uuid ON document_chunks FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_document_chunks_org_uuid ON document_chunks
+    FIELDS organization_id, uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_document_chunks_org_source ON document_chunks
     FIELDS organization_id, source_id;
 DEFINE INDEX IF NOT EXISTS idx_document_chunks_org_source_entities ON document_chunks

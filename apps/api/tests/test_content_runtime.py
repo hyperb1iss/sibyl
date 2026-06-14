@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from sibyl.persistence import content_common, content_runtime, settings_runtime
+from sibyl.persistence import content_archive, content_common, content_runtime, settings_runtime
 from sibyl.persistence.surreal import content as surreal_content
 
 
@@ -86,6 +86,42 @@ async def test_surreal_content_client_scope_reuses_shared_client(
         await surreal_content.close_shared_surreal_content_client()
 
     first.close.assert_awaited_once()
+
+
+def test_surreal_content_builder_uses_configured_pool_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeSurrealContentClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(surreal_content, "SurrealContentClient", FakeSurrealContentClient)
+    monkeypatch.setattr(surreal_content.config_module.settings, "surreal_pool_size", 8)
+    monkeypatch.setattr(surreal_content.config_module.settings, "surreal_content_pool_size", 21)
+
+    surreal_content.build_surreal_content_client()
+
+    assert captured["pool_size"] == 21
+
+
+def test_content_archive_builder_uses_configured_pool_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeSurrealContentClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(content_archive, "SurrealContentClient", FakeSurrealContentClient)
+    monkeypatch.setattr(content_archive.config_module.settings, "surreal_pool_size", 8)
+    monkeypatch.setattr(content_archive.config_module.settings, "surreal_content_pool_size", 21)
+
+    content_archive.build_surreal_content_client()
+
+    assert captured["pool_size"] == 21
 
 
 @pytest.mark.asyncio
@@ -211,6 +247,71 @@ async def test_surreal_search_scope_source_id_takes_precedence_over_source_name(
     assert "name @0@ $source_name" not in source_query
     assert source_params["source_id"] == str(source_id)
     assert "source_name" not in source_params
+
+
+@pytest.mark.asyncio
+async def test_surreal_search_scope_excludes_chunk_embeddings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_id = uuid4()
+    document_id = uuid4()
+    org_id = uuid4()
+    fake_client = FakeSurrealClient(
+        [
+            _query_result(
+                [
+                    {
+                        "uuid": str(source_id),
+                        "organization_id": str(org_id),
+                        "name": "Docs",
+                        "url": "https://docs.example.com",
+                    }
+                ]
+            ),
+            _query_result(
+                [
+                    {
+                        "uuid": str(document_id),
+                        "organization_id": str(org_id),
+                        "source_id": str(source_id),
+                        "url": "https://docs.example.com/guide",
+                        "title": "Guide",
+                    }
+                ]
+            ),
+            _query_result(
+                [
+                    {
+                        "uuid": str(uuid4()),
+                        "organization_id": str(org_id),
+                        "source_id": str(source_id),
+                        "document_id": str(document_id),
+                        "chunk_index": 0,
+                        "content": "alpha",
+                    }
+                ]
+            ),
+        ]
+    )
+
+    @asynccontextmanager
+    async def fake_session():
+        yield fake_client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", fake_session)
+
+    _sources, _sources_by_id, _documents_by_id, chunks = await surreal_content._load_search_scope(
+        organization_id=org_id,
+        source_id=source_id,
+        source_name=None,
+    )
+
+    chunk_query, chunk_params = fake_client.calls[2]
+    assert len(chunks) == 1
+    assert "SELECT * FROM document_chunks" not in chunk_query
+    assert "embedding" not in chunk_query
+    assert "document_id = $document_1_0" in chunk_query
+    assert chunk_params["document_1_0"] == str(document_id)
 
 
 @pytest.mark.asyncio

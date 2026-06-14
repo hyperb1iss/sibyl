@@ -1,0 +1,372 @@
+{
+  "schema_version": "sibyl-golden-eval-dataset/v1",
+  "dataset_id": "sibyl-rc-context-retrieval-golden",
+  "version": "2026-06-10.1",
+  "description": "Labeled RC golden dataset for retrieval and context-pack dogfood cases.",
+  "corpus": {
+    "fixtures": [
+      {
+        "name": "context-pack-cases",
+        "path": "benchmarks/context_pack_cases.json",
+        "sha256": "sha256:ba2e29d85ebf3dcafb3c169a3be60e23126254c02786928eb22994cf977dc63d"
+      },
+      {
+        "name": "large-corpus-dogfood",
+        "path": "packages/python/sibyl-core/tests/fixtures/large_corpus/dogfood.json",
+        "sha256": "sha256:180242137509be00cfd64c4f105c48d6b4850cfc85f46e5388ee5db8c248be17"
+      }
+    ],
+    "source_policy": "Document IDs are stable fixture IDs. Positive documents should be seeded as visible context; forbidden documents are leakage sentinels."
+  },
+  "documents": [
+    {
+      "id": "golden:silver-delta",
+      "title": "Silver Delta replay verification",
+      "content": "Silver Delta covers replay verification and migration acceptance. It is the successor checkpoint after storage adapter extraction.",
+      "expected_scope": "project",
+      "tags": ["context-pack", "migration", "acceptance"],
+      "metadata": {
+        "facet": "recent_memory",
+        "source": "fixture://sibyl-rc-golden/silver-delta"
+      }
+    },
+    {
+      "id": "golden:amethyst-loom",
+      "title": "Amethyst Loom private recall baseline",
+      "content": "Amethyst Loom is the personal baseline memory to remember for private recall.",
+      "expected_scope": "private",
+      "tags": ["context-pack", "private-memory"],
+      "metadata": {
+        "facet": "recent_memory",
+        "source": "fixture://sibyl-rc-golden/amethyst-loom"
+      }
+    },
+    {
+      "id": "golden:cinder-atlas",
+      "title": "Cinder Atlas resilience project",
+      "content": "Cinder Atlas focuses on resilience hardening for deterministic graph replay.",
+      "expected_scope": "project",
+      "tags": ["context-pack", "project-recall"],
+      "metadata": {
+        "facet": "recent_memory",
+        "source": "fixture://sibyl-rc-golden/cinder-atlas"
+      }
+    },
+    {
+      "id": "golden:obsidian-spire",
+      "title": "Obsidian Spire storage predecessor",
+      "content": "Obsidian Spire is the predecessor task covering storage adapter extraction and isolation.",
+      "expected_scope": "project",
+      "tags": ["context-pack", "delegated-recall"],
+      "metadata": {
+        "facet": "recent_memory",
+        "source": "fixture://sibyl-rc-golden/obsidian-spire"
+      }
+    },
+    {
+      "id": "golden:neon-thread",
+      "title": "Neon Thread Nova diary",
+      "content": "Neon Thread is Nova's delegated handoff diary memory for this eval fixture.",
+      "expected_scope": "agent",
+      "tags": ["context-pack", "agent-diary"],
+      "metadata": {
+        "agent_id": "nova",
+        "facet": "recent_memory",
+        "source": "fixture://sibyl-rc-golden/neon-thread"
+      }
+    },
+    {
+      "id": "golden:source-grounding",
+      "title": "Source grounding survives promotion",
+      "content": "The source-linked baseline memory says source links survive promotion and must remain visible in recall provenance.",
+      "expected_scope": "project",
+      "tags": ["context-pack", "source-grounding"],
+      "metadata": {
+        "facet": "recent_memory",
+        "source": "fixture://sibyl-rc-golden/source-grounding"
+      }
+    },
+    {
+      "id": "golden:hidden-private-health",
+      "title": "Private health note sentinel",
+      "content": "private health note medical note",
+      "expected_scope": "forbidden",
+      "tags": ["context-pack", "leak-sentinel"],
+      "metadata": {
+        "reason": "private memory must not leak into public or project context"
+      }
+    },
+    {
+      "id": "golden:hidden-other-agent-diary",
+      "title": "Other agent diary sentinel",
+      "content": "other agent diary",
+      "expected_scope": "forbidden",
+      "tags": ["context-pack", "leak-sentinel"],
+      "metadata": {
+        "agent_id": "other-agent",
+        "reason": "non-requested agent diary must not leak"
+      }
+    },
+    {
+      "id": "golden:stale-obsidian-overclaim",
+      "title": "Stale Obsidian Spire overclaim",
+      "content": "Obsidian Spire is complete enough to skip migration acceptance",
+      "expected_scope": "forbidden",
+      "tags": ["context-pack", "stale-sentinel"],
+      "metadata": {
+        "state": "superseded",
+        "replacement": "golden:silver-delta"
+      }
+    }
+  ],
+  "retrieval_queries": [
+    {
+      "id": "retrieval.coding-handoff",
+      "query": "Which task covers replay verification and migration acceptance?",
+      "expected_ids": ["golden:silver-delta"],
+      "relevance_grades": {
+        "golden:silver-delta": 3
+      },
+      "metadata": {
+        "context_case": "coding-handoff",
+        "intent": "build"
+      }
+    },
+    {
+      "id": "retrieval.personal-memory",
+      "query": "What does personal baseline memory say to remember for private recall?",
+      "expected_ids": ["golden:amethyst-loom"],
+      "relevance_grades": {
+        "golden:amethyst-loom": 3
+      },
+      "metadata": {
+        "context_case": "personal-memory",
+        "intent": "learn"
+      }
+    },
+    {
+      "id": "retrieval.project-recall",
+      "query": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "expected_ids": ["golden:cinder-atlas"],
+      "relevance_grades": {
+        "golden:cinder-atlas": 3
+      },
+      "metadata": {
+        "context_case": "project-recall",
+        "intent": "learn"
+      }
+    },
+    {
+      "id": "retrieval.delegated-recall",
+      "query": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "expected_ids": ["golden:obsidian-spire"],
+      "relevance_grades": {
+        "golden:obsidian-spire": 3
+      },
+      "metadata": {
+        "agent_id": "nova",
+        "context_case": "delegated-recall",
+        "intent": "build"
+      }
+    },
+    {
+      "id": "retrieval.agent-diary",
+      "query": "What should Nova recall from the diary for delegated handoff?",
+      "expected_ids": ["golden:neon-thread"],
+      "relevance_grades": {
+        "golden:neon-thread": 3
+      },
+      "metadata": {
+        "agent_id": "nova",
+        "context_case": "agent-diary",
+        "intent": "learn"
+      }
+    },
+    {
+      "id": "retrieval.private-leak-negative",
+      "query": "What baseline memory is safe for a public handoff?",
+      "expected_ids": ["golden:silver-delta", "golden:source-grounding"],
+      "relevance_grades": {
+        "golden:silver-delta": 2,
+        "golden:source-grounding": 2
+      },
+      "metadata": {
+        "context_case": "private-leak-negative",
+        "forbidden_ids": ["golden:hidden-private-health", "golden:hidden-other-agent-diary"],
+        "intent": "learn"
+      }
+    },
+    {
+      "id": "retrieval.stale-decision-replacement",
+      "query": "Which successor covers migration acceptance after storage adapter extraction?",
+      "expected_ids": ["golden:silver-delta"],
+      "relevance_grades": {
+        "golden:silver-delta": 3
+      },
+      "metadata": {
+        "context_case": "stale-decision-replacement",
+        "forbidden_ids": ["golden:stale-obsidian-overclaim"],
+        "intent": "learn"
+      }
+    },
+    {
+      "id": "retrieval.source-grounding",
+      "query": "What source-linked baseline memory should be used for recall provenance?",
+      "expected_ids": ["golden:source-grounding"],
+      "relevance_grades": {
+        "golden:source-grounding": 3
+      },
+      "metadata": {
+        "context_case": "source-grounding",
+        "intent": "learn"
+      }
+    }
+  ],
+  "context_pack_cases": [
+    {
+      "id": "context-pack.coding-handoff",
+      "case": "coding-handoff",
+      "positive_document_ids": ["golden:silver-delta"],
+      "negative_document_ids": [],
+      "labels": [
+        {
+          "kind": "required_term",
+          "value": "Silver Delta",
+          "grade": 3
+        }
+      ],
+      "negative_labels": []
+    },
+    {
+      "id": "context-pack.personal-memory",
+      "case": "personal-memory",
+      "positive_document_ids": ["golden:amethyst-loom"],
+      "negative_document_ids": ["golden:hidden-private-health"],
+      "labels": [
+        {
+          "kind": "required_term",
+          "value": "Amethyst Loom",
+          "grade": 3
+        }
+      ],
+      "negative_labels": [
+        {
+          "kind": "forbidden_term",
+          "value": "private health note",
+          "grade": 3
+        },
+        {
+          "kind": "forbidden_term",
+          "value": "medical note",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "context-pack.project-recall",
+      "case": "project-recall",
+      "positive_document_ids": ["golden:cinder-atlas"],
+      "negative_document_ids": [],
+      "labels": [
+        {
+          "kind": "required_term",
+          "value": "Cinder Atlas",
+          "grade": 3
+        }
+      ],
+      "negative_labels": []
+    },
+    {
+      "id": "context-pack.delegated-recall",
+      "case": "delegated-recall",
+      "positive_document_ids": ["golden:obsidian-spire"],
+      "negative_document_ids": [],
+      "labels": [
+        {
+          "kind": "required_term",
+          "value": "Obsidian Spire",
+          "grade": 3
+        }
+      ],
+      "negative_labels": []
+    },
+    {
+      "id": "context-pack.agent-diary",
+      "case": "agent-diary",
+      "positive_document_ids": ["golden:neon-thread"],
+      "negative_document_ids": ["golden:hidden-other-agent-diary"],
+      "labels": [
+        {
+          "kind": "required_term",
+          "value": "Neon Thread",
+          "grade": 3
+        }
+      ],
+      "negative_labels": [
+        {
+          "kind": "forbidden_term",
+          "value": "other agent diary",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "context-pack.private-leak-negative",
+      "case": "private-leak-negative",
+      "positive_document_ids": ["golden:silver-delta", "golden:source-grounding"],
+      "negative_document_ids": ["golden:hidden-private-health", "golden:hidden-other-agent-diary"],
+      "labels": [],
+      "negative_labels": [
+        {
+          "kind": "forbidden_term",
+          "value": "private health note",
+          "grade": 3
+        },
+        {
+          "kind": "forbidden_term",
+          "value": "medical note",
+          "grade": 3
+        },
+        {
+          "kind": "forbidden_term",
+          "value": "other agent diary",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "context-pack.stale-decision-replacement",
+      "case": "stale-decision-replacement",
+      "positive_document_ids": ["golden:silver-delta"],
+      "negative_document_ids": ["golden:stale-obsidian-overclaim"],
+      "labels": [
+        {
+          "kind": "required_term",
+          "value": "Silver Delta",
+          "grade": 3
+        }
+      ],
+      "negative_labels": [
+        {
+          "kind": "forbidden_term",
+          "value": "Obsidian Spire is complete enough to skip migration acceptance",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "context-pack.source-grounding",
+      "case": "source-grounding",
+      "positive_document_ids": ["golden:source-grounding"],
+      "negative_document_ids": [],
+      "labels": [
+        {
+          "kind": "required_term",
+          "value": "source links survive promotion",
+          "grade": 3
+        }
+      ],
+      "negative_labels": []
+    }
+  ]
+}

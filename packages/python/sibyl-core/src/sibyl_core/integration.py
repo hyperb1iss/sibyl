@@ -36,7 +36,7 @@ and `sibyl task list --status doing` to see active work before anything else.
 1. **Recall** working context before you act. A past session may have solved this.
    CLI: `sibyl recall "<goal>" --intent build`. MCP: the `search` and `context` tools.
 2. **Act** with that context in hand. Use IDs from recall with
-   `sibyl entity show <id>` when a preview is not enough.
+   `sibyl show <id>` when a preview is not enough.
 3. **Remember** durable knowledge as you learn it: decisions, gotchas, patterns.
    The next session should not have to rediscover it.
    CLI: `sibyl remember "Title" "What matters" --kind decision`. MCP: the `remember` tool.
@@ -50,10 +50,10 @@ Recognize these prompt shapes and reach for the verb, not the file system:
 - "what am I working on" / "current tasks" -> `sibyl task list --status doing,blocked`
 - "where did I leave off" / "pick up from yesterday" -> `sibyl recall "<goal>"`
 - "have we hit this before" / "what's our pattern for X" -> `sibyl search "<topic>"`
-  first; only `sibyl entity show <id>` after you have an ID from search or recall
+  first; only `sibyl show <id>` after you have an ID from search or recall
 - "remember this" / "write this up" / "save this insight" / "we just learned X" -> `sibyl remember`
 - "consolidate this session" / "wrap up" / "save this session for next time" -> `sibyl reflect "<notes>" --persist`
-- "show me the full content" -> `sibyl entity show <id>`
+- "show me the full content" -> `sibyl show <id>`
 - "what's the deal with X" / "X was mentioned" / "tell me about Y" -> `sibyl search "<X>"` before answering
 - "complete this task: <learning>" without an explicit task id -> `sibyl task list -q "<topic>"` once, then `sibyl task complete <id> --learnings "..."`
 

@@ -196,33 +196,23 @@ function CreateBackupModal({
   onClose,
   onConfirm,
   isPending,
-  defaultIncludeDatabaseDump,
-  defaultIncludeGraph,
-  databaseDumpSupported,
   archiveContents,
   lastBackupSize,
 }: {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (options: { include_database_dump: boolean; include_graph: boolean }) => void;
+  onConfirm: () => void;
   isPending: boolean;
-  defaultIncludeDatabaseDump: boolean;
-  defaultIncludeGraph: boolean;
-  databaseDumpSupported: boolean;
   archiveContents: string[];
   lastBackupSize?: number;
 }) {
-  const [includeDatabaseDump, setIncludeDatabaseDump] = useState(defaultIncludeDatabaseDump);
-  const [includeGraph, setIncludeGraph] = useState(defaultIncludeGraph);
   const [step, setStep] = useState<'options' | 'running' | 'success'>('options');
 
   useEffect(() => {
     if (isOpen) {
-      setIncludeDatabaseDump(defaultIncludeDatabaseDump);
-      setIncludeGraph(defaultIncludeGraph);
       setStep('options');
     }
-  }, [isOpen, defaultIncludeDatabaseDump, defaultIncludeGraph]);
+  }, [isOpen]);
 
   useEffect(() => {
     if (step === 'running' && !isPending) {
@@ -232,14 +222,9 @@ function CreateBackupModal({
 
   const handleConfirm = () => {
     setStep('running');
-    onConfirm({ include_database_dump: includeDatabaseDump, include_graph: includeGraph });
+    onConfirm();
   };
 
-  const canCreate = includeDatabaseDump || includeGraph;
-  const dataSnapshotLabel = databaseDumpSupported ? 'Database Dump' : 'Surreal Data Snapshot';
-  const dataSnapshotDescription = databaseDumpSupported
-    ? 'Relational database dump for legacy or mixed runtimes'
-    : 'Auth, content, crawler data, sessions, API keys, and settings from SurrealDB';
   const archiveSummary = archiveContents.length > 0 ? archiveContents.join(', ') : 'runtime data';
 
   return (
@@ -259,9 +244,7 @@ function CreateBackupModal({
             </div>
             <div>
               <DialogTitle>Create Backup</DialogTitle>
-              <DialogDescription className="text-xs">
-                Configure what to include in this backup
-              </DialogDescription>
+              <DialogDescription className="text-xs">Full organization archive</DialogDescription>
             </div>
           </div>
         </DialogHeader>
@@ -270,70 +253,23 @@ function CreateBackupModal({
         <div className="px-6 py-5">
           {step === 'options' && (
             <div className="space-y-4">
-              <button
-                type="button"
-                role="checkbox"
-                aria-checked={includeDatabaseDump}
-                aria-label={dataSnapshotLabel}
-                className={`w-full text-left p-4 rounded-lg border transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated ${
-                  includeDatabaseDump
-                    ? 'bg-sc-cyan/5 border-sc-cyan/30'
-                    : 'bg-sc-bg-highlight/30 border-sc-fg-subtle/10 hover:border-sc-fg-subtle/20'
-                }`}
-                onClick={() => setIncludeDatabaseDump(!includeDatabaseDump)}
-              >
+              <div className="w-full p-4 rounded-lg border bg-sc-cyan/5 border-sc-cyan/30">
                 <div className="flex items-start gap-3">
-                  <div
-                    className={`mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors duration-200 ${
-                      includeDatabaseDump ? 'bg-sc-cyan border-sc-cyan' : 'border-sc-fg-subtle/40'
-                    }`}
-                  >
-                    {includeDatabaseDump && (
-                      <Check width={12} height={12} className="text-sc-on-accent" />
-                    )}
+                  <div className="mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center bg-sc-cyan border-sc-cyan">
+                    <Check width={12} height={12} className="text-sc-on-accent" />
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <Database width={16} height={16} className="text-sc-cyan" />
-                      <span className="font-medium text-sc-fg-primary">{dataSnapshotLabel}</span>
-                    </div>
-                    <p className="text-xs text-sc-fg-muted mt-1">{dataSnapshotDescription}</p>
-                  </div>
-                </div>
-              </button>
-
-              {/* Knowledge Graph Option */}
-              <button
-                type="button"
-                role="checkbox"
-                aria-checked={includeGraph}
-                aria-label="Knowledge Graph"
-                className={`w-full text-left p-4 rounded-lg border transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated ${
-                  includeGraph
-                    ? 'bg-sc-coral/5 border-sc-coral/30'
-                    : 'bg-sc-bg-highlight/30 border-sc-fg-subtle/10 hover:border-sc-fg-subtle/20'
-                }`}
-                onClick={() => setIncludeGraph(!includeGraph)}
-              >
-                <div className="flex items-start gap-3">
-                  <div
-                    className={`mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors duration-200 ${
-                      includeGraph ? 'bg-sc-coral border-sc-coral' : 'border-sc-fg-subtle/40'
-                    }`}
-                  >
-                    {includeGraph && <Check width={12} height={12} className="text-sc-on-accent" />}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <Archive width={16} height={16} className="text-sc-coral" />
-                      <span className="font-medium text-sc-fg-primary">Knowledge Graph</span>
+                      <span className="font-medium text-sc-fg-primary">Full Surreal Archive</span>
                     </div>
                     <p className="text-xs text-sc-fg-muted mt-1">
-                      Entities, relationships, episodes, patterns, and all semantic knowledge
+                      Auth, content, crawl data, API keys, settings, and the knowledge graph for
+                      this organization.
                     </p>
                   </div>
                 </div>
-              </button>
+              </div>
 
               {/* Info */}
               <div className="flex items-start gap-2 p-3 rounded-lg bg-sc-bg-highlight/50 text-xs text-sc-fg-muted">
@@ -348,12 +284,6 @@ function CreateBackupModal({
                   )}
                 </div>
               </div>
-
-              {!canCreate && (
-                <p className="text-xs text-sc-yellow text-center">
-                  Select at least one component to backup
-                </p>
-              )}
             </div>
           )}
 
@@ -369,26 +299,16 @@ function CreateBackupModal({
                 />
               </div>
               <h3 className="text-lg font-semibold text-sc-fg-primary mb-1">Creating Backup</h3>
-              <p className="text-sm text-sc-fg-muted">
-                {includeDatabaseDump && includeGraph
-                  ? 'Exporting data snapshot and knowledge graph...'
-                  : includeDatabaseDump
-                    ? 'Exporting data snapshot...'
-                    : 'Exporting knowledge graph...'}
-              </p>
+              <p className="text-sm text-sc-fg-muted">Exporting the full organization archive...</p>
               <div className="mt-4 flex items-center justify-center gap-4 text-xs text-sc-fg-muted">
-                {includeDatabaseDump && (
-                  <span className="flex items-center gap-1.5">
-                    <Database width={12} height={12} className="text-sc-cyan" />
-                    Data
-                  </span>
-                )}
-                {includeGraph && (
-                  <span className="flex items-center gap-1.5">
-                    <Archive width={12} height={12} className="text-sc-coral" />
-                    Graph
-                  </span>
-                )}
+                <span className="flex items-center gap-1.5">
+                  <Database width={12} height={12} className="text-sc-cyan" />
+                  Surreal
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Archive width={12} height={12} className="text-sc-coral" />
+                  Graph
+                </span>
               </div>
             </div>
           )}
@@ -413,11 +333,7 @@ function CreateBackupModal({
               <Button variant="ghost" onClick={onClose}>
                 Cancel
               </Button>
-              <Button
-                onClick={handleConfirm}
-                disabled={!canCreate}
-                icon={<Play width={14} height={14} />}
-              >
+              <Button onClick={handleConfirm} icon={<Play width={14} height={14} />}>
                 Start Backup
               </Button>
             </>
@@ -449,12 +365,9 @@ export default function BackupsPage() {
   // Get last backup size for estimation
   const lastCompletedBackup = backupsData?.backups.find(b => b.status === 'completed');
 
-  const handleCreateBackup = async (options: {
-    include_database_dump: boolean;
-    include_graph: boolean;
-  }) => {
+  const handleCreateBackup = async () => {
     try {
-      await createBackup.mutateAsync(options);
+      await createBackup.mutateAsync({});
       refetchBackups();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to create backup');
@@ -477,8 +390,6 @@ export default function BackupsPage() {
     enabled?: boolean;
     schedule?: string;
     retention_days?: number;
-    include_database_dump?: boolean;
-    include_graph?: boolean;
   }) => {
     try {
       await updateSettings.mutateAsync(updates);
@@ -510,9 +421,6 @@ export default function BackupsPage() {
         onClose={() => setIsModalOpen(false)}
         onConfirm={handleCreateBackup}
         isPending={createBackup.isPending}
-        defaultIncludeDatabaseDump={settings?.include_database_dump ?? true}
-        defaultIncludeGraph={settings?.include_graph ?? true}
-        databaseDumpSupported={settings?.database_dump_supported ?? false}
         archiveContents={settings?.archive_contents ?? []}
         lastBackupSize={lastCompletedBackup?.size_bytes}
       />
@@ -626,41 +534,23 @@ export default function BackupsPage() {
               </span>
             </div>
 
-            {/* Default Contents for scheduled backups */}
+            {/* Contents */}
             <div className="pt-4 border-t border-sc-fg-subtle/10">
               <p className="text-xs text-sc-fg-muted uppercase tracking-wide mb-3">
-                Default Contents for Scheduled Backups
+                Backup Contents
               </p>
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between p-3 rounded-lg bg-sc-bg-highlight/50 border border-sc-fg-subtle/10">
-                  <div className="flex items-center gap-3">
-                    <Database width={18} height={18} className="text-sc-cyan" />
-                    <span className="text-sm text-sc-fg-primary">
-                      {settings.database_dump_supported ? 'Database Dump' : 'Surreal Data Snapshot'}
-                    </span>
+              <div className="flex items-center justify-between p-3 rounded-lg bg-sc-bg-highlight/50 border border-sc-fg-subtle/10">
+                <div className="flex items-center gap-3">
+                  <Database width={18} height={18} className="text-sc-cyan" />
+                  <div>
+                    <p className="text-sm font-medium text-sc-fg-primary">Full Organization</p>
+                    <p className="text-xs text-sc-fg-muted">
+                      {(settings.archive_contents.length > 0
+                        ? settings.archive_contents
+                        : ['auth.json', 'content.json', 'graph.json', 'metadata.json']
+                      ).join(', ')}
+                    </p>
                   </div>
-                  <Toggle
-                    label="Include data snapshot in scheduled backups"
-                    enabled={settings.include_database_dump}
-                    onChange={() =>
-                      handleUpdateSetting({
-                        include_database_dump: !settings.include_database_dump,
-                      })
-                    }
-                    disabled={updateSettings.isPending}
-                  />
-                </div>
-                <div className="flex items-center justify-between p-3 rounded-lg bg-sc-bg-highlight/50 border border-sc-fg-subtle/10">
-                  <div className="flex items-center gap-3">
-                    <Archive width={18} height={18} className="text-sc-coral" />
-                    <span className="text-sm text-sc-fg-primary">Knowledge Graph</span>
-                  </div>
-                  <Toggle
-                    label="Include knowledge graph in scheduled backups"
-                    enabled={settings.include_graph}
-                    onChange={() => handleUpdateSetting({ include_graph: !settings.include_graph })}
-                    disabled={updateSettings.isPending}
-                  />
                 </div>
               </div>
             </div>

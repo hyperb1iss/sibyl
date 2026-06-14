@@ -36,6 +36,7 @@ dependencies = [
     "httpx>=0.27",
     # Auth
     # Config
+    "packaging>=26.0",
     "pyyaml>=6.0",
     "tomli-w>=1.2.0",
     # WebSocket (logs --follow)

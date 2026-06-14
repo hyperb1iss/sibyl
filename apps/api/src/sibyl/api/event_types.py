@@ -29,3 +29,4 @@ class WSEvent(StrEnum):
     ENTITY_PENDING = "entity_pending"
     QUESTION_ANSWERED = "question_answered"
     SOURCE_IMPORT_UPDATED = "source_import_updated"
+    RAW_CAPTURE_CHANGED = "raw_capture_changed"

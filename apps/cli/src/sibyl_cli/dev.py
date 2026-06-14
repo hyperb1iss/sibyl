@@ -84,7 +84,7 @@ def _run_compose(
     If replace_process is True, exec replaces the current process (used for
     interactive shell).
     """
-    cmd = ["docker", "compose", "-f", str(compose_file), *args]
+    cmd = ["docker", "compose", "--env-file", "/dev/null", "-f", str(compose_file), *args]
 
     if replace_process:
         import os

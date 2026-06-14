@@ -34,7 +34,6 @@ from sibyl.cli.export import app as export_app
 from sibyl.cli.generate import app as generate_app
 from sibyl.cli.migrate import app as migrate_app
 from sibyl.cli.up_cmd import down, status as up_status, up
-from sibyl.runtime_shape import resolve_object_coordination_backend
 
 # Main app
 app = typer.Typer(
@@ -290,24 +289,6 @@ def _tcp_service_running(host: str, port: int) -> bool:
         return False
 
 
-def _check_env_file() -> bool:
-    from sibyl.cli.common import error, success
-
-    env_file = Path(".env")
-    env_example = Path(".env.example")
-    if env_file.exists():
-        success(".env file exists")
-        return True
-    if env_example.exists():
-        info("Creating .env from .env.example...")
-        shutil.copy(env_example, env_file)
-        success(".env file created - please update with your values")
-        return False
-
-    error(".env.example not found - are you in the project directory?")
-    return False
-
-
 def _check_openai_api_key_configured(settings: Any) -> bool:
     from sibyl.cli.common import error, success
 
@@ -317,7 +298,7 @@ def _check_openai_api_key_configured(settings: Any) -> bool:
         return True
 
     error("OpenAI API key not set")
-    console.print(f"  [{NEON_CYAN}]Set SIBYL_OPENAI_API_KEY in .env[/{NEON_CYAN}]")
+    console.print(f"  [{NEON_CYAN}]Export SIBYL_OPENAI_API_KEY in your shell[/{NEON_CYAN}]")
     return False
 
 
@@ -349,7 +330,7 @@ def _check_surreal_services(settings: Any) -> bool:
             success(f"SurrealDB running on {surreal_host}:{surreal_port}")
         else:
             error(f"SurrealDB not running on {surreal_host}:{surreal_port}")
-            console.print(f"  [{NEON_CYAN}]Start with: docker compose up -d[/{NEON_CYAN}]")
+            console.print(f"  [{NEON_CYAN}]Start with: sibyld up[/{NEON_CYAN}]")
             all_good = False
     else:
         info(f"SurrealDB configured via {surreal_url}")
@@ -362,17 +343,24 @@ def _check_coordination_services(settings: Any) -> bool:
 
     all_good = True
 
-    if resolve_object_coordination_backend(settings) == "redis":
+    if _resolved_coordination_backend(settings) == "redis":
         redis_host = settings.redis_host or "127.0.0.1"
         redis_port = settings.redis_port or 6381
         if _tcp_service_running(redis_host, redis_port):
             success(f"Redis/Valkey running on {redis_host}:{redis_port}")
         else:
             error(f"Redis/Valkey not running on {redis_host}:{redis_port}")
-            console.print(f"  [{NEON_CYAN}]Start with: docker compose up -d[/{NEON_CYAN}]")
+            console.print(f"  [{NEON_CYAN}]Start with: sibyld up --with-worker[/{NEON_CYAN}]")
             all_good = False
 
     return all_good
+
+
+def _resolved_coordination_backend(settings: Any) -> str:
+    backend = getattr(settings, "resolved_coordination_backend", None)
+    if backend in {"local", "redis"}:
+        return backend
+    return "redis" if getattr(settings, "coordination_backend", None) == "redis" else "local"
 
 
 def _check_runtime_services(settings: Any) -> bool:
@@ -386,8 +374,7 @@ def setup() -> None:
 
     console.print(create_panel(f"[{ELECTRIC_PURPLE}]Sibyl Setup[/{ELECTRIC_PURPLE}]"))
 
-    all_good = _check_env_file()
-    all_good = _check_openai_api_key_configured(settings) and all_good
+    all_good = _check_openai_api_key_configured(settings)
     all_good = _check_docker_available() and all_good
     all_good = _check_runtime_services(settings) and all_good
 

@@ -1,0 +1,5650 @@
+{
+  "timestamp": "2026-06-10 05:27:33",
+  "label": "retrieval-native-rc1",
+  "search_type": "context-pack",
+  "metadata": {
+    "retrieval_mode": "native",
+    "embedding_provider": "openai",
+    "embedding_model": "text-embedding-3-small",
+    "embedding_dimensions": "1024",
+    "tokenizer_estimate_method": "provider-default",
+    "dataset_name": "context_pack_cases",
+    "corpus_hash": "sha256:ba2e29d85ebf3dcafb3c169a3be60e23126254c02786928eb22994cf977dc63d",
+    "auth_manifest_id": "sha256:398a7bc9601fd6a2351169379062b6b6abe7a87cbbac9de6f3d3eb610f6731d6",
+    "sibyl_commit": "42ec072b71e099ec520853f97c0ae3ac90c328b7",
+    "runtime_mode": "live-api",
+    "repeat_count": "20",
+    "case_count_per_repeat": "8"
+  },
+  "token_estimator": {
+    "method": "approximate_character_count",
+    "characters_per_token": 4,
+    "safety_margin_multiplier": 1.2
+  },
+  "metrics": {
+    "cases": 160,
+    "passed": 160,
+    "failed": 0,
+    "repeat_count": 20,
+    "case_count_per_repeat": 8.0,
+    "pass_rate": 1.0,
+    "latency_ms": 34.527364618838874,
+    "latency_p95_ms": 83.74132799872314,
+    "max_latency_ms": 145.70217100117588,
+    "avg_items": 3.25,
+    "max_items": 7.0,
+    "avg_markdown_chars": 1572.5,
+    "max_markdown_chars": 2693.0,
+    "avg_estimated_tokens": 393.5,
+    "max_estimated_tokens": 674.0,
+    "avg_budgeted_estimated_tokens": 472.625,
+    "max_budgeted_estimated_tokens": 809.0,
+    "source_metadata_coverage": 1.0,
+    "facet_order_match_rate": 1.0,
+    "forbidden_item_matches": 0.0,
+    "forbidden_term_matches": 0.0,
+    "leak_count": 0.0
+  },
+  "per_case": [
+    {
+      "name": "coding-handoff",
+      "repeat_index": 1,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 25.42077500038431
+      },
+      "latency_ms": 25.42077500038431
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 1,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 19.157413000357337
+      },
+      "latency_ms": 19.157413000357337
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 1,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 29.82503399834968
+      },
+      "latency_ms": 29.82503399834968
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 1,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 75.76131799942232
+      },
+      "latency_ms": 75.76131799942232
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 1,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 62.9891869975836
+      },
+      "latency_ms": 62.9891869975836
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 1,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.602201998466626
+      },
+      "latency_ms": 16.602201998466626
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 1,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 33.01113199995598
+      },
+      "latency_ms": 33.01113199995598
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 1,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 15.201641999738058
+      },
+      "latency_ms": 15.201641999738058
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 2,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.20565399955376
+      },
+      "latency_ms": 17.20565399955376
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 2,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.721260999474907
+      },
+      "latency_ms": 16.721260999474907
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 2,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 26.479766998818377
+      },
+      "latency_ms": 26.479766998818377
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 2,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 75.91846300056204
+      },
+      "latency_ms": 75.91846300056204
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 2,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 60.56143299792893
+      },
+      "latency_ms": 60.56143299792893
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 2,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.440560997783905
+      },
+      "latency_ms": 17.440560997783905
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 2,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 26.73923200200079
+      },
+      "latency_ms": 26.73923200200079
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 2,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 15.753650000988273
+      },
+      "latency_ms": 15.753650000988273
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 3,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.629778998321854
+      },
+      "latency_ms": 16.629778998321854
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 3,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.0867390006606
+      },
+      "latency_ms": 17.0867390006606
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 3,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 39.07543899913435
+      },
+      "latency_ms": 39.07543899913435
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 3,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 69.99732400072389
+      },
+      "latency_ms": 69.99732400072389
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 3,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 64.31426299968734
+      },
+      "latency_ms": 64.31426299968734
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 3,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.069520999939414
+      },
+      "latency_ms": 17.069520999939414
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 3,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 44.13965900312178
+      },
+      "latency_ms": 44.13965900312178
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 3,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 15.04766400103108
+      },
+      "latency_ms": 15.04766400103108
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 4,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.482965002272977
+      },
+      "latency_ms": 17.482965002272977
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 4,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.364769999403507
+      },
+      "latency_ms": 17.364769999403507
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 4,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 26.32337099930737
+      },
+      "latency_ms": 26.32337099930737
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 4,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 71.72478999927989
+      },
+      "latency_ms": 71.72478999927989
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 4,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 61.677764999330975
+      },
+      "latency_ms": 61.677764999330975
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 4,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.795920000731712
+      },
+      "latency_ms": 16.795920000731712
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 4,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 21.181520001846366
+      },
+      "latency_ms": 21.181520001846366
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 4,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 14.906767999491422
+      },
+      "latency_ms": 14.906767999491422
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 5,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 15.676380000513745
+      },
+      "latency_ms": 15.676380000513745
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 5,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.288390998146497
+      },
+      "latency_ms": 17.288390998146497
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 5,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 26.46058299797005
+      },
+      "latency_ms": 26.46058299797005
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 5,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 69.0152980023413
+      },
+      "latency_ms": 69.0152980023413
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 5,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 60.5562499986263
+      },
+      "latency_ms": 60.5562499986263
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 5,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.538195999601157
+      },
+      "latency_ms": 16.538195999601157
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 5,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 20.078104000276653
+      },
+      "latency_ms": 20.078104000276653
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 5,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 15.017006000562105
+      },
+      "latency_ms": 15.017006000562105
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 6,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.383948001021054
+      },
+      "latency_ms": 16.383948001021054
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 6,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.627179000352044
+      },
+      "latency_ms": 16.627179000352044
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 6,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 49.48790599883068
+      },
+      "latency_ms": 49.48790599883068
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 6,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 69.11035500161233
+      },
+      "latency_ms": 69.11035500161233
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 6,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 58.97815600110334
+      },
+      "latency_ms": 58.97815600110334
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 6,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.21591200112016
+      },
+      "latency_ms": 17.21591200112016
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 6,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 20.176926998829003
+      },
+      "latency_ms": 20.176926998829003
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 6,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 14.528753999911714
+      },
+      "latency_ms": 14.528753999911714
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 7,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 15.73948699660832
+      },
+      "latency_ms": 15.73948699660832
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 7,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.678823998518055
+      },
+      "latency_ms": 16.678823998518055
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 7,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 52.94455499824835
+      },
+      "latency_ms": 52.94455499824835
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 7,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 69.5805030009069
+      },
+      "latency_ms": 69.5805030009069
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 7,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 58.424290000402834
+      },
+      "latency_ms": 58.424290000402834
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 7,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.659962999256095
+      },
+      "latency_ms": 16.659962999256095
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 7,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 20.63572800034308
+      },
+      "latency_ms": 20.63572800034308
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 7,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 15.657340998586733
+      },
+      "latency_ms": 15.657340998586733
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 8,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.08524000039324
+      },
+      "latency_ms": 16.08524000039324
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 8,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.37538800080074
+      },
+      "latency_ms": 17.37538800080074
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 8,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 26.833838001039112
+      },
+      "latency_ms": 26.833838001039112
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 8,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 69.07606599997962
+      },
+      "latency_ms": 69.07606599997962
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 8,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 58.61247400025604
+      },
+      "latency_ms": 58.61247400025604
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 8,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.829225001856685
+      },
+      "latency_ms": 16.829225001856685
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 8,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 20.749245999468258
+      },
+      "latency_ms": 20.749245999468258
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 8,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 15.57736800168641
+      },
+      "latency_ms": 15.57736800168641
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 9,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.423888002464082
+      },
+      "latency_ms": 16.423888002464082
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 9,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.1686609974131
+      },
+      "latency_ms": 17.1686609974131
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 9,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 26.790100000653183
+      },
+      "latency_ms": 26.790100000653183
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 9,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 68.3189269984723
+      },
+      "latency_ms": 68.3189269984723
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 9,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 58.495603003393626
+      },
+      "latency_ms": 58.495603003393626
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 9,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 20.053446001838893
+      },
+      "latency_ms": 20.053446001838893
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 9,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 21.598250001261476
+      },
+      "latency_ms": 21.598250001261476
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 9,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 15.138892002141802
+      },
+      "latency_ms": 15.138892002141802
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 10,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.32553200033726
+      },
+      "latency_ms": 16.32553200033726
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 10,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.89187000010861
+      },
+      "latency_ms": 16.89187000010861
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 10,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 65.32203300230321
+      },
+      "latency_ms": 65.32203300230321
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 10,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 72.4622060006368
+      },
+      "latency_ms": 72.4622060006368
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 10,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 61.08979100099532
+      },
+      "latency_ms": 61.08979100099532
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 10,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 43.11763900113874
+      },
+      "latency_ms": 43.11763900113874
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 10,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 20.541277001029812
+      },
+      "latency_ms": 20.541277001029812
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 10,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 14.839127998129698
+      },
+      "latency_ms": 14.839127998129698
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 11,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.690942997229286
+      },
+      "latency_ms": 16.690942997229286
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 11,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.827921997901285
+      },
+      "latency_ms": 16.827921997901285
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 11,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 26.385192999441642
+      },
+      "latency_ms": 26.385192999441642
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 11,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 70.46576900029322
+      },
+      "latency_ms": 70.46576900029322
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 11,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 71.14895999984583
+      },
+      "latency_ms": 71.14895999984583
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 11,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.556727998453425
+      },
+      "latency_ms": 17.556727998453425
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 11,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 20.392385999002727
+      },
+      "latency_ms": 20.392385999002727
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 11,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 15.349893001257442
+      },
+      "latency_ms": 15.349893001257442
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 12,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.58337699700496
+      },
+      "latency_ms": 16.58337699700496
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 12,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.604484000708908
+      },
+      "latency_ms": 16.604484000708908
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 12,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 26.597806998324813
+      },
+      "latency_ms": 26.597806998324813
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 12,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 76.07014200038975
+      },
+      "latency_ms": 76.07014200038975
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 12,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 59.91767200248432
+      },
+      "latency_ms": 59.91767200248432
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 12,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.67783100149245
+      },
+      "latency_ms": 17.67783100149245
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 12,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 20.41518600162817
+      },
+      "latency_ms": 20.41518600162817
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 12,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 14.959668002120452
+      },
+      "latency_ms": 14.959668002120452
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 13,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.27862000168534
+      },
+      "latency_ms": 16.27862000168534
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 13,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.68826899913256
+      },
+      "latency_ms": 16.68826899913256
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 13,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 22.40964899829123
+      },
+      "latency_ms": 22.40964899829123
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 13,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 124.03328700020211
+      },
+      "latency_ms": 124.03328700020211
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 13,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 60.896914001205005
+      },
+      "latency_ms": 60.896914001205005
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 13,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.078126002161298
+      },
+      "latency_ms": 17.078126002161298
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 13,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 20.453223001823062
+      },
+      "latency_ms": 20.453223001823062
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 13,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 15.072333000716753
+      },
+      "latency_ms": 15.072333000716753
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 14,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.156367000803584
+      },
+      "latency_ms": 16.156367000803584
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 14,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.674755002895836
+      },
+      "latency_ms": 16.674755002895836
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 14,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 26.706690001446987
+      },
+      "latency_ms": 26.706690001446987
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 14,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 83.74132799872314
+      },
+      "latency_ms": 83.74132799872314
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 14,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 60.2411209983984
+      },
+      "latency_ms": 60.2411209983984
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 14,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.20394999938435
+      },
+      "latency_ms": 17.20394999938435
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 14,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 20.180874998914078
+      },
+      "latency_ms": 20.180874998914078
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 14,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 15.287264999642503
+      },
+      "latency_ms": 15.287264999642503
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 15,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.37647399911657
+      },
+      "latency_ms": 16.37647399911657
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 15,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.07472499765572
+      },
+      "latency_ms": 17.07472499765572
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 15,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 87.22640099949786
+      },
+      "latency_ms": 87.22640099949786
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 15,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 69.70830600039335
+      },
+      "latency_ms": 69.70830600039335
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 15,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 123.96579800042673
+      },
+      "latency_ms": 123.96579800042673
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 15,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.801079000288155
+      },
+      "latency_ms": 16.801079000288155
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 15,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 21.120313002029434
+      },
+      "latency_ms": 21.120313002029434
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 15,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 15.92814000105136
+      },
+      "latency_ms": 15.92814000105136
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 16,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.099852000479586
+      },
+      "latency_ms": 16.099852000479586
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 16,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.639369998301845
+      },
+      "latency_ms": 16.639369998301845
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 16,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 26.589171000523493
+      },
+      "latency_ms": 26.589171000523493
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 16,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 71.6498159999901
+      },
+      "latency_ms": 71.6498159999901
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 16,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 93.25521599748754
+      },
+      "latency_ms": 93.25521599748754
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 16,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.16923899948597
+      },
+      "latency_ms": 17.16923899948597
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 16,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 21.053963999293046
+      },
+      "latency_ms": 21.053963999293046
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 16,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 14.692126998852473
+      },
+      "latency_ms": 14.692126998852473
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 17,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.37536800262751
+      },
+      "latency_ms": 16.37536800262751
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 17,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.82988999891677
+      },
+      "latency_ms": 16.82988999891677
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 17,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 26.431677000800846
+      },
+      "latency_ms": 26.431677000800846
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 17,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 97.35979700053576
+      },
+      "latency_ms": 97.35979700053576
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 17,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 61.55843800297589
+      },
+      "latency_ms": 61.55843800297589
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 17,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.844134999701055
+      },
+      "latency_ms": 16.844134999701055
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 17,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 20.13265799905639
+      },
+      "latency_ms": 20.13265799905639
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 17,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 14.97129000199493
+      },
+      "latency_ms": 14.97129000199493
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 18,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.035816999647068
+      },
+      "latency_ms": 16.035816999647068
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 18,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.87608099746285
+      },
+      "latency_ms": 16.87608099746285
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 18,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 26.449516997672617
+      },
+      "latency_ms": 26.449516997672617
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 18,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 145.70217100117588
+      },
+      "latency_ms": 145.70217100117588
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 18,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 58.70081399916671
+      },
+      "latency_ms": 58.70081399916671
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 18,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.712947999621974
+      },
+      "latency_ms": 16.712947999621974
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 18,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 20.70714100045734
+      },
+      "latency_ms": 20.70714100045734
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 18,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 14.43280599778518
+      },
+      "latency_ms": 14.43280599778518
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 19,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 15.408650000608759
+      },
+      "latency_ms": 15.408650000608759
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 19,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.328492998785805
+      },
+      "latency_ms": 17.328492998785805
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 19,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 26.671339001040906
+      },
+      "latency_ms": 26.671339001040906
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 19,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 106.89343199919676
+      },
+      "latency_ms": 106.89343199919676
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 19,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 61.187309001979884
+      },
+      "latency_ms": 61.187309001979884
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 19,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.982844001177
+      },
+      "latency_ms": 16.982844001177
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 19,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 20.978873999411007
+      },
+      "latency_ms": 20.978873999411007
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 19,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 14.741548999154475
+      },
+      "latency_ms": 14.741548999154475
+    },
+    {
+      "name": "coding-handoff",
+      "repeat_index": 20,
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "coding-handoff",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 6,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2353,
+        "estimated_tokens": 589,
+        "budgeted_estimated_tokens": 707,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.306550001900177
+      },
+      "latency_ms": 16.306550001900177
+    },
+    {
+      "name": "personal-memory",
+      "repeat_index": 20,
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "personal-memory",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1212,
+        "estimated_tokens": 303,
+        "budgeted_estimated_tokens": 364,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 16.35780400101794
+      },
+      "latency_ms": 16.35780400101794
+    },
+    {
+      "name": "project-recall",
+      "repeat_index": 20,
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "project-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1264,
+        "estimated_tokens": 316,
+        "budgeted_estimated_tokens": 380,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 111.11044900098932
+      },
+      "latency_ms": 111.11044900098932
+    },
+    {
+      "name": "delegated-recall",
+      "repeat_index": 20,
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "delegated-recall",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 7,
+        "facets": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order": [
+          "active_work",
+          "gotchas",
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 2693,
+        "estimated_tokens": 674,
+        "budgeted_estimated_tokens": 809,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 71.92476600175723
+      },
+      "latency_ms": 71.92476600175723
+    },
+    {
+      "name": "agent-diary",
+      "repeat_index": 20,
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": "nova",
+      "fixture": "agent-diary",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 3,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1486,
+        "estimated_tokens": 372,
+        "budgeted_estimated_tokens": 447,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 60.787597998569254
+      },
+      "latency_ms": 60.787597998569254
+    },
+    {
+      "name": "private-leak-negative",
+      "repeat_index": 20,
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "private-leak-negative",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1123,
+        "estimated_tokens": 281,
+        "budgeted_estimated_tokens": 338,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 17.04472300116322
+      },
+      "latency_ms": 17.04472300116322
+    },
+    {
+      "name": "stale-decision-replacement",
+      "repeat_index": 20,
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "stale-decision-replacement",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1253,
+        "estimated_tokens": 314,
+        "budgeted_estimated_tokens": 377,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 20.500919999904
+      },
+      "latency_ms": 20.500919999904
+    },
+    {
+      "name": "source-grounding",
+      "repeat_index": 20,
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "layer": "recall",
+      "domain": "sibyl",
+      "project": null,
+      "agent_id": null,
+      "fixture": "source-grounding",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "metrics": {
+        "items": 2,
+        "facets": [
+          "recent_memory"
+        ],
+        "facet_order": [
+          "recent_memory"
+        ],
+        "facet_order_matches": true,
+        "markdown_chars": 1196,
+        "estimated_tokens": 299,
+        "budgeted_estimated_tokens": 359,
+        "source_metadata_coverage": 1.0,
+        "required_item_coverage": 1.0,
+        "forbidden_item_matches": 0,
+        "metadata_requirement_coverage": 1.0,
+        "forbidden_term_matches": 0,
+        "latency_ms": 15.152662002947181
+      },
+      "latency_ms": 15.152662002947181
+    }
+  ]
+}

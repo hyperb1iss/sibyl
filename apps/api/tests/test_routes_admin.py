@@ -473,6 +473,31 @@ async def test_debug_query_blocks_cypher_after_unbalanced_quote_in_comment() -> 
 @pytest.mark.parametrize(
     "query",
     [
+        "INFO FOR ROOT",
+        "SELECT http::get('http://169.254.169.254/latest/meta-data') AS body",
+        "SELECT * FROM entity LIMIT 1; INFO FOR ROOT",
+        "SELECT * FROM entity LIMIT 1; SELECT * FROM users LIMIT 1",
+    ],
+)
+async def test_debug_query_blocks_unsafe_debug_statements(query: str) -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    request = DebugQueryRequest(cypher=query)
+
+    with (
+        patch("sibyl.api.routes.admin.execute_debug_query", AsyncMock()) as mock_execute,
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await debug_query(request=request, org=org)
+
+    assert exc_info.value.status_code == 400
+    assert "single read-only SELECT" in str(exc_info.value.detail)
+    mock_execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query",
+    [
         "UPDATE entity SET name = 'oops'",
         "SELECT * FROM entity WHERE url = 'https://example.test'; UPDATE entity SET name = 'oops'",
         "DEFINE TABLE temp SCHEMALESS",

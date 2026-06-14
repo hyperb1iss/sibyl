@@ -163,8 +163,11 @@ class MemoryProjectionResult:
     extracted: int = 0
     projected_entities: int = 0
     relationships: int = 0
+    projection_state: str = "complete"
     skipped: bool = False
     reason: str | None = None
+    created_projected_entities: tuple[Entity, ...] = field(default_factory=tuple)
+    created_projection_relationships: tuple[Relationship, ...] = field(default_factory=tuple)
     errors: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -174,11 +177,14 @@ class MemoryProjectionBatchResult:
     extracted: int = 0
     projected_entities: int = 0
     relationships: int = 0
+    projection_state: str = "complete"
     skipped: int = 0
     projected_entity_ids_by_source_id: dict[str, tuple[str, ...]] = field(default_factory=dict)
     projected_entity_links_by_source_id: dict[str, tuple[ProjectedEntitySourceLink, ...]] = field(
         default_factory=dict
     )
+    created_projected_entities: tuple[Entity, ...] = field(default_factory=tuple)
+    created_projection_relationships: tuple[Relationship, ...] = field(default_factory=tuple)
     errors: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -193,6 +199,7 @@ class ProjectedEntitySourceLink:
 class _ProjectedEntityWriteResult:
     created_ids: list[str]
     id_map: dict[str, str]
+    created_entities: tuple[Entity, ...] = field(default_factory=tuple)
 
 
 def extract_projected_memory_entities(
@@ -309,7 +316,10 @@ async def project_memory_entity(
         extracted=batch.extracted,
         projected_entities=batch.projected_entities,
         relationships=batch.relationships,
+        projection_state=batch.projection_state,
         skipped=batch.skipped > 0,
+        created_projected_entities=batch.created_projected_entities,
+        created_projection_relationships=batch.created_projection_relationships,
         errors=batch.errors,
     )
 
@@ -487,6 +497,7 @@ async def _persist_projection_batch(
             sources=sources_count,
             extracted=extracted_count,
             skipped=skipped,
+            projection_state="partial",
             errors=(str(exc),),
         )
 
@@ -506,14 +517,33 @@ async def _persist_projection_batch(
         for source_id, links in resolved_links_by_source_id.items()
     }
     relationship_count = 0
+    created_projection_relationships: tuple[Relationship, ...] = ()
     if relationships:
         try:
             resolved_relationships = _relationships_with_resolved_entity_ids(
                 relationships,
                 entity_writes.id_map,
             )
-            created, failed = await relationship_manager.create_bulk(resolved_relationships)
-            relationship_count = created
+            create_direct_bulk = getattr(relationship_manager, "create_direct_bulk", None)
+            if callable(create_direct_bulk):
+                created_relationship_ids = list(
+                    await create_direct_bulk(
+                        resolved_relationships,
+                        generate_embeddings=generate_embeddings,
+                    )
+                )
+                relationship_count = len(created_relationship_ids)
+                created_relationship_id_set = set(created_relationship_ids)
+                created_projection_relationships = tuple(
+                    relationship
+                    for relationship in resolved_relationships
+                    if relationship.id in created_relationship_id_set
+                )
+                failed = len(resolved_relationships) - relationship_count
+            else:
+                created, failed = await relationship_manager.create_bulk(resolved_relationships)
+                relationship_count = created
+                created_projection_relationships = tuple(resolved_relationships[:created])
             if failed:
                 errors.append(f"{failed} projection relationships failed")
         except Exception as exc:
@@ -529,9 +559,12 @@ async def _persist_projection_batch(
         extracted=extracted_count,
         projected_entities=len(entity_writes.created_ids),
         relationships=relationship_count,
+        projection_state="partial" if errors else "complete",
         skipped=skipped,
         projected_entity_ids_by_source_id=resolved_entity_ids_by_source_id,
         projected_entity_links_by_source_id=resolved_links_by_source_id,
+        created_projected_entities=entity_writes.created_entities,
+        created_projection_relationships=created_projection_relationships,
         errors=tuple(errors),
     )
 
@@ -571,7 +604,14 @@ async def _create_projected_entities(
                 generate_embeddings=generate_on_create,
             )
         )
-        return _ProjectedEntityWriteResult(created_ids=created_ids, id_map=id_map)
+        return _ProjectedEntityWriteResult(
+            created_ids=created_ids,
+            id_map=id_map,
+            created_entities=tuple(
+                entity.model_copy(update={"id": created_id})
+                for entity, created_id in zip(unresolved_entities, created_ids, strict=False)
+            ),
+        )
 
     bulk_create_direct = getattr(entity_manager, "bulk_create_direct", None)
     if callable(bulk_create_direct):
@@ -585,18 +625,34 @@ async def _create_projected_entities(
         return _ProjectedEntityWriteResult(
             created_ids=[entity.id for entity in unresolved_entities],
             id_map=id_map,
+            created_entities=tuple(unresolved_entities),
         )
 
     create_direct = getattr(entity_manager, "create_direct", None)
     if callable(create_direct):
-        created_ids = [
-            await create_direct(entity, generate_embedding=generate_on_create)
-            for entity in unresolved_entities
-        ]
-        return _ProjectedEntityWriteResult(created_ids=created_ids, id_map=id_map)
+        created_ids: list[str] = []
+        created_entities: list[Entity] = []
+        for entity in unresolved_entities:
+            created_id = await create_direct(entity, generate_embedding=generate_on_create)
+            created_ids.append(created_id)
+            created_entities.append(entity.model_copy(update={"id": created_id}))
+        return _ProjectedEntityWriteResult(
+            created_ids=created_ids,
+            id_map=id_map,
+            created_entities=tuple(created_entities),
+        )
 
-    created_ids = [await entity_manager.create(entity) for entity in unresolved_entities]
-    return _ProjectedEntityWriteResult(created_ids=created_ids, id_map=id_map)
+    created_ids = []
+    created_entities = []
+    for entity in unresolved_entities:
+        created_id = await entity_manager.create(entity)
+        created_ids.append(created_id)
+        created_entities.append(entity.model_copy(update={"id": created_id}))
+    return _ProjectedEntityWriteResult(
+        created_ids=created_ids,
+        id_map=id_map,
+        created_entities=tuple(created_entities),
+    )
 
 
 async def _prepare_projected_entities(

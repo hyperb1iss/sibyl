@@ -1,21 +1,21 @@
 """Log streaming endpoints for developer introspection.
 
 Provides access to captured log entries for debugging and monitoring.
-Requires OWNER role (super admin equivalent).
+Requires global admin access.
 """
 
 from __future__ import annotations
 
 from typing import Annotated
+from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketException, status
 
-from sibyl.auth.dependencies import require_org_role
 from sibyl.auth.jwt import JwtError, verify_access_token
 from sibyl.config import settings
-from sibyl.persistence.auth_runtime import has_owner_membership, validate_access_session
-from sibyl_core.auth import OrganizationRole
+from sibyl.persistence.auth_runtime import get_user_by_id, validate_access_session
+from sibyl.persistence.operations_runtime import require_global_admin
 from sibyl_core.logging import LogBuffer
 
 log = structlog.get_logger()
@@ -25,13 +25,10 @@ router = APIRouter(
     tags=["logs"],
 )
 
-# Super admin = OWNER role
-_OWNER_ONLY = (OrganizationRole.OWNER,)
-
 
 @router.get(
     "",
-    dependencies=[Depends(require_org_role(*_OWNER_ONLY))],
+    dependencies=[Depends(require_global_admin)],
 )
 async def get_logs(
     limit: Annotated[int, Query(ge=1, le=500, description="Max entries to return")] = 50,
@@ -41,7 +38,7 @@ async def get_logs(
     """Get recent log entries.
 
     Returns log entries captured from the server's ring buffer.
-    Requires organization OWNER role.
+    Requires global admin access.
 
     Args:
         limit: Maximum entries to return (1-500)
@@ -58,7 +55,7 @@ async def get_logs(
 
 @router.get(
     "/stats",
-    dependencies=[Depends(require_org_role(*_OWNER_ONLY))],
+    dependencies=[Depends(require_global_admin)],
 )
 async def get_log_stats() -> dict:
     """Get log buffer statistics.
@@ -73,11 +70,7 @@ async def get_log_stats() -> dict:
 
 
 async def _validate_owner_token(token: str | None) -> bool:
-    """Validate that a token belongs to an OWNER.
-
-    For WebSocket auth, we verify the token and confirm the current
-    org membership still grants OWNER access.
-    """
+    """Validate that a token belongs to a global admin."""
     if settings.disable_auth:
         return True
 
@@ -96,14 +89,15 @@ async def _validate_owner_token(token: str | None) -> bool:
         return False
 
     try:
-        user_id = str(claims.get("sub", ""))
-        org_id = str(claims.get("org", ""))
+        user_id = UUID(str(claims.get("sub", "")))
     except ValueError:
         return False
-    if not user_id or not org_id:
+    try:
+        user = await get_user_by_id(user_id)
+    except TimeoutError:
         return False
 
-    return await has_owner_membership(org_id=org_id, user_id=user_id)
+    return bool(user and user.is_admin)
 
 
 @router.websocket("/stream")

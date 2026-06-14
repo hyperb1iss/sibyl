@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import re
@@ -11,6 +12,8 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Protocol, cast
 from uuid import uuid4
+
+import structlog
 
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
@@ -22,6 +25,8 @@ from sibyl_core.embeddings.providers import (
     EmbeddingProviderName,
     create_embedding_provider,
 )
+from sibyl_core.memory_pipeline.lifecycle import raw_memory_lifecycle_recallable
+from sibyl_core.memory_pipeline.retrieval import CandidateSourceFailure, CandidateSourceResult
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.models.reflection import (
     MemoryLifecycle,
@@ -43,9 +48,19 @@ _MARK_OPEN = "<mark>"
 _MARK_CLOSE = "</mark>"
 _SNIPPET_MAX_CHARS = 320
 _EMBEDDED_SURREAL_SCHEMES = ("memory://", "surrealkv://", "rocksdb://", "file://")
+log = structlog.get_logger()
 type _RawMemoryProviderCacheKey = tuple[EmbeddingProviderName, str, int, str]
 _raw_memory_embedding_provider: EmbeddingProvider | None = None
 _raw_memory_embedding_fingerprint: _RawMemoryProviderCacheKey | None = None
+
+
+@dataclass(slots=True)
+class _SharedContentClientState:
+    client: SurrealContentClient | None = None
+
+
+_shared_content_client_state = _SharedContentClientState()
+_shared_content_client_lock = asyncio.Lock()
 _UPSERT_RECORD = {
     "crawl_sources": (
         "UPSERT crawl_sources CONTENT $record "
@@ -86,6 +101,37 @@ INSERT INTO raw_captures $rows ON DUPLICATE KEY UPDATE
     purge_after = $input.purge_after,
     created_at = $input.created_at;
 """
+_RAW_MEMORY_RECALL_FIELDS = ", ".join(
+    (
+        "id AS record_id",
+        "uuid",
+        "organization_id",
+        "source_id",
+        "principal_id",
+        "memory_scope",
+        "scope_key",
+        "agent_id",
+        "project_id",
+        "review_state",
+        "entity_id",
+        "entity_type",
+        "title",
+        "raw_content",
+        "tags",
+        "metadata",
+        "provenance",
+        "capture_surface",
+        "created_by_user_id",
+        "captured_at",
+        "deleted_at",
+        "purge_after",
+        "created_at",
+    )
+)
+_DOCUMENT_CHUNK_SELECT = (
+    "uuid, organization_id, source_id, document_id, chunk_index, chunk_type, content, context, "
+    "heading_path, language, has_entities, entity_ids"
+)
 _DERIVED_FROM_LINEAGE_CANDIDATE_QUERY = """
     SELECT id, uuid, organization_id, raw_memory_ids, created_at
     FROM source_imports
@@ -384,6 +430,34 @@ class RawMemory:
 
 
 @dataclass(frozen=True, slots=True)
+class RawMemoryRecallResult:
+    memories: tuple[RawMemory, ...]
+    sources: tuple[CandidateSourceResult[RawMemory], ...] = ()
+
+    @property
+    def failures(self) -> tuple[CandidateSourceFailure, ...]:
+        failures: list[CandidateSourceFailure] = []
+        for source in self.sources:
+            if source.failure is not None:
+                failures.append(source.failure)
+        return tuple(failures)
+
+    @property
+    def degraded(self) -> bool:
+        return bool(self.failures)
+
+    def as_metadata(self) -> dict[str, object]:
+        failures = [failure.as_metadata() for failure in self.failures]
+        metadata: dict[str, object] = {
+            "raw_recall_degraded": bool(failures),
+            "raw_recall_failure_count": len(failures),
+        }
+        if failures:
+            metadata["raw_recall_failures"] = failures
+        return metadata
+
+
+@dataclass(frozen=True, slots=True)
 class RawMemoryWrite:
     organization_id: str
     principal_id: str
@@ -419,41 +493,8 @@ class _RawMemoryRecallFilters:
     as_of_text: str | None = None
 
 
-_RECALL_EXCLUDED_REVIEW_STATES = frozenset(
-    {
-        "archived",
-        "deleted",
-        "hidden",
-        "redacted",
-        "superseded",
-    }
-)
-_RECALL_EXCLUDED_LIFECYCLE_STATES = frozenset(
-    {
-        "deleted",
-        "duplicate",
-        "hidden",
-        "redacted",
-        "sensitive",
-        "stale",
-        "superseded",
-        "wrong",
-    }
-)
-
-
 def raw_memory_recallable(memory: RawMemory) -> bool:
-    review_state = str(memory.review_state or "").strip().lower()
-    lifecycle_state = str(memory.metadata.get("lifecycle_state") or "").strip().lower()
-    if review_state in _RECALL_EXCLUDED_REVIEW_STATES:
-        return False
-    if lifecycle_state in _RECALL_EXCLUDED_LIFECYCLE_STATES:
-        return False
-    if memory.metadata.get("superseded_by_raw_memory_id"):
-        return False
-    if memory.metadata.get("superseded_by_source_id"):
-        return False
-    return not memory.metadata.get("duplicate_of_source_id")
+    return raw_memory_lifecycle_recallable(memory)
 
 
 def raw_memory_currently_recallable(memory: RawMemory) -> bool:
@@ -523,16 +564,31 @@ def build_surreal_content_client() -> SurrealContentClient:
         username=settings.surreal_username,
         password=settings.surreal_password.get_secret_value(),
         token=settings.surreal_token.get_secret_value(),
+        pool_size=settings.surreal_client_pool_size("content"),
     )
+
+
+async def get_shared_surreal_content_client() -> SurrealContentClient:
+    if _shared_content_client_state.client is not None:
+        return _shared_content_client_state.client
+
+    async with _shared_content_client_lock:
+        if _shared_content_client_state.client is None:
+            _shared_content_client_state.client = build_surreal_content_client()
+        return _shared_content_client_state.client
+
+
+async def close_shared_surreal_content_client() -> None:
+    async with _shared_content_client_lock:
+        client = _shared_content_client_state.client
+        _shared_content_client_state.client = None
+        if client is not None:
+            await client.close()
 
 
 @asynccontextmanager
 async def surreal_content_client() -> AsyncIterator[SurrealContentClient]:
-    client = build_surreal_content_client()
-    try:
-        yield client
-    finally:
-        await client.close()
+    yield await get_shared_surreal_content_client()
 
 
 def _normalize_record(record: object) -> SurrealRecord | None:
@@ -1702,6 +1758,65 @@ async def _raw_memories_with_embeddings(
     return list(memories)
 
 
+def _raw_memory_embedding_surface(memory: RawMemory) -> str:
+    return raw_memory_embedding_text(title=memory.title, raw_content=memory.raw_content)
+
+
+def _raw_memory_without_embedding(memory: RawMemory) -> RawMemory:
+    metadata = dict(memory.metadata)
+    metadata.pop("embedding_metadata", None)
+    return replace(memory, embedding=None, metadata=metadata)
+
+
+def _raw_memory_with_existing_embedding(memory: RawMemory, existing: RawMemory) -> RawMemory:
+    if memory.embedding is not None or existing.embedding is None:
+        return memory
+    metadata = dict(memory.metadata)
+    existing_metadata = existing.metadata.get("embedding_metadata")
+    if "embedding_metadata" not in metadata and existing_metadata is not None:
+        metadata["embedding_metadata"] = existing_metadata
+    return replace(memory, embedding=list(existing.embedding), metadata=metadata)
+
+
+def _raw_memory_has_replacement_embedding(memory: RawMemory, existing: RawMemory | None) -> bool:
+    if memory.embedding is None:
+        return False
+    if existing is None or existing.embedding is None:
+        return True
+    return memory.embedding != existing.embedding
+
+
+async def _raw_memory_with_save_embedding(
+    memory: RawMemory,
+    embedding_provider: EmbeddingProvider | None | object,
+) -> RawMemory:
+    provider = (
+        _configured_raw_memory_embedding_provider()
+        if embedding_provider is _RAW_MEMORY_EMBEDDING_AUTO
+        else cast("EmbeddingProvider | None", embedding_provider)
+    )
+    return await _raw_memory_with_embedding(_raw_memory_without_embedding(memory), provider)
+
+
+async def _raw_memory_prepared_for_save(
+    memory: RawMemory,
+    *,
+    existing: RawMemory | None,
+    embedding_provider: EmbeddingProvider | None | object,
+) -> RawMemory:
+    if not raw_memory_recallable(memory):
+        return _raw_memory_without_embedding(memory)
+    if _raw_memory_has_replacement_embedding(memory, existing):
+        return memory
+    if existing is None:
+        return await _raw_memory_with_save_embedding(memory, embedding_provider)
+
+    text_changed = _raw_memory_embedding_surface(memory) != _raw_memory_embedding_surface(existing)
+    if not text_changed and raw_memory_recallable(existing):
+        return _raw_memory_with_existing_embedding(memory, existing)
+    return await _raw_memory_with_save_embedding(memory, embedding_provider)
+
+
 def _value_batches(
     values: Iterable[str], *, batch_size: int = _DEFAULT_BATCH_SIZE
 ) -> list[list[str]]:
@@ -1796,7 +1911,8 @@ async def _load_chunks_for_document_ids(
         rows.extend(
             await _select_many(
                 client,
-                "SELECT * FROM document_chunks WHERE document_id INSIDE $document_ids;",
+                f"SELECT {_DOCUMENT_CHUNK_SELECT} "
+                "FROM document_chunks WHERE document_id INSIDE $document_ids;",
                 document_ids=batch,
             )
         )
@@ -1958,7 +2074,8 @@ async def _recall_raw_memory_lexical(
     )
     rows = await _select_many(
         client,
-        f"SELECT * FROM raw_captures WHERE {where_clause} ORDER BY captured_at DESC LIMIT $limit;",
+        f"SELECT {_RAW_MEMORY_RECALL_FIELDS} FROM raw_captures "
+        f"WHERE {where_clause} ORDER BY captured_at DESC LIMIT $limit;",
         **params,
         limit=max(limit * 4, limit),
     )
@@ -1989,7 +2106,8 @@ async def _recall_raw_memory_fulltext(
     rows = await with_timeout(
         _select_many_raw(
             client,
-            "SELECT *, math::max([search::score(0), search::score(1)]) AS score, "
+            f"SELECT {_RAW_MEMORY_RECALL_FIELDS}, "
+            "math::max([search::score(0), search::score(1)]) AS score, "
             "search::highlight('<mark>', '</mark>', 0) AS title_snippet, "
             "search::highlight('<mark>', '</mark>', 1) AS content_snippet "
             f"FROM raw_captures WHERE {where_clause} "
@@ -2023,7 +2141,8 @@ async def _recall_raw_memory_vector(
         _select_many_raw(
             client,
             "SELECT * FROM ("
-            "SELECT *, (1 - vector::distance::knn()) AS score "
+            f"SELECT {_RAW_MEMORY_RECALL_FIELDS}, "
+            "(1 - vector::distance::knn()) AS score "
             f"FROM raw_captures WHERE {where_clause} "
             f"AND embedding <|{candidate_limit}, 40|> $query_embedding"
             ") ORDER BY score DESC, captured_at DESC LIMIT $candidate_limit;",
@@ -2042,14 +2161,24 @@ async def _recall_raw_memory_vector(
 
 
 async def _raw_memory_query_embedding(query: str) -> list[float] | None:
-    provider = _configured_raw_memory_embedding_provider()
-    if provider is None:
-        return None
+    provider: EmbeddingProvider | None = None
     try:
+        provider = _configured_raw_memory_embedding_provider()
+        if provider is None:
+            return None
         embeddings = await provider.embed_texts([query], input_kind="query")
         return _embedding_vector_from_batch(embeddings, provider.metadata.dimensions)
     except Exception as exc:
-        raise RuntimeError("raw memory query embedding failed") from exc
+        metadata = provider.metadata if provider is not None else None
+        log.warning(
+            "raw_memory_query_embedding_failed",
+            provider=metadata.provider if metadata is not None else None,
+            model=metadata.model if metadata is not None else None,
+            dimensions=metadata.dimensions if metadata is not None else None,
+            query_length=len(query),
+            error_type=type(exc).__name__,
+        )
+        return None
 
 
 def _python_raw_memory_rrf_scores(
@@ -2505,8 +2634,24 @@ async def list_raw_memories_for_promotion(
     ][:limit]
 
 
-async def save_raw_memory(memory: RawMemory) -> RawMemory:
+async def save_raw_memory(
+    memory: RawMemory,
+    *,
+    embedding_provider: EmbeddingProvider | None | object = _RAW_MEMORY_EMBEDDING_AUTO,
+) -> RawMemory:
     async with surreal_content_client() as client:
+        existing_record = await _select_one(
+            client,
+            "SELECT * FROM raw_captures "
+            "WHERE organization_id = $organization_id AND uuid = $uuid LIMIT 1;",
+            organization_id=memory.organization_id,
+            uuid=memory.id,
+        )
+        memory = await _raw_memory_prepared_for_save(
+            memory,
+            existing=_raw_memory_from_record(existing_record) if existing_record else None,
+            embedding_provider=embedding_provider,
+        )
         record = await _replace_record(
             client,
             "raw_captures",
@@ -2516,7 +2661,7 @@ async def save_raw_memory(memory: RawMemory) -> RawMemory:
     return _raw_memory_from_record(record)
 
 
-async def recall_raw_memory(
+async def _recall_raw_memory_result(
     *,
     organization_id: str,
     principal_id: str,
@@ -2533,10 +2678,11 @@ async def recall_raw_memory(
     occurred_before: datetime | str | None = None,
     as_of: datetime | str | None = None,
     limit: int = 10,
-) -> list[RawMemory]:
+    raise_on_source_failure: bool,
+) -> RawMemoryRecallResult:
     normalized_query = query.strip()
     if not normalized_query or limit <= 0:
-        return []
+        return RawMemoryRecallResult(())
 
     normalized_scope = _coerce_memory_scope(memory_scope)
     filters = _raw_recall_filters(
@@ -2563,7 +2709,12 @@ async def recall_raw_memory(
         project_id=project_id,
         filters=filters,
     )
-    query_embedding = await _raw_memory_query_embedding(normalized_query)
+    source_results: list[CandidateSourceResult[RawMemory]] = []
+    query_embedding: list[float] | None = None
+    try:
+        query_embedding = await _raw_memory_query_embedding(normalized_query)
+    except Exception as exc:
+        source_results.append(CandidateSourceResult.failed("raw_vector", type(exc).__name__))
     async with surreal_content_client() as client:
         fulltext_memories: list[RawMemory] = []
         vector_memories: list[RawMemory] = []
@@ -2576,8 +2727,18 @@ async def recall_raw_memory(
                 as_of=effective_as_of,
                 limit=limit,
             )
-        except (RuntimeError, TimeoutError):
+        except Exception as exc:
+            log.warning(
+                "raw_memory_fulltext_recall_failed",
+                organization_id=organization_id,
+                memory_scope=normalized_scope.value,
+                has_scope_key=scope_key is not None,
+                error_type=type(exc).__name__,
+            )
             fulltext_memories = []
+            source_results.append(CandidateSourceResult.failed("raw_fulltext", type(exc).__name__))
+        else:
+            source_results.append(CandidateSourceResult.success("raw_fulltext", fulltext_memories))
         if query_embedding is not None:
             try:
                 vector_memories = await _recall_raw_memory_vector(
@@ -2588,28 +2749,126 @@ async def recall_raw_memory(
                     as_of=effective_as_of,
                     limit=limit,
                 )
-            except (RuntimeError, TimeoutError) as exc:
-                raise RuntimeError("raw memory vector recall failed") from exc
+            except Exception as exc:
+                log.warning(
+                    "raw_memory_vector_recall_failed",
+                    organization_id=organization_id,
+                    memory_scope=normalized_scope.value,
+                    has_scope_key=scope_key is not None,
+                    error_type=type(exc).__name__,
+                )
+                vector_memories = []
+                source_results.append(
+                    CandidateSourceResult.failed("raw_vector", type(exc).__name__)
+                )
+            else:
+                source_results.append(CandidateSourceResult.success("raw_vector", vector_memories))
         memories = await _fuse_raw_memory_results(
             client,
             [fulltext_memories, vector_memories],
             limit=limit,
         )
         if memories:
-            return memories
-        return await _recall_raw_memory_lexical(
-            client,
-            organization_id=organization_id,
-            principal_id=principal_id,
-            query=normalized_query,
-            memory_scope=normalized_scope,
-            scope_key=scope_key,
-            agent_id=agent_id,
-            project_id=project_id,
-            filters=filters,
-            as_of=effective_as_of,
-            limit=limit,
-        )
+            return RawMemoryRecallResult(tuple(memories), tuple(source_results))
+        try:
+            lexical_memories = await _recall_raw_memory_lexical(
+                client,
+                organization_id=organization_id,
+                principal_id=principal_id,
+                query=normalized_query,
+                memory_scope=normalized_scope,
+                scope_key=scope_key,
+                agent_id=agent_id,
+                project_id=project_id,
+                filters=filters,
+                as_of=effective_as_of,
+                limit=limit,
+            )
+        except (RuntimeError, TimeoutError) as exc:
+            source_results.append(CandidateSourceResult.failed("raw_lexical", type(exc).__name__))
+            if raise_on_source_failure:
+                raise
+            lexical_memories = []
+        else:
+            source_results.append(CandidateSourceResult.success("raw_lexical", lexical_memories))
+        return RawMemoryRecallResult(tuple(lexical_memories), tuple(source_results))
+
+
+async def recall_raw_memory_with_sources(
+    *,
+    organization_id: str,
+    principal_id: str,
+    query: str,
+    memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
+    scope_key: str | None = None,
+    agent_id: str | None = None,
+    project_id: str | None = None,
+    source_ids: Sequence[str] | None = None,
+    participants: Sequence[str] | None = None,
+    labels: Sequence[str] | None = None,
+    thread_id: str | None = None,
+    occurred_after: datetime | str | None = None,
+    occurred_before: datetime | str | None = None,
+    as_of: datetime | str | None = None,
+    limit: int = 10,
+) -> RawMemoryRecallResult:
+    return await _recall_raw_memory_result(
+        organization_id=organization_id,
+        principal_id=principal_id,
+        query=query,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+        agent_id=agent_id,
+        project_id=project_id,
+        source_ids=source_ids,
+        participants=participants,
+        labels=labels,
+        thread_id=thread_id,
+        occurred_after=occurred_after,
+        occurred_before=occurred_before,
+        as_of=as_of,
+        limit=limit,
+        raise_on_source_failure=False,
+    )
+
+
+async def recall_raw_memory(
+    *,
+    organization_id: str,
+    principal_id: str,
+    query: str,
+    memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
+    scope_key: str | None = None,
+    agent_id: str | None = None,
+    project_id: str | None = None,
+    source_ids: Sequence[str] | None = None,
+    participants: Sequence[str] | None = None,
+    labels: Sequence[str] | None = None,
+    thread_id: str | None = None,
+    occurred_after: datetime | str | None = None,
+    occurred_before: datetime | str | None = None,
+    as_of: datetime | str | None = None,
+    limit: int = 10,
+) -> list[RawMemory]:
+    result = await _recall_raw_memory_result(
+        organization_id=organization_id,
+        principal_id=principal_id,
+        query=query,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+        agent_id=agent_id,
+        project_id=project_id,
+        source_ids=source_ids,
+        participants=participants,
+        labels=labels,
+        thread_id=thread_id,
+        occurred_after=occurred_after,
+        occurred_before=occurred_before,
+        as_of=as_of,
+        limit=limit,
+        raise_on_source_failure=True,
+    )
+    return list(result.memories)
 
 
 async def list_raw_memories_for_scope(
@@ -3108,13 +3367,16 @@ __all__ = [
     "ContentSource",
     "MemoryScope",
     "RawMemory",
+    "RawMemoryRecallResult",
     "RawMemoryWrite",
     "backfill_content_lineage",
     "build_surreal_content_client",
+    "close_shared_surreal_content_client",
     "get_or_create_source",
     "get_raw_memory",
     "get_raw_memory_by_dedupe_key",
     "get_raw_memory_by_source_id",
+    "get_shared_surreal_content_client",
     "lexical_score",
     "lexical_score_from_tokens",
     "list_raw_memories_by_source_id",
@@ -3130,6 +3392,7 @@ __all__ = [
     "raw_memory_embedding_text",
     "raw_memory_recallable",
     "recall_raw_memory",
+    "recall_raw_memory_with_sources",
     "remember_raw_memories",
     "remember_raw_memory",
     "remember_reflection_candidate_review",

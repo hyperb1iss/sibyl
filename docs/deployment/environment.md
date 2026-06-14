@@ -4,11 +4,15 @@ Complete reference for all Sibyl environment variables.
 
 ## Configuration Loading
 
-Sibyl uses Pydantic Settings to load configuration:
+Sibyl uses Pydantic Settings to load configuration from the process environment:
 
 1. Environment variables (highest priority)
-2. `.env` file in `apps/api/`
+2. Explicit deployment env files loaded by the launcher (`docker compose --env-file`, systemd
+   `EnvironmentFile`, Kubernetes secrets, etc.)
 3. Default values
+
+Local development does not read repo `.env` files. Use shell exports, the web onboarding UI, or an
+explicit deployment env file.
 
 All variables use the `SIBYL_` prefix. Some common variables (API keys) also support unprefixed
 versions as fallbacks.
@@ -65,21 +69,21 @@ When using Kong or similar ingress, `SIBYL_PUBLIC_URL` is typically set to the e
 
 ## Authentication
 
-| Variable                            | Default | Description                                             |
-| ----------------------------------- | ------- | ------------------------------------------------------- |
-| `SIBYL_JWT_SECRET`                  | (empty) | **Required.** JWT signing secret                        |
-| `SIBYL_JWT_ALGORITHM`               | `HS256` | JWT signing algorithm                                   |
-| `SIBYL_ACCESS_TOKEN_EXPIRE_MINUTES` | `60`    | Access token TTL in minutes                             |
-| `SIBYL_REFRESH_TOKEN_EXPIRE_DAYS`   | `30`    | Local-auth refresh token TTL in days                    |
-| `SIBYL_DISABLE_AUTH`                | `false` | Disable auth enforcement (dev only)                     |
-| `SIBYL_MCP_AUTH_MODE`               | `auto`  | MCP auth: auto/on/off                                   |
-| `SIBYL_SETTINGS_KEY`                | (auto)  | Fernet key for encrypting DB-stored secrets             |
-| `SIBYL_LOCAL_AUTH_ENABLED`          | `true`  | Enable local username/password login after setup        |
-| `SIBYL_PUBLIC_SIGNUPS_ENABLED`      | `false` | Allow public self-serve account creation after setup    |
-| `SIBYL_OIDC`                        | `{}`    | JSON object for optional OIDC providers and session UX  |
-| `SIBYL_BREAK_GLASS_ENABLED`         | `false` | Enable bounded emergency local login for SSO outages    |
-| `SIBYL_BREAK_GLASS_ALLOWED_IPS`     | `[]`    | JSON array of CIDRs allowed to use break-glass login    |
-| `SIBYL_BREAK_GLASS_EXPIRES_AT`      | (empty) | UTC expiry for break-glass, no more than four hours out |
+| Variable                            | Default    | Description                                             |
+| ----------------------------------- | ---------- | ------------------------------------------------------- |
+| `SIBYL_JWT_SECRET`                  | (dev auto) | JWT signing secret, required in production              |
+| `SIBYL_JWT_ALGORITHM`               | `HS256`    | JWT signing algorithm                                   |
+| `SIBYL_ACCESS_TOKEN_EXPIRE_MINUTES` | `60`       | Access token TTL in minutes                             |
+| `SIBYL_REFRESH_TOKEN_EXPIRE_DAYS`   | `30`       | Local-auth refresh token TTL in days                    |
+| `SIBYL_DISABLE_AUTH`                | `false`    | Disable auth enforcement (dev only)                     |
+| `SIBYL_MCP_AUTH_MODE`               | `auto`     | MCP auth: auto/on/off                                   |
+| `SIBYL_SETTINGS_KEY`                | (auto)     | Fernet key for encrypting DB-stored secrets             |
+| `SIBYL_LOCAL_AUTH_ENABLED`          | `true`     | Enable local username/password login after setup        |
+| `SIBYL_PUBLIC_SIGNUPS_ENABLED`      | `false`    | Allow public self-serve account creation after setup    |
+| `SIBYL_OIDC`                        | `{}`       | JSON object for optional OIDC providers and session UX  |
+| `SIBYL_BREAK_GLASS_ENABLED`         | `false`    | Enable bounded emergency local login for SSO outages    |
+| `SIBYL_BREAK_GLASS_ALLOWED_IPS`     | `[]`       | JSON array of CIDRs allowed to use break-glass login    |
+| `SIBYL_BREAK_GLASS_EXPIRES_AT`      | (empty)    | UTC expiry for break-glass, no more than four hours out |
 
 The default Sibyl mode is local-first and single-user friendly: local auth is enabled, the first
 setup signup creates the owner/admin user, and account creation after setup is invite-based unless
@@ -288,31 +292,29 @@ detail.
 | ------------------ | ------- | ------------------------------------------------------------------- |
 | `SIBYL_RUN_WORKER` | `false` | Embed a worker in the API process when Redis coordination is active |
 
-## Example .env Files
+## Example Environment Blocks
 
-### Local Development
+### Local Development Shell
 
 ```bash
-# .env
-SIBYL_ENVIRONMENT=development
-SIBYL_JWT_SECRET=dev-secret-change-in-production
+export SIBYL_ENVIRONMENT=development
 
 # Recommended local runtime
-SIBYL_STORE=surreal
-SIBYL_COORDINATION_BACKEND=local
-SIBYL_SURREAL_URL=ws://127.0.0.1:8000/rpc
-SIBYL_SURREAL_USERNAME=root
-SIBYL_SURREAL_PASSWORD=root
+export SIBYL_STORE=surreal
+export SIBYL_COORDINATION_BACKEND=local
+export SIBYL_SURREAL_URL=ws://127.0.0.1:8000/rpc
+export SIBYL_SURREAL_USERNAME=root
+export SIBYL_SURREAL_PASSWORD=root
 
 # LLM
-SIBYL_OPENAI_API_KEY=sk-...
-SIBYL_ANTHROPIC_API_KEY=sk-ant-...
+export SIBYL_OPENAI_API_KEY=sk-...
+export SIBYL_ANTHROPIC_API_KEY=sk-ant-...
 
 # Logging
-SIBYL_LOG_LEVEL=DEBUG
+export SIBYL_LOG_LEVEL=DEBUG
 ```
 
-### Production (Surreal, default)
+### Production Env File (Surreal, Default)
 
 ```bash
 SIBYL_ENVIRONMENT=production
@@ -428,24 +430,26 @@ configuring different ports and container names.
 
 ### Quick Setup: Test Instance
 
-1. Create `.env.test` with offset ports (copy from `.env.test.example`):
+1. Export offset ports for this shell:
 
 ```bash
-COMPOSE_PROJECT_NAME=sibyl-test
-SIBYL_SERVER_PORT=3344
-SIBYL_WEB_PORT=3347
+export COMPOSE_PROJECT_NAME=sibyl-test
+export SIBYL_SERVER_PORT=3344
+export SIBYL_WEB_PORT=3347
+export SIBYL_SURREAL_PORT=8010
+export SIBYL_SURREAL_URL=ws://127.0.0.1:8010/rpc
 ```
 
 2. Start databases with isolated containers and volumes:
 
 ```bash
-docker compose -p sibyl-test --env-file .env.test up -d
+docker compose --env-file /dev/null -p "$COMPOSE_PROJECT_NAME" up -d
 ```
 
 3. Start API pointing to test databases:
 
 ```bash
-env $(cat .env.test | xargs) sibyld serve
+sibyld serve
 ```
 
 4. Start web frontend:
@@ -462,7 +466,7 @@ SIBYL_WEB_PORT=3347 SIBYL_BACKEND_URL=http://localhost:3344 pnpm -C apps/web dev
 
 ### Tips
 
-- Use `docker compose -p sibyl-test ps` to see test instance containers
+- Use `docker compose --env-file /dev/null -p sibyl-test ps` to see test instance containers
 - Local Surreal data directories are namespaced by project when you override `SURREAL_DATA_DIR`
 - CLI contexts let you switch between instances: `sibyl context use test`
 

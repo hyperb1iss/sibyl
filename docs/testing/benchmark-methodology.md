@@ -112,8 +112,8 @@ The committed `benchmarks/results/ai-memory/longmemeval_sibyl_raw_20260513.json`
 using those numbers for a later release candidate.
 
 `benchmarks/results/ai-memory/manifest.json` records which AI memory benchmark artifacts are citable
-for the release and which suites are planned coverage only. The manifest is checked against the full
-JSON artifacts by `moon run bench-gate-test`.
+for the release and which suites are planned coverage only. The manifest is checked against full
+JSON artifacts or committed external archive manifests by `moon run bench-gate-test`.
 
 ## Threshold Gates
 
@@ -167,6 +167,13 @@ Use `--require-metadata store=surreal` or other metadata filters when you need t
 produced the artifact. Use `--min-metric` and `--max-metric` to tighten a gate for a specific run
 without forking the script.
 
+Use `--baseline <report.json>` to make the gate fail on absolute regressions against a saved
+baseline report. By default, the comparison uses the selected profile's metrics and allows zero
+regression. Narrow the comparison with `--baseline-metric <metric>` and allow known measurement
+noise only by naming it explicitly with `--max-regression <metric>=<amount>`. Custom baseline
+metrics must have a known direction or an obvious lower-is-better suffix such as `_ms`, `_seconds`,
+`_count`, `_chars`, or `_tokens`; unknown names fail closed.
+
 ## Product Gates
 
 Post-v0.8 release claims use small product gates alongside benchmark gates. These do not replace the
@@ -191,6 +198,13 @@ metadata for the default release run. Local reports from `core:bench-context` ar
 `benchmarks/results/context-pack/` and then gated with
 `moon run bench-gate -- <report.json> --profile context-pack`.
 
+`benchmarks/golden_context_retrieval_dataset.json` is the labeled RC golden dataset that ties the
+retrieval and context-pack fixtures together. It defines stable fixture document IDs, graded
+retrieval positives, forbidden leakage sentinels, and per-case context labels. The loader in
+`sibyl_core.evals` validates the schema, document references, and corpus fixture hashes so future
+retrieval and context-pack runners can consume the same labels instead of drifting into parallel
+fixtures.
+
 ## Reporting Rules
 
 - Lead with `bench-live` when describing Sibyl’s current runtime behavior.
@@ -201,6 +215,8 @@ metadata for the default release run. Local reports from `core:bench-context` ar
 - Keep the artifact JSON from `bench-live` whenever you cite a number in docs or PRs.
 - For AI memory benchmark and competitor claims, keep full raw artifacts plus overall metrics,
   per-slice metrics, corpus or dataset version, command, commit, runtime mode, and caveats.
+- If a full artifact is too large for git, keep a committed external archive manifest with the
+  archive location, digest, expiry, verification receipt, gate receipt, and exact summary fields.
 - If the live stack or auth context is unavailable, say so explicitly instead of substituting an
   offline result.
 
@@ -235,8 +251,10 @@ Required record fields:
 - claim boundary: what the result supports and what stays unproven
 
 `moon run bench-gate` with no report argument gates the committed
-`benchmarks/results/ai-memory/manifest.json` ledger and every citable artifact it names. Use
-`moon run bench-gate -- <artifact>.json --profile ai-memory` for a single uncommitted artifact.
+`benchmarks/results/ai-memory/manifest.json` ledger, every citable artifact it names, and each
+manifest `no_regression` baseline comparison. Use
+`moon run bench-gate -- <artifact>.json --profile ai-memory --baseline <baseline>.json` for a single
+uncommitted artifact that needs the same no-regression policy.
 
 The canonical ledger for which rows are citable is
 `docs/_archive/SURREALDB_GRAPHITI_EXIT_BENCHMARK_EVIDENCE.md`. If a benchmark suite is missing from

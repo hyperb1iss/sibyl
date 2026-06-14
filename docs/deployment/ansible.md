@@ -99,13 +99,13 @@ The role is idempotent; re-run it to roll out config or image changes.
 ```bash
 # on the host
 systemctl status sibyl
-docker compose -f /opt/sibyl/docker-compose.yml ps
+docker compose --env-file /opt/sibyl/.env -f /opt/sibyl/docker-compose.yml ps
 curl -sf https://<sibyl_domain>/api/health
 ```
 
 ## Operations
 
-- **Logs:** `docker compose -f /opt/sibyl/docker-compose.yml logs -f`
+- **Logs:** `docker compose --env-file /opt/sibyl/.env -f /opt/sibyl/docker-compose.yml logs -f`
 - **Update:** bump `sibyl_version` and re-run the role
 - **Backups:** schedule `surreal export` against the running stack and copy the dump off-host. The
   graph is your memory; back it up.

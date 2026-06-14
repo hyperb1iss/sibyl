@@ -1766,8 +1766,6 @@ export interface BackupSettingsUpdate {
   enabled?: boolean;
   schedule?: string;
   retention_days?: number;
-  include_database_dump?: boolean;
-  include_graph?: boolean;
 }
 
 export interface BackupInfo {
@@ -1791,10 +1789,7 @@ export interface BackupListResponse {
   total: number;
 }
 
-export interface CreateBackupRequest {
-  include_database_dump?: boolean;
-  include_graph?: boolean;
-}
+export type CreateBackupRequest = Record<string, never>;
 
 export interface CreateBackupResponse {
   id: string;

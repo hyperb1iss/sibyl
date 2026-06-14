@@ -234,7 +234,10 @@ async def test_priority_decay_archives_only_old_unarchived_episodes(
     )
 
     result = await consolidation_module.priority_decay(
-        {}, group_id="org-123", max_archives_per_run=10
+        {},
+        group_id="org-123",
+        max_archives_per_run=10,
+        entity_types=(EntityType.EPISODE,),
     )
 
     assert result == {
@@ -251,6 +254,74 @@ async def test_priority_decay_archives_only_old_unarchived_episodes(
     assert entity_manager.update.await_args.args[0] == "episode-old"
     assert entity_manager.update.await_args.args[1]["status"] == "archived"
     assert "archived_at" in entity_manager.update.await_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_priority_decay_defaults_to_derived_memory_entities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime.now(UTC)
+    called_types: list[EntityType] = []
+
+    def entity(entity_id: str, entity_type: EntityType) -> Entity:
+        return Entity(
+            id=entity_id,
+            entity_type=entity_type,
+            name=entity_id,
+            created_at=now - timedelta(days=240),
+            metadata={"importance": 0.10},
+        )
+
+    async def list_by_type(
+        entity_type: EntityType,
+        limit: int = 50,
+        offset: int = 0,
+        include_archived: bool = False,
+    ) -> list[Entity]:
+        del limit, include_archived
+        called_types.append(entity_type)
+        if offset != 0:
+            return []
+        if entity_type is EntityType.CLAIM:
+            return [entity("claim-derived", EntityType.CLAIM)]
+        if entity_type is EntityType.IDEA:
+            return [entity("idea-derived", EntityType.IDEA)]
+        return []
+
+    entity_manager = AsyncMock()
+    entity_manager.list_by_type = AsyncMock(side_effect=list_by_type)
+    entity_manager.update = AsyncMock(return_value=object())
+
+    monkeypatch.setattr(
+        consolidation_module,
+        "_get_graph_runtime",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                client=MagicMock(),
+                entity_manager=entity_manager,
+                relationship_manager=AsyncMock(),
+            )
+        ),
+    )
+
+    result = await consolidation_module.priority_decay(
+        {},
+        group_id="org-123",
+        max_archives_per_run=10,
+    )
+
+    assert result["candidates_found"] == 2
+    assert result["archived"] == 2
+    assert set(consolidation_module._PRIORITY_DECAY_ENTITY_TYPES) <= set(called_types)
+    assert EntityType.SOURCE not in called_types
+    assert EntityType.DOCUMENT not in called_types
+    assert EntityType.SESSION not in called_types
+    assert EntityType.TASK not in called_types
+    assert EntityType.PROJECT not in called_types
+    assert sorted(await_call.args[0] for await_call in entity_manager.update.await_args_list) == [
+        "claim-derived",
+        "idea-derived",
+    ]
 
 
 @pytest.mark.asyncio
@@ -289,7 +360,10 @@ async def test_priority_decay_respects_archive_cap_across_pages(
     )
 
     result = await consolidation_module.priority_decay(
-        {}, group_id="org-123", max_archives_per_run=3
+        {},
+        group_id="org-123",
+        max_archives_per_run=3,
+        entity_types=(EntityType.EPISODE,),
     )
 
     assert result["candidates_found"] == 3
@@ -303,6 +377,78 @@ async def test_priority_decay_respects_archive_cap_across_pages(
         "episode-2",
         "episode-3",
     ]
+
+
+@pytest.mark.asyncio
+async def test_priority_decay_scores_importance_recency_and_supersession(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime.now(UTC)
+
+    def episode(entity_id: str, metadata: dict[str, object]) -> Entity:
+        return Entity(
+            id=entity_id,
+            entity_type=EntityType.EPISODE,
+            name=entity_id,
+            created_at=now - timedelta(days=240),
+            updated_at=now - timedelta(days=240),
+            metadata=metadata,
+        )
+
+    entity_manager = AsyncMock()
+    entity_manager.list_by_type = AsyncMock(
+        side_effect=[
+            [
+                episode("low-importance", {"importance": 0.15}),
+                episode("important", {"importance": 0.98}),
+                episode(
+                    "recently-used",
+                    {
+                        "importance": 0.40,
+                        "last_accessed_at": (now - timedelta(days=3)).isoformat(),
+                    },
+                ),
+                episode("superseded", {"importance": 0.95, "lifecycle_state": "superseded"}),
+                episode("pinned", {"importance": 0.05, "retention": "pinned"}),
+            ],
+            [],
+        ]
+    )
+    entity_manager.update = AsyncMock(return_value=object())
+
+    monkeypatch.setattr(
+        consolidation_module,
+        "_get_graph_runtime",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                client=MagicMock(),
+                entity_manager=entity_manager,
+                relationship_manager=AsyncMock(),
+            )
+        ),
+    )
+
+    result = await consolidation_module.priority_decay(
+        {},
+        group_id="org-123",
+        max_archives_per_run=10,
+        decay_threshold=0.35,
+        recency_half_life_days=180,
+        entity_types=(EntityType.EPISODE,),
+    )
+
+    assert result["candidates_found"] == 2
+    assert result["archived"] == 2
+    assert [await_call.args[0] for await_call in entity_manager.update.await_args_list] == [
+        "low-importance",
+        "superseded",
+    ]
+    low_updates = entity_manager.update.await_args_list[0].args[1]
+    superseded_updates = entity_manager.update.await_args_list[1].args[1]
+    assert low_updates["decay_reason"] == "low_priority_decay_score"
+    assert superseded_updates["decay_reason"] == "superseded_or_stale"
+    assert low_updates["decay_score"] < low_updates["decay_threshold"]
+    assert superseded_updates["decay_score"] < superseded_updates["decay_threshold"]
 
 
 @pytest.mark.asyncio

@@ -2481,7 +2481,12 @@ async def detect_communities(
         max_entities=max_entities,
         max_relationships=max_relationships,
     )
-    return _detect_communities_from_graph(G, config=config, algorithm=algorithm)
+    return await asyncio.to_thread(
+        _detect_communities_from_graph,
+        G,
+        config=config,
+        algorithm=algorithm,
+    )
 
 
 async def store_communities(
