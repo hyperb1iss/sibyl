@@ -486,7 +486,7 @@ def _require_break_glass_reason(reason: str | None) -> str | None:
         )
     if len(normalized) > BREAK_GLASS_REASON_MAX_LENGTH:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=BREAK_GLASS_REASON_TOO_LONG_DETAIL,
         )
     return normalized

@@ -336,7 +336,7 @@ def _safe_message_for_status(message: str, status_code: int) -> str:
     sanitized = sanitize_error_text(message)
     if sanitized == VALIDATION_ERROR and status_code not in {
         status.HTTP_400_BAD_REQUEST,
-        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
     }:
         return _message_for_status(status_code)
     return sanitized
@@ -380,7 +380,7 @@ def _error_code_for_status(status_code: int) -> str:
         return "conflict"
     if status_code == status.HTTP_429_TOO_MANY_REQUESTS:
         return "rate_limited"
-    if status_code == status.HTTP_422_UNPROCESSABLE_ENTITY:
+    if status_code == status.HTTP_422_UNPROCESSABLE_CONTENT:
         return "validation_error"
     if status_code >= 500:
         return "internal_error"

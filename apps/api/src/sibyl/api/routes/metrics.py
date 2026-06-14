@@ -604,7 +604,7 @@ async def get_project_summaries(
             "get_project_summaries_entity_limit_exceeded", error=str(e), group_id=str(org.id)
         )
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail="Too many tasks to compute project summaries. Please narrow scope.",
         ) from e
     except Exception as e:
@@ -674,7 +674,7 @@ async def get_org_metrics(
     except MetricsEntityLimitExceededError as e:
         log.warning("get_org_metrics_entity_limit_exceeded", error=str(e), group_id=str(org.id))
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail="Too many tasks to compute organization metrics. Please narrow scope.",
         ) from e
     except Exception as e:
