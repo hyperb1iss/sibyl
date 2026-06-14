@@ -236,7 +236,7 @@ async def _assert_live_raw_ingestion_path(
                     source_id=source_id,
                     raw_content="alpha imported capture without the query marker",
                     title="Live raw memory vector probe",
-                    memory_scope=MemoryScope.PRIVATE,
+                    memory_scope=MemoryScope.ORGANIZATION,
                     metadata={"dedupe_key": "live-dedupe"},
                     capture_surface="source_import",
                 )
@@ -247,6 +247,7 @@ async def _assert_live_raw_ingestion_path(
             organization_id=organization_id,
             principal_id=principal_id,
             query="semantic-only",
+            memory_scope=MemoryScope.ORGANIZATION,
             limit=1,
         )
         assert [memory.id for memory in recalled] == [memories[0].id]
@@ -291,7 +292,7 @@ async def _assert_live_raw_ingestion_path(
                     "principal_id": principal_id,
                     "metadata": {
                         "document_id": memories[0].id,
-                        "memory_scope": MemoryScope.PRIVATE.value,
+                        "memory_scope": MemoryScope.ORGANIZATION.value,
                         "principal_id": principal_id,
                     },
                 }
