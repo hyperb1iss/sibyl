@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -15,6 +15,7 @@ from sibyl.auth.primitives import DeviceTokenError
 from sibyl.auth.session_cache import access_session_cache
 from sibyl.persistence import graph_runtime
 from sibyl.persistence.surreal import auth as surreal_auth, auth_runtime as surreal_auth_runtime
+from sibyl.persistence.surreal.auth_runtime import users as auth_users
 from sibyl_core.auth import AuthSession, OrganizationRole, ProjectRole
 
 
@@ -55,6 +56,49 @@ class _SequenceAuthClient:
         if not self.responses:
             raise AssertionError("unexpected query")
         return self.responses.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_authenticate_local_user_burns_password_check_for_missing_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _RecordingAuthClient([])
+    burn = MagicMock()
+    monkeypatch.setattr(auth_users, "_auth_client_scope", lambda: _StaticAuthClientScope(client))
+    monkeypatch.setattr(auth_users, "verify_password_timing_floor", burn)
+
+    result = await auth_users.authenticate_local_user(
+        email="missing@example.com",
+        password="candidate-password",
+    )
+
+    assert result is None
+    burn.assert_called_once_with(
+        "candidate-password",
+        iterations=auth_users.config_module.settings.password_iterations,
+    )
+
+
+@pytest.mark.asyncio
+async def test_authenticate_local_user_burns_password_check_for_empty_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _RecordingAuthClient([])
+    burn = MagicMock()
+    monkeypatch.setattr(auth_users, "_auth_client_scope", lambda: _StaticAuthClientScope(client))
+    monkeypatch.setattr(auth_users, "verify_password_timing_floor", burn)
+
+    result = await auth_users.authenticate_local_user(
+        email="nova@example.com",
+        password="",
+    )
+
+    assert result is None
+    assert client.calls == []
+    burn.assert_called_once_with(
+        "",
+        iterations=auth_users.config_module.settings.password_iterations,
+    )
 
 
 @pytest.mark.asyncio
@@ -150,6 +194,24 @@ async def test_surreal_auth_client_scope_reuses_shared_client(
         await surreal_auth.close_shared_surreal_auth_client()
 
     assert clients[0].closed is True
+
+
+def test_surreal_auth_builder_uses_configured_pool_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeSurrealAuthClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(surreal_auth, "SurrealAuthClient", FakeSurrealAuthClient)
+    monkeypatch.setattr(surreal_auth.config_module.settings, "surreal_pool_size", 8)
+    monkeypatch.setattr(surreal_auth.config_module.settings, "surreal_auth_pool_size", 13)
+
+    surreal_auth.build_surreal_auth_client()
+
+    assert captured["pool_size"] == 13
 
 
 def test_surreal_auth_runtime_exports_neutral_surface() -> None:

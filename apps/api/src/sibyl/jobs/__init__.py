@@ -18,6 +18,7 @@ from sibyl.jobs.backup import (
 )
 from sibyl.jobs.crawl import crawl_source, sync_all_sources, sync_source
 from sibyl.jobs.entities import (
+    backfill_entity_embeddings,
     create_entity,
     create_learning_episode,
     create_learning_procedure,
@@ -47,6 +48,7 @@ from sibyl.jobs.queue import (
     enqueue_create_entity,
     enqueue_create_learning_episode,
     enqueue_create_learning_procedure,
+    enqueue_entity_embedding_backfill,
     enqueue_memory_extraction,
     enqueue_memory_projection,
     enqueue_priority_decay,
@@ -82,6 +84,7 @@ __all__ = [
     "enqueue_sync",
     # Entity queue
     "enqueue_create_entity",
+    "enqueue_entity_embedding_backfill",
     "enqueue_create_learning_episode",
     "enqueue_create_learning_procedure",
     "enqueue_memory_extraction",
@@ -116,6 +119,7 @@ __all__ = [
     "poll_all_raw_capture_changefeeds",
     "poll_raw_capture_changefeed",
     "create_entity",
+    "backfill_entity_embeddings",
     "create_learning_episode",
     "create_learning_procedure",
     "extract_memory_entities",

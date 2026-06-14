@@ -148,6 +148,8 @@ async def test_project_memory_entity_creates_projected_entities_and_mentions() -
     assert fact_entities[0].entity_type == EntityType.EVENT
     assert fact_entities[0].metadata["projection_kind"] == "memory_fact"
     assert fact_entities[0].metadata["valid_at"] == "2026/01/03 12:00"
+    assert result.created_projected_entities
+    assert result.created_projection_relationships
     assert fact_entities[0].metadata["source_id"] == "raw-session-source"
     assert fact_entities[0].metadata["source_entity_id"] == source.id
 
@@ -162,6 +164,61 @@ async def test_project_memory_entity_creates_projected_entities_and_mentions() -
     assert all(
         relationship.metadata["valid_at"] == "2026/01/03 12:00" for relationship in relationships
     )
+
+
+@pytest.mark.asyncio
+async def test_project_memory_entity_defers_projection_relationship_embeddings() -> None:
+    source = _session("I bought a Samsung TV for the den.")
+    entity_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda entities, **_: [entity.id for entity in entities]
+        )
+    )
+    relationship_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda relationships, **_: [
+                relationship.id for relationship in relationships
+            ]
+        ),
+        create_bulk=AsyncMock(return_value=(0, 0)),
+    )
+
+    result = await project_memory_entity(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        source=source,
+        group_id="org-123",
+        generate_embeddings=False,
+    )
+
+    assert result.created_projected_entities
+    assert result.created_projection_relationships
+    assert entity_manager.create_direct_bulk.await_args.kwargs["generate_embeddings"] is False
+    assert relationship_manager.create_direct_bulk.await_args.kwargs["generate_embeddings"] is False
+    relationship_manager.create_bulk.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_project_memory_entity_marks_partial_relationship_writes() -> None:
+    source = _session("I bought a Samsung TV for the den.")
+    entity_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda entities, **_: [entity.id for entity in entities]
+        )
+    )
+    relationship_manager = SimpleNamespace(create_bulk=AsyncMock(return_value=(1, 1)))
+
+    result = await project_memory_entity(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        source=source,
+        group_id="org-123",
+        generate_embeddings=False,
+    )
+
+    assert result.relationships == 1
+    assert result.projection_state == "partial"
+    assert result.errors == ("1 projection relationships failed",)
 
 
 @pytest.mark.asyncio

@@ -25,6 +25,7 @@ def test_operations_runtime_exports_neutral_runtime_surface() -> None:
         "list_oauth_connections",
         "remove_oauth_connection",
         "request_password_reset",
+        "require_global_admin",
         "require_settings_admin",
         "require_settings_owner",
         "require_setup_mode_or_admin",

@@ -30,15 +30,19 @@ Shipped and landed:
 - Current main CI and docs deployment are green on the latest pushed head.
 - The supported package dependency graph no longer contains `graphiti-core` or `graphiti_core`.
 - No open GitHub issues or pull requests are currently tracking release blockers.
+- Release gate wiring is present: Release runs `moon run :check`, validates a same-SHA Nightly
+  Regression receipt before live tag/publish steps, and uploads an `rc-gate-receipt-*` artifact.
+- `moon run :check` and `moon run :test` both aggregate the RC gate tests named by this plan.
+- The local task graph is readable: the v1.0 RC Evidence Freeze epic has one active RC task and no
+  RC todo or blocked tasks.
 
 Not yet RC-ready:
 
-- The task graph receipt is unavailable until the local Sibyl API is reachable.
-- The release workflow can tag and dispatch publishing without enforcing the RC gates.
-- `moon run :check` does not yet aggregate every RC gate test.
-- Nightly regression must be refreshed on the final tag candidate.
-- Active default-runtime docs, UI copy, and config names still need a hard Graphiti boundary.
-- Install and rollback rehearsals need current, cited receipts.
+- Final same-SHA Nightly Regression and release dry-run receipts must be refreshed whenever the
+  candidate SHA moves.
+- Live release dispatch still requires Bliss's explicit go-ahead.
+- Post-publish checks for GitHub Release, PyPI pages, Docker manifests, docs install copy, and clean
+  installs can only run after the RC is published.
 
 ## 3. RC Success Criteria
 
@@ -390,14 +394,13 @@ Rollback target:
 
 ## 8. Recommendation
 
-Do not cut the RC until B1, B2, B3, and B5 are closed.
+Do not cut the RC until the final candidate SHA has same-SHA CI, LongMemEval V2, Nightly Regression,
+and release dry-run receipts, and Bliss explicitly approves the live dispatch.
 
 The project is close enough that the remaining work should stay narrow. The highest-leverage path
 is:
 
-1. make the release cut gated;
-2. make `moon run :check` cover the full RC claim set;
-3. settle the Graphiti/default-runtime boundary;
-4. refresh all receipts on one final candidate SHA;
-5. rehearse install and rollback;
-6. cut `1.0.0-rc.1`.
+1. keep the candidate SHA still;
+2. refresh the external same-SHA receipts for that exact SHA;
+3. dispatch Release with the matching Nightly Regression run ID after explicit approval;
+4. verify published artifacts and clean installs before announcing the RC.

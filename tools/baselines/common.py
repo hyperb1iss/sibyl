@@ -293,6 +293,23 @@ async def ensure_graph_fixture(client: httpx.AsyncClient, token: str) -> dict[st
     }
 
 
+def _raw_memory_matches_seed(
+    memory: dict[str, Any],
+    *,
+    title: str,
+    source_id: str,
+    required_content_terms: list[str] | None = None,
+) -> bool:
+    if memory.get("source_id") != source_id and memory.get("title") != title:
+        return False
+    if not required_content_terms:
+        return True
+    haystack = " ".join(
+        str(memory.get(key) or "") for key in ("title", "raw_content", "content", "snippet")
+    ).casefold()
+    return all(term.casefold() in haystack for term in required_content_terms)
+
+
 async def ensure_raw_memory(
     client: httpx.AsyncClient,
     token: str,
@@ -304,6 +321,7 @@ async def ensure_raw_memory(
     agent_id: str | None = None,
     tags: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
+    required_content_terms: list[str] | None = None,
 ) -> dict[str, Any]:
     headers = auth_headers(token)
     recall_payload: dict[str, Any] = {
@@ -323,7 +341,12 @@ async def ensure_raw_memory(
     recall_payload = parse_http_response(recall_response)["body"]
     if isinstance(recall_payload, dict):
         for memory in recall_payload.get("memories", []):
-            if memory.get("source_id") == source_id or memory.get("title") == title:
+            if _raw_memory_matches_seed(
+                memory,
+                title=title,
+                source_id=source_id,
+                required_content_terms=required_content_terms,
+            ):
                 return memory
 
     create_response = await client.post(
@@ -415,11 +438,16 @@ async def ensure_raw_memory_fixture(
         token,
         title="Stale Decision Replacement Baseline",
         raw_content=(
-            "Stale decision replacement baseline says Silver Delta supersedes "
-            "old shortcuts for migration acceptance."
+            "Stale decision replacement baseline says Silver Delta is the successor "
+            "after storage adapter extraction and covers migration acceptance."
         ),
-        source_id="baseline:stale-decision-replacement",
+        source_id="baseline:stale-decision-replacement-v2",
         tags=[*BASELINE_TAGS, "stale-decision-replacement"],
+        required_content_terms=[
+            "Silver Delta",
+            "storage adapter extraction",
+            "migration acceptance",
+        ],
     )
     return {
         "personal": personal,

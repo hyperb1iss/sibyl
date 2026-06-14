@@ -165,9 +165,9 @@ proto use                  # Installs node, pnpm, python, uv
 proto install moon
 uv sync && pnpm install
 
-# Configure
-cp .env.example .env
-# Set SIBYL_JWT_SECRET (auto-generated in dev) and at least one LLM provider key.
+# Configure your shell
+export SIBYL_OPENAI_API_KEY=sk-...
+# SIBYL_JWT_SECRET is auto-generated in dev.
 # Embeddings use SIBYL_OPENAI_API_KEY or SIBYL_GEMINI_API_KEY.
 
 # Install CLIs globally (editable, source changes reflect immediately)
@@ -247,7 +247,7 @@ sibyl search "authentication patterns"
 # Knowledge & graph
 sibyl add "Redis pooling" "Pool size must be >= concurrent requests"
 sibyl explore related ent_xyz         # Find connected entities
-sibyl entity show <id>                # Full content by ID
+sibyl show <id>                       # Full content by ID
 
 # Task workflow
 sibyl task list --status todo,doing
@@ -431,7 +431,7 @@ retrieval recall vs LLM-judged QA accuracy is the most common conflation. See
 ### JWT Sessions (Web UI)
 
 ```bash
-SIBYL_JWT_SECRET=your-secret-key        # Required (auto-generated in dev)
+SIBYL_JWT_SECRET=your-secret-key        # Required in production; dev auto-generates
 SIBYL_ACCESS_TOKEN_EXPIRE_MINUTES=60    # Optional (default: 60)
 ```
 

@@ -5,7 +5,7 @@
 # Get running in 5 minutes with pre-built Docker images. No .env file required.
 #
 # Quick Start:
-#   docker compose -f docker-compose.quickstart.yml up -d
+#   docker compose --env-file /dev/null -f docker-compose.quickstart.yml up -d
 #   Open http://localhost:3337
 #   Complete onboarding (API keys entered via UI)
 #
@@ -22,13 +22,13 @@
 #   SIBYL_OPENAI_API_KEY      — Pre-configure via env (or enter in UI)
 #   SIBYL_ANTHROPIC_API_KEY   — Pre-configure via env (or enter in UI)
 #   SIBYL_SETTINGS_KEY        — Fernet key for settings encryption (auto-generated)
-#   SIBYL_JWT_SECRET          — JWT signing key (auto-generated)
 #   SIBYL_SURREAL_PASSWORD    — SurrealDB root password (default: sibyl_quickstart)
 #   SIBYL_COORDINATION_BACKEND — Set to redis with --profile redis for an external worker
 #
-# Running alongside an existing dev setup (different ports):
-#   SIBYL_SERVER_PORT=3344 SIBYL_WEB_PORT=3347 SIBYL_SURREAL_PORT=8010 \
-#     docker compose -f docker-compose.quickstart.yml -p sibyl-qs up -d
+# Running alongside an existing dev setup:
+#   docker compose --env-file /dev/null \
+#     -f docker-compose.quickstart.yml \
+#     -f docker-compose.quickstart.test.yml up -d
 #
 # ============================================================================
 
@@ -42,6 +42,8 @@ services:
     ports:
       - "${SIBYL_SERVER_PORT:-3334}:3334"
     depends_on:
+      secrets-init:
+        condition: service_completed_successfully
       surrealdb:
         condition: service_healthy
     environment:
@@ -53,8 +55,7 @@ services:
       SIBYL_SURREAL_URL: ws://surrealdb:8000/rpc
       SIBYL_SURREAL_USERNAME: ${SIBYL_SURREAL_USERNAME:-root}
       SIBYL_SURREAL_PASSWORD: ${SIBYL_SURREAL_PASSWORD:-sibyl_quickstart}
-      # Auth — auto-generate if not provided
-      SIBYL_JWT_SECRET: ${SIBYL_JWT_SECRET:-}
+      # Auth secret auto-generates and persists in the sibyl_secrets volume.
       SIBYL_SETTINGS_KEY: ${SIBYL_SETTINGS_KEY:-}
       SIBYL_PUBLIC_URL: http://localhost:${SIBYL_WEB_PORT:-3337}
       # AI Providers (optional — can be configured via UI during onboarding)
@@ -67,7 +68,7 @@ services:
       SIBYL_SERVER_PORT: 3334
       SIBYL_ENVIRONMENT: development
     volumes:
-      - sibyl_secrets:/root/.sibyl
+      - sibyl_secrets:/home/sibyl/.sibyl
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:3334/api/health')"]
       interval: 10s
@@ -85,6 +86,8 @@ services:
     container_name: sibyl-worker
     command: ["sibyld", "worker"]
     depends_on:
+      secrets-init:
+        condition: service_completed_successfully
       api:
         condition: service_healthy
       redis:
@@ -104,7 +107,7 @@ services:
       SIBYL_LLM_PROVIDER: anthropic
       SIBYL_LLM_MODEL: claude-haiku-4-5
     volumes:
-      - sibyl_secrets:/root/.sibyl
+      - sibyl_secrets:/home/sibyl/.sibyl
     restart: unless-stopped
 
   # ==========================================================================
@@ -145,6 +148,17 @@ services:
   # ==========================================================================
   # SurrealDB (graph + content + auth, unified)
   # ==========================================================================
+  # The API image runs as UID 1000 with /home/sibyl as its home. Persist
+  # auto-generated keys there so JWT refresh tokens survive container
+  # recreation.
+  secrets-init:
+    image: busybox:1.37
+    container_name: sibyl-secrets-init
+    command: ["chown", "-R", "1000:1000", "/home/sibyl/.sibyl"]
+    volumes:
+      - sibyl_secrets:/home/sibyl/.sibyl
+    restart: "no"
+
   # The SurrealDB image runs as UID 65532 (distroless nonroot), but a
   # fresh named volume is created root-owned, so SurrealDB cannot create
   # its RocksDB directory under /data. This one-shot fixes the volume

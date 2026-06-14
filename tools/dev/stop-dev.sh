@@ -86,5 +86,5 @@ else
 fi
 
 rm -f "$pid_file"
-docker compose down
+docker compose --env-file /dev/null down
 printf '✓ All services stopped\n'

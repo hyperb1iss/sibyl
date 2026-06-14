@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 import structlog
 
+from sibyl.config import settings
 from sibyl.ingestion.parser import ParsedDocument, parse_directory
 from sibyl.persistence.content_common import CrawledDocumentRecord, CrawlSourceRecord
 
@@ -50,11 +51,19 @@ class LocalFileCrawler:
 
         # Expand ~ and resolve
         path = path.expanduser().resolve()
+        import_root = settings.source_import_dir.expanduser().resolve()
+        try:
+            path.relative_to(import_root)
+        except ValueError as exc:
+            raise ValueError(f"Path is outside source import directory: {path}") from exc
 
         if not path.exists():
             raise ValueError(f"Path does not exist: {path}")
         if not path.is_dir():
             raise ValueError(f"Path is not a directory: {path}")
+        for child in path.rglob("*"):
+            if child.is_symlink():
+                raise ValueError(f"Path includes a symlink: {child}")
 
         return path
 

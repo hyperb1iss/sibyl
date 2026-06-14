@@ -29,16 +29,16 @@ tasks:
     - pnpm-lock.yaml
     preset: server
   lint:
-    command: npx prettier --check '**/*.md'
+    script: git ls-files -z '*.md' | xargs -0 npx prettier --check
     inputs:
     - '@group(sources)'
   fix:
-    command: npx prettier --write '**/*.md'
+    script: git ls-files -z '*.md' | xargs -0 npx prettier --write
     inputs:
     - '@group(sources)'
     preset: server
   format:
-    command: npx prettier --write '**/*.md'
+    script: git ls-files -z '*.md' | xargs -0 npx prettier --write
     inputs:
     - '@group(sources)'
     preset: server

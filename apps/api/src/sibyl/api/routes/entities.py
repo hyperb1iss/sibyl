@@ -1392,8 +1392,12 @@ async def create_entities_bulk(
     ]
     created_ids = await runtime.entity_manager.create_direct_bulk(
         entities,
-        generate_embeddings=True,
+        generate_embeddings=not batch.defer_embeddings,
     )
+    persisted_entities = [
+        entity.model_copy(update={"id": created_id})
+        for entity, created_id in zip(entities, created_ids, strict=True)
+    ]
 
     relationships: list[Relationship] = []
     for created_id, entity in zip(created_ids, batch.entities, strict=True):
@@ -1410,9 +1414,46 @@ async def create_entities_bulk(
             ]
         )
     if relationships:
-        await runtime.relationship_manager.create_bulk(relationships)
+        create_direct_bulk = getattr(runtime.relationship_manager, "create_direct_bulk", None)
+        if callable(create_direct_bulk):
+            await create_direct_bulk(
+                relationships,
+                generate_embeddings=not batch.defer_embeddings,
+            )
+        else:
+            await runtime.relationship_manager.create_bulk(relationships)
 
     background_jobs: dict[str, Any] = {}
+    if batch.defer_embeddings:
+        try:
+            from sibyl.jobs.queue import enqueue_entity_embedding_backfill
+
+            embedding_job_id = await enqueue_entity_embedding_backfill(
+                [entity.model_dump(mode="json") for entity in persisted_entities],
+                group_id,
+                relationships=[
+                    relationship.model_dump(mode="json") for relationship in relationships
+                ],
+            )
+            log.info(
+                "bulk_entity_embedding_backfill_enqueued",
+                job_id=embedding_job_id,
+                entities=len(entities),
+                relationships=len(relationships),
+            )
+            background_jobs["embedding_backfill"] = {
+                "status": "queued",
+                "job_ids": [embedding_job_id],
+                "queued_entities": len(entities),
+                "queued_relationships": len(relationships),
+            }
+        except Exception as exc:
+            log.warning(
+                "bulk_entity_embedding_backfill_enqueue_failed",
+                entities=len(entities),
+                relationships=len(relationships),
+                error=str(exc),
+            )
     projection_sources: list[Entity] = []
     projection_source_ids: list[str] = []
     for source, created_id in zip(entities, created_ids, strict=True):
@@ -1608,6 +1649,7 @@ async def create_entity(
         # Sync for projects, async for everything else
         sync=is_sync,
         skip_conflicts=entity.skip_conflicts,
+        generate_embeddings=not entity.defer_embeddings,
     )
 
     if not result.success or not result.id:
@@ -1637,6 +1679,10 @@ async def create_entity(
             metadata=raw_capture_metadata,
         )
 
+    result_background_jobs = getattr(result, "background_jobs", {})
+    if not isinstance(result_background_jobs, dict):
+        result_background_jobs = {}
+
     # For async creation, return immediately with pending response.
     # Entity creation continues in the native background job path.
     if not is_sync:
@@ -1653,6 +1699,7 @@ async def create_entity(
             source_file=None,
             created_at=None,
             updated_at=None,
+            background_jobs=result_background_jobs,
         )
         # Broadcast pending creation event
         await broadcast_event(
@@ -1686,6 +1733,7 @@ async def create_entity(
         source_file=None,
         created_at=response_timestamp,
         updated_at=response_timestamp,
+        background_jobs=result_background_jobs,
     )
 
     # Broadcast creation event (scoped to org)

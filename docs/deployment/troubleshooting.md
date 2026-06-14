@@ -17,7 +17,7 @@ Common issues and solutions for Sibyl deployments.
 
    ```bash
    # Docker Compose
-   docker compose ps
+   docker compose --env-file ~/.sibyl/prod.env ps
 
    # Kubernetes
    kubectl get pods -n sibyl
@@ -27,7 +27,7 @@ Common issues and solutions for Sibyl deployments.
 
    ```bash
    # Docker Compose
-   docker compose logs backend
+   docker compose --env-file ~/.sibyl/prod.env logs backend
 
    # Kubernetes
    kubectl logs -n sibyl -l app.kubernetes.io/component=backend
@@ -56,7 +56,7 @@ surrealdb error: connection refused
 1. **Verify SurrealDB is running:**
 
    ```bash
-   docker compose ps surrealdb
+   docker compose --env-file ~/.sibyl/prod.env ps surrealdb
    kubectl get pods -n sibyl -l app=surrealdb
    ```
 

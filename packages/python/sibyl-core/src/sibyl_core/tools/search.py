@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -9,6 +10,7 @@ import structlog
 
 from sibyl_core.auth.memory_policy import memory_scope_policy_key
 from sibyl_core.embeddings.providers import configured_embedding_provider
+from sibyl_core.memory_pipeline.retrieval import CandidateSourceFailure
 from sibyl_core.models.entities import EntityType
 from sibyl_core.retrieval import HybridConfig, hybrid_search, temporal_boost
 from sibyl_core.retrieval.candidates import (
@@ -20,7 +22,14 @@ from sibyl_core.retrieval.candidates import (
 from sibyl_core.retrieval.fusion import rrf_merge
 from sibyl_core.retrieval.temporal import parse_temporal_datetime
 from sibyl_core.services import document_search as document_search_service
-from sibyl_core.services.surreal_content import MemoryScope, RawMemory, recall_raw_memory
+from sibyl_core.services.surreal_content import (
+    MemoryScope,
+    RawMemory,
+    RawMemoryRecallResult,
+)
+from sibyl_core.services.surreal_content import (
+    recall_raw_memory_with_sources as recall_raw_memory,
+)
 from sibyl_core.tools.helpers import (
     VALID_ENTITY_TYPES,
     _build_entity_metadata,
@@ -36,6 +45,13 @@ log = structlog.get_logger()
 
 DOCUMENT_SEARCH_TIMEOUT_SECONDS = min(10.0, TIMEOUTS["search"])
 DOCUMENT_SEARCH_GRAPH_JOIN_TIMEOUT_SECONDS = min(2.0, DOCUMENT_SEARCH_TIMEOUT_SECONDS)
+
+
+@dataclass(frozen=True, slots=True)
+class RawMemorySearchFetch:
+    results: list[SearchResult]
+    failures: tuple[CandidateSourceFailure, ...]
+    metadata: dict[str, Any]
 
 
 async def get_graph_runtime(group_id: str):
@@ -453,6 +469,25 @@ def _rank_fuse_search_results(
     return [result for result, _score in rrf_merge(ranked_sources, dedup_key=lambda r: r.id)]
 
 
+def _record_source_failure(
+    failures: list[CandidateSourceFailure],
+    *,
+    source: str,
+    error: Exception,
+) -> None:
+    failures.append(CandidateSourceFailure(source=source, error_type=type(error).__name__))
+
+
+def _add_source_failure_filters(
+    filters: dict[str, Any],
+    failures: Sequence[CandidateSourceFailure],
+) -> None:
+    filters["search_source_degraded"] = bool(failures)
+    filters["search_source_failure_count"] = len(failures)
+    if failures:
+        filters["search_source_failures"] = [failure.as_metadata() for failure in failures]
+
+
 async def _search_documents(
     query: str,
     organization_id: str,
@@ -462,19 +497,15 @@ async def _search_documents(
     limit: int = 10,
     include_content: bool = True,
 ) -> list[SearchResult]:
-    try:
-        return await document_search_service.search_documents(
-            query=query,
-            organization_id=organization_id,
-            source_id=source_id,
-            source_name=source_name,
-            language=language,
-            limit=limit,
-            include_content=include_content,
-        )
-    except Exception as e:
-        log.warning("document_search_failed", error_type=type(e).__name__)
-        return []
+    return await document_search_service.search_documents(
+        query=query,
+        organization_id=organization_id,
+        source_id=source_id,
+        source_name=source_name,
+        language=language,
+        limit=limit,
+        include_content=include_content,
+    )
 
 
 def _raw_memory_search_result(
@@ -538,31 +569,42 @@ async def _search_raw_memories(
     occurred_before: datetime | str | None,
     as_of: datetime | str | None,
     limit: int,
-) -> list[SearchResult]:
-    try:
-        memories = await recall_raw_memory(
-            organization_id=organization_id,
-            principal_id=principal_id,
-            query=query,
-            memory_scope=memory_scope,
-            scope_key=scope_key,
-            project_id=project_id,
-            source_ids=[source_id] if source_id else None,
-            participants=participants,
-            labels=labels,
-            thread_id=thread_id,
-            occurred_after=occurred_after,
-            occurred_before=occurred_before,
-            as_of=as_of,
-            limit=limit,
-        )
-        return [
-            _raw_memory_search_result(memory, organization_id=organization_id)
-            for memory in memories
-        ]
-    except Exception as e:
-        log.warning("raw_memory_search_failed", error_type=type(e).__name__)
-        return []
+) -> RawMemorySearchFetch:
+    recall_result = await recall_raw_memory(
+        organization_id=organization_id,
+        principal_id=principal_id,
+        query=query,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+        project_id=project_id,
+        source_ids=[source_id] if source_id else None,
+        participants=participants,
+        labels=labels,
+        thread_id=thread_id,
+        occurred_after=occurred_after,
+        occurred_before=occurred_before,
+        as_of=as_of,
+        limit=limit,
+    )
+    if isinstance(recall_result, RawMemoryRecallResult):
+        memories = recall_result.memories
+        failures = recall_result.failures
+        metadata = recall_result.as_metadata()
+    else:
+        memories = tuple(recall_result)
+        failures = ()
+        metadata = {
+            "raw_recall_degraded": False,
+            "raw_recall_failure_count": 0,
+        }
+    results = [
+        _raw_memory_search_result(memory, organization_id=organization_id) for memory in memories
+    ]
+    return RawMemorySearchFetch(
+        results=results,
+        failures=failures,
+        metadata=metadata,
+    )
 
 
 async def search(
@@ -673,6 +715,7 @@ async def search(
     )
 
     filters = {}
+    source_failures: list[CandidateSourceFailure] = []
     if types:
         filters["types"] = types
     if language:
@@ -783,7 +826,7 @@ async def search(
     doc_results: list[SearchResult] = []
     raw_memory_results: list[SearchResult] = []
     document_search_task: asyncio.Task[list[SearchResult]] | None = None
-    raw_memory_search_task: asyncio.Task[list[SearchResult]] | None = None
+    raw_memory_search_task: asyncio.Task[RawMemorySearchFetch] | None = None
     if search_documents and query and organization_id:
         document_timeout_seconds = (
             DOCUMENT_SEARCH_GRAPH_JOIN_TIMEOUT_SECONDS
@@ -934,6 +977,11 @@ async def search(
 
                 except Exception as e:
                     log.warning("enhanced_search_failed_fallback", error_type=type(e).__name__)
+                    _record_source_failure(
+                        source_failures,
+                        source="graph_enhanced",
+                        error=e,
+                    )
 
             # Fall back to direct entity-manager search
             if query and not raw_results and not enhanced_search_exhausted:
@@ -958,6 +1006,7 @@ async def search(
                         )
                 except Exception as e:
                     log.warning("fallback_graph_search_failed", error_type=type(e).__name__)
+                    _record_source_failure(source_failures, source="graph", error=e)
                     graph_search_failed = True
                     raw_results = []
 
@@ -985,6 +1034,11 @@ async def search(
                         )
                 except Exception as e:
                     log.warning("graph_exact_name_search_failed", error_type=type(e).__name__)
+                    _record_source_failure(
+                        source_failures,
+                        source="graph_exact_name",
+                        error=e,
+                    )
 
             if not query and graph_list_filters:
                 raw_results = await _list_graph_entities_for_filters(
@@ -1031,6 +1085,7 @@ async def search(
                     )
                 except Exception as e:
                     log.warning("untyped_graph_search_failed", error_type=type(e).__name__)
+                    _record_source_failure(source_failures, source="graph", error=e)
                     fallback_results = []
                 typed_results = [
                     (entity, score)
@@ -1074,6 +1129,7 @@ async def search(
 
         except Exception as e:
             log.warning("graph_search_failed", error_type=type(e).__name__)
+            _record_source_failure(source_failures, source="graph", error=e)
 
     # =========================================================================
     # DOCUMENT SEARCH - Search crawled documentation
@@ -1090,13 +1146,18 @@ async def search(
             log.debug("document_search_complete", results=len(doc_results))
         except Exception as e:
             log.warning("document_search_failed", error_type=type(e).__name__)
+            _record_source_failure(source_failures, source="document", error=e)
 
     if raw_memory_search_task is not None:
         try:
-            raw_memory_results = await raw_memory_search_task
+            raw_memory_fetch = await raw_memory_search_task
+            raw_memory_results = raw_memory_fetch.results
+            source_failures.extend(raw_memory_fetch.failures)
+            filters.update(raw_memory_fetch.metadata)
             log.debug("raw_memory_search_complete", results=len(raw_memory_results))
         except Exception as e:
             log.warning("raw_memory_search_failed", error_type=type(e).__name__)
+            _record_source_failure(source_failures, source="raw_memory", error=e)
 
     # =========================================================================
     # MERGE AND RANK RESULTS
@@ -1125,6 +1186,7 @@ async def search(
     total_count = len(all_results)
     paginated_results = all_results[offset : offset + limit]
     has_more = offset + len(paginated_results) < total_count
+    _add_source_failure_filters(filters, source_failures)
 
     return SearchResponse(
         results=paginated_results,

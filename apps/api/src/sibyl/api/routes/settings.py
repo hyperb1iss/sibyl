@@ -1,7 +1,7 @@
 """System settings API endpoints.
 
 Allows reading and writing system settings like API keys.
-Works without auth during setup mode, requires admin role otherwise.
+Works without auth during setup mode, requires global admin otherwise.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from sibyl.persistence.operations_runtime import (
     is_setup_mode,
-    require_settings_admin,
+    require_settings_owner,
 )
 from sibyl.services.settings import get_settings_service
 from sibyl_core.ai.llm.config import LLMProviderName
@@ -181,9 +181,9 @@ async def get_settings(
     the actual secret values.
 
     This endpoint works without authentication during setup mode (no users exist).
-    Otherwise, admin role is required.
+    Otherwise, global admin access is required.
     """
-    await require_settings_admin(request)
+    await require_settings_owner(request)
 
     service = get_settings_service()
     all_settings = await service.get_all(include_secrets=False)
@@ -212,9 +212,9 @@ async def update_settings(
     Validates API keys before saving. Only non-null values are updated.
 
     This endpoint works without authentication during setup mode (no users exist).
-    Otherwise, admin role is required.
+    Otherwise, global admin access is required.
     """
-    await require_settings_admin(request)
+    await require_settings_owner(request)
 
     service = get_settings_service()
     updated: list[str] = []
@@ -315,12 +315,12 @@ async def delete_setting(
     After deletion, the setting will fall back to environment variable
     if one is configured.
 
-    Requires admin role (not available during setup mode).
+    Requires global admin access (not available during setup mode).
     """
     if await is_setup_mode():
         raise HTTPException(status_code=403, detail="Cannot delete settings during setup mode")
 
-    await require_settings_admin(request)
+    await require_settings_owner(request)
 
     service = get_settings_service()
     deleted = await service.delete(key)

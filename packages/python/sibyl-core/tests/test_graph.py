@@ -64,6 +64,38 @@ class _EmbeddingWriteClient:
         return []
 
 
+class _EntityUpdatePatchClient:
+    group_id = "org-native"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        if "UPDATE entity MERGE $patch" not in query:
+            raise AssertionError("update should happen in one server-side write")
+        patch = cast("dict[str, object]", params["patch"])
+        attributes_patch = cast("dict[str, object]", patch["attributes"])
+        return [
+            {
+                "uuid": params["uuid"],
+                "name": patch.get("name", "Original"),
+                "entity_type": "task",
+                "description": patch.get("description", "Original description"),
+                "content": patch.get("content", "Original content"),
+                "group_id": params["group_id"],
+                "attributes": {
+                    "existing": "preserved",
+                    "metadata": json.dumps({"legacy": "preserved"}),
+                    **attributes_patch,
+                },
+                "created_at": datetime(2026, 1, 1, tzinfo=UTC),
+                "updated_at": patch["updated_at"],
+                "status": patch.get("status"),
+            }
+        ]
+
+
 class _TransactionDeleteClient:
     group_id = "org-native"
 
@@ -305,6 +337,67 @@ class _SlowEmbeddingProvider:
         return [[0.1, 0.2, 0.3, 0.4]]
 
 
+class _CoordinatedSearchEmbeddingProvider:
+    metadata = EmbeddingMetadata(
+        provider="deterministic",
+        model="coordinated-unit-test",
+        dimensions=4,
+        cache_namespace="native-graph-test",
+        tokenizer_estimate_method="unit-test",
+    )
+
+    def __init__(
+        self, *, fulltext_started: asyncio.Event, embedding_started: asyncio.Event
+    ) -> None:
+        self._fulltext_started = fulltext_started
+        self._embedding_started = embedding_started
+
+    async def embed_texts(
+        self,
+        texts: list[str],
+        *,
+        input_kind: str = "document",
+    ) -> list[list[float]]:
+        del texts, input_kind
+        self._embedding_started.set()
+        await self._fulltext_started.wait()
+        return [[0.1, 0.2, 0.3, 0.4]]
+
+
+class _CoordinatedSearchClient:
+    group_id = "org-native"
+
+    def __init__(
+        self, *, fulltext_started: asyncio.Event, embedding_started: asyncio.Event
+    ) -> None:
+        self._fulltext_started = fulltext_started
+        self._embedding_started = embedding_started
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        if params.get("_query_label") == "entity.search.fulltext":
+            self._fulltext_started.set()
+            await self._embedding_started.wait()
+            return [
+                {
+                    "record_id": "entity:parallel_search",
+                    "uuid": "parallel_search",
+                    "name": "Parallel Search",
+                    "entity_type": "topic",
+                    "summary": "parallel search",
+                    "group_id": self.group_id,
+                    "attributes": {},
+                    "created_at": datetime.now(UTC),
+                    "updated_at": datetime.now(UTC),
+                    "score": 1.0,
+                }
+            ]
+        if params.get("_query_label") == "entity.search.vector":
+            return []
+        return []
+
+
 @pytest.mark.asyncio
 async def test_graph_client_cache_evicts_oldest_client(
     monkeypatch: pytest.MonkeyPatch,
@@ -332,6 +425,33 @@ async def test_graph_client_cache_evicts_oldest_client(
     assert "org-a" not in graph_module._prepared_groups
 
     await graph_module.close_graph_clients()
+
+
+@pytest.mark.asyncio
+async def test_graph_client_uses_configured_pool_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await graph_module.close_graph_clients()
+    captured: dict[str, object] = {}
+
+    class FakeNativeGraphClient:
+        def __init__(self, *, group_id: str, **kwargs: object) -> None:
+            captured.update(kwargs)
+            self.group_id = group_id
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(graph_module, "SurrealGraphClient", FakeNativeGraphClient)
+    monkeypatch.setattr(graph_module.settings, "surreal_pool_size", 8)
+    monkeypatch.setattr(graph_module.settings, "surreal_graph_pool_size", 34)
+
+    try:
+        await graph_module.get_surreal_graph_client("org-pool")
+    finally:
+        await graph_module.close_graph_clients()
+
+    assert captured["pool_size"] == 34
 
 
 @pytest.mark.asyncio
@@ -559,6 +679,37 @@ async def test_native_entity_manager_generates_embeddings_with_native_provider()
 
 
 @pytest.mark.asyncio
+async def test_native_entity_manager_update_uses_server_side_merge() -> None:
+    client = _EntityUpdatePatchClient()
+    manager = EntityManager(cast("SurrealGraphClient", client), group_id=client.group_id)
+
+    updated = await manager.update(
+        "task-native",
+        {
+            "metadata": {"project_id": "project-native"},
+            "status": "done",
+            "title": "Updated task",
+        },
+    )
+
+    assert updated is not None
+    assert updated.name == "Updated task"
+    assert updated.metadata["existing"] == "preserved"
+    assert updated.metadata["legacy"] == "preserved"
+    assert updated.metadata["project_id"] == "project-native"
+    assert updated.metadata["status"] == "done"
+    query, params = client.calls[0]
+    assert "BEGIN TRANSACTION" in query
+    assert "UPDATE entity MERGE $patch" in query
+    assert "RETURN NONE" in query
+    assert len(client.calls) == 1
+    patch = cast("dict[str, object]", params["patch"])
+    attributes = cast("dict[str, object]", patch["attributes"])
+    assert patch["status"] == "done"
+    assert attributes["status"] == "done"
+
+
+@pytest.mark.asyncio
 async def test_native_entity_manager_bulk_generates_embeddings_in_batches() -> None:
     client = _EmbeddingWriteClient()
     provider = _deterministic_provider()
@@ -701,6 +852,64 @@ async def test_native_entity_manager_search_uses_configured_knn_effort(
     await manager.search(query="configured vector effort", limit=5)
 
     assert any("name_embedding <|32, 88|> $query_embedding" in query for query, _ in client.calls)
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_search_projections_omit_embeddings() -> None:
+    client = _EmbeddingWriteClient()
+    manager = EntityManager(cast(SurrealGraphClient, client), group_id=client.group_id)
+
+    await manager.search(query="projection check", limit=1)
+
+    fulltext_query = next(
+        query
+        for query, params in client.calls
+        if params.get("_query_label") == "entity.search.fulltext"
+    )
+    fallback_query = client.calls[-1][0]
+    assert "SELECT *" not in fulltext_query
+    assert "SELECT *" not in fallback_query
+    assert "id AS record_id" in fulltext_query
+    assert "id AS record_id" in fallback_query
+    assert "name_embedding" not in fulltext_query
+    assert "name_embedding" not in fallback_query
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_search_overlaps_fulltext_and_vector_branches() -> None:
+    fulltext_started = asyncio.Event()
+    embedding_started = asyncio.Event()
+    client = _CoordinatedSearchClient(
+        fulltext_started=fulltext_started,
+        embedding_started=embedding_started,
+    )
+    provider = _CoordinatedSearchEmbeddingProvider(
+        fulltext_started=fulltext_started,
+        embedding_started=embedding_started,
+    )
+    manager = EntityManager(
+        cast(SurrealGraphClient, client),
+        group_id=client.group_id,
+        embedding_provider=provider,
+    )
+
+    results = await asyncio.wait_for(manager.search(query="parallel search", limit=5), timeout=1)
+
+    assert [entity.id for entity, _score in results] == ["parallel_search"]
+    assert fulltext_started.is_set()
+    assert embedding_started.is_set()
+    assert {params.get("_query_label") for _query, params in client.calls} == {
+        "entity.search.fulltext",
+        "entity.search.vector",
+    }
+    vector_query = next(
+        query
+        for query, params in client.calls
+        if params.get("_query_label") == "entity.search.vector"
+    )
+    assert "SELECT *, (1 - vector::distance::knn()) AS score" not in vector_query
+    assert "id AS record_id" in vector_query
+    assert "name_embedding," not in vector_query
 
 
 @pytest.mark.asyncio
@@ -1980,6 +2189,7 @@ async def test_graph_writes_entities_and_relationships() -> None:
         assert updated is not None
         assert updated.name == "Updated Native Decision"
         assert updated.metadata["status"] == "done"
+        assert updated.metadata["source_ids"] == ["raw_123"]
 
         fetched_relationships = await relationship_manager.get_for_entity(
             "decision_native",
@@ -2347,6 +2557,65 @@ async def test_graph_writes_entities_and_relationships() -> None:
         )
         assert [rel.target_id for rel in redirected] == ["dedup_neighbor"]
         assert await relationship_manager.get_for_entity("dedup_remove", direction="both") == []
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_entity_update_recomputes_summary_after_server_side_merge() -> None:
+    client = SurrealGraphClient(group_id="org-native-summary-update", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        entity_manager = EntityManager(client, group_id=client.group_id)
+
+        await entity_manager.create_direct(
+            Entity(
+                id="summary_native",
+                entity_type=EntityType.TOPIC,
+                name="Original Summary Name",
+                description="",
+                organization_id=client.group_id,
+            )
+        )
+
+        renamed = await entity_manager.update(
+            "summary_native",
+            {"title": "Renamed Summary Name"},
+        )
+
+        assert renamed is not None
+        assert renamed.name == "Renamed Summary Name"
+        assert renamed.description == "Renamed Summary Name"
+
+        long_description = "Detailed summary source " * 30
+        described = await entity_manager.update(
+            "summary_native",
+            {"description": long_description},
+        )
+
+        assert described is not None
+        assert described.description == long_description.strip()
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT summary
+                FROM entity
+                WHERE group_id = $group_id AND uuid = "summary_native"
+                LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        assert rows[0]["summary"] == long_description[:500]
+
+        cleared = await entity_manager.update(
+            "summary_native",
+            {"description": ""},
+        )
+
+        assert cleared is not None
+        assert cleared.description == "Renamed Summary Name"
     finally:
         await client.close()
 

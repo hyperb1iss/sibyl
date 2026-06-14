@@ -30,17 +30,15 @@ Docker Compose runs the database services while applications run natively for ho
 
 ```bash
 # 1. Start database services
-docker compose up -d surrealdb
+docker compose --env-file /dev/null up -d surrealdb
 
 # 2. Install dependencies
 uv sync                         # Python packages
 cd apps/web && pnpm install     # Frontend packages
 
-# 3. Configure environment
-cp .env.example .env
-# Edit .env and add:
-#   SIBYL_JWT_SECRET=<random-secret>
-#   SIBYL_OPENAI_API_KEY=sk-...
+# 3. Configure your shell
+export SIBYL_OPENAI_API_KEY=sk-...
+# SIBYL_JWT_SECRET is auto-generated in dev.
 
 # 4. Start all services
 moon run dev
@@ -49,7 +47,7 @@ moon run dev
 For Redis-backed coordination, opt into the `redis` profile explicitly:
 
 ```bash
-docker compose --profile redis up -d surrealdb redis
+docker compose --env-file /dev/null --profile redis up -d surrealdb redis
 SIBYL_COORDINATION_BACKEND=redis moon run dev
 ```
 
@@ -134,14 +132,17 @@ For a complete containerized deployment (backend + frontend + databases), use
 `docker-compose.prod.yml`:
 
 ```bash
-# Copy environment file
-cp apps/api/.env.example .env
+# Copy the production env-file example outside the repo
+cp .env.example ~/.sibyl/prod.env
 
-# Edit .env with required secrets:
+# Edit ~/.sibyl/prod.env with required secrets:
 #   SIBYL_JWT_SECRET=<generate with: openssl rand -hex 32>
 #   SIBYL_OPENAI_API_KEY=sk-...
 
-# Generate ~/.sibyl/docker/.env and a pinned compose file
+# Start the repo production compose directly
+docker compose --env-file ~/.sibyl/prod.env -f docker-compose.prod.yml up -d
+
+# Or generate ~/.sibyl/docker/.env and a pinned compose file
 sibyl docker init
 
 # Optional: run a separate worker with Redis/Valkey coordination
@@ -234,20 +235,21 @@ during onboarding and stored encrypted in the database.
 
 ```bash
 # Start with pre-built images from ghcr.io
-docker compose -f docker-compose.quickstart.yml up -d
+docker compose --env-file /dev/null -f docker-compose.quickstart.yml up -d
 
 # Open http://localhost:3337 and complete onboarding
 
 # Run alongside an existing dev setup on offset ports
-SIBYL_SERVER_PORT=3344 SIBYL_WEB_PORT=3347 SIBYL_SURREAL_PORT=8010 \
-  docker compose -f docker-compose.quickstart.yml -p sibyl-qs up -d
+docker compose --env-file /dev/null \
+  -f docker-compose.quickstart.yml \
+  -f docker-compose.quickstart.test.yml up -d
 ```
 
 Differences from the production compose:
 
 - Pulls `ghcr.io/hyperb1iss/sibyl-api` and `sibyl-web` images instead of building locally
 - `SIBYL_JWT_SECRET` and `SIBYL_SETTINGS_KEY` auto-generate when unset (persisted in the
-  `sibyl_secrets` volume mounted at `/root/.sibyl`)
+  `sibyl_secrets` volume mounted at `/home/sibyl/.sibyl`)
 - Runs with `SIBYL_ENVIRONMENT=development` and a `sibyl_quickstart` default Surreal password
 - The backend service is named `api` and the frontend `web`
 
@@ -310,17 +312,17 @@ lsof -i :6381
 
 ```bash
 # Check container logs
-docker compose logs surrealdb
-docker compose logs redis
+docker compose --env-file /dev/null logs surrealdb
+docker compose --env-file /dev/null logs redis
 
 # Restart with clean state
-docker compose down -v
-docker compose up -d surrealdb
+docker compose --env-file /dev/null down -v
+docker compose --env-file /dev/null up -d surrealdb
 ```
 
 ### Connection Refused
 
-Ensure your `.env` uses the correct ports:
+Ensure your shell environment uses the correct ports:
 
 ```bash
 SIBYL_SURREAL_URL=ws://127.0.0.1:8000/rpc

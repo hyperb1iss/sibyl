@@ -22,9 +22,15 @@ from sibyl_core.retrieval.query_ranking import (
     QueryCoverageCandidate,
     rank_by_query_coverage,
 )
+from sibyl_core.retrieval.reranking import (
+    FeatureRerankCandidate,
+    FeatureWeightedRerankModel,
+    fit_feature_weighted_reranker,
+    rerank_by_feature_weights,
+)
 from sibyl_core.retrieval.temporal import parse_temporal_datetime, resolve_temporal_reference
 
-ReplayStrategy = Literal["identity", "heuristic", "coverage", "oracle"]
+ReplayStrategy = Literal["identity", "heuristic", "coverage", "learned", "oracle"]
 
 STOP_WORDS = {
     "a",
@@ -212,12 +218,11 @@ def replay_longmemeval_report(
     strategy: ReplayStrategy = "heuristic",
     k_values: Sequence[int] | None = None,
     corpus_text_policy: str | None = None,
+    learned_model: FeatureWeightedRerankModel | None = None,
 ) -> ReplaySummary:
     k_list = [int(value) for value in (k_values or report.get("k_values") or [5, 10])]
-    text_policy = corpus_text_policy or str(
-        _nested_get(report, ("dataset", "corpus_text_policy"))
-        or USER_AND_ASSISTANT_CORPUS_TEXT_POLICY
-    )
+    text_policy = _resolve_corpus_text_policy(report, corpus_text_policy)
+    auto_fit_learned = strategy == "learned" and learned_model is None
     case_results: list[dict[str, Any]] = []
     for case in report.get("case_results", []):
         if not isinstance(case, Mapping):
@@ -225,11 +230,20 @@ def replay_longmemeval_report(
         case_index = int(case["case_index"])
         entry = dataset[case_index]
         original_ranked = [str(session_id) for session_id in case.get("ranked_session_ids", [])]
+        case_learned_model = learned_model
+        if auto_fit_learned:
+            case_learned_model = fit_longmemeval_rerank_model(
+                report,
+                dataset,
+                corpus_text_policy=text_policy,
+                exclude_case_index=case_index,
+            )
         reranked = rerank_longmemeval_case(
             case,
             entry,
             strategy=strategy,
             corpus_text_policy=text_policy,
+            learned_model=case_learned_model,
         )
         answers = sorted(str(value) for value in case.get("answer_session_ids", []))
         metrics = score_longmemeval_ranking(reranked, answers, k_list)
@@ -281,9 +295,16 @@ def replay_longmemeval_report_path(
     dataset_path: str | Path | None = None,
     strategy: ReplayStrategy = "heuristic",
     k_values: Sequence[int] | None = None,
+    learned_model: FeatureWeightedRerankModel | None = None,
 ) -> ReplaySummary:
     report, dataset = load_longmemeval_replay_inputs(report_path, dataset_path=dataset_path)
-    return replay_longmemeval_report(report, dataset, strategy=strategy, k_values=k_values)
+    return replay_longmemeval_report(
+        report,
+        dataset,
+        strategy=strategy,
+        k_values=k_values,
+        learned_model=learned_model,
+    )
 
 
 def rerank_longmemeval_case(
@@ -292,6 +313,7 @@ def rerank_longmemeval_case(
     *,
     strategy: ReplayStrategy,
     corpus_text_policy: str,
+    learned_model: FeatureWeightedRerankModel | None = None,
 ) -> list[str]:
     ranked_session_ids = [
         str(session_id) for session_id in case_result.get("ranked_session_ids", [])
@@ -303,26 +325,12 @@ def rerank_longmemeval_case(
         answers = {str(session_id) for session_id in case_result.get("answer_session_ids", [])}
         return sorted(ranked_session_ids, key=lambda session_id: session_id not in answers)
 
-    text_by_session_id = {
-        document.session_id: (document.text, document.timestamp)
-        for document in build_longmemeval_corpus(entry, text_policy=corpus_text_policy)
-    }
-    score_by_session_id = _score_by_session_id(case_result)
-    candidates = []
-    for index, session_id in enumerate(ranked_session_ids):
-        text, timestamp = text_by_session_id.get(session_id, ("", ""))
-        tokens = tuple(_tokenize(text))
-        candidates.append(
-            _Candidate(
-                session_id=session_id,
-                original_rank=index + 1,
-                score=score_by_session_id.get(session_id, 0.0),
-                text=text,
-                timestamp=timestamp,
-                tokens=tokens,
-                token_set=frozenset(tokens),
-            )
-        )
+    candidates = _case_candidates(
+        case_result,
+        entry,
+        ranked_session_ids=ranked_session_ids,
+        corpus_text_policy=corpus_text_policy,
+    )
     query = str(case_result.get("question") or "")
     if strategy == "coverage":
         temporal_target = resolve_temporal_reference(
@@ -351,10 +359,66 @@ def rerank_longmemeval_case(
         question_type=str(case_result.get("question_type") or ""),
         reference_time=str(case_result.get("question_date") or ""),
     )
+    if strategy == "learned":
+        if learned_model is None:
+            msg = "learned LongMemEval replay requires a FeatureWeightedRerankModel"
+            raise ValueError(msg)
+        return _learned_feature_rerank(query, candidates, intents, learned_model)
+
     scored = _score_candidates(query, candidates, intents)
     if intents.multi_evidence:
         return _diversify_ranking(scored)
     return [candidate.session_id for _, candidate in scored]
+
+
+def longmemeval_rerank_feature_rows(
+    case_result: Mapping[str, Any],
+    entry: Mapping[str, Any],
+    *,
+    corpus_text_policy: str,
+) -> list[dict[str, Any]]:
+    ranked_session_ids = [
+        str(session_id) for session_id in case_result.get("ranked_session_ids", [])
+    ]
+    candidates = _case_candidates(
+        case_result,
+        entry,
+        ranked_session_ids=ranked_session_ids,
+        corpus_text_policy=corpus_text_policy,
+    )
+    query = str(case_result.get("question") or "")
+    intents = _detect_intents(
+        query,
+        question_type=str(case_result.get("question_type") or ""),
+        reference_time=str(case_result.get("question_date") or ""),
+    )
+    answers = {str(session_id) for session_id in case_result.get("answer_session_ids", [])}
+    return _candidate_feature_rows(query, candidates, intents, answers)
+
+
+def fit_longmemeval_rerank_model(
+    report: Mapping[str, Any],
+    dataset: Sequence[Mapping[str, Any]],
+    *,
+    corpus_text_policy: str | None = None,
+    exclude_case_index: int | None = None,
+) -> FeatureWeightedRerankModel:
+    text_policy = _resolve_corpus_text_policy(report, corpus_text_policy)
+    rows: list[dict[str, Any]] = []
+    for case in report.get("case_results", []):
+        if not isinstance(case, Mapping):
+            continue
+        case_index = int(case["case_index"])
+        if exclude_case_index is not None and case_index == exclude_case_index:
+            continue
+        rows.extend(
+            longmemeval_rerank_feature_rows(
+                case,
+                dataset[case_index],
+                corpus_text_policy=text_policy,
+            )
+        )
+    return fit_feature_weighted_reranker(rows, name="longmemeval-feature-linear-v1")
 
 
 def summary_to_dict(summary: ReplaySummary, *, include_cases: bool = False) -> dict[str, Any]:
@@ -380,6 +444,16 @@ def _dataset_path(report: Mapping[str, Any]) -> Path:
         msg = "LongMemEval report does not include dataset.path; pass --dataset explicitly"
         raise ValueError(msg)
     return Path(path)
+
+
+def _resolve_corpus_text_policy(
+    report: Mapping[str, Any],
+    corpus_text_policy: str | None,
+) -> str:
+    return corpus_text_policy or str(
+        _nested_get(report, ("dataset", "corpus_text_policy"))
+        or USER_AND_ASSISTANT_CORPUS_TEXT_POLICY
+    )
 
 
 def _nested_get(data: Mapping[str, Any], keys: Sequence[str]) -> Any:
@@ -415,6 +489,36 @@ def _score_by_session_id(case_result: Mapping[str, Any]) -> dict[str, float]:
         raw_score = result.get("score")
         scores[session_id] = float(raw_score) if isinstance(raw_score, int | float) else 0.0
     return scores
+
+
+def _case_candidates(
+    case_result: Mapping[str, Any],
+    entry: Mapping[str, Any],
+    *,
+    ranked_session_ids: Sequence[str],
+    corpus_text_policy: str,
+) -> list[_Candidate]:
+    text_by_session_id = {
+        document.session_id: (document.text, document.timestamp)
+        for document in build_longmemeval_corpus(entry, text_policy=corpus_text_policy)
+    }
+    score_by_session_id = _score_by_session_id(case_result)
+    candidates: list[_Candidate] = []
+    for index, session_id in enumerate(ranked_session_ids):
+        text, timestamp = text_by_session_id.get(session_id, ("", ""))
+        tokens = tuple(_tokenize(text))
+        candidates.append(
+            _Candidate(
+                session_id=session_id,
+                original_rank=index + 1,
+                score=score_by_session_id.get(session_id, 0.0),
+                text=text,
+                timestamp=timestamp,
+                tokens=tokens,
+                token_set=frozenset(tokens),
+            )
+        )
+    return candidates
 
 
 def _detect_intents(
@@ -453,43 +557,180 @@ def _score_candidates(
     candidates: Sequence[_Candidate],
     intents: _Intents,
 ) -> list[tuple[float, _Candidate]]:
+    feature_rows = _candidate_feature_rows(query, candidates, intents, set())
+    scored = [
+        (float(row["heuristic_score"]), candidate)
+        for row, candidate in zip(feature_rows, candidates, strict=True)
+    ]
+    return sorted(scored, key=lambda item: (-item[0], item[1].original_rank))
+
+
+def _learned_feature_rerank(
+    query: str,
+    candidates: Sequence[_Candidate],
+    intents: _Intents,
+    model: FeatureWeightedRerankModel,
+) -> list[str]:
+    feature_rows = _candidate_feature_rows(query, candidates, intents, set())
+    ranked = rerank_by_feature_weights(
+        [
+            FeatureRerankCandidate(
+                item=str(row["session_id"]),
+                stable_id=str(row["session_id"]),
+                features=row["features"],
+                original_rank=int(row["original_rank"]),
+            )
+            for row in feature_rows
+        ],
+        model,
+    )
+    return [ranked_candidate.item for ranked_candidate in ranked]
+
+
+def _candidate_feature_rows(
+    query: str,
+    candidates: Sequence[_Candidate],
+    intents: _Intents,
+    answer_session_ids: set[str],
+) -> list[dict[str, Any]]:
     query_tokens = set(_tokenize(query))
     max_original_score = max((candidate.score for candidate in candidates), default=0.0) or 1.0
-    scored: list[tuple[float, _Candidate]] = []
+    coverage_features_by_rank = _query_coverage_features_by_original_rank(
+        query,
+        candidates,
+        intents,
+    )
     total = max(1, len(candidates) - 1)
+    rows: list[dict[str, Any]] = []
     for candidate in candidates:
-        text = candidate.text
-        text_tokens = candidate.tokens
-        text_token_set = candidate.token_set
-        original_rank_score = 1.0 - ((candidate.original_rank - 1) / total)
-        provider_score = candidate.score / max_original_score if candidate.score > 0 else 0.0
-        overlap = len(query_tokens & text_token_set) / max(1, len(query_tokens))
-        density = sum(1 for token in text_tokens if token in query_tokens) / max(
-            1,
-            math.sqrt(len(text_tokens)),
+        features = _candidate_features(
+            query_tokens=query_tokens,
+            candidate=candidate,
+            intents=intents,
+            max_original_score=max_original_score,
+            rank_span=total,
         )
-        stem_overlap = len(query_tokens & text_token_set) / max(1, len(query_tokens))
-        score = (0.72 * original_rank_score) + (0.12 * provider_score)
-        score += 0.24 * overlap
-        score += 0.035 * density
+        features.update(
+            coverage_features_by_rank.get(
+                candidate.original_rank,
+                _empty_query_coverage_features(),
+            )
+        )
+        rows.append(
+            {
+                "session_id": candidate.session_id,
+                "label": int(candidate.session_id in answer_session_ids),
+                "original_rank": candidate.original_rank,
+                "prior_score": candidate.score,
+                "heuristic_score": _heuristic_score_from_features(features, intents),
+                "features": features,
+            }
+        )
+    return rows
 
-        if intents.preference:
-            preference_markers = min(3, _preference_marker_count(text))
-            preference_evidence = preference_markers * (0.18 + (0.82 * stem_overlap))
-            score += preference_evidence
-            score += 0.08 * stem_overlap * _bool_score(PERSONAL_PATTERN.search(text))
-            if preference_markers == 0:
-                score -= 0.18 * _generic_assistant_count(text)
-        elif intents.personal:
-            score += 0.06 * _bool_score(PERSONAL_PATTERN.search(text))
-            score -= 0.08 * _generic_assistant_count(text)
 
-        if intents.temporal:
-            score += _temporal_score(candidate.timestamp, intents)
+def _query_coverage_features_by_original_rank(
+    query: str,
+    candidates: Sequence[_Candidate],
+    intents: _Intents,
+) -> dict[int, dict[str, float]]:
+    ranking = rank_by_query_coverage(
+        query,
+        [
+            QueryCoverageCandidate(
+                item=candidate.original_rank,
+                stable_id=f"{candidate.session_id}:{candidate.original_rank}",
+                text=candidate.text,
+                prior_score=candidate.score,
+                original_rank=candidate.original_rank,
+                timestamp=candidate.timestamp,
+            )
+            for candidate in candidates
+        ],
+        temporal_target=intents.target_date,
+    )
+    rank_span = max(1, len(ranking.ranked) - 1)
+    return {
+        int(ranked.item): {
+            "query_coverage_score": ranked.score,
+            "query_coverage_overlap": ranked.overlap,
+            "query_coverage_rank": float(index + 1),
+            "query_coverage_rank_score": 1.0 - (index / rank_span),
+            "query_coverage_applied": _bool_score(ranking.applied),
+            "query_coverage_changed": _bool_score(ranking.changed),
+        }
+        for index, ranked in enumerate(ranking.ranked)
+    }
 
-        scored.append((score, candidate))
 
-    return sorted(scored, key=lambda item: (-item[0], item[1].original_rank))
+def _empty_query_coverage_features() -> dict[str, float]:
+    return {
+        "query_coverage_score": 0.0,
+        "query_coverage_overlap": 0.0,
+        "query_coverage_rank": 0.0,
+        "query_coverage_rank_score": 0.0,
+        "query_coverage_applied": 0.0,
+        "query_coverage_changed": 0.0,
+    }
+
+
+def _candidate_features(
+    *,
+    query_tokens: set[str],
+    candidate: _Candidate,
+    intents: _Intents,
+    max_original_score: float,
+    rank_span: int,
+) -> dict[str, float]:
+    text = candidate.text
+    text_tokens = candidate.tokens
+    text_token_set = candidate.token_set
+    query_token_count = max(1, len(query_tokens))
+    overlap = len(query_tokens & text_token_set) / query_token_count
+    return {
+        "original_rank_score": 1.0 - ((candidate.original_rank - 1) / rank_span),
+        "provider_score": candidate.score / max_original_score if candidate.score > 0 else 0.0,
+        "query_overlap": overlap,
+        "query_density": sum(1 for token in text_tokens if token in query_tokens)
+        / max(1.0, math.sqrt(len(text_tokens))),
+        "stem_overlap": overlap,
+        "preference_marker_count": float(_preference_marker_count(text)),
+        "generic_assistant_count": float(_generic_assistant_count(text)),
+        "personal_marker": _bool_score(PERSONAL_PATTERN.search(text)),
+        "temporal_score": _temporal_score(candidate.timestamp, intents),
+        "intent_preference": _bool_score(intents.preference),
+        "intent_personal": _bool_score(intents.personal),
+        "intent_temporal": _bool_score(intents.temporal),
+        "intent_recent": _bool_score(intents.recent),
+        "intent_multi_evidence": _bool_score(intents.multi_evidence),
+        "token_count": float(len(text_tokens)),
+        "query_token_count": float(len(query_tokens)),
+    }
+
+
+def _heuristic_score_from_features(features: Mapping[str, float], intents: _Intents) -> float:
+    score = (0.72 * features.get("original_rank_score", 0.0)) + (
+        0.12 * features.get("provider_score", 0.0)
+    )
+    score += 0.24 * features.get("query_overlap", 0.0)
+    score += 0.035 * features.get("query_density", 0.0)
+
+    if intents.preference:
+        preference_markers = min(3.0, features.get("preference_marker_count", 0.0))
+        stem_overlap = features.get("stem_overlap", 0.0)
+        preference_evidence = preference_markers * (0.18 + (0.82 * stem_overlap))
+        score += preference_evidence
+        score += 0.08 * stem_overlap * features.get("personal_marker", 0.0)
+        if preference_markers == 0:
+            score -= 0.18 * features.get("generic_assistant_count", 0.0)
+    elif intents.personal:
+        score += 0.06 * features.get("personal_marker", 0.0)
+        score -= 0.08 * features.get("generic_assistant_count", 0.0)
+
+    if intents.temporal:
+        score += features.get("temporal_score", 0.0)
+
+    return score
 
 
 def _diversify_ranking(scored: Sequence[tuple[float, _Candidate]]) -> list[str]:

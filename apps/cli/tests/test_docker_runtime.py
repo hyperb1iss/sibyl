@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -8,6 +10,7 @@ import yaml
 from typer.testing import CliRunner
 
 from sibyl_cli import config_store
+from sibyl_cli import dev as dev_module
 from sibyl_cli import docker as docker_module
 from sibyl_cli import local as local_module
 from sibyl_cli.main import app
@@ -54,6 +57,120 @@ def test_docker_compose_can_opt_into_worker_runtime() -> None:
     assert services["api"]["environment"]["SIBYL_COORDINATION_BACKEND"] == "redis"
     assert services["api"]["image"] == "ghcr.io/hyperb1iss/sibyl-api-crawler:1.0.0-rc.1"
     assert services["worker"]["environment"]["SIBYL_REDIS_URL"] == "redis://valkey:6379/0"
+
+
+def test_quickstart_compose_persists_generated_runtime_secrets() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    compose = yaml.safe_load((repo_root / "docker-compose.quickstart.yml").read_text())
+
+    services = compose["services"]
+    secret_mount = "sibyl_secrets:/home/sibyl/.sibyl"
+    assert "SIBYL_JWT_SECRET" not in services["api"]["environment"]
+    assert secret_mount in services["api"]["volumes"]
+    assert secret_mount in services["worker"]["volumes"]
+    assert services["secrets-init"]["command"] == [
+        "chown",
+        "-R",
+        "1000:1000",
+        "/home/sibyl/.sibyl",
+    ]
+    assert secret_mount in services["secrets-init"]["volumes"]
+    assert services["api"]["depends_on"]["secrets-init"] == {
+        "condition": "service_completed_successfully",
+    }
+
+
+def test_quickstart_test_compose_replaces_base_ports() -> None:
+    docker = shutil.which("docker")
+    if docker is None:
+        pytest.skip("docker compose is not available")
+
+    repo_root = Path(__file__).resolve().parents[3]
+    version = subprocess.run(
+        [docker, "compose", "version"],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if version.returncode != 0:
+        pytest.skip("docker compose is not available")
+
+    result = subprocess.run(
+        [
+            docker,
+            "compose",
+            "--env-file",
+            "/dev/null",
+            "-f",
+            "docker-compose.quickstart.yml",
+            "-f",
+            "docker-compose.quickstart.test.yml",
+            "config",
+            "--format",
+            "json",
+        ],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    config = json.loads(result.stdout)
+
+    def published_ports(service: str) -> list[str]:
+        return [
+            str(port["published"])
+            for port in config["services"][service].get("ports", [])
+        ]
+
+    assert published_ports("api") == ["3344"]
+    assert published_ports("web") == ["3347"]
+    assert published_ports("surrealdb") == ["8010"]
+    assert config["networks"]["default"]["name"] == "sibyl-test"
+    assert config["volumes"]["sibyl_secrets"]["name"] == "sibyl_test_secrets"
+    assert config["volumes"]["sibyl_surreal"]["name"] == "sibyl_test_surreal"
+    assert config["services"]["api"]["container_name"] == "sibyl-test-api"
+    assert config["services"]["secrets-init"]["container_name"] == "sibyl-test-secrets-init"
+    assert config["services"]["surrealdb"]["container_name"] == "sibyl-test-surrealdb"
+
+
+def test_dev_compose_disables_default_env_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compose = tmp_path / ".devcontainer" / "docker-compose.yml"
+    compose.parent.mkdir()
+    compose.write_text("services: {}\n")
+    calls: list[list[str]] = []
+
+    def fake_run(
+        cmd: list[str],
+        **_: object,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="[]")
+
+    monkeypatch.setattr(dev_module.subprocess, "run", fake_run)
+
+    result = dev_module._run_compose(["ps", "--format", "json"], compose, capture=True)
+
+    assert result is not None
+    assert result.returncode == 0
+    assert calls == [
+        [
+            "docker",
+            "compose",
+            "--env-file",
+            "/dev/null",
+            "-f",
+            str(compose),
+            "ps",
+            "--format",
+            "json",
+        ]
+    ]
 
 
 def test_docker_init_writes_runtime_files_and_context(

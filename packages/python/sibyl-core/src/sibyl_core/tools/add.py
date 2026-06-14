@@ -1,5 +1,6 @@
 """Add tool for creating new knowledge in the Sibyl graph."""
 
+import inspect
 from datetime import UTC, datetime
 from typing import Any
 
@@ -25,6 +26,7 @@ from sibyl_core.models.tasks import (
     TaskStatus,
 )
 from sibyl_core.projection import project_memory_entity
+from sibyl_core.runtime_ports import get_queue_port
 from sibyl_core.services.graph import get_surreal_graph_runtime
 from sibyl_core.tools.helpers import (
     MAX_CONTENT_LENGTH,
@@ -39,23 +41,6 @@ from sibyl_core.tools.responses import AddResponse, ConflictWarning
 log = structlog.get_logger()
 
 __all__ = ["add"]
-
-DIRECT_ENTITY_TYPES = {
-    "artifact",
-    "claim",
-    "decision",
-    "domain",
-    "epic",
-    "idea",
-    "pattern",
-    "plan",
-    "project",
-    "procedure",
-    "rule",
-    "session",
-    "task",
-    "template",
-}
 
 
 async def get_graph_runtime(group_id: str):
@@ -75,20 +60,91 @@ def _build_relationship(rel_data: dict[str, Any]) -> Relationship:
     )
 
 
+def _accepts_keyword(function: Any, keyword: str) -> bool:
+    try:
+        signature = inspect.signature(function)
+    except (TypeError, ValueError):
+        return True
+    return keyword in signature.parameters or any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
+
+
+async def _create_entity_record(
+    entity_manager: Any,
+    entity: Entity,
+    *,
+    generate_embeddings: bool,
+) -> str:
+    create_direct = getattr(entity_manager, "create_direct", None)
+    if inspect.iscoroutinefunction(create_direct):
+        if _accepts_keyword(create_direct, "generate_embedding"):
+            return await create_direct(entity, generate_embedding=generate_embeddings)
+        return await create_direct(entity)
+    return await entity_manager.create(entity)
+
+
 async def _create_relationships_bulk(
     relationship_manager: Any,
     relationships_to_create: list[dict[str, Any]],
     log_event: str,
+    *,
+    generate_embeddings: bool = True,
 ) -> tuple[int, int]:
     if not relationships_to_create:
         return 0, 0
 
-    created, failed = await relationship_manager.create_bulk(
-        [_build_relationship(rel_data) for rel_data in relationships_to_create]
-    )
+    relationships = [_build_relationship(rel_data) for rel_data in relationships_to_create]
+    create_direct_bulk = getattr(relationship_manager, "create_direct_bulk", None)
+    if inspect.iscoroutinefunction(create_direct_bulk):
+        created_ids = await create_direct_bulk(
+            relationships,
+            generate_embeddings=generate_embeddings,
+        )
+        created = len(created_ids)
+        failed = len(relationships) - created
+    else:
+        created, failed = await relationship_manager.create_bulk(relationships)
+
     if failed:
         log.warning(log_event, created=created, failed=failed)
     return created, failed
+
+
+async def _enqueue_embedding_backfill(
+    entities: list[Entity],
+    group_id: str,
+    relationships_to_create: list[dict[str, Any]],
+) -> dict[str, Any]:
+    try:
+        job_id = await get_queue_port().enqueue_entity_embedding_backfill(
+            entities_data=[entity.model_dump(mode="json") for entity in entities],
+            group_id=group_id,
+            relationships=relationships_to_create or None,
+        )
+    except Exception as exc:
+        log.warning(
+            "embedding_backfill_enqueue_failed",
+            entity_ids=[entity.id for entity in entities],
+            error=str(exc),
+        )
+        return {
+            "embedding_backfill": {
+                "status": "failed",
+                "queued_entities": 0,
+                "queued_relationships": 0,
+                "error": str(exc),
+            }
+        }
+    return {
+        "embedding_backfill": {
+            "status": "queued",
+            "job_ids": [job_id],
+            "queued_entities": len(entities),
+            "queued_relationships": len(relationships_to_create),
+        }
+    }
 
 
 async def add(
@@ -112,6 +168,7 @@ async def add(
     repository_url: str | None = None,
     # Sync mode - wait for Surreal graph writes instead of returning immediately
     sync: bool = False,
+    generate_embeddings: bool = True,
     # Conflict detection - check for contradicting/duplicate knowledge
     check_conflicts: bool = True,
     skip_conflicts: bool = False,
@@ -159,6 +216,8 @@ async def add(
         repository_url: Repository URL for projects.
         sync: If True, wait for Surreal graph writes so the entity exists immediately.
               If False (default), return immediately and process in background.
+        generate_embeddings: If True, generate native graph embeddings during the write.
+              If False, persist lexical records first and queue embedding backfill.
         check_conflicts: If True (default), check for semantically similar existing entities
               that may contradict or duplicate this knowledge. Warnings returned in response.
         skip_conflicts: If True, skip conflict detection even when check_conflicts is True.
@@ -513,18 +572,21 @@ async def add(
         # Sync mode: create entity + relationships immediately via Surreal
         if sync:
             # Use create_direct() for structured entities and create() for episode-compatible managers.
-            if entity_type in DIRECT_ENTITY_TYPES:
-                created_id = await entity_manager.create_direct(entity, generate_embedding=True)
-            else:
-                created_id = await entity_manager.create(entity)
+            created_id = await _create_entity_record(
+                entity_manager,
+                entity,
+                generate_embeddings=generate_embeddings,
+            )
 
             await _create_relationships_bulk(
                 relationship_manager,
                 relationships_to_create,
                 "relationship_creation_partial_failure",
+                generate_embeddings=generate_embeddings,
             )
 
             # Auto-link to related patterns/rules/templates in sync mode
+            auto_relationships: list[dict[str, Any]] = []
             try:
                 auto_link_results = await _auto_discover_links(
                     entity_manager=entity_manager,
@@ -554,6 +616,7 @@ async def add(
                     relationship_manager,
                     auto_relationships,
                     "auto_link_partial_failure",
+                    generate_embeddings=generate_embeddings,
                 )
             except Exception as e:
                 log.warning("auto_link_search_failed", error=str(e))
@@ -564,7 +627,7 @@ async def add(
                 source=entity,
                 group_id=org_id,
                 created_source_id=created_id,
-                generate_embeddings=True,
+                generate_embeddings=generate_embeddings,
             )
             if projection_result.errors:
                 log.warning(
@@ -573,6 +636,7 @@ async def add(
                     extracted=projection_result.extracted,
                     projected_entities=projection_result.projected_entities,
                     relationships=projection_result.relationships,
+                    projection_state=projection_result.projection_state,
                     errors=projection_result.errors,
                 )
             elif projection_result.extracted:
@@ -582,6 +646,7 @@ async def add(
                     extracted=projection_result.extracted,
                     projected_entities=projection_result.projected_entities,
                     relationships=projection_result.relationships,
+                    projection_state=projection_result.projection_state,
                     errors=len(projection_result.errors),
                 )
 
@@ -590,6 +655,24 @@ async def add(
                 message += f" (linked: {len(relationships_to_create)})"
             if conflicts:
                 message += f" (⚠️ {len(conflicts)} potential conflict(s) detected)"
+            background_jobs = {}
+            if not generate_embeddings:
+                projection_entities = list(
+                    getattr(projection_result, "created_projected_entities", ())
+                )
+                projection_relationships = [
+                    relationship.model_dump(mode="json")
+                    for relationship in getattr(
+                        projection_result,
+                        "created_projection_relationships",
+                        (),
+                    )
+                ]
+                background_jobs = await _enqueue_embedding_backfill(
+                    [entity, *projection_entities],
+                    org_id,
+                    relationships_to_create + auto_relationships + projection_relationships,
+                )
 
             return AddResponse(
                 success=True,
@@ -597,13 +680,12 @@ async def add(
                 message=message,
                 timestamp=datetime.now(UTC),
                 conflicts=conflicts,
+                background_jobs=background_jobs,
             )
 
         # Async mode (default): queue arq job, return immediately
         try:
-            from sibyl.jobs.queue import enqueue_create_entity
-
-            await enqueue_create_entity(
+            create_job_id = await get_queue_port().enqueue_create_entity(
                 entity_id=entity_id,
                 entity_data=entity.model_dump(mode="json"),
                 entity_type=entity_type,
@@ -615,6 +697,7 @@ async def add(
                     "technologies": technologies or languages or [],
                     "category": category,
                 },
+                generate_embeddings=generate_embeddings,
             )
             log.info("add_queued_for_arq", entity_id=entity_id, entity_type=entity_type)
 
@@ -622,15 +705,17 @@ async def add(
             # If arq queue fails, fall back to sync creation
             log.warning("arq_queue_failed_falling_back_to_sync", error=str(e))
             # Use create_direct() for structured entities and create() for episode-compatible managers.
-            if entity_type in DIRECT_ENTITY_TYPES:
-                created_id = await entity_manager.create_direct(entity, generate_embedding=True)
-            else:
-                created_id = await entity_manager.create(entity)
+            created_id = await _create_entity_record(
+                entity_manager,
+                entity,
+                generate_embeddings=generate_embeddings,
+            )
 
             await _create_relationships_bulk(
                 relationship_manager,
                 relationships_to_create,
                 "relationship_creation_partial_failure",
+                generate_embeddings=generate_embeddings,
             )
 
             projection_result = await project_memory_entity(
@@ -639,7 +724,7 @@ async def add(
                 source=entity,
                 group_id=org_id,
                 created_source_id=created_id,
-                generate_embeddings=True,
+                generate_embeddings=generate_embeddings,
             )
             if projection_result.errors:
                 log.warning(
@@ -648,6 +733,7 @@ async def add(
                     extracted=projection_result.extracted,
                     projected_entities=projection_result.projected_entities,
                     relationships=projection_result.relationships,
+                    projection_state=projection_result.projection_state,
                     errors=projection_result.errors,
                 )
             elif projection_result.extracted:
@@ -657,30 +743,61 @@ async def add(
                     extracted=projection_result.extracted,
                     projected_entities=projection_result.projected_entities,
                     relationships=projection_result.relationships,
+                    projection_state=projection_result.projection_state,
                     errors=len(projection_result.errors),
                 )
 
             fallback_message = f"Added (sync fallback): {title}"
             if conflicts:
                 fallback_message += f" (⚠️ {len(conflicts)} potential conflict(s) detected)"
+            background_jobs = {}
+            if not generate_embeddings:
+                projection_entities = list(
+                    getattr(projection_result, "created_projected_entities", ())
+                )
+                projection_relationships = [
+                    relationship.model_dump(mode="json")
+                    for relationship in getattr(
+                        projection_result,
+                        "created_projection_relationships",
+                        (),
+                    )
+                ]
+                background_jobs = await _enqueue_embedding_backfill(
+                    [entity, *projection_entities],
+                    org_id,
+                    relationships_to_create + projection_relationships,
+                )
             return AddResponse(
                 success=True,
                 id=created_id,
                 message=fallback_message,
                 timestamp=datetime.now(UTC),
                 conflicts=conflicts,
+                background_jobs=background_jobs,
             )
 
         # Return immediately with the entity ID - entity will be created in background
         queued_message = f"Queued: {title} (processing in background)"
         if conflicts:
             queued_message += f" (⚠️ {len(conflicts)} potential conflict(s) detected)"
+        background_jobs = {}
+        if not generate_embeddings:
+            background_jobs = {
+                "embedding_backfill": {
+                    "status": "deferred",
+                    "queued_by": create_job_id,
+                    "queued_entities": 1,
+                    "queued_relationships": len(relationships_to_create),
+                }
+            }
         return AddResponse(
             success=True,
             id=entity_id,
             message=queued_message,
             timestamp=datetime.now(UTC),
             conflicts=conflicts,
+            background_jobs=background_jobs,
         )
 
     except Exception as e:

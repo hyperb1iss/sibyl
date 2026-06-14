@@ -1,8 +1,7 @@
 """Comprehensive tests for sibyl-core auth module (JWT and passwords).
 
-These tests mock the sibyl config module dependency at import time
-using sys.modules patching. The auth modules have a runtime dependency
-on the sibyl server package which isn't available in sibyl-core's test env.
+These tests install mock settings through the auth modules' explicit provider
+hook so sibyl-core stays independent from the sibyl server package.
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import jwt
@@ -120,10 +119,14 @@ class TestJwt:
     """Tests for JWT token creation and verification."""
 
     def _import_jwt(self):
-        """Import JWT module fresh after mocks are in place."""
+        """Import JWT module fresh and install mock settings."""
         if "sibyl_core.auth.jwt" in sys.modules:
-            return importlib.reload(sys.modules["sibyl_core.auth.jwt"])
-        return importlib.import_module("sibyl_core.auth.jwt")
+            module = importlib.reload(sys.modules["sibyl_core.auth.jwt"])
+        else:
+            module = importlib.import_module("sibyl_core.auth.jwt")
+        mock_config = sys.modules["sibyl.config"]
+        module.install_settings_provider(lambda: mock_config.settings)
+        return module
 
     # === Access Token Creation ===
 
@@ -489,10 +492,14 @@ class TestPasswords:
     """Tests for password hashing and verification."""
 
     def _import_passwords(self):
-        """Import passwords module fresh after mocks are in place."""
+        """Import passwords module fresh and install mock settings."""
         if "sibyl_core.auth.passwords" in sys.modules:
-            return importlib.reload(sys.modules["sibyl_core.auth.passwords"])
-        return importlib.import_module("sibyl_core.auth.passwords")
+            module = importlib.reload(sys.modules["sibyl_core.auth.passwords"])
+        else:
+            module = importlib.import_module("sibyl_core.auth.passwords")
+        mock_config = sys.modules["sibyl.config"]
+        module.install_settings_provider(lambda: mock_config.settings)
+        return module
 
     # === Hash Password ===
 
@@ -643,6 +650,19 @@ class TestPasswords:
         )
 
         assert result is False
+
+    def test_verify_password_timing_floor_burns_for_empty_password(
+        self, mock_sibyl_modules: MagicMock
+    ) -> None:
+        """verify_password_timing_floor always executes PBKDF2."""
+        pwd_module = self._import_passwords()
+
+        with patch.object(pwd_module, "pbkdf2_hmac", wraps=pwd_module.pbkdf2_hmac) as pbkdf2:
+            assert pwd_module.verify_password_timing_floor("", iterations=1) is None
+            assert pwd_module.verify_password_timing_floor("candidate", iterations=1) is None
+
+        assert pbkdf2.call_count == 2
+        assert [call.args[3] for call in pbkdf2.call_args_list] == [1, 1]
 
     def test_verify_password_malformed_hex_salt(self, mock_sibyl_modules: MagicMock) -> None:
         """verify_password returns False for malformed salt hex."""

@@ -114,7 +114,7 @@ moon run docker-up
 For distributed or multi-process dev, opt into Redis explicitly:
 
 ```bash
-docker compose --profile redis up -d surrealdb redis
+docker compose --env-file /dev/null --profile redis up -d surrealdb redis
 ```
 
 Historical `postgres.sql` archive rehearsal now uses an explicitly managed external PostgreSQL
@@ -124,30 +124,23 @@ database. The default compose file starts only SurrealDB, plus Redis when that p
 
 ### Environment Variables
 
-Create a `.env` file from the repo root example:
+Export runtime settings in your shell:
 
 ```bash
-cp .env.example .env
-```
-
-Edit the file with your configuration:
-
-```bash
-# Required
-SIBYL_OPENAI_API_KEY=sk-...        # For embeddings
-SIBYL_JWT_SECRET=your-secret-key   # For authentication
+export SIBYL_OPENAI_API_KEY=sk-...        # For embeddings
+# SIBYL_JWT_SECRET is auto-generated in dev.
 
 # Recommended local runtime
-SIBYL_STORE=surreal
-SIBYL_COORDINATION_BACKEND=local
-SIBYL_SURREAL_URL=ws://127.0.0.1:8000/rpc
-SIBYL_SURREAL_USERNAME=root
-SIBYL_SURREAL_PASSWORD=root
+export SIBYL_STORE=surreal
+export SIBYL_COORDINATION_BACKEND=local
+export SIBYL_SURREAL_URL=ws://127.0.0.1:8000/rpc
+export SIBYL_SURREAL_USERNAME=root
+export SIBYL_SURREAL_PASSWORD=root
 
 # Optional
-SIBYL_LOG_LEVEL=INFO
-SIBYL_EMBEDDING_MODEL=text-embedding-3-small
-SIBYL_ANTHROPIC_API_KEY=...        # For LLM operations
+export SIBYL_LOG_LEVEL=INFO
+export SIBYL_EMBEDDING_MODEL=text-embedding-3-small
+export SIBYL_ANTHROPIC_API_KEY=...        # For LLM operations
 ```
 
 ### Required Environment Variables
@@ -155,7 +148,7 @@ SIBYL_ANTHROPIC_API_KEY=...        # For LLM operations
 | Variable               | Description                              |
 | ---------------------- | ---------------------------------------- |
 | `SIBYL_OPENAI_API_KEY` | OpenAI API key for generating embeddings |
-| `SIBYL_JWT_SECRET`     | Secret key for JWT token signing         |
+| `SIBYL_JWT_SECRET`     | Secret key for production JWT signing    |
 
 ### Optional Environment Variables
 

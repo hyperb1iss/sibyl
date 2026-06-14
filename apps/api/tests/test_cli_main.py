@@ -14,6 +14,19 @@ runner = CliRunner()
 cli_main = import_module("sibyl.cli.main")
 
 
+def _clear_embedded_runtime_env(monkeypatch) -> None:
+    for key in (
+        "SIBYL_STORE",
+        "SIBYL_AUTH_STORE",
+        "SIBYL_COORDINATION_BACKEND",
+        "SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER",
+        "SIBYL_SURREAL_URL",
+    ):
+        if key not in os.environ:
+            monkeypatch.setenv(key, "")
+        monkeypatch.delenv(key, raising=False)
+
+
 def test_top_level_version_uses_package_metadata(monkeypatch) -> None:
     monkeypatch.setattr(cli_main, "pkg_version", lambda package_name: "9.9.9")
 
@@ -78,14 +91,7 @@ def test_serve_with_reload_enables_dev_diagnostics(monkeypatch) -> None:
 
 
 def test_configure_embedded_environment(monkeypatch, tmp_path) -> None:
-    for key in (
-        "SIBYL_STORE",
-        "SIBYL_AUTH_STORE",
-        "SIBYL_COORDINATION_BACKEND",
-        "SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER",
-        "SIBYL_SURREAL_URL",
-    ):
-        monkeypatch.delenv(key, raising=False)
+    _clear_embedded_runtime_env(monkeypatch)
 
     data_dir = cli_main._configure_embedded_environment(tmp_path / "surreal")
 
@@ -98,7 +104,7 @@ def test_configure_embedded_environment(monkeypatch, tmp_path) -> None:
 
 
 def test_configure_embedded_environment_refreshes_global_settings(monkeypatch, tmp_path) -> None:
-    monkeypatch.delenv("SIBYL_SURREAL_URL", raising=False)
+    _clear_embedded_runtime_env(monkeypatch)
     monkeypatch.setattr("sibyl.config.settings.surreal_url", "")
 
     data_dir = cli_main._configure_embedded_environment(tmp_path / "surreal")
@@ -223,3 +229,16 @@ def test_setup_runtime_services_checks_surreal_stack_for_mixed_legacy_mode(
     assert cli_main._check_runtime_services(runtime_settings) is True
     check_surreal.assert_called_once_with(runtime_settings)
     check_coordination.assert_not_called()
+
+
+def test_setup_does_not_create_project_dotenv(monkeypatch, tmp_path) -> None:
+    (tmp_path / ".env.example").write_text("SIBYL_JWT_SECRET=example\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli_main, "_check_openai_api_key_configured", lambda settings: True)
+    monkeypatch.setattr(cli_main, "_check_docker_available", lambda: True)
+    monkeypatch.setattr(cli_main, "_check_runtime_services", lambda settings: True)
+
+    result = runner.invoke(app, ["setup"])
+
+    assert result.exit_code == 0
+    assert not (tmp_path / ".env").exists()

@@ -29,6 +29,7 @@ __all__ = [
     "enqueue_consolidation",
     "enqueue_crawl",
     "enqueue_create_entity",
+    "enqueue_entity_embedding_backfill",
     "enqueue_create_learning_episode",
     "enqueue_create_learning_procedure",
     "enqueue_memory_extraction",
@@ -102,6 +103,7 @@ async def enqueue_create_entity(
     group_id: str,
     relationships: list[dict[str, Any]] | None = None,
     auto_link_params: dict[str, Any] | None = None,
+    generate_embeddings: bool = True,
 ) -> str:
     """Enqueue an entity creation job."""
     return await get_queue().enqueue_create_entity(
@@ -111,6 +113,7 @@ async def enqueue_create_entity(
         group_id,
         relationships=relationships,
         auto_link_params=auto_link_params,
+        generate_embeddings=generate_embeddings,
     )
 
 
@@ -157,6 +160,20 @@ async def enqueue_memory_extraction(
         max_source_chars=max_source_chars,
         max_concurrent=max_concurrent,
         max_tokens=max_tokens,
+    )
+
+
+async def enqueue_entity_embedding_backfill(
+    entities_data: list[dict[str, Any]],
+    group_id: str,
+    *,
+    relationships: list[dict[str, Any]] | None = None,
+) -> str:
+    """Enqueue embedding backfill for lexically-created graph records."""
+    return await get_queue().enqueue_entity_embedding_backfill(
+        entities_data,
+        group_id,
+        relationships=relationships,
     )
 
 

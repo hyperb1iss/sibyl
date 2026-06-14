@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import nullcontext
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -40,6 +41,21 @@ def _prepare_up_command(monkeypatch, tmp_path: Path) -> tuple[MagicMock, MagicMo
     return run_compose, start_foreground
 
 
+def test_run_docker_compose_disables_default_env_file(tmp_path: Path, monkeypatch) -> None:
+    run = MagicMock(return_value=CompletedProcess(["docker"], 0, "", ""))
+    monkeypatch.setattr(up_cmd.subprocess, "run", run)
+
+    up_cmd._run_docker_compose(["ps"], tmp_path)
+
+    run.assert_called_once_with(
+        ["docker", "compose", "--env-file", os.devnull, "ps"],
+        check=False,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+
+
 def test_up_defaults_to_surreal_local_without_redis(tmp_path: Path, monkeypatch) -> None:
     _clear_runtime_env(monkeypatch)
     run_compose, start_foreground = _prepare_up_command(monkeypatch, tmp_path)
@@ -59,11 +75,24 @@ def test_coordination_backend_helper_defaults_to_surreal_local() -> None:
     assert up_cmd._resolve_coordination_backend({}) == "local"
 
 
+def test_up_ignores_project_dotenv(tmp_path: Path, monkeypatch) -> None:
+    _clear_runtime_env(monkeypatch)
+    (tmp_path / ".env").write_text("SIBYL_COORDINATION_BACKEND=redis\n")
+    run_compose, start_foreground = _prepare_up_command(monkeypatch, tmp_path)
+
+    up_cmd.up()
+
+    run_compose.assert_called_once_with(["up", "-d", "surrealdb"], tmp_path)
+    env = start_foreground.call_args.args[2]
+    assert up_cmd._resolve_coordination_backend(env) == "local"
+    assert "SIBYL_REDIS_HOST" not in env
+
+
 def test_up_starts_redis_when_surreal_coordination_backend_is_redis(
     tmp_path: Path, monkeypatch
 ) -> None:
     _clear_runtime_env(monkeypatch)
-    (tmp_path / ".env").write_text("SIBYL_COORDINATION_BACKEND=redis\n")
+    monkeypatch.setenv("SIBYL_COORDINATION_BACKEND", "redis")
     run_compose, start_foreground = _prepare_up_command(monkeypatch, tmp_path)
 
     up_cmd.up()
@@ -80,7 +109,7 @@ def test_up_starts_redis_when_surreal_coordination_backend_is_redis(
 
 def test_up_ignores_removed_postgres_auth_store(tmp_path: Path, monkeypatch) -> None:
     _clear_runtime_env(monkeypatch)
-    (tmp_path / ".env").write_text("SIBYL_AUTH_STORE=postgres\n")
+    monkeypatch.setenv("SIBYL_AUTH_STORE", "postgres")
     run_compose, start_foreground = _prepare_up_command(monkeypatch, tmp_path)
 
     up_cmd.up()
@@ -93,7 +122,7 @@ def test_up_ignores_removed_postgres_auth_store(tmp_path: Path, monkeypatch) -> 
 
 def test_up_starts_legacy_stack_when_store_is_legacy(tmp_path: Path, monkeypatch) -> None:
     _clear_runtime_env(monkeypatch)
-    (tmp_path / ".env").write_text("SIBYL_STORE=legacy\n")
+    monkeypatch.setenv("SIBYL_STORE", "legacy")
     run_compose, start_foreground = _prepare_up_command(monkeypatch, tmp_path)
     warn = MagicMock()
     monkeypatch.setattr(up_cmd, "warn", warn)

@@ -16,6 +16,7 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import Mount, Route
 
 from sibyl.config import settings
+from sibyl.runtime_services import RuntimeServices
 from sibyl_core.observability import telemetry_registry
 
 if TYPE_CHECKING:
@@ -39,18 +40,6 @@ def _enable_dev_signal_diagnostics() -> None:
 
     with contextlib.suppress(OSError, RuntimeError, ValueError):
         faulthandler.register(sigusr1, all_threads=True)
-
-
-async def _bootstrap_surreal_runtime_schemas() -> bool:
-    from sibyl.surreal_runtime_startup import bootstrap_surreal_runtime_schemas
-
-    return await bootstrap_surreal_runtime_schemas()
-
-
-async def _load_runtime_settings_from_db() -> list[str]:
-    from sibyl.services.settings import load_runtime_settings_from_db
-
-    return await load_runtime_settings_from_db()
 
 
 _METRICS_MEDIA_TYPE = "text/plain; version=0.0.4; charset=utf-8"
@@ -80,7 +69,7 @@ def _root_metrics_authorized(request: Request) -> bool:
     return client in {"127.0.0.1", "::1", "localhost"}
 
 
-def create_combined_app(  # noqa: PLR0915
+def create_combined_app(
     host: str | None = None, port: int | None = None, *, embed_worker: bool = False
 ) -> Starlette:
     """Create a combined Starlette app with MCP and REST API.
@@ -115,7 +104,7 @@ def create_combined_app(  # noqa: PLR0915
     mcp_app = mcp.streamable_http_app()
 
     @asynccontextmanager
-    async def lifespan(_app: Starlette) -> "AsyncGenerator[None]":  # noqa: PLR0915
+    async def lifespan(_app: Starlette) -> "AsyncGenerator[None]":
         """Combined lifespan that initializes MCP session manager."""
         import asyncio
         import contextlib
@@ -147,84 +136,8 @@ def create_combined_app(  # noqa: PLR0915
                 hint="Set SIBYL_JWT_SECRET for authenticated access",
             )
 
-        await _bootstrap_surreal_runtime_schemas()
-        await _load_runtime_settings_from_db()
-        from sibyl.services.surreal_connectivity import (
-            initialize_shared_surreal_connectivity,
-            stop_surreal_connectivity_monitor,
-        )
-
-        await initialize_shared_surreal_connectivity()
-
-        broker_initialized = False
-        queue_backend = "unknown"
-        try:
-            from sibyl.coordination.broker import get_broker, get_queue_backend
-
-            queue_backend = get_queue_backend()
-            await get_broker().startup()
-            broker_initialized = True
-            log.info(
-                "Coordination broker ready",
-                backend=coordination_backend,
-                queue_backend=queue_backend,
-            )
-        except Exception as e:
-            log.warning(
-                "Coordination broker unavailable",
-                backend=coordination_backend,
-                queue_backend=queue_backend,
-                error=str(e),
-            )
-
-        scheduler_initialized = False
-        try:
-            from sibyl.coordination.scheduler import get_scheduler
-
-            await get_scheduler().startup()
-            scheduler_initialized = True
-            log.info("Coordination scheduler ready", backend=coordination_backend)
-        except Exception as e:
-            log.warning(
-                "Coordination scheduler unavailable",
-                backend=coordination_backend,
-                error=str(e),
-            )
-
-        # Initialize coordination event bus for WebSocket broadcasts
-        pubsub_initialized = False
-        try:
-            from sibyl.api.pubsub import init_pubsub
-            from sibyl.api.websocket import enable_pubsub, local_broadcast
-
-            await init_pubsub(local_broadcast)
-            enable_pubsub()
-            pubsub_initialized = True
-            log.info(
-                "Coordination event bus enabled for WebSocket broadcasts",
-                backend=coordination_backend,
-            )
-        except Exception as e:
-            log.warning(
-                "Coordination event bus unavailable - WebSocket broadcasts will stay direct",
-                backend=coordination_backend,
-                error=str(e),
-            )
-
-        # Initialize entity locks
-        locks_initialized = False
-        try:
-            from sibyl.locks import init_locks
-
-            await init_locks()
-            locks_initialized = True
-            log.info("Coordination locks enabled", backend=coordination_backend)
-        except Exception as e:
-            log.warning(
-                "Coordination locks unavailable - concurrent updates may conflict",
-                backend=coordination_backend,
-                error=str(e),
-            )
+        runtime_services = RuntimeServices(log=log)
+        await runtime_services.startup()
 
         # Optionally start embedded arq worker (dev mode only)
         worker_task = None
@@ -235,61 +148,15 @@ def create_combined_app(  # noqa: PLR0915
                 log.warning("Embedded worker disabled in surreal mode", store=settings.store)
 
         # The MCP session manager needs to be started for streamable HTTP
-        async with mcp.session_manager.run():
-            yield
-
-        await stop_surreal_connectivity_monitor()
-
         try:
-            from sibyl.persistence.surreal.auth import close_shared_surreal_auth_client
-            from sibyl.persistence.surreal.content import close_shared_surreal_content_client
-
-            await close_shared_surreal_auth_client()
-            await close_shared_surreal_content_client()
-        except Exception as e:
-            log.warning("Error shutting down shared Surreal client", error=str(e))
-
-        # Shutdown coordination event bus
-        if pubsub_initialized:
-            try:
-                from sibyl.api.pubsub import shutdown_pubsub
-                from sibyl.api.websocket import disable_pubsub
-
-                disable_pubsub()
-                await shutdown_pubsub()
-            except Exception as e:
-                log.warning("Error shutting down pub/sub", error=str(e))
-
-        # Shutdown locks
-        if locks_initialized:
-            try:
-                from sibyl.locks import shutdown_locks
-
-                await shutdown_locks()
-            except Exception as e:
-                log.warning("Error shutting down locks", error=str(e))
-
-        if broker_initialized:
-            try:
-                from sibyl.coordination.broker import get_broker
-
-                await get_broker().shutdown()
-            except Exception as e:
-                log.warning("Error shutting down broker", error=str(e))
-
-        if scheduler_initialized:
-            try:
-                from sibyl.coordination.scheduler import get_scheduler
-
-                await get_scheduler().shutdown()
-            except Exception as e:
-                log.warning("Error shutting down scheduler", error=str(e))
-
-        # Shutdown embedded worker if running
-        if worker_task:
-            worker_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await worker_task
+            async with mcp.session_manager.run():
+                yield
+        finally:
+            await runtime_services.shutdown()
+            if worker_task:
+                worker_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await worker_task
 
     # Create combined app with both mounted
     # Note: streamable_http_app() already routes to /mcp internally

@@ -19,8 +19,10 @@ from sibyl_core.auth.memory_policy import (
     memory_scope_policy_key,
 )
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
+from sibyl_core.backends.surreal.records import SurrealQueryError, query_error
 from sibyl_core.config import core_config
 from sibyl_core.embeddings.providers import EmbeddingMetadata, EmbeddingProvider
+from sibyl_core.memory_pipeline.retrieval import CandidateSourceFailure, CandidateSourceResult
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.retrieval.candidates import (
     CandidateKind,
@@ -35,14 +37,15 @@ from sibyl_core.services.graph import get_surreal_graph_runtime, normalize_recor
 from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,
+    RawMemoryRecallResult,
     raw_memory_recallable,
-    recall_raw_memory,
+    recall_raw_memory_with_sources,
 )
 
 if TYPE_CHECKING:
     from sibyl_core.tools.responses import SearchResponse, SearchResult
 
-type RawMemoryRecallFn = Callable[..., Awaitable[list[RawMemory]]]
+type RawMemoryRecallFn = Callable[..., Awaitable[list[RawMemory] | RawMemoryRecallResult]]
 
 DEFAULT_FILTER_SELECTIVITY_THRESHOLD = 0.1
 EDGE_FULLTEXT_MATCH_HEADROOM = 8
@@ -50,6 +53,37 @@ EDGE_FULLTEXT_MIN_MATCH_LIMIT = 32
 _ACTIVE_TASK_STATUSES = {"doing", "in_progress", "review"}
 _RAW_MEMORY_CONTEXT_TYPES = {"raw_memory", "session", "episode", "note"}
 _EDGE_CONTEXT_TYPES = {"claim", "relationship"}
+_GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS = {
+    "DECIDES": 1.0,
+    "REQUIRES": 0.98,
+    "DEPENDS_ON": 0.98,
+    "BLOCKS": 0.96,
+    "SUPERSEDES": 0.95,
+    "SUPPORTS": 0.94,
+    "VALIDATED_BY": 0.94,
+    "USES_PROCEDURE": 0.92,
+    "IMPLEMENTED": 0.9,
+    "REFERENCES": 0.86,
+    "ENCOUNTERED": 0.86,
+    "TOUCHES": 0.82,
+    "PRODUCES": 0.82,
+    "ABOUT": 0.78,
+    "BELONGS_TO": 0.72,
+    "CONTAINS": 0.72,
+    "SHARES_COMMUNITY": 0.74,
+    "DERIVED_FROM": 0.7,
+    "DOCUMENTED_IN": 0.66,
+    "RELATED_TO": 0.64,
+    "MENTIONS": 0.58,
+}
+_GRAPH_EXPANSION_DEPTH_DECAY = 0.72
+_GRAPH_EXPANSION_FETCH_HEADROOM = 4
+_GRAPH_EXPANSION_METADATA_KEYS = (
+    "graph_expansion_depth",
+    "graph_expansion_relationship",
+    "graph_expansion_score",
+    "graph_expansion_community_id",
+)
 log = structlog.get_logger()
 
 
@@ -65,6 +99,22 @@ async def _get_read_only_graph_runtime(organization_id: str) -> Any:
 class FusionBackend(StrEnum):
     PYTHON_RRF = "python_rrf"
     SURREAL_RRF = "surreal_rrf"
+
+
+type FusedCandidate = tuple[RetrievalCandidate, float, dict[str, Any]]
+
+
+@dataclass(frozen=True, slots=True)
+class FusionExecutionResult:
+    candidates: list[FusedCandidate]
+    actual_backend: FusionBackend
+
+
+@dataclass(frozen=True, slots=True)
+class RawCandidateFetch:
+    candidates: list[RetrievalCandidate]
+    failures: tuple[CandidateSourceFailure, ...] = ()
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 DEFAULT_FUSION_BACKEND = FusionBackend.PYTHON_RRF
@@ -87,6 +137,7 @@ class RetrievalWeights:
     project_match_boost: float = 1.2
     direct_raw_source_boost: float = 1.4
     graph_expansion_only_boost: float = 0.45
+    graph_native_signal_boost_cap: float = 1.2
     freshness_boost_cap: float = 1.5
 
 
@@ -145,6 +196,15 @@ class SearchFilter:
     project_ids: tuple[str, ...] = ()
     edge_uuids: tuple[str, ...] = ()
     edge_types: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _GraphExpansionHop:
+    uuid: str
+    depth: int
+    relationship: str
+    score: float
+    community_id: str | None = None
 
 
 def coerce_fusion_backend(
@@ -263,7 +323,7 @@ async def context_search(
     limit: int = 10,
     include_content: bool = True,
     embedding_provider: EmbeddingProvider | None = None,
-    raw_memory_recall_fn: RawMemoryRecallFn = recall_raw_memory,
+    raw_memory_recall_fn: RawMemoryRecallFn = recall_raw_memory_with_sources,
 ) -> SearchResponse:
     """Search context-pack candidates through native SurrealDB paths."""
 
@@ -291,6 +351,7 @@ async def context_search(
     edge_sources_allowed = _edge_sources_allowed(requested_types)
     graph_tasks = [
         (
+            RetrievalSignal.NODE_FULLTEXT,
             _node_fulltext_candidates(
                 client=client,
                 plan=search_plan,
@@ -298,9 +359,10 @@ async def context_search(
                 limit=search_plan.candidate_limits.node_fulltext,
             )
             if node_sources_allowed
-            else _empty_candidate_source()
+            else _empty_candidate_source(),
         ),
         (
+            RetrievalSignal.EPISODE_FULLTEXT,
             _episode_fulltext_candidates(
                 client=client,
                 plan=search_plan,
@@ -308,9 +370,10 @@ async def context_search(
                 limit=search_plan.candidate_limits.episode_fulltext,
             )
             if episode_sources_allowed
-            else _empty_candidate_source()
+            else _empty_candidate_source(),
         ),
         (
+            RetrievalSignal.EDGE_FULLTEXT,
             _edge_fulltext_candidates(
                 client=client,
                 plan=search_plan,
@@ -318,10 +381,15 @@ async def context_search(
                 limit=search_plan.candidate_limits.edge_fulltext,
             )
             if edge_sources_allowed
-            else _empty_candidate_source()
+            else _empty_candidate_source(),
         ),
     ]
-    raw_candidates, graph_candidate_lists = await _gather_candidate_sources(raw_task, graph_tasks)
+    raw_source, graph_sources, raw_failures, raw_recall_metadata = await _gather_candidate_sources(
+        raw_task,
+        graph_tasks,
+    )
+    raw_candidates = list(raw_source.candidates)
+    graph_candidate_lists = [list(source.candidates) for source in graph_sources]
 
     vector_plan = _vector_scoped_plan(
         search_plan,
@@ -335,16 +403,23 @@ async def context_search(
         embedding_provider=embedding_provider,
     )
     vector_candidate_lists = [vector_fetch.node_candidates, vector_fetch.edge_candidates]
-    graph_expansion_candidates = await _graph_expansion_candidates(
-        client=client,
-        plan=search_plan,
-        search_filter=search_filter,
-        seed_candidates=[
-            candidate
-            for source in [*graph_candidate_lists, *vector_candidate_lists]
-            for candidate in source
-        ],
-        limit=search_plan.candidate_limits.graph_expansion,
+    graph_expansion_source = await _gather_graph_expansion_source(
+        _graph_expansion_candidates(
+            client=client,
+            plan=search_plan,
+            search_filter=search_filter,
+            seed_candidates=[
+                candidate
+                for source in [*graph_candidate_lists, *vector_candidate_lists]
+                for candidate in source
+            ],
+            limit=search_plan.candidate_limits.graph_expansion,
+        )
+    )
+    graph_expansion_candidates = list(graph_expansion_source.candidates)
+    candidate_source_metadata = _candidate_source_metadata(
+        (raw_source, *graph_sources, graph_expansion_source),
+        extra_failures=raw_failures,
     )
 
     source_lists = [
@@ -373,15 +448,19 @@ async def context_search(
         for signal, candidates in source_lists
     ]
     fusion_backend = fusion_backend_from_env()
-    fused = await _fuse_candidates_for_plan(
+    fusion_failures: list[CandidateSourceFailure] = []
+    fusion = await _fuse_candidates_for_plan(
         client=client,
         source_lists=filtered_lists,
         plan=search_plan,
         limit=limit,
         fusion_backend=fusion_backend,
+        fusion_failures=fusion_failures,
     )
+    fused = fusion.candidates
     if search_plan.query.strip():
-        fused = _apply_query_coverage_to_fused(
+        fused = await asyncio.to_thread(
+            _apply_query_coverage_to_fused,
             search_plan.query,
             fused,
             temporal_target=None,
@@ -403,7 +482,13 @@ async def context_search(
             "types": list(types) if types else None,
             "project": search_plan.project,
             "retrieval_mode": "native",
-            "fusion_backend": fusion_backend.value,
+            **_fusion_receipt_metadata(
+                requested_backend=fusion_backend,
+                actual_backend=fusion.actual_backend,
+                failures=fusion_failures,
+            ),
+            **candidate_source_metadata,
+            **raw_recall_metadata,
             **vector_fetch.as_metadata(),
         },
         graph_count=len([result for result in results if result.result_origin == "graph"]),
@@ -460,6 +545,20 @@ def _scope_decisions(
                 None,
             )
         )
+    elif accessible_projects:
+        for accessible_project in sorted(accessible_projects):
+            decisions.append(
+                (
+                    authorize_memory_read(
+                        principal_id=principal_id,
+                        memory_scope=MemoryScope.PROJECT,
+                        scope_key=accessible_project,
+                        accessible_projects=accessible_projects,
+                    ),
+                    accessible_project,
+                    None,
+                )
+            )
     if agent_id:
         # Agent diaries default to the project-less private scope, so a query
         # with no specific project must include project_id=None alongside any
@@ -488,12 +587,98 @@ def _scope_decisions(
 
 async def _gather_candidate_sources(
     raw_task: Any,
-    graph_tasks: Sequence[Any],
-) -> tuple[list[RetrievalCandidate], list[list[RetrievalCandidate]]]:
-    gathered = await asyncio.gather(raw_task, *graph_tasks, return_exceptions=True)
-    raw = _candidate_list_or_empty(gathered[0])
-    graph = [_candidate_list_or_empty(result) for result in gathered[1:]]
-    return raw, graph
+    graph_tasks: Sequence[tuple[RetrievalSignal, Any]],
+) -> tuple[
+    CandidateSourceResult[RetrievalCandidate],
+    list[CandidateSourceResult[RetrievalCandidate]],
+    tuple[CandidateSourceFailure, ...],
+    dict[str, object],
+]:
+    gathered = await asyncio.gather(
+        raw_task,
+        *(task for _signal, task in graph_tasks),
+        return_exceptions=True,
+    )
+    raw_result = gathered[0]
+    raw_failures: tuple[CandidateSourceFailure, ...] = ()
+    raw_metadata: dict[str, object] = {}
+    if isinstance(raw_result, RawCandidateFetch):
+        raw = CandidateSourceResult.success(
+            RetrievalSignal.RAW_LEXICAL.value,
+            raw_result.candidates,
+        )
+        raw_failures = raw_result.failures
+        raw_metadata = raw_result.metadata
+    else:
+        raw = _candidate_source_result(RetrievalSignal.RAW_LEXICAL.value, raw_result)
+    graph = [
+        _candidate_source_result(signal.value, result)
+        for (signal, _task), result in zip(graph_tasks, gathered[1:], strict=True)
+    ]
+    return raw, graph, raw_failures, raw_metadata
+
+
+async def _gather_graph_expansion_source(
+    task: Any,
+) -> CandidateSourceResult[RetrievalCandidate]:
+    (result,) = await asyncio.gather(task, return_exceptions=True)
+    return _candidate_source_result(RetrievalSignal.GRAPH_EXPANSION.value, result)
+
+
+def _candidate_source_result(
+    source: str,
+    result: object,
+) -> CandidateSourceResult[RetrievalCandidate]:
+    if isinstance(result, BaseException):
+        log.warning(
+            "retrieval_candidate_source_failed",
+            source=source,
+            error_type=type(result).__name__,
+        )
+        return CandidateSourceResult.failed(source, type(result).__name__)
+    if not isinstance(result, list):
+        log.warning(
+            "retrieval_candidate_source_invalid",
+            source=source,
+            result_type=type(result).__name__,
+        )
+        return CandidateSourceResult.failed(source, f"invalid:{type(result).__name__}")
+    return CandidateSourceResult.success(source, cast("list[RetrievalCandidate]", result))
+
+
+def _candidate_source_metadata(
+    sources: Sequence[CandidateSourceResult[RetrievalCandidate]],
+    *,
+    extra_failures: Sequence[CandidateSourceFailure] = (),
+) -> dict[str, object]:
+    failures = [source.failure for source in sources if source.failure is not None]
+    failures.extend(extra_failures)
+    metadata: dict[str, object] = {
+        "candidate_source_degraded": bool(failures),
+        "candidate_source_failure_count": len(failures),
+    }
+    if failures:
+        metadata["candidate_source_failures"] = [failure.as_metadata() for failure in failures]
+    return metadata
+
+
+def _fusion_receipt_metadata(
+    *,
+    requested_backend: FusionBackend,
+    actual_backend: FusionBackend,
+    failures: Sequence[CandidateSourceFailure],
+) -> dict[str, object]:
+    degraded = bool(failures) or actual_backend is not requested_backend
+    metadata: dict[str, object] = {
+        "fusion_backend": actual_backend.value,
+        "fusion_backend_requested": requested_backend.value,
+        "fusion_backend_actual": actual_backend.value,
+        "fusion_degraded": degraded,
+        "fusion_failure_count": len(failures),
+    }
+    if failures:
+        metadata["fusion_failures"] = [failure.as_metadata() for failure in failures]
+    return metadata
 
 
 def _candidate_list_or_empty(result: object) -> list[RetrievalCandidate]:
@@ -504,6 +689,17 @@ def _candidate_list_or_empty(result: object) -> list[RetrievalCandidate]:
 
 async def _empty_candidate_source() -> list[RetrievalCandidate]:
     return []
+
+
+async def _execute_query_records(
+    client: Any,
+    query: str,
+    **params: object,
+) -> list[dict[str, object]]:
+    result = await client.execute_query(query, **params)
+    if error := query_error(result):
+        raise SurrealQueryError(query, error)
+    return normalize_records(result)
 
 
 def _candidate_limits_for_limit(
@@ -605,39 +801,69 @@ async def _recall_raw_candidates(
     requested_types: set[str],
     limit: int,
     recall_fn: RawMemoryRecallFn,
-) -> list[RetrievalCandidate]:
+) -> RawCandidateFetch:
     if facet is not None and facet is not ContextFacet.RECENT_MEMORY:
-        return []
+        return RawCandidateFetch([])
     if requested_types and requested_types.isdisjoint(_RAW_MEMORY_CONTEXT_TYPES):
-        return []
+        return RawCandidateFetch([])
 
     candidates: list[RetrievalCandidate] = []
+    failures: list[CandidateSourceFailure] = []
     seen_ids: set[str] = set()
-    for scope in plan.scopes:
-        if scope.memory_scope not in {
-            MemoryScope.PRIVATE,
-            MemoryScope.PROJECT,
-            MemoryScope.DELEGATED,
-        }:
+    raw_recall_scopes = {MemoryScope.PRIVATE, MemoryScope.PROJECT, MemoryScope.DELEGATED}
+    raw_scopes = [scope for scope in plan.scopes if scope.memory_scope in raw_recall_scopes]
+    recalled_by_scope = await asyncio.gather(
+        *(
+            recall_fn(
+                organization_id=plan.organization_id,
+                principal_id=scope.principal_id,
+                query=plan.query,
+                memory_scope=scope.memory_scope.value,
+                scope_key=scope.scope_key,
+                agent_id=scope.agent_id,
+                project_id=scope.project_id,
+                limit=limit,
+            )
+            for scope in raw_scopes
+        ),
+        return_exceptions=True,
+    )
+    for scope, recalled in zip(raw_scopes, recalled_by_scope, strict=True):
+        if isinstance(recalled, asyncio.CancelledError):
+            raise recalled
+        if isinstance(recalled, BaseException):
+            log.warning(
+                "raw_recall_scope_failed",
+                error_type=type(recalled).__name__,
+                memory_scope=scope.memory_scope.value,
+                project_id=scope.project_id,
+                scope_key=scope.scope_key,
+            )
+            failures.append(CandidateSourceFailure("raw_scope_recall", type(recalled).__name__))
             continue
-        recalled = await recall_fn(
-            organization_id=plan.organization_id,
-            principal_id=scope.principal_id,
-            query=plan.query,
-            memory_scope=scope.memory_scope.value,
-            scope_key=scope.scope_key,
-            agent_id=scope.agent_id,
-            project_id=scope.project_id,
-            limit=limit,
-        )
-        for memory in recalled:
+        if isinstance(recalled, RawMemoryRecallResult):
+            memories = list(recalled.memories)
+            failures.extend(recalled.failures)
+        else:
+            memories = recalled
+        for memory in memories:
             if not raw_memory_recallable(memory):
                 continue
             if memory.id in seen_ids:
                 continue
             seen_ids.add(memory.id)
             candidates.append(_candidate_from_raw_memory(memory, scope))
-    return sorted(candidates, key=lambda candidate: candidate.score, reverse=True)
+    raw_metadata: dict[str, object] = {
+        "raw_recall_degraded": bool(failures),
+        "raw_recall_failure_count": len(failures),
+    }
+    if failures:
+        raw_metadata["raw_recall_failures"] = [failure.as_metadata() for failure in failures]
+    return RawCandidateFetch(
+        sorted(candidates, key=lambda candidate: candidate.score, reverse=True),
+        failures=tuple(failures),
+        metadata=raw_metadata,
+    )
 
 
 async def _node_fulltext_candidates(
@@ -651,34 +877,33 @@ async def _node_fulltext_candidates(
     if not search_query:
         return []
     filter_clauses, filter_params = _node_filter_clause(search_filter)
-    rows = normalize_records(
-        await client.execute_query(
-            """
-            SELECT *,
-                   math::max([
-                       search::score(0),
-                       search::score(1),
-                       search::score(2),
-                       search::score(3)
-                   ]) AS score
-            FROM entity
-            WHERE """
-            + _where_clause(["group_id = $group_id", *filter_clauses])
-            + """
-              AND (
-                  name @0@ $search_query
-                  OR summary @1@ $search_query
-                  OR description @2@ $search_query
-                  OR content @3@ $search_query
-              )
-            ORDER BY score DESC, created_at DESC, uuid DESC
-            LIMIT $limit;
-            """,
-            group_id=plan.organization_id,
-            search_query=search_query,
-            limit=max(int(limit), 1),
-            **filter_params,
-        )
+    rows = await _execute_query_records(
+        client,
+        """
+        SELECT *,
+               math::max([
+                   search::score(0),
+                   search::score(1),
+                   search::score(2),
+                   search::score(3)
+               ]) AS score
+        FROM entity
+        WHERE """
+        + _where_clause(["group_id = $group_id", *filter_clauses])
+        + """
+          AND (
+              name @0@ $search_query
+              OR summary @1@ $search_query
+              OR description @2@ $search_query
+              OR content @3@ $search_query
+          )
+        ORDER BY score DESC, created_at DESC, uuid DESC
+        LIMIT $limit;
+        """,
+        group_id=plan.organization_id,
+        search_query=search_query,
+        limit=max(int(limit), 1),
+        **filter_params,
     )
     return [
         _candidate_from_node_record(
@@ -702,20 +927,19 @@ async def _episode_fulltext_candidates(
     search_query = build_fulltext_query(plan.query)
     if not search_query:
         return []
-    rows = normalize_records(
-        await client.execute_query(
-            """
-            SELECT *, search::score(0) AS score
-            FROM episode
-            WHERE group_id = $group_id
-              AND content @0@ $search_query
-            ORDER BY score DESC, created_at DESC, uuid DESC
-            LIMIT $limit;
-            """,
-            group_id=plan.organization_id,
-            search_query=search_query,
-            limit=max(int(limit), 1),
-        )
+    rows = await _execute_query_records(
+        client,
+        """
+        SELECT *, search::score(0) AS score
+        FROM episode
+        WHERE group_id = $group_id
+          AND content @0@ $search_query
+        ORDER BY score DESC, created_at DESC, uuid DESC
+        LIMIT $limit;
+        """,
+        group_id=plan.organization_id,
+        search_query=search_query,
+        limit=max(int(limit), 1),
     )
     return [
         _candidate_from_episode_record(
@@ -740,23 +964,22 @@ async def _edge_fulltext_candidates(
     result_limit = max(int(limit), 1)
     match_limit = max(result_limit * EDGE_FULLTEXT_MATCH_HEADROOM, EDGE_FULLTEXT_MIN_MATCH_LIMIT)
     match_clauses, match_params = _edge_match_filter_clause(search_filter)
-    match_rows = normalize_records(
-        await client.execute_query(
-            """
-            SELECT uuid, created_at, search::score(0) AS score
-            FROM relates_to
-            WHERE """
-            + _where_clause(["group_id = $group_id", *match_clauses])
-            + """
-              AND fact @0@ $search_query
-            ORDER BY score DESC, created_at DESC, uuid DESC
-            LIMIT $match_limit;
-            """,
-            group_id=plan.organization_id,
-            search_query=search_query,
-            match_limit=match_limit,
-            **match_params,
-        )
+    match_rows = await _execute_query_records(
+        client,
+        """
+        SELECT uuid, created_at, search::score(0) AS score
+        FROM relates_to
+        WHERE """
+        + _where_clause(["group_id = $group_id", *match_clauses])
+        + """
+          AND fact @0@ $search_query
+        ORDER BY score DESC, created_at DESC, uuid DESC
+        LIMIT $match_limit;
+        """,
+        group_id=plan.organization_id,
+        search_query=search_query,
+        match_limit=match_limit,
+        **match_params,
     )
     match_scores: dict[str, float] = {}
     for row in match_rows:
@@ -776,17 +999,16 @@ async def _edge_fulltext_candidates(
         edge_types=search_filter.edge_types,
     )
     filter_clauses, filter_params = _edge_filter_clause(hydrate_filter)
-    rows = normalize_records(
-        await client.execute_query(
-            _edge_select()
-            + " WHERE "
-            + _where_clause(["uuid IN $match_uuids", "group_id = $group_id", *filter_clauses])
-            + " LIMIT $limit;",
-            match_uuids=match_uuids,
-            group_id=plan.organization_id,
-            limit=len(match_uuids),
-            **filter_params,
-        )
+    rows = await _execute_query_records(
+        client,
+        _edge_select()
+        + " WHERE "
+        + _where_clause(["uuid IN $match_uuids", "group_id = $group_id", *filter_clauses])
+        + " LIMIT $limit;",
+        match_uuids=match_uuids,
+        group_id=plan.organization_id,
+        limit=len(match_uuids),
+        **filter_params,
     )
     rows_by_uuid = {str(row["uuid"]): row for row in rows if row.get("uuid")}
     candidates = [
@@ -940,29 +1162,28 @@ async def _node_vector_candidates(
     filter_clauses, filter_params = _node_filter_clause(search_filter)
     candidate_limit = max(int(limit), 1)
     knn_effort = _graph_knn_effort()
-    rows = normalize_records(
-        await client.execute_query(
-            """
-            SELECT *
-            FROM (
-                SELECT *,
-                       (1 - vector::distance::knn()) AS score
-                FROM entity
-                WHERE """
-            + _where_clause(["group_id = $group_id", *filter_clauses])
-            + f"""
-                  AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
-            )
-            WHERE score >= $min_score
-            ORDER BY score DESC, created_at DESC, uuid DESC
-            LIMIT $limit;
-            """,
-            group_id=plan.organization_id,
-            query_embedding=list(query_embedding),
-            min_score=plan.vector_min_score,
-            limit=candidate_limit,
-            **filter_params,
+    rows = await _execute_query_records(
+        client,
+        """
+        SELECT *
+        FROM (
+            SELECT *,
+                   (1 - vector::distance::knn()) AS score
+            FROM entity
+            WHERE """
+        + _where_clause(["group_id = $group_id", *filter_clauses])
+        + f"""
+              AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
         )
+        WHERE score >= $min_score
+        ORDER BY score DESC, created_at DESC, uuid DESC
+        LIMIT $limit;
+        """,
+        group_id=plan.organization_id,
+        query_embedding=list(query_embedding),
+        min_score=plan.vector_min_score,
+        limit=candidate_limit,
+        **filter_params,
     )
     return [
         _candidate_from_node_record(
@@ -989,25 +1210,24 @@ async def _edge_vector_candidates(
     filter_clauses, filter_params = _edge_filter_clause(search_filter)
     candidate_limit = max(int(limit), 1)
     knn_effort = _graph_knn_effort()
-    rows = normalize_records(
-        await client.execute_query(
-            "SELECT * FROM ("
-            + _edge_select(extra="(1 - vector::distance::knn()) AS score")
-            + " WHERE "
-            + _where_clause(["group_id = $group_id", *filter_clauses])
-            + f"""
-              AND fact_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
-            )
-            WHERE score >= $min_score
-            ORDER BY score DESC, created_at DESC, uuid DESC
-            LIMIT $limit;
-            """,
-            group_id=plan.organization_id,
-            query_embedding=list(query_embedding),
-            min_score=plan.vector_min_score,
-            limit=candidate_limit,
-            **filter_params,
+    rows = await _execute_query_records(
+        client,
+        "SELECT * FROM ("
+        + _edge_select(extra="(1 - vector::distance::knn()) AS score")
+        + " WHERE "
+        + _where_clause(["group_id = $group_id", *filter_clauses])
+        + f"""
+          AND fact_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
         )
+        WHERE score >= $min_score
+        ORDER BY score DESC, created_at DESC, uuid DESC
+        LIMIT $limit;
+        """,
+        group_id=plan.organization_id,
+        query_embedding=list(query_embedding),
+        min_score=plan.vector_min_score,
+        limit=candidate_limit,
+        **filter_params,
     )
     return [
         _candidate_from_edge_record(
@@ -1067,7 +1287,7 @@ async def _graph_expansion_candidates(
         _candidate_from_node_record(
             row,
             signal=RetrievalSignal.GRAPH_EXPANSION,
-            score=1.0,
+            score=_record_score(row),
         )
         for row in rows
     ]
@@ -1162,7 +1382,7 @@ async def _node_bfs_records(
     if (not origin_uuids and not episode_origin_uuids) or max_depth < 1:
         return []
 
-    discovered: list[str] = []
+    discovered: list[_GraphExpansionHop] = []
     seen_discovered: set[str] = set()
     visited_entities = set(origin_uuids)
     entity_frontier = _dedupe_strings(origin_uuids)
@@ -1173,35 +1393,52 @@ async def _node_bfs_records(
         remaining = max(int(limit) - len(discovered), 0)
         if remaining <= 0:
             break
+        fetch_limit = _graph_expansion_fetch_limit(remaining)
+        next_hops: list[_GraphExpansionHop] = []
         if depth == 1:
-            next_entities.extend(
-                await _mentioned_entity_uuids(
+            next_hops.extend(
+                await _mentioned_entity_hops(
                     client=client,
                     episode_uuids=episode_frontier,
                     group_id=group_id,
-                    limit=remaining,
+                    depth=depth,
+                    limit=fetch_limit,
                 )
             )
-            remaining = max(int(limit) - len(discovered) - len(next_entities), 0)
-        if remaining > 0:
-            next_entities.extend(
-                await _relation_target_uuids(
+        next_hops.extend(
+            await _relation_target_hops(
+                client=client,
+                source_uuids=entity_frontier,
+                group_id=group_id,
+                depth=depth,
+                limit=fetch_limit,
+            )
+        )
+        if depth == 1:
+            next_hops.extend(
+                await _community_member_hops(
                     client=client,
                     source_uuids=entity_frontier,
                     group_id=group_id,
-                    limit=remaining,
+                    depth=depth,
+                    limit=fetch_limit,
                 )
             )
+        next_entities.extend(hop.uuid for hop in next_hops)
 
-        for uuid in _dedupe_strings(next_entities):
-            if uuid in seen_discovered:
+        for hop in sorted(
+            _dedupe_expansion_hops(next_hops),
+            key=lambda value: value.score,
+            reverse=True,
+        ):
+            if hop.uuid in seen_discovered:
                 continue
-            seen_discovered.add(uuid)
-            discovered.append(uuid)
+            seen_discovered.add(hop.uuid)
+            discovered.append(hop)
             if len(discovered) >= limit:
-                return await _hydrate_entity_records(
+                return await _hydrate_graph_expansion_records(
                     client=client,
-                    uuids=discovered,
+                    hops=discovered,
                     search_filter=search_filter,
                     group_id=group_id,
                     limit=limit,
@@ -1214,67 +1451,204 @@ async def _node_bfs_records(
         if not entity_frontier:
             break
 
-    return await _hydrate_entity_records(
+    return await _hydrate_graph_expansion_records(
         client=client,
-        uuids=discovered,
+        hops=discovered,
         search_filter=search_filter,
         group_id=group_id,
         limit=limit,
     )
 
 
-async def _mentioned_entity_uuids(
+async def _mentioned_entity_hops(
     *,
     client: Any,
     episode_uuids: Sequence[str],
     group_id: str,
+    depth: int,
     limit: int,
-) -> list[str]:
+) -> list[_GraphExpansionHop]:
     if not episode_uuids:
         return []
-    rows = normalize_records(
-        await client.execute_query(
-            """
-            SELECT target_id AS uuid
-            FROM mentions
-            WHERE source_id IN $episode_uuids
-              AND group_id = $group_id
-              AND out.group_id = $group_id
-            LIMIT $limit;
-            """,
-            episode_uuids=list(episode_uuids),
-            group_id=group_id,
-            limit=max(int(limit), 1),
-        )
+    rows = await _execute_query_records(
+        client,
+        """
+        SELECT target_id AS uuid
+        FROM mentions
+        WHERE source_id IN $episode_uuids
+          AND group_id = $group_id
+          AND out.group_id = $group_id
+        LIMIT $limit;
+        """,
+        episode_uuids=list(episode_uuids),
+        group_id=group_id,
+        limit=max(int(limit), 1),
     )
-    return _dedupe_strings(_record_uuids(rows))
+    return [
+        _GraphExpansionHop(
+            uuid=uuid,
+            depth=depth,
+            relationship="MENTIONS",
+            score=_graph_expansion_path_score("MENTIONS", depth=depth),
+        )
+        for uuid in _dedupe_strings(_record_uuids(rows))
+    ]
 
 
-async def _relation_target_uuids(
+async def _relation_target_hops(
+    *,
+    client: Any,
+    source_uuids: Sequence[str],
+    group_id: str,
+    depth: int,
+    limit: int,
+) -> list[_GraphExpansionHop]:
+    if not source_uuids:
+        return []
+    rows = await _execute_query_records(
+        client,
+        """
+        SELECT target_id AS uuid, name AS relationship
+        FROM relates_to
+        WHERE source_id IN $source_uuids
+          AND group_id = $group_id
+          AND out.group_id = $group_id
+        LIMIT $limit;
+        """,
+        source_uuids=list(source_uuids),
+        group_id=group_id,
+        limit=max(int(limit), 1),
+    )
+    hops: list[_GraphExpansionHop] = []
+    for row in rows:
+        uuid = _string_value(row.get("uuid"))
+        if not uuid:
+            continue
+        relationship = _string_value(row.get("relationship")) or "RELATED_TO"
+        hops.append(
+            _GraphExpansionHop(
+                uuid=uuid,
+                depth=depth,
+                relationship=relationship,
+                score=_graph_expansion_path_score(relationship, depth=depth),
+            )
+        )
+    return _dedupe_expansion_hops(hops)
+
+
+async def _community_member_hops(
+    *,
+    client: Any,
+    source_uuids: Sequence[str],
+    group_id: str,
+    depth: int,
+    limit: int,
+) -> list[_GraphExpansionHop]:
+    if not source_uuids:
+        return []
+    community_ids = await _community_ids_for_entities(
+        client=client,
+        source_uuids=source_uuids,
+        group_id=group_id,
+        limit=limit,
+    )
+    if not community_ids:
+        return []
+    rows = await _execute_query_records(
+        client,
+        """
+        SELECT source_id AS uuid, target_id AS community_id
+        FROM relates_to
+        WHERE target_id IN $community_uuids
+          AND source_id NOT IN $source_uuids
+          AND name = "BELONGS_TO"
+          AND group_id = $group_id
+          AND in.group_id = $group_id
+          AND in.entity_type != "community"
+        ORDER BY target_id
+        LIMIT $limit;
+        """,
+        community_uuids=community_ids,
+        source_uuids=list(source_uuids),
+        group_id=group_id,
+        limit=max(int(limit), 1),
+    )
+    hops: list[_GraphExpansionHop] = []
+    for row in rows:
+        uuid = _string_value(row.get("uuid"))
+        if not uuid:
+            continue
+        hops.append(
+            _GraphExpansionHop(
+                uuid=uuid,
+                depth=depth,
+                relationship="SHARES_COMMUNITY",
+                score=_graph_expansion_path_score("SHARES_COMMUNITY", depth=depth),
+                community_id=_string_value(row.get("community_id")),
+            )
+        )
+    return _dedupe_expansion_hops(hops)
+
+
+async def _community_ids_for_entities(
     *,
     client: Any,
     source_uuids: Sequence[str],
     group_id: str,
     limit: int,
 ) -> list[str]:
-    if not source_uuids:
-        return []
-    rows = normalize_records(
-        await client.execute_query(
-            """
-            SELECT target_id AS uuid
-            FROM relates_to
-            WHERE source_id IN $source_uuids
-              AND group_id = $group_id
-              AND out.group_id = $group_id
-            LIMIT $limit;
-            """,
-            source_uuids=list(source_uuids),
-            group_id=group_id,
-            limit=max(int(limit), 1),
-        )
+    rows = await _execute_query_records(
+        client,
+        """
+        SELECT target_id AS uuid
+        FROM relates_to
+        WHERE source_id IN $source_uuids
+          AND name = "BELONGS_TO"
+          AND group_id = $group_id
+          AND out.group_id = $group_id
+          AND out.entity_type = "community"
+        LIMIT $limit;
+        """,
+        source_uuids=list(source_uuids),
+        group_id=group_id,
+        limit=max(int(limit), 1),
     )
     return _dedupe_strings(_record_uuids(rows))
+
+
+async def _hydrate_graph_expansion_records(
+    *,
+    client: Any,
+    hops: Sequence[_GraphExpansionHop],
+    search_filter: SearchFilter,
+    group_id: str,
+    limit: int,
+) -> list[dict[str, object]]:
+    uuids = [hop.uuid for hop in hops]
+    rows = await _hydrate_entity_records(
+        client=client,
+        uuids=uuids,
+        search_filter=search_filter,
+        group_id=group_id,
+        limit=limit,
+    )
+    hops_by_uuid = {hop.uuid: hop for hop in hops}
+    records: list[dict[str, object]] = []
+    for row in rows:
+        uuid = _string_value(row.get("uuid"))
+        hop = hops_by_uuid.get(uuid or "")
+        if hop is None:
+            continue
+        record = dict(row)
+        record["score"] = hop.score
+        record["graph_expansion_depth"] = hop.depth
+        record["graph_expansion_relationship"] = hop.relationship
+        record["graph_expansion_score"] = hop.score
+        if hop.community_id:
+            record["graph_expansion_community_id"] = hop.community_id
+        records.append(record)
+    records.sort(key=_record_score, reverse=True)
+    return records
 
 
 async def _hydrate_entity_records(
@@ -1288,16 +1662,15 @@ async def _hydrate_entity_records(
     if not uuids:
         return []
     filter_clauses, filter_params = _node_filter_clause(search_filter)
-    rows = normalize_records(
-        await client.execute_query(
-            "SELECT * FROM entity WHERE "
-            + _where_clause(["uuid IN $uuids", "group_id = $group_id", *filter_clauses])
-            + " LIMIT $limit;",
-            uuids=list(uuids),
-            group_id=group_id,
-            limit=max(int(limit), 1),
-            **filter_params,
-        )
+    rows = await _execute_query_records(
+        client,
+        "SELECT * FROM entity WHERE "
+        + _where_clause(["uuid IN $uuids", "group_id = $group_id", *filter_clauses])
+        + " LIMIT $limit;",
+        uuids=list(uuids),
+        group_id=group_id,
+        limit=max(int(limit), 1),
+        **filter_params,
     )
     rows_by_uuid = {str(row["uuid"]): row for row in rows if row.get("uuid")}
     return [rows_by_uuid[uuid] for uuid in uuids if uuid in rows_by_uuid]
@@ -1309,6 +1682,27 @@ def _record_uuids(rows: Sequence[Mapping[str, object]]) -> list[str]:
 
 def _dedupe_strings(values: Iterable[str]) -> list[str]:
     return list(dict.fromkeys(str(value) for value in values if str(value)))
+
+
+def _dedupe_expansion_hops(
+    hops: Iterable[_GraphExpansionHop],
+) -> list[_GraphExpansionHop]:
+    deduped: dict[str, _GraphExpansionHop] = {}
+    for hop in hops:
+        if hop.uuid not in deduped or hop.score > deduped[hop.uuid].score:
+            deduped[hop.uuid] = hop
+    return list(deduped.values())
+
+
+def _graph_expansion_path_score(relationship: str, *, depth: int) -> float:
+    normalized = relationship.upper()
+    base = _GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS.get(normalized, 0.64)
+    depth_multiplier = _GRAPH_EXPANSION_DEPTH_DECAY ** max(depth - 1, 0)
+    return max(min(base * depth_multiplier, 1.0), 0.1)
+
+
+def _graph_expansion_fetch_limit(limit: int) -> int:
+    return max(int(limit) * _GRAPH_EXPANSION_FETCH_HEADROOM, 1)
 
 
 def _candidate_from_node_record(
@@ -1508,6 +1902,7 @@ def _selected_record_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "invalid_at",
         "created_by",
         "modified_by",
+        *_GRAPH_EXPANSION_METADATA_KEYS,
     ):
         value = row.get(key)
         if value is not None:
@@ -1884,19 +2279,47 @@ async def _fuse_candidates_for_plan(
     plan: RetrievalPlan,
     limit: int,
     fusion_backend: FusionBackend | None = None,
-) -> list[tuple[RetrievalCandidate, float, dict[str, Any]]]:
+    fusion_failures: list[CandidateSourceFailure] | None = None,
+) -> FusionExecutionResult:
     backend = fusion_backend or DEFAULT_FUSION_BACKEND
     if backend is FusionBackend.SURREAL_RRF:
-        scores = await _surreal_rrf_scores(client, source_lists, plan=plan, limit=limit)
-        if scores:
-            return _rank_fused_candidates(
-                source_lists,
-                plan=plan,
-                limit=limit,
-                rrf_scores=scores,
-                backend=backend,
+        scores: dict[str, float] = {}
+        try:
+            scores = await _surreal_rrf_scores(client, source_lists, plan=plan, limit=limit)
+        except Exception as exc:
+            log.warning(
+                "surreal_rrf_failed",
+                organization_id=plan.organization_id,
+                error_type=type(exc).__name__,
             )
-    return _fuse_candidates(source_lists, plan=plan, limit=limit)
+            if fusion_failures is not None:
+                fusion_failures.append(
+                    CandidateSourceFailure(
+                        source=backend.value,
+                        error_type=type(exc).__name__,
+                    )
+                )
+        if scores:
+            return FusionExecutionResult(
+                candidates=_rank_fused_candidates(
+                    source_lists,
+                    plan=plan,
+                    limit=limit,
+                    rrf_scores=scores,
+                    backend=backend,
+                ),
+                actual_backend=backend,
+            )
+        if any(candidates for _signal, candidates in source_lists):
+            return FusionExecutionResult(
+                candidates=_fuse_candidates(source_lists, plan=plan, limit=limit),
+                actual_backend=FusionBackend.PYTHON_RRF,
+            )
+        return FusionExecutionResult(candidates=[], actual_backend=backend)
+    return FusionExecutionResult(
+        candidates=_fuse_candidates(source_lists, plan=plan, limit=limit),
+        actual_backend=FusionBackend.PYTHON_RRF,
+    )
 
 
 def _python_rrf_scores(
@@ -1935,22 +2358,13 @@ async def _surreal_rrf_scores(
     unique_candidate_count = len(
         {candidate.id for _signal, candidates in source_lists for candidate in candidates}
     )
-    try:
-        rows = normalize_records(
-            await client.execute_query(
-                "RETURN search::rrf($lists, $limit, $k);",
-                lists=rrf_inputs,
-                limit=max(int(limit), unique_candidate_count, 1),
-                k=plan.weights.rrf_k,
-            )
-        )
-    except Exception as exc:
-        log.warning(
-            "surreal_rrf_failed",
-            organization_id=plan.organization_id,
-            error_type=type(exc).__name__,
-        )
-        return {}
+    rows = await _execute_query_records(
+        client,
+        "RETURN search::rrf($lists, $limit, $k);",
+        lists=rrf_inputs,
+        limit=max(int(limit), unique_candidate_count, 1),
+        k=plan.weights.rrf_k,
+    )
 
     scores: dict[str, float] = {}
     for row in rows:
@@ -1981,9 +2395,12 @@ def _rank_fused_candidates(
         for rank, candidate in enumerate(candidates, start=1):
             score_by_id[candidate.id] = float(rrf_scores.get(candidate.id, 0.0))
             candidates_by_id.setdefault(candidate.id, candidate)
-            metadata_by_id[candidate.id]["sources"].append(signal.value)
-            metadata_by_id[candidate.id]["ranks"][signal.value] = rank
-            metadata_by_id[candidate.id]["original_scores"][signal.value] = candidate.score
+            fusion_metadata = metadata_by_id[candidate.id]
+            fusion_metadata["sources"].append(signal.value)
+            fusion_metadata["ranks"][signal.value] = rank
+            fusion_metadata["original_scores"][signal.value] = candidate.score
+            if signal is RetrievalSignal.GRAPH_EXPANSION:
+                _merge_graph_expansion_metadata(fusion_metadata, candidate)
 
     ranked: list[tuple[RetrievalCandidate, float, dict[str, Any]]] = []
     for candidate_id, score in score_by_id.items():
@@ -2006,10 +2423,29 @@ def _rank_fused_candidates(
             score *= graph_multiplier
             fusion_metadata["graph_expansion_only_demoted"] = True
             fusion_metadata["graph_expansion_only_multiplier"] = graph_multiplier
+        graph_signal_multiplier = _graph_native_signal_multiplier(
+            plan,
+            signals=fusion_metadata["sources"],
+            fusion_metadata=fusion_metadata,
+        )
+        if graph_signal_multiplier > 1.0:
+            score *= graph_signal_multiplier
+            fusion_metadata["graph_native_signal_boost"] = graph_signal_multiplier
         boosted = _boost_score(candidate, score, plan=plan)
         ranked.append((candidate, boosted, fusion_metadata))
     ranked.sort(key=lambda item: item[1], reverse=True)
     return ranked[:limit]
+
+
+def _merge_graph_expansion_metadata(
+    fusion_metadata: dict[str, Any],
+    candidate: RetrievalCandidate,
+) -> None:
+    metadata = candidate.metadata if isinstance(candidate.metadata, Mapping) else {}
+    for key in _GRAPH_EXPANSION_METADATA_KEYS:
+        value = metadata.get(key)
+        if value is not None:
+            fusion_metadata[key] = value
 
 
 def _candidate_query_text(candidate: RetrievalCandidate) -> str:
@@ -2077,6 +2513,30 @@ def _graph_expansion_only_multiplier(
     return max(min(plan.weights.graph_expansion_only_boost, 1.0), 0.0)
 
 
+def _graph_native_signal_multiplier(
+    plan: RetrievalPlan,
+    *,
+    signals: Sequence[str],
+    fusion_metadata: Mapping[str, Any],
+) -> float:
+    if RetrievalSignal.GRAPH_EXPANSION.value not in signals:
+        return 1.0
+    if set(signals) == {RetrievalSignal.GRAPH_EXPANSION.value}:
+        return 1.0
+    cap = max(plan.weights.graph_native_signal_boost_cap, 1.0)
+    raw_path_score = fusion_metadata.get("graph_expansion_score")
+    if not isinstance(raw_path_score, int | float):
+        raw_scores = fusion_metadata.get("original_scores")
+        if isinstance(raw_scores, Mapping):
+            raw_path_score = raw_scores.get(RetrievalSignal.GRAPH_EXPANSION.value)
+    if not isinstance(raw_path_score, int | float):
+        return 1.0
+    path_score = max(min(float(raw_path_score), 1.0), 0.0)
+    if path_score <= 0.0:
+        return 1.0
+    return min(1.0 + path_score * (cap - 1.0), cap)
+
+
 def _boost_score(
     candidate: RetrievalCandidate,
     score: float,
@@ -2131,6 +2591,16 @@ def _search_result_from_candidate(
         metadata["vector_only_demote_multiplier"] = fusion_metadata.get(
             "vector_only_demote_multiplier"
         )
+    if fusion_metadata.get("graph_expansion_only_demoted"):
+        metadata["graph_expansion_only_demoted"] = True
+        metadata["graph_expansion_only_multiplier"] = fusion_metadata.get(
+            "graph_expansion_only_multiplier"
+        )
+    if fusion_metadata.get("graph_native_signal_boost"):
+        metadata["graph_native_signal_boost"] = fusion_metadata.get("graph_native_signal_boost")
+    for key in _GRAPH_EXPANSION_METADATA_KEYS:
+        if key in fusion_metadata:
+            metadata[key] = fusion_metadata[key]
     if candidate.project_id:
         metadata["project_id"] = candidate.project_id
     if candidate.created_at:

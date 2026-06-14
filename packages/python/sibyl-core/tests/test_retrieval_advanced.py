@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import numpy as np
 import pytest
@@ -48,6 +48,7 @@ from sibyl_core.retrieval.query_ranking import (
     rank_by_query_coverage,
     should_accept_query_coverage_refinement,
 )
+from sibyl_core.retrieval.reranking import RerankResult
 from sibyl_core.services.graph import EntityManager, SurrealGraphClient, prepare_graph_schema
 
 # =============================================================================
@@ -1934,6 +1935,8 @@ class TestHybridConfig:
         assert config.temporal_decay_days == 365.0
         assert config.apply_keyword_boost is True
         assert config.graph_expansion_only_boost == 0.45
+        assert config.graph_relationship_type_weights["MENTIONS"] < 1.0
+        assert config.graph_relationship_type_weights["DEPENDS_ON"] > 1.0
         assert config.reference_time is None
 
     def test_hybrid_config_custom(self) -> None:
@@ -1945,6 +1948,7 @@ class TestHybridConfig:
             apply_temporal=False,
             apply_keyword_boost=False,
             graph_expansion_only_boost=0.2,
+            graph_relationship_type_weights={"RELATED_TO": 0.7},
         )
         assert config.vector_weight == 2.0
         assert config.graph_weight == 0.5
@@ -1952,6 +1956,7 @@ class TestHybridConfig:
         assert config.apply_temporal is False
         assert config.apply_keyword_boost is False
         assert config.graph_expansion_only_boost == 0.2
+        assert config.graph_relationship_type_weights == {"RELATED_TO": 0.7}
 
 
 class TestHybridResult:
@@ -2149,6 +2154,115 @@ class TestGraphTraversal:
         assert near_score > far_score  # 1/(1+1) > 1/(3+1)
 
     @pytest.mark.asyncio
+    async def test_graph_traversal_uses_relationship_type_and_weight_signals(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Graph traversal promotes structurally strong edges over mention noise."""
+        import sibyl_core.services.graph as graph_module
+
+        client = make_graph_client()
+        relationship_manager = MagicMock()
+        mention_target = make_entity_for_test("mention", name="A Mention")
+        dependency_target = make_entity_for_test("dependency", name="B Dependency")
+        relationship_manager.get_related_entities = AsyncMock(
+            return_value=[
+                (
+                    mention_target,
+                    Relationship(
+                        id="rel_mention",
+                        source_id="seed",
+                        target_id="mention",
+                        relationship_type=RelationshipType.MENTIONS,
+                    ),
+                ),
+                (
+                    dependency_target,
+                    Relationship(
+                        id="rel_dependency",
+                        source_id="seed",
+                        target_id="dependency",
+                        relationship_type=RelationshipType.DEPENDS_ON,
+                        weight=2.0,
+                    ),
+                ),
+            ]
+        )
+
+        monkeypatch.setattr(
+            graph_module,
+            "RelationshipManager",
+            MagicMock(return_value=relationship_manager),
+        )
+
+        results = await graph_traversal(
+            ["seed"],
+            client,
+            depth=1,
+            limit=1,
+            group_id="org-123",
+        )  # type: ignore[arg-type]
+
+        assert [entity.id for entity, _score in results] == ["dependency"]
+        assert results[0][1] == pytest.approx(1.25)
+
+    @pytest.mark.asyncio
+    async def test_graph_traversal_keeps_strongest_same_tier_parent_edge(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A shared child keeps the strongest edge score across same-depth parents."""
+        import sibyl_core.services.graph as graph_module
+
+        client = make_graph_client()
+        relationship_manager = MagicMock()
+        shared = make_entity_for_test("shared", name="Shared Child")
+        relationship_manager.get_related_entities = AsyncMock(
+            side_effect=[
+                [
+                    (
+                        shared,
+                        Relationship(
+                            id="rel_weak",
+                            source_id="seed-a",
+                            target_id="shared",
+                            relationship_type=RelationshipType.MENTIONS,
+                        ),
+                    )
+                ],
+                [
+                    (
+                        shared,
+                        Relationship(
+                            id="rel_strong",
+                            source_id="seed-b",
+                            target_id="shared",
+                            relationship_type=RelationshipType.DEPENDS_ON,
+                            weight=2.0,
+                        ),
+                    )
+                ],
+            ]
+        )
+
+        monkeypatch.setattr(
+            graph_module,
+            "RelationshipManager",
+            MagicMock(return_value=relationship_manager),
+        )
+
+        results = await graph_traversal(
+            ["seed-a", "seed-b"],
+            client,
+            depth=1,
+            limit=10,
+            group_id="org-123",
+        )  # type: ignore[arg-type]
+
+        assert [entity.id for entity, _score in results] == ["shared"]
+        assert results[0][1] == pytest.approx(1.25)
+
+    @pytest.mark.asyncio
     async def test_graph_traversal_with_group_id(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -2289,6 +2403,86 @@ class TestHybridSearch:
 
         assert result.total >= 1
         assert "vector" in result.metadata["sources"]
+
+    @pytest.mark.asyncio
+    async def test_hybrid_search_reports_applied_reranking(self) -> None:
+        client = MockGraphClientForHybrid()
+        manager = MockEntityManagerForHybrid()
+
+        e1 = make_entity_for_test("id1", name="Python")
+        manager.search_results = [(e1, 0.9)]
+        rerank_result = RerankResult(
+            results=[(e1, 0.97)],
+            reranked_count=1,
+            model_name="test-reranker",
+            metadata={"top_k": 3, "original_count": 1, "final_count": 1},
+        )
+        rerank = AsyncMock(return_value=rerank_result)
+
+        with patch("sibyl_core.retrieval.reranking.rerank_results", new=rerank):
+            result = await hybrid_search(
+                "Python",
+                client,  # type: ignore[arg-type]
+                manager,  # type: ignore[arg-type]
+                config=HybridConfig(
+                    graph_weight=0,
+                    apply_reranking=True,
+                    rerank_model="test-reranker",
+                    rerank_top_k=3,
+                ),
+            )
+
+        assert result.metadata["reranking_applied"] is True
+        assert result.metadata["reranking"] == {
+            "enabled": True,
+            "applied": True,
+            "reranked_count": 1,
+            "requested_model": "test-reranker",
+            "top_k": 3,
+            "original_count": 1,
+            "final_count": 1,
+            "model": "test-reranker",
+        }
+        rerank.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_hybrid_search_reports_skipped_reranking(self) -> None:
+        client = MockGraphClientForHybrid()
+        manager = MockEntityManagerForHybrid()
+
+        e1 = make_entity_for_test("id1", name="Python")
+        manager.search_results = [(e1, 0.9)]
+        rerank_result = RerankResult(
+            results=[(e1, 0.9)],
+            reranked_count=0,
+            model_name=None,
+            metadata={"reranking_skipped": "sentence_transformers_not_installed"},
+        )
+        rerank = AsyncMock(return_value=rerank_result)
+
+        with patch("sibyl_core.retrieval.reranking.rerank_results", new=rerank):
+            result = await hybrid_search(
+                "Python",
+                client,  # type: ignore[arg-type]
+                manager,  # type: ignore[arg-type]
+                config=HybridConfig(
+                    graph_weight=0,
+                    apply_reranking=True,
+                    rerank_model="test-reranker",
+                    rerank_top_k=3,
+                ),
+            )
+
+        assert result.metadata["reranking_applied"] is False
+        assert result.metadata["reranking"] == {
+            "enabled": True,
+            "applied": False,
+            "reranked_count": 0,
+            "requested_model": "test-reranker",
+            "top_k": 3,
+            "reranking_skipped": "sentence_transformers_not_installed",
+            "model": None,
+        }
 
     @pytest.mark.asyncio
     async def test_hybrid_search_with_temporal_boost(self) -> None:
@@ -2765,8 +2959,9 @@ class TestHybridSearch:
             depth: int = 2,
             limit: int = 20,
             group_id: str | None = None,
+            relationship_type_weights: Any = None,
         ) -> list[tuple[Entity, float]]:
-            del client, depth, limit, group_id
+            del client, depth, limit, group_id, relationship_type_weights
             assert seed_ids == ["topic_samsung"]
             return [(answer, 0.5)]
 
@@ -2812,8 +3007,9 @@ class TestHybridSearch:
             depth: int = 2,
             limit: int = 20,
             group_id: str | None = None,
+            relationship_type_weights: Any = None,
         ) -> list[tuple[Entity, float]]:
-            del client, depth, limit, group_id
+            del client, depth, limit, group_id, relationship_type_weights
             assert seed_ids == [session.id for session in sessions[:5]]
             return []
 
@@ -2875,8 +3071,9 @@ class TestHybridSearch:
             depth: int = 2,
             limit: int = 20,
             group_id: str | None = None,
+            relationship_type_weights: Any = None,
         ) -> list[tuple[Entity, float]]:
-            del client, depth, limit, group_id
+            del client, depth, limit, group_id, relationship_type_weights
             assert "topic_camera" in seed_ids
             return [(distractor, 0.9)]
 
@@ -2939,8 +3136,9 @@ class TestHybridSearch:
             depth: int = 2,
             limit: int = 20,
             group_id: str | None = None,
+            relationship_type_weights: Any = None,
         ) -> list[tuple[Entity, float]]:
-            del client, depth, limit, group_id
+            del client, depth, limit, group_id, relationship_type_weights
             assert seed_ids == ["topic_visible"]
             return [(answer, 0.5)]
 

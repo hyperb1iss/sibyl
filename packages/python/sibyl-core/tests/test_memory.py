@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from sibyl_core.models.reflection import (
+    ReflectionCandidate,
     memory_lifecycle_from_metadata,
     reflection_findings_from_metadata,
 )
@@ -928,9 +929,53 @@ async def test_promote_review_candidate_persists_native_record_and_marks_promote
     )
     findings = reflection_findings_from_metadata(saved[0].metadata)
     assert lifecycle.state == "promoted"
+    assert lifecycle.source_id == "candidate-1"
     assert lifecycle.derived_ids == ["decision_123"]
     assert findings[-1].kind == "promotion"
+    assert findings[-1].target_source_id == "candidate-1"
     assert findings[-1].related_source_ids == ["decision_123"]
+
+
+@pytest.mark.asyncio
+async def test_persist_reflection_candidate_reports_partial_relationship_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = ReflectionCandidate(
+        kind="decision",
+        title="Decision: keep receipts honest",
+        content="Relationship writes can partially fail after entity promotion.",
+        reason="captures a reliability invariant",
+        confidence=0.9,
+        tags=["reflection", "decision"],
+    )
+
+    entity_manager = SimpleNamespace(create_direct=AsyncMock(return_value="decision_partial"))
+
+    async def create_relationships(relationships):
+        return (1, len(relationships) - 1)
+
+    relationship_manager = SimpleNamespace(create_bulk=AsyncMock(side_effect=create_relationships))
+    runtime = SimpleNamespace(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+    )
+
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", AsyncMock(return_value=runtime))
+
+    result = await memory_module.persist_reflection_candidate(
+        candidate=candidate,
+        organization_id="org-1",
+        principal_id="user-1",
+        related_to=["related_one", "related_two"],
+        memory_scope=MemoryScope.PRIVATE,
+    )
+
+    assert result.response.success
+    assert result.metadata["native_relationship_requested_count"] == 2
+    assert result.metadata["native_relationship_count"] == 1
+    assert result.metadata["native_relationship_failed_count"] == 1
+    assert result.metadata["promotion_state"] == "partial"
+    assert result.metadata["promotion_errors"] == ["1 promotion relationships failed"]
 
 
 @pytest.mark.asyncio
@@ -1237,5 +1282,8 @@ async def test_promote_raw_memory_persists_native_record_and_marks_promoted(
         source_id="raw-1",
         review_state=saved[0].review_state,
     )
+    findings = reflection_findings_from_metadata(saved[0].metadata)
     assert lifecycle.state == "promoted"
+    assert lifecycle.source_id == "raw-1"
     assert lifecycle.derived_ids == ["episode_123"]
+    assert findings[-1].target_source_id == "raw-1"

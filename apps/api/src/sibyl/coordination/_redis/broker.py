@@ -21,6 +21,7 @@ from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_LIMIT,
     JobInfo,
     JobStatus,
+    entity_embedding_job_id,
     memory_extraction_job_id,
     memory_projection_job_id,
     raw_capture_changefeed_job_id,
@@ -180,6 +181,7 @@ class RedisQueueBroker:
         group_id: str,
         relationships: list[dict[str, Any]] | None = None,
         auto_link_params: dict[str, Any] | None = None,
+        generate_embeddings: bool = True,
     ) -> str:
         """Enqueue an entity creation job."""
         from sibyl.jobs.pending import mark_pending
@@ -193,6 +195,7 @@ class RedisQueueBroker:
             job_id=job_id,
             relationships=relationships,
             auto_link_params=auto_link_params,
+            generate_embeddings=generate_embeddings,
         )
 
         if not result.created:
@@ -308,6 +311,39 @@ class RedisQueueBroker:
             "Enqueued memory extraction job",
             job_id=result.job_id,
             sources=len(sources_data),
+        )
+        return result.job_id
+
+    async def enqueue_entity_embedding_backfill(
+        self,
+        entities_data: list[dict[str, Any]],
+        group_id: str,
+        *,
+        relationships: list[dict[str, Any]] | None = None,
+    ) -> str:
+        """Enqueue embedding backfill for lexically-created graph records."""
+        job_id = entity_embedding_job_id(
+            entities_data,
+            group_id,
+            relationships=relationships,
+        )
+        result = await self._enqueue_unique(
+            "backfill_entity_embeddings",
+            entities_data,
+            group_id,
+            job_id=job_id,
+            relationships=relationships,
+        )
+
+        if not result.created:
+            log.info("Entity embedding backfill job already exists", job_id=job_id)
+            return result.job_id
+
+        log.info(
+            "Enqueued entity embedding backfill",
+            job_id=result.job_id,
+            entities=len(entities_data),
+            relationships=len(relationships or ()),
         )
         return result.job_id
 
@@ -508,6 +544,15 @@ class RedisQueueBroker:
             "Enqueued raw capture changefeed poll",
             job_id=result.job_id,
             organization_id=organization_id,
+        )
+        return result.job_id
+
+    async def enqueue_scheduled_job(self, function: str) -> str:
+        """Enqueue a scheduled worker function through the broker."""
+        result = await self._enqueue_unique(
+            function,
+            job_id=f"scheduled:{function}",
+            clear_result=True,
         )
         return result.job_id
 

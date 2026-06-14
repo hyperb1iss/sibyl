@@ -20,8 +20,6 @@ class CoreConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="SIBYL_",
-        env_file=".env",
-        env_file_encoding="utf-8",
         extra="ignore",
     )
 
@@ -77,6 +75,30 @@ class CoreConfig(BaseSettings):
         default=500.0,
         ge=0.0,
         description="Log SurrealDB queries at warning level when elapsed time exceeds this threshold.",
+    )
+    surreal_pool_size: int = Field(
+        default=8,
+        ge=1,
+        le=256,
+        description="Default concurrent SurrealDB connections per dedicated client.",
+    )
+    surreal_auth_pool_size: int | None = Field(
+        default=None,
+        ge=1,
+        le=256,
+        description="Override SurrealDB auth client pool size; defaults to surreal_pool_size.",
+    )
+    surreal_content_pool_size: int | None = Field(
+        default=None,
+        ge=1,
+        le=256,
+        description="Override SurrealDB content client pool size; defaults to surreal_pool_size.",
+    )
+    surreal_graph_pool_size: int | None = Field(
+        default=None,
+        ge=1,
+        le=256,
+        description="Override SurrealDB graph client pool size; defaults to surreal_pool_size.",
     )
     surreal_graph_client_cache_size: int = Field(
         default=64,
@@ -292,6 +314,15 @@ class CoreConfig(BaseSettings):
         if self.surreal_data_dir:
             return f"surrealkv://{self.surreal_data_dir}"
         return "memory://"
+
+    def surreal_client_pool_size(self, client_kind: Literal["auth", "content", "graph"]) -> int:
+        """Return the configured pool size for a SurrealDB client kind."""
+        override = {
+            "auth": self.surreal_auth_pool_size,
+            "content": self.surreal_content_pool_size,
+            "graph": self.surreal_graph_pool_size,
+        }[client_kind]
+        return override or self.surreal_pool_size
 
 
 # Default core config instance

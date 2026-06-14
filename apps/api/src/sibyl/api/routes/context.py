@@ -141,12 +141,16 @@ async def context_pack(
             limit=request.limit,
             include_related=request.include_related,
             related_limit=request.related_limit,
+            audit=request.audit,
             allowed_memory_scope_keys=set(ctx.api_key_memory_scope_keys)
             if ctx.api_key_memory_scope_keys is not None
             else None,
         )
         payload = context_pack_to_dict(pack)
-        payload["markdown"] = context_pack_to_markdown(pack)
+        payload["markdown"] = context_pack_to_markdown(
+            pack,
+            token_budget=request.markdown_token_budget,
+        )
         response = ContextPackResponse.model_validate(payload)
         await log_context_pack_audit(
             user_id=ctx.user_id,

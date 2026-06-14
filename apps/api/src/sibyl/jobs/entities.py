@@ -149,6 +149,37 @@ async def _inherit_task_knowledge(
     return inherited_count
 
 
+async def _persist_job_relationships(
+    relationship_manager: Any,
+    relationships: list[Any],
+    *,
+    generate_embeddings: bool,
+    log_event: str,
+) -> int:
+    if not relationships:
+        return 0
+
+    create_direct_bulk = getattr(relationship_manager, "create_direct_bulk", None)
+    if callable(create_direct_bulk):
+        try:
+            created_ids = await create_direct_bulk(
+                relationships,
+                generate_embeddings=generate_embeddings,
+            )
+            return len(created_ids)
+        except Exception as exc:
+            log.warning(log_event, error=str(exc), failed=len(relationships))
+
+    created = 0
+    for relationship in relationships:
+        try:
+            await relationship_manager.create(relationship)
+            created += 1
+        except Exception as exc:
+            log.warning(log_event, error=str(exc), relationship_id=relationship.id)
+    return created
+
+
 async def _log_learning_job_audit(
     *,
     action: str,
@@ -273,6 +304,7 @@ async def create_entity(  # noqa: PLR0915
     group_id: str,
     relationships: list[dict[str, Any]] | None = None,
     auto_link_params: dict[str, Any] | None = None,
+    generate_embeddings: bool = True,
 ) -> dict[str, Any]:
     """Create entity asynchronously via SurrealDB.
 
@@ -361,9 +393,9 @@ async def create_entity(  # noqa: PLR0915
             except Exception as e:
                 log.debug("dedup_on_write_check_skipped", error=str(e))
 
-        # Always create the entity so the queued ID stays valid
-        if entity_type in ("task", "project", "epic", "pattern", "procedure"):
-            created_id = await entity_manager.create_direct(entity, generate_embedding=True)
+        create_direct = getattr(entity_manager, "create_direct", None)
+        if callable(create_direct):
+            created_id = await create_direct(entity, generate_embedding=generate_embeddings)
         else:
             created_id = await entity_manager.create(entity)
 
@@ -374,6 +406,7 @@ async def create_entity(  # noqa: PLR0915
         )
 
         relationship_manager = runtime.relationship_manager
+        relationships_for_embedding_backfill: list[Relationship] = []
 
         # Link to existing duplicate if dedup matched (entity still created for ID stability)
         if deduplicated and dedup_target_id:
@@ -385,13 +418,19 @@ async def create_entity(  # noqa: PLR0915
                     relationship_type=RelationshipType.RELATED_TO,
                     metadata={"dedup_match": True, "auto_linked": True},
                 )
-                await relationship_manager.create(dedup_rel)
+                await _persist_job_relationships(
+                    relationship_manager,
+                    [dedup_rel],
+                    generate_embeddings=generate_embeddings,
+                    log_event="dedup_on_write_link_failed",
+                )
+                relationships_for_embedding_backfill.append(dedup_rel)
                 log.info("dedup_on_write_linked", source=created_id, target=dedup_target_id)
             except Exception as e:
                 log.warning("dedup_on_write_link_failed", error=str(e))
 
         # Create explicit relationships (BELONGS_TO, DEPENDS_ON, etc.)
-        relationships_created = 0
+        relationships_to_persist = []
         for rel_data in relationships:
             try:
                 rel_type = RelationshipType(rel_data.get("type", "RELATED_TO"))
@@ -406,20 +445,14 @@ async def create_entity(  # noqa: PLR0915
                         "Skipping relationship with missing source/target", rel_data=rel_data
                     )
                     continue
-                rel = Relationship(
-                    id=rel_id,
-                    source_id=source_id,
-                    target_id=target_id,
-                    relationship_type=rel_type,
-                    metadata=rel_data.get("metadata", {}),
-                )
-                await relationship_manager.create(rel)
-                relationships_created += 1
-                log.debug(
-                    "create_entity_relationship_created",
-                    rel_type=rel_type.value,
-                    source=rel_data.get("source_id"),
-                    target=rel_data.get("target_id"),
+                relationships_to_persist.append(
+                    Relationship(
+                        id=rel_id,
+                        source_id=source_id,
+                        target_id=target_id,
+                        relationship_type=rel_type,
+                        metadata=rel_data.get("metadata", {}),
+                    )
                 )
             except Exception as e:
                 log.warning(
@@ -427,6 +460,13 @@ async def create_entity(  # noqa: PLR0915
                     error=str(e),
                     rel_data=rel_data,
                 )
+        relationships_created = await _persist_job_relationships(
+            relationship_manager,
+            relationships_to_persist,
+            generate_embeddings=generate_embeddings,
+            log_event="create_entity_relationship_failed",
+        )
+        relationships_for_embedding_backfill.extend(relationships_to_persist)
 
         # Auto-link: discover related entities via similarity search
         auto_links_created = 0
@@ -445,9 +485,10 @@ async def create_entity(  # noqa: PLR0915
                     limit=5,
                 )
 
+                auto_relationships = []
                 for linked_id, score in auto_link_results:
-                    try:
-                        rel = Relationship(
+                    auto_relationships.append(
+                        Relationship(
                             id=f"rel_{created_id}_references_{linked_id}",
                             source_id=created_id,
                             target_id=linked_id,
@@ -457,15 +498,14 @@ async def create_entity(  # noqa: PLR0915
                                 "similarity_score": score,
                             },
                         )
-                        await relationship_manager.create(rel)
-                        auto_links_created += 1
-                        log.debug(
-                            "create_entity_auto_link_created",
-                            target=linked_id,
-                            score=score,
-                        )
-                    except Exception as e:
-                        log.warning("create_entity_auto_link_failed", error=str(e))
+                    )
+                auto_links_created = await _persist_job_relationships(
+                    relationship_manager,
+                    auto_relationships,
+                    generate_embeddings=generate_embeddings,
+                    log_event="create_entity_auto_link_failed",
+                )
+                relationships_for_embedding_backfill.extend(auto_relationships)
 
                 log.info(
                     "create_entity_auto_link_complete",
@@ -481,7 +521,7 @@ async def create_entity(  # noqa: PLR0915
             source=entity,
             group_id=group_id,
             created_source_id=created_id,
-            generate_embeddings=True,
+            generate_embeddings=generate_embeddings,
         )
         if projection_result.errors:
             log.warning(
@@ -490,6 +530,7 @@ async def create_entity(  # noqa: PLR0915
                 extracted=projection_result.extracted,
                 projected_entities=projection_result.projected_entities,
                 relationships=projection_result.relationships,
+                projection_state=projection_result.projection_state,
                 errors=projection_result.errors,
             )
         elif projection_result.extracted:
@@ -499,8 +540,50 @@ async def create_entity(  # noqa: PLR0915
                 extracted=projection_result.extracted,
                 projected_entities=projection_result.projected_entities,
                 relationships=projection_result.relationships,
+                projection_state=projection_result.projection_state,
                 errors=len(projection_result.errors),
             )
+
+        embedding_backfill_job_id: str | None = None
+        if not generate_embeddings:
+            try:
+                from sibyl.jobs.queue import enqueue_entity_embedding_backfill
+
+                projection_entities = tuple(
+                    getattr(projection_result, "created_projected_entities", ())
+                )
+                projection_relationships = tuple(
+                    getattr(projection_result, "created_projection_relationships", ())
+                )
+                relationships_to_backfill = (
+                    *relationships_for_embedding_backfill,
+                    *projection_relationships,
+                )
+                embedding_backfill_job_id = await enqueue_entity_embedding_backfill(
+                    [
+                        backfill_entity.model_dump(mode="json")
+                        for backfill_entity in (entity, *projection_entities)
+                    ],
+                    group_id,
+                    relationships=[
+                        relationship.model_dump(mode="json")
+                        for relationship in relationships_to_backfill
+                    ]
+                    or None,
+                )
+                log.info(
+                    "create_entity_embedding_backfill_enqueued",
+                    entity_id=created_id,
+                    job_id=embedding_backfill_job_id,
+                    entities=1 + len(projection_entities),
+                    relationships=len(relationships_to_backfill),
+                )
+            except Exception as exc:
+                log.warning(
+                    "create_entity_embedding_backfill_enqueue_failed",
+                    entity_id=created_id,
+                    error=str(exc),
+                )
 
         try:
             from sibyl.jobs.memory_extraction import enqueue_memory_extraction_batches
@@ -547,6 +630,8 @@ async def create_entity(  # noqa: PLR0915
             "auto_links_created": auto_links_created,
             "projected_entities": projection_result.projected_entities,
             "projection_relationships": projection_result.relationships,
+            "projection_state": projection_result.projection_state,
+            "embedding_backfill_job_id": embedding_backfill_job_id,
             "pending_ops_processed": len(pending_results),
             "deduplicated": deduplicated,
         }
@@ -603,6 +688,7 @@ async def project_memory_batch(
         "extracted": projection.extracted,
         "projected_entities": projection.projected_entities,
         "relationships": projection.relationships,
+        "projection_state": projection.projection_state,
         "skipped": projection.skipped,
         "errors": list(projection.errors),
     }
@@ -610,6 +696,55 @@ async def project_memory_batch(
         log.warning("memory_projection_batch_failed", **result)
     else:
         log.info("memory_projection_batch_complete", **result)
+    return result
+
+
+async def backfill_entity_embeddings(
+    ctx: dict[str, Any],  # noqa: ARG001
+    entities_data: list[dict[str, Any]],
+    group_id: str,
+    *,
+    relationships: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Generate native graph embeddings after a lexical-first write."""
+    from sibyl_core.models.entities import Entity, Relationship
+
+    runtime = await get_surreal_graph_runtime(
+        group_id,
+        embedding_provider=configured_embedding_provider(),
+    )
+    entities = [Entity.model_validate(entity_data) for entity_data in entities_data]
+    created_ids = await runtime.entity_manager.create_direct_bulk(
+        entities,
+        generate_embeddings=True,
+    )
+
+    relationship_ids: list[str] = []
+    if relationships:
+        relationship_models = [
+            Relationship.model_validate(relationship_data) for relationship_data in relationships
+        ]
+        create_direct_bulk = getattr(runtime.relationship_manager, "create_direct_bulk", None)
+        if callable(create_direct_bulk):
+            relationship_ids = list(
+                await create_direct_bulk(
+                    relationship_models,
+                    generate_embeddings=True,
+                )
+            )
+        else:
+            relationship_ids = [
+                await runtime.relationship_manager.create(relationship)
+                for relationship in relationship_models
+            ]
+
+    result = {
+        "entities": len(created_ids),
+        "relationships": len(relationship_ids),
+        "entity_ids": list(created_ids),
+        "relationship_ids": relationship_ids,
+    }
+    log.info("entity_embedding_backfill_complete", **result)
     return result
 
 

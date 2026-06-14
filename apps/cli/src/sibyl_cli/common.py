@@ -188,7 +188,7 @@ def hint(message: str) -> None:
 def print_db_hint() -> None:
     """Print the common local data-services hint."""
     hint("Are the local data services running?")
-    console.print(f"  [{NEON_CYAN}]docker compose up -d[/{NEON_CYAN}]")
+    console.print(f"  [{NEON_CYAN}]sibyld up[/{NEON_CYAN}]")
 
 
 def create_table(title: str | None = None, *columns: str, expand: bool = True) -> Table:

@@ -21,6 +21,7 @@ from sibyl.persistence.backups_runtime import (
 from sibyl.persistence.surreal.setup import (
     get_setup_status,
     is_setup_mode,
+    require_global_admin,
     require_settings_admin,
     require_settings_owner,
     require_setup_mode_or_admin,
@@ -41,6 +42,7 @@ __all__ = [
     "list_oauth_connections",
     "remove_oauth_connection",
     "request_password_reset",
+    "require_global_admin",
     "require_settings_admin",
     "require_settings_owner",
     "require_setup_mode_or_admin",

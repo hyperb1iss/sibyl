@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from tools.baselines.common import (
+    _raw_memory_matches_seed,
     read_jsonl,
     resolve_placeholders,
     resolve_pointer,
@@ -170,6 +171,35 @@ def test_write_manifest_omits_auth_without_runtime_token(tmp_path: Path) -> None
     manifest = json.loads(path.read_text(encoding="utf-8"))
 
     assert "auth" not in manifest
+
+
+def test_raw_memory_seed_match_requires_repair_terms() -> None:
+    old_memory = {
+        "title": "Stale Decision Replacement Baseline",
+        "source_id": "baseline:stale-decision-replacement-v2",
+        "raw_content": "Silver Delta supersedes old shortcuts for migration acceptance.",
+    }
+    repaired_memory = {
+        **old_memory,
+        "raw_content": (
+            "Silver Delta is the successor after storage adapter extraction "
+            "and covers migration acceptance."
+        ),
+    }
+    terms = ["Silver Delta", "storage adapter extraction", "migration acceptance"]
+
+    assert not _raw_memory_matches_seed(
+        old_memory,
+        title="Stale Decision Replacement Baseline",
+        source_id="baseline:stale-decision-replacement-v2",
+        required_content_terms=terms,
+    )
+    assert _raw_memory_matches_seed(
+        repaired_memory,
+        title="Stale Decision Replacement Baseline",
+        source_id="baseline:stale-decision-replacement-v2",
+        required_content_terms=terms,
+    )
 
 
 def test_runtime_baseline_workflows_enable_local_auth_under_production_env() -> None:

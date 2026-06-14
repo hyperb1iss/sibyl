@@ -196,7 +196,7 @@ permission-tests:
   steps:
     - uses: actions/checkout@v4
     - name: Start SurrealDB
-      run: docker compose up -d surrealdb
+      run: docker compose --env-file /dev/null up -d surrealdb
     - name: Run auth tests
       run: moon run api:test -- -k auth -v
 ```

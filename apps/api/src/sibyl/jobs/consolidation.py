@@ -9,12 +9,33 @@ Run on a schedule via arq cron or triggered manually via the API.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
 
+from sibyl_core.models.entities import EntityType
+
 log = structlog.get_logger()
+
+_PRIORITY_DECAY_ENTITY_TYPES = (
+    EntityType.EPISODE,
+    EntityType.CLAIM,
+    EntityType.IDEA,
+    EntityType.PLAN,
+    EntityType.NOTE,
+)
+
+
+class PriorityDecayCandidate:
+    __slots__ = ("created_at", "entity_id", "reason", "score")
+
+    def __init__(self, *, entity_id: str, created_at: datetime, score: float, reason: str) -> None:
+        self.entity_id = entity_id
+        self.created_at = created_at
+        self.score = score
+        self.reason = reason
 
 
 async def _get_graph_runtime(group_id: str) -> Any:
@@ -123,6 +144,9 @@ async def priority_decay(
     group_id: str,
     min_age_days: int = 180,
     max_archives_per_run: int = 100,
+    decay_threshold: float = 0.35,
+    recency_half_life_days: int = 180,
+    entity_types: Sequence[EntityType] | None = None,
 ) -> dict[str, Any]:
     """Archive low-importance entities that haven't been accessed recently.
 
@@ -131,8 +155,9 @@ async def priority_decay(
     a threshold are archived (excluded from default search but still
     retrievable with include_archived=True).
 
-    Only targets episodic entities — patterns, rules, tasks, and projects
-    are preserved regardless of age.
+    Only targets derived memory entities by default. Sources, documents,
+    sessions, patterns, rules, tasks, projects, procedures, and preferences are
+    preserved unless explicitly passed through ``entity_types``.
 
     Args:
         ctx: arq context
@@ -143,8 +168,6 @@ async def priority_decay(
     Returns:
         Dict with archival statistics
     """
-    from sibyl_core.models.entities import EntityType
-
     log.info(
         "priority_decay_started",
         group_id=group_id,
@@ -157,42 +180,77 @@ async def priority_decay(
 
         cutoff = datetime.now(UTC) - timedelta(days=min_age_days)
         page_size = max(200, min(max_archives_per_run * 2, 1000))
-        offset = 0
-        candidates: list[str] = []
+        threshold = max(0.0, min(float(decay_threshold), 1.0))
+        half_life_days = max(int(recency_half_life_days), 1)
+        candidates: list[PriorityDecayCandidate] = []
+        target_entity_types = (
+            _PRIORITY_DECAY_ENTITY_TYPES if entity_types is None else tuple(entity_types)
+        )
 
-        while len(candidates) < max_archives_per_run:
-            batch = await entity_manager.list_by_type(
-                EntityType.EPISODE,
-                limit=page_size,
-                offset=offset,
-                include_archived=False,
-            )
-            if not batch:
-                break
-
-            offset += len(batch)
-            for entity in batch:
-                status = str((entity.metadata or {}).get("status") or "").lower()
-                if status == "archived" or entity.created_at >= cutoff:
-                    continue
-                candidates.append(entity.id)
-                if len(candidates) >= max_archives_per_run:
+        for entity_type in target_entity_types:
+            type_candidates: list[PriorityDecayCandidate] = []
+            offset = 0
+            while len(type_candidates) < max_archives_per_run:
+                batch = await entity_manager.list_by_type(
+                    entity_type,
+                    limit=page_size,
+                    offset=offset,
+                    include_archived=False,
+                )
+                if not batch:
                     break
+
+                offset += len(batch)
+                for entity in batch:
+                    if (
+                        _is_archived(entity)
+                        or _is_pinned_for_retention(entity)
+                        or entity.created_at >= cutoff
+                    ):
+                        continue
+                    score = _priority_decay_score(
+                        entity,
+                        now=datetime.now(UTC),
+                        recency_half_life_days=half_life_days,
+                    )
+                    if score >= threshold:
+                        continue
+                    type_candidates.append(
+                        PriorityDecayCandidate(
+                            entity_id=entity.id,
+                            created_at=entity.created_at,
+                            score=score,
+                            reason=_priority_decay_reason(entity),
+                        )
+                    )
+                    if len(type_candidates) >= max_archives_per_run:
+                        break
+            candidates.extend(type_candidates)
+
+        candidates.sort(key=lambda candidate: (candidate.score, candidate.created_at))
+        candidates = candidates[:max_archives_per_run]
 
         archived_count = 0
         now_iso = datetime.now(UTC).isoformat()
-        for entity_id in candidates:
+        for candidate in candidates:
             try:
                 await entity_manager.update(
-                    entity_id,
+                    candidate.entity_id,
                     {
                         "status": "archived",
                         "archived_at": now_iso,
+                        "decay_score": round(candidate.score, 6),
+                        "decay_threshold": threshold,
+                        "decay_reason": candidate.reason,
                     },
                 )
                 archived_count += 1
             except Exception as e:
-                log.warning("priority_decay_archive_failed", entity_id=entity_id, error=str(e))
+                log.warning(
+                    "priority_decay_archive_failed",
+                    entity_id=candidate.entity_id,
+                    error=str(e),
+                )
 
         result = {
             "group_id": group_id,
@@ -207,6 +265,108 @@ async def priority_decay(
     except Exception as e:
         log.exception("priority_decay_failed", group_id=group_id, error=str(e))
         raise
+
+
+def _priority_decay_score(
+    entity: Any,
+    *,
+    now: datetime,
+    recency_half_life_days: int,
+) -> float:
+    importance = _entity_importance(entity)
+    if _is_superseded_or_stale(entity):
+        importance *= 0.25
+    last_seen = _entity_last_seen_at(entity)
+    age_days = max((now - _aware_datetime(last_seen)).total_seconds() / 86400, 0.0)
+    recency_decay = 0.5 ** (age_days / recency_half_life_days)
+    return max(0.0, min(importance * recency_decay, 1.0))
+
+
+def _priority_decay_reason(entity: Any) -> str:
+    if _is_superseded_or_stale(entity):
+        return "superseded_or_stale"
+    return "low_priority_decay_score"
+
+
+def _entity_importance(entity: Any) -> float:
+    metadata = entity.metadata or {}
+    for key in (
+        "retention_importance",
+        "importance",
+        "memory_importance",
+        "promotion_confidence",
+        "reflection_confidence",
+        "projection_confidence",
+        "confidence",
+    ):
+        if (value := _metadata_float(metadata, key)) is not None:
+            return max(0.0, min(value, 1.0))
+    return 0.5
+
+
+def _entity_last_seen_at(entity: Any) -> datetime:
+    metadata = entity.metadata or {}
+    for key in ("last_accessed_at", "last_recalled_at", "last_used_at"):
+        if value := _metadata_datetime(metadata.get(key)):
+            return value
+    return entity.created_at
+
+
+def _is_archived(entity: Any) -> bool:
+    metadata = entity.metadata or {}
+    status = str(metadata.get("status") or "").lower()
+    return status == "archived"
+
+
+def _is_pinned_for_retention(entity: Any) -> bool:
+    metadata = entity.metadata or {}
+    if metadata.get("pinned") is True:
+        return True
+    retention = str(metadata.get("retention") or metadata.get("retention_policy") or "").lower()
+    return retention in {"pinned", "preserve", "keep"}
+
+
+def _is_superseded_or_stale(entity: Any) -> bool:
+    metadata = entity.metadata or {}
+    lifecycle_values = {
+        str(metadata.get("lifecycle_state") or "").lower(),
+        str(metadata.get("review_state") or "").lower(),
+        str(metadata.get("status") or "").lower(),
+    }
+    if lifecycle_values & {"superseded", "stale"}:
+        return True
+    return bool(
+        metadata.get("superseded_by_raw_memory_id")
+        or metadata.get("superseded_by_source_id")
+        or metadata.get("superseded_by")
+    )
+
+
+def _metadata_float(metadata: Mapping[str, Any], key: str) -> float | None:
+    value = metadata.get(key)
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _metadata_datetime(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return _aware_datetime(value)
+    if isinstance(value, str):
+        try:
+            return _aware_datetime(datetime.fromisoformat(value))
+        except ValueError:
+            return None
+    return None
+
+
+def _aware_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value
 
 
 async def consolidate_all_orgs(

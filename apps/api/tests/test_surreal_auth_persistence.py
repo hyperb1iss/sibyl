@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -19,6 +20,7 @@ from sibyl.persistence.surreal.auth import (
 )
 from sibyl_core.auth import GitHubUserIdentity, OrganizationRole, PasswordChange, ProjectRole
 from sibyl_core.backends.surreal import SurrealAuthClient, bootstrap_auth_schema
+from sibyl_core.backends.surreal.auth_schema import AUTH_TABLES
 
 pytest.importorskip("surrealdb")
 
@@ -131,6 +133,48 @@ async def test_surreal_user_repository_supports_local_and_github_users(
     assert github_user.github_id == 42
     assert github_user.email == "octonova@example.com"
     assert await repo.get_by_email("nova@example.com") == changed
+
+
+@pytest.mark.asyncio
+async def test_surreal_user_repository_burns_password_check_for_missing_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = SurrealUserRepository.from_client(_RecordingAuthClient([]))  # type: ignore[arg-type]
+    burn = MagicMock()
+    monkeypatch.setattr(surreal_auth, "verify_password_timing_floor", burn)
+
+    result = await repo.authenticate_local(
+        email="missing@example.com",
+        password="candidate-password",
+    )
+
+    assert result is None
+    burn.assert_called_once_with(
+        "candidate-password",
+        iterations=surreal_auth.config_module.settings.password_iterations,
+    )
+
+
+@pytest.mark.asyncio
+async def test_surreal_user_repository_burns_password_check_for_empty_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _RecordingAuthClient([])
+    repo = SurrealUserRepository.from_client(client)  # type: ignore[arg-type]
+    burn = MagicMock()
+    monkeypatch.setattr(surreal_auth, "verify_password_timing_floor", burn)
+
+    result = await repo.authenticate_local(
+        email="nova@example.com",
+        password="",
+    )
+
+    assert result is None
+    assert client.calls == []
+    burn.assert_called_once_with(
+        "",
+        iterations=surreal_auth.config_module.settings.password_iterations,
+    )
 
 
 @pytest.mark.asyncio
@@ -271,6 +315,323 @@ async def test_auth_archive_export_reads_from_surreal_backend(
     assert payload["total_rows"] == 1
     assert payload["tables"]["users"][0]["email"] == "export@example.com"
     close.assert_awaited_once()
+
+
+def test_auth_archive_tables_cover_auth_schema_tables() -> None:
+    assert set(auth_archive.AUTH_ARCHIVE_TABLES) == set(AUTH_TABLES)
+
+
+@pytest.mark.asyncio
+async def test_auth_archive_export_can_scope_to_one_organization(
+    monkeypatch: pytest.MonkeyPatch,
+    surreal_auth_client: SurrealAuthClient,
+) -> None:
+    org_a = uuid4()
+    org_b = uuid4()
+    user_a = uuid4()
+    user_b = uuid4()
+    api_key_a = uuid4()
+    api_key_b = uuid4()
+    session_a = uuid4()
+    session_b = uuid4()
+    invitation_a = uuid4()
+    invitation_b = uuid4()
+    device_request_a = uuid4()
+    device_request_b = uuid4()
+    project_a = uuid4()
+    project_b = uuid4()
+
+    for user_id, email in ((user_a, "a@example.com"), (user_b, "b@example.com")):
+        await surreal_auth_client.execute_query(
+            "CREATE users CONTENT $record;",
+            record={
+                "uuid": str(user_id),
+                "email": email,
+                "name": email,
+                "password_salt": f"{email}-salt",
+                "password_hash": f"{email}-hash",
+                "password_iterations": 310000,
+            },
+        )
+    for user_id, email in ((user_a, "a@example.com"), (user_b, "b@example.com")):
+        await surreal_auth_client.execute_query(
+            "CREATE user_identity CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "provider_name": "oidc",
+                "issuer": "https://idp.example.com",
+                "subject": str(user_id),
+                "subject_key": f"oidc:{user_id}",
+                "user_id": str(user_id),
+                "email": email,
+            },
+        )
+        await surreal_auth_client.execute_query(
+            "CREATE password_reset_tokens CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "user_id": str(user_id),
+                "token_hash": f"{email}-reset-token-hash",
+                "expires_at": datetime(2026, 4, 20, 1, 2, 3, tzinfo=UTC),
+            },
+        )
+        await surreal_auth_client.execute_query(
+            "CREATE login_history CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "user_id": str(user_id),
+                "event_type": "login",
+                "success": True,
+                "ip_address": "192.0.2.10",
+            },
+        )
+        await surreal_auth_client.execute_query(
+            "CREATE oauth_connections CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "user_id": str(user_id),
+                "provider": "github",
+                "provider_user_id": str(user_id),
+                "access_token_encrypted": f"{email}-access-token",
+                "refresh_token_encrypted": f"{email}-refresh-token",
+            },
+        )
+    for org_id, slug in ((org_a, "org-a"), (org_b, "org-b")):
+        await surreal_auth_client.execute_query(
+            "CREATE organizations CONTENT $record;",
+            record={"uuid": str(org_id), "name": slug, "slug": slug},
+        )
+    for org_id, user_id in ((org_a, user_a), (org_b, user_b)):
+        await surreal_auth_client.execute_query(
+            "CREATE organization_members CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "organization_id": str(org_id),
+                "user_id": str(user_id),
+                "role": "owner",
+            },
+        )
+    for org_id, user_id, session_id, suffix in (
+        (org_a, user_a, session_a, "a"),
+        (org_b, user_b, session_b, "b"),
+    ):
+        await surreal_auth_client.execute_query(
+            "CREATE user_sessions CONTENT $record;",
+            record={
+                "uuid": str(session_id),
+                "organization_id": str(org_id),
+                "user_id": str(user_id),
+                "token_hash": f"{suffix}-session-token-hash",
+                "refresh_token_hash": f"{suffix}-refresh-token-hash",
+                "expires_at": datetime(2026, 4, 20, 1, 2, 3, tzinfo=UTC),
+            },
+        )
+    for org_id, creator_id, invitation_id, suffix in (
+        (org_a, user_a, invitation_a, "a"),
+        (org_b, user_b, invitation_b, "b"),
+    ):
+        await surreal_auth_client.execute_query(
+            "CREATE organization_invitations CONTENT $record;",
+            record={
+                "uuid": str(invitation_id),
+                "organization_id": str(org_id),
+                "invited_email": f"{suffix}@example.com",
+                "created_by_user_id": str(creator_id),
+                "token": f"{suffix}-invite-token",
+                "token_hash": f"{suffix}-invite-token-hash",
+            },
+        )
+    for org_id, user_id, request_id, suffix in (
+        (org_a, user_a, device_request_a, "a"),
+        (org_b, user_b, device_request_b, "b"),
+    ):
+        await surreal_auth_client.execute_query(
+            "CREATE device_authorization_requests CONTENT $record;",
+            record={
+                "uuid": str(request_id),
+                "organization_id": str(org_id),
+                "user_id": str(user_id),
+                "device_code_hash": f"{suffix}-device-code-hash",
+                "user_code": f"{suffix}-user-code",
+                "expires_at": datetime(2026, 4, 20, 1, 2, 3, tzinfo=UTC),
+            },
+        )
+    for org_id, project_id, owner_id, slug in (
+        (org_a, project_a, user_a, "project-a"),
+        (org_b, project_b, user_b, "project-b"),
+    ):
+        await surreal_auth_client.execute_query(
+            "CREATE projects CONTENT $record;",
+            record={
+                "uuid": str(project_id),
+                "organization_id": str(org_id),
+                "name": slug,
+                "slug": slug,
+                "graph_project_id": str(project_id),
+                "owner_user_id": str(owner_id),
+            },
+        )
+    for org_id, api_key_id, user_id, prefix in (
+        (org_a, api_key_a, user_a, "ak_a"),
+        (org_b, api_key_b, user_b, "ak_b"),
+    ):
+        await surreal_auth_client.execute_query(
+            "CREATE api_keys CONTENT $record;",
+            record={
+                "uuid": str(api_key_id),
+                "organization_id": str(org_id),
+                "user_id": str(user_id),
+                "name": prefix,
+                "key_prefix": prefix,
+                "key_salt": f"{prefix}_salt",
+                "key_hash": f"{prefix}_hash",
+            },
+        )
+    for api_key_id, project_id in ((api_key_a, project_a), (api_key_b, project_b)):
+        await surreal_auth_client.execute_query(
+            "CREATE api_key_project_scopes CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "api_key_id": str(api_key_id),
+                "project_id": str(project_id),
+            },
+        )
+
+    close = AsyncMock()
+    monkeypatch.setattr(auth_archive, "build_surreal_auth_client", lambda: surreal_auth_client)
+    monkeypatch.setattr(surreal_auth_client, "close", close)
+
+    payload = await auth_archive.export_auth_archive_payload(organization_id=org_a)
+
+    assert payload["organization_id"] == str(org_a)
+    assert [row["uuid"] for row in payload["tables"]["organizations"]] == [str(org_a)]
+    assert [row["uuid"] for row in payload["tables"]["users"]] == [str(user_a)]
+    assert payload["tables"]["users"][0]["email"] == "a@example.com"
+    assert "password_salt" not in payload["tables"]["users"][0]
+    assert "password_hash" not in payload["tables"]["users"][0]
+    assert "password_iterations" not in payload["tables"]["users"][0]
+    assert payload["tables"]["user_identity"] == []
+    assert payload["tables"]["password_reset_tokens"] == []
+    assert payload["tables"]["login_history"] == []
+    assert payload["tables"]["oauth_connections"] == []
+    assert [row["uuid"] for row in payload["tables"]["api_keys"]] == [str(api_key_a)]
+    assert payload["tables"]["api_keys"][0]["key_prefix"] == "ak_a"
+    assert "key_salt" not in payload["tables"]["api_keys"][0]
+    assert "key_hash" not in payload["tables"]["api_keys"][0]
+    assert [row["uuid"] for row in payload["tables"]["user_sessions"]] == [str(session_a)]
+    assert "token_hash" not in payload["tables"]["user_sessions"][0]
+    assert "refresh_token_hash" not in payload["tables"]["user_sessions"][0]
+    assert [row["uuid"] for row in payload["tables"]["organization_invitations"]] == [
+        str(invitation_a)
+    ]
+    assert "token" not in payload["tables"]["organization_invitations"][0]
+    assert "token_hash" not in payload["tables"]["organization_invitations"][0]
+    assert [row["uuid"] for row in payload["tables"]["device_authorization_requests"]] == [
+        str(device_request_a)
+    ]
+    assert "device_code_hash" not in payload["tables"]["device_authorization_requests"][0]
+    assert "user_code" not in payload["tables"]["device_authorization_requests"][0]
+    assert [row["api_key_id"] for row in payload["tables"]["api_key_project_scopes"]] == [
+        str(api_key_a)
+    ]
+    close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_auth_archive_clean_restore_scopes_to_payload_organization(
+    surreal_auth_client: SurrealAuthClient,
+) -> None:
+    org_a = uuid4()
+    org_b = uuid4()
+    user_a = uuid4()
+    user_b = uuid4()
+    old_membership_a = uuid4()
+    membership_b = uuid4()
+    restored_membership_a = uuid4()
+
+    for user_id, email in ((user_a, "a@example.com"), (user_b, "b@example.com")):
+        await surreal_auth_client.execute_query(
+            "CREATE users CONTENT $record;",
+            record={"uuid": str(user_id), "email": email, "name": email},
+        )
+    for org_id, slug in ((org_a, "org-a-old"), (org_b, "org-b")):
+        await surreal_auth_client.execute_query(
+            "CREATE organizations CONTENT $record;",
+            record={"uuid": str(org_id), "name": slug, "slug": slug},
+        )
+    for org_id, user_id, membership_id in (
+        (org_a, user_a, old_membership_a),
+        (org_b, user_b, membership_b),
+    ):
+        await surreal_auth_client.execute_query(
+            "CREATE organization_members CONTENT $record;",
+            record={
+                "uuid": str(membership_id),
+                "organization_id": str(org_id),
+                "user_id": str(user_id),
+                "role": "owner",
+            },
+        )
+
+    payload = {
+        "version": "1.0",
+        "created_at": "2026-06-01T00:00:00+00:00",
+        "organization_id": str(org_a),
+        "tables": {
+            "organizations": [
+                {
+                    "id": str(org_a),
+                    "name": "org-a-restored",
+                    "slug": "org-a-restored",
+                    "is_personal": False,
+                    "settings": {},
+                }
+            ],
+            "organization_members": [
+                {
+                    "id": str(restored_membership_a),
+                    "organization_id": str(org_a),
+                    "user_id": str(user_a),
+                    "role": "admin",
+                }
+            ],
+        },
+        "row_counts": {"organizations": 1, "organization_members": 1},
+        "total_rows": 2,
+    }
+
+    with (
+        patch.object(surreal_auth_client, "close", AsyncMock()),
+        patch(
+            "sibyl.persistence.auth_archive.build_surreal_auth_client",
+            return_value=surreal_auth_client,
+        ),
+    ):
+        result = await restore_auth_archive_payload(payload, clean=True)
+
+    org_a_rows = _normalize_records(
+        await surreal_auth_client.execute_query(
+            "SELECT * FROM organizations WHERE uuid = $uuid LIMIT 1;",
+            uuid=str(org_a),
+        )
+    )
+    org_b_members = _normalize_records(
+        await surreal_auth_client.execute_query(
+            "SELECT * FROM organization_members WHERE organization_id = $organization_id;",
+            organization_id=str(org_b),
+        )
+    )
+    old_members = _normalize_records(
+        await surreal_auth_client.execute_query(
+            "SELECT * FROM organization_members WHERE uuid = $uuid;",
+            uuid=str(old_membership_a),
+        )
+    )
+
+    assert result.success is True
+    assert org_a_rows[0]["slug"] == "org-a-restored"
+    assert [row["uuid"] for row in org_b_members] == [str(membership_b)]
+    assert old_members == []
 
 
 @pytest.mark.asyncio

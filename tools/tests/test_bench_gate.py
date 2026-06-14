@@ -10,6 +10,7 @@ from tools.bench import eval_gate
 EXPECTED_SUCCESS_AT_5 = 0.5
 EXPECTED_LATENCY_MS = 1200.0
 EXPECTED_MRR = 0.4
+ARGPARSE_USAGE_ERROR = 2
 RELEASE_METADATA = {
     "retrieval_mode": "native",
     "embedding_provider": "gemini",
@@ -96,6 +97,10 @@ def _ai_memory_report(mode: str = "raw") -> dict[str, Any]:
     }
 
 
+def _clone_report(report: dict[str, Any]) -> dict[str, Any]:
+    return json.loads(json.dumps(report))
+
+
 def _manifest_entry(report: dict[str, Any], artifact: str = "artifact.json") -> dict[str, Any]:
     case_results = report["case_results"]
     assert isinstance(case_results, list)
@@ -109,6 +114,58 @@ def _manifest_entry(report: dict[str, Any], artifact: str = "artifact.json") -> 
         "sibyl_commit": report["sibyl_commit"],
         "questions": report["total_questions"],
         "case_results": len(case_results),
+        "elapsed_seconds": report["elapsed_seconds"],
+        "dataset": report["dataset"],
+        "runtime": report["runtime"],
+        "overall": report["overall"],
+        "claim_boundary": report["claim_boundary"],
+        "repeat_count": report["repeat_count"],
+        "auth_manifest_id": report["auth_manifest_id"],
+    }
+
+
+def _external_ai_memory_report(report: dict[str, Any] | None = None) -> dict[str, Any]:
+    external_report = _clone_report(report or _ai_memory_report(mode="hybrid"))
+    case_results = external_report["case_results"]
+    assert isinstance(case_results, list)
+    external_report["case_results"] = len(case_results)
+    external_report["external_artifact"] = {
+        "provider": "github-actions",
+        "repo": "hyperb1iss/sibyl",
+        "run_id": "123456789",
+        "run_url": "https://github.com/hyperb1iss/sibyl/actions/runs/123456789",
+        "job_name": "LongMemEval Live Full",
+        "artifact_name": "longmemeval-live-full-abc123",
+        "artifact_path": "longmemeval_live_full.json",
+        "sha256": "a" * 64,
+        "size_bytes": 7073488,
+        "archive_size_bytes": 933836,
+        "expires_at": "2026-08-20T18:21:29Z",
+        "verified_at": "2026-06-10T14:11:37Z",
+        "verification_command": "sha256sum artifact.json && wc -c artifact.json",
+        "verification_receipt": "sha256 aaaa; size 7073488",
+        "gate_profile": "ai-memory",
+        "gate_command": "moon run bench-gate -- artifact.json --profile ai-memory",
+        "gate_passed": True,
+        "gate_receipt": "Gate passed",
+    }
+    return external_report
+
+
+def _external_manifest_entry(
+    report: dict[str, Any],
+    external_artifact_manifest: str = "external/artifact-manifest.json",
+) -> dict[str, Any]:
+    return {
+        "suite": report["suite"],
+        "suite_version": report["suite_version"],
+        "mode": report["mode"],
+        "external_artifact_manifest": external_artifact_manifest,
+        "status": "citable",
+        "gate_profile": "ai-memory",
+        "sibyl_commit": report["sibyl_commit"],
+        "questions": report["total_questions"],
+        "case_results": report["case_results"],
         "elapsed_seconds": report["elapsed_seconds"],
         "dataset": report["dataset"],
         "runtime": report["runtime"],
@@ -381,6 +438,100 @@ def test_evaluate_report_reports_threshold_and_metadata_failures() -> None:
     assert "metric 'mrr' below minimum 0.2500: 0.1000" in failures
 
 
+def test_evaluate_baseline_regressions_blocks_quality_drop() -> None:
+    baseline = _ai_memory_report()
+    candidate = _clone_report(baseline)
+    candidate["overall"]["recall@5"] = 0.98
+
+    failures = eval_gate.evaluate_baseline_regressions(
+        candidate,
+        baseline,
+        profile="ai-memory",
+        metrics=["recall@5"],
+    )
+
+    assert failures == [
+        "metric 'recall@5' regressed below baseline 1.0000 by 0.0200; allowed 0.0000"
+    ]
+
+
+def test_evaluate_baseline_regressions_honors_lower_is_better_tolerance() -> None:
+    baseline = {"metrics": {"success@5": 0.5, "latency_ms": 100.0}}
+    candidate = {"metrics": {"success@5": 0.5, "latency_ms": 125.0}}
+
+    failures = eval_gate.evaluate_baseline_regressions(
+        candidate,
+        baseline,
+        profile="smoke",
+        metrics=["latency_ms"],
+        max_regressions={"latency_ms": 20.0},
+    )
+
+    assert failures == [
+        "metric 'latency_ms' regressed above baseline 100.0000 by 25.0000; allowed 20.0000"
+    ]
+
+
+def test_evaluate_baseline_regressions_passes_with_named_tolerance() -> None:
+    baseline = _ai_memory_report()
+    candidate = _clone_report(baseline)
+    candidate["overall"]["ndcg@5"] = 0.99
+
+    failures = eval_gate.evaluate_baseline_regressions(
+        candidate,
+        baseline,
+        profile="ai-memory",
+        metrics=["ndcg@5"],
+        max_regressions={"ndcg@5": 0.02},
+    )
+
+    assert failures == []
+
+
+def test_evaluate_baseline_regressions_rejects_non_finite_tolerance() -> None:
+    baseline = _ai_memory_report()
+    candidate = _clone_report(baseline)
+    candidate["overall"]["recall@5"] = 0.1
+
+    failures = eval_gate.evaluate_baseline_regressions(
+        candidate,
+        baseline,
+        profile="ai-memory",
+        metrics=["recall@5"],
+        max_regressions={"recall@5": float("nan")},
+    )
+
+    assert "max regression for metric 'recall@5' must be finite" in failures
+
+
+def test_evaluate_baseline_regressions_rejects_non_finite_candidate_metric() -> None:
+    baseline = {"metrics": {"success@5": 0.5, "latency_ms": 100.0}}
+    candidate = {"metrics": {"success@5": float("nan"), "latency_ms": 100.0}}
+
+    failures = eval_gate.evaluate_baseline_regressions(
+        candidate,
+        baseline,
+        profile="smoke",
+        metrics=["success@5"],
+    )
+
+    assert failures == ["candidate missing metric 'success@5'"]
+
+
+def test_evaluate_baseline_regressions_rejects_unknown_metric_direction() -> None:
+    baseline = {"metrics": {"custom_quality": 1.0}}
+    candidate = {"metrics": {"custom_quality": 0.9}}
+
+    failures = eval_gate.evaluate_baseline_regressions(
+        candidate,
+        baseline,
+        profile="smoke",
+        metrics=["custom_quality"],
+    )
+
+    assert failures == ["metric 'custom_quality' has unknown regression direction"]
+
+
 def test_main_can_gate_ai_memory_record(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = tmp_path / "ai-memory.json"
     path.write_text(
@@ -489,9 +640,65 @@ def test_validate_ai_memory_manifest_rejects_citable_artifact_drift(tmp_path: Pa
     assert "artifact.json: manifest repeat_count does not match artifact" in failures
 
 
+def test_validate_ai_memory_manifest_accepts_external_artifact_manifest(
+    tmp_path: Path,
+) -> None:
+    report = _external_ai_memory_report()
+    entry = _external_manifest_entry(report)
+    external_path = tmp_path / "external" / "artifact-manifest.json"
+    external_path.parent.mkdir()
+    external_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({"citable": [entry]}), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == []
+
+
+def test_validate_ai_memory_manifest_rejects_external_artifact_manifest_drift(
+    tmp_path: Path,
+) -> None:
+    report = _external_ai_memory_report()
+    entry = _external_manifest_entry(report)
+    entry["overall"] = {"recall@5": 0.25}
+    entry["external_artifact_manifest"] = "external/drift.json"
+    external_path = tmp_path / "external" / "drift.json"
+    external_path.parent.mkdir()
+    external_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({"citable": [entry]}), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert "external/drift.json: manifest overall does not match artifact" in failures
+
+
+def test_validate_ai_memory_manifest_rejects_partial_external_artifact_summary(
+    tmp_path: Path,
+) -> None:
+    report = _external_ai_memory_report()
+    report["total_questions"] = 2
+    entry = _external_manifest_entry(report, external_artifact_manifest="external/partial.json")
+    external_path = tmp_path / "external" / "partial.json"
+    external_path.parent.mkdir()
+    external_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({"citable": [entry]}), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert "external/partial.json: case_results must equal total_questions" in failures
+
+
 def test_validate_ai_memory_manifest_rejects_planned_artifact_fields(tmp_path: Path) -> None:
     planned = [
         {"suite": "Future suite", "status": "planned", "artifact": "future.json"},
+        {
+            "suite": "Future external suite",
+            "status": "planned",
+            "external_artifact_manifest": "future.json",
+        },
         {"suite": "Mistagged suite", "status": "citable"},
     ]
     manifest_path = _write_ai_memory_manifest(tmp_path, planned=planned)
@@ -499,7 +706,8 @@ def test_validate_ai_memory_manifest_rejects_planned_artifact_fields(tmp_path: P
     failures = eval_gate.validate_ai_memory_manifest(manifest_path)
 
     assert "planned[0] must not include artifact" in failures
-    assert "planned[1] status is not 'planned'" in failures
+    assert "planned[1] must not include external_artifact_manifest" in failures
+    assert "planned[2] status is not 'planned'" in failures
 
 
 def test_validate_ai_memory_manifest_rejects_empty_citable_list(tmp_path: Path) -> None:
@@ -509,6 +717,49 @@ def test_validate_ai_memory_manifest_rejects_empty_citable_list(tmp_path: Path) 
     failures = eval_gate.validate_ai_memory_manifest(manifest_path)
 
     assert failures == ["manifest missing non-empty citable list"]
+
+
+def test_validate_ai_memory_manifest_rejects_null_no_regression(tmp_path: Path) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["no_regression"] = None
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == ["no_regression must be a list"]
+
+
+def test_validate_ai_memory_manifest_enforces_no_regression_entries(tmp_path: Path) -> None:
+    baseline = _ai_memory_report()
+    candidate = _clone_report(baseline)
+    candidate["overall"]["ndcg@5"] = 0.95
+    (tmp_path / "baseline.json").write_text(json.dumps(baseline), encoding="utf-8")
+    (tmp_path / "candidate.json").write_text(json.dumps(candidate), encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "citable": [_manifest_entry(candidate, artifact="candidate.json")],
+                "no_regression": [
+                    {
+                        "candidate": "candidate.json",
+                        "baseline": "baseline.json",
+                        "profile": "ai-memory",
+                        "metrics": ["ndcg@5"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == [
+        "no_regression[0] candidate.json: metric 'ndcg@5' regressed below "
+        "baseline 1.0000 by 0.0500; allowed 0.0000"
+    ]
 
 
 def test_main_returns_nonzero_when_gate_fails(
@@ -534,6 +785,53 @@ def test_main_returns_nonzero_when_gate_fails(
     assert "Gate failed" in captured.out
 
 
+def test_main_returns_nonzero_when_baseline_regresses(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    _write_report(
+        baseline_path,
+        metrics={"success@5": 0.50, "latency_ms": 100.0},
+    )
+    _write_report(
+        candidate_path,
+        metrics={"success@5": 0.49, "latency_ms": 100.0},
+    )
+
+    exit_code = eval_gate.main(
+        [
+            str(candidate_path),
+            "--profile",
+            "smoke",
+            "--baseline",
+            str(baseline_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Baseline comparison" in captured.out
+    assert "metric 'success@5' regressed below baseline" in captured.out
+
+
+def test_main_rejects_baseline_without_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    _write_report(
+        baseline_path,
+        metrics={"success@5": 0.50, "latency_ms": 100.0},
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        eval_gate.main(["--baseline", str(baseline_path)])
+
+    captured = capsys.readouterr()
+    assert exc.value.code == ARGPARSE_USAGE_ERROR
+    assert "--baseline options require a report argument" in captured.err
+
+
 def test_ai_memory_manifest_tracks_full_citable_artifacts() -> None:
     repo_root = Path(__file__).parents[2]
     manifest_path = repo_root / "benchmarks" / "results" / "ai-memory" / "manifest.json"
@@ -543,19 +841,34 @@ def test_ai_memory_manifest_tracks_full_citable_artifacts() -> None:
     assert citable
 
     for entry in citable:
-        artifact = manifest_path.parent / entry["artifact"]
-        assert artifact.exists()
-        report = eval_gate.load_report(artifact)
-        assert eval_gate.evaluate_report(report, profile="ai-memory") == []
+        if "artifact" in entry:
+            artifact = manifest_path.parent / entry["artifact"]
+            assert artifact.exists()
+            report = eval_gate.load_report(artifact)
+            assert eval_gate.evaluate_report(report, profile="ai-memory") == []
+            case_result_count = len(report["case_results"])
+        else:
+            artifact = manifest_path.parent / entry["external_artifact_manifest"]
+            assert artifact.exists()
+            report = eval_gate.load_report(artifact)
+            assert eval_gate.evaluate_external_ai_memory_report(report) == []
+            case_result_count = report["case_results"]
+            external_artifact = report["external_artifact"]
+            assert external_artifact["provider"] == "github-actions"
+            assert external_artifact["sha256"]
+            assert external_artifact["expires_at"]
+            assert external_artifact["verified_at"]
+            assert external_artifact["verification_receipt"]
+            assert external_artifact["gate_passed"] is True
         assert entry["status"] == "citable"
         assert entry["suite"] == report["suite"]
         assert entry["suite_version"] == report["suite_version"]
         assert entry["sibyl_commit"] == report["sibyl_commit"]
         assert entry["mode"] == report["mode"]
         assert entry["questions"] == report["total_questions"]
-        assert entry["case_results"] == len(report["case_results"])
+        assert entry["case_results"] == case_result_count
         assert entry["runtime"] == report["runtime"]
-        assert entry["dataset"]["evaluated_entries"] == report["dataset"]["evaluated_entries"]
+        assert entry["dataset"] == report["dataset"]
         for metric, expected in entry["overall"].items():
             assert report["overall"][metric] == pytest.approx(expected)
 
@@ -564,3 +877,4 @@ def test_ai_memory_manifest_tracks_full_citable_artifacts() -> None:
     for entry in planned:
         assert entry["status"] == "planned"
         assert "artifact" not in entry
+        assert "external_artifact_manifest" not in entry

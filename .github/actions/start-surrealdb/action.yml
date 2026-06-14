@@ -17,10 +17,10 @@ runs:
         echo "SurrealDB data dir: $SURREAL_DATA_DIR"
         echo "SurrealDB path: $SIBYL_SURREAL_PATH"
 
-        docker compose up -d surrealdb
+        docker compose --env-file /dev/null up -d surrealdb
 
         for i in {1..30}; do
-          if docker compose exec -T surrealdb /surreal is-ready --endpoint http://localhost:8000; then
+          if docker compose --env-file /dev/null exec -T surrealdb /surreal is-ready --endpoint http://localhost:8000; then
             echo "SurrealDB is ready!"
             exit 0
           fi
@@ -28,6 +28,6 @@ runs:
           sleep 1
         done
 
-        docker compose ps || true
-        docker compose logs surrealdb || true
+        docker compose --env-file /dev/null ps || true
+        docker compose --env-file /dev/null logs surrealdb || true
         exit 1
