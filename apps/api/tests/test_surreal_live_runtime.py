@@ -247,6 +247,7 @@ async def _assert_live_raw_ingestion_path(
             organization_id=organization_id,
             principal_id=principal_id,
             query="semantic-only",
+            memory_scope=MemoryScope.ORGANIZATION,
             limit=1,
         )
         assert [memory.id for memory in recalled] == [memories[0].id]
