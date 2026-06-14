@@ -138,13 +138,30 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      - name: "◇ Validate Homebrew tap token"
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::HOMEBREW_TAP_TOKEN is not configured."
+            exit 1
+          fi
+          can_push="$(
+            gh api repos/hyperb1iss/homebrew-tap --jq '.permissions.push // false'
+          )"
+          if [[ "$can_push" != "true" ]]; then
+            echo "::error::HOMEBREW_TAP_TOKEN cannot push to hyperb1iss/homebrew-tap."
+            exit 1
+          fi
+
       - name: "◆ Checkout Homebrew tap"
         uses: actions/checkout@v6
         with:
           repository: hyperb1iss/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
-          persist-credentials: false
+          persist-credentials: true
 
       - name: "△ Generate formula"
         env:

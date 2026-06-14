@@ -90,6 +90,16 @@ def test_release_workflow_validates_before_tag_or_publish() -> None:
     assert r"(-[a-zA-Z0-9.]+)?" in workflow
     assert "steps.version.outputs.needs_version_commit == 'true'" in workflow
     assert "from: ${{ steps.version.outputs.previous_tag }}" in workflow
+    assert "Generate AI release notes" in workflow
+    assert "continue-on-error: true" in workflow
+    assert "Prepare release notes" in workflow
+    assert "steps.ai_release_notes.outputs.content" in workflow
+    assert "AI-generated release notes were unavailable" in workflow
+    assert 'git rev-parse --verify --quiet "$PREVIOUS_TAG^{commit}"' in workflow
+    assert "git log --no-merges --pretty=format:'- %s (%h)'" in workflow
+    assert "RELEASE_NOTES_CONTENT" in workflow
+    assert "printf '%s\\n' \"$RELEASE_NOTES_CONTENT\"" in workflow
+    assert "cat << 'EOF' >> $GITHUB_STEP_SUMMARY" not in workflow
 
 
 def test_nightly_regression_uploads_candidate_sha_receipts() -> None:
@@ -118,6 +128,10 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     assert "tools/release/aur_pkgbuild.py" in workflow
     assert "hyperb1iss/homebrew-tap" in workflow
     assert "HOMEBREW_TAP_TOKEN" in workflow
+    assert "Validate Homebrew tap token" in workflow
+    assert "gh api repos/hyperb1iss/homebrew-tap --jq '.permissions.push // false'" in workflow
+    assert "HOMEBREW_TAP_TOKEN cannot push to hyperb1iss/homebrew-tap" in workflow
+    assert "persist-credentials: true" in workflow
     assert (
         "KSXGitHub/github-actions-deploy-aur@da03e160361ce01bf087e790b6ffd196d7dccff7" in workflow
     )

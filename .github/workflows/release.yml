@@ -162,10 +162,11 @@ jobs:
           echo "::error::Commit the version bump, run same-SHA CI and Nightly Regression, then dispatch Release with nightly_run_id."
           exit 1
 
-      - name: "◈ Generate release notes"
+      - name: "◈ Generate AI release notes"
         if: ${{ !inputs.dry_run }}
-        id: release_notes
+        id: ai_release_notes
         uses: hyperb1iss/git-iris@v2
+        continue-on-error: true
         with:
           command: release-notes
           from: ${{ steps.version.outputs.previous_tag }}
@@ -174,6 +175,42 @@ jobs:
           provider: anthropic
           model: claude-opus-4-8
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: "◇ Prepare release notes"
+        if: ${{ !inputs.dry_run }}
+        id: release_notes
+        env:
+          AI_CONTENT: ${{ steps.ai_release_notes.outputs.content }}
+          PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          notes_path="$(mktemp)"
+
+          if [[ -n "$AI_CONTENT" ]]; then
+            printf '%s\n' "$AI_CONTENT" > "$notes_path"
+          else
+            {
+              echo "## v$VERSION"
+              echo ""
+              echo "AI-generated release notes were unavailable; using deterministic git log fallback."
+              echo ""
+              echo "### Changes"
+              if git rev-parse --verify --quiet "$PREVIOUS_TAG^{commit}" >/dev/null; then
+                git log --no-merges --pretty=format:'- %s (%h)' "$PREVIOUS_TAG..HEAD"
+              else
+                git log --no-merges --pretty=format:'- %s (%h)'
+              fi
+              echo ""
+            } > "$notes_path"
+          fi
+
+          delimiter="release_notes_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          {
+            echo "content<<$delimiter"
+            cat "$notes_path"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
 
       - name: "◇ Record candidate SHA"
         id: candidate
@@ -300,6 +337,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: "► Summary"
+        env:
+          RELEASE_NOTES_CONTENT: ${{ steps.release_notes.outputs.content }}
         run: |
           echo "## Release ${{ inputs.dry_run && '[DRY RUN] ' || '' }}v${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -324,7 +363,5 @@ jobs:
             echo "---" >> $GITHUB_STEP_SUMMARY
             echo "### Release Notes" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            cat << 'EOF' >> $GITHUB_STEP_SUMMARY
-          ${{ steps.release_notes.outputs.content }}
-          EOF
+            printf '%s\n' "$RELEASE_NOTES_CONTENT" >> "$GITHUB_STEP_SUMMARY"
           fi
