@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -295,7 +296,57 @@ async def test_auth_archive_export_can_scope_to_one_organization(
     for user_id, email in ((user_a, "a@example.com"), (user_b, "b@example.com")):
         await surreal_auth_client.execute_query(
             "CREATE users CONTENT $record;",
-            record={"uuid": str(user_id), "email": email, "name": email},
+            record={
+                "uuid": str(user_id),
+                "email": email,
+                "name": email,
+                "password_salt": f"{email}-salt",
+                "password_hash": f"{email}-hash",
+                "password_iterations": 310000,
+            },
+        )
+    for user_id, email in ((user_a, "a@example.com"), (user_b, "b@example.com")):
+        await surreal_auth_client.execute_query(
+            "CREATE user_identity CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "provider_name": "oidc",
+                "issuer": "https://idp.example.com",
+                "subject": str(user_id),
+                "subject_key": f"oidc:{user_id}",
+                "user_id": str(user_id),
+                "email": email,
+            },
+        )
+        await surreal_auth_client.execute_query(
+            "CREATE password_reset_tokens CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "user_id": str(user_id),
+                "token_hash": f"{email}-reset-token-hash",
+                "expires_at": datetime(2026, 4, 20, 1, 2, 3, tzinfo=UTC),
+            },
+        )
+        await surreal_auth_client.execute_query(
+            "CREATE login_history CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "user_id": str(user_id),
+                "event_type": "login",
+                "success": True,
+                "ip_address": "192.0.2.10",
+            },
+        )
+        await surreal_auth_client.execute_query(
+            "CREATE oauth_connections CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "user_id": str(user_id),
+                "provider": "github",
+                "provider_user_id": str(user_id),
+                "access_token_encrypted": f"{email}-access-token",
+                "refresh_token_encrypted": f"{email}-refresh-token",
+            },
         )
     for org_id, slug in ((org_a, "org-a"), (org_b, "org-b")):
         await surreal_auth_client.execute_query(
@@ -362,6 +413,14 @@ async def test_auth_archive_export_can_scope_to_one_organization(
     assert payload["organization_id"] == str(org_a)
     assert [row["uuid"] for row in payload["tables"]["organizations"]] == [str(org_a)]
     assert [row["uuid"] for row in payload["tables"]["users"]] == [str(user_a)]
+    assert payload["tables"]["users"][0]["email"] == "a@example.com"
+    assert "password_salt" not in payload["tables"]["users"][0]
+    assert "password_hash" not in payload["tables"]["users"][0]
+    assert "password_iterations" not in payload["tables"]["users"][0]
+    assert payload["tables"]["user_identity"] == []
+    assert payload["tables"]["password_reset_tokens"] == []
+    assert payload["tables"]["login_history"] == []
+    assert payload["tables"]["oauth_connections"] == []
     assert [row["uuid"] for row in payload["tables"]["api_keys"]] == [str(api_key_a)]
     assert [row["api_key_id"] for row in payload["tables"]["api_key_project_scopes"]] == [
         str(api_key_a)
