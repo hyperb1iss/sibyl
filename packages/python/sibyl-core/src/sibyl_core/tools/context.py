@@ -8,6 +8,7 @@ from typing import Any
 
 import structlog
 
+from sibyl_core.auth.memory_policy import memory_scope_policy_key
 from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.models.context import (
     ContextFacet,
@@ -25,6 +26,7 @@ from sibyl_core.retrieval.search import (
 )
 from sibyl_core.services.graph import get_surreal_graph_runtime
 from sibyl_core.services.surreal_content import (
+    MemoryScope,
     RawMemory,
     recall_raw_memory,
 )
@@ -1002,6 +1004,22 @@ def _item_from_active_entity(entity: Any) -> ContextItem:
     )
 
 
+def _active_work_project_allowed(
+    *,
+    project: str,
+    accessible_projects: set[str] | None,
+    scoped_accessible_projects: frozenset[str] | None,
+    allowed_memory_scope_keys: set[str] | None,
+) -> bool:
+    if scoped_accessible_projects is not None:
+        return project in scoped_accessible_projects
+    if accessible_projects is not None and project not in accessible_projects:
+        return False
+    if allowed_memory_scope_keys is not None:
+        return memory_scope_policy_key(MemoryScope.PROJECT, project) in allowed_memory_scope_keys
+    return True
+
+
 async def _default_active_work(
     *,
     organization_id: str,
@@ -1153,7 +1171,12 @@ async def compile_context(
     if (
         ContextFacet.ACTIVE_WORK in facets
         and project
-        and (accessible_projects is None or project in accessible_projects)
+        and _active_work_project_allowed(
+            project=project,
+            accessible_projects=accessible_projects,
+            scoped_accessible_projects=plan.accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+        )
     ):
         lookup = active_work_fn if active_work_fn is not None else _default_active_work
         try:

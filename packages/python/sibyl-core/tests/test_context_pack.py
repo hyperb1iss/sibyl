@@ -1078,6 +1078,52 @@ async def test_compile_context_direct_active_lookup_leads_active_work(
 
 
 @pytest.mark.asyncio
+async def test_compile_context_direct_active_lookup_respects_api_key_project_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl_core.auth.memory_policy import memory_scope_policy_key
+    from sibyl_core.services.surreal_content import MemoryScope
+
+    active_calls: list[dict[str, Any]] = []
+
+    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
+        assert kwargs["plan"].accessible_projects == frozenset()
+        return SearchResponse(results=[], total=0, query=kwargs["plan"].query, filters={})
+
+    async def fake_active_work(**kwargs: Any) -> list[ContextItem]:
+        active_calls.append(kwargs)
+        return [
+            ContextItem(
+                id="task-denied",
+                type="task",
+                name="Denied active task",
+                content="Sensitive denied project work",
+                score=0.0,
+                facet=ContextFacet.ACTIVE_WORK,
+                reason="task is currently in progress for this project",
+            )
+        ]
+
+    monkeypatch.setattr(context_module, "context_search", fake_native_context_search)
+
+    pack = await compile_context(
+        "ship retrieval",
+        intent="build",
+        project="project-denied",
+        accessible_projects={"project-denied"},
+        principal_id="user-123",
+        organization_id="org-123",
+        active_work_fn=fake_active_work,
+        allowed_memory_scope_keys={
+            memory_scope_policy_key(MemoryScope.PRIVATE, "user-123"),
+        },
+    )
+
+    assert active_calls == []
+    assert pack.items == []
+
+
+@pytest.mark.asyncio
 async def test_compile_context_active_lookup_failure_degrades_gracefully(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
