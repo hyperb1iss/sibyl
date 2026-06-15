@@ -260,7 +260,7 @@ jobs:
           ref: ${{ inputs.tag }}
 
       - name: "◇ Setup Docker Buildx"
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: "◇ Login to GHCR"
         if: ${{ !inputs.dry_run }}
@@ -329,7 +329,7 @@ jobs:
           merge-multiple: true
 
       - name: "◇ Setup Docker Buildx"
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: "◇ Login to GHCR"
         uses: docker/login-action@v4
@@ -442,7 +442,7 @@ jobs:
         uses: sigstore/cosign-installer@v4.1.1
 
       - name: "◇ Setup Docker Buildx"
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: "◇ Login to GHCR"
         uses: docker/login-action@v4
