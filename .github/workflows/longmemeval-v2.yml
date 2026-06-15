@@ -112,7 +112,7 @@ jobs:
             --output ".moon/cache/evals/longmemeval_v2_${{ matrix.tier }}_probe.json"
 
       - name: Upload LongMemEval-V2 probe artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: longmemeval-v2-${{ matrix.tier }}-probe-${{ github.sha }}
           path: .moon/cache/evals/longmemeval_v2_${{ matrix.tier }}_probe.json

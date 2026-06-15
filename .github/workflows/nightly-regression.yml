@@ -201,7 +201,7 @@ jobs:
 
       - name: Upload baseline parity receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: baseline-parity-receipt-${{ github.sha }}
           path: .moon/cache/nightly/baseline-parity-receipt.txt
@@ -209,13 +209,13 @@ jobs:
 
       - name: Upload context-pack retrieval compare report
         if: always() && steps.context-pack-compare.outputs.report != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: context-pack-retrieval-compare
           path: ${{ steps.context-pack-compare.outputs.report }}
 
       - name: Upload retrieval mode history
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: retrieval-mode-history
           path: .moon/retrieval-mode-history.json
@@ -312,7 +312,7 @@ jobs:
 
       - name: Upload live graph receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: live-graph-receipt-${{ github.sha }}
           path: .moon/cache/nightly/live-graph-receipt.txt
@@ -399,7 +399,7 @@ jobs:
 
       - name: Upload backup restore receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backup-restore-gate-receipt-${{ github.sha }}
           path: .moon/cache/backup-restore-gate/receipt.json
@@ -407,7 +407,7 @@ jobs:
 
       - name: Upload restore-to-scratch receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: restore-to-scratch-receipt-${{ github.sha }}
           path: .moon/cache/nightly/restore-to-scratch-receipt.txt

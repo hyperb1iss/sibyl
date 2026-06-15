@@ -243,7 +243,7 @@ jobs:
 
       - name: Upload eval report
         if: always() && steps.eval.outputs.report != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: live-context-pack-eval-${{ github.sha }}
           path: ${{ steps.eval.outputs.report }}
@@ -407,7 +407,7 @@ jobs:
             --profile ai-memory
 
       - name: Upload LongMemEval live smoke artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: longmemeval-live-smoke-${{ github.sha }}
           path: .moon/cache/evals/longmemeval_live_smoke.json
@@ -434,7 +434,7 @@ jobs:
 
       - name: Upload LongMemEval live smoke diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: longmemeval-live-smoke-diagnostics-${{ github.sha }}
           path: .moon/cache/evals/longmemeval_live_smoke_diagnostics
@@ -599,7 +599,7 @@ jobs:
 
       - name: Upload LongMemEval live full artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: longmemeval-live-full-${{ github.sha }}
           path: .moon/cache/evals/longmemeval_live_full.json
@@ -626,7 +626,7 @@ jobs:
 
       - name: Upload LongMemEval live full diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: longmemeval-live-full-diagnostics-${{ github.sha }}
           path: .moon/cache/evals/longmemeval_live_full_diagnostics
