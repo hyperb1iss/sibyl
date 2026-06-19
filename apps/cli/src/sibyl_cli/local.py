@@ -168,7 +168,7 @@ COMPOSE_CONFIG = {
             "ports": ["127.0.0.1:8000:8000"],
             "volumes": ["sibyl_surreal:/data"],
             "healthcheck": {
-                "test": ["CMD", "/surreal", "is-ready", "--conn", "http://localhost:8000"],
+                "test": ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"],
                 "interval": "5s",
                 "timeout": "3s",
                 "retries": 5,
