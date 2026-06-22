@@ -593,7 +593,7 @@ wheels = [
 
 [[package]]
 name = "crawl4ai"
-version = "0.8.9"
+version = "0.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -630,9 +630,9 @@ dependencies = [
     { name = "unclecode-litellm" },
     { name = "xxhash" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/90/2b/9e2b376ec8d4b803cc7b47b428a0ac762c59ce1215d0ab5a4aa9e7afc4a3/crawl4ai-0.8.9.tar.gz", hash = "sha256:00a3c97b9492a694f24fa66bc80b9f1533e5637745dc0e30914c88aac52763e3", size = 608119, upload-time = "2026-06-04T06:19:16.08Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/52/37/9b288598bb0049b918eeb00f029592c748465c8a3e819461e95d8b5f9dab/crawl4ai-0.9.0.tar.gz", hash = "sha256:00c1c3516d9ca24a9b5004523ae67974ace8a5baadc6e92e295afca73f077153", size = 591734, upload-time = "2026-06-18T09:31:08.674Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c3/97/6443bf99add1c16b16d992b8d0816a3ce7adecde37323d368bed36dd0aff/crawl4ai-0.8.9-py3-none-any.whl", hash = "sha256:7836cfc9d81ed7fc646d614e984402c336e5a682462f3d92ff37de121a4244d6", size = 516731, upload-time = "2026-06-04T06:19:14.348Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/19/2d634f26d9ad1281874c503c1043174042fef9af631dc10798f4f22c1544/crawl4ai-0.9.0-py3-none-any.whl", hash = "sha256:1296072d9cd92e79144c6823ed6f27ab3966f16ce44e79fcbe86943b3435c366", size = 499084, upload-time = "2026-06-18T09:31:07.27Z" },
 ]
 
 [[package]]
@@ -3387,8 +3387,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anyio", specifier = ">=4.0" },
-    { name = "crawl4ai", marker = "extra == 'crawler'", specifier = ">=0.8.9" },
-    { name = "crawl4ai", marker = "extra == 'runtime'", specifier = ">=0.8.9" },
+    { name = "crawl4ai", marker = "extra == 'crawler'", specifier = ">=0.9.0" },
+    { name = "crawl4ai", marker = "extra == 'runtime'", specifier = ">=0.9.0" },
     { name = "google-genai", marker = "extra == 'embeddings'", specifier = ">=2.8.0" },
     { name = "google-genai", marker = "extra == 'runtime'", specifier = ">=2.8.0" },
     { name = "httpx", specifier = ">=0.27" },
