@@ -148,11 +148,13 @@ jobs:
             NEEDS_VERSION_COMMIT=true
           fi
 
-          echo "current=$CURRENT" >> $GITHUB_OUTPUT
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "previous_tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
-          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
-          echo "needs_version_commit=$NEEDS_VERSION_COMMIT" >> $GITHUB_OUTPUT
+          {
+            echo "current=$CURRENT"
+            echo "version=$VERSION"
+            echo "previous_tag=$PREVIOUS_TAG"
+            echo "is_prerelease=$IS_PRERELEASE"
+            echo "needs_version_commit=$NEEDS_VERSION_COMMIT"
+          } >> "$GITHUB_OUTPUT"
           echo "Releasing: $CURRENT → $VERSION"
 
       - name: "◇ Enforce precommitted release candidate"
@@ -340,28 +342,30 @@ jobs:
         env:
           RELEASE_NOTES_CONTENT: ${{ steps.release_notes.outputs.content }}
         run: |
-          echo "## Release ${{ inputs.dry_run && '[DRY RUN] ' || '' }}v${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- Candidate SHA: \`${{ steps.candidate.outputs.sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Previous release: \`${{ steps.version.outputs.previous_tag }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- RC gate: \`${{ steps.rc_check.conclusion }}\`" >> $GITHUB_STEP_SUMMARY
-          if [[ -n "${{ steps.nightly.outputs.url }}" ]]; then
-            echo "- Nightly Regression: ${{ steps.nightly.outputs.url }}" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
-            echo "No version commit, tag, release, or publish was created." >> $GITHUB_STEP_SUMMARY
-          else
-            echo "✓ Released: ${{ steps.version.outputs.previous_tag }} → v${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Published Packages" >> $GITHUB_STEP_SUMMARY
-            echo "- [sibyl-core on PyPI](https://pypi.org/project/sibyl-core/${{ steps.version.outputs.version }}/)" >> $GITHUB_STEP_SUMMARY
-            echo "- [sibyl-dev on PyPI](https://pypi.org/project/sibyl-dev/${{ steps.version.outputs.version }}/)" >> $GITHUB_STEP_SUMMARY
-            echo "- [sibyld on PyPI](https://pypi.org/project/sibyld/${{ steps.version.outputs.version }}/)" >> $GITHUB_STEP_SUMMARY
-            echo "- [Docker Images on GHCR](https://github.com/hyperb1iss/sibyl/pkgs/container/sibyl-api)" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "---" >> $GITHUB_STEP_SUMMARY
-            echo "### Release Notes" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            printf '%s\n' "$RELEASE_NOTES_CONTENT" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          {
+            echo "## Release ${{ inputs.dry_run && '[DRY RUN] ' || '' }}v${{ steps.version.outputs.version }}"
+            echo ""
+            echo "- Candidate SHA: \`${{ steps.candidate.outputs.sha }}\`"
+            echo "- Previous release: \`${{ steps.version.outputs.previous_tag }}\`"
+            echo "- RC gate: \`${{ steps.rc_check.conclusion }}\`"
+            if [[ -n "${{ steps.nightly.outputs.url }}" ]]; then
+              echo "- Nightly Regression: ${{ steps.nightly.outputs.url }}"
+            fi
+            echo ""
+            if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+              echo "No version commit, tag, release, or publish was created."
+            else
+              echo "✓ Released: ${{ steps.version.outputs.previous_tag }} → v${{ steps.version.outputs.version }}"
+              echo ""
+              echo "### Published Packages"
+              echo "- [sibyl-core on PyPI](https://pypi.org/project/sibyl-core/${{ steps.version.outputs.version }}/)"
+              echo "- [sibyl-dev on PyPI](https://pypi.org/project/sibyl-dev/${{ steps.version.outputs.version }}/)"
+              echo "- [sibyld on PyPI](https://pypi.org/project/sibyld/${{ steps.version.outputs.version }}/)"
+              echo "- [Docker Images on GHCR](https://github.com/hyperb1iss/sibyl/pkgs/container/sibyl-api)"
+              echo ""
+              echo "---"
+              echo "### Release Notes"
+              echo ""
+              printf '%s\n' "$RELEASE_NOTES_CONTENT"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
