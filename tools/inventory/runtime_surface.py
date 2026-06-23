@@ -325,7 +325,6 @@ API_CLI_LEGACY_TERM_FILES = (
     "docs/cli/task-lifecycle.md",
 )
 APP_LEGACY_TERM_FILES = (
-    "apps/api/examples/README.md",
     "apps/api/README.md",
     "apps/cli/README.md",
     "apps/cli/src/sibyl_cli/data/skill-packs/core.md",
