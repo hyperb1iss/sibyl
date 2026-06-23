@@ -138,24 +138,49 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: "◇ Validate Homebrew tap token"
+      - name: "△ Generate formula"
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python tools/release/homebrew_formula.py \
+            --version "$VERSION" \
+            --output homebrew-formula/Formula/sibyl.rb
+
+      - name: "► Upload Homebrew formula artifact"
+        uses: actions/upload-artifact@v7
+        with:
+          name: sibyl-homebrew-${{ steps.version.outputs.version }}
+          path: homebrew-formula/Formula/sibyl.rb
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: "◇ Check Homebrew tap token"
+        id: tap_token
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
           if [[ -z "${GH_TOKEN:-}" ]]; then
-            echo "::error::HOMEBREW_TAP_TOKEN is not configured."
-            exit 1
+            echo "can_push=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::HOMEBREW_TAP_TOKEN is not configured; formula artifact was uploaded."
+            exit 0
           fi
-          can_push="$(
+          if ! can_push="$(
             gh api repos/hyperb1iss/homebrew-tap --jq '.permissions.push // false'
-          )"
-          if [[ "$can_push" != "true" ]]; then
-            echo "::error::HOMEBREW_TAP_TOKEN cannot push to hyperb1iss/homebrew-tap."
-            exit 1
+          )"; then
+            echo "can_push=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::HOMEBREW_TAP_TOKEN cannot authenticate; formula artifact was uploaded."
+            exit 0
           fi
+          if [[ "$can_push" != "true" ]]; then
+            echo "can_push=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::HOMEBREW_TAP_TOKEN cannot push to hyperb1iss/homebrew-tap; formula artifact was uploaded."
+            exit 0
+          fi
+          echo "can_push=true" >> "$GITHUB_OUTPUT"
 
       - name: "◆ Checkout Homebrew tap"
+        if: ${{ steps.tap_token.outputs.can_push == 'true' }}
         uses: actions/checkout@v6
         with:
           repository: hyperb1iss/homebrew-tap
@@ -163,15 +188,14 @@ jobs:
           path: homebrew-tap
           persist-credentials: true
 
-      - name: "△ Generate formula"
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
+      - name: "△ Stage formula in tap"
+        if: ${{ steps.tap_token.outputs.can_push == 'true' }}
         run: |
-          python tools/release/homebrew_formula.py \
-            --version "$VERSION" \
-            --output homebrew-tap/Formula/sibyl.rb
+          mkdir -p homebrew-tap/Formula
+          cp homebrew-formula/Formula/sibyl.rb homebrew-tap/Formula/sibyl.rb
 
       - name: "► Commit tap update"
+        if: ${{ steps.tap_token.outputs.can_push == 'true' }}
         working-directory: homebrew-tap
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -217,7 +241,7 @@ jobs:
 
       - name: "△ Extract version from tag"
         id: version
-        run: echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
         env:
           TAG: ${{ inputs.tag }}
 
@@ -317,7 +341,7 @@ jobs:
     steps:
       - name: "△ Extract version from tag"
         id: version
-        run: echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
         env:
           TAG: ${{ inputs.tag }}
 
@@ -345,10 +369,14 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
+          refs=()
+          for digest in *; do
+            refs+=("${REPO}@sha256:${digest}")
+          done
           docker buildx imagetools create \
             -t "${REPO}:latest" \
             -t "${REPO}:${VERSION}" \
-            $(printf "${REPO}@sha256:%s " *)
+            "${refs[@]}"
 
       - name: "△ Inspect image"
         env:
@@ -369,12 +397,13 @@ jobs:
       contents: read
       packages: read
     strategy:
+      fail-fast: false
       matrix:
         image: [api, web]
     steps:
       - name: "△ Extract version from tag"
         id: version
-        run: echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
         env:
           TAG: ${{ inputs.tag }}
 
@@ -434,7 +463,7 @@ jobs:
     steps:
       - name: "△ Extract version from tag"
         id: version
-        run: echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
         env:
           TAG: ${{ inputs.tag }}
 
@@ -514,7 +543,7 @@ jobs:
     steps:
       - name: "△ Extract version from tag"
         id: version
-        run: echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
         env:
           TAG: ${{ inputs.tag }}
 
@@ -579,16 +608,18 @@ jobs:
 
       - name: "► Summary"
         run: |
-          echo "## Publish ${{ inputs.tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Python Packages" >> $GITHUB_STEP_SUMMARY
-          echo "- [sibyl-core](https://pypi.org/project/sibyl-core/${{ steps.version.outputs.version }}/)" >> $GITHUB_STEP_SUMMARY
-          echo "- [sibyl-dev](https://pypi.org/project/sibyl-dev/${{ steps.version.outputs.version }}/)" >> $GITHUB_STEP_SUMMARY
-          echo "- [sibyld](https://pypi.org/project/sibyld/${{ steps.version.outputs.version }}/)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Linux Packages" >> $GITHUB_STEP_SUMMARY
-          echo "- [sibyl](https://aur.archlinux.org/packages/sibyl)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Docker Images (multi-arch: linux/amd64, linux/arm64)" >> $GITHUB_STEP_SUMMARY
-          echo "- \`ghcr.io/hyperb1iss/sibyl-api:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`ghcr.io/hyperb1iss/sibyl-web:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Publish ${{ inputs.tag }}"
+            echo ""
+            echo "### Python Packages"
+            echo "- [sibyl-core](https://pypi.org/project/sibyl-core/${{ steps.version.outputs.version }}/)"
+            echo "- [sibyl-dev](https://pypi.org/project/sibyl-dev/${{ steps.version.outputs.version }}/)"
+            echo "- [sibyld](https://pypi.org/project/sibyld/${{ steps.version.outputs.version }}/)"
+            echo ""
+            echo "### Linux Packages"
+            echo "- [sibyl](https://aur.archlinux.org/packages/sibyl)"
+            echo ""
+            echo "### Docker Images (multi-arch: linux/amd64, linux/arm64)"
+            echo "- \`ghcr.io/hyperb1iss/sibyl-api:${{ steps.version.outputs.version }}\`"
+            echo "- \`ghcr.io/hyperb1iss/sibyl-web:${{ steps.version.outputs.version }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

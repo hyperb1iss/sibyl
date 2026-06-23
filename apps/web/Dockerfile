@@ -7,13 +7,13 @@
 # Stage 1: Dependencies
 FROM node:24-alpine AS deps
 
-RUN corepack enable && corepack prepare pnpm@11.5.2 --activate
-
 WORKDIR /app
 
 # Copy package files from monorepo root
-COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json ./apps/web/
+
+RUN corepack enable
 
 # Install dependencies for web app only
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
@@ -23,12 +23,12 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 # Stage 2: Builder
 FROM node:24-alpine AS builder
 
-RUN corepack enable && corepack prepare pnpm@11.5.2 --activate
+RUN corepack enable
 
 WORKDIR /app/apps/web
 
 # Copy workspace structure needed for pnpm
-COPY --from=deps /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/
+COPY --from=deps /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/
 COPY --from=deps /app/node_modules /app/node_modules
 COPY --from=deps /app/apps/web/node_modules ./node_modules
 
@@ -63,6 +63,10 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3337 \
     HOSTNAME=0.0.0.0
+
+RUN rm -rf /usr/local/lib/node_modules/npm \
+    /usr/local/bin/npm \
+    /usr/local/bin/npx
 
 # Copy standalone output (preserves monorepo structure)
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone /app

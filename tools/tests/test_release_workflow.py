@@ -128,8 +128,12 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     assert "tools/release/aur_pkgbuild.py" in workflow
     assert "hyperb1iss/homebrew-tap" in workflow
     assert "HOMEBREW_TAP_TOKEN" in workflow
-    assert "Validate Homebrew tap token" in workflow
+    assert "Upload Homebrew formula artifact" in workflow
+    assert "Check Homebrew tap token" in workflow
+    assert "can_push=false" in workflow
+    assert "steps.tap_token.outputs.can_push == 'true'" in workflow
     assert "gh api repos/hyperb1iss/homebrew-tap --jq '.permissions.push // false'" in workflow
+    assert "HOMEBREW_TAP_TOKEN cannot authenticate" in workflow
     assert "HOMEBREW_TAP_TOKEN cannot push to hyperb1iss/homebrew-tap" in workflow
     assert "persist-credentials: true" in workflow
     assert (
@@ -149,6 +153,7 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     assert "paru -S sibyl" in workflow
     assert "needs: [python, homebrew, aur, docker-sign]" in workflow
     assert "docker-security:" in workflow
+    assert "fail-fast: false" in workflow
     assert "docker-sign:" in workflow
     assert "aquasecurity/trivy-action@v0.36.0" in workflow
     assert "sigstore/cosign-installer@v4.1.1" in workflow
