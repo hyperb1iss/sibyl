@@ -138,11 +138,6 @@ jobs:
             exit 1
           fi
 
-          IS_PRERELEASE=false
-          if [[ "$VERSION" == *-* ]]; then
-            IS_PRERELEASE=true
-          fi
-
           NEEDS_VERSION_COMMIT=false
           if [[ "$CURRENT" != "$VERSION" ]]; then
             NEEDS_VERSION_COMMIT=true
@@ -152,7 +147,6 @@ jobs:
             echo "current=$CURRENT"
             echo "version=$VERSION"
             echo "previous_tag=$PREVIOUS_TAG"
-            echo "is_prerelease=$IS_PRERELEASE"
             echo "needs_version_commit=$NEEDS_VERSION_COMMIT"
           } >> "$GITHUB_OUTPUT"
           echo "Releasing: $CURRENT → $VERSION"
@@ -329,7 +323,8 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
           body: ${{ steps.release_notes.outputs.content }}
-          prerelease: ${{ steps.version.outputs.is_prerelease == 'true' }}
+          prerelease: false
+          make_latest: true
 
       - name: "◇ Trigger publish"
         if: ${{ !inputs.dry_run }}

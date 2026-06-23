@@ -97,6 +97,9 @@ def test_release_workflow_validates_before_tag_or_publish() -> None:
     assert "Prepare release notes" in workflow
     assert "steps.ai_release_notes.outputs.content" in workflow
     assert "AI-generated release notes were unavailable" in workflow
+    assert "prerelease: false" in workflow
+    assert "make_latest: true" in workflow
+    assert "is_prerelease" not in workflow
     assert 'git rev-parse --verify --quiet "$PREVIOUS_TAG^{commit}"' in workflow
     assert "git log --no-merges --pretty=format:'- %s (%h)'" in workflow
     assert "RELEASE_NOTES_CONTENT" in workflow
