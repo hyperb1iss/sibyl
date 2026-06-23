@@ -1758,7 +1758,8 @@ async def test_request_password_reset_batches_user_and_token_reads(
         "replace_record",
         replace_record,
     )
-    monkeypatch.setattr(surreal_auth_runtime, "_log_login_history", AsyncMock())
+    login_history = AsyncMock()
+    monkeypatch.setattr(surreal_auth_runtime, "_log_login_history", login_history)
     monkeypatch.setattr(surreal_auth_runtime, "get_email_client", lambda: email_client)
 
     await surreal_auth_runtime.request_password_reset("Bliss@Example.com")
@@ -1775,6 +1776,38 @@ async def test_request_password_reset_batches_user_and_token_reads(
     assert any("CREATE password_reset_tokens CONTENT $record" in query for query in queries)
     replace_record.assert_not_awaited()
     email_client.send_template.assert_awaited_once()
+    login_history.assert_awaited_once()
+    assert login_history.await_args.kwargs["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_request_password_reset_marks_email_delivery_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    user_record = {
+        "uuid": str(user_id),
+        "email": "bliss@example.com",
+        "name": "Bliss",
+    }
+    client = _SequenceAuthClient([{"user": user_record, "tokens": []}, [], []])
+    email_client = SimpleNamespace(send_template=AsyncMock(return_value=None))
+    login_history = AsyncMock()
+
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(client),
+    )
+    monkeypatch.setattr(surreal_auth_runtime, "_log_login_history", login_history)
+    monkeypatch.setattr(surreal_auth_runtime, "get_email_client", lambda: email_client)
+
+    await surreal_auth_runtime.request_password_reset("Bliss@Example.com")
+
+    email_client.send_template.assert_awaited_once()
+    login_history.assert_awaited_once()
+    assert login_history.await_args.kwargs["success"] is False
+    assert login_history.await_args.kwargs["failure_reason"] == "email_delivery_failed"
 
 
 @pytest.mark.asyncio

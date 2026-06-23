@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import smtplib
+import ssl
 from asyncio import to_thread
 from datetime import UTC, datetime
 from email.message import EmailMessage
@@ -68,7 +69,7 @@ class EmailClient:
         """
         recipients = [to] if isinstance(to, str) else to
 
-        self._write_outbox(
+        outbox_written = self._write_outbox(
             to=recipients,
             subject=subject,
             html=html,
@@ -83,6 +84,7 @@ class EmailClient:
                 html=html,
                 text=text,
                 reply_to=reply_to,
+                outbox_written=outbox_written,
             )
 
         if not self._resend:
@@ -92,7 +94,7 @@ class EmailClient:
                 to=recipients,
                 subject=subject,
             )
-            return None
+            return "outbox" if outbox_written else None
 
         try:
             import resend
@@ -112,11 +114,11 @@ class EmailClient:
             email_id = result.get("id") if isinstance(result, dict) else None
 
             log.info("email_sent", email_id=email_id, to=recipients, subject=subject)
-            return email_id
+            return email_id or "resend"
 
         except Exception:
             log.exception("email_failed", to=recipients, subject=subject)
-            return None
+            return "outbox" if outbox_written else None
 
     async def _send_smtp(
         self,
@@ -126,6 +128,7 @@ class EmailClient:
         html: str,
         text: str | None,
         reply_to: str | None,
+        outbox_written: bool,
     ) -> str | None:
         try:
             await to_thread(
@@ -137,10 +140,10 @@ class EmailClient:
                 reply_to=reply_to,
             )
             log.info("email_sent", provider="smtp", to=to, subject=subject)
-            return None
+            return "smtp"
         except Exception:
             log.exception("email_failed", provider="smtp", to=to, subject=subject)
-            return None
+            return "outbox" if outbox_written else None
 
     def _send_smtp_sync(
         self,
@@ -160,14 +163,23 @@ class EmailClient:
         message.set_content(text or "")
         message.add_alternative(html, subtype="html")
 
-        smtp_cls = smtplib.SMTP_SSL if self._smtp_ssl else smtplib.SMTP
-        with smtp_cls(
-            self._smtp_host,
-            self._smtp_port,
-            timeout=self._smtp_timeout_seconds,
-        ) as smtp:
+        context = ssl.create_default_context()
+        if self._smtp_ssl:
+            smtp = smtplib.SMTP_SSL(
+                self._smtp_host,
+                self._smtp_port,
+                timeout=self._smtp_timeout_seconds,
+                context=context,
+            )
+        else:
+            smtp = smtplib.SMTP(
+                self._smtp_host,
+                self._smtp_port,
+                timeout=self._smtp_timeout_seconds,
+            )
+        with smtp:
             if self._smtp_starttls and not self._smtp_ssl:
-                smtp.starttls()
+                smtp.starttls(context=context)
             if self._smtp_username:
                 smtp.login(self._smtp_username, self._smtp_password)
             smtp.send_message(message)
@@ -180,9 +192,9 @@ class EmailClient:
         html: str,
         text: str | None,
         reply_to: str | None,
-    ) -> None:
+    ) -> bool:
         if not self._outbox_path:
-            return
+            return False
         path = Path(self._outbox_path).expanduser()
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -197,8 +209,10 @@ class EmailClient:
             with path.open("a", encoding="utf-8") as file:
                 file.write(json.dumps(record, sort_keys=True))
                 file.write("\n")
+            return True
         except Exception:
             log.exception("email_outbox_write_failed", path=str(path))
+            return False
 
     async def send_template(
         self,

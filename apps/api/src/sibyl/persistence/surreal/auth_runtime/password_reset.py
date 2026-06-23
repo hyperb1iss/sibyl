@@ -119,14 +119,15 @@ async def request_password_reset(email: str) -> None:
             user_name=str(user.get("name") or "") or None,
             expires_in_minutes=60,
         )
-        await get_email_client().send_template(
+        delivery_id = await get_email_client().send_template(
             template, to=str(user.get("email") or normalized_email)
         )
         await _log_login_history(
             client,
             user_id=_coerce_uuid(user.get("uuid"), field_name="user.uuid"),
             event_type="password_reset_request",
-            success=True,
+            success=delivery_id is not None,
+            failure_reason=None if delivery_id else "email_delivery_failed",
             email_attempted=normalized_email,
         )
 

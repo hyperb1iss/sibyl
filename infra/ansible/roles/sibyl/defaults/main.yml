@@ -17,8 +17,8 @@ sibyl_break_glass_enabled: false
 # MCP bearer-token enforcement: on | auto | off.
 sibyl_mcp_auth_mode: "auto"
 
-# Transactional email. Leave SMTP host empty to disable live delivery while
-# keeping the JSONL outbox available for break-glass recovery.
+# Transactional email. Leave SMTP host empty to disable live delivery.
+# Set sibyl_email_outbox_path when you want JSONL break-glass recovery.
 sibyl_resend_api_key: ""
 sibyl_smtp_host: ""
 sibyl_smtp_port: 587

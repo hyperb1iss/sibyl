@@ -262,6 +262,7 @@ stored encrypted in the database (using `SIBYL_SETTINGS_KEY`).
 
 Sibyl sends through SMTP when `SIBYL_SMTP_HOST` is set, otherwise through Resend when
 `SIBYL_RESEND_API_KEY` is set. The JSONL outbox writes regardless of live delivery provider.
+When setting SMTP passwords in a Compose `.env` file, escape literal `$` characters as `$$`.
 
 | Variable                       | Default                     | Description                                          |
 | ------------------------------ | --------------------------- | ---------------------------------------------------- |
