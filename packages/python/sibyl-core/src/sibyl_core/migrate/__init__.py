@@ -26,6 +26,7 @@ from sibyl_core.migrate.merge import (
     ArchiveMergeOptions,
     ArchiveMergeResult,
     EntityCollisionPolicy,
+    UserCollisionPolicy,
     merge_archives,
 )
 
@@ -60,6 +61,7 @@ __all__ = [
     "EntityCollisionPolicy",
     "GraphVerificationResult",
     "LoadedArchive",
+    "UserCollisionPolicy",
     "auth_payload_from_archive",
     "build_manifest",
     "content_payload_from_archive",

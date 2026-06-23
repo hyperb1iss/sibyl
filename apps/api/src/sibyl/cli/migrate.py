@@ -38,7 +38,12 @@ from sibyl_core.migrate.archive import (
     validate_archive,
     write_archive,
 )
-from sibyl_core.migrate.merge import ArchiveMergeOptions, EntityCollisionPolicy, merge_archives
+from sibyl_core.migrate.merge import (
+    ArchiveMergeOptions,
+    EntityCollisionPolicy,
+    UserCollisionPolicy,
+    merge_archives,
+)
 
 app = typer.Typer(
     name="migrate",
@@ -922,6 +927,13 @@ def merge_archive_sources(
             help="Entity merge policy: merge-by-type-name or keep-all",
         ),
     ] = EntityCollisionPolicy.MERGE_BY_TYPE_NAME.value,
+    user_collision_policy: Annotated[
+        str,
+        typer.Option(
+            "--user-collision-policy",
+            help="User merge policy: provider-or-uuid or provider-or-email",
+        ),
+    ] = UserCollisionPolicy.PROVIDER_OR_UUID.value,
     drop_volatile_auth: Annotated[
         bool,
         typer.Option(
@@ -948,6 +960,12 @@ def merge_archive_sources(
         allowed = ", ".join(policy.value for policy in EntityCollisionPolicy)
         error(f"Invalid --entity-collision-policy. Expected one of: {allowed}")
         raise typer.Exit(code=1) from exc
+    try:
+        user_policy = UserCollisionPolicy(user_collision_policy)
+    except ValueError as exc:
+        allowed = ", ".join(policy.value for policy in UserCollisionPolicy)
+        error(f"Invalid --user-collision-policy. Expected one of: {allowed}")
+        raise typer.Exit(code=1) from exc
 
     archives = [_load_valid_archive(source) for source in sources]
     try:
@@ -958,6 +976,7 @@ def merge_archive_sources(
                 canonical_org_name=canonical_org_name,
                 canonical_org_slug=canonical_org_slug,
                 entity_collision_policy=collision_policy,
+                user_collision_policy=user_policy,
                 drop_volatile_auth=drop_volatile_auth,
             ),
         )

@@ -9,6 +9,7 @@ from sibyl_core.migrate import (
     GRAPH_FILENAME,
     ArchiveMergeOptions,
     LoadedArchive,
+    UserCollisionPolicy,
     build_manifest,
     content_payload_from_archive,
     graph_payload_from_archive,
@@ -469,3 +470,153 @@ def test_merge_archives_does_not_coalesce_users_by_email() -> None:
     assert content["tables"]["raw_captures"][0]["created_by_user_id"] == "user-a"
     assert content["tables"]["source_imports"][0]["principal_id"] == "user-b"
     assert content["tables"]["source_imports"][0]["target_scope_key"] == "user-b"
+
+
+def test_merge_archives_can_coalesce_users_by_email() -> None:
+    result = merge_archives(
+        [
+            _archive(
+                "org-a",
+                auth={
+                    "version": "1.0",
+                    "created_at": "2026-04-26T00:00:00+00:00",
+                    "tables": {
+                        "users": [
+                            {
+                                "uuid": "user-a",
+                                "email": "STEF@HYPERBLISS.TECH",
+                                "name": "Stef A",
+                                "is_admin": False,
+                            }
+                        ],
+                        "organizations": [{"uuid": "org-a", "name": "Org A", "slug": "org-a"}],
+                        "organization_members": [
+                            {
+                                "uuid": "member-a",
+                                "organization_id": "org-a",
+                                "user_id": "user-a",
+                                "role": "member",
+                            }
+                        ],
+                        "memory_spaces": [
+                            {
+                                "uuid": "space-a",
+                                "organization_id": "org-a",
+                                "memory_scope": "private",
+                                "scope_key": "user-a",
+                                "created_by_user_id": "user-a",
+                            }
+                        ],
+                    },
+                    "row_counts": {},
+                    "total_rows": 4,
+                },
+                content={
+                    "version": "1.0",
+                    "created_at": "2026-04-26T00:00:00+00:00",
+                    "tables": {
+                        "raw_captures": [
+                            {
+                                "uuid": "capture-a",
+                                "organization_id": "org-a",
+                                "principal_id": "user-a",
+                                "memory_scope": "private",
+                                "scope_key": "user-a",
+                                "created_by_user_id": "user-a",
+                            }
+                        ]
+                    },
+                    "row_counts": {"raw_captures": 1},
+                    "total_rows": 1,
+                },
+            ),
+            _archive(
+                "org-b",
+                auth={
+                    "version": "1.0",
+                    "created_at": "2026-04-26T00:00:00+00:00",
+                    "tables": {
+                        "users": [
+                            {
+                                "uuid": "user-b",
+                                "email": "stef@hyperbliss.tech",
+                                "name": "Stef B",
+                                "is_admin": True,
+                            }
+                        ],
+                        "organizations": [{"uuid": "org-b", "name": "Org B", "slug": "org-b"}],
+                        "organization_members": [
+                            {
+                                "uuid": "member-b",
+                                "organization_id": "org-b",
+                                "user_id": "user-b",
+                                "role": "owner",
+                            }
+                        ],
+                        "memory_spaces": [
+                            {
+                                "uuid": "space-b",
+                                "organization_id": "org-b",
+                                "memory_scope": "private",
+                                "scope_key": "user-b",
+                                "created_by_user_id": "user-b",
+                            }
+                        ],
+                    },
+                    "row_counts": {},
+                    "total_rows": 4,
+                },
+                content={
+                    "version": "1.0",
+                    "created_at": "2026-04-26T00:00:00+00:00",
+                    "tables": {
+                        "source_imports": [
+                            {
+                                "uuid": "import-b",
+                                "organization_id": "org-b",
+                                "principal_id": "user-b",
+                                "target_memory_scope": "private",
+                                "target_scope_key": "user-b",
+                            }
+                        ]
+                    },
+                    "row_counts": {"source_imports": 1},
+                    "total_rows": 1,
+                },
+            ),
+        ],
+        options=ArchiveMergeOptions(
+            canonical_org_id=CANONICAL_ORG_ID,
+            user_collision_policy=UserCollisionPolicy.PROVIDER_OR_EMAIL,
+        ),
+    )
+
+    assert result.user_alias_count == 1
+
+    auth = json.loads(result.archive.files[AUTH_FILENAME].decode("utf-8"))
+    assert auth["tables"]["users"] == [
+        {"uuid": "user-a", "email": "stef@hyperbliss.tech", "name": "Stef A", "is_admin": True}
+    ]
+    assert auth["tables"]["organization_members"] == [
+        {
+            "uuid": "member-a",
+            "organization_id": CANONICAL_ORG_ID,
+            "user_id": "user-a",
+            "role": "owner",
+        }
+    ]
+    assert auth["tables"]["memory_spaces"] == [
+        {
+            "uuid": "space-a",
+            "organization_id": CANONICAL_ORG_ID,
+            "memory_scope": "private",
+            "scope_key": "user-a",
+            "created_by_user_id": "user-a",
+        }
+    ]
+
+    content = json.loads(result.archive.files[CONTENT_FILENAME].decode("utf-8"))
+    assert content["tables"]["raw_captures"][0]["principal_id"] == "user-a"
+    assert content["tables"]["raw_captures"][0]["scope_key"] == "user-a"
+    assert content["tables"]["source_imports"][0]["principal_id"] == "user-a"
+    assert content["tables"]["source_imports"][0]["target_scope_key"] == "user-a"

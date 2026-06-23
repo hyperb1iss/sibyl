@@ -278,6 +278,28 @@ def test_migrate_merge_dry_run_does_not_write_archive(tmp_path: Path) -> None:
     assert not output_archive.exists()
 
 
+def test_migrate_merge_rejects_invalid_user_collision_policy(tmp_path: Path) -> None:
+    source_archive = tmp_path / "source.tar.gz"
+    _write_graph_archive(source_archive, org_id="org-a")
+
+    result = runner.invoke(
+        migrate_cli.app,
+        [
+            "merge",
+            str(source_archive),
+            "--canonical-org-id",
+            "org-canonical",
+            "--user-collision-policy",
+            "email-ish",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Invalid --user-collision-policy" in result.output
+    assert "provider-or-email" in result.output
+
+
 def test_migrate_export_graph_only_writes_archive(tmp_path: Path) -> None:
     archive_path = tmp_path / "migration.tar.gz"
     graph_payload = {

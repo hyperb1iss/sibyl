@@ -62,12 +62,18 @@ class EntityCollisionPolicy(StrEnum):
     KEEP_ALL = "keep-all"
 
 
+class UserCollisionPolicy(StrEnum):
+    PROVIDER_OR_UUID = "provider-or-uuid"
+    PROVIDER_OR_EMAIL = "provider-or-email"
+
+
 @dataclass(frozen=True)
 class ArchiveMergeOptions:
     canonical_org_id: str
     canonical_org_name: str = ""
     canonical_org_slug: str = ""
     entity_collision_policy: EntityCollisionPolicy = EntityCollisionPolicy.MERGE_BY_TYPE_NAME
+    user_collision_policy: UserCollisionPolicy = UserCollisionPolicy.PROVIDER_OR_UUID
     drop_volatile_auth: bool = True
 
 
@@ -143,7 +149,10 @@ def merge_archives(
     user_alias_count = 0
 
     if auth_payloads:
-        merged_users, user_id_map, user_alias_count = _merge_user_payloads(auth_payloads)
+        merged_users, user_id_map, user_alias_count = _merge_user_payloads(
+            auth_payloads,
+            policy=options.user_collision_policy,
+        )
         auth_payload = _merge_tabular_payloads(
             auth_payloads,
             replacements=replacements | user_id_map,
@@ -195,6 +204,7 @@ def merge_archives(
                 "canonical_org_name": options.canonical_org_name,
                 "canonical_org_slug": options.canonical_org_slug,
                 "entity_collision_policy": options.entity_collision_policy.value,
+                "user_collision_policy": options.user_collision_policy.value,
                 "entity_alias_count": entity_alias_count,
                 "user_alias_count": user_alias_count,
                 "drop_volatile_auth": options.drop_volatile_auth,
@@ -271,10 +281,18 @@ def _normalized_email(row: dict[str, Any]) -> str:
     return str(row.get("email") or "").strip().casefold()
 
 
-def _user_identity_key(row: dict[str, Any]) -> tuple[str, str]:
+def _user_identity_key(
+    row: dict[str, Any],
+    *,
+    policy: UserCollisionPolicy = UserCollisionPolicy.PROVIDER_OR_UUID,
+) -> tuple[str, str]:
     github_id = str(row.get("github_id") or "").strip()
     if github_id:
         return ("github_id", github_id)
+    if policy == UserCollisionPolicy.PROVIDER_OR_EMAIL:
+        email = _normalized_email(row)
+        if email:
+            return ("email", email)
     user_id = _row_uuid(row)
     if user_id:
         return ("uuid", user_id)
@@ -283,6 +301,8 @@ def _user_identity_key(row: dict[str, Any]) -> tuple[str, str]:
 
 def _merge_user_payloads(
     payloads: list[dict[str, Any]],
+    *,
+    policy: UserCollisionPolicy,
 ) -> tuple[list[dict[str, Any]], dict[str, str], int]:
     users: list[dict[str, Any]] = []
     by_identity: dict[tuple[str, str], dict[str, Any]] = {}
@@ -303,7 +323,7 @@ def _merge_user_payloads(
             user_id = _row_uuid(user)
             if email := _normalized_email(user):
                 user["email"] = email
-            key = _user_identity_key(user)
+            key = _user_identity_key(user, policy=policy)
             existing = by_identity.get(key)
             if existing is None:
                 by_identity[key] = user
@@ -684,5 +704,6 @@ __all__ = [
     "ArchiveMergeOptions",
     "ArchiveMergeResult",
     "EntityCollisionPolicy",
+    "UserCollisionPolicy",
     "merge_archives",
 ]
