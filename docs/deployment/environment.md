@@ -261,21 +261,21 @@ stored encrypted in the database (using `SIBYL_SETTINGS_KEY`).
 ## Email
 
 Sibyl sends through SMTP when `SIBYL_SMTP_HOST` is set, otherwise through Resend when
-`SIBYL_RESEND_API_KEY` is set. The JSONL outbox writes regardless of live delivery provider.
-When setting SMTP passwords in a Compose `.env` file, escape literal `$` characters as `$$`.
+`SIBYL_RESEND_API_KEY` is set. The JSONL outbox writes regardless of live delivery provider. When
+setting SMTP passwords in a Compose `.env` file, escape literal `$` characters as `$$`.
 
-| Variable                       | Default                     | Description                                          |
-| ------------------------------ | --------------------------- | ---------------------------------------------------- |
-| `SIBYL_RESEND_API_KEY`         | (empty)                     | Resend API key for transactional email               |
-| `SIBYL_SMTP_HOST`              | (empty)                     | SMTP host for transactional email                    |
-| `SIBYL_SMTP_PORT`              | `587`                       | SMTP port                                            |
-| `SIBYL_SMTP_USERNAME`          | (empty)                     | SMTP authentication username                         |
-| `SIBYL_SMTP_PASSWORD`          | (empty)                     | SMTP authentication password                         |
-| `SIBYL_SMTP_STARTTLS`          | `true`                      | Upgrade SMTP connection with STARTTLS                |
-| `SIBYL_SMTP_SSL`               | `false`                     | Use implicit TLS instead of STARTTLS                 |
-| `SIBYL_SMTP_TIMEOUT_SECONDS`   | `20`                        | SMTP connection timeout                              |
-| `SIBYL_EMAIL_FROM`             | `Sibyl <noreply@sibyl.dev>` | Default from address                                 |
-| `SIBYL_EMAIL_OUTBOX_PATH`      | (empty)                     | Optional JSONL outbox path for local/staging capture |
+| Variable                     | Default                     | Description                                          |
+| ---------------------------- | --------------------------- | ---------------------------------------------------- |
+| `SIBYL_RESEND_API_KEY`       | (empty)                     | Resend API key for transactional email               |
+| `SIBYL_SMTP_HOST`            | (empty)                     | SMTP host for transactional email                    |
+| `SIBYL_SMTP_PORT`            | `587`                       | SMTP port                                            |
+| `SIBYL_SMTP_USERNAME`        | (empty)                     | SMTP authentication username                         |
+| `SIBYL_SMTP_PASSWORD`        | (empty)                     | SMTP authentication password                         |
+| `SIBYL_SMTP_STARTTLS`        | `true`                      | Upgrade SMTP connection with STARTTLS                |
+| `SIBYL_SMTP_SSL`             | `false`                     | Use implicit TLS instead of STARTTLS                 |
+| `SIBYL_SMTP_TIMEOUT_SECONDS` | `20`                        | SMTP connection timeout                              |
+| `SIBYL_EMAIL_FROM`           | `Sibyl <noreply@sibyl.dev>` | Default from address                                 |
+| `SIBYL_EMAIL_OUTBOX_PATH`    | (empty)                     | Optional JSONL outbox path for local/staging capture |
 
 ## Content Ingestion
 

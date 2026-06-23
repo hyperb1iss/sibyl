@@ -255,9 +255,9 @@ Differences from the production compose:
 
 When upgrading from a pre-1.0 RC quickstart compose file by hand, keep the `secrets-init` service
 from the current compose file. It chowns the persisted `/home/sibyl/.sibyl` volume to the current
-API service UID (`10001`) so older `1000:1000` volumes stay writable after the image upgrade. If
-you intentionally pin an older API image, set `SIBYL_API_UID=1000` and `SIBYL_API_GID=1000` while
-that older image is running.
+API service UID (`10001`) so older `1000:1000` volumes stay writable after the image upgrade. If you
+intentionally pin an older API image, set `SIBYL_API_UID=1000` and `SIBYL_API_GID=1000` while that
+older image is running.
 
 ## Volume Persistence
 
