@@ -132,9 +132,9 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
         fragment in workflow
         for fragment in (
             "Upload Homebrew formula artifact",
-            "Check Homebrew tap token",
-            "can_push=false",
-            "steps.tap_token.outputs.can_push == 'true'",
+            "Verify Homebrew tap token",
+            "::error::HOMEBREW_TAP_TOKEN is not configured",
+            "exit 1",
         )
     )
     assert "gh api repos/hyperb1iss/homebrew-tap --jq '.permissions.push // false'" in workflow

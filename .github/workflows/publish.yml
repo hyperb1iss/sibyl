@@ -154,33 +154,27 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: "◇ Check Homebrew tap token"
-        id: tap_token
+      - name: "◇ Verify Homebrew tap token"
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
           if [[ -z "${GH_TOKEN:-}" ]]; then
-            echo "can_push=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::HOMEBREW_TAP_TOKEN is not configured; formula artifact was uploaded."
-            exit 0
+            echo "::error::HOMEBREW_TAP_TOKEN is not configured; formula artifact was uploaded."
+            exit 1
           fi
           if ! can_push="$(
             gh api repos/hyperb1iss/homebrew-tap --jq '.permissions.push // false'
           )"; then
-            echo "can_push=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::HOMEBREW_TAP_TOKEN cannot authenticate; formula artifact was uploaded."
-            exit 0
+            echo "::error::HOMEBREW_TAP_TOKEN cannot authenticate; formula artifact was uploaded."
+            exit 1
           fi
           if [[ "$can_push" != "true" ]]; then
-            echo "can_push=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::HOMEBREW_TAP_TOKEN cannot push to hyperb1iss/homebrew-tap; formula artifact was uploaded."
-            exit 0
+            echo "::error::HOMEBREW_TAP_TOKEN cannot push to hyperb1iss/homebrew-tap; formula artifact was uploaded."
+            exit 1
           fi
-          echo "can_push=true" >> "$GITHUB_OUTPUT"
 
       - name: "◆ Checkout Homebrew tap"
-        if: ${{ steps.tap_token.outputs.can_push == 'true' }}
         uses: actions/checkout@v6
         with:
           repository: hyperb1iss/homebrew-tap
@@ -189,13 +183,11 @@ jobs:
           persist-credentials: true
 
       - name: "△ Stage formula in tap"
-        if: ${{ steps.tap_token.outputs.can_push == 'true' }}
         run: |
           mkdir -p homebrew-tap/Formula
           cp homebrew-formula/Formula/sibyl.rb homebrew-tap/Formula/sibyl.rb
 
       - name: "► Commit tap update"
-        if: ${{ steps.tap_token.outputs.can_push == 'true' }}
         working-directory: homebrew-tap
         env:
           VERSION: ${{ steps.version.outputs.version }}
