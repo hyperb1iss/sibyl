@@ -9,8 +9,8 @@ apiVersion: v2
 name: sibyl
 description: Knowledge graph and task workflow for durable development memory
 type: application
-version: 1.0.0-rc.1
-appVersion: "1.0.0-rc.1"
+version: 1.0.0-rc.6
+appVersion: "1.0.0-rc.6"
 ```
 
 Release builds update `version` and `appVersion` from the repository `VERSION` file.
@@ -268,13 +268,17 @@ Redis password from `SIBYL_REDIS_PASSWORD` at runtime.
 
 ### Security Contexts
 
+The default UIDs match the packaged images for this chart version. If you intentionally pin older
+image tags, keep the image tag and security context in lockstep: pre-service-UID API/worker images
+use `1000:1000`, and pre-service-UID web images use `1001:65533`.
+
 ```yaml
 backend:
   podSecurityContext:
     runAsNonRoot: true
-    runAsUser: 1000
-    runAsGroup: 1000
-    fsGroup: 1000
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
 
   securityContext:
     allowPrivilegeEscalation: false
@@ -367,9 +371,9 @@ frontend:
 
   podSecurityContext:
     runAsNonRoot: true
-    runAsUser: 1000
-    runAsGroup: 1000
-    fsGroup: 1000
+    runAsUser: 10002
+    runAsGroup: 10002
+    fsGroup: 10002
 
   securityContext:
     allowPrivilegeEscalation: false
@@ -427,9 +431,9 @@ worker:
 
   podSecurityContext:
     runAsNonRoot: true
-    runAsUser: 1000
-    runAsGroup: 1000
-    fsGroup: 1000
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
 
   securityContext:
     allowPrivilegeEscalation: false
@@ -493,7 +497,7 @@ backend:
   replicaCount: 3
   image:
     repository: ghcr.io/hyperb1iss/sibyl-api
-    tag: "1.0.0-rc.1"
+    tag: "1.0.0-rc.6"
     pullPolicy: Always
   existingSecret: sibyl-secrets
   surreal:

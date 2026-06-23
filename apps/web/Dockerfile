@@ -54,9 +54,9 @@ FROM node:24-alpine AS runner
 
 WORKDIR /app/apps/web
 
-# Create non-root user
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
+# Create non-root user with a high service UID to avoid host user collisions.
+RUN addgroup --system --gid 10002 nodejs && \
+    adduser --system --uid 10002 --ingroup nodejs nextjs
 
 # Set production env
 ENV NODE_ENV=production \

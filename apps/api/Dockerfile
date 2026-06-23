@@ -29,9 +29,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Stage 2: Runtime
 FROM python:3.13-slim-bookworm AS runtime
 
-# Create non-root user
-RUN groupadd --gid 1000 sibyl && \
-    useradd --uid 1000 --gid 1000 --shell /bin/bash --create-home sibyl
+# Create non-root user with a high service UID to avoid host user collisions.
+RUN groupadd --gid 10001 sibyl && \
+    useradd --uid 10001 --gid 10001 --shell /bin/bash --create-home sibyl
 
 WORKDIR /app
 

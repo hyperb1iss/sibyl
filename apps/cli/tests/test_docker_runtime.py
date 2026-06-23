@@ -71,7 +71,7 @@ def test_quickstart_compose_persists_generated_runtime_secrets() -> None:
     assert services["secrets-init"]["command"] == [
         "chown",
         "-R",
-        "1000:1000",
+        "${SIBYL_API_UID:-10001}:${SIBYL_API_GID:-10001}",
         "/home/sibyl/.sibyl",
     ]
     assert secret_mount in services["secrets-init"]["volumes"]
@@ -120,10 +120,7 @@ def test_quickstart_test_compose_replaces_base_ports() -> None:
     config = json.loads(result.stdout)
 
     def published_ports(service: str) -> list[str]:
-        return [
-            str(port["published"])
-            for port in config["services"][service].get("ports", [])
-        ]
+        return [str(port["published"]) for port in config["services"][service].get("ports", [])]
 
     assert published_ports("api") == ["3344"]
     assert published_ports("web") == ["3347"]
@@ -194,6 +191,42 @@ def test_docker_init_writes_runtime_files_and_context(
     assert ctx is not None
     assert ctx.name == "docker"
     assert ctx.server_url == "http://localhost:3334"
+
+
+def test_docker_upgrade_tag_updates_pinned_compose_images(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    docker_dir = tmp_path / "docker"
+    monkeypatch.setattr(docker_module, "SIBYL_DOCKER_DIR", docker_dir)
+    monkeypatch.setattr(docker_module, "SIBYL_DOCKER_ENV", docker_dir / ".env")
+    monkeypatch.setattr(docker_module, "SIBYL_DOCKER_COMPOSE", docker_dir / "docker-compose.yml")
+    docker_module.write_env_file(
+        image_tag="1.0.0-rc.1",
+        surreal_password="surreal",
+        jwt_secret="jwt",
+    )
+    docker_module.write_compose_file(
+        docker_module.compose_config(
+            image_tag="1.0.0-rc.1",
+            api_port=3334,
+            web_port=3337,
+            surreal_port=8000,
+            with_worker=True,
+            with_crawler=True,
+        )
+    )
+
+    docker_module.update_configured_image_tag("1.0.0-rc.6")
+
+    env = (docker_dir / ".env").read_text()
+    compose = yaml.safe_load((docker_dir / "docker-compose.yml").read_text())
+    services = compose["services"]
+    assert "SIBYL_IMAGE_TAG=1.0.0-rc.6" in env
+    assert services["api"]["image"] == "ghcr.io/hyperb1iss/sibyl-api-crawler:1.0.0-rc.6"
+    assert services["worker"]["image"] == "ghcr.io/hyperb1iss/sibyl-api-crawler:1.0.0-rc.6"
+    assert services["web"]["image"] == "ghcr.io/hyperb1iss/sibyl-web:1.0.0-rc.6"
+    assert services["surrealdb"]["image"] == "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.1.0}"
 
 
 def test_up_starts_local_runtime_without_agent_setup(

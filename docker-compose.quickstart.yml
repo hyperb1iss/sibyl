@@ -37,7 +37,7 @@ services:
   # Sibyl Backend (API + MCP Server)
   # ==========================================================================
   api:
-    image: ghcr.io/hyperb1iss/sibyl-api:${SIBYL_IMAGE_TAG:-1.0.0-rc.1}
+    image: ghcr.io/hyperb1iss/sibyl-api:${SIBYL_IMAGE_TAG:-1.0.0-rc.6}
     container_name: sibyl-api
     ports:
       - "${SIBYL_SERVER_PORT:-3334}:3334"
@@ -82,7 +82,7 @@ services:
   # ==========================================================================
   worker:
     profiles: ["redis"]
-    image: ghcr.io/hyperb1iss/sibyl-api:${SIBYL_IMAGE_TAG:-1.0.0-rc.1}
+    image: ghcr.io/hyperb1iss/sibyl-api:${SIBYL_IMAGE_TAG:-1.0.0-rc.6}
     container_name: sibyl-worker
     command: ["sibyld", "worker"]
     depends_on:
@@ -124,7 +124,7 @@ services:
   # Frontend (Next.js Web UI)
   # ==========================================================================
   web:
-    image: ghcr.io/hyperb1iss/sibyl-web:${SIBYL_IMAGE_TAG:-1.0.0-rc.1}
+    image: ghcr.io/hyperb1iss/sibyl-web:${SIBYL_IMAGE_TAG:-1.0.0-rc.6}
     container_name: sibyl-web
     ports:
       - "${SIBYL_WEB_PORT:-3337}:3337"
@@ -148,13 +148,20 @@ services:
   # ==========================================================================
   # SurrealDB (graph + content + auth, unified)
   # ==========================================================================
-  # The API image runs as UID 1000 with /home/sibyl as its home. Persist
-  # auto-generated keys there so JWT refresh tokens survive container
-  # recreation.
+  # The current API image runs as UID 10001 with /home/sibyl as its home.
+  # Persist auto-generated keys there so JWT refresh tokens survive
+  # container recreation. Override SIBYL_API_UID/GID only when pinning an
+  # older image whose runtime user still used a different numeric UID.
   secrets-init:
     image: busybox:1.37
     container_name: sibyl-secrets-init
-    command: ["chown", "-R", "1000:1000", "/home/sibyl/.sibyl"]
+    command:
+      [
+        "chown",
+        "-R",
+        "${SIBYL_API_UID:-10001}:${SIBYL_API_GID:-10001}",
+        "/home/sibyl/.sibyl",
+      ]
     volumes:
       - sibyl_secrets:/home/sibyl/.sibyl
     restart: "no"

@@ -64,7 +64,7 @@ def _default_image_tag() -> str:
     try:
         return _version_to_image_tag(pkg_version("sibyl-dev"))
     except PackageNotFoundError:
-        return "1.0.0-rc.1"
+        return "1.0.0-rc.6"
 
 
 DEFAULT_IMAGE_TAG = _default_image_tag()

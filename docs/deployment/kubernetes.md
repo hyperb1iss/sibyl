@@ -73,7 +73,7 @@ backend:
 
   image:
     repository: ghcr.io/hyperb1iss/sibyl-api
-    tag: "1.0.0-rc.1"
+    tag: "1.0.0-rc.6"
     pullPolicy: Always
 
   # Reference pre-created secrets
@@ -137,7 +137,7 @@ frontend:
 
   image:
     repository: ghcr.io/hyperb1iss/sibyl-web
-    tag: "1.0.0-rc.1"
+    tag: "1.0.0-rc.6"
 
   apiUrl: "http://sibyl-backend:3334/api"
 
@@ -433,12 +433,17 @@ kubectl logs -n sibyl -l app.kubernetes.io/name=sibyl -f
 
 ## Upgrades
 
+Keep image tags and security contexts in lockstep. Current Sibyl images run backend/worker as
+`10001:10001` and frontend as `10002:10002`; older pinned images need matching overrides in
+`backend.podSecurityContext`, `frontend.podSecurityContext`, and `worker.podSecurityContext`.
+
 ```bash
 # Update values
 helm upgrade sibyl ./charts/sibyl \
   -n sibyl \
   -f values-production.yaml \
-  --set backend.image.tag=0.2.0
+  --set backend.image.tag=1.0.0-rc.6 \
+  --set frontend.image.tag=1.0.0-rc.6
 
 # Rollback if needed
 helm rollback sibyl -n sibyl

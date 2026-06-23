@@ -25,6 +25,11 @@ app = typer.Typer(
 SIBYL_DOCKER_DIR = Path.home() / ".sibyl" / "docker"
 SIBYL_DOCKER_ENV = SIBYL_DOCKER_DIR / ".env"
 SIBYL_DOCKER_COMPOSE = SIBYL_DOCKER_DIR / "docker-compose.yml"
+MANAGED_IMAGE_REPOSITORIES = (
+    "ghcr.io/hyperb1iss/sibyl-api",
+    "ghcr.io/hyperb1iss/sibyl-api-crawler",
+    "ghcr.io/hyperb1iss/sibyl-web",
+)
 
 
 def compose_config(
@@ -155,6 +160,38 @@ def write_env_file(*, image_tag: str, surreal_password: str, jwt_secret: str) ->
 def write_compose_file(config: dict[str, Any]) -> None:
     SIBYL_DOCKER_DIR.mkdir(parents=True, exist_ok=True)
     SIBYL_DOCKER_COMPOSE.write_text(yaml.dump(config, default_flow_style=False, sort_keys=False))
+
+
+def _retag_managed_image(image: str, image_tag: str) -> str:
+    for repository in MANAGED_IMAGE_REPOSITORIES:
+        if image.startswith(f"{repository}:"):
+            return f"{repository}:{image_tag}"
+    return image
+
+
+def update_configured_image_tag(image_tag: str) -> None:
+    content = SIBYL_DOCKER_ENV.read_text()
+    lines = []
+    wrote_tag = False
+    for line in content.splitlines():
+        if line.startswith("SIBYL_IMAGE_TAG="):
+            lines.append(f"SIBYL_IMAGE_TAG={image_tag}")
+            wrote_tag = True
+        else:
+            lines.append(line)
+    if not wrote_tag:
+        lines.append(f"SIBYL_IMAGE_TAG={image_tag}")
+    SIBYL_DOCKER_ENV.write_text("\n".join(lines) + "\n")
+
+    config = yaml.safe_load(SIBYL_DOCKER_COMPOSE.read_text()) or {}
+    services = config.get("services", {})
+    for service in services.values():
+        if not isinstance(service, dict):
+            continue
+        image = service.get("image")
+        if isinstance(image, str):
+            service["image"] = _retag_managed_image(image, image_tag)
+    write_compose_file(config)
 
 
 def compose_command(args: list[str]) -> list[str]:
@@ -298,12 +335,7 @@ def upgrade(
     require_configured()
     require_docker()
     if image_tag:
-        content = SIBYL_DOCKER_ENV.read_text()
-        lines = [
-            f"SIBYL_IMAGE_TAG={image_tag}" if line.startswith("SIBYL_IMAGE_TAG=") else line
-            for line in content.splitlines()
-        ]
-        SIBYL_DOCKER_ENV.write_text("\n".join(lines) + "\n")
+        update_configured_image_tag(image_tag)
     result = run_compose(["pull"])
     if result.returncode == 0:
         result = run_compose(["up", "-d"])

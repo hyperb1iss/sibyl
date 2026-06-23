@@ -3,7 +3,7 @@
 sibyl_dir: /opt/sibyl
 
 # ghcr.io/hyperb1iss/sibyl-api and sibyl-web image tag to run.
-sibyl_version: "0.9.0"
+sibyl_version: "1.0.0-rc.6"
 
 # Public hostname Caddy serves and requests a certificate for.
 sibyl_domain: sibyl.hyperbliss.tech

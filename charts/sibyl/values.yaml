@@ -205,12 +205,13 @@ backend:
   # -- Pod annotations
   podAnnotations: {}
 
-  # -- Pod security context
+  # -- Pod security context. These UIDs match the packaged API image; override
+  # when intentionally pinning older images with different runtime users.
   podSecurityContext:
     runAsNonRoot: true
-    runAsUser: 1000
-    runAsGroup: 1000
-    fsGroup: 1000
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
 
   # -- Container security context
   securityContext:
@@ -327,12 +328,13 @@ frontend:
   # -- Pod annotations
   podAnnotations: {}
 
-  # -- Pod security context
+  # -- Pod security context. These UIDs match the packaged web image; override
+  # when intentionally pinning older images with different runtime users.
   podSecurityContext:
     runAsNonRoot: true
-    runAsUser: 1000
-    runAsGroup: 1000
-    fsGroup: 1000
+    runAsUser: 10002
+    runAsGroup: 10002
+    fsGroup: 10002
 
   # -- Container security context
   securityContext:
@@ -408,12 +410,13 @@ worker:
   # -- Pod annotations
   podAnnotations: {}
 
-  # -- Pod security context
+  # -- Pod security context. These UIDs match the packaged API image; override
+  # when intentionally pinning older images with different runtime users.
   podSecurityContext:
     runAsNonRoot: true
-    runAsUser: 1000
-    runAsGroup: 1000
-    fsGroup: 1000
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
 
   # -- Container security context
   securityContext:
