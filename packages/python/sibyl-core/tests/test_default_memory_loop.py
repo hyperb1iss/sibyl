@@ -445,7 +445,7 @@ assert cli_main.app is not None
 api_app = create_api_app()
 mcp = create_mcp_server(host="127.0.0.1", port=3334)
 combined_app = create_combined_app(host="127.0.0.1", port=3334)
-api_paths = {getattr(route, "path", "") for route in api_app.routes}
+api_paths = set(api_app.openapi()["paths"])
 combined_routes = {
     (getattr(route, "path", ""), getattr(route, "name", "")) for route in combined_app.routes
 }

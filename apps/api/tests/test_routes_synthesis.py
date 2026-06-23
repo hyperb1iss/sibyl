@@ -40,7 +40,7 @@ def _ctx() -> SimpleNamespace:
 
 
 def test_synthesis_plan_route_is_registered() -> None:
-    paths = {route.path for route in create_api_app().routes if hasattr(route, "path")}
+    paths = set(create_api_app().openapi()["paths"])
 
     assert "/synthesis/plan" in paths
     assert "/synthesis/draft" in paths

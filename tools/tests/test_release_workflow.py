@@ -169,7 +169,7 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     assert "fail-fast: false" in workflow
     assert "docker-sign:" in workflow
     assert "aquasecurity/trivy-action@v0.36.0" in workflow
-    assert "sigstore/cosign-installer@v4.1.1" in workflow
+    assert "sigstore/cosign-installer@v4.1.2" in workflow
     assert "format: cyclonedx" in workflow
     assert "severity: HIGH,CRITICAL" in workflow
     assert "cosign sign --yes" in workflow

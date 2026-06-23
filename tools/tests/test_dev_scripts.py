@@ -81,7 +81,7 @@ def _run_detector(
         rocksdb_dir.mkdir()
         (rocksdb_dir / "CURRENT").write_text("MANIFEST-000001\n", encoding="utf-8")
 
-    env = {
+    env: dict[str, str] = {
         **os.environ,
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "SIBYL_STORE": "surreal",

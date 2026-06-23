@@ -7,7 +7,7 @@
   },
   "packageManager": "pnpm@11.5.2",
   "devDependencies": {
-    "prettier": "^3.8.3"
+    "prettier": "^3.8.4"
   },
   "engines": {
     "node": "~24"

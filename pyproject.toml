@@ -27,7 +27,9 @@ constraint-dependencies = [
     "httpx>=0.28,<1.0",
     "playwright>=1.50,<2.0",
     # Transitive deps (avoid yanked versions)
+    "cryptography>=48.0.1",
     "numpy>=2.4.1",
+    "python-multipart>=0.0.30",
 ]
 
 [tool.uv.workspace]
