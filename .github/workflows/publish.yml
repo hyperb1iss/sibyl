@@ -95,6 +95,14 @@ jobs:
       - name: "△ Build Python packages"
         run: moon run python-package-build
 
+      - name: "► Upload Python distribution artifacts"
+        uses: actions/upload-artifact@v7
+        with:
+          name: sibyl-python-${{ inputs.tag }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 90
+
       - name: "► Publish to PyPI"
         if: ${{ !inputs.dry_run }}
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -274,11 +282,18 @@ jobs:
           echo "publish=true" >> "$GITHUB_OUTPUT"
 
       - name: "△ Generate PKGBUILD"
-        if: ${{ steps.aur_state.outputs.publish == 'true' }}
         run: |
           python tools/release/aur_pkgbuild.py \
             --version "${{ steps.version.outputs.version }}" \
             --output PKGBUILD
+
+      - name: "► Upload AUR PKGBUILD artifact"
+        uses: actions/upload-artifact@v7
+        with:
+          name: sibyl-aur-${{ steps.version.outputs.version }}
+          path: PKGBUILD
+          if-no-files-found: error
+          retention-days: 90
 
       - name: "► Publish to AUR"
         if: ${{ steps.aur_state.outputs.publish == 'true' }}
@@ -577,64 +592,123 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
 
+      - name: "► Download Python distributions"
+        uses: actions/download-artifact@v8
+        with:
+          name: sibyl-python-${{ inputs.tag }}
+          path: release-evidence/python
+
+      - name: "► Download Homebrew formula"
+        uses: actions/download-artifact@v8
+        with:
+          name: sibyl-homebrew-${{ steps.version.outputs.version }}
+          path: release-evidence/homebrew
+
+      - name: "► Download AUR PKGBUILD"
+        uses: actions/download-artifact@v8
+        with:
+          name: sibyl-aur-${{ steps.version.outputs.version }}
+          path: release-evidence/aur
+
       - name: "► Download image evidence"
         uses: actions/download-artifact@v8
         with:
-          path: release-evidence
+          path: release-evidence/images
           pattern: sibyl-*-${{ steps.version.outputs.version }}-*
           merge-multiple: true
 
       - name: "◇ Prepare release evidence assets"
         run: |
           set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
           mkdir -p release-assets
-          find release-evidence -type f \( \
+          find release-evidence/images -type f \( \
             -name "*.cdx.json" -o \
             -name "*-cosign-receipt.json" \
           \) -exec cp {} release-assets/ \;
+          find release-evidence/python -type f \( \
+            -name "*.whl" -o \
+            -name "*.tar.gz" \
+          \) -exec cp {} release-assets/ \;
+
+          formula="$(find release-evidence/homebrew -type f -name "sibyl.rb" -print -quit)"
+          pkgbuild="$(find release-evidence/aur -type f -name "PKGBUILD" -print -quit)"
+          test -n "$formula"
+          test -n "$pkgbuild"
+          cp "$formula" "release-assets/sibyl-homebrew-${version}.rb"
+          cp "$pkgbuild" "release-assets/sibyl-${version}-PKGBUILD"
+
           test "$(find release-assets -maxdepth 1 -type f -name '*.cdx.json' | wc -l)" -eq 2
           test "$(find release-assets -maxdepth 1 -type f -name '*-cosign-receipt.json' | wc -l)" -eq 2
+          test "$(find release-assets -maxdepth 1 -type f -name '*.whl' | wc -l)" -eq 3
+          test "$(find release-assets -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 3
+          test -f "release-assets/sibyl-homebrew-${version}.rb"
+          test -f "release-assets/sibyl-${version}-PKGBUILD"
+
+          (
+            cd release-assets
+            sha256sum -- * > "sibyl-${version}-checksums.txt"
+          )
+
+      - name: "◇ Prepare release body"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release view "${{ inputs.tag }}" --json body --jq .body \
+            | awk '
+                /^## Install$/ { stop = 1 }
+                /^## Artifacts$/ { stop = 1 }
+                !stop { print }
+              ' > release-body.md
+          cat >> release-body.md <<'EOF'
+
+          ## Install
+
+          **Local server**
+          ```bash
+          curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --version ${{ steps.version.outputs.version }}
+          ```
+
+          **Remote CLI**
+          ```bash
+          curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote --version ${{ steps.version.outputs.version }}
+          sibyl init --remote https://sibyl.example.com
+          sibyl auth login
+          ```
+
+          **Homebrew**
+          ```bash
+          brew install hyperb1iss/tap/sibyl
+          sibyl up
+          ```
+
+          **Arch Linux (AUR)**
+          ```bash
+          paru -S sibyl
+          sibyl up
+          ```
+
+          **Headless server**
+          ```bash
+          curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --version ${{ steps.version.outputs.version }} --no-open
+          ```
+
+          ## Artifacts
+
+          This release includes Python wheels and sdists, the generated
+          Homebrew formula, the generated AUR PKGBUILD, Docker SBOMs,
+          cosign receipts, and a SHA256 checksum manifest.
+          EOF
 
       - name: "◆ Update release with install instructions"
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag }}
           fail_on_unmatched_files: true
+          body_path: release-body.md
           files: |
-            release-assets/*.cdx.json
-            release-assets/*-cosign-receipt.json
-          append_body: |
-
-            ## Install
-
-            **Local server**
-            ```bash
-            curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --version ${{ steps.version.outputs.version }}
-            ```
-
-            **Remote CLI**
-            ```bash
-            curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote --version ${{ steps.version.outputs.version }}
-            sibyl init --remote https://sibyl.example.com
-            sibyl auth login
-            ```
-
-            **Homebrew**
-            ```bash
-            brew install hyperb1iss/tap/sibyl
-            sibyl up
-            ```
-
-            **Arch Linux (AUR)**
-            ```bash
-            paru -S sibyl
-            sibyl up
-            ```
-
-            **Headless server**
-            ```bash
-            curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --version ${{ steps.version.outputs.version }} --no-open
-            ```
+            release-assets/*
 
       - name: "► Summary"
         run: |

@@ -92,6 +92,8 @@ def test_release_workflow_validates_before_tag_or_publish() -> None:
     assert "from: ${{ steps.version.outputs.previous_tag }}" in workflow
     assert "Generate AI release notes" in workflow
     assert "continue-on-error: true" in workflow
+    assert "provider: openai" in workflow
+    assert "secrets.OPENAI_API_KEY" in workflow
     assert "Prepare release notes" in workflow
     assert "steps.ai_release_notes.outputs.content" in workflow
     assert "AI-generated release notes were unavailable" in workflow
@@ -116,14 +118,31 @@ def test_nightly_regression_uploads_candidate_sha_receipts() -> None:
     assert "moon run backup-restore-gate" in workflow
 
 
+def _publish_workflow() -> str:
+    return (REPO_ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8")
+
+
 def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
-    workflow = (REPO_ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8")
+    workflow = _publish_workflow()
 
     assert "rc-gate:" in workflow
     assert "homebrew:" in workflow
     assert "aur:" in workflow
     assert "moon run :check" in workflow
     assert "moon run python-package-build" in workflow
+    assert workflow.count("needs: rc-gate") == PUBLISH_ENTRYPOINTS_REQUIRING_RC_GATE
+    assert workflow.index("rc-gate:") < workflow.index("moon run python-package-build")
+    assert workflow.index("rc-gate:") < workflow.index("Docker: ${{ matrix.image }}")
+    assert "id-token: write" in workflow
+    assert "uv tool install sibyld" not in workflow
+
+
+def test_publish_workflow_uploads_python_homebrew_and_aur_artifacts() -> None:
+    workflow = _publish_workflow()
+
+    assert "Upload Python distribution artifacts" in workflow
+    assert "sibyl-python-${{ inputs.tag }}" in workflow
+    assert "path: dist/*" in workflow
     assert "tools/release/homebrew_formula.py" in workflow
     assert "tools/release/aur_pkgbuild.py" in workflow
     assert "hyperb1iss/homebrew-tap" in workflow
@@ -150,20 +169,29 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
             "Check AUR package version",
             "https://aur.archlinux.org/rpc/?v=5&type=info&arg[]=sibyl",
             "steps.aur_state.outputs.publish == 'true'",
+            "Upload AUR PKGBUILD artifact",
+            "sibyl-aur-${{ steps.version.outputs.version }}",
         )
     )
     assert "# v4.1.3" in workflow
     assert "AUR_SSH_KEY" in workflow
     assert workflow.index("gh-action-pypi-publish") < workflow.index("homebrew_formula.py")
     assert workflow.index("gh-action-pypi-publish") < workflow.index("aur_pkgbuild.py")
-    assert workflow.count("needs: rc-gate") == PUBLISH_ENTRYPOINTS_REQUIRING_RC_GATE
-    assert workflow.index("rc-gate:") < workflow.index("moon run python-package-build")
-    assert workflow.index("rc-gate:") < workflow.index("Docker: ${{ matrix.image }}")
+
+
+def test_publish_workflow_keeps_install_instructions_current() -> None:
+    workflow = _publish_workflow()
+
     assert "install.sh | sh -s -- --version ${{ steps.version.outputs.version }}" in workflow
     assert (
         "install.sh | sh -s -- --remote --version ${{ steps.version.outputs.version }}" in workflow
     )
     assert "paru -S sibyl" in workflow
+
+
+def test_publish_workflow_attaches_docker_and_release_evidence() -> None:
+    workflow = _publish_workflow()
+
     assert "needs: [python, homebrew, aur, docker-sign]" in workflow
     assert "docker-security:" in workflow
     assert "fail-fast: false" in workflow
@@ -174,15 +202,29 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     assert "severity: HIGH,CRITICAL" in workflow
     assert "cosign sign --yes" in workflow
     assert "Upload Cosign receipt" in workflow
+    assert "Download Python distributions" in workflow
+    assert "Download Homebrew formula" in workflow
+    assert "Download AUR PKGBUILD" in workflow
     assert "Download image evidence" in workflow
     assert "Prepare release evidence assets" in workflow
     assert "pattern: sibyl-*-${{ steps.version.outputs.version }}-*" in workflow
-    assert "find release-evidence -type f" in workflow
-    assert "release-assets/*.cdx.json" in workflow
-    assert "release-assets/*-cosign-receipt.json" in workflow
+    assert "find release-evidence/images -type f" in workflow
+    assert "release-evidence/python" in workflow
+    assert "release-evidence/homebrew" in workflow
+    assert "release-evidence/aur" in workflow
+    assert "sibyl-homebrew-${version}.rb" in workflow
+    assert "sibyl-${version}-PKGBUILD" in workflow
+    assert "sibyl-${version}-checksums.txt" in workflow
+    assert "Prepare release body" in workflow
+    assert "body_path: release-body.md" in workflow
+    assert "append_body:" not in workflow
+    assert "release-assets/*" in workflow
     assert "fail_on_unmatched_files: true" in workflow
-    assert "id-token: write" in workflow
-    assert "uv tool install sibyld" not in workflow
+
+
+def test_publish_workflow_summary_links_all_package_channels() -> None:
+    workflow = _publish_workflow()
+
     assert "[sibyld](https://pypi.org/project/sibyld/" in workflow
     assert "[sibyl](https://aur.archlinux.org/packages/sibyl)" in workflow
 

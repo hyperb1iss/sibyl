@@ -174,9 +174,8 @@ jobs:
           from: ${{ steps.version.outputs.previous_tag }}
           to: HEAD
           version-name: ${{ steps.version.outputs.version }}
-          provider: anthropic
-          model: claude-opus-4-8
-          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          provider: openai
+          api-key: ${{ secrets.OPENAI_API_KEY }}
 
       - name: "◇ Prepare release notes"
         if: ${{ !inputs.dry_run }}
