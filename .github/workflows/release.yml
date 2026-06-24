@@ -162,43 +162,31 @@ jobs:
         if: ${{ !inputs.dry_run }}
         id: ai_release_notes
         uses: hyperb1iss/git-iris@v2
-        continue-on-error: true
         with:
           command: release-notes
+          version: v2.1.0
           from: ${{ steps.version.outputs.previous_tag }}
           to: HEAD
           version-name: ${{ steps.version.outputs.version }}
-          provider: openai
-          api-key: ${{ secrets.OPENAI_API_KEY }}
+          provider: anthropic
+          model: claude-opus-4-8
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: "◇ Prepare release notes"
         if: ${{ !inputs.dry_run }}
         id: release_notes
         env:
           AI_CONTENT: ${{ steps.ai_release_notes.outputs.content }}
-          PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           notes_path="$(mktemp)"
 
-          if [[ -n "$AI_CONTENT" ]]; then
-            printf '%s\n' "$AI_CONTENT" > "$notes_path"
-          else
-            {
-              echo "## v$VERSION"
-              echo ""
-              echo "AI-generated release notes were unavailable; using deterministic git log fallback."
-              echo ""
-              echo "### Changes"
-              if git rev-parse --verify --quiet "$PREVIOUS_TAG^{commit}" >/dev/null; then
-                git log --no-merges --pretty=format:'- %s (%h)' "$PREVIOUS_TAG..HEAD"
-              else
-                git log --no-merges --pretty=format:'- %s (%h)'
-              fi
-              echo ""
-            } > "$notes_path"
+          if [[ ! "$AI_CONTENT" =~ [^[:space:]] ]]; then
+            echo "::error::Git-Iris generated empty release notes; refusing to create a release."
+            exit 1
           fi
+
+          printf '%s\n' "$AI_CONTENT" > "$notes_path"
 
           delimiter="release_notes_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
           {

@@ -22,6 +22,52 @@ PYTHON_RELEASE_PACKAGES = {
     "uv build --package sibyld --out-dir dist/",
 }
 PUBLISH_ENTRYPOINTS_REQUIRING_RC_GATE = 2
+RELEASE_WORKFLOW_REQUIRED_FRAGMENTS = (
+    "No version commit, tag, release, or publish was created.",
+    "moon run :check",
+    "nightly_run_id",
+    "if: ${{ !inputs.dry_run || inputs.nightly_run_id != '' }}",
+    'gh run view "$NIGHTLY_RUN_ID"',
+    'run.get("workflowName") != "Nightly Regression"',
+    'run.get("headSha") != expected_sha',
+    "nightly_run_id is required for live releases.",
+    "Release candidates must have VERSION pre-committed",
+    "rc-gate-receipt-${{ steps.candidate.outputs.sha }}",
+    r"(-[a-zA-Z0-9.]+)?",
+    "steps.version.outputs.needs_version_commit == 'true'",
+    "from: ${{ steps.version.outputs.previous_tag }}",
+    "Generate AI release notes",
+    "provider: anthropic",
+    "version: v2.1.0",
+    "model: claude-opus-4-8",
+    "secrets.ANTHROPIC_API_KEY",
+    "Prepare release notes",
+    "steps.ai_release_notes.outputs.content",
+    "Git-Iris generated empty release notes",
+    "[^[:space:]]",
+    'echo "::error::Git-Iris generated empty release notes; refusing to create a release."\n'
+    "            exit 1",
+    "prerelease: false",
+    "make_latest: true",
+    "RELEASE_NOTES_CONTENT",
+    "printf '%s\\n' \"$RELEASE_NOTES_CONTENT\"",
+)
+RELEASE_WORKFLOW_FORBIDDEN_FRAGMENTS = (
+    'git commit -m "🔖',
+    "chore(release): prepare v${{ steps.version.outputs.version }}",
+    "Update version",
+    "Commit version bump",
+    "Build and checks passed. Ready to release.",
+    "continue-on-error: true",
+    "provider: openai",
+    "secrets.OPENAI_API_KEY",
+    "deterministic git log fallback",
+    "AI-generated release notes were unavailable",
+    'git rev-parse --verify --quiet "$PREVIOUS_TAG^{commit}"',
+    "git log --no-merges --pretty=format:'- %s (%h)'",
+    "is_prerelease",
+    "cat << 'EOF' >> $GITHUB_STEP_SUMMARY",
+)
 
 
 def _root_task(task_id: str) -> dict[str, Any]:
@@ -44,6 +90,14 @@ def _root_task(task_id: str) -> dict[str, Any]:
 
 def _dep_targets(task_id: str) -> set[str]:
     return {dep["target"] for dep in _root_task(task_id)["deps"]}
+
+
+def _assert_fragments_present(content: str, fragments: tuple[str, ...]) -> None:
+    assert [fragment for fragment in fragments if fragment not in content] == []
+
+
+def _assert_fragments_absent(content: str, fragments: tuple[str, ...]) -> None:
+    assert [fragment for fragment in fragments if fragment in content] == []
 
 
 def test_root_check_covers_release_test_matrix() -> None:
@@ -72,39 +126,8 @@ def test_release_workflow_validates_before_tag_or_publish() -> None:
     assert rc_check_index < workflow.index("gh workflow run publish.yml")
     assert nightly_index < workflow.index('git tag -a "v${{ steps.version.outputs.version }}"')
     assert nightly_index < workflow.index("gh workflow run publish.yml")
-    assert 'git commit -m "🔖' not in workflow
-    assert "chore(release): prepare v${{ steps.version.outputs.version }}" not in workflow
-    assert "Update version" not in workflow
-    assert "Commit version bump" not in workflow
-    assert "No version commit, tag, release, or publish was created." in workflow
-    assert "Build and checks passed. Ready to release." not in workflow
-    assert "moon run :check" in workflow
-    assert "nightly_run_id" in workflow
-    assert "if: ${{ !inputs.dry_run || inputs.nightly_run_id != '' }}" in workflow
-    assert 'gh run view "$NIGHTLY_RUN_ID"' in workflow
-    assert 'run.get("workflowName") != "Nightly Regression"' in workflow
-    assert 'run.get("headSha") != expected_sha' in workflow
-    assert "nightly_run_id is required for live releases." in workflow
-    assert "Release candidates must have VERSION pre-committed" in workflow
-    assert "rc-gate-receipt-${{ steps.candidate.outputs.sha }}" in workflow
-    assert r"(-[a-zA-Z0-9.]+)?" in workflow
-    assert "steps.version.outputs.needs_version_commit == 'true'" in workflow
-    assert "from: ${{ steps.version.outputs.previous_tag }}" in workflow
-    assert "Generate AI release notes" in workflow
-    assert "continue-on-error: true" in workflow
-    assert "provider: openai" in workflow
-    assert "secrets.OPENAI_API_KEY" in workflow
-    assert "Prepare release notes" in workflow
-    assert "steps.ai_release_notes.outputs.content" in workflow
-    assert "AI-generated release notes were unavailable" in workflow
-    assert "prerelease: false" in workflow
-    assert "make_latest: true" in workflow
-    assert "is_prerelease" not in workflow
-    assert 'git rev-parse --verify --quiet "$PREVIOUS_TAG^{commit}"' in workflow
-    assert "git log --no-merges --pretty=format:'- %s (%h)'" in workflow
-    assert "RELEASE_NOTES_CONTENT" in workflow
-    assert "printf '%s\\n' \"$RELEASE_NOTES_CONTENT\"" in workflow
-    assert "cat << 'EOF' >> $GITHUB_STEP_SUMMARY" not in workflow
+    _assert_fragments_present(workflow, RELEASE_WORKFLOW_REQUIRED_FRAGMENTS)
+    _assert_fragments_absent(workflow, RELEASE_WORKFLOW_FORBIDDEN_FRAGMENTS)
 
 
 def test_nightly_regression_uploads_candidate_sha_receipts() -> None:
