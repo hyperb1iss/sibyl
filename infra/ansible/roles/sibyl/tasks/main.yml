@@ -123,6 +123,7 @@
 
 - name: Resolve the Tailscale interface address
   ansible.builtin.command: tailscale ip -4
+  check_mode: false
   register: sibyl_tailscale_ip
   changed_when: false
   until: sibyl_tailscale_ip.rc == 0 and (sibyl_tailscale_ip.stdout | trim | length) > 0
