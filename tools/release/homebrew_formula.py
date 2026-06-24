@@ -9,6 +9,16 @@ from pathlib import Path
 from urllib.request import urlopen
 
 PACKAGES = ("sibyl-dev", "sibyld", "sibyl-core")
+_PRERELEASE_LABELS = {
+    "a": "a",
+    "alpha": "a",
+    "b": "b",
+    "beta": "b",
+    "c": "rc",
+    "pre": "rc",
+    "preview": "rc",
+    "rc": "rc",
+}
 
 
 @dataclass(frozen=True)
@@ -19,7 +29,15 @@ class PackageArtifact:
 
 
 def pep440_version(version: str) -> str:
-    return re.sub(r"-([a-zA-Z]+)\.", r"\1", version)
+    match = re.fullmatch(
+        r"(?P<base>[0-9]+(?:\.[0-9]+)*)(?:-(?P<label>[A-Za-z]+)\.(?P<number>[0-9]+))?",
+        version,
+    )
+    if not match or not match.group("label"):
+        return version
+
+    label = _PRERELEASE_LABELS.get(match.group("label").lower(), match.group("label").lower())
+    return f"{match.group('base')}{label}{match.group('number')}"
 
 
 def fetch_package_artifact(package: str, version: str) -> PackageArtifact:

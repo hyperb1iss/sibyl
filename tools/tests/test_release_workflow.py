@@ -6,6 +6,8 @@ import subprocess
 from shutil import which
 from typing import Any, cast
 
+import tomllib
+from packaging.requirements import Requirement
 from tools.release.aur_pkgbuild import render_pkgbuild as render_aur_pkgbuild
 from tools.release.homebrew_formula import PackageArtifact, pep440_version, render_formula
 from tools.tests.conftest import REPO_ROOT
@@ -98,6 +100,13 @@ def _assert_fragments_present(content: str, fragments: tuple[str, ...]) -> None:
 
 def _assert_fragments_absent(content: str, fragments: tuple[str, ...]) -> None:
     assert [fragment for fragment in fragments if fragment in content] == []
+
+
+def _requirement_by_name(dependencies: list[str], name: str) -> Requirement:
+    requirements = [Requirement(dependency) for dependency in dependencies]
+    matches = [requirement for requirement in requirements if requirement.name == name]
+    assert len(matches) == 1
+    return matches[0]
 
 
 def test_root_check_covers_release_test_matrix() -> None:
@@ -268,6 +277,35 @@ def test_install_script_defaults_to_server_ui_story() -> None:
     assert "uv tool upgrade" not in installer
 
 
+def test_pep440_version_normalizes_supported_prerelease_labels() -> None:
+    cases = {
+        "1.0.0": "1.0.0",
+        "1.0.0-rc.1": "1.0.0rc1",
+        "1.0.0-alpha.1": "1.0.0a1",
+        "1.0.0-beta.2": "1.0.0b2",
+        "1.0.0-c.3": "1.0.0rc3",
+        "1.0.0-pre.4": "1.0.0rc4",
+        "1.0.0-preview.5": "1.0.0rc5",
+    }
+
+    assert {version: pep440_version(version) for version in cases} == cases
+
+
+def test_python_packages_pin_sibyl_core_to_current_release() -> None:
+    version = pep440_version((REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip())
+    package_dependencies = {
+        "apps/cli/pyproject.toml": set(),
+        "apps/api/pyproject.toml": {"crawler", "embeddings", "graph", "graphrag", "llm"},
+    }
+
+    for path, extras in package_dependencies.items():
+        pyproject = tomllib.loads((REPO_ROOT / path).read_text(encoding="utf-8"))
+        requirement = _requirement_by_name(pyproject["project"]["dependencies"], "sibyl-core")
+
+        assert requirement.extras == extras
+        assert str(requirement.specifier) == f"=={version}"
+
+
 def test_python_package_build_verifies_cli_bundle_data() -> None:
     task = _root_task("python-package-build")
     input_paths = {cast(str, entry.get("file") or entry.get("glob")) for entry in task["inputs"]}
@@ -278,6 +316,17 @@ def test_python_package_build_verifies_cli_bundle_data() -> None:
     assert "sibyl_cli/data/skills/sibyl/SKILL.md" in script
     assert "sibyl_cli/data/skill-packs/core.md" in script
     assert "sibyl_cli/data/skill-packs/workflows.md" in script
+    assert "Requires-Dist" in script
+    assert "sibyl_dev-*.whl" in script
+    assert "sibyld-*.whl" in script
+    assert "must declare exactly one sibyl-core dependency" in script
+    assert "pep440_version" in script
+    assert "expected_requirements" in script
+    assert (
+        '"sibyld-*.whl": (expected_core, {"crawler", "embeddings", "graph", "graphrag", "llm"})'
+        in script
+    )
+    assert "expected_core" in script
 
 
 def test_python_package_build_covers_cli_core_and_daemon() -> None:

@@ -510,6 +510,9 @@ tasks:
     inputs:
       - tools/tests/conftest.py
       - tools/tests/test_release_workflow.py
+      - VERSION
+      - apps/api/pyproject.toml
+      - apps/cli/pyproject.toml
       - .github/workflows/release.yml
       - .github/workflows/publish.yml
       - moon.yml
@@ -523,8 +526,11 @@ tasks:
       uv build --package sibyl-dev --out-dir dist/
       uv build --package sibyld --out-dir dist/
       python - <<'PY'
+      from email.parser import Parser
       from pathlib import Path
+      import re
       from zipfile import ZipFile
+      from tools.release.homebrew_formula import pep440_version
 
       wheel = next(Path("dist").glob("sibyl_dev-*.whl"))
       required = {
@@ -538,6 +544,43 @@ tasks:
           missing = sorted(required - set(archive.namelist()))
       if missing:
           raise SystemExit("Missing CLI bundle data: " + ", ".join(missing))
+
+      version = pep440_version(Path("VERSION").read_text(encoding="utf-8").strip())
+      expected_core = f"=={version}"
+      expected_requirements = {
+          "sibyl_dev-*.whl": (expected_core, set()),
+          "sibyld-*.whl": (expected_core, {"crawler", "embeddings", "graph", "graphrag", "llm"}),
+      }
+      core_requirement = re.compile(
+          r"^sibyl-core(?:\[(?P<extras>[^\]]+)\])?\s*(?P<specifier>==\s*[^;,\s]+)"
+      )
+
+      for wheel_pattern, (expected_specifier, expected_extras) in expected_requirements.items():
+          wheel = next(Path("dist").glob(wheel_pattern))
+          with ZipFile(wheel) as archive:
+              metadata_name = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
+              metadata = Parser().parsestr(archive.read(metadata_name).decode("utf-8"))
+          core_requirements = []
+          for value in metadata.get_all("Requires-Dist", []):
+              if match := core_requirement.match(value):
+                  extras = {
+                      extra.strip()
+                      for extra in (match.group("extras") or "").split(",")
+                      if extra.strip()
+                  }
+                  core_requirements.append((match.group("specifier").replace(" ", ""), extras))
+          if len(core_requirements) != 1:
+              raise SystemExit(f"{wheel.name} must declare exactly one sibyl-core dependency")
+          specifier, extras = core_requirements[0]
+          if specifier != expected_specifier:
+              raise SystemExit(
+                  f"{wheel.name} pins sibyl-core as {specifier}, expected {expected_specifier}"
+              )
+          if extras != expected_extras:
+              raise SystemExit(
+                  f"{wheel.name} declares sibyl-core extras {sorted(extras)}, "
+                  f"expected {sorted(expected_extras)}"
+              )
       PY
       ls -la dist/
     inputs:
