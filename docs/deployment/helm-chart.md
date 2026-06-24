@@ -9,8 +9,8 @@ apiVersion: v2
 name: sibyl
 description: Knowledge graph and task workflow for durable development memory
 type: application
-version: 1.0.0-rc.6
-appVersion: "1.0.0-rc.6"
+version: 1.0.0-rc.7
+appVersion: "1.0.0-rc.7"
 ```
 
 Release builds update `version` and `appVersion` from the repository `VERSION` file.
@@ -177,11 +177,15 @@ backend:
 
   readinessProbe:
     httpGet:
-      path: /api/health
+      path: /api/health/ready
       port: http
     initialDelaySeconds: 5
     periodSeconds: 10
 ```
+
+The readiness probe must hit `/api/health/ready`, the deep readiness endpoint that returns `503`
+when SurrealDB is unreachable. Liveness stays on `/api/health`, which only asserts the process is
+up.
 
 ### Environment Variables
 
@@ -450,11 +454,14 @@ worker:
 
 ## Ingress Configuration
 
+Ingress is split into a shared route table (`ingress.hosts`) plus two independently toggled
+renderers: classic `networking.k8s.io/v1` Ingress under `ingress.classic`, and Gateway API
+`gateway.networking.k8s.io/v1` HTTPRoute under `ingress.gatewayApi`. Enable whichever your cluster
+uses. The legacy `ingress.enabled` flag still works as a compatibility toggle for classic Ingress.
+
 ```yaml
 ingress:
-  enabled: false
-  className: ""
-  annotations: {}
+  # Shared route table consumed by both classic Ingress and Gateway API HTTPRoute.
   hosts:
     - host: sibyl.local
       paths:
@@ -467,10 +474,114 @@ ingress:
         - path: /
           pathType: Prefix
           service: frontend
-  tls: []
-  # - secretName: sibyl-tls
-  #   hosts:
-  #     - sibyl.example.com
+  classic:
+    # Render a networking.k8s.io/v1 Ingress.
+    enabled: false
+    # Ingress class name. Empty leaves controller selection to cluster policy.
+    className: ""
+    annotations: {}
+    tls: []
+    # - secretName: sibyl-tls
+    #   hosts:
+    #     - sibyl.example.com
+  gatewayApi:
+    # Render a gateway.networking.k8s.io/v1 HTTPRoute.
+    enabled: false
+    annotations: {}
+    parentRefs: []
+    # - name: shared-gateway
+    #   namespace: gateway-system
+    #   sectionName: https
+    # Optional hostnames override. Defaults to ingress.hosts[*].host.
+    hostnames: []
+```
+
+## Network Policy
+
+Renders a default-deny NetworkPolicy plus explicit allows for frontend/backend ingress and SurrealDB
+(and optional Redis/Valkey) egress. Leave disabled unless your cluster enforces NetworkPolicies.
+
+```yaml
+networkPolicy:
+  # Enable default-deny plus explicit app allows.
+  enabled: false
+  ingress:
+    # Sources allowed to reach frontend/backend, usually ingress controller pods.
+    from: []
+    # - namespaceSelector:
+    #     matchLabels:
+    #       kubernetes.io/metadata.name: ingress-nginx
+  egress:
+    # Allow DNS egress for selected Sibyl pods.
+    allowDns: true
+    dnsPorts:
+      - 53
+    # Extra egress rules appended to backend/worker policies.
+    extra: []
+  surrealdb:
+    # Destination selectors for the SurrealDB service/pods.
+    to: []
+    ports:
+      - 8000
+  redis:
+    # Enable Redis/Valkey egress allow rules.
+    enabled: false
+    to: []
+    ports:
+      - 6379
+```
+
+## Pod Security
+
+Labels the release namespace with Pod Security Admission enforce/audit/warn at the `restricted`
+level. Enable for hardened multi-tenant clusters.
+
+```yaml
+podSecurity:
+  # Label the release namespace with Pod Security restricted enforce/audit/warn.
+  enforceRestricted: false
+  version: "latest"
+```
+
+## Bootstrap
+
+A post-install/post-upgrade Job that seeds the first organization and an optional default memory
+space, so a fresh install lands ready to use. Disabled by default.
+
+```yaml
+bootstrap:
+  enabled: false
+  organization:
+    name: "Sibyl"
+    slug: ""
+  memorySpace:
+    enabled: true
+    name: "Default memory"
+    scope: "private"
+    scopeKey: ""
+  job:
+    annotations: {}
+    backoffLimit: 3
+    ttlSecondsAfterFinished: 300
+    podAnnotations: {}
+```
+
+## Break-Glass
+
+Bounded emergency local-owner login for SSO outages. Keep disabled in normal operation; when
+enabled, both `expiresAt` (no more than four hours out) and `allowedIPs` are required.
+
+```yaml
+breakGlass:
+  enabled: false
+  # Source CIDRs allowed to use break-glass login when enabled.
+  allowedIPs: []
+  # UTC timestamp after which app-level break-glass login is denied.
+  expiresAt: ""
+  # Existing secret containing owner bootstrap fields.
+  existingSecret: ""
+  ownerEmailKey: "owner-email"
+  ownerPasswordKey: "owner-password"
 ```
 
 ## Service Account
@@ -497,7 +608,7 @@ backend:
   replicaCount: 3
   image:
     repository: ghcr.io/hyperb1iss/sibyl-api
-    tag: "1.0.0-rc.6"
+    tag: "1.0.0-rc.7"
     pullPolicy: Always
   existingSecret: sibyl-secrets
   surreal:
@@ -553,11 +664,6 @@ worker:
     enabled: true
 
 ingress:
-  enabled: true
-  className: "nginx"
-  annotations:
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
   hosts:
     - host: sibyl.example.com
       paths:
@@ -570,10 +676,16 @@ ingress:
         - path: /
           pathType: Prefix
           service: frontend
-  tls:
-    - secretName: sibyl-tls
-      hosts:
-        - sibyl.example.com
+  classic:
+    enabled: true
+    className: "nginx"
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    tls:
+      - secretName: sibyl-tls
+        hosts:
+          - sibyl.example.com
 
 serviceAccount:
   create: true
@@ -585,21 +697,26 @@ serviceAccount:
 
 The chart includes these templates:
 
-| Template                 | Purpose                                 |
-| ------------------------ | --------------------------------------- |
-| backend-deployment.yaml  | Backend Deployment                      |
-| backend-service.yaml     | Backend ClusterIP Service               |
-| backend-hpa.yaml         | Backend HorizontalPodAutoscaler         |
-| frontend-deployment.yaml | Frontend Deployment                     |
-| frontend-service.yaml    | Frontend ClusterIP Service              |
-| frontend-hpa.yaml        | Frontend HorizontalPodAutoscaler        |
-| worker-deployment.yaml   | Worker Deployment                       |
-| worker-hpa.yaml          | Worker HorizontalPodAutoscaler          |
-| pdb.yaml                 | PodDisruptionBudgets                    |
-| configmap.yaml           | Non-secret environment config           |
-| surreal-secret.yaml      | Auto-generated Surreal secret (default) |
-| redis-secret.yaml        | Auto-generated Redis/Valkey secret      |
-| serviceaccount.yaml      | ServiceAccount                          |
+| Template                 | Purpose                                     |
+| ------------------------ | ------------------------------------------- |
+| backend-deployment.yaml  | Backend Deployment                          |
+| backend-service.yaml     | Backend ClusterIP Service                   |
+| backend-hpa.yaml         | Backend HorizontalPodAutoscaler             |
+| frontend-deployment.yaml | Frontend Deployment                         |
+| frontend-service.yaml    | Frontend ClusterIP Service                  |
+| frontend-hpa.yaml        | Frontend HorizontalPodAutoscaler            |
+| worker-deployment.yaml   | Worker Deployment                           |
+| worker-hpa.yaml          | Worker HorizontalPodAutoscaler              |
+| pdb.yaml                 | PodDisruptionBudgets                        |
+| configmap.yaml           | Non-secret environment config               |
+| surreal-secret.yaml      | Auto-generated Surreal secret (default)     |
+| redis-secret.yaml        | Auto-generated Redis/Valkey secret          |
+| bootstrap-job.yaml       | Post-install tenant bootstrap Job           |
+| ingress.yaml             | Classic networking.k8s.io/v1 Ingress        |
+| httproute.yaml           | Gateway API HTTPRoute                       |
+| networkpolicy.yaml       | Default-deny plus app-allow NetworkPolicies |
+| podsecurity.yaml         | Namespace Pod Security enforcement labels   |
+| serviceaccount.yaml      | ServiceAccount                              |
 
 ## Debugging
 

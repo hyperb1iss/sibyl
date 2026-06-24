@@ -167,6 +167,10 @@ The same loop runs everywhere:
 - **Web UI:** the [memory workspace](./memory-workspace.md) shows captures, imports, and synthesis
   for human oversight.
 
+Memory also grows from bulk feeds outside the per-entry loop: transcript ingestion
+(`sibyl ingest claude-code`/`codex`) replays past sessions, and document collections (`sibyl docs`)
+import reference material.
+
 ## Next Steps
 
 - [Capturing Knowledge](./capturing-knowledge.md) - Quality patterns for remember

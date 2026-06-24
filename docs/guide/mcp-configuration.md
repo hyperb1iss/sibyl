@@ -151,12 +151,13 @@ sibyl auth api-key create --name "MCP Client" --scopes mcp
 
 ### Core Settings
 
-| Variable            | Default     | Description                      |
-| ------------------- | ----------- | -------------------------------- |
-| `SIBYL_SERVER_HOST` | `localhost` | Host to bind to                  |
-| `SIBYL_SERVER_PORT` | `3334`      | Port to listen on                |
-| `SIBYL_SERVER_URL`  | -           | Public URL (for OAuth callbacks) |
-| `SIBYL_SERVER_NAME` | `sibyl`     | Server name in MCP responses     |
+| Variable            | Default                 | Description                                    |
+| ------------------- | ----------------------- | ---------------------------------------------- |
+| `SIBYL_SERVER_HOST` | `localhost`             | Host to bind to                                |
+| `SIBYL_SERVER_PORT` | `3334`                  | Port to listen on                              |
+| `SIBYL_PUBLIC_URL`  | `http://localhost:3337` | Public base URL for OAuth callbacks/redirects  |
+| `SIBYL_SERVER_URL`  | -                       | Override API base URL (defaults to public_url) |
+| `SIBYL_SERVER_NAME` | `sibyl`                 | Server name in MCP responses                   |
 
 ### Authentication Settings
 
@@ -175,11 +176,10 @@ sibyl auth api-key create --name "MCP Client" --scopes mcp
 
 ### Database Settings
 
-| Variable             | Default     | Description                                    |
-| -------------------- | ----------- | ---------------------------------------------- |
-| `SIBYL_SURREAL_URL`  | -           | SurrealDB connection URL (`ws://` / `http://`) |
-| `SIBYL_REDIS_HOST`   | `127.0.0.1` | Optional Redis/Valkey host                     |
-| `SIBYL_POSTGRES_URL` | -           | Migration/rehearsal-only PostgreSQL            |
+| Variable            | Default     | Description                                    |
+| ------------------- | ----------- | ---------------------------------------------- |
+| `SIBYL_SURREAL_URL` | -           | SurrealDB connection URL (`ws://` / `http://`) |
+| `SIBYL_REDIS_HOST`  | `127.0.0.1` | Optional Redis/Valkey host                     |
 
 `moon run dev` provisions a local SurrealDB automatically. The `memory://` URL is a test-only mode
 and is rejected by the production config validator.

@@ -213,7 +213,7 @@ Find entities directly connected to a specific entity.
       "id": "template_auth",
       "type": "template",
       "name": "Auth Middleware Template",
-      "relationship": "REFERENCES",
+      "relationship": "DOCUMENTED_IN",
       "direction": "outgoing",
       "distance": 1
     }

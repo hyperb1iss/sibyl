@@ -13,10 +13,13 @@ Sibyl consists of four components plus one unified storage backend:
 | **Worker**    | arq job queue processor             | -      |
 | **Frontend**  | Next.js 16 web UI                   | 3337   |
 | **SurrealDB** | Graph + content + auth (default)    | 8000\* |
-| **Postgres**  | External archive rehearsal only     | 5433\* |
 
-\*Default internal ports. External mappings vary by deployment mode. PostgreSQL is not deployed by
-default; use an operator-managed instance only for explicit migration and archive-rehearsal flows.
+\*Default internal ports. External mappings vary by deployment mode.
+
+> **Migration-only:** PostgreSQL is **not** a deployed Sibyl component. It is consumed only by the
+> standalone `migrate` CLI when restoring a retained `postgres.sql` archive against an
+> operator-managed database (default port `5433`). It never runs as an ambient sidecar in any
+> supported deployment.
 
 ## Runtime Boundary
 

@@ -24,19 +24,6 @@ Basic usage of the four most common tools (search, explore, add, manage).
 uv run python apps/api/examples/quickstart.py
 ```
 
-### [task_workflow_example.py](task_workflow_example.py)
-
-Full task management lifecycle including:
-
-- Creating projects and tasks
-- Task state transitions (start, block, unblock, review, complete)
-- Automatic knowledge linking
-- Learning capture and effort estimation
-
-```bash
-uv run python apps/api/examples/task_workflow_example.py
-```
-
 ### [mcp_client_example.py](mcp_client_example.py)
 
 Calling Sibyl as an MCP client over HTTP.
@@ -70,8 +57,8 @@ documented in [`apps/api/README.md`](../README.md).
 
 ## Entity Types
 
-Sibyl tracks roughly 29 entity types. The graph operates on a memory loop of recall, act, remember,
-and reflect. A representative slice:
+Sibyl tracks 33 entity types. The graph operates on a memory loop of recall, act, remember, and
+reflect. A representative slice:
 
 | Type       | Description                              |
 | ---------- | ---------------------------------------- |

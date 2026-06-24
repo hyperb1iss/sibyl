@@ -4,27 +4,40 @@ Health checks, logging, and monitoring for Sibyl deployments.
 
 ## Health Check Endpoints
 
-### Public Health Check
+### Public Liveness Check
 
 ```
 GET /api/health
 ```
 
-Simple health check for load balancers and monitoring. No authentication required.
+Simple liveness check for load balancers and monitoring. Asserts only that the process is up. No
+authentication required.
 
 **Response:**
 
 ```json
 {
-  "status": "healthy"
+  "status": "healthy",
+  "version": "1.0.0-rc.7"
 }
 ```
 
 Used by:
 
-- Kubernetes liveness/readiness probes
+- Kubernetes liveness probes
 - Load balancer health checks
 - Frontend connection checks
+
+### Public Readiness Check
+
+```
+GET /api/health/ready
+```
+
+Deep readiness check for Kubernetes readiness probes. Returns `200` when the serving dependencies
+(SurrealDB reachability) are healthy and `503` with a structured body when they are not, so traffic
+is gated until the backend can actually serve. Runs pre-auth and never touches the per-org query
+path. No authentication required.
 
 ### Detailed Health Check
 
@@ -94,7 +107,7 @@ backend:
 
   readinessProbe:
     httpGet:
-      path: /api/health
+      path: /api/health/ready
       port: http
     initialDelaySeconds: 5
     periodSeconds: 10
@@ -212,9 +225,15 @@ Clients receive a safe error response:
 
 ```json
 {
-  "detail": "An internal error occurred. Please try again later. (ref: a1b2c3d4)"
+  "error": "internal_error",
+  "message": "An internal error occurred. Please try again later.",
+  "request_id": "req_a1b2c3d4",
+  "remediation": "Retry the command or inspect server logs with this request ID."
 }
 ```
+
+The matching `error_id` is recorded in the server logs so an operator can correlate the
+client-facing `request_id` with the full traceback.
 
 ### Exception Context
 

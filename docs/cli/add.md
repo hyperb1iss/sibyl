@@ -46,7 +46,7 @@ also be read from a file with `--content-file`.
 
 ## Entity Types
 
-`--type` accepts any of around 29 entity types. Common ones:
+`--type` accepts any of 33 entity types. Common ones:
 
 | Type            | Use Case                                      |
 | --------------- | --------------------------------------------- |
@@ -156,7 +156,7 @@ sibyl add "Surreal driver per-org cloning" \
 
 # Configuration quirk
 sibyl add "Surreal embedded mode storage" \
-  "Embedded SurrealDB uses RocksDB at .moon/cache/surreal-dev and is single-writer. Memory mode (memory://) is test-only." \
+  "Embedded SurrealDB uses SurrealKV at .moon/cache/surreal-dev and is single-writer. Memory mode (memory://) is test-only." \
   --type episode --category config
 
 # Performance finding

@@ -1,7 +1,7 @@
 # MCP Tool: manage
 
 State-changing operations for Sibyl entities. Handles task workflow, epic management, source
-operations, analysis, and admin actions through a single action-dispatched tool.
+operations, and analysis through a single action-dispatched tool.
 
 ## Overview
 
@@ -13,11 +13,13 @@ The `manage` tool handles state-changing operations organized by category:
 | Epic Workflow     | `start_epic`, `complete_epic`, `archive_epic`, `update_epic`                                                            |
 | Source Operations | `crawl`, `sync`, `refresh`, `link_graph`, `link_graph_status`                                                           |
 | Analysis          | `estimate`, `prioritize`, `detect_cycles`, `suggest`                                                                    |
-| Admin             | `health`, `stats`, `rebuild_index`                                                                                      |
 
 For web applications, the REST task endpoints (`/api/tasks/{id}/*`) offer the same task workflow
 with finer-grained routes and authorization. The `manage` tool is the agent-facing equivalent and
-remains the only interface for source, analysis, and admin actions.
+remains the only interface for source and analysis actions.
+
+Server health and graph statistics are not `manage` actions. They are exposed as the
+`sibyl://health` and `sibyl://stats` MCP resources instead.
 
 ## Input Schema
 
@@ -561,42 +563,11 @@ Suggest relevant knowledge for a task.
 }
 ```
 
-## Admin Actions
+## Server Health and Statistics
 
-### health
-
-Server health check.
-
-```json
-{
-  "name": "manage",
-  "arguments": { "action": "health" }
-}
-```
-
-### stats
-
-Knowledge graph statistics.
-
-```json
-{
-  "name": "manage",
-  "arguments": { "action": "stats" }
-}
-```
-
-### rebuild_index
-
-Rebuild search indices.
-
-```json
-{
-  "name": "manage",
-  "arguments": { "action": "rebuild_index" }
-}
-```
-
-The `sibyl://health` and `sibyl://stats` MCP resources expose the same data without an action call.
+The `manage` tool does not expose server health, graph statistics, or index rebuilds as actions.
+Server health and graph statistics are available through the `sibyl://health` and `sibyl://stats`
+MCP resources, which return the same data without an action call.
 
 ## Response Schema
 

@@ -5,15 +5,15 @@ description: All entity types available in Sibyl
 
 # Entity Types
 
-Sibyl supports roughly 29 entity types for different kinds of knowledge. Understanding when to use
-each type helps keep your knowledge graph organized and searchable.
+Sibyl supports 33 entity types for different kinds of knowledge. Understanding when to use each type
+helps keep your knowledge graph organized and searchable.
 
 The full set, as accepted by `--type` on `sibyl add` and `--kind` on `sibyl remember`:
 
 `pattern`, `rule`, `template`, `guide`, `tool`, `language`, `topic`, `episode`, `knowledge_source`,
 `config_file`, `slash_command`, `project`, `epic`, `task`, `team`, `error_pattern`, `milestone`,
 `source`, `document`, `procedure`, `community`, `note`, `domain`, `artifact`, `decision`, `plan`,
-`idea`, `claim`, `session`.
+`idea`, `claim`, `preference`, `person`, `place`, `event`, `session`.
 
 You rarely touch most of them directly. The sections below cover the types you choose by hand;
 crawler, analysis, and reflection paths create the rest.

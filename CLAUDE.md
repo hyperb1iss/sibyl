@@ -70,19 +70,23 @@ sibyl/
 ├── apps/
 │   ├── api/              # sibyld - Server daemon (serve, worker, db)
 │   ├── cli/              # sibyl - Client CLI (task, search, add, etc.)
-│   └── web/              # Next.js 16 frontend
+│   ├── web/              # Next.js 16 frontend
+│   └── e2e/              # End-to-end tests
 ├── packages/python/
-│   └── sibyl-core/       # Shared library (models, graph, tools)
+│   └── sibyl-core/       # Shared library (models, graph, ai, retrieval, services)
 ├── skills/               # Claude Code skills
-└── charts/               # Helm charts
+├── hooks/                # Claude Code context hooks
+├── charts/               # Helm charts
+├── infra/                # Ansible self-host + local compose
+└── docs/                 # Documentation site (VitePress)
 ```
 
 ### CLI Executables
 
-| Binary   | Package    | Purpose                                    |
-| -------- | ---------- | ------------------------------------------ |
-| `sibyld` | `apps/api` | Server daemon (serve, worker, db, up/down) |
-| `sibyl`  | `apps/cli` | Client CLI (task, search, add, explore)    |
+| Binary   | Package    | Purpose                                                                 |
+| -------- | ---------- | ----------------------------------------------------------------------- |
+| `sibyld` | `apps/api` | Server daemon (serve, worker, db, bootstrap, export, generate, migrate) |
+| `sibyl`  | `apps/cli` | Client CLI (task, search, add, explore)                                 |
 
 ### Development Commands
 
@@ -123,7 +127,7 @@ sibyl debug status              # API/worker/graph/queue health + recent errors
 
 # Inspect the graph directly
 sibyl debug schema              # Entity types and counts
-sibyl debug query "MATCH ..."   # Run read-only Cypher queries
+sibyl debug query "SELECT name, entity_type FROM entity LIMIT 5;"   # Run read-only SurrealQL queries
 
 # Server logs
 sibyl logs tail                 # Last 50 log entries
@@ -140,7 +144,7 @@ sibyl logs tail --json
 **When to use:**
 
 - Tests failing mysteriously → `sibyl logs tail -l error`
-- Graph queries returning unexpected results → `sibyl debug query "MATCH ..."`
+- Graph queries returning unexpected results → `sibyl debug query "SELECT * FROM entity LIMIT 5;"`
 - Need to understand entity distribution → `sibyl debug schema`
 - Something feels broken → `sibyl debug status`
 
@@ -183,8 +187,8 @@ Older Graphiti archives contain two node shapes:
 
 Migration and compatibility queries must handle both:
 
-```cypher
-WHERE (n:Episodic OR n:Entity) AND n.entity_type = $type
+```surql
+SELECT * FROM entity WHERE entity_type = $type;  -- handles both Episodic- and Entity-shaped archives
 ```
 
 ### Package Imports
@@ -192,7 +196,7 @@ WHERE (n:Episodic OR n:Entity) AND n.entity_type = $type
 ```python
 # Core library
 from sibyl_core.models import Task, Entity
-from sibyl_core.graph import EntityManager
+from sibyl_core.services.graph import EntityManager
 
 # Server-side (apps/api)
 from sibyl.auth.dependencies import get_current_user
@@ -206,7 +210,7 @@ from sibyl.cli.common import ELECTRIC_PURPLE
 ### SurrealDB (default)
 
 - **Port 8000** for ws/http; RPC path is `/rpc`
-- **Embedded mode** uses RocksDB at `.moon/cache/surreal-dev` by default; single-writer
+- **Embedded mode** uses SurrealKV at `.moon/cache/surreal-dev` by default; single-writer
 - **Namespace-per-org** (`org_<uuid_hex>`): missing group_id routes queries to the wrong namespace
 - **Memory mode** (`memory://`) is test-only; forbidden in production via config validator
 - **Legacy graph compatibility code** is not part of the default memory loop. Graphiti-shaped

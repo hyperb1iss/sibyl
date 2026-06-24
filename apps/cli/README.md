@@ -68,11 +68,13 @@ sibyl task complete <id> --learnings "..."   # Complete with learnings
 
 ### Sources & synthesis
 
-| Command     | Purpose                                                           |
-| ----------- | ----------------------------------------------------------------- |
-| `crawl`     | Documentation sources, crawling, document browsing, graph linking |
-| `synthesis` | Source-grounded synthesis (plan, draft, verify, remember)         |
-| `archive`   | Browse archived raw quick captures                                |
+| Command     | Purpose                                                            |
+| ----------- | ------------------------------------------------------------------ |
+| `crawl`     | Documentation sources, crawling, document browsing, graph linking  |
+| `ingest`    | Import local source archives (Claude Code transcripts) into memory |
+| `docs`      | Import and list document collections                               |
+| `synthesis` | Source-grounded synthesis (plan, draft, verify, remember)          |
+| `archive`   | Browse archived raw quick captures                                 |
 
 ### Memory governance
 
@@ -89,6 +91,7 @@ sibyl task complete <id> --learnings "..."   # Complete with learnings
 
 | Command          | Purpose                                           |
 | ---------------- | ------------------------------------------------- |
+| `show`           | Resolve any entity or raw memory by ID            |
 | `health`         | Check API connectivity and health                 |
 | `auth`           | Login, logout, tokens, API keys                   |
 | `org`            | Organization switching and member management      |
@@ -175,6 +178,7 @@ Terminal output uses the SilkCircuit palette:
 - `#e135ff` Electric Purple: headers
 - `#80ffea` Neon Cyan: interactions
 - `#ff6ac1` Coral: data and IDs
+- `#f1fa8c` Electric Yellow: warnings and timestamps
 - `#50fa7b` Success Green
 - `#ff6363` Error Red
 

@@ -315,6 +315,7 @@ API_CLI_LEGACY_TERM_FILES = (
     "docs/api/rest-memory.md",
     "docs/api/rest-tasks.md",
     "docs/cli/add.md",
+    "docs/cli/docker.md",
     "docs/cli/entity.md",
     "docs/cli/index.md",
     "docs/cli/project.md",

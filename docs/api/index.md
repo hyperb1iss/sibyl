@@ -8,7 +8,7 @@ same daemon (`sibyld`) and share one SurrealDB-native runtime for graph, content
 
 ```
 Sibyl Combined App (Starlette, port 3334)
-|-- /api/*    --> FastAPI REST endpoints (26 routers)
+|-- /api/*    --> FastAPI REST endpoints (29 routers)
 |-- /mcp      --> MCP streamable-http transport (11 tools, 2 resources)
 |-- /ws       --> WebSocket for real-time updates
 '-- Lifespan  --> Coordination runtime + session management
@@ -28,8 +28,8 @@ multi-process or distributed worker deployments.
 
 ### MCP Tools (for Assistant Clients)
 
-The MCP interface exposes eleven tools that cover discovery, context, capture, synthesis, and
-administration. Tools are registered in `apps/api/src/sibyl/server.py`.
+The MCP interface exposes eleven tools that cover discovery, context, capture, synthesis, lifecycle
+operations, and introspection. Tools are registered in `apps/api/src/sibyl/server.py`.
 
 | Tool               | Purpose                                                      | Documentation                          |
 | ------------------ | ------------------------------------------------------------ | -------------------------------------- |
@@ -42,7 +42,7 @@ administration. Tools are registered in `apps/api/src/sibyl/server.py`.
 | `add`              | Create new knowledge entities                                | [mcp-add.md](./mcp-add.md)             |
 | `remember`         | Capture durable memory with verbatim raw provenance          | [mcp-remember.md](./mcp-remember.md)   |
 | `reflect`          | Reflect raw notes into reviewable memory candidates          | [mcp-reflect.md](./mcp-reflect.md)     |
-| `manage`           | Lifecycle operations and administration                      | [mcp-manage.md](./mcp-manage.md)       |
+| `manage`           | Task, epic, source, and analysis lifecycle operations        | [mcp-manage.md](./mcp-manage.md)       |
 | `logs`             | Recent server logs (OWNER role)                              | [mcp-logs.md](./mcp-logs.md)           |
 
 **MCP Endpoint:** `POST /mcp` (streamable-http transport)
@@ -52,7 +52,7 @@ The MCP server also exposes two resources: `sibyl://health` (connectivity and en
 
 ### REST API (for Applications)
 
-The REST API spans 26 routers. The pages below cover the most commonly used surfaces; the full
+The REST API spans 29 routers. The pages below cover the most commonly used surfaces; the full
 contract is in the OpenAPI schema.
 
 | Category  | Endpoints                            | Documentation                            |
@@ -65,9 +65,16 @@ contract is in the OpenAPI schema.
 | Synthesis | `/api/synthesis/*`                   | [rest-synthesis.md](./rest-synthesis.md) |
 
 Additional routers not covered by dedicated pages include `auth`, `users`, `epics`, `graph`,
-`crawler`, `rag`, `resolve`, `jobs`, `backups`, `settings`, `metrics`, `admin`, `logs`, `orgs`,
-`org_members`, `org_invitations`, `project_members`, `session`, and `setup`. All are described in
-the OpenAPI schema.
+`crawler`, `ingestion`, `rag`, `resolve`, `jobs`, `backups`, `settings`, `ai_settings`, `metrics`,
+`telemetry`, `admin`, `logs`, `orgs`, `org_members`, `org_invitations`, `invitations`,
+`project_members`, `session`, and `setup`. All are described in the OpenAPI schema.
+
+A few prefixes are worth calling out because they do not match the router name. The `crawler` router
+is mounted under `/sources` (for example `/api/sources/...`), not `/crawler`. The `org_invitations`
+router serves org-scoped invitations under `/api/orgs/{slug}/invitations`, while the separate
+`invitations` router serves invitation acceptance under `/api/invitations`. The `ingestion` router
+(prefix `/ingestion`) backs the `sibyl ingest` CLI with paths under `/api/ingestion/imports`,
+`/api/ingestion/documents`, and `/api/ingestion/collections`.
 
 **OpenAPI Spec:** Available at `/api/docs` (Swagger UI) and `/api/openapi.json`
 
@@ -159,13 +166,25 @@ ws.onmessage = (event) => {
 
 ## Error Responses
 
-All errors follow a consistent format:
+All errors follow a consistent envelope. A global exception handler returns a structured JSON body
+and echoes the correlation ID in an `X-Request-ID` response header:
 
 ```json
 {
-  "detail": "Human-readable error message"
+  "error": "not_found",
+  "message": "The requested resource was not found.",
+  "request_id": "req_a1b2c3d4e5f6",
+  "remediation": "Check the ID or prefix and try again.",
+  "details": {
+    "field": "task_id"
+  }
 }
 ```
+
+The `error` field is a stable machine-readable code (for example `authentication_required`,
+`forbidden`, `not_found`, `conflict`, `validation_error`, `rate_limited`, `internal_error`).
+`remediation` is a short hint for resolving the error, and `details` is optional and only present
+when the handler has safe, structured context to share.
 
 | Status Code | Meaning                                           |
 | ----------- | ------------------------------------------------- |

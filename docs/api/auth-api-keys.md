@@ -206,26 +206,34 @@ Keys can have optional expiration:
 }
 ```
 
-Expired keys return 401:
+Expired keys return 401 with the standard error envelope:
 
 ```json
 {
-  "detail": "API key expired"
+  "error": "authentication_required",
+  "message": "Authentication failed.",
+  "request_id": "req_a1b2c3d4e5f6",
+  "remediation": "Run 'sibyl auth login' or set SIBYL_AUTH_TOKEN."
 }
 ```
 
 ## Error Responses
 
-| Status | Cause                            |
-| ------ | -------------------------------- |
-| 401    | Invalid, expired, or revoked key |
-| 403    | Insufficient scope for operation |
+API key failures use the standard error envelope and echo an `X-Request-ID` header.
+
+| Status | Error code                | Cause                            |
+| ------ | ------------------------- | -------------------------------- |
+| 401    | `authentication_required` | Invalid, expired, or revoked key |
+| 403    | `forbidden`               | Insufficient scope for operation |
 
 **Invalid Key:**
 
 ```json
 {
-  "detail": "Invalid API key"
+  "error": "authentication_required",
+  "message": "Authentication failed.",
+  "request_id": "req_a1b2c3d4e5f6",
+  "remediation": "Run 'sibyl auth login' or set SIBYL_AUTH_TOKEN."
 }
 ```
 
@@ -233,7 +241,10 @@ Expired keys return 401:
 
 ```json
 {
-  "detail": "Insufficient API key scope"
+  "error": "forbidden",
+  "message": "You don't have permission to perform this action.",
+  "request_id": "req_a1b2c3d4e5f6",
+  "remediation": "Check your organization and project permissions."
 }
 ```
 

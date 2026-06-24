@@ -17,7 +17,7 @@ operational surface was heavier than the product itself.
 
 - **One engine, one backup strategy.** Graph memory, document chunks, auth records, API keys, and
   tasks can live in the same SurrealDB instance. Per-org graph isolation is a namespace, not a
-  separate cluster. Backups are a single RocksDB directory or one SurrealQL export.
+  separate cluster. Backups are a single SurrealKV data directory or one SurrealQL export.
 - **Embedded mode for dev.** Point Sibyl at a local `surrealkv://` path and you're running with zero
   external services. No Docker required for a fresh checkout.
 - **Native hybrid search.** HNSW vector indexes and full-text search live next to the graph data, so

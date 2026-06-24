@@ -113,13 +113,13 @@ moon run docker-down
 # Start recommended Surreal local-dev stack
 moon run dev
 
-# Start API + Worker only (no frontend)
+# Start API only with in-process jobs (no frontend)
 moon run dev-api
 
 # Start frontend only
 moon run dev-web
 
-# Start Redis worker when SIBYL_COORDINATION_BACKEND=redis
+# Start a standalone worker process (used with SIBYL_COORDINATION_BACKEND=redis)
 moon run api:worker
 
 # Stop all services

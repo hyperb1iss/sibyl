@@ -48,6 +48,7 @@ Capture knowledge and recall it back into agent context.
 | Command                           | Description                                         |
 | --------------------------------- | --------------------------------------------------- |
 | [`sibyl recall`](./recall.md)     | Recall a compact working context pack for an agent  |
+| [`sibyl brief`](./brief.md)       | One-shot lean context brief for a subagent          |
 | [`sibyl remember`](./remember.md) | Remember a decision, plan, idea, claim, or learning |
 | [`sibyl reflect`](./reflect.md)   | Reflect raw notes into reviewable memory candidates |
 | [`sibyl capture`](./capture.md)   | Quick capture with an auto-derived title            |
@@ -75,10 +76,12 @@ Plan and run tasks, epics, and projects.
 
 Ingest external docs and produce source-grounded artifacts.
 
-| Command                             | Description                                   |
-| ----------------------------------- | --------------------------------------------- |
-| [`sibyl crawl`](./crawl.md)         | Web crawling and documentation ingestion      |
-| [`sibyl synthesis`](./synthesis.md) | Source-grounded synthesis (plan/draft/verify) |
+| Command                             | Description                                                 |
+| ----------------------------------- | ----------------------------------------------------------- |
+| [`sibyl crawl`](./crawl.md)         | Web crawling and documentation ingestion                    |
+| [`sibyl ingest`](./ingest.md)       | Import Claude Code / Codex transcript JSONL into raw memory |
+| [`sibyl docs`](./docs.md)           | Import and list document collections                        |
+| [`sibyl synthesis`](./synthesis.md) | Source-grounded synthesis (plan/draft/verify)               |
 
 ### Memory governance
 
@@ -98,31 +101,33 @@ Review, promote, share, and audit memory.
 
 Auth, organizations, configuration, and operations.
 
-| Command                   | Description                                       |
-| ------------------------- | ------------------------------------------------- |
-| [`sibyl auth`](./auth.md) | Authentication, tokens, and API keys              |
-| `sibyl login`             | Log in to the active or provided server           |
-| `sibyl logout`            | Clear stored auth credentials                     |
-| `sibyl whoami`            | Check auth status for the active context          |
-| [`sibyl org`](./org.md)   | Organizations and member management               |
-| `sibyl context`           | Server/org/project context bundles (see above)    |
-| `sibyl config`            | Manage CLI configuration                          |
-| `sibyl health`            | Check Sibyl server health                         |
-| `sibyl stats`             | Show knowledge graph statistics                   |
-| `sibyl version`           | Show version information                          |
-| `sibyl logs`              | View server logs (requires OWNER role)            |
-| `sibyl debug`             | Debug tools for development (requires OWNER role) |
-| `sibyl up`                | Start the local server and web UI                 |
-| `sibyl down`              | Stop the local server and web UI                  |
-| `sibyl serve`             | Start the local embedded daemon                   |
-| `sibyl start`             | Start the local embedded daemon in the background |
-| `sibyl stop`              | Stop the background local daemon                  |
-| `sibyl service`           | Install native local daemon service files         |
-| `sibyl docker`            | Manage a self-hosted Docker deployment            |
-| `sibyl local`             | Legacy local Docker stack commands                |
-| `sibyl dev`               | Devcontainer shell and lifecycle commands         |
-| `sibyl update`            | Update Sibyl components                           |
-| `sibyl skill`             | Install the loader skill and print bundled packs  |
+| Command                         | Description                                          |
+| ------------------------------- | ---------------------------------------------------- |
+| [`sibyl auth`](./auth.md)       | Authentication, tokens, and API keys                 |
+| `sibyl login`                   | Log in to the active or provided server              |
+| `sibyl logout`                  | Clear stored auth credentials                        |
+| `sibyl whoami`                  | Check auth status for the active context             |
+| [`sibyl org`](./org.md)         | Organizations and member management                  |
+| `sibyl context`                 | Server/org/project context bundles (see above)       |
+| [`sibyl init`](./init.md)       | Create a local or remote context for first-run setup |
+| `sibyl config`                  | Manage CLI configuration                             |
+| `sibyl health`                  | Check Sibyl server health                            |
+| `sibyl stats`                   | Show knowledge graph statistics                      |
+| `sibyl version`                 | Show version information                             |
+| `sibyl logs`                    | View server logs (requires OWNER role)               |
+| `sibyl debug`                   | Debug tools for development (requires OWNER role)    |
+| [`sibyl doctor`](./doctor.md)   | Diagnose CLI/server/auth/agent setup                 |
+| `sibyl up`                      | Start the local server and web UI                    |
+| `sibyl down`                    | Stop the local server and web UI                     |
+| `sibyl serve`                   | Start the local embedded daemon                      |
+| `sibyl start`                   | Start the local embedded daemon in the background    |
+| `sibyl stop`                    | Stop the background local daemon                     |
+| [`sibyl service`](./service.md) | Install local daemon service files                   |
+| [`sibyl docker`](./docker.md)   | Manage a self-hosted Docker deployment               |
+| [`sibyl local`](./local.md)     | Manage a local Docker-based instance                 |
+| `sibyl dev`                     | Devcontainer shell and lifecycle commands            |
+| [`sibyl update`](./update.md)   | Self-update the CLI/containers/skills                |
+| [`sibyl skill`](./skill.md)     | Install/list/print version-matched skill packs       |
 
 ## Global Options
 

@@ -334,9 +334,9 @@ sibyl task list --status todo --priority critical
 
 ### Verification Patterns
 
-| Task Area | How to Verify                          |
-| --------- | -------------------------------------- |
-| Backend   | `grep -r "def func" apps/api/`         |
-| Frontend  | `ls apps/web/src/components/`          |
-| CLI       | `grep -r "@app.command" apps/cli/src/` |
-| MCP Tools | `ls apps/api/src/sibyl/tools/`         |
+| Task Area | How to Verify                                      |
+| --------- | -------------------------------------------------- |
+| Backend   | `grep -r "def func" apps/api/`                     |
+| Frontend  | `ls apps/web/src/components/`                      |
+| CLI       | `grep -r "@app.command" apps/cli/src/`             |
+| MCP Tools | `grep -n '@mcp.tool' apps/api/src/sibyl/server.py` |

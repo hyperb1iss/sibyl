@@ -31,6 +31,10 @@ interface ContextInput {
   limit?: number; // Max total context items, clamped 1-50 (default 24)
   include_related?: boolean; // Include one-hop related graph context (default true)
   related_limit?: number; // Related items per context item (default 3)
+
+  // Output Shaping
+  audit?: boolean; // Include full retrieval metadata per item (default false)
+  markdown_token_budget?: number; // Cap rendered markdown at ~this many tokens
 }
 ```
 

@@ -73,7 +73,7 @@ backend:
 
   image:
     repository: ghcr.io/hyperb1iss/sibyl-api
-    tag: "1.0.0-rc.6"
+    tag: "1.0.0-rc.7"
     pullPolicy: Always
 
   # Reference pre-created secrets
@@ -137,7 +137,7 @@ frontend:
 
   image:
     repository: ghcr.io/hyperb1iss/sibyl-web
-    tag: "1.0.0-rc.6"
+    tag: "1.0.0-rc.7"
 
   apiUrl: "http://sibyl-backend:3334/api"
 
@@ -164,11 +164,9 @@ worker:
     minAvailable: 1
 
 # Ingress (adjust for your ingress controller)
+# ingress.hosts is the shared route table. Enable ingress.classic for a classic
+# networking.k8s.io/v1 Ingress, or ingress.gatewayApi for a Gateway API HTTPRoute.
 ingress:
-  enabled: true
-  className: "kong"
-  annotations:
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
   hosts:
     - host: sibyl.example.com
       paths:
@@ -181,10 +179,22 @@ ingress:
         - path: /
           pathType: Prefix
           service: frontend
-  tls:
-    - secretName: sibyl-tls
-      hosts:
-        - sibyl.example.com
+  # Classic Ingress (NGINX and similar):
+  classic:
+    enabled: true
+    className: "nginx"
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    tls:
+      - secretName: sibyl-tls
+        hosts:
+          - sibyl.example.com
+  # Gateway API HTTPRoute (Kong and similar): enable this instead of classic.
+  gatewayApi:
+    enabled: false
+    parentRefs:
+      - name: production-gateway
+        namespace: kong
 ```
 
 ## Database Setup
@@ -263,10 +273,12 @@ pre-upgrade hook for the active runtime.
 
 ## Ingress Configuration
 
-The chart can render a standard Kubernetes Ingress from `values.yaml`. For Gateway API deployments,
-leave `ingress.enabled=false` and apply an HTTPRoute like the Kong example below.
+The chart renders from the shared `ingress.hosts` route table. Set `ingress.classic.enabled=true`
+for a classic `networking.k8s.io/v1` Ingress, or `ingress.gatewayApi.enabled=true` (with
+`parentRefs`) for a Gateway API HTTPRoute. The standalone manifests below are equivalent
+hand-written forms if you prefer to manage routing outside the chart.
 
-### Kong Gateway
+### Kong Gateway (standalone HTTPRoute)
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
@@ -300,7 +312,7 @@ spec:
           port: 3337
 ```
 
-### NGINX Ingress
+### NGINX Ingress (standalone manifest)
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -360,11 +372,15 @@ backend:
 
   readinessProbe:
     httpGet:
-      path: /api/health
+      path: /api/health/ready
       port: http
     initialDelaySeconds: 5
     periodSeconds: 10
 ```
+
+The readiness probe targets `/api/health/ready`, the deep readiness endpoint that returns `503` when
+SurrealDB is unreachable so the pod is pulled from service until it can serve. Liveness stays on
+`/api/health`.
 
 ## Scaling
 
@@ -442,8 +458,8 @@ Keep image tags and security contexts in lockstep. Current Sibyl images run back
 helm upgrade sibyl ./charts/sibyl \
   -n sibyl \
   -f values-production.yaml \
-  --set backend.image.tag=1.0.0-rc.6 \
-  --set frontend.image.tag=1.0.0-rc.6
+  --set backend.image.tag=1.0.0-rc.7 \
+  --set frontend.image.tag=1.0.0-rc.7
 
 # Rollback if needed
 helm rollback sibyl -n sibyl

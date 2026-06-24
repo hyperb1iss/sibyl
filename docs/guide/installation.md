@@ -163,7 +163,6 @@ export SIBYL_ANTHROPIC_API_KEY=...        # For LLM operations
 | `SIBYL_SERVER_URL`           | derived                  | Override API base URL (defaults to public)   |
 | `SIBYL_FRONTEND_URL`         | derived                  | Override frontend URL (defaults to public)   |
 | `SIBYL_REDIS_HOST`           | `127.0.0.1`              | Redis/Valkey host when `coordination=redis`  |
-| `SIBYL_POSTGRES_HOST`        | `localhost`              | Migration-only PostgreSQL host               |
 
 ## Running Sibyl
 
@@ -298,7 +297,7 @@ The CLI writes a pinned compose bundle and generated secrets under `~/.sibyl/doc
 ```bash
 sibyl docker init --with-worker
 sibyl docker up --pull
-sibyl docker upgrade --tag 1.0.0-rc.6
+sibyl docker upgrade --tag 1.0.0-rc.7
 ```
 
 When `--tag` is provided, `upgrade` updates the generated `.env` and the pinned Sibyl image

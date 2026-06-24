@@ -4,14 +4,15 @@ Sibyl's memory loop is governed. Raw memories and reflection candidates are not 
 into the shared graph; they move through review, promotion, and audit. This page covers the
 governance command family:
 
-| Command                                   | Description                                 |
-| ----------------------------------------- | ------------------------------------------- |
-| [`sibyl memory-audit`](#memory-audit)     | Inspect memory audit receipts               |
-| [`sibyl memory-inspect`](#memory-inspect) | Inspect a memory source and its audit trail |
-| [`sibyl memory-promote`](#memory-promote) | Preview or auto-review candidate promotion  |
-| [`sibyl memory-share`](#memory-share)     | Preview memory sharing across scopes        |
-| [`sibyl memory-space`](#memory-space)     | Memory-space inspection and preview         |
-| [`sibyl memory-review`](#memory-review)   | Reflection review queue automation          |
+| Command                                               | Description                                                      |
+| ----------------------------------------------------- | ---------------------------------------------------------------- |
+| [`sibyl memory-audit`](#memory-audit)                 | Inspect memory audit receipts                                    |
+| [`sibyl memory-inspect`](#memory-inspect)             | Inspect a memory source and its audit trail                      |
+| [`sibyl memory-import-status`](#memory-import-status) | Inspect a source import receipt and its published raw memory IDs |
+| [`sibyl memory-promote`](#memory-promote)             | Preview or auto-review candidate promotion                       |
+| [`sibyl memory-share`](#memory-share)                 | Preview memory sharing across scopes                             |
+| [`sibyl memory-space`](#memory-space)                 | Memory-space inspection and preview                              |
+| [`sibyl memory-review`](#memory-review)               | Reflection review queue automation                               |
 
 For the dream-cycle automation that drives much of this, see [`memory-review`](#memory-review).
 
@@ -101,11 +102,42 @@ sibyl memory-inspect mem_abc123def456
 
 ---
 
+## memory-import-status
+
+Inspect a source import receipt and its published raw memory IDs. Given a source import ID, this
+shows the import receipt together with the raw memory IDs the import published.
+
+### Synopsis
+
+```bash
+sibyl memory-import-status <import_id> [options]
+```
+
+### Arguments
+
+| Argument    | Required | Description      |
+| ----------- | -------- | ---------------- |
+| `import_id` | Yes      | Source import ID |
+
+### Options
+
+| Option   | Short | Description    |
+| -------- | ----- | -------------- |
+| `--json` | `-j`  | Output as JSON |
+
+### Example
+
+```bash
+sibyl memory-import-status imp_abc123def456
+```
+
+---
+
 ## memory-promote
 
-Preview or auto-review reflection candidate promotion. A reflection candidate is a typed memory
-extracted by [`reflect`](./reflect.md) and routed to the review queue. Promotion moves a candidate
-into the shared graph.
+Preview, apply, or auto-review candidate promotion. The target is a raw memory or a reflection
+candidate (a typed memory extracted by [`reflect`](./reflect.md) and routed to the review queue).
+Promotion moves it into the shared graph.
 
 ### Synopsis
 
@@ -115,15 +147,16 @@ sibyl memory-promote <candidate_id> [options]
 
 ### Arguments
 
-| Argument       | Required | Description                 |
-| -------------- | -------- | --------------------------- |
-| `candidate_id` | Yes      | Raw reflection candidate ID |
+| Argument       | Required | Description                           |
+| -------------- | -------- | ------------------------------------- |
+| `candidate_id` | Yes      | Raw memory or reflection candidate ID |
 
 ### Options
 
 | Option                   | Short | Description                                             |
 | ------------------------ | ----- | ------------------------------------------------------- |
 | `--preview`              |       | Preview without promoting                               |
+| `--apply`                |       | Apply the promotion now                                 |
 | `--auto`                 |       | Auto-review and promote when safe                       |
 | `--dry-run`              |       | Evaluate auto-review without applying                   |
 | `--confidence-threshold` |       | Override the auto-review confidence threshold (0.0-1.0) |
@@ -138,9 +171,13 @@ sibyl memory-promote <candidate_id> [options]
 
 ### Promotion Modes
 
+Exactly one of `--preview`, `--apply`, or `--auto` is required.
+
 - `--preview`: show what promotion would produce; write nothing.
-- `--dry-run`: run the auto-review scoring and report the decision without applying it.
+- `--apply`: apply the promotion now.
 - `--auto`: auto-review the candidate and promote it when it clears the confidence threshold.
+- `--dry-run`: with `--auto`, run the auto-review scoring and report the decision without applying
+  it.
 
 ### Examples
 

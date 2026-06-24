@@ -134,17 +134,19 @@ async def admin_only(
 
 ### Error Response (403 Forbidden)
 
-When authorization fails, a structured error is returned:
+When authorization fails, the standard error envelope is returned with an `X-Request-ID` header. The
+role values are surfaced under `details` as `expected` (the required role) and `actual` (the
+caller's resolved role):
 
 ```json
 {
-  "error": "forbidden",
-  "code": "PROJECT_ACCESS_DENIED",
-  "message": "Insufficient permissions for project",
+  "error": "project_access_denied",
+  "message": "Requires project_contributor access to project",
+  "request_id": "req_a1b2c3d4e5f6",
+  "remediation": "Check your project permissions or switch context.",
   "details": {
-    "project_id": "proj_abc123",
-    "required_role": "project_contributor",
-    "actual_role": "project_viewer"
+    "expected": "project_contributor",
+    "actual": "project_viewer"
   }
 }
 ```
@@ -153,9 +155,9 @@ When authorization fails, a structured error is returned:
 
 | Code                    | Description                        |
 | ----------------------- | ---------------------------------- |
-| `PROJECT_ACCESS_DENIED` | User lacks required project role   |
-| `PROJECT_NOT_FOUND`     | Project doesn't exist or no access |
-| `ORG_ACCESS_DENIED`     | User not in organization           |
+| `project_access_denied` | User lacks required project role   |
+| `not_found`             | Project doesn't exist or no access |
+| `forbidden`             | User not in organization           |
 
 ## Organization Isolation
 
@@ -188,7 +190,7 @@ Application code always carries organization context. Graph operations require a
 `group_id`, and there is no implicit default:
 
 ```python
-from sibyl_core.graph import EntityManager
+from sibyl_core.services.graph import EntityManager
 
 manager = EntityManager(client, group_id=str(org.id))
 ```
@@ -224,35 +226,37 @@ POST /api/projects/{project_id}/members
 ```json
 {
   "user_id": "user-uuid",
-  "role": "writer"
+  "role": "project_contributor"
 }
 ```
 
-**Required Role:** `admin`
+The `role` defaults to `project_contributor` when omitted.
+
+**Required Role:** `project_maintainer`
 
 ### Update Member Role
 
 ```http
-PATCH /api/projects/{project_id}/members/{member_id}
+PATCH /api/projects/{project_id}/members/{user_id}
 ```
 
 **Request:**
 
 ```json
 {
-  "role": "admin"
+  "role": "project_maintainer"
 }
 ```
 
-**Required Role:** `admin` (cannot demote/remove owners without being owner)
+**Required Role:** `project_maintainer` (cannot demote or remove owners without being an owner)
 
 ### Remove Member
 
 ```http
-DELETE /api/projects/{project_id}/members/{member_id}
+DELETE /api/projects/{project_id}/members/{user_id}
 ```
 
-**Required Role:** `admin`
+**Required Role:** `project_maintainer`
 
 ### List Members
 
@@ -260,15 +264,13 @@ DELETE /api/projects/{project_id}/members/{member_id}
 GET /api/projects/{project_id}/members
 ```
 
-**Required Role:** `reader`
+**Required Role:** `project_viewer`
 
 ## Teams
 
-Teams provide group-based access control.
-
-### Team Membership
-
-Users inherit the highest role from their team memberships:
+Teams are an internal grouping that feeds the effective-role calculation. There is no public REST
+surface for managing teams. When a user belongs to one or more teams with project access, the
+effective project role resolves to the highest role granted across those memberships:
 
 ```
 User A -> Team Alpha (project_contributor) -> Project X
@@ -277,37 +279,8 @@ User A -> Team Alpha (project_contributor) -> Project X
 Result: User A has project_maintainer on Project X
 ```
 
-### Creating Teams
-
-```http
-POST /api/organizations/{org_id}/teams
-```
-
-**Request:**
-
-```json
-{
-  "name": "Engineering",
-  "description": "Core engineering team"
-}
-```
-
-### Team Project Access
-
-```http
-POST /api/teams/{team_id}/projects
-```
-
-**Request:**
-
-```json
-{
-  "project_id": "proj-uuid",
-  "role": "project_contributor"
-}
-```
-
-All team members inherit this role for the project.
+This inheritance is applied during access checks alongside direct project assignments and org-level
+roles, as described in [Effective Role Calculation](#effective-role-calculation).
 
 ## Security Considerations
 

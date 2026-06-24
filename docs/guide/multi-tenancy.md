@@ -122,28 +122,22 @@ manager = runtime.entity_manager
 
 ### Query Pattern
 
-Queries must include group_id filter:
+Org scoping is namespace-level: an org-scoped driver runs every query inside that org's
+`org_<uuid_hex>` namespace, so queries do not carry a `group_id` predicate. Get isolation by using
+the org-scoped runtime or a cloned driver, then write plain SurrealQL:
 
 ```python
-# CORRECT - scoped to org
-result = await driver.execute_query(
-    """
-    MATCH (n)
-    WHERE n.group_id = $group_id AND n.entity_type = $type
-    RETURN n
-    """,
-    group_id=str(org_id),
-    type="task"
+# CORRECT - the org-scoped runtime queries the org's namespace
+runtime = await get_surreal_graph_runtime(str(org_id))
+result = await runtime.driver.execute_query(
+    "SELECT * FROM entity WHERE entity_type = $type",
+    type="task",
 )
 
-# WRONG - no org scope (queries wrong graph!)
-result = await driver.execute_query(
-    """
-    MATCH (n)
-    WHERE n.entity_type = $type
-    RETURN n
-    """,
-    type="task"
+# WRONG - a shared, unscoped driver queries the wrong namespace
+result = await client.client.driver.execute_query(
+    "SELECT * FROM entity WHERE entity_type = $type",
+    type="task",
 )
 ```
 

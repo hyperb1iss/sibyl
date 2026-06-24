@@ -257,6 +257,8 @@ sibyl task complete <task_id> --learnings "Key insight: check TTL first"
 # Synthesis, sources, projects, orgs
 sibyl synthesis draft "Onboarding guide"
 sibyl crawl add "https://docs.example.com" --name "Example Docs"
+sibyl ingest claude-code ~/transcripts/  # Import agent transcripts into memory
+sibyl docs list                          # Browse document collections
 sibyl project link proj_xxx
 ```
 
@@ -435,6 +437,8 @@ SIBYL_JWT_SECRET=your-secret-key        # Required in production; dev auto-gener
 SIBYL_ACCESS_TOKEN_EXPIRE_MINUTES=60    # Optional (default: 60)
 ```
 
+Self-service password reset is delivered over SMTP when `SIBYL_SMTP_HOST` is configured.
+
 ### API Keys (Programmatic Access)
 
 ```bash
@@ -526,25 +530,24 @@ save instance-wide model routing. A typical solo developer uses around $5/month 
 
 ### Is it production-ready?
 
-Sibyl is in active development (v0.10.x, heading toward 1.0). SurrealDB is the default runtime for
-graph, content, and auth; legacy PostgreSQL paths are retained only for migration and archive
+Sibyl is in the v1.0 release-candidate phase (latest `v1.0.0-rc.6`). SurrealDB is the default
+runtime for graph, content, and auth; PostgreSQL is retained only for migration and archive
 rehearsal. **We use Sibyl to build Sibyl.** Every feature, task, and learning you see here was
 tracked inside the system itself.
 
 ## 🎯 Roadmap
 
-**Where we're headed after v0.10.0, toward 1.0:**
+**Where we're headed for 1.0 and beyond:**
 
-- **Corpus Runtime:** real private source corpora can be imported, searched, inspected, corrected,
-  and synthesized without leaking scope.
 - **Memory Workspace OS:** automatic memory decisions become visible, explainable, correctable, and
   undoable from one product surface.
 - **Surreal-only closure:** remaining legacy assumptions leave the supported runtime once native
   behavior has receipts.
 - **1.0 evidence freeze:** release claims cite gates, artifacts, and install rehearsals.
 
-The graph gets smarter. The workflow gets sharper. See
-[`docs/architecture/SIBYL_1_0_ROADMAP.md`](docs/architecture/SIBYL_1_0_ROADMAP.md).
+Already shipped on the way here: a Surreal-only default runtime, and source, document, and
+transcript ingestion via `sibyl ingest` and `sibyl docs`. The graph gets smarter. The workflow gets
+sharper. See [`docs/architecture/SIBYL_1_0_ROADMAP.md`](docs/architecture/SIBYL_1_0_ROADMAP.md).
 
 ## 💜 Philosophy
 

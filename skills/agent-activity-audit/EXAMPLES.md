@@ -193,7 +193,8 @@ and the relevant source. Write `SYNTHESIS.md` using the structure documented in 
 For this run the synthesis revealed:
 
 - **P0**: 1-second Codex sandbox timeout dropped ~20% of Sibyl calls into empty output
-- **P1**: CLI `--kind`/`--intent` enum doesn't match the API (9 vs 29 entity types)
+- **P1**: CLI `--kind`/`--intent` enum doesn't match the API (9 vs 29 entity types) (historical; the
+  enum is now 33)
 - **P1**: Bundled SKILL.md still references FalkorDB
 - **P1**: Auth expiry silently loses write payloads
 - **P2**: 4 redundant capture commands; agents prefer `add` over `remember` 4.5×

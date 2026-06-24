@@ -35,7 +35,7 @@ are upgrading an existing install.
 ### 1. Export from legacy
 
 ```bash
-SIBYL_STORE=legacy sibyld migrate export \
+sibyld migrate export \
   --org-id <org-uuid> \
   --output /tmp/sibyl-migration.tar.gz
 ```

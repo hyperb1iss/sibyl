@@ -373,12 +373,15 @@ curl -X DELETE "https://api.example.com/api/entities/pattern_abc123" \
 
 ## Concurrency Control
 
-Update and delete operations acquire a distributed lock to prevent concurrent modifications:
+Update and delete operations acquire a distributed lock to prevent concurrent modifications. A lock
+conflict returns a `409` with error code `conflict`:
 
-```
-409 Conflict
+```json
 {
-  "detail": "Entity is being updated by another process. Please retry."
+  "error": "conflict",
+  "message": "Entity is being updated by another process. Please retry.",
+  "request_id": "req_a1b2c3d4e5f6",
+  "remediation": "Refresh the resource state and retry the operation."
 }
 ```
 

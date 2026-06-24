@@ -162,7 +162,7 @@ for item in result.results:
 ### EntityManager
 
 ```python
-from sibyl_core.graph import EntityManager
+from sibyl_core.services.graph import EntityManager
 
 manager = EntityManager(client, group_id=org_id)
 

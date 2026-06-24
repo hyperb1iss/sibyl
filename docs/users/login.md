@@ -29,13 +29,17 @@ and audit readability.
 
 ## Role Claims
 
-Your identity provider must put one of these values in the configured role claim:
+Your identity provider must put one of these claim strings in the configured role claim. Each maps
+to a Sibyl organization role:
 
-| Role           | Meaning                                                                                  |
-| -------------- | ---------------------------------------------------------------------------------------- |
-| `Sibyl.Member` | Standard user. Can use memory, projects, CLI, and MCP within assigned scopes.            |
-| `Sibyl.Admin`  | Organization admin. Can manage users, settings, audit exports, and operational controls. |
-| `Sibyl.Owner`  | Full owner. Use sparingly for break-glass and platform ownership.                        |
+| Claim string   | Maps to Sibyl role | Meaning                                                                       |
+| -------------- | ------------------ | ----------------------------------------------------------------------------- |
+| `Sibyl.Member` | `member`           | Standard user. Can use memory, projects, CLI, and MCP within assigned scopes. |
+| `Sibyl.Admin`  | `admin`            | Organization admin. Manages users, settings, audit exports, and controls.     |
+| `Sibyl.Owner`  | `owner`            | Full owner. Use sparingly for break-glass and platform ownership.             |
+
+Lowercase `member`, `admin`, and `owner` claim values are accepted as well. The read-only `viewer`
+role is available for local invitations but has no dedicated OIDC claim string.
 
 If the role claim is missing, Sibyl denies the login. If the claim is removed later, the next OIDC
 refresh fails and the session must go through full login again.
@@ -85,6 +89,18 @@ best-effort OIDC `prompt=none` request:
 
 That keeps deprovisioning real: removing the role in the identity provider stops new Sibyl sessions
 without depending on a local refresh token.
+
+## Forgot Your Password
+
+This applies to local username/password installs, not OIDC sign-in. From the web login screen,
+choose **Forgot password?**, enter your email, and submit. When Sibyl has an email provider
+configured (SMTP or Resend), it sends a reset link; follow it to set a new password and sign in. The
+response is intentionally the same whether or not an account exists, so it never reveals which
+emails are registered.
+
+If no reset email arrives, the instance may not have email configured yet; ask your admin to set up
+[transactional email](../admin/installing.md#transactional-email). OIDC users do not have a Sibyl
+password and reset credentials at their identity provider instead.
 
 ## Troubleshooting
 

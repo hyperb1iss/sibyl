@@ -1,7 +1,7 @@
 # Sibyl Web UI
 
-Next.js 16 admin interface for Sibyl. Built with React 19, React Query, and the
-SilkCircuit design system.
+Next.js 16 admin interface for Sibyl. Built with React 19, React Query, and the SilkCircuit design
+system.
 
 ## Quick Reference
 
@@ -25,8 +25,8 @@ moon run web:generate-types
 - **Search:** Semantic search with filters
 - **Memory:** The memory workspace, raw captures, source imports, and synthesis
 - **Sources:** Documentation crawl management and document inspection
-- **Settings:** Organizations, teams, API keys, security, language models,
-  embeddings, backups, and preferences
+- **Settings:** Organizations, teams, API keys, security, language models, embeddings, backups, and
+  preferences
 
 ## Stack
 
@@ -63,9 +63,9 @@ src/
 
 ## Configuration
 
-The web app calls the backend through the relative `/api` base. `proxy.ts` rewrites
-`/api/*` to the API server, so the browser and server share one origin. No public API
-URL env var is required for the default setup.
+The web app calls the backend through the relative `/api` base. `proxy.ts` rewrites `/api/*` to the
+API server, so the browser and server share one origin. No public API URL env var is required for
+the default setup.
 
 ```bash
 SIBYL_WEB_PORT=3337           # Dev/start port (default 3337, set in scripts)
@@ -76,35 +76,33 @@ Port: **3337** (not 3000, to avoid conflicts).
 
 ## AI Settings
 
-The admin AI settings page puts language model controls beside the existing embedding
-and API-key controls. Language model settings are instance-wide and expose three
-surfaces:
+The admin AI settings page puts language model controls beside the existing embedding and API-key
+controls. Language model settings are instance-wide and expose three surfaces:
 
 - `default`: shared fallback
 - `crawler`: structured extraction for crawled document chunks
 - `synthesis`: generated summaries, drafts, and synthesis artifacts
 
-Each field shows its active source: `env`, `db`, or `default`. Environment-backed
-fields are disabled because the API rejects writes with `409 LOCKED_BY_ENV`. Operators
-can select curated registry models, open an advanced custom-model disclosure, and run
-per-surface tests that show latency, token counts, and structured failures.
+Each field shows its active source: `env`, `db`, or `default`. Environment-backed fields are
+disabled because the API rejects writes with `409 LOCKED_BY_ENV`. Operators can select curated
+registry models, open an advanced custom-model disclosure, and run per-surface tests that show
+latency, token counts, and structured failures.
 
-Custom models are saved only after explicit confirmation and show an unverified
-warning. Per-org language model overrides are a planned follow-up; this UI configures
-the whole instance.
+Custom models are saved only after explicit confirmation and show an unverified warning. Per-org
+language model overrides are a planned follow-up; this UI configures the whole instance.
 
 ## SilkCircuit Palette
 
 ```css
---sc-purple: #e135ff;   /* Primary */
---sc-cyan: #80ffea;     /* Interactions */
---sc-coral: #ff6ac1;    /* Secondary */
---sc-green: #50fa7b;    /* Success */
---sc-red: #ff6363;      /* Errors */
+--sc-purple: #e135ff; /* Primary */
+--sc-cyan: #80ffea; /* Interactions */
+--sc-coral: #ff6ac1; /* Secondary */
+--sc-green: #50fa7b; /* Success */
+--sc-red: #ff6363; /* Errors */
 ```
 
-Themes: Neon (default), Vibrant, Soft, Glow, Dawn (light). See
-[`DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) for the full design system.
+Themes: Neon (default, dark), Dawn (light). See [`DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) for the full
+design system.
 
 ## Testing
 

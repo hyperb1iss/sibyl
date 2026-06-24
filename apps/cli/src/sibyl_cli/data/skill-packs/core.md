@@ -34,8 +34,8 @@ These rules exist because real agent sessions consistently fail without them.
    If the server is down, don't retry the same command. Report it and move on.
 
 6. **Never invent subcommands.** If you're unsure whether a command exists, run
-   `sibyl <group> --help`. Do not guess. Commands like `sibyl auth token`, `sibyl db backup`, and
-   `sibyl explore path` do not exist.
+   `sibyl <group> --help`. Do not guess. Commands like `sibyl auth token` and `sibyl db backup` do
+   not exist.
 
 ---
 
@@ -101,8 +101,8 @@ sibyl task complete task_a1b2c3d4e5f6 --learnings "OAuth tokens expire..."
 
 - **Link your project first** — then task commands just work without `--project`
 - **Table output is default** — use `--json` only for scripting
-- **Show is full fidelity** — use `sibyl show <id>` for complete content; don't use `--json` only
-  to escape search-preview truncation
+- **Show is full fidelity** — use `sibyl show <id>` for complete content; don't use `--json` only to
+  escape search-preview truncation
 - Use `--all` flag to bypass context and see all projects
 
 ---
@@ -207,9 +207,9 @@ sibyl recall "plan the launch" --intent plan --json
 sibyl recall "resume the migration" --budget 1200
 ```
 
-**When to use:** Before acting. This is the agent-ready working memory view. The Active Work
-section is grounded in a direct status lookup, so in-flight tasks always lead it; completed work
-appears under Prior Art with its learnings as the content.
+**When to use:** Before acting. This is the agent-ready working memory view. The Active Work section
+is grounded in a direct status lookup, so in-flight tasks always lead it; completed work appears
+under Prior Art with its learnings as the content.
 
 ---
 
@@ -221,8 +221,8 @@ sibyl brief "fix the parser crash" --budget 1500
 ```
 
 **When to use:** When dispatching a worker or subagent. Run it as the parent and paste the output
-into the worker's prompt. Workers that only need this do not need the full core skill pack —
-point them at `sibyl skill get quick` instead.
+into the worker's prompt. Workers that only need this do not need the full core skill pack — point
+them at `sibyl skill get quick` instead.
 
 ---
 
@@ -239,9 +239,9 @@ sibyl context pack "debug memory retrieval" --intent debug --json
 sibyl context pack "debug memory retrieval" --intent debug --json --audit
 ```
 
-**When to use:** When you need the structured context that hooks and agents consume directly.
-Item metadata is a lean projection by default; pass `--audit` to inspect retrieval signals and
-policy decisions when a pack looks noisy or wrong.
+**When to use:** When you need the structured context that hooks and agents consume directly. Item
+metadata is a lean projection by default; pass `--audit` to inspect retrieval signals and policy
+decisions when a pack looks noisy or wrong.
 
 ---
 
@@ -296,6 +296,28 @@ Persisted output shows the stored source ID when one exists, the candidate count
 candidate ID. It links to the single active `doing` task when exactly one exists; use `--task` for
 explicit task links or `--no-active-task` for project memory without task context. `--no-source`
 skips storing the raw notes while keeping extracted candidates.
+
+---
+
+### Synthesis - Source-Grounded Artifacts
+
+```bash
+# Plan a synthesis from authorized memory
+sibyl synthesis plan "launch readiness brief" --intent plan
+
+# Draft, verify, and optionally remember the artifact
+sibyl synthesis draft "launch readiness brief" --intent plan
+
+# Verify citations, freshness, hidden context, and gap coverage on a draft
+sibyl synthesis verify --content-file ./draft.md
+
+# Persist a verified synthesis artifact into memory
+sibyl synthesis remember "Launch readiness brief" --content-file ./draft.md
+```
+
+**When to use:** When you need a cited, verifiable artifact built from memory rather than a raw
+recall dump. `plan`/`draft`/`verify` mirror the
+`synthesis_plan`/`synthesis_draft`/`synthesis_verify` MCP tools.
 
 ---
 
@@ -401,9 +423,9 @@ sibyl project create --name "Auth System" --description "OAuth and JWT implement
 Epics group related tasks into larger features or initiatives.
 
 > **An epic is just a task with subtasks.** There is no separate Epic entity to manage: any task you
-> hang children off of IS an epic, and its rolled-up status derives from its subtasks. The `sibyl
-> epic` commands still work as sugar over this task tree. The `--complexity epic` flag is unrelated:
-> it is only a task *size* label and does not create or link anything.
+> hang children off of IS an epic, and its rolled-up status derives from its subtasks. The
+> `sibyl epic` commands still work as sugar over this task tree. The `--complexity epic` flag is
+> unrelated: it is only a task _size_ label and does not create or link anything.
 
 ```bash
 sibyl epic list                                    # List epics
@@ -468,7 +490,9 @@ sibyl entity related epsd_a1b2c3d4e5f6
 sibyl entity delete epsd_a1b2c3d4e5f6
 ```
 
-**Entity Types:** task, epic, project, pattern, episode, document, note, source, placeholder
+**Common entity types:** episode, pattern, note, decision, plan, idea, claim, artifact, procedure,
+error_pattern, session, task, epic, project, document, source (full 33-type set: run
+`sibyl add --help`).
 
 ---
 
@@ -528,6 +552,12 @@ sibyl crawl documents list --source source_a1b2c3d4e5f6
 # Read a crawled document
 sibyl crawl documents show doc_a1b2c3d4e5f6
 ```
+
+**Transcript ingestion:** Pull agent session history into memory with `sibyl ingest claude-code` or
+`sibyl ingest codex`.
+
+**Document collections:** Manage indexed documents directly with `sibyl docs add`,
+`sibyl docs paste`, and `sibyl docs list` when you have content to index outside a crawl.
 
 ---
 
@@ -694,8 +724,18 @@ Do not auto-start `moon run dev` after migration — propose it; let the user ru
    - `episode` — Temporal insights, debugging discoveries
    - `pattern` — Reusable coding patterns
    - `note` — Progress breadcrumbs, observations
+   - `decision` — A choice made and its rationale
+   - `plan` — Intended sequence of work
+   - `idea` — A proposal or concept worth keeping
+   - `claim` — An assertion to verify or cite
+   - `artifact` — A produced output (synthesis, report, doc reference)
+   - `procedure` — A repeatable how-to
+   - `error_pattern` — A recurring failure and its fix
+   - `session` — A consolidated session checkpoint
    - `task` — Work items with lifecycle
    - `document` — Crawled documentation pages
+
+   These cover the `remember --kind <type>` values; run `sibyl add --help` for the full 33-type set.
 
 ---
 
@@ -820,7 +860,7 @@ Your directory is not linked. Run `sibyl context` — if `Project: none`, link i
 | `sibyl search ... 2>/dev/null`      | `sibyl search ...` (never suppress stderr)       |
 | `sibyl search ... \|\| true`        | `sibyl search ...` (let errors surface)          |
 | `sibyl config`                      | `sibyl config show`                              |
-| `sibyl explore path A B`            | Not a real command — use `explore related`       |
+| `sibyl explore path A B` (no depth) | `sibyl explore path <id-a> <id-b> --depth N`     |
 | `sibyl auth token`                  | Not a real command — use `sibyl auth status`     |
 | Using `--kind gotcha` or `learning` | Use `error_pattern` or `note`                    |
 
@@ -860,6 +900,8 @@ sibyl task show task_c24fc3228e7c  # Full ID required (17 chars)
 ## Prerequisites
 
 ```bash
+sibyl init           # First-run setup (server, org, auth)
+sibyl doctor         # Diagnose a broken local setup
 sibyl health         # Check connectivity
 sibyl context        # Confirm project and org context
 sibyl auth status    # Check authentication
@@ -869,16 +911,25 @@ sibyl auth status    # Check authentication
 
 ## MCP Tools (Programmatic Access)
 
-When used as an MCP server, Sibyl exposes 5 tools. These are different from CLI commands.
+When used as an MCP server, Sibyl exposes 11 tools. These are different from CLI commands.
 
-| MCP Tool  | Purpose                                     |
-| --------- | ------------------------------------------- |
-| `search`  | Unified semantic search (graph + docs)      |
-| `explore` | Browse graph: list, related, traverse, deps |
-| `add`     | Add knowledge, tasks, or projects           |
-| `manage`  | Task lifecycle, source ops, analysis, admin |
-| `logs`    | View server logs (OWNER role required)      |
+| MCP Tool           | Purpose                                                           |
+| ------------------ | ----------------------------------------------------------------- |
+| `search`           | Unified semantic search (graph + docs)                            |
+| `context`          | Compile an agent context pack                                     |
+| `synthesis_plan`   | Plan source-grounded synthesis from authorized memory             |
+| `synthesis_draft`  | Draft + verify + optionally remember a synthesis artifact         |
+| `synthesis_verify` | Verify citation/freshness/hidden-context/gap coverage             |
+| `explore`          | Browse graph: list, related, traverse, deps                       |
+| `add`              | Add knowledge, tasks, or projects                                 |
+| `remember`         | Capture durable memory: decision/plan/idea/claim/artifact/session |
+| `reflect`          | Convert raw notes into reviewable memory candidates               |
+| `manage`           | Task lifecycle, source ops, analysis, admin                       |
+| `logs`             | View server logs (OWNER role required)                            |
 
-The `manage` tool accepts an `action` parameter: `start_task`, `block_task`, `unblock_task`,
-`submit_review`, `complete_task`, `archive_task`, `update_task`, `crawl`, `sync`, `health`, `stats`,
-`estimate`, `prioritize`, `detect_cycles`, `suggest`.
+The `manage` tool accepts an `action` parameter. Task actions: `start_task`, `block_task`,
+`unblock_task`, `submit_review`, `complete_task`, `archive_task`, `update_task`, `add_note`. Epic
+actions: `start_epic`, `complete_epic`, `archive_epic`, `update_epic`. Source actions: `crawl`,
+`sync`, `refresh`, `link_graph`, `link_graph_status`. Analysis actions: `estimate`, `prioritize`,
+`detect_cycles`, `suggest`. Server health and graph statistics are not `manage` actions — they are
+the `sibyl://health` and `sibyl://stats` MCP resources.

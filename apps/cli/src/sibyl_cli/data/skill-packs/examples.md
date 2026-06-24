@@ -6,7 +6,8 @@ Concrete examples showing the CLI in action.
 >
 > - `sibyl task add` → Use `sibyl task create --title "..."`
 > - `-t "Title"` → Use `--title "..."` for task creation
-> - `jq '.[].title'` → Use `jq '.[].name'` (field is `name`)
+> - When scripting `--json`, capture output and check the exit code first; the task field is `name`,
+>   not `title`.
 > - Not fetching full content → Use `sibyl show <id>` after search
 
 ---

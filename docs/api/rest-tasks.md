@@ -478,22 +478,28 @@ backlog --> todo --> doing --> blocked
 | `review`  | `doing`, `done`, `archived`         |
 | `done`    | `archived`                          |
 
-Invalid transitions return:
+Invalid transitions return a `400` with the standard error envelope:
 
 ```json
 {
-  "detail": "Cannot transition from 'todo' to 'done'. Use workflow actions."
+  "error": "invalid_request",
+  "message": "Cannot transition from 'todo' to 'done'. Use workflow actions.",
+  "request_id": "req_a1b2c3d4e5f6",
+  "remediation": "Check the command arguments and try again."
 }
 ```
 
 ## Concurrency Control
 
-Update operations acquire a distributed lock:
+Update operations acquire a distributed lock. A lock conflict returns a `409` with error code
+`conflict`:
 
-```
-409 Conflict
+```json
 {
-  "detail": "Task is being updated by another process. Please retry."
+  "error": "conflict",
+  "message": "Task is being updated by another process. Please retry.",
+  "request_id": "req_a1b2c3d4e5f6",
+  "remediation": "Refresh the resource state and retry the operation."
 }
 ```
 

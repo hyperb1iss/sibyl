@@ -1,14 +1,49 @@
 ---
 title: Inviting Users
-description: JIT provisioning, admin role changes, and deprovisioning
+description: Local invitations, OIDC JIT provisioning, admin role changes, and deprovisioning
 ---
 
 # Inviting Users
 
+How users get into Sibyl depends on the install shape. The default local install uses admin-issued
+invitations. Enterprise SSO installs use just-in-time provisioning driven by the identity provider's
+role claim.
+
+## Inviting Users (Local / Default Install)
+
+On a default local install, the first setup signup creates the owner, and everyone else joins by
+invitation (unless `SIBYL_PUBLIC_SIGNUPS_ENABLED=true`). An owner or admin creates the invitation,
+and the invitee accepts through an emailed link.
+
+To invite someone:
+
+- **Web UI:** open Settings, organization members, and add the person's email with a role.
+- **API:** `POST /api/orgs/{slug}/invitations` with a JSON body of `email`, `role`, and optional
+  `expires_days` (defaults to 7, max 30).
+
+```bash
+curl -X POST https://sibyl.example.com/api/orgs/acme/invitations \
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "newuser@example.com", "role": "member", "expires_days": 7}'
+```
+
+`role` is one of the Sibyl roles `owner`, `admin`, `member`, or `viewer` (read-only).
+
+The invitee receives an email with a link and accepts it, which provisions their account:
+
+```text
+POST /api/invitations/{token}/accept
+```
+
+Invitation and password-reset emails require a configured email provider (Resend or SMTP). Without
+one, Sibyl writes the message to its JSONL outbox and skips delivery, so the invitee never gets the
+link. See [Installing Sibyl](installing.md#transactional-email).
+
+## JIT Provisioning (Enterprise SSO)
+
 Enterprise Sibyl uses just-in-time provisioning. Users do not need pre-created Sibyl accounts when
 the identity provider sends a valid stable subject and a Sibyl role claim.
-
-## JIT Provisioning
 
 On first OIDC login, Sibyl:
 
@@ -29,6 +64,11 @@ Grant access in the identity provider:
 - Assign `Sibyl.Member` for ordinary users.
 - Assign `Sibyl.Admin` for people who manage settings, audit, users, and API keys.
 - Assign `Sibyl.Owner` only to platform owners and break-glass accounts.
+
+`Sibyl.Member`, `Sibyl.Admin`, and `Sibyl.Owner` are IdP claim **strings**, not Sibyl roles. Sibyl
+maps them onto its own organization roles: `Sibyl.Owner` to `owner`, `Sibyl.Admin` to `admin`, and
+`Sibyl.Member` to `member` (lowercase `owner`, `admin`, and `member` claim values are accepted too).
+The read-only `viewer` role exists for local invitations; it has no dedicated OIDC claim string.
 
 The next successful login creates the user. For existing users, the next login or silent refresh
 updates the organization membership role.
@@ -58,6 +98,7 @@ boundary.
 
 ## Local Accounts
 
-Enterprise SSO values should set `SIBYL_LOCAL_AUTH_ENABLED=false`. Local username/password accounts
-remain the default single-user path and the break-glass path, but they should not be the normal
-enterprise SSO path.
+Local username/password accounts are the default single-user and small-team path, provisioned by the
+[invitation flow above](#inviting-users-local--default-install), and they back the break-glass path.
+Enterprise SSO values should set `SIBYL_LOCAL_AUTH_ENABLED=false` once a corporate OIDC owner can
+sign in, so local login is not the normal enterprise path.

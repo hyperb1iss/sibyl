@@ -18,12 +18,12 @@ moon run core:test        # Pytest
 ## What's Here
 
 - **models/:** Domain entities (Task, Project, Epic, Source, reflection, synthesis)
-- **graph/:** SurrealDB graph managers and native graph helpers
 - **backends/surreal/:** SurrealDB driver, schema, and per-table operations
 - **retrieval/:** Native context-pack retrieval, compatibility search, fusion, dedup
 - **ai/:** Native LLM substrate, model registry, providers, validation
 - **embeddings/:** Embedding provider clients
-- **services/:** Memory loop, reflection, synthesis, autonomy, source adapters
+- **services/:** Memory loop, reflection, synthesis, autonomy, source adapters, and the
+  `EntityManager` / `RelationshipManager` graph managers
 - **tools/:** MCP tool implementations
 - **tasks/:** Workflow engine and dependency resolution
 - **migrate/:** Migration archive merge and rewrite logic
@@ -41,8 +41,6 @@ src/sibyl_core/
 │   ├── reflection.py     # Reflection candidate models
 │   ├── synthesis.py      # Synthesis plan and artifact models
 │   └── responses.py      # API response models
-├── graph/
-│   └── surreal/          # SurrealDB graph managers
 ├── backends/surreal/     # Driver, schema, table operations
 ├── retrieval/            # Native context retrieval, fusion (RRF), dedup
 ├── ai/
@@ -51,7 +49,10 @@ src/sibyl_core/
 │   ├── clients.py        # Scoped agent caching
 │   └── llm/              # Extractor, Generator, config sources
 ├── embeddings/           # Embedding provider clients
-├── services/             # Memory loop, reflection, synthesis, source adapters
+├── services/
+│   ├── graph.py          # EntityManager, RelationshipManager
+│   ├── graph_client.py   # SurrealGraphClient driver wrapper
+│   └── ...               # Memory loop, reflection, synthesis, source adapters
 ├── tools/                # MCP tool implementations
 └── tasks/                # Workflow state machine, dependency resolution
 ```
@@ -76,28 +77,28 @@ task = Task(
 ### Graph Client
 
 ```python
-from sibyl_core.graph import GraphClient, EntityManager
+from sibyl_core.services import get_graph_client
+from sibyl_core.services.graph import EntityManager
 
-client = GraphClient()
-await client.connect()
+client = await get_graph_client(group_id=str(org_id))
 manager = EntityManager(client, group_id=str(org_id))
 
 # CRUD
 await manager.create(entity)
 # Retrieval uses search or list_by_type rather than direct ID lookup
-results = await manager.search("authentication patterns", limit=20)
+results = await manager.search(query="authentication patterns", limit=20)
 ```
 
 ### Write Concurrency
 
 The SurrealDB driver serializes WebSocket operations per client, and org-scoped graph access should
-use cloned drivers.
+use a per-org client (`get_graph_client(group_id=...)` returns one scoped to the org namespace).
 
 ```python
-# Direct writes go through the active graph backend
-await client.execute_write_org(query, org_id, **params)
+# Native write path, no LLM extraction
+await manager.create_direct(entity)
 
-# Or use EntityManager
+# Compatibility path with LLM-backed extraction
 await manager.create(entity)
 ```
 
@@ -139,13 +140,16 @@ through an `LLMConfigSource` so the API can supply database-backed settings whil
 
 ## Entity Types
 
-Sibyl models a broad set of entity types so memory stays structured. The registry lives in
-`models/entities.py` and covers, among others:
+Sibyl models 33 entity types so memory stays structured. The registry lives in `models/entities.py`
+and covers, among others:
 
-- **Work:** `task`, `epic`, `project`, `milestone`
-- **Knowledge:** `pattern`, `episode`, `procedure`, `rule`, `guide`, `error_pattern`
-- **Memory:** `decision`, `plan`, `idea`, `claim`, `artifact`, `session`, `note`
-- **Sources:** `source`, `document`, `domain`, `community`
+- **Work:** `task`, `epic`, `project`, `milestone`, `team`
+- **Knowledge:** `pattern`, `episode`, `procedure`, `rule`, `guide`, `template`, `error_pattern`,
+  `tool`, `language`, `topic`
+- **Memory:** `decision`, `plan`, `idea`, `claim`, `artifact`, `session`, `note`, `preference`
+- **People & places:** `person`, `place`, `event`
+- **Sources:** `source`, `document`, `domain`, `community`, `knowledge_source`, `config_file`,
+  `slash_command`
 
 ## Relationship Types
 

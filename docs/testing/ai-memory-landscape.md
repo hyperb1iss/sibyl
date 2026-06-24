@@ -1,11 +1,11 @@
 ---
 title: AI Memory Landscape
-description: Honest competitive positioning for Sibyl in the May 2026 AI memory systems field
+description: Honest competitive positioning for Sibyl in the June 2026 AI memory systems field
 ---
 
 # AI Memory Landscape
 
-This page positions Sibyl against the May 2026 AI memory systems field. The headline result —
+This page positions Sibyl against the June 2026 AI memory systems field. The headline result —
 [500/500 hit@5, 96.96% strict R@5, 98.90% R@10 on LongMemEval-S](./longmemeval.md) — is one number
 in a noisy landscape. The point of this page is to make the comparison legible without overclaim and
 without burying real competitive strengths.
@@ -160,7 +160,7 @@ a deliberate next step, not a hidden gap.
 
 ## The Architectural Landscape
 
-Six rough clusters cover most of the field as of May 2026.
+Six rough clusters cover most of the field as of June 2026.
 
 ### Cluster 1: Hosted-First Commercial Platforms
 
@@ -216,7 +216,7 @@ grows, fewer problems require dedicated memory infrastructure.
 [Memory-R1](https://arxiv.org/abs/2508.19828), [A-MEM](https://arxiv.org/abs/2502.12110),
 [Mem-α](https://arxiv.org/abs/2509.25911), [MAGMA](https://arxiv.org/abs/2601.03236),
 [Kumiho](https://arxiv.org/abs/2603.17244), [FiFA](https://arxiv.org/html/2512.12856v1),
-[MemOS](https://arxiv.org/abs/2507.03724). None production-ready in May 2026. The next paradigm
+[MemOS](https://arxiv.org/abs/2507.03724). None production-ready in June 2026. The next paradigm
 shift is RL-learned memory operations (store, retrieve, update, summarize, discard as tools the
 agent uses, with policy learned via PPO or GRPO).
 

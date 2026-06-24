@@ -166,13 +166,15 @@ Fallbacks:
 | `SIBYL_RATE_LIMIT_DEFAULT` | `100/minute` | Default rate limit                      |
 | `SIBYL_RATE_LIMIT_STORAGE` | `memory://`  | Storage backend (memory:// or redis://) |
 
-## PostgreSQL
+## PostgreSQL (migration/rehearsal only)
 
-Used only by historical archive and migration commands that explicitly restore a retained
-`postgres.sql` payload against an operator-managed PostgreSQL database. Structured auth/content
-archive export now reads SurrealDB. PostgreSQL auth and ambient runtime sidecars were removed after
-the v0.6.0 compatibility release; remove stale `SIBYL_AUTH_STORE=postgres` values before starting
-the API.
+PostgreSQL is not part of the Sibyl runtime and is not read by the `Settings` model. It is consumed
+only by the standalone `migrate` CLI when explicitly restoring a retained `postgres.sql` payload
+against an operator-managed PostgreSQL database. Structured auth and content archive export reads
+SurrealDB. Remove any stale `SIBYL_AUTH_STORE=postgres` value before starting the API.
+
+The variables below are **not** `SIBYL_` Settings fields. They are read directly by the migration
+tooling for a rehearsal database connection and are ignored by the running API and worker.
 
 | Variable                      | Default     | Description                                 |
 | ----------------------------- | ----------- | ------------------------------------------- |
@@ -184,8 +186,8 @@ the API.
 | `SIBYL_POSTGRES_POOL_SIZE`    | `10`        | External rehearsal database connection pool |
 | `SIBYL_POSTGRES_MAX_OVERFLOW` | `20`        | External rehearsal database overflow limit  |
 
-Note: these settings are ignored by the default Surreal runtime. Configure them only when running a
-historical archive rehearsal that explicitly restores a retained `postgres.sql` payload.
+Configure them only when running a migration that explicitly restores a retained `postgres.sql`
+payload. They have no effect on the default Surreal runtime.
 
 ## Redis/Valkey Coordination
 
@@ -492,13 +494,12 @@ The Settings class exposes computed connection URLs and runtime-shape helpers:
 ```python
 settings.resolved_surreal_url  # ws://..., surrealkv://..., or memory://
 settings.redis_url             # redis:// URL assembled from host/port/password
-settings.postgres_url          # historical archive rehearsal URL
-settings.postgres_url_sync     # historical archive rehearsal URL alias
-settings.fully_surreal         # True when graph, content, and auth all use SurrealDB
-settings.uses_relational_auth  # True only when auth_store still needs PostgreSQL
-settings.requires_relational_support  # True only for relational store/auth_store
+settings.fully_surreal         # always True; graph, content, and auth are SurrealDB
 settings.resolved_coordination_backend  # resolves "auto" to "local" or "redis"
 ```
 
-With the default `SIBYL_STORE=surreal` and `SIBYL_AUTH_STORE=surreal`, `fully_surreal` is `True` and
-both `uses_relational_auth` and `requires_relational_support` are `False`.
+Sibyl is fully SurrealDB-backed, so `fully_surreal` always returns `True`. There are no PostgreSQL
+connection helpers or relational-shape flags on `Settings` (`postgres_url`, `postgres_url_sync`,
+`uses_relational_auth`, and `requires_relational_support` do not exist). PostgreSQL connection
+details live with the migration tooling described under
+[PostgreSQL (migration/rehearsal only)](#postgresql-migrationrehearsal-only).

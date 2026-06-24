@@ -26,7 +26,7 @@ memory store, with `org_<uuid_hex>` namespaces for per-org isolation. It provide
 
 - **SurrealQL queries**: graph traversal, full-text, and vector search in one language
 - **HNSW vector indexes**: native embedding support for semantic recall
-- **Embedded or remote**: RocksDB for dev, WebSocket/HTTP for services
+- **Embedded or remote**: SurrealKV for dev, WebSocket/HTTP for services
 
 ### Legacy FalkorDB Archives
 
@@ -237,7 +237,7 @@ tasks = await manager.list_by_type(
 ### Using RelationshipManager
 
 ```python
-from sibyl_core.graph import RelationshipManager
+from sibyl_core.services.graph import RelationshipManager
 
 rel_manager = RelationshipManager(client, group_id=str(org_id))
 
@@ -249,22 +249,23 @@ related = await rel_manager.get_related_entities(
 )
 ```
 
-### Direct Cypher Queries
+### Direct SurrealQL Queries
 
-For complex queries, use Cypher directly:
+For complex queries, use SurrealQL directly:
 
 ```python
 result = await driver.execute_query(
     """
-    MATCH (t:Entity)-[:BELONGS_TO]->(p:Entity)
-    WHERE t.entity_type = 'task'
-      AND p.uuid = $project_id
-      AND t.status = 'doing'
-    RETURN t.uuid, t.name, t.status
-    """,
-    project_id="proj_abc"
+    SELECT id, name, status
+    FROM entity
+    WHERE entity_type = 'task'
+      AND status = 'doing'
+    """
 )
 ```
+
+Cypher (`MATCH`) applies only to legacy archive migration. Runtime queries against the active
+SurrealDB store use SurrealQL.
 
 ## Best Practices
 
@@ -295,15 +296,14 @@ application-level locking is needed.
 
 ### 4. Filter Early in Queries
 
-```cypher
+```surql
 -- WRONG (fetches all, filters in Python)
-MATCH (n) RETURN n
+SELECT * FROM entity;
 
 -- RIGHT (filters in DB)
-MATCH (n)
-WHERE n.entity_type = $type AND n.group_id = $org_id
-RETURN n
-LIMIT 100
+SELECT * FROM entity
+WHERE entity_type = $type
+LIMIT 100;
 ```
 
 ## Troubleshooting

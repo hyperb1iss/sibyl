@@ -47,6 +47,9 @@ The imports surface tracks [source import](./sources.md#source-import) jobs. Sou
 structured external records, such as a mailbox archive, into raw memory. Because imports are
 resumable, the surface shows checkpoint progress and lets you see exactly which records landed.
 
+Transcript ingestion (`sibyl ingest claude-code`/`codex`) and document collections (`sibyl docs`)
+are additional memory-feed paths that land records here.
+
 ## Synthesize
 
 The synthesize surface runs [source-grounded synthesis](./synthesis.md) interactively. Set a goal,

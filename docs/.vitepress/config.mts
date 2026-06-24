@@ -141,6 +141,8 @@ export default defineConfig({
                         { text: 'capture', link: '/cli/capture' },
                         { text: 'search', link: '/cli/search' },
                         { text: 'add', link: '/cli/add' },
+                        { text: 'show', link: '/cli/show' },
+                        { text: 'brief', link: '/cli/brief' },
                         { text: 'session', link: '/cli/session' },
                         { text: 'archive', link: '/cli/archive' },
                     ],
@@ -161,6 +163,8 @@ export default defineConfig({
                     text: 'Sources & Synthesis',
                     items: [
                         { text: 'crawl', link: '/cli/crawl' },
+                        { text: 'ingest', link: '/cli/ingest' },
+                        { text: 'docs', link: '/cli/docs' },
                         { text: 'synthesis', link: '/cli/synthesis' },
                     ],
                 },
@@ -174,9 +178,16 @@ export default defineConfig({
                 {
                     text: 'System',
                     items: [
+                        { text: 'init', link: '/cli/init' },
                         { text: 'auth', link: '/cli/auth' },
                         { text: 'org', link: '/cli/org' },
                         { text: 'context', link: '/cli/context' },
+                        { text: 'doctor', link: '/cli/doctor' },
+                        { text: 'service', link: '/cli/service' },
+                        { text: 'docker', link: '/cli/docker' },
+                        { text: 'local', link: '/cli/local' },
+                        { text: 'skill', link: '/cli/skill' },
+                        { text: 'update', link: '/cli/update' },
                     ],
                 },
             ],
@@ -222,6 +233,7 @@ export default defineConfig({
                     text: 'Evaluation',
                     items: [
                         { text: 'LongMemEval Results', link: '/testing/longmemeval' },
+                        { text: 'LongMemEval-V2', link: '/testing/longmemeval-v2' },
                         { text: 'AI Memory Landscape', link: '/testing/ai-memory-landscape' },
                         { text: 'Benchmark Methodology', link: '/testing/benchmark-methodology' },
                     ],

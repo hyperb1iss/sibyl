@@ -110,7 +110,8 @@ Restart Claude Desktop after changing the MCP config.
 
 ## Verify
 
-Ask the client to search Sibyl for a known memory. If the request fails:
+A connected client sees 11 Sibyl tools plus the `sibyl://health` resource. Ask the client to search
+Sibyl for a known memory. If the request fails:
 
 - Confirm the API key starts with `sk_live_` or `sk_test_`.
 - Confirm the key has the `mcp` scope.

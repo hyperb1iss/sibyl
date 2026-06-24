@@ -17,14 +17,15 @@ sibyl search <query> [options]
 
 ## Options
 
-| Option         | Short | Default | Description                          |
-| -------------- | ----- | ------- | ------------------------------------ |
-| `--type`       | `-t`  | (all)   | Filter by entity type                |
-| `--limit`      | `-l`  | 10      | Maximum results to return            |
-| `--all`        | `-a`  | false   | Search all projects (bypass context) |
-| `--graph-only` |       | false   | Search graph memory only             |
-| `--docs-only`  |       | false   | Search crawled docs only             |
-| `--json`       | `-j`  | false   | Output as JSON                       |
+| Option         | Short | Default | Description                           |
+| -------------- | ----- | ------- | ------------------------------------- |
+| `--type`       | `-t`  | (all)   | Filter by entity type                 |
+| `--limit`      | `-l`  | 10      | Maximum results to return             |
+| `--all`        | `-a`  | false   | Search all projects (bypass context)  |
+| `--graph-only` |       | false   | Search graph memory only              |
+| `--docs-only`  |       | false   | Search crawled docs only              |
+| `--as-of`      |       | (now)   | Filter graph memory as of a timestamp |
+| `--json`       | `-j`  | false   | Output as JSON                        |
 
 Search spans both graph memory and crawled documents by default. Use `--graph-only` or `--docs-only`
 to restrict the surface.
@@ -42,7 +43,7 @@ Common types to filter by:
 - `document` - Crawled documents
 - `decision`, `plan`, `idea`, `claim` - Memory-loop reasoning artifacts
 
-See [`sibyl entity`](./entity.md) for the full list of around 29 entity types.
+See [`sibyl entity`](./entity.md) for the full list of 33 entity types.
 
 ## Examples
 

@@ -5,8 +5,9 @@ description: The supported storage configurations and when to pick each
 
 # Storage Modes
 
-Sibyl's active runtime is SurrealDB. `SIBYL_STORE=legacy` remains accepted only as a migration-era
-input and is normalized by local startup paths.
+Sibyl's active runtime is SurrealDB. Current binaries only accept `SIBYL_STORE=surreal`; any other
+value, including `legacy`, is rejected at startup. `legacy` is historical context for the v0.6
+compatibility archives, not a runtime you can select today.
 
 | Mode                          | `SIBYL_STORE` | Auth store | Coordination | External services               |
 | ----------------------------- | ------------- | ---------- | ------------ | ------------------------------- |
@@ -16,7 +17,8 @@ input and is normalized by local startup paths.
 Active auth, content, crawler, raw-capture, graph, and RAG runtime paths resolve through SurrealDB.
 PostgreSQL remains only for explicit historical archive import/restore rehearsal against an
 operator-managed database. Fully Surreal is the only recommended target for new deployments.
-`SIBYL_AUTH_STORE=postgres` was removed after the v0.6.0 compatibility release.
+`SIBYL_AUTH_STORE` now only accepts `surreal`; a leftover `SIBYL_AUTH_STORE=postgres` fails config
+validation.
 
 Existing installs should read the
 [SurrealDB migration release notes](./surrealdb-migration-release-notes.md) before upgrading.
@@ -51,7 +53,7 @@ SIBYL_STORE=surreal
 # SIBYL_SURREAL_DATA_DIR=./.moon/cache/surreal-dev
 ```
 
-- **Dev:** `moon run dev` starts local SurrealDB backed by RocksDB automatically.
+- **Dev:** `moon run dev` starts local SurrealDB backed by SurrealKV automatically.
 - **Prod:** run SurrealDB as a service (`ws://` or `http://` URL). In-memory mode (`memory://`) is
   rejected by the production config validator.
 - **Server version:** use SurrealDB 3.x, and pin the exact server image/tag in production.

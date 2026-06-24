@@ -154,9 +154,10 @@ search("error handling patterns", types=["pattern"])
 # Check for related work
 explore(mode="list", types=["task"], project="proj_abc", status="doing")
 
-# Track progress via notes
+# Track progress on the task description
 manage("update_task", entity_id="task_xyz",
-       data={"notes": "Implemented OAuth callback"})
+       data={"description": "Implemented OAuth callback"})
+# For a timestamped note, use the CLI: sibyl task note task_xyz "..."
 ```
 
 ### After Completing
@@ -171,6 +172,9 @@ add("OAuth redirect insight",
     "Redirect URIs must match exactly including trailing slashes...",
     category="authentication")
 ```
+
+Search returns previews; fetch the full record with `sibyl show <id>`. To seed memory from existing
+sessions, import transcripts with `sibyl ingest claude-code <path>` or `sibyl ingest codex <path>`.
 
 ## Tool Reference
 

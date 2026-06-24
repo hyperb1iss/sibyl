@@ -25,9 +25,10 @@ moon run api:typecheck    # Type check
 
 - **MCP Server:** eleven tools for search, context packs, exploration, capture, memory, synthesis,
   and management
-- **REST API:** 26 routers covering entities, tasks, projects, memory, synthesis, sources, auth,
+- **REST API:** 29 routers covering entities, tasks, projects, memory, synthesis, sources, auth,
   settings, and admin
-- **Auth System:** JWT sessions, GitHub OAuth, API keys with scopes, MCP OAuth clients, RBAC
+- **Auth System:** JWT sessions, GitHub OAuth, API keys with scopes, MCP OAuth clients, RBAC,
+  SMTP-backed password reset
 - **Background Jobs:** in-process local runtime or Redis-backed `arq` workers, including the nightly
   reflection dream-cycle
 - **WebSocket:** Real-time updates for entities and tasks
@@ -45,18 +46,18 @@ Sibyl API (port 3334)
 
 ## Key Directories
 
-| Directory       | Purpose                                                                                         |
-| --------------- | ----------------------------------------------------------------------------------------------- |
-| `api/routes/`   | REST endpoints (26 routers: tasks, entities, memory, synthesis, crawler, auth, admin, and more) |
-| `ai/`           | DB-backed LLM settings, model validation routes, runtime invalidation                           |
-| `auth/`         | JWT, sessions, API keys, RBAC, MCP OAuth clients                                                |
-| `persistence/`  | SurrealDB-native runtimes for auth, content, graph, and backups                                 |
-| `crawler/`      | Documentation crawl and ingestion pipeline                                                      |
-| `ingestion/`    | Source import pipeline (mailbox and other adapters)                                             |
-| `jobs/`         | Background jobs (reflection dream-cycle, crawl, backups)                                        |
-| `coordination/` | Local and Redis brokers for jobs, locks, and pub/sub                                            |
-| `email/`        | Transactional email delivery                                                                    |
-| `generator/`    | Synthetic test-data generation                                                                  |
+| Directory       | Purpose                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------ |
+| `api/routes/`   | REST endpoints (29 routers: tasks, entities, memory, synthesis, crawler, ingestion, auth, admin) |
+| `ai/`           | DB-backed LLM settings, model validation routes, runtime invalidation                            |
+| `auth/`         | JWT, sessions, API keys, RBAC, MCP OAuth clients                                                 |
+| `persistence/`  | SurrealDB-native runtimes for auth, content, graph, and backups                                  |
+| `crawler/`      | Documentation crawl and ingestion pipeline                                                       |
+| `ingestion/`    | Source import pipeline (mailbox and other adapters)                                              |
+| `jobs/`         | Background jobs (reflection dream-cycle, crawl, backups)                                         |
+| `coordination/` | Local and Redis brokers for jobs, locks, and pub/sub                                             |
+| `email/`        | Transactional email delivery                                                                     |
+| `generator/`    | Synthetic test-data generation                                                                   |
 
 ## Configuration
 

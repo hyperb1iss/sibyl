@@ -60,7 +60,8 @@ artifacts:
 | `session`  | A session-level memory or summary           |
 | `episode`  | General learning or knowledge (default)     |
 
-See [`sibyl entity`](./entity.md) for the full entity type list.
+`--kind` accepts the full set of 33 entity types, including `preference`, `person`, `place`, and
+`event`. See [`sibyl entity`](./entity.md) for the complete list.
 
 ## Examples
 

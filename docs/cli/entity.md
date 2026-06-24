@@ -16,39 +16,43 @@ episodes, templates, and other types.
 
 ## Entity Types
 
-Sibyl tracks around 29 entity types. The full set:
+Sibyl tracks 33 entity types. The full set:
 
-| Type               | Description                            |
-| ------------------ | -------------------------------------- |
-| `pattern`          | Code patterns, best practices          |
-| `rule`             | Rules and constraints                  |
-| `template`         | Code templates                         |
-| `guide`            | Team guidance, standards               |
-| `tool`             | Tools and utilities                    |
-| `language`         | Programming languages                  |
-| `topic`            | General topics                         |
-| `episode`          | Knowledge episodes, learnings          |
-| `knowledge_source` | External knowledge sources             |
-| `config_file`      | Configuration files                    |
-| `slash_command`    | Slash commands                         |
-| `project`          | Projects (use `sibyl project` instead) |
-| `epic`             | Epics (use `sibyl epic` instead)       |
-| `task`             | Tasks (use `sibyl task` instead)       |
-| `team`             | Team definitions                       |
-| `error_pattern`    | Error patterns and solutions           |
-| `milestone`        | Project milestones                     |
-| `source`           | Web sources                            |
-| `document`         | Crawled documents                      |
-| `procedure`        | Procedures and processes               |
-| `community`        | Community groupings                    |
-| `note`             | Standalone notes                       |
-| `domain`           | Knowledge domains                      |
-| `artifact`         | Produced outputs (synthesis, docs)     |
-| `decision`         | A choice made, with rationale          |
-| `plan`             | An intended sequence of work           |
-| `idea`             | An exploration or proposal             |
-| `claim`            | An assertion to be verified or cited   |
-| `session`          | Session-level memory or summary        |
+| Type               | Description                                         |
+| ------------------ | --------------------------------------------------- |
+| `pattern`          | Code patterns, best practices                       |
+| `rule`             | Rules and constraints                               |
+| `template`         | Code templates                                      |
+| `guide`            | Team guidance, standards                            |
+| `tool`             | Tools and utilities                                 |
+| `language`         | Programming languages                               |
+| `topic`            | General topics                                      |
+| `episode`          | Knowledge episodes, learnings                       |
+| `knowledge_source` | External knowledge sources                          |
+| `config_file`      | Configuration files                                 |
+| `slash_command`    | Slash commands                                      |
+| `project`          | Projects (use `sibyl project` instead)              |
+| `epic`             | Epics (use `sibyl epic` instead)                    |
+| `task`             | Tasks (use `sibyl task` instead)                    |
+| `team`             | Team definitions                                    |
+| `error_pattern`    | Error patterns and solutions                        |
+| `milestone`        | Project milestones                                  |
+| `source`           | Web sources                                         |
+| `document`         | Crawled documents                                   |
+| `procedure`        | Procedures and processes                            |
+| `community`        | Community groupings                                 |
+| `note`             | Standalone notes                                    |
+| `domain`           | Knowledge domains                                   |
+| `artifact`         | Produced outputs (synthesis, docs)                  |
+| `decision`         | A choice made, with rationale                       |
+| `plan`             | An intended sequence of work                        |
+| `idea`             | An exploration or proposal                          |
+| `claim`            | An assertion to be verified or cited                |
+| `preference`       | Like, dislike, habit, or stable personal constraint |
+| `person`           | Named person or relationship anchor                 |
+| `place`            | Location, venue, or destination                     |
+| `event`            | Dated activity, milestone, or occurrence            |
+| `session`          | Session-level memory or summary                     |
 
 ---
 

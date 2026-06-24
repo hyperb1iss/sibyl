@@ -38,6 +38,10 @@ sibyl add "Descriptive title" "What, why, how, caveats" --type pattern
 `capture` and `remember` are the memory-loop verbs. `add` is the lower-level command with the widest
 set of flags.
 
+Knowledge does not only arrive one entry at a time. Transcript ingestion
+(`sibyl ingest claude-code`/`codex`) replays past agent sessions into memory, and document
+collections (`sibyl docs`) import reference material. Both are additional ways to feed the graph.
+
 ### Complete With Learnings
 
 Every task completion is an opportunity:

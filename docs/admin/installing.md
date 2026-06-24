@@ -161,6 +161,28 @@ SIBYL_ANTHROPIC_API_KEY
 Use a generated 32-byte or stronger `SIBYL_JWT_SECRET`. Keep `SIBYL_SETTINGS_KEY` stable so
 encrypted settings can be read after a restart.
 
+### Transactional Email
+
+Password reset and invitation emails need a delivery provider. Configure either Resend or SMTP, plus
+a from address:
+
+```text
+# Option A: Resend
+SIBYL_RESEND_API_KEY
+SIBYL_EMAIL_FROM
+
+# Option B: SMTP
+SIBYL_SMTP_HOST
+SIBYL_SMTP_PORT
+SIBYL_SMTP_USERNAME
+SIBYL_SMTP_PASSWORD
+SIBYL_EMAIL_FROM
+```
+
+Without one of these configured, Sibyl logs those emails to its JSONL outbox and skips live
+delivery, so invited users and password-reset requests never receive a link. When setting SMTP
+passwords in a Compose `.env` file, escape literal `$` characters as `$$`.
+
 ## First Owner
 
 The default Sibyl install is local-first. The first setup signup creates the owner/admin user. After

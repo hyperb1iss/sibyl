@@ -1880,7 +1880,7 @@ def _register_tools(mcp: FastMCP) -> None:
         """Manage operations that modify state in the knowledge graph.
 
         The manage() tool handles all state-changing operations including task
-        workflow, source operations, analysis, and admin actions.
+        and epic workflow, source operations, and analysis.
 
         Task Workflow Actions:
             - start_task: Begin work on a task (sets status to 'doing')
@@ -1890,6 +1890,13 @@ def _register_tools(mcp: FastMCP) -> None:
             - complete_task: Mark done (data.learnings optional)
             - archive_task: Archive without completing
             - update_task: Update task fields (data contains updates)
+            - add_note: Append a note to a task (data.content required)
+
+        Epic Workflow Actions:
+            - start_epic: Begin work on an epic
+            - complete_epic: Mark an epic complete (data.learnings optional)
+            - archive_epic: Archive an epic (data.reason optional)
+            - update_epic: Update epic fields (data contains updates)
 
         Source Operations:
             - crawl: Trigger crawl of URL (data.url required, data.depth optional)
@@ -1904,10 +1911,8 @@ def _register_tools(mcp: FastMCP) -> None:
             - detect_cycles: Find circular dependencies in project
             - suggest: Get knowledge suggestions for a task
 
-        Admin Actions:
-            - health: Server health check
-            - stats: Graph statistics
-            - rebuild_index: Rebuild search indices
+        Server health and graph statistics are exposed as the sibyl://health and
+        sibyl://stats MCP resources, not as manage() actions.
 
         Args:
             action: Action to perform (see categories above)
@@ -1926,7 +1931,7 @@ def _register_tools(mcp: FastMCP) -> None:
             manage("link_graph", entity_id="source-123")  # Link specific source
             manage("link_graph_status")  # Check pending work
             manage("estimate", entity_id="task-456")
-            manage("health")
+            manage("add_note", entity_id="task-123", data={"content": "Root cause found"})
         """
         return await _manage_mcp_action(
             action=action,

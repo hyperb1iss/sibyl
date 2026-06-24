@@ -2,7 +2,7 @@
 
 - Status: active planning baseline
 - Created: 2026-05-15
-- Current release floor: v0.10.0
+- Current release floor: v1.0.0-rc.6
 - Current implementation focus: v1.0 RC Evidence Freeze
 - Active remap spec:
   [`SIBYL_POST_V010_RELEASE_REMAP_SPEC.md`](SIBYL_POST_V010_RELEASE_REMAP_SPEC.md)
@@ -278,7 +278,10 @@ Reflection OS foundations, trust-control and auth-session gates, runtime telemet
 writes, single-host deployment scaffolding, and broad RBAC/scope hardening. Treat v0.10 as the
 current baseline, not as the start of new implementation.
 
-### v0.11: Corpus Runtime
+### v0.11: Corpus Runtime (absorbed into the v1.0 RC line)
+
+Status: not cut as a standalone release. This packet's work landed across `v1.0.0-rc.1` through
+`v1.0.0-rc.6`. Kept here as the corpus-runtime scope and gate list, not a forthcoming version.
 
 Goal: make source-grounded memory work on real corpora.
 
@@ -307,7 +310,10 @@ Required gates:
 - `moon run docs:build`
 - `moon run :check`
 
-### v0.12: Memory Workspace OS
+### v0.12: Memory Workspace OS (absorbed into the v1.0 RC line)
+
+Status: not cut as a standalone release. This packet's work landed across `v1.0.0-rc.1` through
+`v1.0.0-rc.6`. Kept here as the workspace-OS scope and gate list, not a forthcoming version.
 
 Goal: make Sibyl's automatic memory behavior understandable and correctable from one product
 surface.
@@ -332,7 +338,10 @@ Required gates:
 - `overview-perf-gate`
 - `moon run :check`
 
-### v0.13: Surreal-Only Runtime Closure
+### v0.13: Surreal-Only Runtime Closure (absorbed into the v1.0 RC line)
+
+Status: not cut as a standalone release. This packet's work landed across `v1.0.0-rc.1` through
+`v1.0.0-rc.6`. Kept here as the runtime-closure scope and gate list, not a forthcoming version.
 
 Goal: remove remaining Graphiti and Redis-required default-runtime assumptions.
 
@@ -364,7 +373,10 @@ Required gates:
 - `backup-restore-gate`
 - `moon run :check`
 
-### v1.0 RC
+### v1.0 RC (active milestone, latest tag v1.0.0-rc.6)
+
+Status: active. The release-candidate line is current; `v1.0.0-rc.1` through `v1.0.0-rc.6` have
+shipped, absorbing the v0.11 through v0.13 packets above.
 
 Goal: freeze the claim surface and cut only when receipts are boring.
 
@@ -411,9 +423,9 @@ The RC work is receipt refresh and release rehearsal, not adding new gate names.
 
 ## 7. Strategic Boundary
 
-The Gradial Rust direction can share design DNA, primitives, and evaluation fixtures with Sibyl, but
+Adjacent Rust runtime work can share design DNA, primitives, and evaluation fixtures with Sibyl, but
 it should not derail Python Sibyl's 1.0. Sibyl remains the polished personal/team memory product.
-Gradial can explore high-throughput swarm architecture separately.
+High-throughput swarm architecture can evolve separately.
 
 Shared:
 

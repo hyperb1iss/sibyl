@@ -28,11 +28,24 @@ sibyl recall <goal> [options]
 | `--all`       | `-a`  | false     | Use all accessible projects                            |
 | `--limit`     | `-l`  | 12        | Maximum context items (1-50)                           |
 | `--related`   |       | on        | Include one-hop related graph context (`--no-related`) |
+| `--audit`     |       | false     | Include full retrieval metadata per item               |
+| `--budget`    |       | (none)    | Cap rendered markdown at ~N tokens (100-8000)          |
 | `--json`      | `-j`  | false     | Output full JSON                                       |
 | `--raw`       |       | false     | Recall verbatim raw memories                           |
 | `--diary`     |       | false     | Recall a private agent diary                           |
 | `--scope`     |       | `private` | Raw memory scope                                       |
 | `--scope-key` |       | (none)    | Project/team/shared scope key                          |
+
+The following flags filter raw imports and apply only with `--raw` or `--diary`:
+
+| Option              | Short | Default | Description                                      |
+| ------------------- | ----- | ------- | ------------------------------------------------ |
+| `--participant`     |       | (none)  | Filter raw imports by participant (repeatable)   |
+| `--label`           |       | (none)  | Filter raw imports by adapter label (repeatable) |
+| `--thread`          |       | (none)  | Filter raw imports by thread                     |
+| `--occurred-after`  |       | (none)  | Filter raw imports after an ISO timestamp        |
+| `--occurred-before` |       | (none)  | Filter raw imports before an ISO timestamp       |
+| `--as-of`           |       | (now)   | Filter raw memory by validity timestamp          |
 
 ## Intent
 

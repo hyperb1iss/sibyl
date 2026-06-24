@@ -276,6 +276,75 @@ Exchange refresh token for new access token.
 }
 ```
 
+## Password Reset
+
+Password management runs through the `/api/users` router and uses an email-delivered reset token
+(SMTP). The two reset endpoints are unauthenticated; the in-session change endpoint requires a valid
+access token.
+
+### Request Reset
+
+```http
+POST /api/users/password/reset
+```
+
+Sends a reset email if an account exists for the address. The response is intentionally generic so
+the endpoint never reveals whether an account exists.
+
+**Request:**
+
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+**Response:** `202 Accepted`
+
+```json
+{
+  "message": "If an account exists, a reset email has been sent."
+}
+```
+
+### Confirm Reset
+
+```http
+POST /api/users/password/reset/confirm
+```
+
+Completes the reset using the token from the email and sets the new password.
+
+**Request:**
+
+```json
+{
+  "token": "reset-token-from-email",
+  "new_password": "new-secure-password"
+}
+```
+
+**Response:** `204 No Content`
+
+### Change Password (Authenticated)
+
+```http
+POST /api/users/me/password
+```
+
+Changes the current user's password. Requires the current password and a valid session.
+
+**Request:**
+
+```json
+{
+  "current_password": "old-secure-password",
+  "new_password": "new-secure-password"
+}
+```
+
+**Response:** `204 No Content`
+
 ## Token Validation
 
 ### Validation Flow
@@ -378,20 +447,27 @@ SIBYL_MCP_AUTH_MODE=auto  # auto, on, or off
 
 ## Error Responses
 
+Auth failures use the standard error envelope with a stable `error` code and an `X-Request-ID`
+header:
+
 ```json
 {
-  "detail": "Not authenticated"
+  "error": "authentication_required",
+  "message": "Authentication failed.",
+  "request_id": "req_a1b2c3d4e5f6",
+  "remediation": "Run 'sibyl auth login' or set SIBYL_AUTH_TOKEN."
 }
 ```
 
-| Status | Error                     | Resolution                         |
-| ------ | ------------------------- | ---------------------------------- |
-| 401    | `Not authenticated`       | Provide valid token                |
-| 401    | `Invalid token`           | Token may be corrupted or tampered |
-| 401    | `Token expired`           | Refresh token or re-login          |
-| 401    | `User not found`          | Account may be deleted             |
-| 403    | `No organization context` | Token missing org claim            |
-| 403    | `Forbidden`               | Insufficient role permissions      |
+| Status | Error code                | Cause                                | Resolution                           |
+| ------ | ------------------------- | ------------------------------------ | ------------------------------------ |
+| 401    | `authentication_required` | Missing token                        | Provide valid token                  |
+| 401    | `authentication_required` | Signature verification failed        | Token may be corrupted or tampered   |
+| 401    | `authentication_required` | Token past expiration                | Refresh token or re-login            |
+| 401    | `authentication_required` | User ID not in database              | Account may be deleted               |
+| 403    | `forbidden`               | Token missing org claim              | Re-authenticate with an org token    |
+| 403    | `forbidden`               | Insufficient role permissions        | Check organization and project roles |
+| 404    | `not_found`               | Resource does not exist or no access | Check the ID or prefix and retry     |
 
 ## Related
 

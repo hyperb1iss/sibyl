@@ -81,9 +81,10 @@ Multiple agents can work on related tasks:
 # Claim a task
 manage("start_task", entity_id="task_frontend_auth")
 
-# Add progress note
+# Record progress on the task description
+# (for a timestamped note from the CLI: sibyl task note task_frontend_auth "...")
 manage("update_task", entity_id="task_frontend_auth",
-       data={"notes": "Working on login form"})
+       data={"description": "Working on login form"})
 ```
 
 **Agent B:**
@@ -262,9 +263,9 @@ add("Sprint 5 - Auth Feature",
 **Worker Agents:**
 
 ```python
-# Find highest priority work
+# Find candidate work
 explore(mode="list", types=["task"],
-        project="proj_abc", status="todo", priority="critical,high")
+        project="proj_abc", status="todo")
 
 # Claim and start
 manage("start_task", entity_id="task_1")
@@ -276,9 +277,9 @@ manage("start_task", entity_id="task_1")
 # Check distribution
 explore(mode="list", types=["task"], status="doing")
 
-# Find unassigned high-priority work
+# Find unassigned work
 explore(mode="list", types=["task"],
-        status="todo", priority="high")
+        status="todo")
 
 # Self-assign
 manage("start_task", entity_id="available_task")
@@ -292,7 +293,7 @@ manage("start_task", entity_id="available_task")
 
 ```python
 # Find recent additions
-explore(mode="list", types=["episode"], since="7d")
+search("", types=["episode"], since="7d")
 
 # Promote valuable episodes to patterns
 add("Promoted pattern",
@@ -407,7 +408,9 @@ add("OAuth state parameter insight", "...")
 
 # End session
 manage("update_task", entity_id="task_oauth",
-       data={"status": "review", "notes": "Ready for review"})
+       data={"status": "review"})
+# Leave a timestamped note from the CLI:
+# sibyl task note task_oauth "Ready for review"
 ```
 
 **Afternoon - Agent B (Reviewer):**
@@ -429,7 +432,7 @@ manage("complete_task", entity_id="task_oauth",
 
 ```python
 # Review completed work
-explore(mode="list", types=["task"], status="done", since="1d")
+search("", types=["task"], status="done", since="1d")
 
 # Plan follow-ups
 add("Add refresh token rotation",

@@ -1317,7 +1317,7 @@ Receipt, 2026-05-15:
     post-doc rerun completed 36 tasks with 33 cache hits.
   - `git diff --check` -> clean.
 - Gate repairs made during audit:
-  - `docs/.prettierignore` now ignores generated `docs/research/*` dumps and local Gradial
+  - `docs/.prettierignore` now ignores generated `docs/research/*` dumps and local Rust-runtime
     brainstorm scratch notes so docs lint evaluates tracked documentation rather than ignored local
     artifacts.
   - `docs/research/rust-port/INVENTORY.md` and its guard constants now include the synthesis REST

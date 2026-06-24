@@ -385,7 +385,7 @@ Graphiti Core module.
 ### Out Of Scope
 
 - high-throughput distributed swarm runtime
-- Gradial Rust runtime decisions
+- adjacent Rust runtime decisions
 - cloud-only deployment assumptions
 
 ### Required Packets

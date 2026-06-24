@@ -78,6 +78,9 @@ sibyl search "running awaits at the same time"
 
 Semantic search finds that memory even though you searched with different words.
 
+Pull the full record back with `sibyl show <id>`. You can also seed memory from past agent sessions:
+`sibyl ingest claude-code <path>` and `sibyl ingest codex <path>` import transcript JSONL.
+
 ## Step 6: Connect your AI agent
 
 Sibyl earns its keep when your AI agent uses it too. Any agent can reach Sibyl through the `sibyl`
@@ -101,6 +104,7 @@ see [Agents & MCP](./claude-code.md).
 | Capture a memory | `sibyl remember "Title" "What matters"`      |
 | Recall context   | `sibyl recall "goal" --intent build`         |
 | Search the graph | `sibyl search "query"`                       |
+| Show a record    | `sibyl show <id>`                            |
 | Create a task    | `sibyl task create --title "..."`            |
 | Complete a task  | `sibyl task complete <id> --learnings "..."` |
 | Link a repo      | `sibyl project link <id>`                    |
