@@ -44,7 +44,7 @@ const SelectContent = forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={`
-        relative z-50 min-w-[180px] overflow-hidden
+        relative z-50 max-h-[min(var(--radix-select-content-available-height),16rem)] min-w-[180px] overflow-y-auto
         bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg shadow-xl
         animate-fade-in
         data-[state=open]:animate-in data-[state=closed]:animate-out
@@ -59,7 +59,7 @@ const SelectContent = forwardRef<
       {...props}
     >
       <SelectPrimitive.Viewport
-        className={`p-1 ${position === 'popper' ? 'h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]' : ''}`}
+        className={`p-1 ${position === 'popper' ? 'w-full min-w-[var(--radix-select-trigger-width)]' : ''}`}
       >
         {children}
       </SelectPrimitive.Viewport>
