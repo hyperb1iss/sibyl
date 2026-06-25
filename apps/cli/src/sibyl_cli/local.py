@@ -83,7 +83,7 @@ COMPOSE_CONFIG = {
             "environment": {
                 "SIBYL_STORE": "surreal",
                 "SIBYL_AUTH_STORE": "surreal",
-                "SIBYL_COORDINATION_BACKEND": "auto",
+                "SIBYL_COORDINATION_BACKEND": "local",
                 "SIBYL_SURREAL_URL": "ws://surrealdb:8000/rpc",
                 "SIBYL_SURREAL_USERNAME": "${SIBYL_SURREAL_USERNAME:-root}",
                 "SIBYL_SURREAL_PASSWORD": "${SIBYL_SURREAL_PASSWORD:-sibyl_local}",
@@ -111,27 +111,6 @@ COMPOSE_CONFIG = {
             },
             "restart": "unless-stopped",
         },
-        "worker": {
-            "image": f"ghcr.io/hyperb1iss/sibyl-api:{DEFAULT_IMAGE_TAG}",
-            "container_name": "sibyl-worker",
-            "command": ["sibyld", "worker"],
-            "depends_on": {
-                "api": {"condition": "service_healthy"},
-            },
-            "environment": {
-                "SIBYL_STORE": "surreal",
-                "SIBYL_AUTH_STORE": "surreal",
-                "SIBYL_COORDINATION_BACKEND": "auto",
-                "SIBYL_SURREAL_URL": "ws://surrealdb:8000/rpc",
-                "SIBYL_SURREAL_USERNAME": "${SIBYL_SURREAL_USERNAME:-root}",
-                "SIBYL_SURREAL_PASSWORD": "${SIBYL_SURREAL_PASSWORD:-sibyl_local}",
-                "SIBYL_OPENAI_API_KEY": "${SIBYL_OPENAI_API_KEY}",
-                "SIBYL_ANTHROPIC_API_KEY": "${SIBYL_ANTHROPIC_API_KEY}",
-                "SIBYL_LLM_PROVIDER": "anthropic",
-                "SIBYL_LLM_MODEL": "claude-haiku-4-5",
-            },
-            "restart": "unless-stopped",
-        },
         "web": {
             "image": f"ghcr.io/hyperb1iss/sibyl-web:{DEFAULT_IMAGE_TAG}",
             "container_name": "sibyl-web",
@@ -143,9 +122,12 @@ COMPOSE_CONFIG = {
                 "SIBYL_API_URL": "http://api:3334/api",  # Server-side (SSR) fetches
                 "NEXT_PUBLIC_API_URL": "http://localhost:3334",  # Client-side fetches
                 "NODE_ENV": "production",
+                # Next.js standalone binds 0.0.0.0 (IPv4 only) by default; :: makes
+                # the server dual-stack so it answers on both ::1 and 127.0.0.1.
+                "HOSTNAME": "::",
             },
             "healthcheck": {
-                "test": ["CMD", "wget", "-q", "--spider", "http://localhost:3337/"],
+                "test": ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3337/"],
                 "interval": "10s",
                 "timeout": "5s",
                 "retries": 3,

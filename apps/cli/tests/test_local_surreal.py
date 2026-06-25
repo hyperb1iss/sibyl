@@ -15,12 +15,14 @@ def test_local_compose_defaults_to_fully_surreal_runtime() -> None:
     assert services["surrealdb"]["image"] == "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.1.0}"
     assert "falkordb" not in services
     assert "postgres" not in services
+    assert "worker" not in services
 
     api = services["api"]
     assert api["depends_on"] == {"surrealdb": {"condition": "service_healthy"}}
     assert api["environment"]["SIBYL_STORE"] == "surreal"
     assert api["environment"]["SIBYL_AUTH_STORE"] == "surreal"
     assert api["environment"]["SIBYL_SURREAL_URL"] == "ws://surrealdb:8000/rpc"
+    assert api["environment"]["SIBYL_COORDINATION_BACKEND"] == "local"
 
 
 def test_local_compose_uses_versioned_sibyl_images() -> None:
@@ -28,26 +30,19 @@ def test_local_compose_uses_versioned_sibyl_images() -> None:
 
     assert local._version_to_image_tag("1.0.0rc1") == "1.0.0-rc.1"
     assert services["api"]["image"] == f"ghcr.io/hyperb1iss/sibyl-api:{local.DEFAULT_IMAGE_TAG}"
-    assert services["worker"]["image"] == f"ghcr.io/hyperb1iss/sibyl-api:{local.DEFAULT_IMAGE_TAG}"
     assert services["web"]["image"] == f"ghcr.io/hyperb1iss/sibyl-web:{local.DEFAULT_IMAGE_TAG}"
     assert ":latest" not in services["api"]["image"]
-    assert ":latest" not in services["worker"]["image"]
     assert ":latest" not in services["web"]["image"]
 
 
-def test_local_worker_uses_same_surreal_runtime_as_api() -> None:
-    api_env = local.COMPOSE_CONFIG["services"]["api"]["environment"]
-    worker_env = local.COMPOSE_CONFIG["services"]["worker"]["environment"]
+def test_local_compose_web_healthcheck_uses_ipv4_loopback() -> None:
+    web = local.COMPOSE_CONFIG["services"]["web"]
 
-    for key in (
-        "SIBYL_STORE",
-        "SIBYL_AUTH_STORE",
-        "SIBYL_COORDINATION_BACKEND",
-        "SIBYL_SURREAL_URL",
-        "SIBYL_SURREAL_USERNAME",
-        "SIBYL_SURREAL_PASSWORD",
-    ):
-        assert worker_env[key] == api_env[key]
+    assert web["environment"]["HOSTNAME"] == "::"
+    healthcheck_test = web["healthcheck"]["test"]
+    url = healthcheck_test[-1]
+    assert "127.0.0.1" in url
+    assert "localhost" not in url
 
 
 def test_local_env_file_contains_surreal_credentials(
