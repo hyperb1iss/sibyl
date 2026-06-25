@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import secrets
+import shlex
 import shutil
 import subprocess
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -60,6 +63,16 @@ DEFAULT_AUTH_FLOW_PASSWORD = "auth-flow-password-secure-123!"  # noqa: S105
 DEFAULT_AUTH_FLOW_EMAIL_OUTBOX = Path(".moon/cache/auth-flow-email-outbox.jsonl")
 DEFAULT_CUTOVER_BENCH_LABEL = "cutover-acceptance"
 DEFAULT_CLOUD_ENV_PATH = Path(".env.sibyl-cloud")
+DEFAULT_CONSOLIDATION_DIR = Path("sibyl-consolidation")
+DEFAULT_REMOTE_EXPORT_DIR = "sibyl-exports"
+DEFAULT_TARGET_ARCHIVE_PATH = "/tmp/sibyl-consolidated.tar.gz"  # noqa: S108
+
+
+@dataclass(frozen=True)
+class ConsolidationSource:
+    host: str
+    org_id: str
+    label: str
 
 
 async def verify_graph_archive(*args: Any, **kwargs: Any) -> Any:
@@ -149,6 +162,84 @@ def _print_cloud_env_next_steps(output: Path, canonical_org_id: str) -> None:
         "  sibyld migrate import sibyl-cloud-merged.tar.gz "
         "--source-type surreal-archive --target-mode surreal --dry-run"
     )
+
+
+def _shell_join(args: Sequence[str | Path]) -> str:
+    return shlex.join(str(arg) for arg in args)
+
+
+def _safe_archive_label(value: str) -> str:
+    label = "".join(char if char.isalnum() or char in "._-" else "_" for char in value)
+    return label.strip("._-") or "source"
+
+
+def _parse_consolidation_source(raw_source: str) -> ConsolidationSource:
+    host, separator, org_id = raw_source.partition("=")
+    host = host.strip()
+    org_id = org_id.strip()
+    if not host:
+        error("--source cannot be empty")
+        raise typer.Exit(code=1)
+    if separator and not org_id:
+        error("--source HOST=ORG_ID requires a non-empty ORG_ID")
+        raise typer.Exit(code=1)
+    return ConsolidationSource(host=host, org_id=org_id, label=_safe_archive_label(host))
+
+
+def _run_operator_command(
+    args: Sequence[str | Path],
+    *,
+    label: str,
+    plan: bool,
+    interactive: bool = False,
+) -> None:
+    if plan:
+        info(label)
+        console.print(f"  [dim]{_shell_join(args)}[/dim]")
+        return
+
+    info(label)
+    if interactive:
+        result = subprocess.run(  # noqa: S603 - operator-supplied migration command
+            [str(arg) for arg in args],
+            check=False,
+        )
+        if result.returncode == 0:
+            return
+        error(f"{label} failed")
+        raise typer.Exit(code=result.returncode)
+
+    result = subprocess.run(  # noqa: S603 - operator-supplied migration command
+        [str(arg) for arg in args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.stdout.strip():
+        console.print(f"[dim]{result.stdout.strip()}[/dim]")
+    if result.returncode == 0:
+        return
+    error(f"{label} failed")
+    if result.stderr.strip():
+        console.print(f"[dim]{result.stderr.strip()}[/dim]")
+    raise typer.Exit(code=result.returncode)
+
+
+def _run_target_command(
+    target_host: str,
+    remote_args: Sequence[str | Path],
+    *,
+    label: str,
+    plan: bool,
+) -> None:
+    if not target_host:
+        error("--target-host is required for target import steps")
+        raise typer.Exit(code=1)
+    _run_operator_command(["ssh", target_host, *remote_args], label=label, plan=plan)
+
+
+def _remote_source_archive_path(remote_export_dir: str, label: str) -> str:
+    return f"{remote_export_dir.rstrip('/')}/{label}-sibyl.tar.gz"
 
 
 def _load_valid_archive(source: Path):
@@ -1015,6 +1106,424 @@ def merge_archive_sources(
 
     write_archive(output, manifest=result.archive.manifest, files=result.archive.files)
     success(f"Merged archive written to {output}")
+
+
+def _next_consolidation_label(
+    source: ConsolidationSource,
+    seen_labels: dict[str, int],
+) -> str:
+    seen_labels[source.label] = seen_labels.get(source.label, 0) + 1
+    if seen_labels[source.label] == 1:
+        return source.label
+    return f"{source.label}-{seen_labels[source.label]}"
+
+
+def _run_local_consolidation_export(
+    *,
+    source: ConsolidationSource,
+    label: str,
+    local_archive: Path,
+    plan: bool,
+) -> None:
+    export_args: list[str | Path] = [
+        "sibyld",
+        "migrate",
+        "export",
+        "--output",
+        local_archive,
+        "--skip-auth",
+    ]
+    if source.org_id:
+        export_args.extend(["--org-id", source.org_id])
+
+    _run_operator_command(export_args, label=f"Export local source {label}", plan=plan)
+    _run_operator_command(
+        ["sibyld", "migrate", "check", local_archive],
+        label=f"Check local source archive {label}",
+        plan=plan,
+    )
+
+
+def _run_remote_consolidation_export(
+    *,
+    source: ConsolidationSource,
+    label: str,
+    local_archive: Path,
+    remote_export_dir: str,
+    plan: bool,
+) -> None:
+    remote_archive = _remote_source_archive_path(remote_export_dir, label)
+    remote_export_args: list[str | Path] = [
+        "sibyld",
+        "migrate",
+        "export",
+        "--output",
+        remote_archive,
+        "--skip-auth",
+    ]
+    if source.org_id:
+        remote_export_args.extend(["--org-id", source.org_id])
+
+    _run_operator_command(
+        ["ssh", source.host, "mkdir", "-p", remote_export_dir],
+        label=f"Create export directory on {source.host}",
+        plan=plan,
+    )
+    _run_operator_command(
+        ["ssh", source.host, *remote_export_args],
+        label=f"Export source {source.host}",
+        plan=plan,
+    )
+    _run_operator_command(
+        ["ssh", source.host, "sibyld", "migrate", "check", remote_archive],
+        label=f"Check source archive on {source.host}",
+        plan=plan,
+    )
+    _run_operator_command(
+        ["scp", f"{source.host}:{remote_archive}", local_archive],
+        label=f"Pull source archive from {source.host}",
+        plan=plan,
+    )
+
+
+def _export_consolidation_sources(
+    *,
+    source_specs: Sequence[ConsolidationSource],
+    work_dir: Path,
+    remote_export_dir: str,
+    plan: bool,
+) -> list[Path]:
+    pulled_archives: list[Path] = []
+    seen_labels: dict[str, int] = {}
+    for source in source_specs:
+        label = _next_consolidation_label(source, seen_labels)
+        local_archive = work_dir / f"{label}-sibyl.tar.gz"
+        if source.host.lower() in {"local", "localhost", "."}:
+            _run_local_consolidation_export(
+                source=source,
+                label=label,
+                local_archive=local_archive,
+                plan=plan,
+            )
+        else:
+            _run_remote_consolidation_export(
+                source=source,
+                label=label,
+                local_archive=local_archive,
+                remote_export_dir=remote_export_dir,
+                plan=plan,
+            )
+        pulled_archives.append(local_archive)
+    return pulled_archives
+
+
+def _build_consolidation_merge_args(
+    *,
+    all_archives: Sequence[Path],
+    canonical_org_id: str,
+    canonical_org_name: str,
+    canonical_org_slug: str,
+    entity_collision_policy: str,
+    output: Path,
+) -> list[str | Path]:
+    merge_args: list[str | Path] = [
+        "sibyld",
+        "migrate",
+        "merge",
+        *all_archives,
+        "--canonical-org-id",
+        canonical_org_id,
+        "--entity-collision-policy",
+        entity_collision_policy,
+        "--output",
+        output,
+    ]
+    if canonical_org_name:
+        merge_args.extend(["--canonical-org-name", canonical_org_name])
+    if canonical_org_slug:
+        merge_args.extend(["--canonical-org-slug", canonical_org_slug])
+    return merge_args
+
+
+def _run_target_consolidation_import(
+    *,
+    target_host: str,
+    output: Path,
+    target_archive_path: str,
+    target_container: str,
+    target_compose_dir: str,
+    target_service: str,
+    canonical_org_id: str,
+    apply: bool,
+    plan: bool,
+) -> None:
+    _run_operator_command(
+        ["scp", output, f"{target_host}:{target_archive_path}"],
+        label=f"Copy merged archive to {target_host}",
+        plan=plan,
+    )
+    _run_target_command(
+        target_host,
+        ["docker", "cp", target_archive_path, f"{target_container}:{target_archive_path}"],
+        label=f"Copy merged archive into {target_container}",
+        plan=plan,
+    )
+
+    import_args: list[str | Path] = [
+        "docker",
+        "compose",
+        "--project-directory",
+        target_compose_dir,
+        "exec",
+        "-T",
+        target_service,
+        "sibyld",
+        "migrate",
+        "import",
+        target_archive_path,
+        "--source-type",
+        ArchiveSourceType.surreal_archive.value,
+        "--target-mode",
+        ArchiveTargetMode.surreal.value,
+        "--skip-auth",
+        "--yes",
+    ]
+    _run_target_command(
+        target_host,
+        [*import_args, "--dry-run"],
+        label=f"Dry-run target import on {target_host}",
+        plan=plan,
+    )
+    if not apply:
+        warn("Target import stopped after dry run. Pass --apply to write data.")
+        return
+
+    _run_target_command(
+        target_host,
+        import_args,
+        label=f"Import merged archive on {target_host}",
+        plan=plan,
+    )
+    _run_target_command(
+        target_host,
+        [
+            "docker",
+            "compose",
+            "--project-directory",
+            target_compose_dir,
+            "exec",
+            "-T",
+            target_service,
+            "sibyld",
+            "migrate",
+            "verify",
+            target_archive_path,
+            "--org-id",
+            canonical_org_id,
+        ],
+        label=f"Verify target import on {target_host}",
+        plan=plan,
+    )
+
+
+def _run_consolidation_cli_setup(
+    *,
+    server_url: str,
+    context_name: str,
+    email: str,
+    plan: bool,
+) -> None:
+    _run_operator_command(
+        ["sibyl", "init", "--remote", server_url, "--name", context_name, "--force"],
+        label="Create local Sibyl context",
+        plan=plan,
+    )
+    _run_operator_command(
+        ["sibyl", "auth", "login", server_url, "--context", context_name, "--email", email],
+        label="Log local CLI into remote Sibyl",
+        plan=plan,
+        interactive=True,
+    )
+    _run_operator_command(
+        ["sibyl", "context", "use", context_name],
+        label="Activate local Sibyl context",
+        plan=plan,
+    )
+    _run_operator_command(["sibyl", "whoami"], label="Verify local CLI login", plan=plan)
+    _run_operator_command(["sibyl", "health"], label="Check remote Sibyl health", plan=plan)
+
+
+@app.command("consolidate")
+def consolidate_instances(
+    sources: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--source",
+            "-s",
+            help=(
+                "Source host to export, optionally HOST=ORG_UUID. "
+                "Use local or local=ORG_UUID for the current machine."
+            ),
+        ),
+    ] = None,
+    archives: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--archive",
+            "-a",
+            help="Existing migration archive to include in the merge",
+        ),
+    ] = None,
+    canonical_org_id: Annotated[
+        str,
+        typer.Option("--canonical-org-id", help="Target organization UUID for merged data"),
+    ] = "",
+    canonical_org_name: Annotated[
+        str,
+        typer.Option("--canonical-org-name", help="Target organization display name"),
+    ] = "",
+    canonical_org_slug: Annotated[
+        str,
+        typer.Option("--canonical-org-slug", help="Target organization slug"),
+    ] = "",
+    output: Annotated[
+        Path,
+        typer.Option("--output", "-o", help="Merged archive path"),
+    ] = DEFAULT_CONSOLIDATION_DIR / "sibyl-consolidated.tar.gz",
+    work_dir: Annotated[
+        Path,
+        typer.Option("--work-dir", help="Local directory for pulled source archives"),
+    ] = DEFAULT_CONSOLIDATION_DIR,
+    remote_export_dir: Annotated[
+        str,
+        typer.Option(
+            "--remote-export-dir",
+            help="Directory on source hosts where archives are written",
+        ),
+    ] = DEFAULT_REMOTE_EXPORT_DIR,
+    target_host: Annotated[
+        str,
+        typer.Option("--target-host", help="SSH host for the target Sibyl instance"),
+    ] = "",
+    target_compose_dir: Annotated[
+        str,
+        typer.Option("--target-compose-dir", help="Docker Compose project directory on target"),
+    ] = "/opt/sibyl",
+    target_service: Annotated[
+        str,
+        typer.Option("--target-service", help="Docker Compose service that contains sibyld"),
+    ] = "backend",
+    target_container: Annotated[
+        str,
+        typer.Option("--target-container", help="Docker container name for docker cp"),
+    ] = "sibyl-backend",
+    target_archive_path: Annotated[
+        str,
+        typer.Option("--target-archive-path", help="Archive path inside the target host/container"),
+    ] = DEFAULT_TARGET_ARCHIVE_PATH,
+    entity_collision_policy: Annotated[
+        str,
+        typer.Option(
+            "--entity-collision-policy",
+            help="Entity merge policy passed to migrate merge",
+        ),
+    ] = EntityCollisionPolicy.MERGE_BY_TYPE_NAME.value,
+    plan: Annotated[
+        bool,
+        typer.Option("--plan", help="Print the commands without running them"),
+    ] = False,
+    apply: Annotated[
+        bool,
+        typer.Option("--apply", help="Run the live target import after the dry-run import"),
+    ] = False,
+    setup_cli: Annotated[
+        bool,
+        typer.Option("--setup-cli", help="Configure the local sibyl CLI for the target URL"),
+    ] = False,
+    server_url: Annotated[
+        str,
+        typer.Option("--server-url", help="Remote Sibyl URL for local CLI setup"),
+    ] = "",
+    context_name: Annotated[
+        str,
+        typer.Option("--context-name", help="Local sibyl context name"),
+    ] = "remote",
+    email: Annotated[
+        str,
+        typer.Option("--email", help="Login email for local CLI setup"),
+    ] = "",
+) -> None:
+    """Consolidate several personal Sibyl instances into one target org.
+
+    The command exports graph and content payloads with auth intentionally
+    skipped, merges every archive into one canonical organization, runs a
+    target import dry run, and only writes to the target when --apply is set.
+    """
+    source_specs = [_parse_consolidation_source(source) for source in sources or []]
+    archive_paths = [archive.expanduser() for archive in archives or []]
+    if not source_specs and not archive_paths:
+        error("Pass at least one --source or --archive")
+        raise typer.Exit(code=1)
+    if not canonical_org_id.strip():
+        error("--canonical-org-id is required")
+        raise typer.Exit(code=1)
+    if setup_cli and (not server_url.strip() or not email.strip()):
+        error("--setup-cli requires --server-url and --email")
+        raise typer.Exit(code=1)
+
+    work_dir = work_dir.expanduser()
+    output = output.expanduser()
+    if not plan:
+        work_dir.mkdir(parents=True, exist_ok=True)
+        output.parent.mkdir(parents=True, exist_ok=True)
+
+    pulled_archives = _export_consolidation_sources(
+        source_specs=source_specs,
+        work_dir=work_dir,
+        remote_export_dir=remote_export_dir,
+        plan=plan,
+    )
+
+    all_archives = [*archive_paths, *pulled_archives]
+    merge_args = _build_consolidation_merge_args(
+        all_archives=all_archives,
+        canonical_org_id=canonical_org_id,
+        canonical_org_name=canonical_org_name,
+        canonical_org_slug=canonical_org_slug,
+        entity_collision_policy=entity_collision_policy,
+        output=output,
+    )
+    _run_operator_command(merge_args, label="Merge source archives", plan=plan)
+    _run_operator_command(
+        ["sibyld", "migrate", "check", output],
+        label="Check merged archive",
+        plan=plan,
+    )
+
+    if target_host:
+        _run_target_consolidation_import(
+            target_host=target_host,
+            output=output,
+            target_archive_path=target_archive_path,
+            target_container=target_container,
+            target_compose_dir=target_compose_dir,
+            target_service=target_service,
+            canonical_org_id=canonical_org_id,
+            apply=apply,
+            plan=plan,
+        )
+    else:
+        warn("No --target-host supplied; merged archive was not copied or imported.")
+
+    if setup_cli:
+        _run_consolidation_cli_setup(
+            server_url=server_url,
+            context_name=context_name,
+            email=email,
+            plan=plan,
+        )
+
+    success("Sibyl consolidation flow complete")
 
 
 @app.command("export")

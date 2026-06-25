@@ -300,6 +300,88 @@ def test_migrate_merge_rejects_invalid_user_collision_policy(tmp_path: Path) -> 
     assert "provider-or-email" in result.output
 
 
+def test_migrate_consolidate_plan_prints_safe_flow() -> None:
+    archive_path = Path("existing.tar.gz")
+    output_path = Path("merged.tar.gz")
+    work_dir = Path("work")
+
+    result = runner.invoke(
+        migrate_cli.app,
+        [
+            "consolidate",
+            "--source",
+            "local=org-local",
+            "--source",
+            "laptop=org-laptop",
+            "--archive",
+            str(archive_path),
+            "--canonical-org-id",
+            "org-canonical",
+            "--canonical-org-name",
+            "Stefanie Jane",
+            "--canonical-org-slug",
+            "stefanie-jane",
+            "--target-host",
+            "eternia",
+            "--server-url",
+            "https://sibyl.example.test",
+            "--email",
+            "stef@example.test",
+            "--setup-cli",
+            "--apply",
+            "--plan",
+            "--output",
+            str(output_path),
+            "--work-dir",
+            str(work_dir),
+        ],
+    )
+
+    output = _strip_ansi(result.output)
+    assert result.exit_code == 0
+    assert "sibyld migrate export" in output
+    assert "--skip-auth" in output
+    assert "ssh laptop sibyld migrate export" in output
+    assert "sibyld migrate merge" in output
+    assert "--canonical-org-id org-canonical" in output
+    assert f"scp {output_path} eternia:/tmp/sibyl-consolidated.tar.gz" in output
+    assert "sibyld migrate import /tmp/sibyl-consolidated.tar.gz" in output
+    assert "--target-mode surreal --skip-auth --yes --dry-run" in output
+    assert "sibyld migrate verify /tmp/sibyl-consolidated.tar.gz" in output
+    assert "sibyl init --remote https://sibyl.example.test --name remote --force" in output
+    assert "sibyl auth login https://sibyl.example.test --context remote" in output
+
+
+def test_migrate_consolidate_requires_sources_or_archives() -> None:
+    result = runner.invoke(
+        migrate_cli.app,
+        ["consolidate", "--canonical-org-id", "org-canonical", "--plan"],
+    )
+
+    assert result.exit_code == 1
+    assert "Pass at least one --source or --archive" in result.output
+
+
+def test_migrate_consolidate_setup_cli_requires_login_context(tmp_path: Path) -> None:
+    archive_path = tmp_path / "existing.tar.gz"
+
+    result = runner.invoke(
+        migrate_cli.app,
+        [
+            "consolidate",
+            "--archive",
+            str(archive_path),
+            "--canonical-org-id",
+            "org-canonical",
+            "--setup-cli",
+            "--plan",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--setup-cli requires --server-url and --email" in result.output
+
+
 def test_migrate_export_graph_only_writes_archive(tmp_path: Path) -> None:
     archive_path = tmp_path / "migration.tar.gz"
     graph_payload = {
