@@ -85,11 +85,11 @@ function scriptFetch(steps: Array<{ match: string; response: MockResponse }>) {
  * observable. redirectToLogin() sets href and returns a never-resolving
  * promise, so tests assert the side effect rather than awaiting the caller.
  */
-function stubLocation(pathname = '/dashboard') {
+function stubLocation(pathname = '/dashboard', search = '') {
   const setHref = vi.fn();
   const location = {
     pathname,
-    search: '',
+    search,
     get href() {
       return '';
     },
@@ -167,6 +167,17 @@ describe('fetchApi auth state machine', () => {
     const { api } = await import('./api');
     await expect(api.auth.me()).rejects.toThrow('nope');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not redirect public password reset pages on auth probe failure', async () => {
+    const setHref = stubLocation('/reset-password', '?token=reset-token');
+    const { fetchMock } = scriptFetch([{ match: '/auth/me', response: errorResponse(401) }]);
+
+    const { api } = await import('./api');
+    await expect(api.auth.me()).rejects.toThrow('API error: 401');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(setHref).not.toHaveBeenCalled();
   });
 
   it('shares one refresh across concurrent 401s instead of refreshing per request', async () => {

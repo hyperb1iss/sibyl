@@ -4,6 +4,8 @@
  * Uses fetch with React Query for data fetching and WebSocket for realtime updates.
  */
 
+import { isPublicRoutePath } from '@/lib/public-routes';
+
 const API_BASE = '/api';
 
 // =============================================================================
@@ -1954,6 +1956,10 @@ function redirectToLogin(): never {
   }) as never;
 }
 
+function shouldRedirectAuthFailure(endpoint: string): boolean {
+  return endpoint !== '/auth/refresh' && !isPublicRoutePath(window.location.pathname);
+}
+
 async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const makeRequest = () =>
     fetch(`${API_BASE}${endpoint}`, {
@@ -1970,8 +1976,7 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
   if (!response.ok) {
     // Handle 401 - try to refresh token before redirecting to login
     if (response.status === 401 && typeof window !== 'undefined') {
-      // Don't try to refresh if we're on login page or if this IS the refresh endpoint
-      if (window.location.pathname !== '/login' && endpoint !== '/auth/refresh') {
+      if (shouldRedirectAuthFailure(endpoint)) {
         const refreshed = await tryRefreshToken();
         const retryResponse = await makeRequest();
 
@@ -2015,7 +2020,7 @@ async function fetchApiBlob(endpoint: string): Promise<Blob> {
   const response = await makeRequest();
   if (!response.ok) {
     if (response.status === 401 && typeof window !== 'undefined') {
-      if (window.location.pathname !== '/login') {
+      if (shouldRedirectAuthFailure(endpoint)) {
         const refreshed = await tryRefreshToken();
         const retryResponse = await makeRequest();
         if (retryResponse.ok) return retryResponse.blob();

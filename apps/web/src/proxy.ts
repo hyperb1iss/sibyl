@@ -8,6 +8,7 @@ import {
   shouldRefreshAuthCookies,
 } from '@/lib/auth-refresh';
 import { log } from '@/lib/logger';
+import { isPublicRoutePath } from '@/lib/public-routes';
 
 /**
  * Check if request has valid auth cookies.
@@ -38,7 +39,7 @@ export function proxy(request: NextRequest) {
 
   // Login, setup, and password reset pages: always allow without auth
   // Setup page handles its own redirect if setup is already complete
-  if (pathname === '/login' || pathname === '/setup' || pathname === '/reset-password') {
+  if (isPublicRoutePath(pathname)) {
     log.debug('proxy', { path: pathname, action: 'allow_public' });
     return NextResponse.next();
   }

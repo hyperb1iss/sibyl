@@ -6,17 +6,21 @@ import {
   QueryClient,
   QueryClientProvider,
 } from '@tanstack/react-query';
+import { usePathname } from 'next/navigation';
 import { type ReactNode, Suspense, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { ThemedToaster } from '@/components/ui/themed-toaster';
 import { printConsoleGreeting } from '@/lib/console-greeting';
 import { useMe, useRealtimeUpdates } from '@/lib/hooks';
 import { ProjectContextProvider } from '@/lib/project-context';
+import { isPublicRoutePath } from '@/lib/public-routes';
 import { ThemeProvider } from '@/lib/theme';
 
 function RealtimeProvider({ children }: { children: ReactNode }) {
-  const { data: me, isSuccess } = useMe();
-  const isAuthenticated = isSuccess ? !!me?.user : undefined;
+  const pathname = usePathname();
+  const isPublicRoute = isPublicRoutePath(pathname);
+  const { data: me, isSuccess } = useMe({ enabled: !isPublicRoute });
+  const isAuthenticated = isPublicRoute ? false : isSuccess ? !!me?.user : undefined;
   useRealtimeUpdates(isAuthenticated);
   return <>{children}</>;
 }
