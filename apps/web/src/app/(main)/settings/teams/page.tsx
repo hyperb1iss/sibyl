@@ -239,20 +239,23 @@ function OrgMembersCard({ org, currentUserId, isCurrentOrg }: OrgMembersCardProp
         <div className="border-t border-sc-fg-subtle/10 p-4">
           {canManage && (
             <div className="mb-4 rounded-lg border border-sc-fg-subtle/10 bg-sc-bg-highlight/35 p-3">
-              <form onSubmit={handleInvite} className="flex flex-col gap-2 sm:flex-row">
+              <form
+                onSubmit={handleInvite}
+                className="grid gap-2 sm:grid-cols-[minmax(12rem,1fr)_180px_auto]"
+              >
                 <input
                   type="email"
                   value={inviteEmail}
                   onChange={event => setInviteEmail(event.target.value)}
                   placeholder="teammate@example.com"
                   aria-label={`Invite email for ${org.name}`}
-                  className="min-w-0 flex-1 rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-highlight px-3 py-2 text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
+                  className="min-w-0 w-full rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-highlight px-3 py-2 text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                 />
                 <Select
                   value={inviteRole}
                   onValueChange={value => setInviteRole(value as (typeof INVITE_ROLES)[number])}
                 >
-                  <SelectTrigger className="w-auto min-w-[120px]" aria-label="Invite role">
+                  <SelectTrigger className="w-full" aria-label="Invite role">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
