@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 import structlog
+from pydantic import ValidationError
 
 from sibyl_core.config import settings
 from sibyl_core.migrate.legacy_graph_archive import (
@@ -571,7 +572,12 @@ def _entity_from_backup_data(entity_data: dict[str, Any]) -> Entity:
     model = _entity_restore_model(entity_type)
     if model in {Task, Project, Epic} and "title" not in payload:
         payload["title"] = str(payload.get("name") or "")
-    return model.model_validate(payload)
+    try:
+        return model.model_validate(payload)
+    except ValidationError:
+        if model is Entity:
+            raise
+        return Entity.model_validate(payload)
 
 
 async def _list_backup_episodes(

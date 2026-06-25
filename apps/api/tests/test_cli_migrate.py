@@ -326,8 +326,6 @@ def test_migrate_consolidate_plan_prints_safe_flow() -> None:
             "--target-sudo",
             "--server-url",
             "https://sibyl.example.test",
-            "--email",
-            "stef@example.test",
             "--setup-cli",
             "--apply",
             "--plan",
@@ -382,7 +380,7 @@ def test_migrate_consolidate_setup_cli_requires_login_context(tmp_path: Path) ->
     )
 
     assert result.exit_code == 1
-    assert "--setup-cli requires --server-url and --email" in result.output
+    assert "--setup-cli requires --server-url" in result.output
 
 
 def test_migrate_export_graph_only_writes_archive(tmp_path: Path) -> None:

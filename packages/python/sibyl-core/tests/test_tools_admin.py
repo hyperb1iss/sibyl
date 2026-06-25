@@ -428,6 +428,64 @@ class TestRestoreBackup:
         assert restored[2].project_id == "project-1"
 
     @pytest.mark.asyncio
+    async def test_restore_preserves_legacy_typed_entities_as_generic(self) -> None:
+        org_id = "00000000-0000-0000-0000-000000000111"
+        entity_manager = AsyncMock()
+        relationship_manager = AsyncMock()
+        entity_manager.bulk_create_direct = AsyncMock(return_value=(2, 0))
+        relationship_manager.create_bulk = AsyncMock(return_value=(0, 0))
+        backup_data = BackupData(
+            version="2.0",
+            created_at="2026-04-19T00:00:00Z",
+            organization_id=org_id,
+            entity_count=2,
+            relationship_count=0,
+            entities=[
+                {
+                    "id": "note-1",
+                    "entity_type": "note",
+                    "name": "Imported note",
+                    "content": "Old note without a task edge",
+                    "organization_id": org_id,
+                },
+                {
+                    "id": "error-pattern-1",
+                    "entity_type": "error_pattern",
+                    "name": "Imported error",
+                    "content": "Old error pattern before structured fields",
+                    "organization_id": org_id,
+                },
+            ],
+            relationships=[],
+        )
+
+        with patch(
+            "sibyl_core.tools.admin.get_graph_runtime",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    client=SimpleNamespace(get_org_driver=lambda group_id: SimpleNamespace()),
+                    entity_manager=entity_manager,
+                    relationship_manager=relationship_manager,
+                )
+            ),
+        ):
+            result = await restore_backup(
+                backup_data,
+                organization_id=org_id,
+                skip_existing=False,
+            )
+
+        assert result.success is True
+        restored = entity_manager.bulk_create_direct.await_args.args[0]
+        assert [type(entity) for entity in restored] == [Entity, Entity]
+        assert [entity.entity_type for entity in restored] == [
+            EntityType.NOTE,
+            EntityType.ERROR_PATTERN,
+        ]
+        assert restored[0].content == "Old note without a task edge"
+        assert restored[1].content == "Old error pattern before structured fields"
+
+    @pytest.mark.asyncio
     async def test_skip_existing_restore_uses_direct_create_without_embeddings(self) -> None:
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()

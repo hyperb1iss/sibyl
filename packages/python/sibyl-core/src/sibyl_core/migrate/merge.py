@@ -179,6 +179,7 @@ def merge_archives(
             canonical_org_name=options.canonical_org_name,
             canonical_org_slug=options.canonical_org_slug,
             force_canonical_org=False,
+            force_row_organization_id=True,
         )
         content_row_counts = dict(content_payload["row_counts"])
         files[CONTENT_FILENAME] = _json_bytes(content_payload)
@@ -578,6 +579,7 @@ def _merge_tabular_payloads(
     canonical_org_name: str,
     canonical_org_slug: str,
     force_canonical_org: bool,
+    force_row_organization_id: bool = False,
     drop_tables: set[str] | None = None,
     table_overrides: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
@@ -597,7 +599,10 @@ def _merge_tabular_payloads(
             rows = merged_tables.setdefault(table_name, [])
             for raw_row in raw_rows:
                 if isinstance(raw_row, dict):
-                    rows.append(_rewrite_value(dict(raw_row), replacements))
+                    row = _rewrite_value(dict(raw_row), replacements)
+                    if force_row_organization_id:
+                        _force_row_organization_id(row, canonical_org_id)
+                    rows.append(row)
 
     if force_canonical_org:
         merged_tables["organizations"] = [
@@ -624,6 +629,12 @@ def _merge_tabular_payloads(
         "row_counts": row_counts,
         "total_rows": sum(row_counts.values()),
     }
+
+
+def _force_row_organization_id(row: dict[str, Any], canonical_org_id: str) -> None:
+    for field in ("organization_id", "org_id", "group_id"):
+        if field in row:
+            row[field] = canonical_org_id
 
 
 def _canonical_org_row(

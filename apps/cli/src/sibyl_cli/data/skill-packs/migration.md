@@ -47,7 +47,6 @@ uv run --directory apps/api sibyld migrate consolidate \
   --target-sudo \
   --server-url https://sibyl.hyperbliss.tech \
   --context-name eternia \
-  --email stef@hyperbliss.tech \
   --setup-cli
 ```
 
@@ -65,8 +64,25 @@ uv run --directory apps/api sibyld migrate consolidate \
   --target-sudo \
   --server-url https://sibyl.hyperbliss.tech \
   --context-name eternia \
-  --email stef@hyperbliss.tech \
   --setup-cli \
+  --apply
+```
+
+When exporting from a local `sibyld up`/`moon run dev` instance, set the same SurrealDB runtime env
+that the dev server uses. A standalone `uv run --directory apps/api sibyld ...` with an empty
+`SIBYL_SURREAL_URL` defaults to `memory://` and will export an empty graph:
+
+```bash
+SIBYL_STORE=surreal \
+SIBYL_AUTH_STORE=surreal \
+SIBYL_SURREAL_URL=ws://127.0.0.1:8000/rpc \
+SIBYL_SURREAL_USERNAME=root \
+SIBYL_SURREAL_PASSWORD=root \
+uv run --directory apps/api sibyld migrate consolidate \
+  --source local=<local-org-id> \
+  --canonical-org-id <target-org-id> \
+  --target-host eternia \
+  --target-sudo \
   --apply
 ```
 
@@ -80,6 +96,33 @@ Defaults assume the target host is reachable by SSH and runs the self-hosted Doc
 Override those with `--target-compose-dir`, `--target-service`, `--target-container`, or
 `--target-archive-path` when the deploy shape differs.
 Pass `--target-sudo` when the SSH user needs `sudo -n docker ...` for Docker access.
+
+After the live import, verify both stores:
+
+```bash
+# Graph parity: expected/actual entities, relationships, episodes, mentions.
+ssh eternia 'sudo -n docker compose --project-directory /opt/sibyl exec -T backend \
+  sibyld migrate verify /tmp/sibyl-consolidated.tar.gz --org-id <target-org-id>'
+
+# Content parity: compare row_counts from content.json with an org-scoped content export.
+ssh eternia 'sudo -n docker compose --project-directory /opt/sibyl exec -T backend \
+  python - <<'"'"'PY'"'"'
+from sibyl.cli.common import run_async
+from sibyl.persistence.content_archive import export_content_archive_payload
+
+@run_async
+async def main():
+    payload = await export_content_archive_payload("<target-org-id>")
+    print(payload["total_rows"])
+    print(payload["row_counts"])
+
+main()
+PY'
+```
+
+`--setup-cli` creates/activates the local context and starts normal browser/device auth. Do not pass
+passwords in shell history or process args; run `sibyl auth login https://... --context eternia`
+interactively if setup needs to be finished by hand.
 
 For already-collected archives, skip SSH exports and pass them directly:
 

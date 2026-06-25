@@ -1337,13 +1337,15 @@ def _run_consolidation_cli_setup(
     email: str,
     plan: bool,
 ) -> None:
+    if email:
+        warn("--email is ignored for CLI setup; complete the browser/device login flow instead.")
     _run_operator_command(
         ["sibyl", "init", "--remote", server_url, "--name", context_name, "--force"],
         label="Create local Sibyl context",
         plan=plan,
     )
     _run_operator_command(
-        ["sibyl", "auth", "login", server_url, "--context", context_name, "--email", email],
+        ["sibyl", "auth", "login", server_url, "--context", context_name],
         label="Log local CLI into remote Sibyl",
         plan=plan,
         interactive=True,
@@ -1475,8 +1477,8 @@ def consolidate_instances(
     if not canonical_org_id.strip():
         error("--canonical-org-id is required")
         raise typer.Exit(code=1)
-    if setup_cli and (not server_url.strip() or not email.strip()):
-        error("--setup-cli requires --server-url and --email")
+    if setup_cli and not server_url.strip():
+        error("--setup-cli requires --server-url")
         raise typer.Exit(code=1)
 
     work_dir = work_dir.expanduser()

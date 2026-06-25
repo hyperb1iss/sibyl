@@ -131,6 +131,7 @@ def _auth_payload(org_id: str, *, role: str) -> dict[str, object]:
 
 
 def _content_payload(org_id: str, *, source_id: str, entity_id: str) -> dict[str, object]:
+    stray_org_id = f"{org_id}-stray"
     return {
         "version": "1.0",
         "created_at": "2026-04-26T00:00:00+00:00",
@@ -149,11 +150,17 @@ def _content_payload(org_id: str, *, source_id: str, entity_id: str) -> dict[str
                     "organization_id": org_id,
                     "entity_id": entity_id,
                     "entity_ids": [entity_id],
-                }
+                },
+                {
+                    "uuid": f"capture-stray-{source_id}",
+                    "organization_id": stray_org_id,
+                    "entity_id": entity_id,
+                    "entity_ids": [entity_id],
+                },
             ],
         },
-        "row_counts": {"crawl_sources": 1, "raw_captures": 1},
-        "total_rows": 2,
+        "row_counts": {"crawl_sources": 1, "raw_captures": 2},
+        "total_rows": 3,
     }
 
 
@@ -260,8 +267,11 @@ def test_merge_archives_rewrites_auth_and_content_to_canonical_org() -> None:
     content = content_payload_from_archive(result.archive)
     assert content is not None
     assert content["row_counts"]["crawl_sources"] == 1
-    assert content["row_counts"]["raw_captures"] == 2
+    assert content["row_counts"]["raw_captures"] == 4
     assert content["tables"]["crawl_sources"][0]["organization_id"] == CANONICAL_ORG_ID
+    assert {row["organization_id"] for row in content["tables"]["raw_captures"]} == {
+        CANONICAL_ORG_ID
+    }
     assert content["tables"]["raw_captures"][1]["entity_id"] == "entity-bliss-a"
     assert content["tables"]["raw_captures"][1]["entity_ids"] == ["entity-bliss-a"]
 
