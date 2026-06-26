@@ -19,7 +19,7 @@ requires-python = ">=3.13"
 authors = [{ name = "Stefanie Jane", email = "stef@hyperbliss.tech" }]
 keywords = ["knowledge-graph", "tasks", "cli", "mcp"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
@@ -42,7 +42,7 @@ dependencies = [
     # WebSocket (logs --follow)
     "websockets>=12.0",
     # Shared library
-    "sibyl-core==1.0.0rc8",
+    "sibyl-core==1.0.0",
 ]
 
 # =============================================================================

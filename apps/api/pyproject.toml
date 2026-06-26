@@ -23,7 +23,7 @@ requires-python = ">=3.13"
 authors = [{ name = "Stefanie Jane", email = "stef@hyperbliss.tech" }]
 keywords = ["knowledge-graph", "task-workflow", "persistent-memory", "semantic-search", "developer-tools", "graph-rag"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
@@ -33,7 +33,7 @@ classifiers = [
 
 dependencies = [
     # Sibyl Core Library with daemon/runtime extras
-    "sibyl-core[crawler,embeddings,graph,graphrag,llm]==1.0.0rc8",
+    "sibyl-core[crawler,embeddings,graph,graphrag,llm]==1.0.0",
     # Core Framework
     "fastapi>=0.115.0",
     "mcp>=1.27.2",

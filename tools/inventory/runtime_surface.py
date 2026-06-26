@@ -420,16 +420,6 @@ LEGACY_TERM_ALLOWLIST = (
         owner="benchmark evidence",
         reason="Competitive landscape docs name Graphiti only as historical comparison context.",
     ),
-    LegacyTermAllowlistRecord(
-        path="docs/architecture/SIBYL_1_0_RC_PLAN.md",
-        owner="v1.0 RC evidence freeze",
-        reason="Active RC plan names legacy terms only as blockers, evidence boundaries, and optional coordination risks.",
-    ),
-    LegacyTermAllowlistRecord(
-        path="docs/architecture/SIBYL_1_0_RC_RELEASE_PACKET.md",
-        owner="v1.0 RC evidence freeze",
-        reason="Active RC packet cites legacy terms only in release receipts and pending external checks.",
-    ),
     *legacy_term_allowlist_records(
         PROJECT_INSTRUCTION_LEGACY_TERM_FILES,
         owner="project instructions",

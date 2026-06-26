@@ -12,7 +12,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - Raw SQL query usage files: 0
 - Session-backed storage access files: 0
 - Graphiti import files: 0
-- Retained legacy term files: 97
+- Retained legacy term files: 95
 - Dependency records: 4
 
 ## API Surface
@@ -105,7 +105,7 @@ must carry an owner and reason here.
 | `apps/cli/README.md` | `redis` | 1 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
 | `apps/cli/src/sibyl_cli/data/skill-packs/core.md` | `falkor`, `postgres`, `redis` | 10 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
 | `apps/cli/src/sibyl_cli/data/skill-packs/examples.md` | `redis` | 3 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
-| `apps/cli/src/sibyl_cli/data/skill-packs/migration.md` | `falkor`, `graphiti`, `postgres`, `redis` | 75 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
+| `apps/cli/src/sibyl_cli/data/skill-packs/migration.md` | `falkor`, `graphiti`, `postgres`, `redis` | 76 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
 | `charts/sibyl/Chart.yaml` | `valkey` | 1 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
 | `charts/sibyl/templates/backend-deployment.yaml` | `redis` | 6 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
 | `charts/sibyl/templates/bootstrap-job.yaml` | `redis` | 6 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
@@ -131,8 +131,6 @@ must carry an owner and reason here.
 | `docs/architecture/INGESTION_IMPLEMENTATION_PLAN_2026-05-30.md` | `graphiti` | 17 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/PACKAGING_PLAN_2026-05-19.md` | `falkor`, `postgres`, `redis`, `valkey` | 10 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/PERMISSION_SYSTEM_AUDIT.md` | `falkor`, `postgres` | 23 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
-| `docs/architecture/SIBYL_1_0_RC_PLAN.md` | `graphiti`, `redis` | 28 | v1.0 RC evidence freeze | Active RC plan names legacy terms only as blockers, evidence boundaries, and optional coordination risks. |
-| `docs/architecture/SIBYL_1_0_RC_RELEASE_PACKET.md` | `falkor`, `graphiti`, `postgres`, `redis` | 7 | v1.0 RC evidence freeze | Active RC packet cites legacy terms only in release receipts and pending external checks. |
 | `docs/architecture/SIBYL_1_0_ROADMAP.md` | `graphiti`, `redis` | 34 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/SIBYL_NORTHSTAR.md` | `falkor`, `graphiti`, `postgres`, `redis` | 43 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/SIBYL_POST_V010_RELEASE_REMAP_SPEC.md` | `graphiti`, `redis` | 37 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |

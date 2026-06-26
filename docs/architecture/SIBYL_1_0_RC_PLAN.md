@@ -1,385 +1,144 @@
-# Sibyl 1.0 RC Plan
+# Sibyl 1.0 Final-Prep Plan
 
-- Status: active execution plan
+- Status: active final-prep plan; `v1.0.0` is not cut
 - Created: 2026-05-19
-- Release target: `1.0.0-rc.1`
-- Release floor: `v0.10.0`, published 2026-05-17
-- Current focus: v1.0 RC Evidence Freeze
+- Refreshed: 2026-06-26
+- Release target: `1.0.0`
+- Current shipped candidate: `v1.0.0-rc.8`
+- Public rollback floor: `v1.0.0-rc.8`
+- Previous stable rollback: `v0.10.0`
 - Parent roadmap: [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
-- Evidence checklist:
-  [`SIBYL_POST_V010_RELEASE_REMAP_SPEC.md`](SIBYL_POST_V010_RELEASE_REMAP_SPEC.md)
+- Release packet: [`SIBYL_1_0_RC_RELEASE_PACKET.md`](SIBYL_1_0_RC_RELEASE_PACKET.md)
 
-## 1. Release Promise
+This plan carries the original RC evidence-freeze work into the final 1.0 cut. The RC line has
+already shipped through `v1.0.0-rc.8`; this document now tracks what must be true before the final
+tag is created.
 
-Sibyl 1.0 RC is ready when the public claim surface is frozen, every release claim has a current
-receipt from the tag candidate, install paths tell one story, and the release cut itself cannot
-bypass the gates that make those claims true.
+Do not tag, publish, dispatch Release, or announce 1.0 until Bliss gives explicit release go-ahead.
 
-The RC does not add another large product slice. It closes the loop on evidence, release mechanics,
-default-runtime truth, install rehearsal, and rollback readiness.
+## Release Promise
 
-## 2. Current State
+Sibyl 1.0 is ready when the repo is versioned for `1.0.0`, package metadata and internal dependency
+pins agree with that version, the exact final SHA has fresh same-SHA release receipts, and the live
+cut cannot bypass those gates.
 
-The project is close to RC.
+The final pass does not add another product slice. It closes release hygiene, local compose
+installability, current evidence, and post-publish verification.
+
+## Current State
 
 Shipped and landed:
 
-- `v0.10.0` is published and is the planning floor.
-- The active roadmap and remap spec point at v1.0 RC Evidence Freeze.
-- The v0.11 through v0.13 gate surfaces exist as Moon tasks.
-- Current main CI and docs deployment are green on the latest pushed head.
-- The supported package dependency graph no longer contains `graphiti-core` or `graphiti_core`.
-- No open GitHub issues or pull requests are currently tracking release blockers.
-- Release gate wiring is present: Release runs `moon run :check`, validates a same-SHA Nightly
-  Regression receipt before live tag/publish steps, and uploads an `rc-gate-receipt-*` artifact.
-- `moon run :check` and `moon run :test` both aggregate the RC gate tests named by this plan.
-- The local task graph is readable: the v1.0 RC Evidence Freeze epic has one active RC task and no
-  RC todo or blocked tasks.
+- `v1.0.0-rc.8` is published and is the public rollback floor.
+- Main CI is green on `f0ff15e6a86e07c39cddacba9aaf8dfe1b815d9c`.
+- Main Nightly Regression is green on `f0ff15e6a86e07c39cddacba9aaf8dfe1b815d9c`, but its restore
+  job did not run from the scheduled event.
+- rc8 Release and Publish workflows succeeded on `779a9347c81e5be1377e6675e4b702e8533ab980`.
+- PyPI, Homebrew, AUR, GHCR, and clean package-install smoke checks passed for rc8.
+- PR #194 fixes local compose runtime issues and is included in the prep branch.
 
-Not yet RC-ready:
+Not yet final-ready:
 
-- Final same-SHA Nightly Regression and release dry-run receipts must be refreshed whenever the
-  candidate SHA moves.
-- Live release dispatch still requires Bliss's explicit go-ahead.
-- Post-publish checks for GitHub Release, PyPI pages, Docker manifests, docs install copy, and clean
-  installs can only run after the RC is published.
+- The final candidate SHA has not been selected and frozen.
+- Same-SHA Live Runtime Eval and LongMemEval receipts are stale.
+- Manual Nightly Regression for the final candidate SHA still needs to run so restore coverage is
+  present.
+- Release dry-run still needs to run for the final candidate SHA.
+- Live Release dispatch still requires explicit Bliss approval.
+- Post-publish artifact checks can only run after the live cut.
 
-## 3. RC Success Criteria
+## Final Success Criteria
 
-The RC can be cut only when all of these are true:
+The final release can be cut only when all of these are true:
 
-- Active architecture docs agree that v1.0 RC is an Evidence Freeze.
-- The task graph shows v1.0 RC work, not stale v0.8, v0.10, v0.11, or v0.12 ghosts.
-- Every RC gate has a current receipt from the final tag candidate.
-- `moon run :check` covers every gate test that protects an RC claim.
-- Nightly regression is green on the final tag candidate.
-- Graphiti Core is absent from supported runtime imports, tests, package metadata, install docs,
-  Docker, Helm, CI, and default dev paths.
-- Any remaining Graphiti-named compatibility surface is either removed from active default-runtime
-  surfaces or explicitly accepted as a compatibility shim with a documented rationale.
-- Redis remains optional for local single-machine usage and opt-in for distributed coordination.
-- Backup/restore proves auth, graph, content, raw memory, tasks, settings, source imports, and
-  synthesis provenance survive a round trip.
-- Source ingest, corpus rehearsal, synthesis, context quality, workspace trust, autonomy, auth
-  session behavior, reflection quality, overview performance, and memory trust all have receipts.
-- Quickstart, Docker, Helm, package install, docs, and release notes agree on how users install and
-  run the RC.
-- The release workflow cannot produce a tag or publish artifacts from an ungated SHA.
-- The rollback path is explicit before publish.
+- `VERSION` is `1.0.0`.
+- `sibyl-dev` and `sibyld` pin `sibyl-core==1.0.0`, including daemon extras.
+- Published package classifiers no longer describe Sibyl as alpha.
+- The local compose path works without the standalone worker crash loop and with reliable web/API
+  health checks.
+- `moon run :check` is green on the exact final candidate SHA.
+- Manual Nightly Regression is green on the exact final candidate SHA.
+- Live Runtime Eval and LongMemEval receipts are current for the final candidate SHA.
+- Release dry-run validates the same-SHA Nightly Regression run ID and uploads an
+  `rc-gate-receipt-*` artifact.
+- The live Release workflow is dispatched only after explicit Bliss approval.
+- GitHub Release, PyPI packages, Homebrew, AUR, Docker images, docs install copy, and clean installs
+  are verified after publish.
 
-## 4. Release Blockers
+## Work Plan
 
-### B1. Release Cut Can Bypass Gates
+### Wave 1. Repo Final Prep
 
-The release workflow currently owns version bump, release-note generation, tag creation, GitHub
-release creation, and publish dispatch. It does not enforce the RC gate bundle before tag creation.
-The publish workflow builds artifacts but does not replace the missing release gate.
-
-Required outcome:
-
-- A release cannot tag or publish unless the same SHA has passed the RC gate bundle.
-
-Acceptable fixes:
-
-- Run the curated RC gate bundle inside the release workflow before the tag step.
-- Require and validate a green CI run for the exact SHA being released.
-
-Exit criteria:
-
-- Dry-run output describes only what actually ran.
-- Live release output records the gate receipt or same-SHA CI receipt.
-- The release commit message follows the repo's conventional-commit policy.
-
-### B2. `:check` Does Not Cover Every RC Gate Test
-
-The aggregate check task already covers many release gates, but it does not include every gate test
-named by the RC matrix.
-
-Required outcome:
-
-- `moon run :check` includes the test variants for:
-  - `autonomy-gate`
-  - `reflection-quality-gate`
-  - `auth-session-gate`
-  - `overview-perf-gate`
-
-Exit criteria:
-
-- `moon run :check` fails if any RC gate test fails.
-- The RC matrix and Moon aggregation agree.
-
-### B3. Nightly Regression Is Not Pinned To The Candidate SHA
-
-The current nightly receipt is useful but not sufficient for RC. Evidence Freeze receipts must match
-the exact tag candidate.
-
-Required outcome:
-
-- Nightly regression is green on the final RC SHA.
-
-Exit criteria:
-
-- Baseline parity and live graph regression receipts cite the candidate SHA.
-- Benchmark artifacts from the nightly run are retained or linked in the release packet.
-
-### B4. Task Graph Receipt Is Missing
-
-The docs require the project task graph to show current RC work. The repository is linked locally,
-but the API-backed task and recall surfaces require the Sibyl server.
-
-Required outcome:
-
-- The RC task graph is readable and current.
-
-Exit criteria:
-
-- The v1.0 RC epic exists and reflects the remaining packets.
-- Active tasks match this plan.
-- Obsolete release ghosts are completed, archived, or explicitly labeled historical.
-
-### B5. Graphiti Boundary Is Too Soft
-
-Graphiti Core is no longer a supported dependency, but user-facing copy, environment docs, enum
-names, config descriptions, and compatibility modules still mention Graphiti. For 1.0, this needs a
-hard release boundary rather than a fuzzy migration vibe.
-
-Required outcome:
-
-- Active default-runtime surfaces stop presenting Graphiti as a supported runtime choice, or the
-  remaining named compatibility shims are documented as accepted release risk.
-
-Exit criteria:
-
-- Supported runtime grep has no Graphiti Core imports or dependencies.
-- Active install docs do not instruct new users to run Graphiti.
-- UI copy describes native graph embeddings and compatibility history accurately.
-- Any retained `graphiti` mode/config naming has a documented owner, reason, and removal condition.
-
-### B6. Redis-Optional Local Runtime Needs A Receipt
-
-The RC promise includes SurrealDB as the only required default data plane. Redis can remain
-available for distributed coordination, but local single-machine usage cannot require it.
-
-Required outcome:
-
-- Local mode can enqueue and complete representative work without Redis.
-
-Exit criteria:
-
-- Crawl, entity creation, task update, backup, and reflection maintenance can run through the local
-  coordination path.
-- Redis mode remains documented as opt-in for distributed deployments.
-- Default install docs do not imply Redis is required for a local RC install.
-
-## 5. Work Plan
-
-### Wave 1. Release Gate Wiring
-
-Goal: make the release cut enforce the same truth as the RC checklist.
+Goal: make the branch releaseable without cutting it.
 
 Tasks:
 
-1. Add the missing RC gate tests to `moon run :check`.
-2. Decide whether the release workflow runs the RC gate bundle directly or validates same-SHA CI.
-3. Update release dry-run text so it never claims checks ran when they did not.
-4. Update the release bot commit message to match conventional commits and include a useful body.
-5. Keep the release version regex compatible with `1.0.0-rc.1`.
+1. Include PR #194 or an equivalent local compose fix.
+2. Advance `VERSION` to `1.0.0`.
+3. Update internal Python package pins to `sibyl-core==1.0.0`.
+4. Move package classifiers to production/stable.
+5. Refresh this plan and the release packet so they describe rc8 and final 1.0 truth, not stale rc1
+   state.
 
 Verification:
 
-- `moon query tasks --id check` shows all RC gate test dependencies.
-- Release workflow dry-run cannot create a misleading success summary.
-- Release workflow live path cannot tag before gate enforcement or same-SHA validation.
-- Release commit subject and body satisfy repo commit policy.
+- Focused CLI lint, typecheck, and local compose tests.
+- `moon run python-package-build`.
+- `moon run release-workflow-test`.
+- `moon run docs:lint`.
+- `moon run docs:build`.
 
-### Wave 2. Task Graph And Planning Truth
+### Wave 2. Candidate Freeze
 
-Goal: align durable task state with the current RC.
-
-Tasks:
-
-1. Restore task graph readability.
-2. Confirm the v1.0 RC epic and active tasks match this plan.
-3. Close, archive, or relabel stale tasks from shipped release packets.
-4. Record the remaining blockers as concrete RC tasks.
-
-Verification:
-
-- `sibyl context` shows the linked Sibyl project.
-- The RC epic shows current work.
-- Doing and todo task lists contain RC packets, not stale shipped work.
-- Recall for "Sibyl 1.0 RC" returns this plan and the active blockers.
-
-### Wave 3. Default Runtime Boundary
-
-Goal: make Surreal-only runtime closure claim-safe.
+Goal: prove the exact final SHA is the one being released.
 
 Tasks:
 
-1. Clean user-facing Graphiti wording in active UI and docs where it describes current default
-   behavior.
-2. Decide the fate of `SIBYL_RETRIEVAL_MODE=graphiti` and `NativeRetrievalMode.GRAPHITI` for RC.
-3. Give any retained compatibility shim an owner, rationale, and removal condition.
-4. Confirm no package metadata, lockfile, Docker, Helm, CI, or install path references Graphiti
-   Core.
-5. Confirm local single-machine docs do not require Redis.
-
-Verification:
-
-- RC grep audit for `graphiti[_-]core` returns no supported runtime, test helper, package metadata,
-  install doc, or active guide match.
-- Package metadata and lockfile grep returns no Graphiti Core dependency.
-- Active install docs and UI copy describe native SurrealDB behavior.
-- Redis references are either migration/coordination opt-in text or removed from default install
-  paths.
-
-### Wave 4. Data Integrity And Runtime Receipts
-
-Goal: prove the runtime claims that would be expensive to discover broken after release.
-
-Tasks:
-
-1. Run inventory gates for supported-runtime closure.
-2. Run backup/restore gate and inspect the receipt scope.
-3. Prove Redis-optional local coordination for representative background work.
-4. Run memory trust and trust-control gates.
-5. Run auth-session gate.
-
-Verification:
-
-- `moon run inventory-check`
-- `moon run inventory-typecheck`
-- `moon run inventory-test`
-- `moon run backup-restore-gate`
-- `moon run memory-trust-gate`
-- `moon run trust-control-gate`
-- `moon run auth-session-gate`
-- Local coordination receipt covers crawl, entity creation, task update, backup, and reflection
-  maintenance without Redis.
-
-### Wave 5. Memory Product Receipts
-
-Goal: prove the product loops named by the release notes.
-
-Tasks:
-
-1. Refresh source adapter and large-corpus receipts.
-2. Refresh source-grounded synthesis receipts.
-3. Refresh autonomy and reflection-quality receipts.
-4. Refresh context-quality and workspace-trust receipts.
-5. Refresh overview performance receipt.
-6. Refresh benchmark ledger receipt.
-
-Verification:
-
-- `moon run adapter-ingest-gate`
-- `moon run large-corpus-rehearsal`
-- `moon run synthesis-gate`
-- `moon run autonomy-gate`
-- `moon run reflection-quality-gate`
-- `moon run context-quality-gate`
-- `moon run workspace-trust-gate`
-- `moon run overview-perf-gate`
-- `moon run bench-gate`
-
-### Wave 6. Install Rehearsal
-
-Goal: prove a user can install and run the RC from the published surfaces.
-
-Tasks:
-
-1. Rehearse the documented quickstart from a clean environment.
-2. Rehearse the Python package install path for CLI and daemon entrypoints.
-3. Rehearse Docker image startup with the documented compose path.
-4. Rehearse Helm chart rendering and linting.
-5. Confirm whether Homebrew is an RC target. If it is, rehearse it. If it is not, remove it from the
-   RC checklist and release notes.
-6. Build the docs site and verify install pages match the release artifacts.
-
-Verification:
-
-- `sibyl --version` reports the RC version from a clean package install.
-- `sibyld --version` reports the RC version from a clean package install.
-- Docker images start and expose expected health endpoints.
-- Helm chart renders without default-runtime legacy services.
-- Docs build succeeds and install instructions match available artifacts.
-
-### Wave 7. Candidate Validation
-
-Goal: prove the final SHA is the one being released.
-
-Tasks:
-
-1. Run or cite CI for the exact candidate SHA.
-2. Run nightly regression on the exact candidate SHA.
-3. Run `moon run :check` after gate aggregation is fixed.
-4. Verify docs deploy or docs build for the candidate SHA.
-5. Build the release packet as a claim-to-receipt matrix.
+1. Push or merge the final-prep branch to the selected candidate location.
+2. Run CI for the exact candidate SHA.
+3. Run manual Nightly Regression for the exact candidate SHA.
+4. Run Live Runtime Eval and LongMemEval for the exact candidate SHA.
+5. Run Release dry-run with the same-SHA Nightly Regression run ID.
+6. Record the final receipt IDs in the release packet.
 
 Verification:
 
 - Same-SHA CI is green.
-- Same-SHA nightly regression is green.
-- `moon run :check` is green.
-- Release packet maps every public claim to a command, artifact, or CI URL.
+- Same-SHA Nightly Regression is green and includes restore coverage.
+- Same-SHA Live Runtime Eval and LongMemEval receipts are attached.
+- Release dry-run reports `rc_gate_conclusion=success`, `nightly_conclusion=success`, and skipped
+  tag/publish steps.
 
-### Wave 8. Release Cut And Post-Publish Checks
+### Wave 3. Live Cut
 
-Goal: cut the RC without ambiguity and prove published artifacts work.
+Goal: publish 1.0 with no ambiguity.
 
 Tasks:
 
-1. Prepare release notes from the claim-to-receipt matrix.
-2. Cut `1.0.0-rc.1` only after explicit release go-ahead.
-3. Verify the GitHub release body and tag.
-4. Verify PyPI package pages and package metadata.
-5. Verify Docker multi-arch manifests and tags.
-6. Verify docs install page references the RC correctly.
+1. Get explicit Bliss go-ahead for live Release dispatch.
+2. Dispatch Release with `version=1.0.0`, `dry_run=false`, and the same-SHA Nightly Regression run
+   ID.
+3. Confirm Publish completes successfully.
+4. Verify the GitHub release body and tag.
+5. Verify PyPI package pages and package metadata.
+6. Verify Homebrew, AUR, and Docker multi-arch manifests.
 7. Verify clean installs of CLI and daemon entrypoints from published artifacts.
-8. Record residual risks and accepted follow-up items.
 
 Verification:
 
-- GitHub release exists for `v1.0.0-rc.1`.
-- PyPI has matching `sibyl-core` and `sibyl-dev` RC packages.
+- GitHub release exists for `v1.0.0`.
+- PyPI has matching `sibyl-core`, `sibyl-dev`, and `sibyld` `1.0.0` packages.
 - Docker tags exist for API and web images.
-- Clean install entrypoints report the RC version.
-- Release notes include receipts and residual risks.
+- Clean install entrypoints report `1.0.0`.
+- The release packet records final receipts and residual risks.
 
-## 6. Release Packet
+## Release Decision Template
 
-The working packet lives in [`SIBYL_1_0_RC_RELEASE_PACKET.md`](SIBYL_1_0_RC_RELEASE_PACKET.md).
-
-The release packet should contain this matrix:
-
-| Claim                                   | Required Receipt                                                    |
-| --------------------------------------- | ------------------------------------------------------------------- |
-| Active docs agree                       | Docs lint/build and links to active planning docs                   |
-| Task graph is current                   | RC epic and active task output                                      |
-| Source ingest is current                | `adapter-ingest-gate` and `large-corpus-rehearsal` receipts         |
-| Synthesis is source-grounded            | `synthesis-gate` receipt                                            |
-| Automatic memory is policy-safe         | `autonomy-gate`, `memory-trust-gate`, `trust-control-gate` receipts |
-| Sessions are boring                     | `auth-session-gate` receipt                                         |
-| Reflection quality is current           | `reflection-quality-gate` receipt                                   |
-| Context and workspace trust are current | `context-quality-gate`, `workspace-trust-gate` receipts             |
-| Overview performance is current         | `overview-perf-gate` receipt                                        |
-| Surreal-only runtime holds              | Inventory gates, package grep, docs grep, install rehearsal         |
-| Redis is optional locally               | Local coordination receipt                                          |
-| Backup/restore is release-gated         | `backup-restore-gate` receipt                                       |
-| Benchmark ledger is claim-safe          | `bench-gate` and nightly regression receipts                        |
-| Install surfaces work                   | Quickstart, package, Docker, Helm, docs receipts                    |
-| Release cut is gated                    | Same-SHA CI or release workflow gate receipt                        |
-| Rollback is ready                       | Rollback owner, tag/artifact plan, and known-good SHA               |
-
-## 7. Release Decision
-
-Use this decision once Wave 7 is complete:
+Use this decision once Wave 2 is complete:
 
 ```text
-Ship v1.0 RC:
+Ship v1.0.0:
   yes/no
-Version:
-  1.0.0-rc.1
 Candidate SHA:
   <sha>
 Blocking packet:
@@ -389,18 +148,19 @@ Proof command or receipt:
 Residual risk:
   <accepted risks and owners>
 Rollback target:
-  <known-good SHA or release>
+  v1.0.0-rc.8 or v0.10.0
 ```
 
-## 8. Recommendation
+## Recommendation
 
-Do not cut the RC until the final candidate SHA has same-SHA CI, LongMemEval V2, Nightly Regression,
-and release dry-run receipts, and Bliss explicitly approves the live dispatch.
+Do not cut final 1.0 until the final candidate SHA has same-SHA CI, manual Nightly Regression, Live
+Runtime Eval, LongMemEval, and Release dry-run receipts, and Bliss explicitly approves the live
+dispatch.
 
-The project is close enough that the remaining work should stay narrow. The highest-leverage path
-is:
+The highest-leverage path is:
 
-1. keep the candidate SHA still;
-2. refresh the external same-SHA receipts for that exact SHA;
-3. dispatch Release with the matching Nightly Regression run ID after explicit approval;
-4. verify published artifacts and clean installs before announcing the RC.
+1. land the final-prep branch;
+2. freeze the resulting candidate SHA;
+3. refresh the external same-SHA receipts for that exact SHA;
+4. dispatch Release with the matching Nightly Regression run ID after explicit approval;
+5. verify published artifacts and clean installs before announcing 1.0.
