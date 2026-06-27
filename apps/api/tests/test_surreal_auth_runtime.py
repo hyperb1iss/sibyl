@@ -15,7 +15,7 @@ from sibyl.auth.primitives import DeviceTokenError
 from sibyl.auth.session_cache import access_session_cache
 from sibyl.persistence import graph_runtime
 from sibyl.persistence.surreal import auth as surreal_auth, auth_runtime as surreal_auth_runtime
-from sibyl.persistence.surreal.auth_runtime import users as auth_users
+from sibyl.persistence.surreal.auth_runtime import _common as auth_common, users as auth_users
 from sibyl_core.auth import AuthSession, OrganizationRole, ProjectRole
 
 
@@ -142,6 +142,45 @@ def test_auth_user_namespace_defaults_missing_optional_profile_fields() -> None:
     assert user.preferences == {}
     assert user.email_verified_at is None
     assert user.created_at == created_at
+
+
+def test_oauth_connection_namespace_defaults_missing_provider_email() -> None:
+    # provider_email is option<string>; a provider without a public email
+    # leaves it unset, so /users/me/connections must not raise on the gap.
+    connection = auth_common._oauth_connection_namespace(
+        {
+            "uuid": str(uuid4()),
+            "user_id": str(uuid4()),
+            "provider": "github",
+            "provider_user_id": "12345",
+            "created_at": datetime.now(UTC).replace(tzinfo=None),
+        }
+    )
+
+    assert connection is not None
+    assert connection.provider == "github"
+    assert connection.provider_user_id == "12345"
+    assert connection.provider_email is None
+
+
+def test_device_request_namespace_defaults_missing_optional_fields() -> None:
+    # client_name is option<string>; rows predating the scope/status defaults
+    # also omit those keys. The approval and exchange paths read them directly.
+    request_row = auth_common._device_request_namespace(
+        {
+            "uuid": str(uuid4()),
+            "user_code": "ABCD-1234",
+            "device_code_hash": "hash",
+            "created_at": datetime.now(UTC).replace(tzinfo=None),
+            "expires_at": datetime.now(UTC) + timedelta(minutes=5),
+        }
+    )
+
+    assert request_row is not None
+    assert request_row.user_code == "ABCD-1234"
+    assert request_row.client_name is None
+    assert request_row.scope is None
+    assert request_row.status is None
 
 
 def _auth_session(*, organization_id=None) -> AuthSession:
@@ -1433,6 +1472,51 @@ async def test_list_user_sessions_filters_active_rows_in_surreal(
     assert "expires_at > $now" in query
     assert params["user_id"] == str(user_id)
     assert "now" in params
+
+
+@pytest.mark.asyncio
+async def test_list_user_sessions_defaults_missing_device_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Sessions created before device metadata capture (and NONE columns that
+    # SurrealDB omits from stored records) return without these keys. The
+    # /users/me/sessions surface reads them unconditionally, so they must
+    # materialize as None instead of raising AttributeError.
+    user_id = uuid4()
+    session_id = uuid4()
+    client = _RecordingAuthClient(
+        [
+            {
+                "uuid": str(session_id),
+                "user_id": str(user_id),
+                "token_hash": "hash",
+                "expires_at": datetime.now(UTC) + timedelta(minutes=5),
+                "last_active_at": datetime.now(UTC).replace(tzinfo=None),
+                "created_at": datetime.now(UTC).replace(tzinfo=None),
+                "revoked_at": None,
+            }
+        ]
+    )
+
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(client),
+    )
+
+    sessions = await surreal_auth_runtime.list_user_sessions(user_id=user_id)
+
+    assert len(sessions) == 1
+    session = sessions[0]
+    assert session.user_agent is None
+    assert session.ip_address is None
+    assert session.device_name is None
+    assert session.device_type is None
+    assert session.browser is None
+    assert session.os is None
+    assert session.location is None
+    assert session.is_current is False
+    assert session.version == 0
 
 
 @pytest.mark.asyncio
