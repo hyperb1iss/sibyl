@@ -325,7 +325,7 @@ Sibyl models a wide range of entity types so memory stays structured, not just a
 - **Work:** `task`, `epic`, `project`, `milestone`
 - **Knowledge:** `pattern`, `episode`, `procedure`, `rule`, `guide`, `error_pattern`
 - **Memory:** `decision`, `plan`, `idea`, `claim`, `artifact`, `session`, `note`
-- **Sources:** `source`, `document`, `domain`, `community`
+- **Sources:** `source`, `document`, `domain`
 
 The full registry and how types relate live in [Entity Types](docs/guide/entity-types.md).
 
@@ -334,8 +334,8 @@ The full registry and how types relate live in [Entity Types](docs/guide/entity-
 ### Who is Sibyl for?
 
 **Solo developers** who want durable memory for projects and debugging. **Teams** who want shared
-knowledge that compounds. **Anyone** building with AI who is tired of repeating context every
-session.
+knowledge that compounds. **Anyone** building with AI who wants the memory they generate to stay
+theirs, across every tool.
 
 ### Do I need AI agents to use Sibyl?
 
@@ -361,9 +361,8 @@ solo developer uses around $5/month in API costs.
 
 ### Is it production-ready?
 
-Sibyl is at its **1.0 release candidate**. SurrealDB is the runtime for graph, content, and auth.
-**We use Sibyl to build Sibyl.** Every feature, task, and learning you see here was tracked inside
-the system itself.
+**Yes.** Sibyl is **1.0**. SurrealDB is the runtime for graph, content, and auth. **We use Sibyl to
+build Sibyl.** Every feature, task, and learning you see here was tracked inside the system itself.
 
 ## 🎯 What's Next
 

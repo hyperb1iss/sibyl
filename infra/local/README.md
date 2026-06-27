@@ -1,9 +1,11 @@
 # Sibyl Local Infrastructure
 
-Local Kubernetes development for a small scalable Sibyl fleet.
+Local Kubernetes development for experimenting with a distributed Sibyl topology.
 
-The Tilt path runs Sibyl in its default SurrealDB-native mode, with TiKV as SurrealDB's distributed
-datastore and Valkey as the coordination plane for jobs, locks, pub/sub, and rate limits.
+The Tilt path runs Sibyl in its SurrealDB-native mode wired for distributed scale: TiKV as
+SurrealDB's distributed datastore and Valkey as the coordination plane for jobs, locks, pub/sub, and
+rate limits. This is a scaling demo, not the recommended deployment. Most instances run single-node
+(SurrealDB on RocksDB); reach for this topology only when you actually need horizontal scale.
 
 ## Components
 

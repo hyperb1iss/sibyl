@@ -88,8 +88,8 @@ disabled because the API rejects writes with `409 LOCKED_BY_ENV`. Operators can 
 registry models, open an advanced custom-model disclosure, and run per-surface tests that show
 latency, token counts, and structured failures.
 
-Custom models are saved only after explicit confirmation and show an unverified warning. Per-org
-language model overrides are a planned follow-up; this UI configures the whole instance.
+Custom models are saved only after explicit confirmation and show an unverified warning. Model
+configuration applies instance-wide.
 
 ## SilkCircuit Palette
 
