@@ -399,11 +399,29 @@ def _auth_org_namespace(record: SurrealRecord | None) -> SimpleNamespace | None:
 
 
 def _session_namespace(record: SurrealRecord | None) -> SimpleNamespace | None:
-    return _ns(
+    session = _ns(
         record,
         uuid_fields={"uuid", "user_id", "organization_id"},
         datetime_fields=_SESSION_DATETIME_FIELDS,
     )
+    if session is None:
+        return None
+
+    # SurrealDB omits unset/NONE columns from stored records, and sessions
+    # created before device metadata was captured have no such keys at all.
+    # Seed the full shape so consumers can read these attributes unconditionally.
+    session.token_hash = getattr(session, "token_hash", None)
+    session.refresh_token_hash = getattr(session, "refresh_token_hash", None)
+    session.device_name = getattr(session, "device_name", None)
+    session.device_type = getattr(session, "device_type", None)
+    session.browser = getattr(session, "browser", None)
+    session.os = getattr(session, "os", None)
+    session.ip_address = getattr(session, "ip_address", None)
+    session.user_agent = getattr(session, "user_agent", None)
+    session.location = getattr(session, "location", None)
+    session.is_current = bool(getattr(session, "is_current", False))
+    session.version = getattr(session, "version", 0) or 0
+    return session
 
 
 def _auth_session_namespace(session: AuthSession | None) -> SimpleNamespace | None:
@@ -469,19 +487,36 @@ def _api_key_memory_space_scope(record: SurrealRecord) -> ApiKeyMemorySpaceAuth:
 
 
 def _device_request_namespace(record: SurrealRecord | None) -> SimpleNamespace | None:
-    return _ns(
+    request_row = _ns(
         record,
         uuid_fields={"uuid", "user_id", "organization_id"},
         datetime_fields=_DEVICE_DATETIME_FIELDS,
     )
+    if request_row is None:
+        return None
+
+    # client_name is option<string>; scope/status carry schema defaults that
+    # rows predating those fields never received. SurrealDB omits unset columns,
+    # so seed the consumer surface to keep approval and token exchange safe.
+    request_row.client_name = getattr(request_row, "client_name", None)
+    request_row.scope = getattr(request_row, "scope", None)
+    request_row.status = getattr(request_row, "status", None)
+    return request_row
 
 
 def _oauth_connection_namespace(record: SurrealRecord | None) -> SimpleNamespace | None:
-    return _ns(
+    connection = _ns(
         record,
         uuid_fields={"uuid", "user_id"},
         datetime_fields=_OAUTH_DATETIME_FIELDS,
     )
+    if connection is None:
+        return None
+
+    # provider_email is option<string>, so a provider that returns no public
+    # email leaves the column unset and absent from the stored record.
+    connection.provider_email = getattr(connection, "provider_email", None)
+    return connection
 
 
 def _password_reset_namespace(record: SurrealRecord | None) -> SimpleNamespace | None:
