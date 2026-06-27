@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 
 from sibyl.auth.api_key_common import api_key_prefix, hash_api_key
-from sibyl.auth.passwords import hash_password
+from sibyl.auth.passwords import hash_password, verify_password
 from sibyl.auth.primitives import DeviceTokenError
 from sibyl.auth.session_cache import access_session_cache
 from sibyl.persistence import graph_runtime
@@ -1532,6 +1532,18 @@ async def test_update_auth_user_changes_password_without_repository_reload(
     select_one.assert_not_awaited()
     assert written_record["password_hash"] != password_state.hash_hex
     assert written_record["password_salt"] != password_state.salt_hex
+    assert verify_password(
+        "new-password",
+        salt_hex=str(written_record["password_salt"]),
+        hash_hex=str(written_record["password_hash"]),
+        iterations=int(written_record["password_iterations"]),
+    )
+    assert not verify_password(
+        "old-password",
+        salt_hex=str(written_record["password_salt"]),
+        hash_hex=str(written_record["password_hash"]),
+        iterations=int(written_record["password_iterations"]),
+    )
     audit.assert_awaited_once()
 
 
@@ -1919,6 +1931,14 @@ async def test_confirm_password_reset_batches_token_and_user_reads(
     assert "FROM users" in read_query
     assert read_params == {"token_hash": surreal_auth_runtime._hash_reset_token("reset-token")}
     assert "UPSERT users CONTENT $record" in client.calls[1][0]
+    reset_user = client.calls[1][1]["record"]
+    assert isinstance(reset_user, dict)
+    assert verify_password(
+        "new-password",
+        salt_hex=str(reset_user["password_salt"]),
+        hash_hex=str(reset_user["password_hash"]),
+        iterations=int(reset_user["password_iterations"]),
+    )
     assert "UPSERT password_reset_tokens CONTENT $record" in client.calls[2][0]
     login_history.assert_awaited_once()
 
