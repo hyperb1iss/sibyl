@@ -13,6 +13,15 @@ export default defineConfig({
     description: 'Knowledge graph, semantic search, and task workflow for durable project memory',
     base: '/sibyl/',
 
+    // Internal planning, audits, and strategy stay in-repo but never publish.
+    // retrieval-system.md is the one lowercase architecture doc and ships.
+    srcExclude: [
+        'architecture/[A-Z]*.md',
+        '_archive/**',
+        'research/**',
+        'testing/PERMISSION_TEST_STRATEGY.md',
+    ],
+
     head: [
         ['meta', { name: 'theme-color', content: '#e135ff' }],
         ['meta', { property: 'og:type', content: 'website' }],

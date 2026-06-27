@@ -47,8 +47,5 @@ SurrealDB deliberately. PostgreSQL is now a restore-only archive compatibility s
 active content runtime. See [storage-modes.md](./storage-modes.md) for the mode matrix and
 [migrating-from-falkor.md](./migrating-from-falkor.md) for the cutover playbook.
 
-For the larger product and architecture direction, see
-[Sibyl Northstar](../architecture/SIBYL_NORTHSTAR.md).
-
 The direction is clear: new installs default to fully Surreal, existing installs migrate
 deliberately, then FalkorDB and PostgreSQL leave the product surface.
