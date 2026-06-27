@@ -5,7 +5,7 @@
 export const APP_CONFIG = {
   VERSION: process.env.NEXT_PUBLIC_VERSION || '0.0.0',
   NAME: 'Sibyl',
-  TAGLINE: 'Knowledge Oracle',
+  TAGLINE: 'Cross-agent memory',
   GITHUB_URL: 'https://github.com/hyperb1iss/sibyl',
   SPONSOR_URL: 'https://github.com/sponsors/hyperb1iss',
 } as const;

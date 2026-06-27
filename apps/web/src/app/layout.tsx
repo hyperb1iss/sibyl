@@ -20,8 +20,9 @@ const firaCode = Fira_Code({
 });
 
 export const metadata: Metadata = {
-  title: 'Sibyl - Knowledge Oracle',
-  description: 'Knowledge graph visualization and management for development wisdom',
+  title: 'Sibyl - Cross-agent memory',
+  description:
+    'Cross-agent memory for AI coding tools. One self-hosted knowledge graph your agents share, and you keep.',
 };
 
 export const viewport: Viewport = {

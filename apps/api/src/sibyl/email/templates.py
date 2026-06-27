@@ -175,8 +175,8 @@ class WelcomeEmail(EmailTemplate):
                 {greeting}
             </p>
             <p style="margin: 0 0 24px; color: #e0e0e0; font-size: 16px; line-height: 1.5;">
-                Welcome to Sibyl! Your account is ready. Sibyl is your Graph-RAG Knowledge Oracle -
-                helping you capture, search, and leverage development wisdom across your projects.
+                Welcome to Sibyl! Your account is ready. Sibyl is your cross-agent memory,
+                helping you capture, search, and recall what you learn across every tool and project.
             </p>
             <p style="margin: 0 0 24px;">
                 <a href="{self.login_url}" style="display: inline-block; padding: 12px 24px; background-color: #e135ff; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500;">
@@ -195,7 +195,7 @@ class WelcomeEmail(EmailTemplate):
 
 Welcome to Sibyl! Your account is ready.
 
-Sibyl is your Graph-RAG Knowledge Oracle - helping you capture, search, and leverage development wisdom across your projects.
+Sibyl is your cross-agent memory, helping you capture, search, and recall what you learn across every tool and project.
 
 Get started: {self.login_url}
 

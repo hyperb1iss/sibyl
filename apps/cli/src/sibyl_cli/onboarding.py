@@ -27,7 +27,7 @@ def show_welcome() -> None:
     console.print(
         f"  [{ELECTRIC_PURPLE}]◈[/{ELECTRIC_PURPLE}] Welcome to [bold {ELECTRIC_PURPLE}]Sibyl[/bold {ELECTRIC_PURPLE}]"
     )
-    console.print("    [dim]Your AI-powered knowledge oracle[/dim]")
+    console.print("    [dim]Cross-agent memory for every coding tool you use[/dim]")
     console.print()
 
 
@@ -37,7 +37,7 @@ def show_first_run_message() -> None:
     console.print(
         f"  [{ELECTRIC_PURPLE}]◈[/{ELECTRIC_PURPLE}] Welcome to [bold {ELECTRIC_PURPLE}]Sibyl[/bold {ELECTRIC_PURPLE}]"
     )
-    console.print("    [dim]Your AI-powered knowledge oracle[/dim]")
+    console.print("    [dim]Cross-agent memory for every coding tool you use[/dim]")
     console.print()
     console.print("  [dim]Get started:[/dim]")
     console.print()
