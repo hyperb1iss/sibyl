@@ -364,36 +364,6 @@ describe('backend record normalizers', () => {
     expect(result.api_key).not.toHaveProperty('api_key');
   });
 
-  it('maps OAuth connection records onto the frontend shape', async () => {
-    scriptFetch([
-      {
-        match: '/users/me/connections',
-        response: jsonResponse([
-          {
-            id: 'c1',
-            provider: 'github',
-            provider_user_id: 'gh-42',
-            provider_email: 'dev@example.com',
-            connected_at: '2026-04-01T12:00:00Z',
-          },
-        ]),
-      },
-    ]);
-
-    const { api } = await import('./api');
-    const { connections } = await api.security.connections.list();
-
-    expect(connections[0]).toEqual({
-      id: 'c1',
-      provider: 'github',
-      provider_user_id: 'gh-42',
-      email: 'dev@example.com',
-      name: null,
-      avatar_url: null,
-      created_at: '2026-04-01T12:00:00Z',
-    });
-  });
-
   it('passes session records through under the sessions envelope', async () => {
     const sessions = [
       {

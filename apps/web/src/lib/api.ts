@@ -1251,20 +1251,6 @@ export interface ApiKeyCreateResponse {
   key: string; // Full key, only shown once
 }
 
-export interface OAuthConnection {
-  id: string;
-  provider: string;
-  provider_user_id: string;
-  email: string | null;
-  name: string | null;
-  avatar_url: string | null;
-  created_at: string;
-}
-
-export interface OAuthConnectionsResponse {
-  connections: OAuthConnection[];
-}
-
 interface ApiKeyBackendRecord {
   id: string;
   name: string;
@@ -1286,14 +1272,6 @@ interface ApiKeyCreateBackendResponse extends ApiKeyBackendRecord {
   api_key: string;
 }
 
-interface OAuthConnectionBackendRecord {
-  id: string;
-  provider: string;
-  provider_user_id: string;
-  provider_email: string | null;
-  connected_at: string;
-}
-
 function normalizeApiKey(record: ApiKeyBackendRecord): ApiKey {
   return {
     id: record.id,
@@ -1305,18 +1283,6 @@ function normalizeApiKey(record: ApiKeyBackendRecord): ApiKey {
     last_used_at: record.last_used_at ?? null,
     expires_at: record.expires_at ?? null,
     created_at: record.created_at ?? null,
-  };
-}
-
-function normalizeOAuthConnection(record: OAuthConnectionBackendRecord): OAuthConnection {
-  return {
-    id: record.id,
-    provider: record.provider,
-    provider_user_id: record.provider_user_id,
-    email: record.provider_email,
-    name: null,
-    avatar_url: null,
-    created_at: record.connected_at,
   };
 }
 
@@ -2447,7 +2413,7 @@ export const api = {
       }),
   },
 
-  // Security (sessions, API keys, OAuth connections, password)
+  // Security (sessions, API keys, password)
   security: {
     // Sessions
     sessions: {
@@ -2490,18 +2456,6 @@ export const api = {
         fetchApi<{ success: boolean }>(`/auth/api-keys/${keyId}/revoke`, {
           method: 'POST',
         }),
-    },
-
-    // OAuth Connections
-    connections: {
-      list: async () => {
-        const connections = await fetchApi<OAuthConnectionBackendRecord[]>('/users/me/connections');
-        return { connections: connections.map(normalizeOAuthConnection) };
-      },
-      remove: (connectionId: string) =>
-        fetchApi<void>(`/users/me/connections/${connectionId}`, {
-          method: 'DELETE',
-        }).then(() => ({ success: true })),
     },
 
     // Password

@@ -30,7 +30,6 @@ EXTENDED_AUTH_TABLES = (
     "api_keys",
     "api_key_project_scopes",
     "api_key_memory_space_scopes",
-    "oauth_connections",
     "oauth_client_registrations",
     "device_authorization_requests",
     "audit_logs",
@@ -320,28 +319,6 @@ DEFINE INDEX IF NOT EXISTS idx_api_key_memory_space_scopes_space
 DEFINE INDEX IF NOT EXISTS idx_api_key_memory_space_scopes_key_space
     ON api_key_memory_space_scopes FIELDS api_key_id, memory_space_id UNIQUE;
 
-DEFINE TABLE IF NOT EXISTS oauth_connections SCHEMAFULL;
-DEFINE FIELD IF NOT EXISTS uuid ON oauth_connections TYPE string;
-DEFINE FIELD IF NOT EXISTS user_id ON oauth_connections TYPE string;
-DEFINE FIELD IF NOT EXISTS provider ON oauth_connections TYPE string;
-DEFINE FIELD IF NOT EXISTS provider_user_id ON oauth_connections TYPE string;
-DEFINE FIELD IF NOT EXISTS provider_username ON oauth_connections TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS provider_email ON oauth_connections TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS access_token_encrypted ON oauth_connections TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS refresh_token_encrypted ON oauth_connections TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS token_expires_at ON oauth_connections TYPE option<datetime>;
-DEFINE FIELD IF NOT EXISTS scopes ON oauth_connections TYPE array<string> DEFAULT [];
-DEFINE FIELD IF NOT EXISTS connected_at ON oauth_connections TYPE datetime DEFAULT time::now();
-DEFINE FIELD IF NOT EXISTS disconnected_at ON oauth_connections TYPE option<datetime>;
-DEFINE FIELD IF NOT EXISTS last_used_at ON oauth_connections TYPE option<datetime>;
-DEFINE FIELD IF NOT EXISTS created_at ON oauth_connections TYPE datetime DEFAULT time::now();
-DEFINE FIELD IF NOT EXISTS updated_at ON oauth_connections TYPE datetime DEFAULT time::now();
-
-DEFINE INDEX IF NOT EXISTS idx_oauth_connections_uuid ON oauth_connections FIELDS uuid UNIQUE;
-DEFINE INDEX IF NOT EXISTS idx_oauth_connections_user ON oauth_connections FIELDS user_id;
-DEFINE INDEX IF NOT EXISTS idx_oauth_connections_provider_user
-    ON oauth_connections FIELDS provider, provider_user_id UNIQUE;
-
 DEFINE TABLE IF NOT EXISTS oauth_client_registrations SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON oauth_client_registrations TYPE string;
 DEFINE FIELD IF NOT EXISTS client_id ON oauth_client_registrations TYPE string;
@@ -613,7 +590,6 @@ ALTER TABLE IF EXISTS organization_invitations PERMISSIONS
 ALTER TABLE IF EXISTS api_keys PERMISSIONS NONE;
 ALTER TABLE IF EXISTS api_key_project_scopes PERMISSIONS NONE;
 ALTER TABLE IF EXISTS api_key_memory_space_scopes PERMISSIONS NONE;
-ALTER TABLE IF EXISTS oauth_connections PERMISSIONS NONE;
 ALTER TABLE IF EXISTS oauth_client_registrations PERMISSIONS NONE;
 ALTER TABLE IF EXISTS device_authorization_requests PERMISSIONS NONE;
 ALTER TABLE IF EXISTS audit_logs PERMISSIONS

@@ -385,17 +385,6 @@ async def test_auth_archive_export_can_scope_to_one_organization(
                 "ip_address": "192.0.2.10",
             },
         )
-        await surreal_auth_client.execute_query(
-            "CREATE oauth_connections CONTENT $record;",
-            record={
-                "uuid": str(uuid4()),
-                "user_id": str(user_id),
-                "provider": "github",
-                "provider_user_id": str(user_id),
-                "access_token_encrypted": f"{email}-access-token",
-                "refresh_token_encrypted": f"{email}-refresh-token",
-            },
-        )
     for org_id, slug in ((org_a, "org-a"), (org_b, "org-b")):
         await surreal_auth_client.execute_query(
             "CREATE organizations CONTENT $record;",
@@ -513,7 +502,6 @@ async def test_auth_archive_export_can_scope_to_one_organization(
     assert payload["tables"]["user_identity"] == []
     assert payload["tables"]["password_reset_tokens"] == []
     assert payload["tables"]["login_history"] == []
-    assert payload["tables"]["oauth_connections"] == []
     assert [row["uuid"] for row in payload["tables"]["api_keys"]] == [str(api_key_a)]
     assert payload["tables"]["api_keys"][0]["key_prefix"] == "ak_a"
     assert "key_salt" not in payload["tables"]["api_keys"][0]

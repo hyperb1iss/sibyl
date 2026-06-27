@@ -61,48 +61,6 @@ async def test_confirm_password_reset_uses_runtime_helper(
 
 
 @pytest.mark.asyncio
-async def test_list_connections_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
-    auth = _auth()
-    connected_at = datetime.now(UTC).replace(tzinfo=None)
-    monkeypatch.setattr(
-        user_routes,
-        "list_oauth_connections",
-        AsyncMock(
-            return_value=[
-                SimpleNamespace(
-                    id=uuid4(),
-                    provider="github",
-                    provider_user_id="123",
-                    provider_email="person@example.com",
-                    created_at=connected_at,
-                )
-            ]
-        ),
-    )
-
-    response = await user_routes.list_connections(auth=auth)
-
-    assert len(response) == 1
-    assert response[0].provider == "github"
-    assert response[0].connected_at is connected_at
-
-
-@pytest.mark.asyncio
-async def test_remove_connection_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
-    auth = _auth()
-    connection_id = uuid4()
-    remove_connection = AsyncMock(return_value=SimpleNamespace(provider="github"))
-    monkeypatch.setattr(user_routes, "remove_oauth_connection", remove_connection)
-
-    await user_routes.remove_connection(connection_id=connection_id, auth=auth)
-
-    remove_connection.assert_awaited_once_with(
-        user_id=auth.user.id,
-        connection_id=connection_id,
-    )
-
-
-@pytest.mark.asyncio
 async def test_get_profile_uses_auth_context_user() -> None:
     auth = _auth()
 

@@ -144,25 +144,6 @@ def test_auth_user_namespace_defaults_missing_optional_profile_fields() -> None:
     assert user.created_at == created_at
 
 
-def test_oauth_connection_namespace_defaults_missing_provider_email() -> None:
-    # provider_email is option<string>; a provider without a public email
-    # leaves it unset, so /users/me/connections must not raise on the gap.
-    connection = auth_common._oauth_connection_namespace(
-        {
-            "uuid": str(uuid4()),
-            "user_id": str(uuid4()),
-            "provider": "github",
-            "provider_user_id": "12345",
-            "created_at": datetime.now(UTC).replace(tzinfo=None),
-        }
-    )
-
-    assert connection is not None
-    assert connection.provider == "github"
-    assert connection.provider_user_id == "12345"
-    assert connection.provider_email is None
-
-
 def test_device_request_namespace_defaults_missing_optional_fields() -> None:
     # client_name is option<string>; rows predating the scope/status defaults
     # also omit those keys. The approval and exchange paths read them directly.
@@ -2063,67 +2044,6 @@ async def test_list_user_org_records_batches_organization_reads() -> None:
     assert "FROM organizations" in client.calls[0][0]
     assert "FROM organization_members" in client.calls[0][0]
     assert client.calls[0][1] == {"user_id": str(user_id)}
-
-
-@pytest.mark.asyncio
-async def test_remove_oauth_connection_batches_safety_reads(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    user_id = uuid4()
-    connection_id = uuid4()
-    other_connection_id = uuid4()
-    now = datetime.now(UTC).replace(tzinfo=None)
-    connection_record = {
-        "uuid": str(connection_id),
-        "user_id": str(user_id),
-        "provider": "github",
-        "provider_user_id": "123",
-        "created_at": now,
-    }
-    client = _SequenceAuthClient(
-        [
-            {
-                "connection": connection_record,
-                "user": {"uuid": str(user_id), "password_hash": None},
-                "connections": [
-                    connection_record,
-                    {
-                        "uuid": str(other_connection_id),
-                        "user_id": str(user_id),
-                        "provider": "google",
-                        "provider_user_id": "456",
-                        "created_at": now,
-                    },
-                ],
-            },
-            [],
-        ]
-    )
-
-    monkeypatch.setattr(
-        surreal_auth_runtime,
-        "_auth_client_scope",
-        lambda: _StaticAuthClientScope(client),
-    )
-
-    removed = await surreal_auth_runtime.remove_oauth_connection(
-        user_id=user_id,
-        connection_id=connection_id,
-    )
-
-    assert removed.id == connection_id
-    assert len(client.calls) == 2
-    read_query, read_params = client.calls[0]
-    assert "RETURN" in read_query
-    assert "FROM oauth_connections" in read_query
-    assert "FROM users" in read_query
-    assert read_params == {
-        "connection_id": str(connection_id),
-        "user_id": str(user_id),
-    }
-    delete_query, delete_params = client.calls[1]
-    assert delete_query == "DELETE FROM oauth_connections WHERE uuid = $uuid;"
-    assert delete_params == {"uuid": str(connection_id)}
 
 
 @pytest.mark.asyncio

@@ -46,7 +46,6 @@ export const queryKeys = {
   security: {
     sessions: ['security', 'sessions'] as const,
     apiKeys: ['security', 'apiKeys'] as const,
-    connections: ['security', 'connections'] as const,
   },
   preferences: ['preferences'] as const,
   entities: {
@@ -489,24 +488,6 @@ export function useRevokeApiKey() {
     mutationFn: (keyId: string) => api.security.apiKeys.revoke(keyId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.security.apiKeys });
-    },
-  });
-}
-
-export function useOAuthConnections() {
-  return useQuery({
-    queryKey: queryKeys.security.connections,
-    queryFn: () => api.security.connections.list(),
-  });
-}
-
-export function useRemoveOAuthConnection() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (connectionId: string) => api.security.connections.remove(connectionId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.security.connections });
     },
   });
 }

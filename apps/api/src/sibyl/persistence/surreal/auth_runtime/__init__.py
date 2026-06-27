@@ -65,10 +65,6 @@ from sibyl.persistence.surreal.auth_runtime.login import (
     login_oidc_identity,
     signup_local_user,
 )
-from sibyl.persistence.surreal.auth_runtime.oauth_connections import (
-    list_oauth_connections,
-    remove_oauth_connection,
-)
 from sibyl.persistence.surreal.auth_runtime.password_reset import (
     confirm_password_reset,
     request_password_reset,
@@ -168,7 +164,6 @@ __all__ = [
     "list_memory_audit_events",
     "list_memory_space_members",
     "list_memory_spaces",
-    "list_oauth_connections",
     "list_user_organizations",
     "list_user_sessions",
     "load_oauth_client_registration",
@@ -180,7 +175,6 @@ __all__ = [
     "login_local_user",
     "login_oidc_identity",
     "patch_auth_user",
-    "remove_oauth_connection",
     "request_user_deletion",
     "request_password_reset",
     "resolve_accessible_project_graph_ids",
@@ -235,7 +229,6 @@ from sibyl.persistence.surreal.auth_runtime import (  # noqa: E402
     audit as _audit_module,
     device_authorization as _device_authorization_module,
     login as _login_module,
-    oauth_connections as _oauth_connections_module,
     password_reset as _password_reset_module,
     projects as _projects_module,
     sessions as _sessions_module,
@@ -248,7 +241,6 @@ _SUBMODULES: tuple[_ModuleType, ...] = (
     _audit_module,
     _device_authorization_module,
     _login_module,
-    _oauth_connections_module,
     _password_reset_module,
     _projects_module,
     _sessions_module,

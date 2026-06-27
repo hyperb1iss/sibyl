@@ -11,8 +11,6 @@ import {
   Clock,
   Command,
   Copy,
-  Eye,
-  Github,
   Key,
   Plus,
   RefreshDouble,
@@ -26,8 +24,6 @@ import {
   useApiKeys,
   useChangePassword,
   useCreateApiKey,
-  useOAuthConnections,
-  useRemoveOAuthConnection,
   useRevokeAllSessions,
   useRevokeApiKey,
   useRevokeSession,
@@ -568,110 +564,6 @@ function ApiKeysSection() {
 }
 
 // =============================================================================
-// OAuth Connections Section
-// =============================================================================
-
-function OAuthConnectionsSection() {
-  const { data, isLoading, error } = useOAuthConnections();
-  const removeConnection = useRemoveOAuthConnection();
-  const [pendingRemove, setPendingRemove] = useState<{ id: string; provider: string } | null>(null);
-
-  const handleConfirmRemove = async () => {
-    if (!pendingRemove) return;
-    const { id, provider } = pendingRemove;
-    try {
-      await removeConnection.mutateAsync(id);
-      toast.success(`${provider} disconnected`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to disconnect');
-    } finally {
-      setPendingRemove(null);
-    }
-  };
-
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-  };
-
-  const getProviderIcon = (provider: string) => {
-    if (provider.toLowerCase() === 'github') {
-      return <Github width={18} height={18} />;
-    }
-    return <User width={18} height={18} />;
-  };
-
-  return (
-    <SettingsSection title="Connected Accounts" icon={Eye} iconColor="text-sc-yellow">
-      <p className="text-sc-fg-muted text-sm mb-4">
-        External accounts linked to your Sibyl account for authentication.
-      </p>
-
-      {isLoading && <SectionSkeleton />}
-
-      {error && (
-        <p className="text-sc-fg-muted text-sm">We couldn&apos;t load your connections just now.</p>
-      )}
-
-      {data && data.connections.length === 0 && (
-        <div className="text-center py-6">
-          <User width={28} height={28} className="mx-auto text-sc-fg-muted mb-2" />
-          <p className="text-sc-fg-muted text-sm">No connected accounts.</p>
-        </div>
-      )}
-
-      {data && data.connections.length > 0 && (
-        <div className="space-y-3">
-          {data.connections.map(conn => (
-            <div
-              key={conn.id}
-              className="flex items-center gap-3 p-3 rounded-lg bg-sc-bg-highlight border border-sc-fg-subtle/10"
-            >
-              <div className="w-10 h-10 rounded-lg bg-sc-bg-dark flex items-center justify-center text-sc-fg-muted">
-                {getProviderIcon(conn.provider)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-medium text-sc-fg-primary capitalize">
-                    {conn.provider}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3 text-xs text-sc-fg-muted mt-1">
-                  {conn.email && <span>{conn.email}</span>}
-                  {conn.name && <span>({conn.name})</span>}
-                  <span>Connected {formatDate(conn.created_at)}</span>
-                </div>
-              </div>
-              <IconButton
-                icon={<Trash width={14} height={14} />}
-                label={`Disconnect ${conn.provider}`}
-                size="sm"
-                variant="ghost"
-                onClick={() => setPendingRemove({ id: conn.id, provider: conn.provider })}
-                className="text-sc-red hover:text-sc-red"
-              />
-            </div>
-          ))}
-        </div>
-      )}
-
-      <ConfirmDialog
-        open={!!pendingRemove}
-        onOpenChange={open => {
-          if (!open) setPendingRemove(null);
-        }}
-        title={pendingRemove ? `Disconnect ${pendingRemove.provider}?` : 'Disconnect account?'}
-        description="You may need to re-authenticate to use this login method again."
-        confirmLabel="Disconnect"
-        variant="danger"
-        loading={removeConnection.isPending}
-        onConfirm={handleConfirmRemove}
-      />
-    </SettingsSection>
-  );
-}
-
-// =============================================================================
 // Main Page
 // =============================================================================
 
@@ -681,13 +573,12 @@ export default function SecurityPage() {
       <SettingsPageHeader
         icon={Key}
         title="Security"
-        description="Password, active sessions, API keys, and connected accounts."
+        description="Password, active sessions, and API keys."
       />
 
       <PasswordSection />
       <SessionsSection />
       <ApiKeysSection />
-      <OAuthConnectionsSection />
     </div>
   );
 }

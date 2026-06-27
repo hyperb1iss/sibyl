@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from sibyl.persistence.auth_runtime import (
     confirm_password_reset,
-    list_oauth_connections,
-    remove_oauth_connection,
     request_password_reset,
 )
 from sibyl.persistence.backups_runtime import (
@@ -39,8 +37,6 @@ __all__ = [
     "get_setup_status",
     "is_setup_mode",
     "list_backups",
-    "list_oauth_connections",
-    "remove_oauth_connection",
     "request_password_reset",
     "require_global_admin",
     "require_settings_admin",

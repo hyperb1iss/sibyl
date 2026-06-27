@@ -23,7 +23,6 @@ def test_auth_runtime_maps_resolver_name_for_surreal() -> None:
 def test_auth_runtime_exports_neutral_runtime_surface() -> None:
     assert "resolve_auth_context" in auth_runtime.__all__
     assert "patch_auth_user" in auth_runtime.__all__
-    assert "list_oauth_connections" in auth_runtime.__all__
     assert "validate_access_session" in auth_runtime.__all__
 
     assert "AuthContextResolver" in surreal_auth_runtime.__all__

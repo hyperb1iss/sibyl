@@ -142,21 +142,12 @@ _DEVICE_DATETIME_FIELDS = {
 }
 _PASSWORD_RESET_DATETIME_FIELDS = {"created_at", "expires_at", "used_at", "revoked_at"}
 _LOGIN_HISTORY_DATETIME_FIELDS = {"created_at"}
-_OAUTH_DATETIME_FIELDS = {
-    "created_at",
-    "updated_at",
-    "token_expires_at",
-    "connected_at",
-    "disconnected_at",
-    "last_used_at",
-}
 _UPSERT_QUERY_BY_TABLE = {
     "api_keys": "UPSERT api_keys CONTENT $record WHERE uuid = $uuid;",
     "device_authorization_requests": (
         "UPSERT device_authorization_requests CONTENT $record WHERE uuid = $uuid;"
     ),
     "identity_provider": "UPSERT identity_provider CONTENT $record WHERE uuid = $uuid;",
-    "oauth_connections": "UPSERT oauth_connections CONTENT $record WHERE uuid = $uuid;",
     "oauth_client_registrations": (
         "UPSERT oauth_client_registrations CONTENT $record WHERE uuid = $uuid;"
     ),
@@ -502,21 +493,6 @@ def _device_request_namespace(record: SurrealRecord | None) -> SimpleNamespace |
     request_row.scope = getattr(request_row, "scope", None)
     request_row.status = getattr(request_row, "status", None)
     return request_row
-
-
-def _oauth_connection_namespace(record: SurrealRecord | None) -> SimpleNamespace | None:
-    connection = _ns(
-        record,
-        uuid_fields={"uuid", "user_id"},
-        datetime_fields=_OAUTH_DATETIME_FIELDS,
-    )
-    if connection is None:
-        return None
-
-    # provider_email is option<string>, so a provider that returns no public
-    # email leaves the column unset and absent from the stored record.
-    connection.provider_email = getattr(connection, "provider_email", None)
-    return connection
 
 
 def _password_reset_namespace(record: SurrealRecord | None) -> SimpleNamespace | None:

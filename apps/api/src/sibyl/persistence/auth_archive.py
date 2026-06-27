@@ -91,12 +91,6 @@ _AUTH_ARCHIVE_SQL = {
         "delete_by_uuid": "DELETE FROM api_key_memory_space_scopes WHERE uuid = $uuid;",
         "create": "CREATE api_key_memory_space_scopes CONTENT $record;",
     },
-    "oauth_connections": {
-        "select": "SELECT * FROM oauth_connections ORDER BY id ASC;",
-        "delete_all": "DELETE FROM oauth_connections;",
-        "delete_by_uuid": "DELETE FROM oauth_connections WHERE uuid = $uuid;",
-        "create": "CREATE oauth_connections CONTENT $record;",
-    },
     "oauth_client_registrations": {
         "select": "SELECT * FROM oauth_client_registrations ORDER BY id ASC;",
         "delete_all": "DELETE FROM oauth_client_registrations;",
@@ -206,7 +200,6 @@ _ORG_EXCLUDED_GLOBAL_USER_TABLES = frozenset(
         "user_identity",
         "password_reset_tokens",
         "login_history",
-        "oauth_connections",
     }
 )
 _ORG_SCOPED_REDACTED_FIELDS = {

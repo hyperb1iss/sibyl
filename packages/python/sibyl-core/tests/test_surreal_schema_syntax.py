@@ -243,7 +243,6 @@ def test_auth_table_permissions_are_versioned() -> None:
         "api_keys",
         "user_sessions",
         "password_reset_tokens",
-        "oauth_connections",
     ):
         assert f"ALTER TABLE IF EXISTS {table} PERMISSIONS NONE" in (
             AUTH_PERMISSION_MIGRATION_DEFINITIONS

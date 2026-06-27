@@ -16,10 +16,8 @@ from sibyl.auth.http import select_access_token
 from sibyl.persistence.auth_runtime import (
     UserNotFoundError,
     confirm_password_reset as confirm_password_reset_token,
-    list_oauth_connections,
     list_user_sessions,
     patch_auth_user,
-    remove_oauth_connection,
     request_password_reset as request_password_reset_token,
     request_user_deletion,
     revoke_all_user_sessions,
@@ -109,16 +107,6 @@ class RevokeSessionsResponse(BaseModel):
     """Session revocation response."""
 
     revoked: int
-
-
-class OAuthConnectionResponse(BaseModel):
-    """OAuth connection response."""
-
-    id: UUID
-    provider: str
-    provider_user_id: str
-    provider_email: str | None
-    connected_at: datetime
 
 
 class UserDeletionResponse(BaseModel):
@@ -331,48 +319,6 @@ async def revoke_session(
     )
     if not revoked:
         raise HTTPException(status_code=404, detail="Session not found")
-
-
-# ============================================================================
-# OAuth Connections
-# ============================================================================
-
-
-@router.get("/me/connections", response_model=list[OAuthConnectionResponse])
-async def list_connections(
-    auth: AuthContext = Depends(get_auth_context),
-) -> list[OAuthConnectionResponse]:
-    """List OAuth connections for current user."""
-    connections = await list_oauth_connections(user_id=auth.user.id)
-
-    return [
-        OAuthConnectionResponse(
-            id=c.id,
-            provider=c.provider,
-            provider_user_id=c.provider_user_id,
-            provider_email=c.provider_email,
-            connected_at=c.created_at,
-        )
-        for c in connections
-    ]
-
-
-@router.delete("/me/connections/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_connection(
-    connection_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
-) -> None:
-    """Remove an OAuth connection."""
-    connection = await remove_oauth_connection(
-        user_id=auth.user.id,
-        connection_id=connection_id,
-    )
-
-    log.info(
-        "oauth_connection_removed",
-        user_id=str(auth.user.id),
-        provider=connection.provider,
-    )
 
 
 @router.delete(
