@@ -95,3 +95,9 @@ docs/research/*
 !docs/research/rust-port/
 docs/research/rust-port/*
 !docs/research/rust-port/INVENTORY.md
+
+# Local strategy and planning notes (kept on disk, referenced by Sibyl memory)
+docs/architecture/COMPETITIVE_ANALYSIS_*.md
+docs/architecture/DATA_MODEL_*_2026-*.md
+docs/architecture/LAUNCH_AND_MONETIZATION_*
+docs/architecture/SAAS_HOSTING_STRATEGY_*.md
