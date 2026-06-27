@@ -50,14 +50,16 @@ features:
 
 ## The Problem
 
-Every time you start a new coding session, critical context slips away. That OAuth gotcha you
-debugged for two hours? Gone. The pattern that finally made your tests pass? Vanished. The
-configuration quirk that took forever to figure out? Lost to the void.
+Every app wants to remember you now. Your assistant imports your history from the last one, builds a
+profile, and turns the context you generate into someone else's asset. And none of it travels: what
+you taught Claude Code, Cursor never sees, so you re-explain the same project to every tool you use.
+The question stopped being whether your tools remember and became who the memory works for.
 
 ## The Solution
 
-Sibyl is **cross-agent memory**. A knowledge graph, memory loop, and task workflow shared across
-every coding agent you use:
+Sibyl is **cross-agent memory** where the answer is you. A knowledge graph, memory loop, and task
+workflow shared across every coding agent you use, self-hosted on your own hardware so the memory
+works for you and stays yours:
 
 - **Memory:** Store patterns, decisions, and solutions that persist across sessions
 - **The Memory Loop:** `recall → act → remember → reflect`, built into every surface

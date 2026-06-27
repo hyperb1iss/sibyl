@@ -89,6 +89,15 @@ who paywalled or killed self-hosting. (Relicensed from AGPL-3.0 to Apache-2.0 on
 remove the enterprise adoption objection; the anti-strip-mining lever stays available later via
 dual-licensing if it is ever needed.)
 
+**The opening hook: the memory land-grab inversion.** In 2026 every app added memory, and the funded
+ones now import each other's (Gemini imports ChatGPT chats and memory; Mistral's Le Chat imports
+ChatGPT memories). That memory is built to capture the user, not serve them. Sibyl's surfaces open
+on the inversion: every app wants to remember you, Sibyl is the one where the memory works _for_ you
+and stays yours. This is the emotional rendering of the flank, and it is the lede on the README and
+docs home. Do NOT open any surface on the genre's "sessions start cold / your AI forgets" trope: it
+is single-app framing Mem0 and Zep already own, and our closest rival (Hindsight) opens with it
+verbatim. Lead with sovereignty plus the cross-agent wedge instead.
+
 ### 5. The proof: one number, one run, everywhere
 
 **96.96% strict R@5 on LongMemEval-S, live API path, no LLM in the retrieval path.**
@@ -166,14 +175,16 @@ scales.
 | Surface                  | Lead                                                                  | Carries                                              |
 | ------------------------ | --------------------------------------------------------------------- | ---------------------------------------------------- |
 | **sibyl.ist hero**       | Wedge headline, cross-agent-memory subhead with the shell-native hook | install one-liner, hit@5 badge, two CTAs             |
-| **GitHub README lede**   | cross-agent memory and the wedge, codemode as the how                 | quickstart, the proof number, "What You Get" breadth |
-| **VitePress docs home**  | Wedge as `hero.text`, problem-first framing                           | the loop, breadth features, quickstart               |
+| **GitHub README lede**   | land-grab inversion + cross-agent memory, codemode as the how         | quickstart, the proof number, "What You Get" breadth |
+| **VitePress docs home**  | Wedge as `hero.text`, land-grab inversion as the problem framing      | the loop, breadth features, quickstart               |
 | **Meta / OG / keywords** | "cross-agent memory" first keyword                                    | self-hosted, LongMemEval, the agent names            |
 | **Social / launch**      | Wedge, the honest benchmark, solo-in-the-open                         | screenshots, the graph, the star count               |
 
 Consistency checklist before any launch surface ships:
 
 - [ ] Leads with the wedge, not "persistent memory."
+- [ ] Does NOT open on the "sessions start cold / your AI forgets" trope; uses the land-grab
+      sovereignty inversion instead.
 - [ ] Uses "cross-agent memory" as the category phrase.
 - [ ] Benchmark number is 96.96% R@5 / 98.90% R@10, cited to run `26304777971`, with the
       retrieval-vs-QA caveat.

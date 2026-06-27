@@ -33,45 +33,41 @@
   <a href="#-the-memory-loop">Memory Loop</a> •
   <a href="#the-cli">CLI</a> •
   <a href="#mcp-integration">MCP</a> •
-  <a href="#faq">FAQ</a>
+  <a href="https://hyperb1iss.github.io/sibyl/">📖 Docs</a>
 </p>
 
 ---
 
 ## 🔮 Why Sibyl
 
-Sibyl is **cross-agent memory** for AI coding tools: one self-hostable knowledge graph shared across
-Claude Code, Codex, OpenCode, Cursor, and the agents you build yourself. Tell one tool your context,
-and every tool keeps it.
+In 2026, every app remembers you. Your assistant imports your history from the last one, every tool
+quietly assembles a profile, and the memory you generate becomes someone else's asset. The question
+stopped being _whether_ it remembers and became _who the memory works for_.
 
-Most AI sessions start cold. Coding agents forget yesterday's decisions. Notes drift between
-worktrees, tasks scatter across tools, and the context you earned the hard way evaporates the moment
-a session ends.
+Sibyl is **cross-agent memory** where the answer is you. One knowledge graph holds your decisions,
+your gotchas, and the conventions you actually follow. It is self-hosted on your own hardware and
+shared across every coding agent you run: Claude Code, Codex, Cursor, and the agents you build
+yourself. Tell one tool your context, and every tool keeps it. Nothing harvested into a vendor's
+profile, nothing trapped behind an export you can't take.
 
 The interaction surface is the shell. If your agent can run a command, it already speaks Sibyl. No
-SDK to adopt, no MCP server you are locked into. Claude Code, Codex, Cursor, Aider, Cline, and your
-own scripts all recall context, capture learnings, and run task workflows the same way you do. MCP
-is there for the clients that prefer it; the depth lives in the CLI.
+SDK to adopt, no MCP server you are locked into. The depth lives in the CLI; MCP is there for the
+clients that prefer it.
 
-A durable knowledge graph holds what matters: personal context, project work, shared spaces, source
-documents, decisions, agent state. Each lives in its own scope and gets tied to the others when
-context calls for it. A built-in memory loop (`recall → act → remember → reflect`) keeps hard-won
-context close at hand for humans and AI alike. Source-grounded synthesis turns what you already know
-into verified documents.
-
-**Every session adds up instead of starting over.**
+**Switch tools, swap models, walk to a new machine. The graph comes with you, because it was always
+yours.**
 
 ## ✦ What You Get
 
-| Capability                       | What It Means                                                                                                          |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| 🔮 **Compounding Context**       | Every session adds to the graph instead of starting over. The longer you use it, the sharper it gets                   |
-| 🪄 **The Memory Loop**           | `recall → act → remember → reflect` runs through the CLI, MCP, and hooks. Agents wake with context and leave it behind |
-| 🎯 **Semantic Search**           | Find knowledge by meaning. "Authentication patterns" surfaces OAuth notes even when "OAuth" isn't in the text          |
-| 🦋 **Task Workflow**             | Plan with epics and tasks, then track execution across sessions and teammates in one place                             |
-| 🧪 **Source-Grounded Synthesis** | Draft verified documents from your own memory with citation, freshness, and gap checks                                 |
-| 🌊 **Source Ingestion**          | Crawl documentation sites and import sources (mailboxes, archives) into scoped raw content and graph memory            |
-| 💎 **Scoped Multi-Tenancy**      | Namespace-isolated graphs, org-scoped content/auth records, and policy gates for personal, project, and team scopes    |
+| Capability                       | What It Means                                                                                                           |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 🔮 **Compounding Context**       | Every session adds to the graph instead of starting over. The longer you use it, the sharper it gets                    |
+| 🪄 **The Memory Loop**           | `recall → act → remember → reflect` runs through the CLI, MCP, and hooks. Agents wake with context and leave it behind  |
+| 🎯 **Semantic Search**           | Find knowledge by meaning. "Authentication patterns" surfaces OAuth notes even when "OAuth" isn't in the text           |
+| 🦋 **Task Workflow**             | Plan with epics and tasks, then track execution across sessions and teammates in one place                              |
+| 🧪 **Source-Grounded Synthesis** | Draft verified documents from your own memory with citation, freshness, and gap checks                                  |
+| 🌊 **Source Ingestion**          | Crawl docs, import sources (mailboxes, archives), and ingest agent transcripts into scoped raw content and graph memory |
+| 💎 **Scoped Multi-Tenancy**      | Namespace-isolated graphs, org-scoped content/auth records, and policy gates for personal, project, and team scopes     |
 
 <table>
   <tr>
@@ -98,44 +94,19 @@ into verified documents.
 
 ## ⚡ Quickstart
 
-### Shell Installer
-
 ```bash
+# Shell installer: puts sibyl on your PATH, starts the local stack, opens setup UI
 curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
+
+# Or Homebrew
+brew install hyperb1iss/tap/sibyl && sibyl up
 ```
 
-The installer puts `sibyl` on your PATH, starts the local API + web stack, and opens the setup UI
-when it is ready. Use `--remote` for CLI-only installs and `--daemon` for the embedded daemon
-without the web UI.
-
-### Homebrew
-
-```bash
-brew install hyperb1iss/tap/sibyl
-sibyl up
-```
-
-### Remote CLI
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote
-sibyl init --remote https://sibyl.example.com
-sibyl auth login
-```
-
-### Docker Self-Host
-
-```bash
-sibyl docker init       # Generate ~/.sibyl/docker/.env + compose
-sibyl docker up         # Start API, web, and SurrealDB
-sibyl docker logs       # Follow logs
-sibyl docker down       # Stop services
-sibyl docker upgrade    # Pull and recreate
-```
+Use `--remote` for a CLI-only install against a hosted server, or `--daemon` for the embedded daemon
+without the web UI. For containers, `sibyl docker init && sibyl docker up` brings up API, web, and
+SurrealDB. Full matrix in [Installation](docs/guide/installation.md).
 
 ### First Five Minutes
-
-Everything below runs against your local Sibyl stack. MCP wiring is optional.
 
 ```bash
 # Capture a learning the moment you find it
@@ -145,55 +116,12 @@ sibyl remember "Stale auth token bug" \
 # Pull it back as working context for your next session
 sibyl recall "auth token bug" --intent debug
 
-# Or search semantically across the whole graph
+# Search semantically across the whole graph
 sibyl search "stale auth token redis ttl"
 
 # Package wake-up context for the next coding session
 sibyl session bundle
 ```
-
-### Development Setup
-
-```bash
-# One-line setup (installs proto, moon, toolchain, dependencies)
-./setup-dev.sh            # macOS / Linux
-pwsh -File .\setup-dev.ps1  # Windows (PowerShell 7+)
-
-# Or manually:
-curl -fsSL https://moonrepo.dev/install/proto.sh | bash
-proto use                  # Installs node, pnpm, python, uv
-proto install moon
-uv sync && pnpm install
-
-# Configure your shell
-export SIBYL_OPENAI_API_KEY=sk-...
-# SIBYL_JWT_SECRET is auto-generated in dev.
-# Embeddings use SIBYL_OPENAI_API_KEY or SIBYL_GEMINI_API_KEY.
-
-# Install CLIs globally (editable, source changes reflect immediately)
-moon run install-dev
-
-# Launch the default local-dev stack (SurrealDB + API + web)
-moon run dev
-
-# Verify
-curl http://localhost:3334/api/health
-```
-
-`moon run dev` is the single-machine flow. When `SIBYL_SURREAL_URL` is unset it starts local
-SurrealDB, points the API at `ws://127.0.0.1:8000/rpc`, and stores data files in
-`.moon/cache/surreal-dev`. Jobs and schedules run in-process by default
-(`SIBYL_COORDINATION_BACKEND=local`). Set `SIBYL_SURREAL_URL` to connect to a hosted SurrealDB
-endpoint, including Surreal Cloud, instead.
-
-**Ports:**
-
-| Service      | Port | URL                     |
-| ------------ | ---- | ----------------------- |
-| API + MCP    | 3334 | http://localhost:3334   |
-| Web UI       | 3337 | http://localhost:3337   |
-| SurrealDB    | 8000 | ws://localhost:8000/rpc |
-| Redis/Valkey | 6381 | optional                |
 
 ## 🪄 The Memory Loop
 
@@ -206,8 +134,7 @@ recall ──▶ act ──▶ remember ──▶ reflect
 ```
 
 1. **Recall** working context before you start. `sibyl recall "<goal>"` returns a compact context
-   pack: active work, decisions, plans, constraints, and recent lessons, scoped to your linked
-   project.
+   pack: active work, decisions, plans, constraints, and recent lessons, scoped to your project.
 2. **Act** with that context in hand.
 3. **Remember** durable knowledge as you learn it. `sibyl remember` stores decisions, plans, ideas,
    claims, procedures, and gotchas so the next session does not rediscover them.
@@ -222,19 +149,12 @@ sibyl reflect "We decided X. Next we build Y." --title "Planning checkpoint" --p
 
 Memory is graded, auditable, and scoped. Raw captures stay verbatim, reflection candidates pass an
 automatic review before promotion, and a nightly dream-cycle keeps the graph consolidated. See
-[`docs/guide/capturing-knowledge.md`](docs/guide/capturing-knowledge.md).
+[Capturing Knowledge](docs/guide/capturing-knowledge.md).
 
 ## The CLI
 
-The CLI is the power-user interface. Clean output, built for scripting and durable project
+The CLI is the power-user interface: clean output, built for scripting and durable project
 workflows.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
-moon run cli:install         # or install from source
-```
-
-### Command Families
 
 ```bash
 # Memory loop
@@ -257,29 +177,14 @@ sibyl task complete <task_id> --learnings "Key insight: check TTL first"
 # Synthesis, sources, projects, orgs
 sibyl synthesis draft "Onboarding guide"
 sibyl crawl add "https://docs.example.com" --name "Example Docs"
-sibyl ingest claude-code ~/transcripts/  # Import agent transcripts into memory
-sibyl docs list                          # Browse document collections
+sibyl ingest claude-code ~/transcripts/   # Import agent transcripts into memory
+sibyl docs list                           # Browse document collections
 sibyl project link proj_xxx
 ```
 
-### Task Workflow
-
-```
-backlog ──▶ todo ──▶ doing ──▶ review ──▶ done ──▶ archived
-                       │
-                       ▼
-                    blocked
-```
-
-### Output Formats
-
-```bash
-sibyl task list           # Table output (default)
-sibyl task list --json    # JSON for scripts
-sibyl task list --csv     # For spreadsheets
-```
-
-Full command reference: [`docs/cli/`](docs/cli/).
+Tasks flow `backlog → todo → doing → review → done → archived` (with a `blocked` side state), and
+every list command supports `--json` and `--csv` for scripting. Full command reference:
+[`docs/cli/`](docs/cli/).
 
 ## 🦋 Web UI
 
@@ -314,8 +219,6 @@ Connect Claude Code, Cursor, or any MCP client to Sibyl:
 }
 ```
 
-### The Tool API
-
 Sibyl exposes eleven MCP tools, organized by what they do:
 
 | Tool               | Purpose                                                   |
@@ -343,20 +246,11 @@ sibyl skill get core       # Print version-matched guidance from the CLI bundle
 moon run hooks:install     # Optional Claude Code context hooks for repo dev
 ```
 
-The installed `/sibyl` skill is intentionally tiny. It points agents back to the installed CLI,
-which serves the full markdown skill packs for the exact Sibyl version on the machine. A single hook
-nudges the agent at session boundaries; everything else is the agent's job:
-
-| Hook             | Trigger        | Action                                                                |
-| ---------------- | -------------- | --------------------------------------------------------------------- |
-| **SessionStart** | Session begins | Prints a compact session bundle with active tasks and relevant memory |
-
-The agent is responsible for invoking the `sibyl` skill and calling `sibyl recall` /
-`sibyl context pack` for working memory. We previously shipped a per-prompt context-injection hook
-(`UserPromptSubmit`) but removed it: it substituted for skill invocation instead of prompting it,
-and agents stopped reaching for the CLI.
-
-See [`skills/`](skills/) and [`hooks/`](hooks/) for implementation details.
+The installed `/sibyl` skill is intentionally tiny: it points agents back to the installed CLI,
+which serves the full markdown skill packs for the exact Sibyl version on the machine. A single
+**SessionStart** hook prints a compact session bundle with active tasks and relevant memory; the
+agent owns invoking the `sibyl` skill and calling `sibyl recall` for working context. See
+[Skills & Hooks](docs/guide/skills.md).
 
 ## Architecture
 
@@ -380,105 +274,49 @@ sibyl/
 
 - **Backend:** Python 3.13 / FastAPI / FastMCP / SurrealDB-native runtime
 - **Frontend:** Next.js 16 / React 19 / React Query / Tailwind 4
-- **Storage:** SurrealDB unifies graph, content, and auth. PostgreSQL is retained only for migration
-  and archive rehearsal.
-- **AI routing:** Anthropic, OpenAI, and Gemini swap per surface; embeddings are pluggable.
-- **Coordination:** In-process by default; Redis/Valkey is optional for multi-process or distributed
-  deployments.
+- **Storage:** SurrealDB unifies graph, content, and auth in one runtime
+- **AI routing:** Anthropic, OpenAI, and Gemini swap per surface; embeddings are pluggable
+- **Coordination:** In-process by default; Redis/Valkey is optional for multi-process deployments
 - **Build:** moonrepo + uv (Python) + pnpm (TypeScript)
-- **Compatibility:** Legacy Graphiti-shaped records are handled by Sibyl-owned Surreal projection
-  and archive code. No supported install pulls Graphiti.
 
-See [`docs/guide/why-surreal.md`](docs/guide/why-surreal.md) for the rationale and
-[`docs/guide/storage-modes.md`](docs/guide/storage-modes.md) for the mode matrix.
+See [Why SurrealDB](docs/guide/why-surreal.md) for the rationale and
+[Storage Modes](docs/guide/storage-modes.md) for the mode matrix.
 
 ## 🧪 Benchmarks
 
-Sibyl reaches the LongMemEval-S retrieval ceiling on the live API path with no LLM extraction and no
-LLM reranking.
+Sibyl reaches the LongMemEval-S retrieval ceiling on the live `/api/search` path, measured in an
+ephemeral CI stack, with no LLM extraction and no LLM reranking.
 
-| Metric           | Value                                         |
-| ---------------- | --------------------------------------------- |
-| `hit@5`          | **100.00%** (500/500)                         |
-| `recall@5`       | **96.96%** (strict multi-answer)              |
-| `recall@10`      | **98.90%**                                    |
-| `ndcg@5`         | 94.63%                                        |
-| Questions        | 500/500                                       |
-| LLM extraction   | disabled                                      |
-| LLM reranking    | none                                          |
-| Embeddings       | OpenAI `text-embedding-3-small`, 1024 dims    |
-| Tenant isolation | graph namespace + scoped content per question |
+| Metric      | Value                            |
+| ----------- | -------------------------------- |
+| `hit@5`     | **100.00%** (500/500)            |
+| `recall@5`  | **96.96%** (strict multi-answer) |
+| `recall@10` | **98.90%**                       |
+| `ndcg@5`    | 94.63%                           |
 
-The result is measured against the production `/api/search` surface in an ephemeral CI stack, not an
-offline notebook replay. Each question gets an isolated graph namespace with scoped content rows,
-and the full artifact and diagnostics are published.
-
-`hit@5 = 100%` and strict `recall@5 = 96.96%` measure different things and we report both: hit asks
-"did _any_ correct session land in the top 5", strict recall asks "did _every_ correct session land
-for multi-answer questions". Many LongMemEval-S questions have multiple correct answer sessions,
-which is why these numbers diverge.
-
-A few comparisons that are _not_ apples-to-apples are usually shown side by side in this space —
-retrieval recall vs LLM-judged QA accuracy is the most common conflation. See
-[AI Memory Landscape](docs/testing/ai-memory-landscape.md) for the honest field positioning.
-
-- **Headline run:**
-  [GitHub Actions run 26304777971](https://github.com/hyperb1iss/sibyl/actions/runs/26304777971)
-- **Full results doc:** [`docs/testing/longmemeval.md`](docs/testing/longmemeval.md)
-- **Methodology:** [`docs/testing/benchmark-methodology.md`](docs/testing/benchmark-methodology.md)
-- **Architecture:** [`docs/architecture/retrieval-system.md`](docs/architecture/retrieval-system.md)
-
-## Authentication
-
-### JWT Sessions (Web UI)
-
-```bash
-SIBYL_JWT_SECRET=your-secret-key        # Required in production; dev auto-generates
-SIBYL_ACCESS_TOKEN_EXPIRE_MINUTES=60    # Optional (default: 60)
-```
-
-Self-service password reset is delivered over SMTP when `SIBYL_SMTP_HOST` is configured.
-
-### API Keys (Programmatic Access)
-
-```bash
-sibyl auth api-key create --name "CI/CD" --scopes mcp,api:read
-# Scopes: mcp, api:read, api:write
-```
-
-### OAuth (GitHub)
-
-```bash
-SIBYL_GITHUB_CLIENT_ID=...
-SIBYL_GITHUB_CLIENT_SECRET=...
-```
-
-MCP endpoints enforce Bearer auth when a JWT secret is set (`SIBYL_MCP_AUTH_MODE=auto`). See
-[`docs/api/`](docs/api/) for the full auth reference.
+`hit@5` and strict `recall@5` measure different things, and many published "LongMemEval" numbers are
+end-to-end QA accuracy with an LLM judge, a different metric than retrieval recall. Full results and
+honest side-by-side positioning: [LongMemEval](docs/testing/longmemeval.md) ·
+[AI Memory Landscape](docs/testing/ai-memory-landscape.md).
 
 ## Deployment
 
-### Docker Compose
-
 ```bash
-sibyl docker init
-sibyl docker up
-```
+# Docker Compose
+sibyl docker init && sibyl docker up
 
-### Kubernetes (Helm)
-
-```bash
+# Kubernetes (Helm)
 helm install sibyl ./charts/sibyl \
   --set backend.existingSecret=sibyl-secrets \
   --set backend.surreal.existingSecret=sibyl-surreal \
   --set ingress.enabled=true
 ```
 
-See [`docs/deployment/`](docs/deployment/) for detailed guides:
-
-- [Docker Compose](docs/deployment/docker-compose.md)
-- [Kubernetes](docs/deployment/kubernetes.md)
-- [Environment Variables](docs/deployment/environment.md)
+Authentication supports JWT sessions for the web UI, scoped API keys for programmatic access
+(`sibyl auth api-key create --scopes mcp,api:read`), GitHub OAuth, and self-service password reset
+over SMTP. MCP endpoints enforce Bearer auth when a JWT secret is set. Detailed guides:
+[Docker Compose](docs/deployment/docker-compose.md) · [Kubernetes](docs/deployment/kubernetes.md) ·
+[Environment](docs/deployment/environment.md) · [Auth reference](docs/api/).
 
 ## Knowledge Model
 
@@ -489,8 +327,7 @@ Sibyl models a wide range of entity types so memory stays structured, not just a
 - **Memory:** `decision`, `plan`, `idea`, `claim`, `artifact`, `session`, `note`
 - **Sources:** `source`, `document`, `domain`, `community`
 
-The full registry and how types relate is documented in
-[`docs/guide/entity-types.md`](docs/guide/entity-types.md).
+The full registry and how types relate live in [Entity Types](docs/guide/entity-types.md).
 
 ## FAQ
 
@@ -508,16 +345,10 @@ automatic, but they are not required.
 
 ### How does it compare to Mem0 / LangMem / similar?
 
-Sibyl is **self-hosted and open source**. You own your data. It includes a full **task workflow
-system**, not just memory. It has a **web UI** for humans, not just APIs for machines. And it keeps
-knowledge, tasks, and docs connected in one graph instead of scattering them across tools.
-
-On retrieval quality: Sibyl reaches the LongMemEval-S retrieval ceiling (500/500 `hit@5`, 96.96%
-strict `recall@5`, 98.90% `recall@10`) on the live API path with no LLM extraction or LLM reranking.
-Many published "LongMemEval" numbers are end-to-end QA accuracy with an LLM judge, which is a
-different metric than retrieval recall — see
-[`docs/testing/ai-memory-landscape.md`](docs/testing/ai-memory-landscape.md) for honest side-by-side
-positioning.
+Sibyl is **self-hosted and open source**, so you own your data. It includes a full **task workflow
+system**, not just memory, a **web UI** for humans, not just APIs for machines, and it keeps
+knowledge, tasks, and docs connected in one graph instead of scattering them across tools. On
+retrieval quality, see the [Benchmarks](#-benchmarks) above.
 
 ### What LLM APIs do I need?
 
@@ -525,62 +356,43 @@ positioning.
   extraction, synthesis, and reflection.
 - **OpenAI or Gemini** (required): for embeddings and semantic search.
 
-Providers and models are configurable globally or per surface, and the web admin settings page can
-save instance-wide model routing. A typical solo developer uses around $5/month in API costs.
+Providers and models are configurable globally or per surface from the web admin settings. A typical
+solo developer uses around $5/month in API costs.
 
 ### Is it production-ready?
 
-Sibyl is in the v1.0 release-candidate phase (latest `v1.0.0-rc.8`). SurrealDB is the default
-runtime for graph, content, and auth; PostgreSQL is retained only for migration and archive
-rehearsal. **We use Sibyl to build Sibyl.** Every feature, task, and learning you see here was
-tracked inside the system itself.
+Sibyl is at its **1.0 release candidate**. SurrealDB is the runtime for graph, content, and auth.
+**We use Sibyl to build Sibyl.** Every feature, task, and learning you see here was tracked inside
+the system itself.
 
-## 🎯 Roadmap
+## 🎯 What's Next
 
-**Where we're headed for 1.0 and beyond:**
+Past 1.0, the work is making memory more automatic and the sources deeper:
 
 - **Memory Workspace OS:** automatic memory decisions become visible, explainable, correctable, and
   undoable from one product surface.
-- **Surreal-only closure:** remaining legacy assumptions leave the supported runtime once native
-  behavior has receipts.
-- **1.0 evidence freeze:** release claims cite gates, artifacts, and install rehearsals.
+- **Correction propagation:** edits, redactions, and rollbacks flow forward into future recall and
+  synthesis, not just the record you touched.
+- **Broader ingestion:** source import reaches past mailbox-style archives into more corpora, scoped
+  and provenance-tracked.
 
-Already shipped on the way here: a Surreal-only default runtime, and source, document, and
-transcript ingestion via `sibyl ingest` and `sibyl docs`. The graph gets smarter. The workflow gets
-sharper. See [`docs/architecture/SIBYL_1_0_ROADMAP.md`](docs/architecture/SIBYL_1_0_ROADMAP.md).
+Already shipped on the way here: a Surreal-only default runtime, plus source, document, and agent
+transcript ingestion via `sibyl ingest` and `sibyl docs`. See
+[`docs/architecture/SIBYL_1_0_ROADMAP.md`](docs/architecture/SIBYL_1_0_ROADMAP.md) for the full
+direction.
 
 ## 💜 Philosophy
 
-### Recall Before You Act
-
-The graph knows things. Before you code, pull context:
-
-```bash
-sibyl recall "what you're building" --intent build
-sibyl search "error you hit" --type episode
-```
-
-### Work In Task Context
-
-Never do significant work outside a task. Tasks provide traceability, progress tracking, and
-knowledge linking.
-
-### Remember What You Learn
-
-If it took time to figure out, save it:
+**Recall before you act.** The graph knows things, so pull context before you code. **Work in task
+context** for traceability, progress, and knowledge linking. **Remember what you learn:** if it took
+time to figure out, save it so the next session doesn't pay for it twice.
 
 ```bash
 sibyl remember "Descriptive title" "What, why, how, caveats" --kind decision
 ```
 
-**Bad:** "Fixed the bug." **Good:** "JWT refresh fails when Redis TTL expires. Root cause: token
-service does not handle WRONGTYPE. Fix: try/except with regeneration fallback."
-
-### Complete With Learnings
-
-```bash
-sibyl task complete <id> --learnings "Key insight: ..."
-```
+> **Bad:** "Fixed the bug." **Good:** "JWT refresh fails when Redis TTL expires. Root cause: token
+> service does not handle WRONGTYPE. Fix: try/except with regeneration fallback."
 
 The graph should be smarter after every session.
 
@@ -589,14 +401,30 @@ The graph should be smarter after every session.
 We welcome contributions. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ```bash
-# Fork, clone, then:
+# One-line setup (installs proto, moon, toolchain, dependencies)
 ./setup-dev.sh              # macOS / Linux
 pwsh -File .\setup-dev.ps1  # Windows (PowerShell 7+)
-moon run dev
 
-# Make changes, then:
-moon run :check           # Lint + typecheck + test
+# Configure your shell, then launch the local-dev stack
+export SIBYL_OPENAI_API_KEY=sk-...   # embeddings; SIBYL_JWT_SECRET auto-generates in dev
+moon run install-dev                 # editable CLI installs
+moon run dev                         # SurrealDB + API + web
+
+# Verify, then run the quality gates before a PR
+curl http://localhost:3334/api/health
+moon run :check                      # lint + typecheck + test
 ```
+
+`moon run dev` is the single-machine flow: with `SIBYL_SURREAL_URL` unset it starts local SurrealDB,
+points the API at `ws://127.0.0.1:8000/rpc`, and stores data in `.moon/cache/surreal-dev`. Set
+`SIBYL_SURREAL_URL` to use a hosted endpoint, including Surreal Cloud.
+
+| Service      | Port | URL                     |
+| ------------ | ---- | ----------------------- |
+| API + MCP    | 3334 | http://localhost:3334   |
+| Web UI       | 3337 | http://localhost:3337   |
+| SurrealDB    | 8000 | ws://localhost:8000/rpc |
+| Redis/Valkey | 6381 | optional                |
 
 ## License
 
