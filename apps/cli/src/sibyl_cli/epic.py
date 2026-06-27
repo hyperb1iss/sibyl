@@ -330,7 +330,7 @@ def show_epic(
                 )
                 related = related_response.get("entities", [])
 
-                # Only show entities with our ID prefixes (skip Graphiti's internal UUIDs)
+                # Only show entities with our typed ID prefixes (skip untyped bare-UUID nodes)
                 # Also filter out noise: episodes, tasks (already shown), projects, the epic itself
                 valid_prefixes = ("pattern_", "rule_", "document_", "source_", "template_", "tool_")
                 task_ids = {t.get("id") for t in tasks}
@@ -341,7 +341,7 @@ def show_epic(
                     r_id = r.get("id", "")
                     r_type = r.get("type", "")
 
-                    # Skip if no valid prefix (Graphiti internal entities have UUIDs)
+                    # Skip if no valid prefix (untyped archive entities carry bare UUIDs)
                     if not any(r_id.startswith(p) for p in valid_prefixes):
                         continue
 

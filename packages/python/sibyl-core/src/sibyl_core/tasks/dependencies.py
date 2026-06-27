@@ -205,13 +205,8 @@ async def get_task_dependencies(
         blockers: list[str] = []
 
         for record in rows:
-            # Handle list-based FalkorDB results
-            if isinstance(record, (list, tuple)):
-                dep_id = record[0] if len(record) > 0 else None
-                dep_status = record[1] if len(record) > 1 else None
-            else:
-                dep_id = record.get("dep_id")
-                dep_status = record.get("dep_status")
+            dep_id = record.get("dep_id")
+            dep_status = record.get("dep_status")
 
             if dep_id:
                 dependencies.append(dep_id)
@@ -285,13 +280,8 @@ async def get_blocking_tasks(
         incomplete: list[str] = []
 
         for record in rows:
-            # Handle list-based FalkorDB results
-            if isinstance(record, (list, tuple)):
-                dep_id = record[0] if len(record) > 0 else None
-                dep_status = record[1] if len(record) > 1 else None
-            else:
-                dep_id = record.get("dep_id")
-                dep_status = record.get("dep_status")
+            dep_id = record.get("dep_id")
+            dep_status = record.get("dep_status")
 
             if dep_id:
                 blocked_tasks.append(dep_id)

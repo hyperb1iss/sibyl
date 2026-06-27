@@ -222,12 +222,10 @@ def timeout(
 
 
 # Timeout defaults for different operations
-# NOTE: Compatibility add_episode can take 60-90s under load.
 TIMEOUTS = {
     "graph_connect": 15.0,
     "graph_query": 60.0,  # Increased for complex queries under load
     "search": 30.0,  # Increased for fulltext search under load
     "embedding": 30.0,  # Increased for batch embeddings
     "ingestion_file": 120.0,  # Increased for large file processing
-    "add_episode": 180.0,  # 3 min for full add_episode cycle (LLM + embedding + edges)
 }
