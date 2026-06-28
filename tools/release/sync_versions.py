@@ -95,14 +95,48 @@ def _read_version() -> str:
     return version
 
 
-def _apply(text: str, subs: list[_Sub]) -> str:
+def _apply(text: str, subs: list[_Sub]) -> tuple[str, list[int]]:
+    counts: list[int] = []
     for pattern, repl in subs:
-        text = re.sub(pattern, repl, text)
-    return text
+        text, n = re.subn(pattern, repl, text)
+        counts.append(n)
+    return text, counts
 
 
 def emit(message: str, stream: TextIO = sys.stdout) -> None:
     stream.write(f"{message}\n")
+
+
+def _emit_list(label: str, items: list[str]) -> None:
+    emit(label)
+    for rel_path in items:
+        emit(f"  - {rel_path}")
+
+
+_ANCHORS_LOST = "✗ Version anchors matched nothing (target reformatted?):"
+
+
+def _report_check(version: str, drifted: list[str], unmatched: list[str]) -> int:
+    if not (drifted or unmatched):
+        emit(f"✓ All deployment pins match VERSION ({version}).")
+        return 0
+    if drifted:
+        _emit_list(f"✗ Version pins out of sync with VERSION ({version}):", drifted)
+    if unmatched:
+        _emit_list(_ANCHORS_LOST, unmatched)
+    emit("\nRun: moon run sync-versions")
+    return 1
+
+
+def _report_write(version: str, written: list[str], unmatched: list[str]) -> int:
+    if written:
+        _emit_list(f"Stamped VERSION ({version}) into {len(written)} file(s):", written)
+    if unmatched:
+        _emit_list(_ANCHORS_LOST, unmatched)
+        return 1
+    if not written:
+        emit(f"✓ All deployment pins already match VERSION ({version}).")
+    return 0
 
 
 def main() -> int:
@@ -119,11 +153,17 @@ def main() -> int:
 
     drifted: list[str] = []
     written: list[str] = []
+    unmatched: list[str] = []
 
     for rel_path, subs in targets.items():
         path = REPO_ROOT / rel_path
         original = path.read_text(encoding="utf-8")
-        updated = _apply(original, subs)
+        updated, counts = _apply(original, subs)
+        # A pattern that matched nothing means its anchor is gone (the target
+        # was reformatted), so a stale pin would slip past the updated ==
+        # original check below. Track it as a hard failure in both modes.
+        if 0 in counts:
+            unmatched.append(rel_path)
         if updated == original:
             continue
         if args.check:
@@ -133,22 +173,8 @@ def main() -> int:
             written.append(rel_path)
 
     if args.check:
-        if drifted:
-            emit(f"✗ Version pins out of sync with VERSION ({version}):")
-            for rel_path in drifted:
-                emit(f"  - {rel_path}")
-            emit("\nRun: moon run sync-versions")
-            return 1
-        emit(f"✓ All deployment pins match VERSION ({version}).")
-        return 0
-
-    if written:
-        emit(f"Stamped VERSION ({version}) into {len(written)} file(s):")
-        for rel_path in written:
-            emit(f"  - {rel_path}")
-    else:
-        emit(f"✓ All deployment pins already match VERSION ({version}).")
-    return 0
+        return _report_check(version, drifted, unmatched)
+    return _report_write(version, written, unmatched)
 
 
 if __name__ == "__main__":
