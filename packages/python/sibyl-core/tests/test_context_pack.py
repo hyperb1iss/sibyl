@@ -1464,6 +1464,138 @@ def test_markdown_token_budget_trims_items() -> None:
     assert "Trimmed to ~200 tokens" in trimmed
 
 
+def test_markdown_renderer_prioritizes_relevant_recent_memory() -> None:
+    from sibyl_core.models.context import ContextPack, ContextSection
+
+    gotcha = ContextItem(
+        id="error-1",
+        type="error_pattern",
+        name="Generic deploy gotcha",
+        content="This is less specific context.",
+        score=0.9,
+        facet=ContextFacet.GOTCHAS,
+        reason="error_pattern can prevent repeated mistakes",
+        metadata={"source_id": "error-1"},
+    )
+    recent = ContextItem(
+        id="raw_memory:ha-runbook",
+        type="raw_memory",
+        name="HA deploy runbook",
+        content="Use the GitHub sync path, then sudo git pull on the box.",
+        score=0.7,
+        facet=ContextFacet.RECENT_MEMORY,
+        reason="raw memory matched the goal",
+        metadata={"source_id": "cli:manual"},
+    )
+    pack = ContextPack(
+        goal="deploy HA",
+        intent=ContextIntent.DEBUG,
+        query="deploy HA",
+        domain=None,
+        project=None,
+        sections=[
+            ContextSection(facet=ContextFacet.GOTCHAS, title="Gotchas", items=[gotcha]),
+            ContextSection(facet=ContextFacet.RECENT_MEMORY, title="Recent Memory", items=[recent]),
+        ],
+        total_items=2,
+        layer=ContextLayer.RECALL,
+    )
+
+    markdown = context_pack_to_markdown(pack, max_items=1)
+
+    assert "HA deploy runbook" in markdown
+    assert "Generic deploy gotcha" not in markdown
+
+
+@pytest.mark.parametrize("intent", [ContextIntent.BUILD, ContextIntent.GENERAL])
+def test_markdown_renderer_anchors_active_work_for_work_intents(
+    intent: ContextIntent,
+) -> None:
+    from sibyl_core.models.context import ContextPack, ContextSection
+
+    active = ContextItem(
+        id="task-1",
+        type="task",
+        name="Ship context work",
+        content="Current task should stay visible in work-oriented context.",
+        score=0.0,
+        facet=ContextFacet.ACTIVE_WORK,
+        reason="active task lookup",
+        metadata={"active_lookup": True, "status": "doing"},
+    )
+    decision = ContextItem(
+        id="decision-1",
+        type="decision",
+        name="High-scoring decision",
+        content="Relevant, but not the current task spine.",
+        score=1.4,
+        facet=ContextFacet.DECISIONS,
+        reason="decision matched the goal",
+        metadata={"source_id": "decision-1"},
+    )
+    pack = ContextPack(
+        goal="ship context work",
+        intent=intent,
+        query="ship context work",
+        domain=None,
+        project=None,
+        sections=[
+            ContextSection(facet=ContextFacet.DECISIONS, title="Decisions", items=[decision]),
+            ContextSection(facet=ContextFacet.ACTIVE_WORK, title="Active Work", items=[active]),
+        ],
+        total_items=2,
+        layer=ContextLayer.WAKE,
+    )
+
+    markdown = context_pack_to_markdown(pack, max_items=1)
+
+    assert "Ship context work" in markdown
+    assert "High-scoring decision" not in markdown
+
+
+def test_markdown_renderer_gives_active_lookup_a_floor_for_debug() -> None:
+    from sibyl_core.models.context import ContextPack, ContextSection
+
+    active = ContextItem(
+        id="task-1",
+        type="task",
+        name="Current debugging task",
+        content="Active work should not vanish behind a weak gotcha match.",
+        score=0.0,
+        facet=ContextFacet.ACTIVE_WORK,
+        reason="active task lookup",
+        metadata={"active_lookup": True, "status": "doing"},
+    )
+    gotcha = ContextItem(
+        id="error-1",
+        type="error_pattern",
+        name="Weak gotcha",
+        content="Potentially relevant, but lower signal.",
+        score=0.7,
+        facet=ContextFacet.GOTCHAS,
+        reason="error pattern matched loosely",
+        metadata={"source_id": "error-1"},
+    )
+    pack = ContextPack(
+        goal="debug context output",
+        intent=ContextIntent.DEBUG,
+        query="debug context output",
+        domain=None,
+        project=None,
+        sections=[
+            ContextSection(facet=ContextFacet.GOTCHAS, title="Gotchas", items=[gotcha]),
+            ContextSection(facet=ContextFacet.ACTIVE_WORK, title="Active Work", items=[active]),
+        ],
+        total_items=2,
+        layer=ContextLayer.RECALL,
+    )
+
+    markdown = context_pack_to_markdown(pack, max_items=1)
+
+    assert "Current debugging task" in markdown
+    assert "Weak gotcha" not in markdown
+
+
 def test_markdown_token_budget_always_renders_first_item() -> None:
     pack = _budget_pack(3)
 

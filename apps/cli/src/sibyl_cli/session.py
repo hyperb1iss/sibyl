@@ -28,6 +28,7 @@ from sibyl_cli.config_store import (
 )
 from sibyl_core.session_bundle import (
     derive_query,
+    memory_dedupe_keys,
     summarize_memory,
     summarize_raw_memory,
     summarize_task,
@@ -50,8 +51,10 @@ def _append_unique_memory(
 ) -> None:
     if len(memories) >= limit:
         return
-    memory_id = memory.get("id")
-    if memory_id and any(existing.get("id") == memory_id for existing in memories):
+    candidate_keys = memory_dedupe_keys(memory)
+    if candidate_keys and any(
+        candidate_keys & memory_dedupe_keys(existing) for existing in memories
+    ):
         return
     memories.append(memory)
 

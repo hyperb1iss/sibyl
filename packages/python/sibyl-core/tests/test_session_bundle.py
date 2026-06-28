@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sibyl_core.session_bundle import summarize_memory, summarize_raw_memory
+from sibyl_core.session_bundle import memory_dedupe_keys, summarize_memory, summarize_raw_memory
 
 
 def test_summarize_memory_preserves_scope_metadata() -> None:
@@ -53,3 +53,18 @@ def test_summarize_raw_memory_uses_raw_memory_identity_and_source() -> None:
         "memory_scope": "private",
         "scope_key": None,
     }
+
+
+def test_memory_dedupe_keys_match_duplicate_summaries_with_different_ids() -> None:
+    first = {
+        "id": "raw_memory:one",
+        "name": "HA deploy runbook",
+        "preview": "Deploy via GitHub, then pull on the box.",
+    }
+    second = {
+        "id": "raw_memory:two",
+        "name": "HA deploy runbook",
+        "preview": "Deploy via GitHub, then pull on the box.",
+    }
+
+    assert memory_dedupe_keys(first) & memory_dedupe_keys(second)

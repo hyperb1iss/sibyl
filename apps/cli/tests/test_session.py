@@ -219,6 +219,67 @@ def test_session_bundle_json_blends_raw_memory(
 
 
 @patch("sibyl_cli.session.get_effective_server_url", return_value="http://localhost:3334")
+@patch("sibyl_cli.session.get_effective_project", return_value="project_123")
+@patch(
+    "sibyl_cli.session.get_current_context", return_value=("project_123", "/Users/bliss/dev/sibyl")
+)
+@patch("sibyl_cli.session.get_active_context")
+@patch("sibyl_cli.session.get_client")
+def test_session_bundle_dedupes_same_memory_with_different_ids(
+    mock_get_client: MagicMock,
+    mock_get_active_context: MagicMock,
+    mock_get_current_context: MagicMock,
+    mock_get_effective_project: MagicMock,
+    mock_get_effective_server_url: MagicMock,
+) -> None:
+    context = MagicMock()
+    context.name = "local"
+    context.org_slug = "hyper"
+    mock_get_active_context.return_value = context
+
+    mock_client = MagicMock()
+    mock_client.get_entity = AsyncMock(return_value={"id": "project_123", "name": "Sibyl"})
+    mock_client.explore = AsyncMock(return_value={"entities": []})
+    mock_client.search = AsyncMock(return_value={"results": []})
+    mock_client.recall_raw_memory = AsyncMock(
+        side_effect=[
+            {
+                "memories": [
+                    {
+                        "id": "raw_private",
+                        "title": "HA deploy runbook",
+                        "raw_content": "Deploy via GitHub, then pull on the box.",
+                        "source_id": "cli:manual",
+                        "memory_scope": "private",
+                        "scope_key": None,
+                    }
+                ]
+            },
+            {
+                "memories": [
+                    {
+                        "id": "raw_project",
+                        "title": "HA deploy runbook",
+                        "raw_content": "Deploy via GitHub, then pull on the box.",
+                        "source_id": "api:manual",
+                        "memory_scope": "project",
+                        "scope_key": "project_123",
+                    }
+                ]
+            },
+        ]
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["session", "bundle", "deploy HA", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert [memory["id"] for memory in payload["relevant_entities"]] == ["raw_memory:raw_private"]
+
+
+@patch("sibyl_cli.session.get_effective_server_url", return_value="http://localhost:3334")
 @patch("sibyl_cli.session.get_effective_project", return_value=None)
 @patch("sibyl_cli.session.get_current_context", return_value=(None, None))
 @patch("sibyl_cli.session.get_active_context", return_value=None)

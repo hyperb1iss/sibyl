@@ -716,6 +716,50 @@ def _quality_metadata_to_markdown(
 
 
 _MARKDOWN_CHARS_PER_TOKEN = 4
+_ACTIVE_WORK_ANCHOR_INTENTS = frozenset({ContextIntent.BUILD, ContextIntent.GENERAL})
+
+
+def _has_active_lookup(section: ContextSection) -> bool:
+    return section.facet is ContextFacet.ACTIVE_WORK and any(
+        item.metadata.get("active_lookup") for item in section.items
+    )
+
+
+def _section_render_score(section: ContextSection) -> float:
+    score = max((item.score for item in section.items), default=0.0)
+    if section.facet is ContextFacet.RECENT_MEMORY:
+        score += 0.25
+    elif _has_active_lookup(section):
+        score = max(score, 0.75)
+    return score
+
+
+def _section_render_key(
+    section: ContextSection,
+    *,
+    index: int,
+    intent: ContextIntent,
+) -> tuple[int, float, int]:
+    if intent in _ACTIVE_WORK_ANCHOR_INTENTS and _has_active_lookup(section):
+        return (0, 0.0, index)
+    return (1, -_section_render_score(section), index)
+
+
+def _sections_for_markdown(
+    sections: Sequence[ContextSection],
+    *,
+    intent: ContextIntent,
+) -> list[ContextSection]:
+    return [
+        section
+        for _key, section in sorted(
+            (
+                (_section_render_key(section, index=index, intent=intent), section)
+                for index, section in enumerate(sections)
+            ),
+            key=lambda item: item[0],
+        )
+    ]
 
 
 def _item_markdown_lines(
@@ -795,7 +839,7 @@ def context_pack_to_markdown(
     remaining = max_items
     emitted_items = 0
     trimmed = False
-    for section in pack.sections:
+    for section in _sections_for_markdown(pack.sections, intent=pack.intent):
         if remaining <= 0 or trimmed:
             break
         section_lines = ["", f"## {section.title}"]

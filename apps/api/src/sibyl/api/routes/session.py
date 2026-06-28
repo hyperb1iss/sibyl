@@ -21,6 +21,7 @@ from sibyl_core.auth import AuthOrganization, OrganizationRole
 from sibyl_core.services.surreal_content import recall_raw_memory
 from sibyl_core.session_bundle import (
     derive_query,
+    memory_dedupe_keys,
     remember_next,
     summarize_memory,
     summarize_raw_memory,
@@ -71,8 +72,10 @@ def _append_unique_memory(
 ) -> None:
     if len(memories) >= limit:
         return
-    memory_id = memory.get("id")
-    if memory_id and any(existing.get("id") == memory_id for existing in memories):
+    candidate_keys = memory_dedupe_keys(memory)
+    if candidate_keys and any(
+        candidate_keys & memory_dedupe_keys(existing) for existing in memories
+    ):
         return
     memories.append(memory)
 

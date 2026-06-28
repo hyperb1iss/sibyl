@@ -22,6 +22,23 @@ def format_preview(content: str, max_chars: int = SESSION_PREVIEW_CHARS) -> str:
     return preview[:cutoff].rstrip() + "…"
 
 
+def _normalized_memory_text(value: Any) -> str:
+    return " ".join(str(value or "").casefold().split())
+
+
+def memory_dedupe_keys(memory: Mapping[str, Any]) -> set[str]:
+    keys: set[str] = set()
+    memory_id = _normalized_memory_text(memory.get("id"))
+    if memory_id:
+        keys.add(f"id:{memory_id}")
+
+    name = _normalized_memory_text(memory.get("name"))
+    preview = _normalized_memory_text(memory.get("preview"))
+    if name and preview:
+        keys.add(f"summary:{name}:{preview[:120]}")
+    return keys
+
+
 def summarize_task(task: Mapping[str, Any]) -> dict[str, Any]:
     metadata = task.get("metadata", {})
     if not isinstance(metadata, Mapping):
