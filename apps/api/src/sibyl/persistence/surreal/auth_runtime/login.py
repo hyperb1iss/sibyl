@@ -117,13 +117,13 @@ async def _ensure_oidc_organization_membership_record(
     # Require an existing membership and keep the existing role assignment.
     membership = await repo.select_one(
         """
-            SELECT om.*
-            FROM organization_members om
-            WHERE om.user_id = $user_id
-              AND om.organization_id IN (
+            SELECT *
+            FROM organization_members
+            WHERE user_id = $user_id
+              AND organization_id IN (
                   SELECT VALUE uuid FROM organizations WHERE is_personal = false
               )
-            ORDER BY om.created_at ASC
+            ORDER BY created_at ASC
             LIMIT 1;
         """,
         user_id=str(user_id),

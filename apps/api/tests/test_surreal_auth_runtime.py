@@ -15,7 +15,11 @@ from sibyl.auth.primitives import DeviceTokenError
 from sibyl.auth.session_cache import access_session_cache
 from sibyl.persistence import graph_runtime
 from sibyl.persistence.surreal import auth as surreal_auth, auth_runtime as surreal_auth_runtime
-from sibyl.persistence.surreal.auth_runtime import _common as auth_common, users as auth_users
+from sibyl.persistence.surreal.auth_runtime import (
+    _common as auth_common,
+    login as auth_login,
+    users as auth_users,
+)
 from sibyl_core.auth import AuthSession, OrganizationRole, ProjectRole
 
 
@@ -2044,6 +2048,65 @@ async def test_list_user_org_records_batches_organization_reads() -> None:
     assert "FROM organizations" in client.calls[0][0]
     assert "FROM organization_members" in client.calls[0][0]
     assert client.calls[0][1] == {"user_id": str(user_id)}
+
+
+@pytest.mark.asyncio
+async def test_oidc_membership_lookup_uses_surrealql_without_table_alias() -> None:
+    user_id = uuid4()
+    organization_id = uuid4()
+    client = _SequenceAuthClient(
+        [
+            [
+                {
+                    "uuid": str(uuid4()),
+                    "user_id": str(user_id),
+                    "organization_id": str(organization_id),
+                    "role": "member",
+                }
+            ],
+            [
+                {
+                    "uuid": str(organization_id),
+                    "name": "Team Org",
+                    "slug": "team-org",
+                    "is_personal": False,
+                }
+            ],
+        ]
+    )
+
+    organization = await auth_login._ensure_oidc_organization_membership_record(
+        client,
+        user_id=user_id,
+        user_name="Bliss",
+    )
+
+    assert organization["uuid"] == str(organization_id)
+    query, params = client.calls[0]
+    assert "FROM organization_members" in query
+    assert "FROM organization_members om" not in query
+    assert "om." not in query
+    assert params == {"user_id": str(user_id)}
+
+
+@pytest.mark.asyncio
+async def test_oidc_membership_lookup_requires_existing_non_personal_membership() -> None:
+    user_id = uuid4()
+    client = _SequenceAuthClient([[]])
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_login._ensure_oidc_organization_membership_record(
+            client,
+            user_id=user_id,
+            user_name="Bliss",
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail["code"] == "oidc_membership_required"
+    assert len(client.calls) == 1
+    query, params = client.calls[0]
+    assert "is_personal = false" in query
+    assert params == {"user_id": str(user_id)}
 
 
 @pytest.mark.asyncio
