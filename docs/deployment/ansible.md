@@ -37,7 +37,7 @@ compiles on the host.
 | Variable                | Default                 | Purpose                            |
 | ----------------------- | ----------------------- | ---------------------------------- |
 | `sibyl_domain`          | `sibyl.hyperbliss.tech` | Hostname Caddy serves              |
-| `sibyl_version`         | `1.0.1`                 | ghcr.io image tag                  |
+| `sibyl_version`         | `1.0.2`                 | ghcr.io image tag                  |
 | `sibyl_dir`             | `/opt/sibyl`            | Deployment directory               |
 | `sibyl_proxy_interface` | `tailscale0`            | Interface HTTP/HTTPS is exposed on |
 | `sibyl_mcp_auth_mode`   | `auto`                  | MCP bearer-token enforcement       |

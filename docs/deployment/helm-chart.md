@@ -9,8 +9,8 @@ apiVersion: v2
 name: sibyl
 description: Knowledge graph and task workflow for durable development memory
 type: application
-version: 1.0.1
-appVersion: "1.0.1"
+version: 1.0.2
+appVersion: "1.0.2"
 ```
 
 Release builds update `version` and `appVersion` from the repository `VERSION` file.
@@ -608,7 +608,7 @@ backend:
   replicaCount: 3
   image:
     repository: ghcr.io/hyperb1iss/sibyl-api
-    tag: "1.0.1"
+    tag: "1.0.2"
     pullPolicy: Always
   existingSecret: sibyl-secrets
   surreal:
