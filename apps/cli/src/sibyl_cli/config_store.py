@@ -177,37 +177,115 @@ def reset_config() -> None:
 # --- Path mapping for project context ---
 
 
-def get_path_mappings() -> dict[str, str]:
-    """Get all path -> project_id mappings."""
+def _path_entry_fields(value: Any) -> tuple[str | None, str | None]:
+    """Unpack a ``[paths]`` value into (project_id, context_name).
+
+    A path link is stored either as a bare string (legacy: project only) or as a
+    table ``{project, context}``. Either field may be absent, e.g. a directory tree
+    pinned to a context with no project yet.
+    """
+    if isinstance(value, str):
+        return (value or None, None)
+    if isinstance(value, dict):
+        project = value.get("project") or None
+        context = value.get("context") or None
+        return (project, context)
+    return (None, None)
+
+
+def _make_path_entry(project_id: str | None, context: str | None) -> str | dict[str, str]:
+    """Build a ``[paths]`` value, preferring the legacy bare-string form.
+
+    TOML cannot hold null, so absent fields are simply omitted. A project-only link
+    stays a bare string to avoid churning existing configs; anything carrying a
+    context is promoted to a table.
+    """
+    if context:
+        entry: dict[str, str] = {}
+        if project_id:
+            entry["project"] = project_id
+        entry["context"] = context
+        return entry
+    return project_id or ""
+
+
+def _set_path_entry(path: str, project_id: str | None, context: str | None) -> None:
+    normalized = str(Path(path).expanduser().resolve())
     config = load_config()
-    return config.get("paths", {})
+    paths = config.setdefault("paths", {})
+    if not project_id and not context:
+        paths.pop(normalized, None)
+    else:
+        paths[normalized] = _make_path_entry(project_id, context)
+    save_config(config)
 
 
-def set_path_mapping(path: str, project_id: str) -> None:
-    """Set a path -> project_id mapping.
+def get_path_mappings() -> dict[str, str]:
+    """Get all path -> project_id mappings (context-only links omitted)."""
+    config = load_config()
+    result: dict[str, str] = {}
+    for mapped_path, value in config.get("paths", {}).items():
+        project, _ = _path_entry_fields(value)
+        if project:
+            result[mapped_path] = project
+    return result
+
+
+def get_path_context_mappings() -> dict[str, str]:
+    """Get all path -> context_name mappings (project-only links omitted)."""
+    config = load_config()
+    result: dict[str, str] = {}
+    for mapped_path, value in config.get("paths", {}).items():
+        _, context = _path_entry_fields(value)
+        if context:
+            result[mapped_path] = context
+    return result
+
+
+def get_path_link(path: str) -> tuple[str | None, str | None]:
+    """Get (project_id, context_name) pinned for an exact normalized path."""
+    normalized = str(Path(path).expanduser().resolve())
+    config = load_config()
+    return _path_entry_fields(config.get("paths", {}).get(normalized))
+
+
+def set_path_mapping(path: str, project_id: str, *, context: str | None | _Unset = _UNSET) -> None:
+    """Pin a directory to a project (and optionally the context it lives on).
 
     Args:
         path: Directory path (will be normalized, ~ expanded)
         project_id: Project ID to associate with this path
+        context: Context name the project lives on. ``_UNSET`` keeps any existing
+            context pin; ``None`` clears it; a name pins project + context together.
     """
-    # Normalize path: expand ~ and resolve to absolute
-    normalized = str(Path(path).expanduser().resolve())
+    _, existing_context = get_path_link(path)
+    new_context = existing_context if isinstance(context, _Unset) else context
+    _set_path_entry(path, project_id, new_context)
 
-    config = load_config()
-    if "paths" not in config:
-        config["paths"] = {}
-    config["paths"][normalized] = project_id
-    save_config(config)
+
+def set_path_context(path: str, context: str) -> None:
+    """Pin a directory tree to a context, preserving any existing project link."""
+    existing_project, _ = get_path_link(path)
+    _set_path_entry(path, existing_project, context)
+
+
+def remove_path_context(path: str) -> bool:
+    """Clear the context pin for a path, keeping any project link.
+
+    Returns True if a context pin was removed, False if there was none.
+    """
+    existing_project, existing_context = get_path_link(path)
+    if not existing_context:
+        return False
+    _set_path_entry(path, existing_project, None)
+    return True
 
 
 def remove_path_mapping(path: str) -> bool:
-    """Remove a path mapping.
-
-    Args:
-        path: Directory path to unlink
+    """Remove a path link entirely (both project and context pins).
 
     Returns:
-        True if mapping was removed, False if not found
+        True if a link was removed, False if not found
     """
     normalized = str(Path(path).expanduser().resolve())
 
@@ -310,6 +388,35 @@ def resolve_project_from_cwd() -> str | None:
     if main_repo:
         repo_match, repo_length = _find_project_in_mappings(main_repo, mappings)
         # Use main repo match if it's better (or only match)
+        if repo_match and repo_length > best_length:
+            best_match = repo_match
+
+    return best_match
+
+
+def resolve_context_from_cwd() -> str | None:
+    """Resolve the pinned context name from the current working directory.
+
+    Walks up from cwd looking for the longest matching path prefix in the context
+    pins, and (when inside a git worktree) the main repo path too. This is what lets
+    a directory route to its own Sibyl server without a manual ``context use``.
+
+    Returns:
+        Context name if a pin covers the cwd, None otherwise.
+    """
+    import os
+
+    cwd = Path(os.getcwd()).resolve()
+    mappings = get_path_context_mappings()
+
+    if not mappings:
+        return None
+
+    best_match, best_length = _find_project_in_mappings(cwd, mappings)
+
+    main_repo = _resolve_worktree_main_repo(cwd)
+    if main_repo:
+        repo_match, repo_length = _find_project_in_mappings(main_repo, mappings)
         if repo_match and repo_length > best_length:
             best_match = repo_match
 
@@ -602,18 +709,49 @@ def delete_context(name: str) -> bool:
     return True
 
 
-def get_effective_server_url() -> str:
-    """Get the effective server URL, considering active context.
+def resolve_context_name() -> str | None:
+    """Resolve the effective context name across all selection inputs.
 
     Priority:
-    1. Active context's server_url
+    1. ``--context`` flag / ``SIBYL_CONTEXT`` env (explicit, per-invocation)
+    2. Directory pin (``resolve_context_from_cwd``)
+    3. Active context from config
+
+    Returns None in legacy mode (no context configured or selected).
+    """
+    from sibyl_cli.state import get_context_override
+
+    override = get_context_override()
+    if override:
+        return override
+
+    pinned = resolve_context_from_cwd()
+    if pinned:
+        return pinned
+
+    return get_active_context_name()
+
+
+def resolve_effective_context() -> Context | None:
+    """Resolve the effective :class:`Context` (see :func:`resolve_context_name`)."""
+    name = resolve_context_name()
+    if not name:
+        return None
+    return get_context(name)
+
+
+def get_effective_server_url() -> str:
+    """Get the effective server URL.
+
+    Priority:
+    1. Effective context's server_url (override > directory pin > active)
     2. Legacy server.url config
     3. Default localhost
 
     Returns:
         Server URL to use.
     """
-    context = get_active_context()
+    context = resolve_effective_context()
     if context:
         return context.server_url
     return get_server_url()
@@ -624,7 +762,7 @@ def get_effective_project() -> str | None:
 
     Priority:
     1. Path mapping for cwd
-    2. Active context's default_project
+    2. Effective context's default_project
     3. Legacy defaults.project
 
     Returns:
@@ -635,8 +773,8 @@ def get_effective_project() -> str | None:
     if project:
         return project
 
-    # Then check active context
-    context = get_active_context()
+    # Then check the effective context
+    context = resolve_effective_context()
     if context and context.default_project:
         return context.default_project
 

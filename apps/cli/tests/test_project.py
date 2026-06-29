@@ -24,7 +24,9 @@ def test_project_relink_accepts_slug_reference() -> None:
 
     assert result.exit_code == 0
     assert "Relinked" in result.stdout
-    mock_set_path_mapping.assert_called_once_with("/tmp/hypercolor", "project_123")
+    mock_set_path_mapping.assert_called_once_with(
+        "/tmp/hypercolor", "project_123", context=mock_client.context_name
+    )
 
 
 def test_project_relink_rejects_inaccessible_direct_id() -> None:
@@ -61,7 +63,9 @@ def test_project_relink_auto_matches_current_directory() -> None:
 
     assert result.exit_code == 0
     assert "Relinked" in result.stdout
-    mock_set_path_mapping.assert_called_once_with("/tmp/hypercolor", "project_123")
+    mock_set_path_mapping.assert_called_once_with(
+        "/tmp/hypercolor", "project_123", context=mock_client.context_name
+    )
 
 
 def test_project_relink_auto_matches_repository_url_basename() -> None:
@@ -86,7 +90,9 @@ def test_project_relink_auto_matches_repository_url_basename() -> None:
 
     assert result.exit_code == 0
     assert "Relinked" in result.stdout
-    mock_set_path_mapping.assert_called_once_with("/tmp/hypercolor", "project_123")
+    mock_set_path_mapping.assert_called_once_with(
+        "/tmp/hypercolor", "project_123", context=mock_client.context_name
+    )
 
 
 def test_project_relink_requires_explicit_id_for_ambiguous_matches() -> None:

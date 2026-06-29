@@ -2173,28 +2173,29 @@ _clients: dict[str | None, SibylClient] = {}
 def get_client(context_name: str | None = None) -> SibylClient:
     """Get a client instance for the given context.
 
-    Clients are cached by context name. Passing None uses the global override,
-    then falls back to active context.
+    Clients are cached by context name. Passing None resolves the effective
+    context from the override, the directory pin, then the active context.
 
     Priority for context resolution:
     1. Explicit context_name parameter
     2. Global --context flag override
     3. SIBYL_CONTEXT environment variable
-    4. Active context from config
+    4. Directory pin for the current working directory
+    5. Active context from config
 
     Args:
-        context_name: Optional context name. None = use override or active context.
+        context_name: Optional context name. None = resolve from environment.
 
     Returns:
         SibylClient configured for the specified context.
     """
     global _clients
 
-    # Check for global override if no explicit context provided
+    # Resolve the effective context when one isn't explicitly provided.
     if context_name is None:
-        from sibyl_cli.state import get_context_override
+        from sibyl_cli import config_store
 
-        context_name = get_context_override()
+        context_name = config_store.resolve_context_name()
 
     cache_key = context_name
 

@@ -1225,7 +1225,7 @@ def main_callback(
         typer.Option(
             "--context",
             "-C",
-            help="Override project context for this command (project ID or name)",
+            help="Use this named context (server/org bundle) for this command",
             envvar="SIBYL_CONTEXT",
         ),
     ] = None,

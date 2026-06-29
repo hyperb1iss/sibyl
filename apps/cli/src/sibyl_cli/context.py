@@ -36,8 +36,12 @@ from sibyl_cli.config_store import (
     get_current_context,
     get_effective_server_url,
     list_contexts,
+    remove_path_context,
+    resolve_context_from_cwd,
+    resolve_effective_context,
     resolve_project_from_cwd,
     set_active_context,
+    set_path_context,
     update_context,
 )
 from sibyl_cli.context_quick import quick_context_payload, render_quick_context
@@ -79,8 +83,9 @@ def callback(
         render_quick_context(quick_context_payload(), json_out=json_out)
         return
 
-    # No subcommand - show active context or path-detected project
-    active = get_active_context()
+    # No subcommand - show the effective context (override > directory pin > active)
+    active = resolve_effective_context()
+    pinned_context = resolve_context_from_cwd()
     linked_project = resolve_project_from_cwd()
 
     # If no named context and no path mapping, show helpful message
@@ -96,6 +101,8 @@ def callback(
         return
 
     assert active is not None
+
+    pinned_by_dir = bool(pinned_context) and pinned_context == active.name
 
     # Resolve effective project (linked > default)
     linked_project = resolve_project_from_cwd()
@@ -126,6 +133,7 @@ def callback(
     if json_out:
         result = _context_to_dict(active)
         result["active"] = True
+        result["pinned_by_directory"] = pinned_by_dir
         if linked_project:
             result["linked_project"] = linked_project
         if project_data:
@@ -136,7 +144,8 @@ def callback(
     # Table output
     console.print()
     console.print(f"  [{ELECTRIC_PURPLE}]Context:[/{ELECTRIC_PURPLE}] [bold]{active.name}[/bold]")
-    console.print(f"  [{SUCCESS_GREEN}](active)[/{SUCCESS_GREEN}]")
+    source_label = "pinned by directory" if pinned_by_dir else "active"
+    console.print(f"  [{SUCCESS_GREEN}]({source_label})[/{SUCCESS_GREEN}]")
     console.print()
     console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}]   {active.server_url}")
     console.print(f"  [{NEON_CYAN}]Org:[/{NEON_CYAN}]      {active.org_slug or '[dim]auto[/dim]'}")
@@ -788,6 +797,55 @@ def delete_cmd(
     else:
         error(f"Failed to delete context '{name}'")
         raise typer.Exit(1)
+
+
+@app.command("link")
+def link_cmd(
+    name: Annotated[str, typer.Argument(help="Context name to pin to this directory")],
+    path: Annotated[
+        str | None, typer.Option("--path", "-p", help="Directory path (defaults to cwd)")
+    ] = None,
+) -> None:
+    """Pin a directory tree to a context so commands here route to its server.
+
+    Unlike `project link`, this binds only the context (server/org), not a project,
+    so new repositories under this tree route to the right server before they are
+    linked to a specific project.
+    """
+    import os
+
+    ctx = get_context(name)
+    if not ctx:
+        error(f"Context '{name}' not found")
+        contexts = list_contexts()
+        if contexts:
+            info(f"Available: {', '.join(c.name for c in contexts)}")
+        raise typer.Exit(1)
+
+    target_path = path or os.getcwd()
+    set_path_context(target_path, name)
+    clear_client_cache()  # New connections under this path use the pinned context
+
+    success(f"Pinned [{NEON_CYAN}]{target_path}[/{NEON_CYAN}] to context '{name}'")
+    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}] {ctx.server_url}")
+    info("Commands under this directory now route to this server")
+
+
+@app.command("unlink")
+def unlink_cmd(
+    path: Annotated[
+        str | None, typer.Option("--path", "-p", help="Directory path (defaults to cwd)")
+    ] = None,
+) -> None:
+    """Remove the context pin from a directory (keeps any project link)."""
+    import os
+
+    target_path = path or os.getcwd()
+    if remove_path_context(target_path):
+        clear_client_cache()
+        success(f"Unpinned context from [{NEON_CYAN}]{target_path}[/{NEON_CYAN}]")
+    else:
+        info(f"No context pin found for {target_path}")
 
 
 @app.command("clear")

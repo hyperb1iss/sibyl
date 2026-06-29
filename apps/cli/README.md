@@ -155,13 +155,48 @@ candidates should still be saved.
 
 ## Context System
 
-```bash
-# Override for a single command
-sibyl --context myproject task list
-SIBYL_CONTEXT=myproject sibyl task list
+A **context** is a named bundle of `{server_url, org, default_project}` with its own
+stored credentials, so you can keep separate Sibyl instances (e.g. a personal server
+and a local work server) cleanly isolated — memories only ever go to the server of the
+context in effect.
 
-# Priority: --context flag > SIBYL_CONTEXT env > active context > path link
+```bash
+# Define two servers as contexts (auth login creates + activates one in one step)
+sibyl auth login https://sibyl.hyperbliss.tech -c personal
+sibyl auth login http://localhost:3334 -c work
+
+# Switch the global default
+sibyl context use work
+
+# Override for a single command
+sibyl --context work task list
+SIBYL_CONTEXT=work sibyl task list
 ```
+
+### Routing by directory
+
+You don't have to switch contexts by hand. Pin a directory to a context and every
+command run there routes to that context's server automatically:
+
+```bash
+# Pin a whole tree to a context (new repos under it route correctly before linking)
+cd ~/work && sibyl context link work
+
+# Linking a project pins the project AND the context it lives on, together
+cd ~/dev/sibyl && sibyl project link project_sibyl   # records the active context too
+
+sibyl context        # shows the effective context, marked "pinned by directory"
+sibyl project links   # lists every directory pin (project and/or context)
+```
+
+This is what keeps work memory out of your personal instance: a work repo is pinned to
+the work context, so `sibyl remember` there writes only to the work server. The only way
+to reach another instance from a pinned directory is to ask for it explicitly with
+`--context` or `SIBYL_CONTEXT`.
+
+**Resolution priority:** `--context` flag → `SIBYL_CONTEXT` env → directory pin →
+active context → legacy `server.url`. Pins are stored in `~/.sibyl/config.toml` and are
+git-worktree aware (a worktree inherits its main repo's pin).
 
 ## Development
 

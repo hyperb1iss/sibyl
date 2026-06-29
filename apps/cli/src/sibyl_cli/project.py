@@ -29,7 +29,9 @@ from sibyl_cli.common import (
     warn,
 )
 from sibyl_cli.config_store import (
+    get_context,
     get_current_context,
+    get_path_context_mappings,
     get_path_mappings,
     remove_path_mapping,
     set_path_mapping,
@@ -49,6 +51,15 @@ app = typer.Typer(
 )
 
 _handle_client_error = handle_client_error
+
+
+def _print_pinned_context(context_name: str | None) -> None:
+    """Show the context (and server) a directory link now routes to."""
+    if not context_name:
+        return
+    ctx = get_context(context_name)
+    server = f" [dim]{ctx.server_url}[/dim]" if ctx else ""
+    console.print(f"  → context [{NEON_CYAN}]{context_name}[/{NEON_CYAN}]{server}")
 
 
 @app.command("list")
@@ -360,6 +371,7 @@ def link_project(
     @run_async
     async def _link() -> None:
         client = get_client()
+        context_name = client.context_name
 
         # Verify project exists
         try:
@@ -369,13 +381,15 @@ def link_project(
             error(f"Project not found: {project_id}. {PROJECT_RELINK_HINT}.")
             return
 
-        # Set the mapping (project_id is guaranteed non-None after verification above)
+        # Pin the project together with the context it lives on, so this directory
+        # always routes to the right server regardless of the active context.
         assert project_id is not None
-        set_path_mapping(target_path, project_id)
+        set_path_mapping(target_path, project_id, context=context_name)
 
         success(f"Linked [{NEON_CYAN}]{target_path}[/{NEON_CYAN}]")
         console.print(f"  → [{ELECTRIC_PURPLE}]{project_name}[/{ELECTRIC_PURPLE}] ({project_id})")
-        info("Task commands in this directory will now auto-scope to this project")
+        _print_pinned_context(context_name)
+        info("Commands in this directory now route to this project and server")
 
     _link()
 
@@ -396,6 +410,7 @@ def relink_project(
     @run_async
     async def _relink() -> None:
         client = get_client()
+        context_name = client.context_name
         try:
             projects = await list_accessible_projects(client)
             selected_id = None
@@ -429,11 +444,12 @@ def relink_project(
                     info("Run: sibyl project relink --id <project>")
                     return
 
-            set_path_mapping(target_path, selected_id)
+            set_path_mapping(target_path, selected_id, context=context_name)
             success(f"Relinked [{NEON_CYAN}]{target_path}[/{NEON_CYAN}]")
             console.print(
                 f"  → [{ELECTRIC_PURPLE}]{selected_name}[/{ELECTRIC_PURPLE}] ({selected_id})"
             )
+            _print_pinned_context(context_name)
         except (SibylClientError, ValueError) as exc:
             error(str(exc))
             info(PROJECT_RELINK_HINT)
@@ -463,24 +479,30 @@ def unlink_project(
 
 @app.command("links")
 def list_links() -> None:
-    """List all directory-to-project links."""
-    mappings = get_path_mappings()
+    """List all directory links (project and/or context pins)."""
+    project_map = get_path_mappings()
+    context_map = get_path_context_mappings()
 
-    if not mappings:
-        info("No project links configured")
-        info("Use 'sibyl project link' to link a directory to a project")
+    if not project_map and not context_map:
+        info("No directory links configured")
+        info("Use 'sibyl project link' to pin a directory to a project and server")
         return
 
     # Get current context to highlight it
     _current_project, current_path = get_current_context()
 
-    console.print(f"\n[{ELECTRIC_PURPLE}]Project Links:[/{ELECTRIC_PURPLE}]\n")
+    console.print(f"\n[{ELECTRIC_PURPLE}]Directory Links:[/{ELECTRIC_PURPLE}]\n")
 
-    for mapped_path, project_id in sorted(mappings.items()):
+    for mapped_path in sorted(project_map.keys() | context_map.keys()):
         is_current = mapped_path == current_path
         marker = f"[{SUCCESS_GREEN}]* [/{SUCCESS_GREEN}]" if is_current else "  "
         console.print(f"{marker}[{NEON_CYAN}]{mapped_path}[/{NEON_CYAN}]")
-        console.print(f"    → [{CORAL}]{project_id}[/{CORAL}]")
+        if project_id := project_map.get(mapped_path):
+            console.print(f"    → [{CORAL}]{project_id}[/{CORAL}]")
+        if context_name := context_map.get(mapped_path):
+            ctx = get_context(context_name)
+            server = f" [dim]{ctx.server_url}[/dim]" if ctx else ""
+            console.print(f"    → context [{NEON_CYAN}]{context_name}[/{NEON_CYAN}]{server}")
 
     if current_path:
-        console.print("\n[dim]* = current context[/dim]")
+        console.print("\n[dim]* = current directory[/dim]")
