@@ -40,7 +40,7 @@ jobs:
       SIBYL_ANTHROPIC_API_KEY: sk-ant-test-key
       SIBYL_MOCK_LLM: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -249,7 +249,7 @@ jobs:
       SIBYL_ANTHROPIC_API_KEY: sk-ant-test-key
       SIBYL_MOCK_LLM: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -336,7 +336,7 @@ jobs:
       SIBYL_ANTHROPIC_API_KEY: sk-ant-test-key
       SIBYL_MOCK_LLM: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

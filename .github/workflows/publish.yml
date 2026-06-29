@@ -28,7 +28,7 @@ jobs:
       contents: read
     steps:
       - name: "◆ Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag }}
 
@@ -73,7 +73,7 @@ jobs:
       id-token: write # PyPI trusted publishing
     steps:
       - name: "◆ Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag }}
 
@@ -123,7 +123,7 @@ jobs:
       contents: read
     steps:
       - name: "◆ Checkout Sibyl"
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag }}
           persist-credentials: false
@@ -183,7 +183,7 @@ jobs:
           fi
 
       - name: "◆ Checkout Homebrew tap"
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: hyperb1iss/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -229,7 +229,7 @@ jobs:
       contents: read
     steps:
       - name: "◆ Checkout Sibyl"
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag }}
           persist-credentials: false
@@ -324,7 +324,7 @@ jobs:
         platform: [amd64, arm64]
     steps:
       - name: "◆ Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag }}
 

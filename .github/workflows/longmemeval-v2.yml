@@ -49,7 +49,7 @@ jobs:
       DATA_ROOT: .moon/cache/benchmarks/longmemeval-v2
       HF_BASE: https://huggingface.co/datasets/xiaowu0162/longmemeval-v2/resolve/main
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
