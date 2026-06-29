@@ -148,7 +148,7 @@ jobs:
           uv --version
 
       - name: Cache moon outputs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .moon/cache
           key: moon-eval-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
@@ -156,7 +156,7 @@ jobs:
             moon-eval-${{ runner.os }}-
 
       - name: Cache uv
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/uv
           key: uv-eval-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
@@ -315,7 +315,7 @@ jobs:
           cache-version: surreal-ci-v1
 
       - name: Cache moon outputs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .moon/cache
           key: moon-longmemeval-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
@@ -323,7 +323,7 @@ jobs:
             moon-longmemeval-${{ runner.os }}-
 
       - name: Cache uv
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/uv
           key: uv-longmemeval-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
@@ -506,7 +506,7 @@ jobs:
           cache-version: surreal-ci-v1
 
       - name: Cache moon outputs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .moon/cache
           key: moon-longmemeval-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
@@ -514,7 +514,7 @@ jobs:
             moon-longmemeval-${{ runner.os }}-
 
       - name: Cache uv
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/uv
           key: uv-longmemeval-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
