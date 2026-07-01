@@ -18,9 +18,8 @@ implementation threads inside this larger product direction.
 
 Active executable plan:
 
-- v1.0 automatic memory operating system: [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
-- post-v0.10 release remap and v1.0 RC evidence freeze:
-  [`SIBYL_POST_V010_RELEASE_REMAP_SPEC.md`](SIBYL_POST_V010_RELEASE_REMAP_SPEC.md)
+- post-1.0 releases (v1.1 → v1.3): [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md)
+- v1.0 automatic memory operating system (shipped): [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
 
 Shipped execution plans, kept in `docs/_archive/` as release receipts and design contracts:
 

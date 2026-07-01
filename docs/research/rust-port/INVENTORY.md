@@ -12,7 +12,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - Raw SQL query usage files: 0
 - Session-backed storage access files: 0
 - Graphiti import files: 0
-- Retained legacy term files: 92
+- Retained legacy term files: 89
 - Dependency records: 4
 
 ## API Surface
@@ -126,13 +126,9 @@ must carry an owner and reason here.
 | `docs/api/rest-memory.md` | `postgres` | 1 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/api/rest-projects.md` | `postgres`, `redis` | 5 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/api/rest-tasks.md` | `redis` | 1 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
-| `docs/architecture/AUDIT_2026-05-28.md` | `falkor`, `graphiti`, `postgres` | 9 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
-| `docs/architecture/ENTERPRISE_READINESS_PLAN_2026-05-21.md` | `graphiti`, `valkey` | 4 | enterprise readiness | Enterprise docs mention legacy services only as migration context or optional coordination. |
-| `docs/architecture/SIBYL_1_0_RC_PLAN.md` | `graphiti`, `redis` | 28 | v1.0 RC evidence freeze | Active RC plan names legacy terms only as blockers, evidence boundaries, and optional coordination risks. |
-| `docs/architecture/SIBYL_1_0_RC_RELEASE_PACKET.md` | `falkor`, `graphiti`, `postgres`, `redis` | 7 | v1.0 RC evidence freeze | Active RC packet cites legacy terms only in release receipts and pending external checks. |
-| `docs/architecture/SIBYL_1_0_ROADMAP.md` | `graphiti`, `redis` | 34 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
-| `docs/architecture/SIBYL_NORTHSTAR.md` | `falkor`, `graphiti`, `postgres`, `redis` | 43 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
-| `docs/architecture/SIBYL_POST_V010_RELEASE_REMAP_SPEC.md` | `graphiti`, `redis` | 37 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
+| `docs/architecture/SIBYL_1_0_ROADMAP.md` | `graphiti`, `redis` | 33 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
+| `docs/architecture/SIBYL_NORTHSTAR.md` | `falkor`, `graphiti`, `postgres`, `redis` | 46 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
+| `docs/architecture/SIBYL_POST_1_0_ROADMAP.md` | `falkor`, `graphiti`, `postgres`, `redis` | 4 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/retrieval-system.md` | `graphiti` | 1 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/cli/add.md` | `postgres`, `redis` | 3 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/cli/docker.md` | `valkey` | 2 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
@@ -160,17 +156,18 @@ must carry an owner and reason here.
 | `docs/guide/knowledge-graph.md` | `falkor`, `graphiti`, `redis` | 5 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/mcp-configuration.md` | `redis`, `valkey` | 5 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/memory-loop.md` | `redis` | 1 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
-| `docs/guide/migrating-from-falkor.md` | `falkor`, `graphiti`, `postgres` | 18 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
+| `docs/guide/migrating-from-falkor.md` | `falkor`, `graphiti`, `postgres` | 26 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/semantic-search.md` | `redis` | 1 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/setting-up-prompts.md` | `redis`, `valkey` | 3 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
+| `docs/guide/skills.md` | `falkor`, `graphiti` | 2 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/sources.md` | `redis` | 2 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/storage-modes.md` | `falkor`, `postgres`, `redis`, `valkey` | 17 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
-| `docs/guide/surrealdb-migration-release-notes.md` | `falkor`, `graphiti`, `postgres` | 29 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
+| `docs/guide/surrealdb-migration-release-notes.md` | `falkor`, `graphiti`, `postgres` | 35 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/task-management.md` | `redis` | 1 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/why-surreal.md` | `falkor`, `graphiti`, `postgres`, `redis` | 18 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/working-with-agents.md` | `redis` | 6 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/index.md` | `redis` | 2 | v0.8 docs | Top-level docs mention current Surreal default and historical migration context. |
-| `docs/testing/ai-memory-landscape.md` | `graphiti` | 5 | benchmark evidence | Competitive landscape docs name Graphiti only as historical comparison context. |
+| `docs/testing/ai-memory-landscape.md` | `falkor`, `graphiti` | 7 | benchmark evidence | Competitive landscape docs name Graphiti only as historical comparison context. |
 | `docs/testing/benchmark-methodology.md` | `falkor`, `graphiti`, `postgres` | 8 | benchmark evidence | Benchmark comparison flow names historical migration rehearsal mode. |
 | `docs/users/sharing-memory.md` | `postgres` | 2 | enterprise readiness | Enterprise docs mention legacy services only as migration context or optional coordination. |
 | `infra/local/README.md` | `redis`, `valkey` | 12 | local Kubernetes/Tilt dev | Local Tilt and Helm dev keep Redis/Valkey as explicit coordination while Surreal owns data. |
