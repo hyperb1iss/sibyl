@@ -63,7 +63,7 @@ GET /api/entities?entity_type=project
 **Example Request:**
 
 ```bash
-curl -X GET "https://api.example.com/api/entities?entity_type=project" \
+curl -X GET "http://localhost:3334/api/entities?entity_type=project" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -106,7 +106,7 @@ GET /api/entities/{project_id}
 **Example Request:**
 
 ```bash
-curl -X GET "https://api.example.com/api/entities/proj_abc123" \
+curl -X GET "http://localhost:3334/api/entities/proj_abc123" \
   -H "Authorization: Bearer $TOKEN"
 ```
 

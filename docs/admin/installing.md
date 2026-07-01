@@ -1,6 +1,6 @@
 ---
 title: Installing Sibyl
-description: Enterprise Kubernetes installation guide for Sibyl admins
+description: Team and enterprise install guide (Kubernetes, Helm, OIDC). For a personal instance, see Run Sibyl for Yourself.
 ---
 
 # Installing Sibyl
@@ -12,6 +12,11 @@ Sibyl has two supported install shapes:
   explicitly enabled.
 - **Enterprise SSO install:** Kubernetes deployment behind a corporate identity provider, with OIDC
   configured explicitly and local password login disabled only after an OIDC owner can sign in.
+
+::: tip Just want Sibyl for yourself? This guide covers team and enterprise installs on Kubernetes.
+For a personal single-user instance, [Run Sibyl for Yourself](../guide/self-hosting.md) (one command
+with `sibyl up`) or the [single-host Ansible deploy](../deployment/ansible.md) for an always-on VM
+are the simpler paths. :::
 
 SurrealDB is the active data plane in both shapes. Valkey or Redis is only needed for coordination
 when running multiple backend or worker replicas. Enterprise installs add an ingress or Gateway API

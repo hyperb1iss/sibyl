@@ -23,7 +23,10 @@ moon run cli:install-dev
 ## Quick Start
 
 ```bash
-# Authenticate (creates or uses the active context)
+# Running Sibyl locally? Start it; the CLI points at localhost by default.
+sibyl up
+
+# Connecting to a remote or shared server instead? Authenticate first.
 sibyl auth login
 
 # Link the current directory to a project

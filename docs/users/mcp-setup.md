@@ -24,14 +24,15 @@ sibyl auth api-key create --name "project-agent" \
 
 ## Shared HTTP Configuration
 
-Most MCP clients accept the same HTTP shape:
+Most MCP clients accept the same HTTP shape. A local `sibyl up` install lives at
+`http://localhost:3334/mcp`; on a remote or shared server, swap in your own host:
 
 ```json
 {
   "mcpServers": {
     "sibyl": {
       "type": "http",
-      "url": "https://sibyl.example.com/mcp",
+      "url": "http://localhost:3334/mcp",
       "headers": {
         "Authorization": "Bearer sk_live_replace_me"
       }
@@ -52,7 +53,7 @@ Add Sibyl as an HTTP MCP server in Cursor's MCP settings:
   "mcpServers": {
     "sibyl": {
       "type": "http",
-      "url": "https://sibyl.example.com/mcp",
+      "url": "http://localhost:3334/mcp",
       "headers": {
         "Authorization": "Bearer sk_live_replace_me"
       }
@@ -72,7 +73,7 @@ Use Claude Code's MCP configuration with the same HTTP server entry:
   "mcpServers": {
     "sibyl": {
       "type": "http",
-      "url": "https://sibyl.example.com/mcp",
+      "url": "http://localhost:3334/mcp",
       "headers": {
         "Authorization": "Bearer sk_live_replace_me"
       }
@@ -97,7 +98,7 @@ Claude Desktop can use the same HTTP MCP server entry in its MCP server config:
   "mcpServers": {
     "sibyl": {
       "type": "http",
-      "url": "https://sibyl.example.com/mcp",
+      "url": "http://localhost:3334/mcp",
       "headers": {
         "Authorization": "Bearer sk_live_replace_me"
       }
@@ -115,5 +116,5 @@ Sibyl for a known memory. If the request fails:
 
 - Confirm the API key starts with `sk_live_` or `sk_test_`.
 - Confirm the key has the `mcp` scope.
-- Confirm the client can reach `https://sibyl.example.com/mcp`.
+- Confirm the client can reach `http://localhost:3334/mcp`.
 - Check Settings, Security, API Keys to make sure the key was not revoked.

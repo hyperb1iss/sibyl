@@ -430,6 +430,18 @@ sibyl task list  # Uses proj_other
 
 ## Common Workflows
 
+### Solo / Local Only
+
+Most personal installs never need more than one context. `sibyl up` sets up a local context for you
+automatically; to create it by hand, this is the whole setup:
+
+```bash
+sibyl context create local --server http://localhost:3334 --use
+sibyl health
+```
+
+Everything else on this page is for people juggling multiple servers or orgs.
+
 ### Development Setup
 
 ```bash

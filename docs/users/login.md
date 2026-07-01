@@ -1,13 +1,23 @@
 ---
-title: Enterprise Sign-In
-description: Signing in to Sibyl with a corporate OIDC identity provider
+title: Signing In
+description: How Sibyl sign-in works, from a local single-user install to enterprise OIDC
 ---
 
-# Enterprise Sign-In
+# Signing In
 
-This page applies when an operator has enabled enterprise OIDC. The default Sibyl install is
-local-first: the first setup signup creates the owner/admin user, and later users join by invitation
-unless public signups are enabled.
+How you sign in depends on how Sibyl was installed.
+
+## Local Sign-In (Default)
+
+The default Sibyl install is local-first. The first account you create during setup is the
+owner/admin; after that, new users join by invitation unless public signups are explicitly enabled.
+Sign in from the web login screen with your username and password. If you forget it, see
+[Forgot Your Password](#forgot-your-password) below.
+
+That is the whole story for a personal or small-team self-host. The rest of this page covers
+enterprise SSO, which only applies when an operator has enabled OIDC.
+
+## Enterprise SSO
 
 In enterprise SSO mode, Sibyl signs users in through your organization's OpenID Connect provider.
 The production shape is intentionally boring: the identity provider proves who you are, Sibyl reads

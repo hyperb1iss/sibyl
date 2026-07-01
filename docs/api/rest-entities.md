@@ -51,7 +51,7 @@ GET /api/entities
 **Example Request:**
 
 ```bash
-curl -X GET "https://api.example.com/api/entities?entity_type=pattern&language=python&page_size=20" \
+curl -X GET "http://localhost:3334/api/entities?entity_type=pattern&language=python&page_size=20" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -102,7 +102,7 @@ Retrieves a single entity by ID. Transparently handles both:
 **Example Request:**
 
 ```bash
-curl -X GET "https://api.example.com/api/entities/pattern_abc123" \
+curl -X GET "http://localhost:3334/api/entities/pattern_abc123" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -207,7 +207,7 @@ Creates a new entity in the knowledge graph.
 **Example Request:**
 
 ```bash
-curl -X POST "https://api.example.com/api/entities?sync=true" \
+curl -X POST "http://localhost:3334/api/entities?sync=true" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -302,7 +302,7 @@ Updates an existing entity. Only provided fields are updated.
 **Example Request:**
 
 ```bash
-curl -X PATCH "https://api.example.com/api/entities/pattern_abc123" \
+curl -X PATCH "http://localhost:3334/api/entities/pattern_abc123" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -347,7 +347,7 @@ Deletes an entity from the knowledge graph.
 **Example Request:**
 
 ```bash
-curl -X DELETE "https://api.example.com/api/entities/pattern_abc123" \
+curl -X DELETE "http://localhost:3334/api/entities/pattern_abc123" \
   -H "Authorization: Bearer $TOKEN"
 ```
 

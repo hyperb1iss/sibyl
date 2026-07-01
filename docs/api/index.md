@@ -96,18 +96,18 @@ Sibyl supports multiple authentication methods and role-based access control:
 ```bash
 # Using JWT token (from login)
 curl -H "Authorization: Bearer $ACCESS_TOKEN" \
-  https://api.example.com/api/entities
+  http://localhost:3334/api/entities
 
 # Using API key
 curl -H "Authorization: Bearer sk_live_abc123..." \
-  https://api.example.com/api/entities
+  http://localhost:3334/api/entities
 ```
 
 **For MCP:**
 
 ```bash
 # API key with mcp scope
-curl -X POST https://api.example.com/mcp \
+curl -X POST http://localhost:3334/mcp \
   -H "Authorization: Bearer sk_live_abc123..." \
   -H "Content-Type: application/json" \
   -d '{"method": "tools/call", "params": {"name": "search", "arguments": {"query": "OAuth patterns"}}}'
@@ -155,7 +155,7 @@ X-RateLimit-Reset: 1704067200
 Real-time updates are available via WebSocket at `/ws`:
 
 ```javascript
-const ws = new WebSocket("wss://api.example.com/ws?token=YOUR_TOKEN");
+const ws = new WebSocket("ws://localhost:3334/ws?token=YOUR_TOKEN");
 
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);

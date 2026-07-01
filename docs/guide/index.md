@@ -1,6 +1,6 @@
 ---
 title: Introduction
-description: Build a knowledge graph your team can actually reuse
+description: Build a knowledge graph you and your team can actually reuse
 ---
 
 # Introduction
@@ -167,6 +167,7 @@ tool calls.
 
 1. **[Installation](./installation)**: Get Sibyl running locally
 2. **[Quick Start](./quick-start)**: Create your first knowledge entries
+3. **[Run Sibyl for Yourself](./self-hosting)**: The full solo self-host path, start to finish
 
 ### Working Effectively
 

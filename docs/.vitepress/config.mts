@@ -52,8 +52,8 @@ export default defineConfig({
 
         nav: [
             { text: 'Guide', link: '/guide/' },
-            { text: 'Users', link: '/users/login' },
-            { text: 'Admins', link: '/admin/installing' },
+            { text: 'Using Sibyl', link: '/users/cli-setup' },
+            { text: 'Self-Hosting & Admin', link: '/admin/installing' },
             { text: 'CLI', link: '/cli/' },
             { text: 'API', link: '/api/' },
             { text: 'Benchmarks', link: '/testing/' },
@@ -65,16 +65,16 @@ export default defineConfig({
                 {
                     text: 'Using Sibyl',
                     items: [
-                        { text: 'Enterprise Sign-In', link: '/users/login' },
                         { text: 'CLI Setup', link: '/users/cli-setup' },
                         { text: 'MCP Setup', link: '/users/mcp-setup' },
                         { text: 'Sharing Memory', link: '/users/sharing-memory' },
+                        { text: 'Signing In', link: '/users/login' },
                     ],
                 },
             ],
             '/admin/': [
                 {
-                    text: 'Enterprise Administration',
+                    text: 'Self-Hosting & Admin',
                     items: [
                         { text: 'Installing Sibyl', link: '/admin/installing' },
                         { text: 'Inviting Users', link: '/admin/inviting-users' },
@@ -91,6 +91,7 @@ export default defineConfig({
                         { text: 'Introduction', link: '/guide/' },
                         { text: 'Installation', link: '/guide/installation' },
                         { text: 'Quick Start', link: '/guide/quick-start' },
+                        { text: 'Run Sibyl for Yourself', link: '/guide/self-hosting' },
                     ],
                 },
                 {

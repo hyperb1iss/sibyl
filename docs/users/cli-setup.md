@@ -31,15 +31,25 @@ python -m pip install sibyl-dev
 
 ## Point The CLI At Your Server
 
-Create a remote context for the enterprise server:
+A fresh Sibyl CLI defaults to `http://localhost:3334`, so if you run Sibyl locally with `sibyl up`
+you can usually skip ahead to [Daily Checks](#daily-checks). `sibyl up` does not change your CLI's
+active context, though, so if you previously pointed it at a remote server, switch back to the local
+context (it defaults to localhost, so no URL is needed):
 
 ```bash
-sibyl init --remote https://sibyl.example.com
+sibyl init --local        # or: sibyl context use local
+sibyl doctor
+```
+
+To point the CLI at a remote or shared server instead:
+
+```bash
+sibyl init --remote https://your-sibyl-host
 sibyl auth login
 ```
 
-`sibyl auth login` opens the browser sign-in flow. In enterprise deployments, that browser flow uses
-the same corporate OIDC provider as the web app.
+`sibyl auth login` opens the browser sign-in flow. On a team server behind corporate SSO, that
+browser flow uses the same OIDC provider as the web app.
 
 For headless terminals, print the login URL instead:
 

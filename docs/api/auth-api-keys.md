@@ -72,14 +72,14 @@ POST /api/auth/api-keys
 ### Authorization Header
 
 ```bash
-curl -X GET "https://api.example.com/api/entities" \
+curl -X GET "http://localhost:3334/api/entities" \
   -H "Authorization: Bearer sk_live_abc123def456ghi789..."
 ```
 
 ### MCP Endpoint
 
 ```bash
-curl -X POST "https://api.example.com/mcp" \
+curl -X POST "http://localhost:3334/mcp" \
   -H "Authorization: Bearer sk_live_abc123..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -304,7 +304,7 @@ For CI/CD and automation, use environment variables:
     SIBYL_API_KEY: ${{ secrets.SIBYL_API_KEY }}
   run: |
     curl -H "Authorization: Bearer $SIBYL_API_KEY" \
-      https://api.example.com/api/entities
+      http://localhost:3334/api/entities
 ```
 
 ## Related

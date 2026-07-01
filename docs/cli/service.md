@@ -8,6 +8,30 @@ daemon comes up.
 This is for running Sibyl directly on the host. For a containerized deployment, use
 [`sibyl docker`](./docker.md) or [`sibyl local`](./local.md).
 
+## Running the Daemon
+
+Three top-level commands run the embedded `sibyld` daemon natively, without Docker:
+
+| Command       | What it does                                      |
+| ------------- | ------------------------------------------------- |
+| `sibyl serve` | Run the daemon in the foreground (Ctrl+C to stop) |
+| `sibyl start` | Start the daemon in the background                |
+| `sibyl stop`  | Stop the background daemon                         |
+
+```bash
+# First-run local setup, then run in the foreground
+sibyl init --local
+sibyl serve
+
+# Or run it in the background and check health
+sibyl start
+sibyl doctor
+sibyl stop
+```
+
+For a daemon that survives reboots, install a user-service file with
+[`sibyl service install`](#service-install) below.
+
 ## Commands
 
 | Command                                     | Description                                                   |

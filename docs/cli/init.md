@@ -36,10 +36,10 @@ defaults to `remote` when `--remote` is set and `local` otherwise.
 sibyl init --local
 
 # Point the CLI at a hosted server
-sibyl init --remote https://sibyl.example.com --org acme
+sibyl init --remote https://your-sibyl-host --org acme
 
 # Update an existing context in place
-sibyl init --remote https://sibyl.example.com --force
+sibyl init --remote https://your-sibyl-host --force
 
 # Name a context and set a default project
 sibyl init --local --name dev --project sibyl

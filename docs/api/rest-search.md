@@ -91,7 +91,7 @@ Search both knowledge graph entities and crawled documentation.
 **Example Request:**
 
 ```bash
-curl -X POST "https://api.example.com/api/search" \
+curl -X POST "http://localhost:3334/api/search" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -214,7 +214,7 @@ Navigate graph structure without semantic search.
 **Example Request:**
 
 ```bash
-curl -X POST "https://api.example.com/api/search/explore" \
+curl -X POST "http://localhost:3334/api/search/explore" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
