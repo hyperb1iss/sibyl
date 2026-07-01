@@ -10,6 +10,11 @@ persistent memory. This guide explains how to connect an agent and what Sibyl ex
 wired in. It works the same for coding agents like Claude Code, Codex, and opencode, and for
 personal assistants like OpenClaw.
 
+::: tip The CLI is the default agent interface. Most agents use Sibyl by running `sibyl` shell
+commands (taught by the [`sibyl` skill](./skills.md)), which is lighter-weight than MCP and needs no
+per-client config. Reach for the MCP tools below when a client works better with structured tool
+calls. See [Working with Agents](./working-with-agents.md). :::
+
 ## What is MCP?
 
 The Model Context Protocol (MCP) is an open standard that lets AI agents interact with external

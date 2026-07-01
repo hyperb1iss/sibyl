@@ -20,8 +20,8 @@ This page is the end-to-end solo path. If you administer Sibyl for a team behind
 - A local SurrealDB knowledge graph, running on your box
 - The full memory loop (`recall → act → remember → reflect`) from any terminal
 - A web UI at `http://localhost:3337` for the graph explorer, tasks, and the memory workspace
-- An MCP endpoint at `http://localhost:3334/mcp` for Claude Code, Codex, Cursor, and anything else
-  that speaks MCP
+- The `sibyl` CLI as your agents' main interface — any tool that runs shell commands can use it —
+  with an MCP endpoint at `http://localhost:3334/mcp` for MCP-native clients
 - One owner account: you
 
 ## Step 1: Install and Start
@@ -82,16 +82,34 @@ Sibyl is now yours from any terminal.
 
 ## Step 4: Connect Your Agent
 
-Any MCP-capable agent connects to your local endpoint at `http://localhost:3334/mcp`. The **Connect**
-page in the web UI shows the client config for each tool. You supply an API key with the `mcp` scope,
-created from Settings → Security → API Keys or with the CLI:
+The primary way an agent uses Sibyl is the `sibyl` CLI. If a tool can run a shell command, it can
+use Sibyl: the agent runs `sibyl recall`, `sibyl remember`, `sibyl search`, and the rest against the
+local server from Step 3. This is the recommended path — it is lighter-weight than MCP (less token
+overhead) and every Sibyl command is available. Sign in once with `sibyl auth login` if a write
+reports that authentication is required.
+
+Teach your agent the workflow by installing the Sibyl skill (and, for Claude Code, the session
+hooks):
+
+```bash
+sibyl local setup
+```
+
+This installs the `sibyl` skill for Claude Code and Codex. In a client that supports skills, `/sibyl`
+loads the full memory-loop workflow; run `sibyl local setup --snippet` to print a prompt snippet you
+can paste into any agent's instructions instead. See [Working with Agents](./working-with-agents.md)
+and [Skills & Hooks](./skills.md).
+
+### Prefer MCP tools?
+
+MCP-native clients can also connect to the endpoint at `http://localhost:3334/mcp`. Reach for MCP
+only when a client works better with structured tool calls; otherwise the CLI is the lighter path.
+`sibyl up` generates a signing secret on first run, so MCP auth is on by default. Create a scoped key
+and add it to your client config:
 
 ```bash
 sibyl auth api-key create --name "claude-code" --scopes mcp
 ```
-
-`sibyl up` generates a signing secret on first run, so MCP auth is on by default. Drop the key into
-your client config:
 
 ```json
 {
@@ -107,11 +125,9 @@ your client config:
 }
 ```
 
-That same entry works for Claude Code, Cursor, Claude Desktop, and other MCP clients. Sibyl
-auto-generates a signing secret even for a bare `sibyl serve`, so MCP auth stays on by default. If you
-want an unauthenticated endpoint for local development only, set `SIBYL_MCP_AUTH_MODE=off` and drop
-the `Authorization` header. See [Agents & MCP](./claude-code.md) and
-[MCP Configuration](./mcp-configuration.md) for per-client details.
+For an unauthenticated local-only endpoint, set `SIBYL_MCP_AUTH_MODE=off` and drop the header. See
+[Agents & MCP](./claude-code.md) and [MCP Configuration](./mcp-configuration.md) for per-client
+details.
 
 ## Step 5: Run the Memory Loop
 
