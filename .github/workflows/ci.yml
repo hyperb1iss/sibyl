@@ -219,7 +219,7 @@ jobs:
           uv --version
 
       - name: Cache moon outputs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             .moon/cache
@@ -231,7 +231,7 @@ jobs:
             moon-${{ runner.os }}-
 
       - name: Cache pnpm store
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.local/share/pnpm/store
           key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -239,7 +239,7 @@ jobs:
             pnpm-${{ runner.os }}-
 
       - name: Cache uv
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/uv
           key: uv-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
@@ -324,7 +324,7 @@ jobs:
           uv --version
 
       - name: Cache moon outputs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             .moon/cache
@@ -336,7 +336,7 @@ jobs:
             moon-${{ runner.os }}-
 
       - name: Cache pnpm store
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.local/share/pnpm/store
           key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -344,7 +344,7 @@ jobs:
             pnpm-${{ runner.os }}-
 
       - name: Cache uv
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/uv
           key: uv-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
@@ -396,7 +396,7 @@ jobs:
           uv --version
 
       - name: Cache moon outputs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             .moon/cache
@@ -408,7 +408,7 @@ jobs:
             moon-${{ runner.os }}-
 
       - name: Cache pnpm store
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.local/share/pnpm/store
           key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -416,7 +416,7 @@ jobs:
             pnpm-${{ runner.os }}-
 
       - name: Cache uv
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/uv
           key: uv-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
@@ -482,7 +482,7 @@ jobs:
           uv --version
 
       - name: Cache moon outputs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .moon/cache
           key: moon-live-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
@@ -490,7 +490,7 @@ jobs:
             moon-live-${{ runner.os }}-
 
       - name: Cache uv
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/uv
           key: uv-live-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
@@ -548,7 +548,7 @@ jobs:
           uv --version
 
       - name: Cache moon outputs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             .moon/cache
@@ -560,7 +560,7 @@ jobs:
             moon-${{ runner.os }}-
 
       - name: Cache pnpm store
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.local/share/pnpm/store
           key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -568,7 +568,7 @@ jobs:
             pnpm-${{ runner.os }}-
 
       - name: Cache uv
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/uv
           key: uv-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
@@ -667,7 +667,7 @@ jobs:
           cache-version: surreal-ci-v1
 
       - name: Cache moon outputs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             .moon/cache
@@ -679,7 +679,7 @@ jobs:
             moon-${{ runner.os }}-
 
       - name: Cache pnpm store
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.local/share/pnpm/store
           key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}

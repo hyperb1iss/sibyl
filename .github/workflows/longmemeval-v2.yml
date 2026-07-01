@@ -66,7 +66,7 @@ jobs:
           cache-version: longmemeval-v2-v1
 
       - name: Cache moon outputs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .moon/cache
           key: moon-longmemeval-v2-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
@@ -74,7 +74,7 @@ jobs:
             moon-longmemeval-v2-${{ runner.os }}-
 
       - name: Cache uv
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/uv
           key: uv-longmemeval-v2-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
