@@ -260,15 +260,13 @@ def legacy_term_allowlist_records(
 GRAPHITI_COMPATIBILITY_ALLOWLIST: tuple[GraphitiCompatibilityRecord, ...] = ()
 
 ARCHITECTURE_LEGACY_TERM_FILES = (
-    "docs/architecture/AUDIT_2026-05-28.md",
     "docs/architecture/retrieval-system.md",
     "docs/architecture/SIBYL_1_0_ROADMAP.md",
     "docs/architecture/SIBYL_NORTHSTAR.md",
-    "docs/architecture/SIBYL_POST_V010_RELEASE_REMAP_SPEC.md",
+    "docs/architecture/SIBYL_POST_1_0_ROADMAP.md",
 )
 ENTERPRISE_LEGACY_TERM_FILES = (
     "docs/admin/installing.md",
-    "docs/architecture/ENTERPRISE_READINESS_PLAN_2026-05-21.md",
     "docs/users/sharing-memory.md",
 )
 GUIDE_LEGACY_TERM_FILES = (
@@ -283,6 +281,7 @@ GUIDE_LEGACY_TERM_FILES = (
     "docs/guide/migrating-from-falkor.md",
     "docs/guide/semantic-search.md",
     "docs/guide/setting-up-prompts.md",
+    "docs/guide/skills.md",
     "docs/guide/sources.md",
     "docs/guide/storage-modes.md",
     "docs/guide/surrealdb-migration-release-notes.md",
@@ -414,16 +413,6 @@ LEGACY_TERM_ALLOWLIST = (
         path="docs/testing/ai-memory-landscape.md",
         owner="benchmark evidence",
         reason="Competitive landscape docs name Graphiti only as historical comparison context.",
-    ),
-    LegacyTermAllowlistRecord(
-        path="docs/architecture/SIBYL_1_0_RC_PLAN.md",
-        owner="v1.0 RC evidence freeze",
-        reason="Active RC plan names legacy terms only as blockers, evidence boundaries, and optional coordination risks.",
-    ),
-    LegacyTermAllowlistRecord(
-        path="docs/architecture/SIBYL_1_0_RC_RELEASE_PACKET.md",
-        owner="v1.0 RC evidence freeze",
-        reason="Active RC packet cites legacy terms only in release receipts and pending external checks.",
     ),
     *legacy_term_allowlist_records(
         PROJECT_INSTRUCTION_LEGACY_TERM_FILES,

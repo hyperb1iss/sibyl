@@ -2,6 +2,13 @@
 -- Sibyl Comprehensive Permission Data Model
 -- =============================================================================
 --
+-- HISTORICAL REFERENCE SCHEMA (as of 2026-07-01).
+-- PostgreSQL is no longer part of Sibyl's runtime; SurrealDB is the live data plane.
+-- Keep this file as a reference for the RBAC model it describes -- effective-role
+-- resolution and Row-Level Security (RLS) policies -- not as a schema you can apply.
+-- The live implementation is the SurrealDB auth schema:
+--   packages/python/sibyl-core/src/sibyl_core/backends/surreal/auth_schema.py
+--
 -- This schema provides multi-tier authorization:
 --   1. Global Admin Roles (super-admin, system-admin)
 --   2. Org-level RBAC (owner, admin, member, viewer)
@@ -10,8 +17,8 @@
 --   5. API key scoped permissions
 --   6. Row-Level Security (RLS) policies
 --
--- Architecture:
---   - PostgreSQL 14+ with RLS
+-- Architecture (historical PostgreSQL reference model):
+--   - PostgreSQL 14+ with RLS (historical; the live runtime is SurrealDB)
 --   - Defense-in-depth: app-level + database-level enforcement
 --   - Audit logging for all permission changes
 --

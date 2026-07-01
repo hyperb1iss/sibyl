@@ -5,6 +5,12 @@ description: Release guidance for the SurrealDB-first storage cutover
 
 # SurrealDB Migration Release Notes
 
+> **Note (2026-07):** FalkorDB and PostgreSQL are fully removed from Sibyl as of the v0.6–v1.0 line.
+> This guide documents the historical migration path; the current `sibyld migrate` CLI supports only
+> `surreal-archive` → `surreal`. The `--source-type legacy-archive`,
+> `--target-mode postgres-rehearsal`, `--restore-database-dump`, and `--postgres-base-url` flags
+> below no longer exist.
+
 Sibyl now starts the SurrealDB runtime by default. New installs should use SurrealDB for graph,
 content, and auth. Do not start new deployments on FalkorDB or PostgreSQL auth.
 
@@ -30,6 +36,8 @@ If you have an old local FalkorDB + PostgreSQL install, export an archive from t
 compatibility release before upgrading, then import it into SurrealDB:
 
 ```bash
+# HISTORICAL (removed v0.6–v1.0): the --source-type legacy-archive on-ramp no longer exists.
+# The current CLI accepts only --source-type surreal-archive --target-mode surreal.
 uv run --directory apps/api sibyld migrate import <archive> \
   --source-type legacy-archive \
   --target-mode surreal \
@@ -42,14 +50,15 @@ uv run --directory apps/api sibyld migrate import <archive> \
   --clean
 ```
 
-Every archive import, rehearsal, and cutover now requires an explicit source type and target mode.
-Use `--source-type surreal-archive --target-mode surreal` for Surreal-native archive restores. Use
-`--source-type legacy-archive --target-mode surreal` for historical FalkorDB/PostgreSQL migration
-archives imported into SurrealDB.
+Every archive import, rehearsal, and cutover requires an explicit source type and target mode. Use
+`--source-type surreal-archive --target-mode surreal` for Surreal-native archive restores. (The
+`--source-type legacy-archive` on-ramp for historical FalkorDB/PostgreSQL migration archives was
+removed in the v0.6–v1.0 line and no longer exists.)
 
-Use `--restore-database-dump` only for PostgreSQL rehearsal evidence, and always pair it with
-`--source-type legacy-archive --target-mode postgres-rehearsal`. `postgres.sql` is a historical
-migration payload, not the default restore path.
+Historically, `--restore-database-dump` replayed PostgreSQL rehearsal evidence, always paired with
+`--source-type legacy-archive --target-mode postgres-rehearsal`; `postgres.sql` was a historical
+migration payload, never the default restore path. Those flags were removed in the v0.6–v1.0 line
+and no longer exist.
 
 ## Existing production installs
 
@@ -74,9 +83,10 @@ before cutting over production.
 Release owners should execute the live gate checklist in
 `docs/_archive/SURREALDB_PHASE2_LIVE_GATES.md` before tagging the SurrealDB-first release.
 
-`sibyld migrate auth-flow-compare` refuses to compare one API to itself by default. Start one
-legacy-auth API and one Surreal-auth API, then pass distinct `--postgres-base-url` and
-`--surreal-base-url` values. Use `--allow-same-base-url` only when debugging the harness itself.
+Historically, `sibyld migrate auth-flow-compare` compared a legacy Postgres-auth API against a
+Surreal-auth API (distinct `--postgres-base-url` and `--surreal-base-url` values, with
+`--allow-same-base-url` only for harness debugging). With PostgreSQL auth fully removed there is no
+legacy API to start, so this cross-runtime comparison is historical.
 
 ## Phase 3 archive policy
 
@@ -86,9 +96,9 @@ surface:
 - archive import, verify, and cutover commands for existing legacy installs
 - Surreal-native archive restore through explicit
   `--source-type surreal-archive --target-mode surreal`
-- retained `postgres.sql` restore through explicit
-  `--restore-database-dump --source-type legacy-archive --target-mode postgres-rehearsal` rehearsal
-  commands
+- retained `postgres.sql` restore — historically via
+  `--restore-database-dump --source-type legacy-archive --target-mode postgres-rehearsal`; these
+  flags were removed in the v0.6–v1.0 line and no longer exist
 - graph archive payload import into SurrealDB with dry-run restore review before writes
 
 The old PostgreSQL auth/RBAC runtime, active PostgreSQL content sidecars, ambient PostgreSQL
