@@ -16,7 +16,7 @@ Three top-level commands run the embedded `sibyld` daemon natively, without Dock
 | ------------- | ------------------------------------------------- |
 | `sibyl serve` | Run the daemon in the foreground (Ctrl+C to stop) |
 | `sibyl start` | Start the daemon in the background                |
-| `sibyl stop`  | Stop the background daemon                         |
+| `sibyl stop`  | Stop the background daemon                        |
 
 ```bash
 # First-run local setup, then run in the foreground

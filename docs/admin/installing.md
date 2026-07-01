@@ -1,6 +1,8 @@
 ---
 title: Installing Sibyl
-description: Team and enterprise install guide (Kubernetes, Helm, OIDC). For a personal instance, see Run Sibyl for Yourself.
+description:
+  Team and enterprise install guide (Kubernetes, Helm, OIDC). For a personal instance, see Run Sibyl
+  for Yourself.
 ---
 
 # Installing Sibyl
