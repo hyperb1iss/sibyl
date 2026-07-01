@@ -1,9 +1,10 @@
 # Sibyl Northstar
 
 - Status: living product and architecture spec
-- Last validated: 2026-06-23
-- Current release floor: v1.0.0-rc.8 (v1.0 release-candidate phase)
-- Active 1.0 roadmap: [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
+- Last validated: 2026-07-01
+- Current release floor: v1.0.2 (v1.0 shipped; post-1.0 planning underway)
+- Active roadmap: [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md) (post-1.0, v1.1 → v1.3);
+  the shipped 1.0 plan is [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
 
 This document defines Sibyl's northstar: the product shape, architecture principles, and deletion
 gates for the next form of the system.
@@ -31,12 +32,6 @@ Shipped execution plans, kept in `docs/_archive/` as release receipts and design
   [`SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md`](../_archive/SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md)
 - Native LLM provider substrate:
   [`SIBYL_LLM_SUBSTRATE_PLAN.md`](../_archive/SIBYL_LLM_SUBSTRATE_PLAN.md)
-
-Design provenance kept alongside active architecture docs:
-
-- Reflection OS packet: [`SIBYL_REFLECTION_OS_PLAN.md`](SIBYL_REFLECTION_OS_PLAN.md). Its first
-  implementation slice landed in v0.10; keep this as design provenance, not the active release
-  label.
 
 ## Northstar
 
@@ -221,8 +216,8 @@ automation.
 - No hard dependency on a single hosted LLM for core recall.
 - No Graphiti deletion before native behavior is better, measured, and reversible. For 1.0, this is
   now a deletion gate, not an argument for carrying a compatibility extra forever.
-- No indefinite dual-store product. FalkorDB and PostgreSQL are migration bridges, not permanent
-  architecture.
+- No indefinite dual-store product. FalkorDB and PostgreSQL were migration bridges, not permanent
+  architecture; both were fully removed across the v0.6–v1.0 line.
 - No Cloud-only architecture. Local/server mode remains first-class.
 
 ## Current State Already Landed
@@ -234,10 +229,12 @@ These pieces are part of the foundation and must not get lost while we push towa
 - `v0.8` closed the pure-Surreal default-runtime and memory-trust release gates.
 - `v0.9.0` shipped source-grounded synthesis, source inspect and correction, source-preserving
   import, and the Memory Workspace as the primary product surface.
-- Legacy FalkorDB and PostgreSQL services are out of the default local, CI, and Helm paths. They
-  remain migration/archive source surfaces only.
-- Default `sibyl-core` installs do not require Graphiti Core; retained compatibility code is
-  optional, historical, migration, admin, or test scaffolding.
+- Legacy FalkorDB and PostgreSQL services were fully removed across the v0.6–v1.0 line. They are no
+  longer runtime, migration, or archive source surfaces in the product; only the historical
+  migration guides reference them.
+- Default `sibyl-core` installs do not require Graphiti Core. Graphiti was fully removed from the
+  supported runtime and dependency graph across the v0.6–v1.0 line; legacy Graphiti-shaped archives
+  are handled by Sibyl-owned Surreal projection/import code, not the Graphiti Core module.
 - Graph archives can be exported, imported, verified, and dry-run merged.
 - Merge tooling can rewrite source org data into a target organization.
 - Surreal auth supports username/password sign-in plus optional token authentication.
@@ -275,8 +272,9 @@ Target properties:
 - Authorization filters applied before context is rendered.
 - Idempotent schema bootstrap.
 - Archive-backed migration and rollback.
-- No permanent mixed-mode destination after migration. Existing FalkorDB and PostgreSQL installs
-  should be migrated, verified, cut over, and then removed from the default product surface.
+- No permanent mixed-mode destination after migration. FalkorDB and PostgreSQL were migrated,
+  verified, cut over, and removed across the v0.6–v1.0 line; the product now runs on the single
+  SurrealDB data plane.
 - Runtime-neutral primitives shared by CLI, API, MCP, prompt hooks, and web UI.
 
 SurrealDB Cloud remains attractive for managed multi-user deployments, but the official Cloud FAQ
@@ -981,6 +979,8 @@ Expose the multi-user model in the web app, CLI, and MCP surfaces:
 
 ### W13. Legacy Removal
 
+**Status: shipped.**
+
 Remove legacy guts when migration gates are green. The destination is not "support both forever"; it
 is migrate existing users, verify the cutover, and let the old stack disappear.
 
@@ -993,6 +993,8 @@ is migrate existing users, verify the cutover, and let the old stack disappear.
   accepted
 
 ### W14. Work-Item Hierarchy Unification
+
+**Status: shipped.**
 
 Collapse the Epic entity into the task tree: a task with children is an epic. Today Epic is a
 sibling entity (`class Epic(Entity)`, `entity_type=epic`) that carries no scoping of its own — only

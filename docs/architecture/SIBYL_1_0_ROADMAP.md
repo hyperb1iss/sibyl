@@ -1,9 +1,10 @@
 # Sibyl 1.0 Roadmap
 
-- Status: active planning baseline
+- Status: shipped (v1.0.0 → v1.0.2); superseded for forward planning by
+  [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md)
 - Created: 2026-05-15
-- Current release floor: v1.0.0-rc.8
-- Current implementation focus: v1.0 RC Evidence Freeze
+- Current release floor: v1.0.2 (1.0 shipped)
+- Current implementation focus: v1.0 shipped (v1.0.0 → v1.0.2); post-1.0 planning underway
 - Active remap spec:
   [`SIBYL_POST_V010_RELEASE_REMAP_SPEC.md`](SIBYL_POST_V010_RELEASE_REMAP_SPEC.md)
 - Tracking task: `12b1fee4-7bdd-45c8-8a6a-b13fd6eab308`
@@ -34,13 +35,6 @@ These living docs in `docs/architecture/` remain active planning inputs:
 - [`SIBYL_POST_V010_RELEASE_REMAP_SPEC.md`](SIBYL_POST_V010_RELEASE_REMAP_SPEC.md): current
   post-v0.10 release schedule and RC evidence checklist.
 - [`SIBYL_1_0_RC_PLAN.md`](SIBYL_1_0_RC_PLAN.md): concrete remaining-work plan for the v1.0 RC cut.
-- [`PERMISSION_SYSTEM_AUDIT.md`](PERMISSION_SYSTEM_AUDIT.md): current auth, policy, project RBAC,
-  MCP, and trust-surface audit.
-- [`TASKIQ_MIGRATION_PLAN.md`](TASKIQ_MIGRATION_PLAN.md): coordination backend boundary and
-  Redis-optional local runtime direction.
-- [`SIBYL_REFLECTION_OS_PLAN.md`](SIBYL_REFLECTION_OS_PLAN.md): Reflection OS design packet whose
-  first slice landed in v0.10; keep it as design provenance for reflection-quality work, not as the
-  active release label.
 
 These docs are release receipts or historical execution plans. They moved to `docs/_archive/` once
 their work shipped. They can still hold useful receipts and design contracts, but they do not
@@ -373,10 +367,11 @@ Required gates:
 - `backup-restore-gate`
 - `moon run :check`
 
-### v1.0 RC (active milestone, latest tag v1.0.0-rc.8)
+### v1.0 RC — Shipped (v1.0.0 → v1.0.2)
 
-Status: active. The release-candidate line is current; `v1.0.0-rc.1` through `v1.0.0-rc.8` have
-shipped, absorbing the v0.11 through v0.13 packets above.
+Status: Shipped (v1.0.0 → v1.0.2). The release-candidate line (`v1.0.0-rc.1` through `v1.0.0-rc.8`)
+shipped and was followed by `v1.0.0`, `v1.0.1`, and `v1.0.2`, absorbing the v0.11 through v0.13
+packets above.
 
 Goal: freeze the claim surface and cut only when receipts are boring.
 
