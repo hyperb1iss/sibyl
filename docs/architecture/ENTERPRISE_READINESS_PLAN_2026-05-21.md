@@ -1,5 +1,9 @@
 # Sibyl Enterprise Readiness Plan
 
+> ⚠️ **HISTORICAL (as of 2026-07-01).** This plan's work has shipped (Sibyl is at v1.0.2). Kept as a
+> historical receipt; it does not describe current status. See
+> [`SIBYL_NORTHSTAR.md`](SIBYL_NORTHSTAR.md) for current product truth.
+
 - **Date:** 2026-05-21
 - **Status:** Validated proposal — drives the OSS work needed to make Sibyl enterprise-deployable
 - **Scope:** What Sibyl itself needs to support enterprise deployment behind a corporate IdP, on a
@@ -7,7 +11,7 @@
   single-tenant data plane that ships clean. No cloud or deployment specifics — those belong in a
   deployment-overlay doc per organization.
 - **Related:** [`SIBYL_NORTHSTAR.md`](SIBYL_NORTHSTAR.md),
-  [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md), `POST_GRAPHITI_PLAN_2026-05-19.md`
+  [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
 
 ### Revision history
 

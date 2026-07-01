@@ -5,6 +5,12 @@ description: CLI playbook for moving an existing install to SurrealDB
 
 # Migrating from FalkorDB
 
+> **Note (2026-07):** FalkorDB and PostgreSQL are fully removed from Sibyl as of the v0.6–v1.0 line.
+> This guide documents the historical migration path; the current `sibyld migrate` CLI supports only
+> `surreal-archive` → `surreal`. The `--source-type legacy-archive`,
+> `--target-mode postgres-rehearsal`, `--restore-database-dump`, and `--postgres-base-url` flags
+> below no longer exist.
+
 Sibyl ships CLI tooling to move an organization (or a whole install) from the legacy FalkorDB +
 PostgreSQL stack to SurrealDB. The migration is explicit and rehearsal-driven. Nothing happens
 automatically when you upgrade.
@@ -54,6 +60,8 @@ database dump sidecars.
 ### 2. Import to SurrealDB
 
 ```bash
+# HISTORICAL (removed v0.6–v1.0): the --source-type legacy-archive on-ramp no longer exists.
+# The current CLI accepts only --source-type surreal-archive --target-mode surreal.
 SIBYL_STORE=surreal \
 SIBYL_SURREAL_URL=ws://localhost:8000/rpc \
 sibyld migrate import /tmp/sibyl-migration.tar.gz \
@@ -62,9 +70,10 @@ sibyld migrate import /tmp/sibyl-migration.tar.gz \
 ```
 
 The structured `auth.json` and `content.json` payloads restore directly into SurrealDB. New
-structured archive exports read from Surreal; `--restore-database-dump` is only needed when
-explicitly replaying a retained `postgres.sql` archive during rehearsal or rollback validation with
-`--source-type legacy-archive --target-mode postgres-rehearsal`.
+structured archive exports read from Surreal. (Historically, `--restore-database-dump` replayed a
+retained `postgres.sql` archive during PostgreSQL rehearsal or rollback validation via
+`--source-type legacy-archive --target-mode postgres-rehearsal`; those flags were removed in the
+v0.6–v1.0 line and no longer exist.)
 
 Legacy `episode` nodes and `mentions` edges are archive compatibility records. They are restored
 only so older Graphiti/Falkor exports can round-trip and verify. Current runtime memory uses
@@ -104,9 +113,12 @@ Run the live auth replay directly when you want a focused check:
 moon run auth-flow-replay -- --base-url http://localhost:3334
 ```
 
-For final auth cutover confidence, compare a Postgres-backed API and a Surreal-backed API:
+Historically, final auth cutover confidence compared a Postgres-backed API against a Surreal-backed
+API. With PostgreSQL fully removed there is no longer a Postgres-backed API to run, so this
+cross-runtime comparison is historical:
 
 ```bash
+# HISTORICAL: no Postgres-backed API exists post-removal; kept for provenance only.
 moon run auth-flow-compare -- \
   --postgres-base-url http://localhost:3334 \
   --surreal-base-url http://localhost:3335
@@ -126,6 +138,8 @@ FalkorDB export wrapper was retired after the v0.6.0 compatibility release, so l
 uses the same archive import path as production rehearsal:
 
 ```bash
+# HISTORICAL (removed v0.6–v1.0): the --source-type legacy-archive on-ramp no longer exists.
+# The current CLI accepts only --source-type surreal-archive --target-mode surreal.
 uv run --directory apps/api sibyld migrate import <archive> \
   --source-type legacy-archive \
   --target-mode surreal \

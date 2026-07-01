@@ -1,5 +1,9 @@
 # Sibyl Post-v0.10 Release Remap Spec
 
+> ⚠️ **HISTORICAL (as of 2026-07-01).** This plan's work has shipped (Sibyl is at v1.0.2). Kept as a
+> historical receipt; it does not describe current status. See
+> [`SIBYL_NORTHSTAR.md`](SIBYL_NORTHSTAR.md) for current product truth.
+
 - Status: active RC evidence checklist
 - Created: 2026-05-17
 - Baseline release: v0.10.0, published 2026-05-17

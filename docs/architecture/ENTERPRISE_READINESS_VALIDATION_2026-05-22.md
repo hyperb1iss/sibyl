@@ -1,5 +1,9 @@
 # Enterprise Readiness Validation Packet
 
+> ⚠️ **HISTORICAL (as of 2026-07-01).** This plan's work has shipped (Sibyl is at v1.0.2). Kept as a
+> historical receipt; it does not describe current status. See
+> [`SIBYL_NORTHSTAR.md`](SIBYL_NORTHSTAR.md) for current product truth.
+
 - Date: 2026-05-22
 - Scope: implementation evidence for
   [`ENTERPRISE_READINESS_PLAN_2026-05-21.md`](ENTERPRISE_READINESS_PLAN_2026-05-21.md)

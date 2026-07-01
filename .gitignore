@@ -96,6 +96,10 @@ docs/research/*
 docs/research/rust-port/*
 !docs/research/rust-port/INVENTORY.md
 
+# Memory consolidation exports (dogfood archive tarballs kept on disk, not committed)
+sibyl-consolidation/
+apps/api/sibyl-consolidation/
+
 # Local strategy and planning notes (kept on disk, referenced by Sibyl memory)
 docs/architecture/COMPETITIVE_ANALYSIS_*.md
 docs/architecture/DATA_MODEL_*_2026-*.md

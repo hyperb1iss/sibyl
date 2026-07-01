@@ -172,11 +172,15 @@ manager = EntityManager(client, group_id=str(org.id))
 Each organization gets its own isolated Surreal namespace (`org_<uuid_hex>`). Forgetting org scope
 queries the wrong namespace or breaks isolation.
 
-### Surreal Write Concurrency
+### Surreal Connection Pooling & Concurrency
 
-The SurrealDB driver serializes websocket queries through a per-client `asyncio.Lock`. Do not hold
-the lock across awaits you don't control, and don't share a single driver instance across orgs — use
-`driver.clone(group_id)` to get an isolated client.
+Each org gets a dedicated, connection-pooled SurrealDB client scoped to its namespace. Get it via
+`get_surreal_graph_client(group_id)` (or pass `group_id` to `EntityManager`); never share one client
+across orgs. The pool hands out independent sockets (one query per socket at a time), so queries
+within an org run concurrently — there is no single per-client query lock anymore. Clients are
+cached per `group_id` in an LRU (`surreal_graph_client_cache_size`, default 64); an evicted client
+is closed and its schema marked dirty. Embedded/`memory://` URLs are clamped to a single connection
+(a pool would fragment single-writer state).
 
 ### Legacy Graph Archives
 

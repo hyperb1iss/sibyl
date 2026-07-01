@@ -1,5 +1,9 @@
 # Sibyl 1.0 RC Release Packet
 
+> ⚠️ **HISTORICAL (as of 2026-07-01).** This plan's work has shipped (Sibyl is at v1.0.2). Kept as a
+> historical receipt; it does not describe current status. See
+> [`SIBYL_NORTHSTAR.md`](SIBYL_NORTHSTAR.md) for current product truth.
+
 - Status: candidate packet prepared; external same-SHA receipts required before live dispatch
 - Version: `1.0.0-rc.1`
 - Candidate branch: `feature/sibyl-1-0-rc-candidate-20260610`

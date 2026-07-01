@@ -44,8 +44,8 @@ There is a second distinction inside the retrieval lane:
   2, 41 have 3, the rest more). `recall_any` is strictly easier than `recall_all`.
 
 Sibyl reports both: `hit@5 = 100%` (the easier metric, equivalent to `recall_any@5`) and
-`recall@5 = 96.96%` (the strict multi-answer metric). When MemPalace, agentmemory, and Schift report
-"R@5", they generally mean `recall_any@5`.
+`recall@5 = 96.96%` (the strict multi-answer metric). When MemPalace and agentmemory report "R@5",
+they generally mean `recall_any@5`.
 
 ## Where Sibyl Sits
 
@@ -62,9 +62,10 @@ Sibyl's defensible position is the intersection of six properties. No competitor
 
 Going around the field on those six dimensions:
 
-- [**Cognee**](https://www.cognee.ai/) gets closest. Self-hosted, graph-native, physical tenant
-  isolation via EBAC permissions, live benchmarking. Trails on LLM-free retrieval — extraction is
-  LLM-driven.
+- [**Cognee**](https://www.cognee.ai/) gets closest. Self-hosted, graph-native, tenant isolation via
+  its permission model (Users/Tenants/Roles plus dataset ACLs, toggled on via the Enable Backend
+  Access Control (EBAC) env flag, with physical isolation only on the Kuzu/LanceDB/FalkorDB
+  backends), live benchmarking. Trails on LLM-free retrieval — extraction is LLM-driven.
 - [**Graphiti**](https://github.com/getzep/graphiti) (Zep's underlying engine) is the closest
   architectural sibling. Zep itself
   [deprecated self-hosted Community Edition](https://vectorize.io/articles/zep-alternatives) in
@@ -95,7 +96,6 @@ it.
 | MemPalace hybrid | 100% R@5 (full), 98.4% held-out | recall_any@K |          ✗          |   yes (Haiku)    |    ✗     |        ✗         |
 | Memweave         | 98.0% R@5, 99.11% R@10          | recall_any@K |       unclear       |        ✗         |    ✗     |    filesystem    |
 | agentmemory      | 95.2% R@5, 98.6% R@10           | recall_any@K |          ✗          |        ✗         |    ✗     |        ✗         |
-| Schift           | 96.0% R@5                       | unclear      |       unclear       |        ✗         |    ✗     |        ✗         |
 
 A few honest readings of this table:
 
@@ -108,8 +108,8 @@ point at when someone asks "is anyone close to Sibyl on this axis?". Its real ed
 simplicity: plain Markdown source files, SQLite + sqlite-vec + FTS5 index, zero infrastructure,
 graceful degradation. For a single developer on a laptop, Memweave is a defensible choice.
 
-[**MemPalace**](https://www.mempalace.tech/) had the loudest 2026 launch and the public methodology
-hasn't held up under independent review. The 96.6% raw number is
+[**MemPalace**](https://github.com/MemPalace/mempalace) had the loudest 2026 launch and the public
+methodology hasn't held up under independent review. The 96.6% raw number is
 [a ChromaDB + `all-MiniLM-L6-v2` baseline](https://github.com/MemPalace/mempalace/issues/214); the
 palace architecture is not actually exercised in the benchmark, and turning the palace features on
 _reduces_ recall (89.4% with rooms, 84.2% with AAAK compression). The 100% hybrid result was overfit
@@ -123,10 +123,6 @@ strict-multi-answer live-API run.
 point. BM25 + `all-MiniLM-L6-v2` hybrid, no LLM in the loop, explicitly flags the `recall_any` vs
 strict distinction in its own README. Less prominent than MemPalace but its numbers are believable
 and its methodology disclosure is exemplary.
-
-[**Schift**](https://schift.io/blog/longmemeval-benchmark/) reports 96.0% R@5 with their own
-`schift-embed-1` embedder. The metric definition (any vs all) is not explicit in the blog post.
-Treat as a peer in the same lane with somewhat opaque methodology.
 
 ## QA-Accuracy Comparison (Different Lane)
 
@@ -175,8 +171,10 @@ internal entity linking. Physical tenant isolation is usually an Enterprise-tier
 
 [Cognee](https://www.cognee.ai/), [MemOS (MemTensor)](https://github.com/MemTensor/MemOS), and raw
 [Graphiti](https://github.com/getzep/graphiti) as a library. Sibyl's closest architectural siblings.
-Cognee in particular ships per-tenant graph + vector store isolation via its EBAC permission model —
-the most direct production analog to Sibyl's namespace-per-org pattern.
+Cognee in particular ships per-tenant graph + vector store isolation — a permission model of
+Users/Tenants/Roles plus dataset ACLs, toggled on via its Enable Backend Access Control (EBAC) env
+flag, with physical isolation only on the Kuzu/LanceDB/FalkorDB backends — the most direct
+production analog to Sibyl's namespace-per-org pattern.
 
 ### Cluster 3: Agent Runtimes That Bundle Memory
 
@@ -196,9 +194,9 @@ entered maintenance mode in Q1 2026**; Microsoft moved active development to the
 ### Cluster 5: Source-Preserving Local Libraries
 
 [Memweave](https://github.com/sachinsharma9780/memweave) and
-[MemPalace](https://www.mempalace.tech/). Both reject vector DBs as required infrastructure and
-store source artifacts as the truth. Memweave is the honest, methodologically clean version;
-MemPalace is the viral version where benchmark methodology
+[MemPalace](https://github.com/MemPalace/mempalace). Both reject vector DBs as required
+infrastructure and store source artifacts as the truth. Memweave is the honest, methodologically
+clean version; MemPalace is the viral version where benchmark methodology
 [fell apart on independent review](https://vectorize.io/articles/mempalace-benchmarks).
 
 ### Cluster 6: Provider-Bundled Consumer Memory
@@ -234,14 +232,19 @@ Sibyl trails academic SOTA:
   45% storage reduction with biologically inspired exponential decay;
   [FiFA](https://arxiv.org/html/2512.12856v1) introduces six forgetting policies (FIFO, LRU,
   priority decay, reflection-summary, random-drop, hybrid) with privacy sensitivity scores. Sibyl
-  accumulates memory indefinitely today.
+  ships a `priority_decay` consolidation job that archives low-importance, stale entities
+  (importance × recency, reversible via `include_archived`), so forgetting is partial rather than
+  absent; the gap is tuning and benchmarking it against FadeMem/FiFA-style policies and privacy
+  sensitivity.
 - **Procedural memory and skill learning.**
   [Letta's skill learning](https://www.letta.com/blog/skill-learning) reports +36.8% relative on
   Terminal-Bench 2.0. Sibyl has task `learnings` but no procedural-memory primitive that an agent
   can update its own behavior from.
-- **Temporal decay scoring fully enabled.** Sibyl has temporal boosting code, but it is not enabled
-  by default and does not integrate deeply with the main search path. The Stanford generative agents
-  recency + importance + relevance scoring model has become a de facto standard.
+- **Temporal decay scoring applied uniformly.** Sibyl applies temporal boosting by default in the
+  hybrid search path (`apply_temporal=True`, 365-day half-life) but not in the context/recall path
+  (which passes `temporal_target=None`), so decay is unevenly wired rather than a uniform ranking
+  signal. The Stanford generative agents recency + importance + relevance scoring model has become a
+  de facto standard.
 - **Multi-graph disentanglement.** [MAGMA](https://arxiv.org/abs/2601.03236) splits memory into four
   orthogonal graphs (semantic, temporal, causal, entity) with intent-aware query routing, achieving
   +45.5% accuracy on LOCOMO at 0.7–4.2k tokens per query vs 101k for full context. Sibyl uses a
@@ -277,8 +280,10 @@ Things we do not yet have, and want to be explicit about:
    working number but not yet contextualized against competitors' published latency-cost envelopes.
 6. **No cross-encoder reranker.** We chose interpretable ranking; that choice has a cost on
    strict-recall ranking quality.
-7. **No principled forgetting.** Storage grows monotonically; old facts compete with new ones in
-   retrieval scoring.
+7. **Forgetting is partial, not principled.** A `priority_decay` consolidation job archives
+   low-importance, stale entities (reversibly), but it is not yet tuned, benchmarked, or applied as
+   a uniform decay signal across the context/recall path — old facts still compete with new ones in
+   the main recall scoring.
 
 ## How To Read This Page
 
