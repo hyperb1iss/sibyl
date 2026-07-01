@@ -20,21 +20,14 @@ latency, token-efficiency, and isolation integrity** — not a bigger benchmark 
 
 Two structural facts make Sibyl's position stronger than it looks:
 
-1. **The substrate is necessary, but it is no longer the moat.** A unified engine still matters —
-   Mem0 dropped external graph stores; Cognee's isolation works on only three of its backends; Papr
-   stitches together MongoDB + Neo4j + Qdrant + Redis. But SurrealDB's own **Spectron** (agent
-   memory; ~$23M, Feb 2026) now makes the unified-substrate / typed-memory / forgetting-as-a-verb
-   argument on the very engine Sibyl runs on. You cannot out-database the database vendor. Sibyl's
-   durable edge is therefore _above_ the substrate: the governed, self-hostable memory **product** —
-   the memory loop as legible verbs, a real auth/multi-tenancy runtime, task coordination as a
-   first-class memory citizen, and coalesced team memory with provenance and audit.
-2. **Team / collaborative memory is open on every axis, and the literature agrees.** Almost all
-   "multi-agent memory" in the market is per-agent namespacing, not coalescence. The 2026 governance
-   literature names four failure modes no system clears — unauthorized leakage, stale propagation,
-   contradiction persistence, provenance collapse (ArgusFleet, arXiv:2606.24535); GateMem
-   (arXiv:2606.18829) shows no method achieves utility, access control, and forgetting together; and
-   _no public benchmark measures team memory at all_. Sibyl already ships the two hardest
-   prerequisites: a real multi-tenant auth runtime and a unified graph.
+1. **The field is fragmenting away from unified graph substrates.** Mem0 dropped external graph
+   stores; Cognee's isolation works on only three of its backends; Papr stitches together MongoDB +
+   Neo4j + Qdrant + Redis. Sibyl's "graph + document + vector + full-text + auth in one engine, with
+   physical namespace-per-org isolation" is a coherence story no competitor can tell truthfully.
+2. **Team / collaborative memory is open on every axis.** No competitor does cross-user entity
+   resolution, and _no benchmark measures team memory at all_ (GroupMemBench, EverMemBench,
+   SocialMemBench, and GateMem are all early-2026 preprints showing systems fail; none use real team
+   logs; there is no shared leaderboard).
 
 The bet is a three-release arc:
 
@@ -45,10 +38,9 @@ The bet is a three-release arc:
 - **v1.3 "Lead It"** — publish the benchmark the field lacks and push the frontier.
 
 Positioning: _in a field where memory systems can't reliably beat `cat *.txt` on accuracy and can't
-keep shared memory scoped, Sibyl's edge is not a bigger number and not the storage engine — it is
-making auth-scoped, graph-native team memory a database guarantee instead of an application-layer
-hope, delivered as a governed, self-hostable product: the one layer the frontier labs won't build
-and the benchmarks say no one has solved._
+keep shared memory scoped, Sibyl's edge is not a bigger number — it is the only substrate that makes
+multi-tenant, auth-scoped, graph-native team memory a database guarantee rather than an
+application-layer hope._
 
 ## 2. Verified starting point
 

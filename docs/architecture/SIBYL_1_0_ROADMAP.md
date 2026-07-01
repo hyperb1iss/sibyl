@@ -5,6 +5,8 @@
 - Created: 2026-05-15
 - Current release floor: v1.0.2 (1.0 shipped)
 - Current implementation focus: v1.0 shipped (v1.0.0 → v1.0.2); post-1.0 planning underway
+- Active remap spec:
+  [`SIBYL_POST_V010_RELEASE_REMAP_SPEC.md`](SIBYL_POST_V010_RELEASE_REMAP_SPEC.md)
 - Tracking task: `12b1fee4-7bdd-45c8-8a6a-b13fd6eab308`
 
 ## 1. Thesis
@@ -30,7 +32,9 @@ real work, and leave the graph smarter without Bliss babysitting a manual inbox.
 These living docs in `docs/architecture/` remain active planning inputs:
 
 - [`SIBYL_NORTHSTAR.md`](SIBYL_NORTHSTAR.md): product and architecture truth.
-- [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md): forward plan (v1.1 → v1.3).
+- [`SIBYL_POST_V010_RELEASE_REMAP_SPEC.md`](SIBYL_POST_V010_RELEASE_REMAP_SPEC.md): current
+  post-v0.10 release schedule and RC evidence checklist.
+- [`SIBYL_1_0_RC_PLAN.md`](SIBYL_1_0_RC_PLAN.md): concrete remaining-work plan for the v1.0 RC cut.
 
 These docs are release receipts or historical execution plans. They moved to `docs/_archive/` once
 their work shipped. They can still hold useful receipts and design contracts, but they do not
