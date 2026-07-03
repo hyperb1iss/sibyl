@@ -84,6 +84,8 @@ class _EntityUpdatePatchClient:
                 "description": patch.get("description", "Original description"),
                 "content": patch.get("content", "Original content"),
                 "group_id": params["group_id"],
+                "created_by": patch.get("created_by"),
+                "modified_by": patch.get("modified_by"),
                 "attributes": {
                     "existing": "preserved",
                     "metadata": json.dumps({"legacy": "preserved"}),
@@ -663,6 +665,8 @@ async def test_native_entity_manager_generates_embeddings_with_native_provider()
             name="Native Embedding Pattern",
             description="Generated without Graphiti.",
             organization_id=client.group_id,
+            created_by="stef",
+            modified_by="nova",
         ),
         generate_embedding=True,
     )
@@ -670,12 +674,16 @@ async def test_native_entity_manager_generates_embeddings_with_native_provider()
     assert created_id == "entity_embed"
     write_query, write_params = client.calls[0]
     assert "INSERT INTO entity $rows ON DUPLICATE KEY UPDATE" in write_query
+    assert "created_by = created_by ?? $input.created_by" in write_query
+    assert "modified_by = $input.modified_by ?? modified_by" in write_query
     rows = cast("list[dict[str, object]]", write_params["rows"])
     assert len(cast(list[float], rows[0]["name_embedding"])) == 4
     assert isinstance(rows[0]["updated_at"], datetime)
     attributes = cast(dict[str, object], rows[0]["attributes"])
     assert isinstance(attributes["updated_at"], datetime)
     assert attributes["embedding_metadata"] == provider.metadata.to_dict()
+    assert rows[0]["created_by"] == "stef"
+    assert rows[0]["modified_by"] == "nova"
 
 
 @pytest.mark.asyncio
@@ -687,6 +695,7 @@ async def test_native_entity_manager_update_uses_server_side_merge() -> None:
         "task-native",
         {
             "metadata": {"project_id": "project-native"},
+            "modified_by": "nova",
             "status": "done",
             "title": "Updated task",
         },
@@ -698,6 +707,7 @@ async def test_native_entity_manager_update_uses_server_side_merge() -> None:
     assert updated.metadata["legacy"] == "preserved"
     assert updated.metadata["project_id"] == "project-native"
     assert updated.metadata["status"] == "done"
+    assert updated.modified_by == "nova"
     query, params = client.calls[0]
     assert "BEGIN TRANSACTION" in query
     assert "UPDATE entity MERGE $patch" in query
@@ -705,8 +715,56 @@ async def test_native_entity_manager_update_uses_server_side_merge() -> None:
     assert len(client.calls) == 1
     patch = cast("dict[str, object]", params["patch"])
     attributes = cast("dict[str, object]", patch["attributes"])
+    assert patch["modified_by"] == "nova"
     assert patch["status"] == "done"
     assert attributes["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_native_entity_upsert_preserves_creator_and_updates_modifier() -> None:
+    client = SurrealGraphClient(group_id="org-native-actor-upsert", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="actor_upsert",
+                entity_type=EntityType.TASK,
+                name="Original actor task",
+                organization_id=client.group_id,
+                created_by="creator-a",
+                modified_by="modifier-a",
+            )
+        )
+        await manager.create_direct(
+            Entity(
+                id="actor_upsert",
+                entity_type=EntityType.TASK,
+                name="Rewritten actor task",
+                organization_id=client.group_id,
+                created_by="creator-b",
+                modified_by="modifier-b",
+            )
+        )
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT name, created_by, modified_by
+                FROM entity
+                WHERE group_id = $group_id AND uuid = "actor_upsert"
+                LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+
+        assert rows[0]["name"] == "Rewritten actor task"
+        assert rows[0]["created_by"] == "creator-a"
+        assert rows[0]["modified_by"] == "modifier-b"
+    finally:
+        await client.close()
 
 
 @pytest.mark.asyncio
@@ -1378,6 +1436,10 @@ async def test_graph_migration_normalizes_legacy_updated_at_values() -> None:
         legacy_definitions = NODE_DEFINITIONS.replace(
             "DEFINE FIELD IF NOT EXISTS updated_at ON entity TYPE option<datetime>;",
             "DEFINE FIELD IF NOT EXISTS updated_at ON entity TYPE option<string>;",
+        ).replace(
+            "DEFINE FIELD IF NOT EXISTS created_by ON entity TYPE option<string>;\n"
+            "DEFINE FIELD IF NOT EXISTS modified_by ON entity TYPE option<string>;\n",
+            "",
         )
         await client.execute_query(
             render_fulltext_compatible_sql(
@@ -1392,7 +1454,11 @@ async def test_graph_migration_normalizes_legacy_updated_at_values() -> None:
                 name = 'Legacy String',
                 entity_type = 'task',
                 labels = [],
-                attributes = { status: 'todo' },
+                attributes = {
+                    status: 'todo',
+                    created_by: 'legacy-user',
+                    modified_by: 'legacy-agent',
+                },
                 group_id = $group_id,
                 created_at = d'2026-05-10T12:00:00Z',
                 updated_at = '2026-05-15T12:00:00+00:00';
@@ -1401,7 +1467,11 @@ async def test_graph_migration_normalizes_legacy_updated_at_values() -> None:
                 name = 'Malformed String',
                 entity_type = 'task',
                 labels = [],
-                attributes = { status: 'todo' },
+                attributes = {
+                    status: 'todo',
+                    created_by: 42,
+                    modified_by: { agent: 'legacy-agent' },
+                },
                 group_id = $group_id,
                 created_at = d'2026-05-14T12:00:00Z',
                 updated_at = 'not-a-date';
@@ -1441,7 +1511,11 @@ async def test_graph_migration_normalizes_legacy_updated_at_values() -> None:
 
         rows = normalize_records(
             await client.execute_query(
-                "SELECT uuid, updated_at FROM entity WHERE group_id = $group_id;",
+                """
+                SELECT uuid, updated_at, created_by, modified_by
+                FROM entity
+                WHERE group_id = $group_id;
+                """,
                 group_id=client.group_id,
             )
         )
@@ -1449,6 +1523,12 @@ async def test_graph_migration_normalizes_legacy_updated_at_values() -> None:
         assert by_uuid["legacy_string"] == datetime(2026, 5, 15, 12, tzinfo=UTC)
         assert by_uuid["malformed_string"] is None
         assert by_uuid["missing_updated"] is None
+        legacy_row = next(row for row in rows if row.get("uuid") == "legacy_string")
+        malformed_row = next(row for row in rows if row.get("uuid") == "malformed_string")
+        assert legacy_row["created_by"] == "legacy-user"
+        assert legacy_row["modified_by"] == "legacy-agent"
+        assert malformed_row.get("created_by") is None
+        assert malformed_row.get("modified_by") is None
 
         listed = await entity_manager.list_by_type(
             EntityType.TASK,
@@ -2580,12 +2660,13 @@ async def test_entity_update_recomputes_summary_after_server_side_merge() -> Non
 
         renamed = await entity_manager.update(
             "summary_native",
-            {"title": "Renamed Summary Name"},
+            {"title": "Renamed Summary Name", "modified_by": "nova"},
         )
 
         assert renamed is not None
         assert renamed.name == "Renamed Summary Name"
         assert renamed.description == "Renamed Summary Name"
+        assert renamed.modified_by == "nova"
 
         long_description = "Detailed summary source " * 30
         described = await entity_manager.update(

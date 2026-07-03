@@ -15,10 +15,12 @@ from sibyl.api.routes.tasks import (
     CompleteTaskRequest,
     CreateNoteRequest,
     CreateTaskRequest,
+    UpdateTaskRequest,
     complete_task,
     create_note,
     create_task,
     list_notes,
+    update_task,
 )
 from sibyl.persistence.content_common import ApiIdempotencyRecord
 from sibyl.services.work_item_workflow import WorkItemAction, WorkItemTransition
@@ -229,6 +231,72 @@ async def test_create_task_rejects_idempotency_key_payload_mismatch() -> None:
         )
 
     assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_update_task_sync_allows_title_description_with_actor_attribution() -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
+    auth = SimpleNamespace()
+    updated = SimpleNamespace(name="Renamed task", metadata={})
+    entity_manager = SimpleNamespace(update=AsyncMock(return_value=updated))
+    runtime = SimpleNamespace(entity_manager=entity_manager, relationship_manager=None)
+
+    with (
+        patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock()),
+        patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock(return_value=runtime)),
+        patch("sibyl.api.routes.tasks.broadcast_event", AsyncMock()),
+    ):
+        response = await update_task(
+            task_id="task-123",
+            request=UpdateTaskRequest(title="Renamed task", description="Updated body"),
+            sync=True,
+            org=org,
+            user=user,
+            auth=auth,
+        )
+
+    assert response.success is True
+    entity_manager.update.assert_awaited_once_with(
+        "task-123",
+        {
+            "modified_by": str(user.id),
+            "name": "Renamed task",
+            "description": "Updated body",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_task_async_allows_dependency_only_update() -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
+    auth = SimpleNamespace()
+    enqueue = AsyncMock(return_value="job-123")
+
+    with (
+        patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock()),
+        patch("sibyl.jobs.queue.enqueue_update_task", enqueue),
+    ):
+        response = await update_task(
+            task_id="task-123",
+            request=UpdateTaskRequest(add_depends_on=["task-dep"]),
+            sync=False,
+            org=org,
+            user=user,
+            auth=auth,
+        )
+
+    assert response.success is True
+    enqueue.assert_awaited_once_with(
+        "task-123",
+        {"modified_by": str(user.id)},
+        str(org.id),
+        epic_id=None,
+        new_status=None,
+        add_depends_on=["task-dep"],
+        remove_depends_on=[],
+    )
 
 
 @pytest.mark.asyncio
