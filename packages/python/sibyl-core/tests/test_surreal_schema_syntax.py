@@ -41,6 +41,7 @@ from sibyl_core.backends.surreal.schema import (
     CURRENT_SCHEMA_MAINTENANCE_DEFINITIONS,
     DEAD_GRAPH_OBJECT_REMOVAL_DEFINITIONS,
     EDGE_DEFINITIONS,
+    ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS,
     ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS,
     GRAPH_ENUM_ASSERTION_DEFINITIONS,
     GRAPH_INDEX_PRUNE_DEFINITIONS,
@@ -835,6 +836,27 @@ def test_graph_enum_assertions_are_versioned() -> None:
     assert "ASSERT $value IN ['pattern'" in GRAPH_ENUM_ASSERTION_DEFINITIONS
     assert "graph_enum_assertions" in [migration.name for migration in GRAPH_SCHEMA_MIGRATIONS]
     assert GRAPH_ENUM_ASSERTION_DEFINITIONS.strip().splitlines()[0] in migration_sql
+
+
+def test_graph_entity_actor_attribution_fields_are_versioned() -> None:
+    migration_sql = "\n".join(
+        statement for migration in GRAPH_SCHEMA_MIGRATIONS for statement in migration.statements
+    )
+
+    assert "DEFINE FIELD IF NOT EXISTS created_by ON entity TYPE option<string>" in NODE_DEFINITIONS
+    assert "DEFINE FIELD IF NOT EXISTS modified_by ON entity TYPE option<string>" in (
+        NODE_DEFINITIONS
+    )
+    assert "UPDATE entity SET created_by = attributes.created_by" in (
+        ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS
+    )
+    assert "type::is::string(attributes.created_by)" in (ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS)
+    assert "UPDATE entity SET modified_by = attributes.modified_by" in (
+        ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS
+    )
+    assert "type::is::string(attributes.modified_by)" in (ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS)
+    assert "entity_actor_attribution" in [migration.name for migration in GRAPH_SCHEMA_MIGRATIONS]
+    assert ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS.strip().splitlines()[0] in migration_sql
 
 
 def test_graph_relation_cleanup_covers_all_relation_tables() -> None:

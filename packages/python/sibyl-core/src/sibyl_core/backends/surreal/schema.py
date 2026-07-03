@@ -85,6 +85,8 @@ DEFINE FIELD IF NOT EXISTS attributes ON entity TYPE object FLEXIBLE DEFAULT {{}
 DEFINE FIELD IF NOT EXISTS group_id ON entity TYPE string;
 DEFINE FIELD IF NOT EXISTS created_at ON entity TYPE datetime DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS updated_at ON entity TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS created_by ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS modified_by ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS project_id ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS epic_id ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS parent_task_id ON entity TYPE option<string>;
@@ -368,6 +370,22 @@ DEFINE FIELD OVERWRITE entity_type ON entity TYPE string
 """
 
 
+ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS = """
+DEFINE FIELD IF NOT EXISTS created_by ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS modified_by ON entity TYPE option<string>;
+UPDATE entity SET created_by = attributes.created_by
+WHERE created_by = NONE
+    AND attributes.created_by != NONE
+    AND type::is::string(attributes.created_by)
+    AND attributes.created_by != '';
+UPDATE entity SET modified_by = attributes.modified_by
+WHERE modified_by = NONE
+    AND attributes.modified_by != NONE
+    AND type::is::string(attributes.modified_by)
+    AND attributes.modified_by != '';
+"""
+
+
 CURRENT_SCHEMA_MAINTENANCE_DEFINITIONS = ENTITY_DENORMALIZATION_MAINTENANCE_DEFINITIONS
 
 
@@ -421,6 +439,11 @@ GRAPH_SCHEMA_MIGRATIONS = (
         version=8,
         name="graph_enum_assertions",
         statements=tuple(split_statements(GRAPH_ENUM_ASSERTION_DEFINITIONS)),
+    ),
+    SchemaMigration(
+        version=9,
+        name="entity_actor_attribution",
+        statements=tuple(split_statements(ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS)),
     ),
 )
 
@@ -804,6 +827,7 @@ __all__ = [
     "EDGE_DEFINITIONS",
     "EMBEDDING_DIM",
     "EMBEDDING_VECTOR_FIELDS",
+    "ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS",
     "ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS",
     "GRAPH_EDGES",
     "GRAPH_ENUM_ASSERTION_DEFINITIONS",
