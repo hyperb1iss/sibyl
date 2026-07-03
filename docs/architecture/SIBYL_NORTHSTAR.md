@@ -64,6 +64,11 @@ refresh memory as routine background product behavior. Humans should mainly see 
 sensitive material, ambiguous contradictions, destructive actions, policy failures, and high-impact
 sharing decisions.
 
+Post-1.0, the loop closes on itself: when recalled memory informs an action, that use is recorded
+(citation/usage signal), and usage drives survival, consolidation priority, and distillation — so
+forgetting means "unused = dead," not "old = dead," and the corpus gets better the more it is used.
+(See the usage-loop work in [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md).)
+
 That loop must work for a solo developer, a team of humans, a swarm of agents, or an organization
 with private and shared memory spaces. It must cover software projects, product strategy, home
 automation, creative planning, research, relationships between people and organizations, or any
