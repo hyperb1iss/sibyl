@@ -117,6 +117,24 @@
       "metric_contracts": [
         {
           "metric": "lafs_gain",
+          "mode": "receipt",
+          "required_receipt": "pinned-longmemeval-v2.json",
+          "receipt_schema": "sibyl-longmemeval-v2-official-receipt-v1",
+          "direction": "higher",
+          "threshold": 0,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "official harness",
+            "dataset hashes",
+            "source runs",
+            "model pins",
+            "leaderboard metrics",
+            "accounting",
+            "approval boundary"
+          ]
+        },
+        {
+          "metric": "lafs_gain",
           "mode": "no-regression",
           "direction": "higher",
           "baseline": "pinned-longmemeval-v2",

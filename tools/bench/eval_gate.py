@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, TypeGuard, cast
 
-ProfileName = Literal["smoke", "acceptance", "context-pack", "ai-memory"]
+ProfileName = Literal["smoke", "acceptance", "context-pack", "ai-memory", "longmemeval-v2"]
 MetricDirection = Literal["higher", "lower"]
 ManifestGateMode = Literal["threshold", "no-regression", "receipt"]
 
@@ -46,6 +46,11 @@ PROFILE_THRESHOLDS: dict[ProfileName, dict[str, MetricThreshold]] = {
         "ndcg@5": MetricThreshold(minimum=0.70),
         "recall@10": MetricThreshold(minimum=0.80),
         "ndcg@10": MetricThreshold(minimum=0.70),
+    },
+    "longmemeval-v2": {
+        "lafs_gain": MetricThreshold(minimum=0.0),
+        "overall_full_set": MetricThreshold(minimum=0.0),
+        "memory_query_avg_seconds": MetricThreshold(maximum=200.0),
     },
 }
 
@@ -167,6 +172,12 @@ HIGHER_IS_BETTER_METRICS = frozenset(
         "pass_rate",
         "qa_accuracy",
         "qa_mean_score",
+        "lafs_gain",
+        "overall_full_set",
+        "gotchas_accuracy",
+        "static_accuracy",
+        "dynamic_accuracy",
+        "procedure_accuracy",
         "source_metadata_coverage",
         "facet_order_match_rate",
     )
@@ -182,6 +193,10 @@ _KNOWN_EMBEDDING_DIMENSIONS = {
 }
 ACCOUNTING_SCHEMA_VERSION = "sibyl-eval-accounting-v1"
 QA_SCHEMA_VERSION = "sibyl-longmemeval-s-qa-v1"
+LONGMEMEVAL_V2_RECEIPT_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-receipt-v1"
+LONGMEMEVAL_V2_OFFICIAL_REPO_URL = "https://github.com/xiaowu0162/LongMemEval-V2"
+LONGMEMEVAL_V2_QWEN_READER_FRAGMENT = "qwen3.5-9b"
+LONGMEMEVAL_V2_GPT_EVALUATOR_FRAGMENT = "gpt-5.2"
 _ACCOUNTING_SECTIONS = ("latency", "tokens", "embedding", "reader", "judge", "cost")
 _ACCOUNTING_LATENCY_FIELDS = ("p50_ms", "p95_ms", "max_ms")
 _ACCOUNTING_TOKEN_FIELDS = (
@@ -220,6 +235,55 @@ _QA_CASE_REQUIRED_FIELDS = (
     "context_session_ids",
     "answer_session_ids",
     "judge_rationale",
+)
+_LONGMEMEVAL_V2_REQUIRED_FIELDS = (
+    "schema_version",
+    "suite",
+    "suite_version",
+    "generated_at",
+    "sibyl_commit",
+    "command",
+    "domain",
+    "tier",
+    "method",
+    "claim_boundary",
+    "official_repo",
+    "dataset",
+    "source_runs",
+    "models",
+    "artifacts",
+    "metrics",
+    "accounting",
+    "checks",
+    "approval_boundary",
+)
+_LONGMEMEVAL_V2_DATASET_FIELDS = (
+    "name",
+    "tier",
+    "questions_sha256",
+    "trajectories_sha256",
+    "haystack_sha256",
+    "question_count",
+)
+_LONGMEMEVAL_V2_METRICS = (
+    "lafs_gain",
+    "overall_full_set",
+    "memory_query_avg_seconds",
+    "gotchas_accuracy",
+    "static_accuracy",
+    "dynamic_accuracy",
+    "procedure_accuracy",
+)
+_LONGMEMEVAL_V2_REQUIRED_CHECK_SURFACES = frozenset(
+    (
+        "official harness",
+        "dataset hashes",
+        "source runs",
+        "model pins",
+        "leaderboard metrics",
+        "accounting",
+        "approval boundary",
+    )
 )
 
 
@@ -826,6 +890,212 @@ def _validate_ai_memory_qa(report: dict[str, Any], *, require_qa: bool) -> list[
     return failures
 
 
+def _validate_sha256_ref(value: Any, *, path: str) -> list[str]:
+    if not isinstance(value, str) or not value.startswith("sha256:"):
+        return [f"{path} must be a sha256: digest"]
+    digest = value.removeprefix("sha256:").lower()
+    if len(digest) != SHA256_HEX_LENGTH or any(
+        character not in SHA256_HEX_CHARACTERS for character in digest
+    ):
+        return [f"{path} must be a sha256: digest"]
+    return []
+
+
+def _validate_probability_metric(value: Any, *, path: str) -> list[str]:
+    return _validate_probability(value, path=path)
+
+
+def _validate_longmemeval_v2_repo(report: dict[str, Any]) -> list[str]:
+    official_repo = report.get("official_repo")
+    if not isinstance(official_repo, dict):
+        return ["official_repo must be an object"]
+
+    failures: list[str] = []
+    if official_repo.get("url") != LONGMEMEVAL_V2_OFFICIAL_REPO_URL:
+        failures.append(f"official_repo['url'] must be {LONGMEMEVAL_V2_OFFICIAL_REPO_URL!r}")
+    for field in ("commit", "harness_path"):
+        if not isinstance(official_repo.get(field), str) or not official_repo[field].strip():
+            failures.append(f"official_repo missing non-empty field {field!r}")
+    if official_repo.get("harness_exists") is not True:
+        failures.append("official_repo['harness_exists'] must be true")
+    return failures
+
+
+def _validate_longmemeval_v2_dataset(report: dict[str, Any]) -> list[str]:
+    dataset = report.get("dataset")
+    if not isinstance(dataset, dict):
+        return ["dataset must be an object"]
+
+    failures: list[str] = []
+    failures.extend(
+        _validate_required_fields(
+            dataset,
+            path="dataset",
+            fields=_LONGMEMEVAL_V2_DATASET_FIELDS,
+        )
+    )
+    for field in ("questions_sha256", "trajectories_sha256", "haystack_sha256"):
+        failures.extend(_validate_sha256_ref(dataset.get(field), path=f"dataset[{field!r}]"))
+    if dataset.get("tier") not in {"small", "medium"}:
+        failures.append("dataset['tier'] must be 'small' or 'medium'")
+    if not _is_positive_integer(dataset.get("question_count")):
+        failures.append("dataset['question_count'] must be a positive integer")
+    return failures
+
+
+def _contains_model_fragment(value: Any, fragment: str) -> bool:
+    return fragment in str(value or "").lower()
+
+
+def _validate_longmemeval_v2_models(report: dict[str, Any]) -> list[str]:
+    models = report.get("models")
+    if not isinstance(models, dict):
+        return ["models must be an object"]
+
+    failures: list[str] = []
+    for field in ("reader_model", "evaluator_model"):
+        if not isinstance(models.get(field), str) or not models[field].strip():
+            failures.append(f"models missing non-empty field {field!r}")
+    if not _contains_model_fragment(
+        models.get("reader_model"),
+        LONGMEMEVAL_V2_QWEN_READER_FRAGMENT,
+    ):
+        failures.append(
+            f"models['reader_model'] must contain {LONGMEMEVAL_V2_QWEN_READER_FRAGMENT!r}"
+        )
+    if not _contains_model_fragment(
+        models.get("evaluator_model"),
+        LONGMEMEVAL_V2_GPT_EVALUATOR_FRAGMENT,
+    ):
+        failures.append(
+            f"models['evaluator_model'] must contain {LONGMEMEVAL_V2_GPT_EVALUATOR_FRAGMENT!r}"
+        )
+    return failures
+
+
+def _validate_longmemeval_v2_source_runs(report: dict[str, Any]) -> list[str]:
+    source_runs = report.get("source_runs")
+    if not isinstance(source_runs, dict):
+        return ["source_runs must be an object"]
+
+    failures: list[str] = []
+    if source_runs.get("complete") is not True:
+        failures.append("source_runs['complete'] must be true")
+    if source_runs.get("model_consistent") is not True:
+        failures.append("source_runs['model_consistent'] must be true")
+    expected_domains = source_runs.get("expected_domains")
+    domains = source_runs.get("domains")
+    if not isinstance(expected_domains, list) or not expected_domains:
+        failures.append("source_runs['expected_domains'] must be a non-empty list")
+        expected_domains = []
+    if not isinstance(domains, dict):
+        failures.append("source_runs['domains'] must be an object")
+        domains = {}
+    for domain in expected_domains:
+        if not isinstance(domain, str) or not domain.strip():
+            failures.append("source_runs['expected_domains'] must contain strings")
+            continue
+        source = domains.get(domain)
+        if not isinstance(source, dict):
+            failures.append(f"source_runs['domains'] missing domain {domain!r}")
+            continue
+        for artifact in ("run_args", "aggregated_metrics", "per_question"):
+            record = source.get(artifact)
+            if not isinstance(record, dict) or record.get("exists") is not True:
+                failures.append(f"source_runs['domains'][{domain!r}][{artifact!r}] must exist")
+    return failures
+
+
+def _validate_longmemeval_v2_metrics(report: dict[str, Any]) -> list[str]:
+    metrics = report.get("metrics")
+    if not isinstance(metrics, dict):
+        return ["metrics must be an object"]
+
+    failures: list[str] = []
+    for metric in _LONGMEMEVAL_V2_METRICS:
+        value = metrics.get(metric)
+        if not _is_finite_number(value):
+            failures.append(f"metrics[{metric!r}] must be finite numeric")
+            continue
+        if metric.endswith("_accuracy") or metric == "overall_full_set":
+            failures.extend(_validate_probability_metric(value, path=f"metrics[{metric!r}]"))
+    memory_query = metrics.get("memory_query_avg_seconds")
+    if _is_finite_number(memory_query) and float(memory_query) <= 0:
+        failures.append("metrics['memory_query_avg_seconds'] must be positive")
+    return failures
+
+
+def _validate_longmemeval_v2_accounting(report: dict[str, Any]) -> list[str]:
+    accounting = report.get("accounting")
+    if not isinstance(accounting, dict):
+        return ["accounting must be an object"]
+    failures = _validate_accounting(report)
+    failures.extend(_validate_accounting_consistency(report, extract_metrics(report)))
+    return failures
+
+
+def _validate_longmemeval_v2_checks(report: dict[str, Any]) -> list[str]:
+    checks = report.get("checks")
+    if not isinstance(checks, list) or not checks:
+        return ["checks must be a non-empty list"]
+
+    failures: list[str] = []
+    covered_surfaces: set[str] = set()
+    for index, check in enumerate(checks):
+        path = f"checks[{index}]"
+        if not isinstance(check, dict):
+            failures.append(f"{path} must be an object")
+            continue
+        if check.get("status") != "PASS":
+            failures.append(f"{path} status must be 'PASS'")
+        surfaces = check.get("surfaces")
+        if not isinstance(surfaces, list) or not surfaces:
+            failures.append(f"{path}.surfaces must be a non-empty list")
+            continue
+        for surface in surfaces:
+            if isinstance(surface, str) and surface.strip():
+                covered_surfaces.add(surface.strip())
+            else:
+                failures.append(f"{path}.surfaces must contain only non-empty strings")
+
+    missing_surfaces = sorted(_LONGMEMEVAL_V2_REQUIRED_CHECK_SURFACES - covered_surfaces)
+    if missing_surfaces:
+        failures.append(f"checks missing required surfaces: {missing_surfaces}")
+    return failures
+
+
+def _validate_longmemeval_v2_receipt(report: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    failures.extend(
+        _validate_required_fields(
+            report,
+            path="receipt",
+            fields=_LONGMEMEVAL_V2_REQUIRED_FIELDS,
+        )
+    )
+    if report.get("schema_version") != LONGMEMEVAL_V2_RECEIPT_SCHEMA_VERSION:
+        failures.append(f"schema_version must be {LONGMEMEVAL_V2_RECEIPT_SCHEMA_VERSION!r}")
+    if report.get("domain") not in {"web", "enterprise", "combined"}:
+        failures.append("domain must be 'web', 'enterprise', or 'combined'")
+    if report.get("tier") not in {"small", "medium"}:
+        failures.append("tier must be 'small' or 'medium'")
+
+    failures.extend(_validate_longmemeval_v2_repo(report))
+    failures.extend(_validate_longmemeval_v2_dataset(report))
+    failures.extend(_validate_longmemeval_v2_source_runs(report))
+    failures.extend(_validate_longmemeval_v2_models(report))
+    failures.extend(_validate_longmemeval_v2_metrics(report))
+    failures.extend(_validate_longmemeval_v2_accounting(report))
+    failures.extend(_validate_longmemeval_v2_checks(report))
+
+    approval = report.get("approval_boundary")
+    if not isinstance(approval, dict):
+        failures.append("approval_boundary must be an object")
+    elif approval.get("official_full_run_requires_approval") is not True:
+        failures.append("approval_boundary['official_full_run_requires_approval'] must be true")
+    return failures
+
+
 def validate_ai_memory_record(
     report: dict[str, Any],
     *,
@@ -1268,6 +1538,8 @@ def _validate_profile_requirements(
         return validate_ai_memory_record(report, require_qa=require_qa)
     if profile == "context-pack":
         return validate_context_pack_release_metadata(report)
+    if profile == "longmemeval-v2":
+        return _validate_longmemeval_v2_receipt(report)
     return []
 
 
@@ -2446,7 +2718,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--profile",
-        choices=("smoke", "acceptance", "context-pack", "ai-memory"),
+        choices=("smoke", "acceptance", "context-pack", "ai-memory", "longmemeval-v2"),
         default="acceptance",
         help="Named threshold profile to enforce.",
     )

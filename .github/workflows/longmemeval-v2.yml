@@ -5,8 +5,13 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/longmemeval-v2.yml"
+      - "benchmarks/longmemeval_v2_download.py"
+      - "benchmarks/longmemeval_v2_memory/**"
+      - "benchmarks/longmemeval_v2_official.py"
       - "benchmarks/longmemeval_v2_probe.py"
       - "packages/python/sibyl-core/src/sibyl_core/evals/**"
+      - "tools/bench/eval_gate.py"
+      - "tools/tests/test_longmemeval_v2_official.py"
       - "packages/python/sibyl-core/tests/test_longmemeval_v2.py"
       - "tools/tests/test_longmemeval_v2_probe.py"
       - "moon.yml"
@@ -16,14 +21,55 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/longmemeval-v2.yml"
+      - "benchmarks/longmemeval_v2_download.py"
+      - "benchmarks/longmemeval_v2_memory/**"
+      - "benchmarks/longmemeval_v2_official.py"
       - "benchmarks/longmemeval_v2_probe.py"
       - "packages/python/sibyl-core/src/sibyl_core/evals/**"
+      - "tools/bench/eval_gate.py"
+      - "tools/tests/test_longmemeval_v2_official.py"
       - "packages/python/sibyl-core/tests/test_longmemeval_v2.py"
       - "tools/tests/test_longmemeval_v2_probe.py"
       - "moon.yml"
       - "pyproject.toml"
       - "uv.lock"
   workflow_dispatch:
+    inputs:
+      run_official_full:
+        description: "Run the approval-bound official full harness"
+        type: boolean
+        default: false
+      official_tier:
+        description: "Official haystack tier"
+        type: choice
+        options:
+          - small
+          - medium
+        default: small
+      official_limit:
+        description: "Optional question limit per domain; blank means full domain"
+        type: string
+        default: ""
+      official_dataset_revision:
+        description: "Optional Hugging Face dataset revision"
+        type: string
+        default: ""
+      official_reader_base_url:
+        description: "OpenAI-compatible Qwen reader endpoint"
+        type: string
+        default: "http://localhost:8023/v1"
+      official_reader_model:
+        description: "Official reader model"
+        type: string
+        default: "Qwen/Qwen3.5-9B"
+      official_evaluator_model:
+        description: "Official evaluator model"
+        type: string
+        default: "gpt-5.2"
+      official_include_screenshots:
+        description: "Download trajectory screenshots and pass screenshot refs"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -116,4 +162,296 @@ jobs:
         with:
           name: longmemeval-v2-${{ matrix.tier }}-probe-${{ github.sha }}
           path: .moon/cache/evals/longmemeval_v2_${{ matrix.tier }}_probe.json
+          if-no-files-found: error
+
+  official-full:
+    name: Official ${{ matrix.domain }} ${{ inputs.official_tier || 'small' }}
+    if: github.event_name == 'workflow_dispatch' && inputs.run_official_full
+    runs-on: ubuntu-latest
+    timeout-minutes: 720
+    strategy:
+      fail-fast: false
+      matrix:
+        domain: [web, enterprise]
+    env:
+      COMPOSE_PROJECT_NAME: sibyl-longmemeval-v2
+      DATA_ROOT: .moon/cache/benchmarks/longmemeval-v2-official
+      OFFICIAL_REPO_DIR: .moon/cache/longmemeval-v2-official
+      OUTPUT_ROOT: .moon/cache/evals/longmemeval-v2-official
+      OFFICIAL_TIER: ${{ inputs.official_tier || 'small' }}
+      OFFICIAL_LIMIT: ${{ inputs.official_limit || '' }}
+      OFFICIAL_DATASET_REVISION: ${{ inputs.official_dataset_revision || '' }}
+      OFFICIAL_INCLUDE_SCREENSHOTS: ${{ inputs.official_include_screenshots || false }}
+      READER_BASE_URL: ${{ inputs.official_reader_base_url || 'http://localhost:8023/v1' }}
+      READER_MODEL: ${{ inputs.official_reader_model || 'Qwen/Qwen3.5-9B' }}
+      EVALUATOR_MODEL: ${{ inputs.official_evaluator_model || 'gpt-5.2' }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SIBYL_ENVIRONMENT: production
+      SIBYL_JWT_SECRET: test-secret-for-longmemeval-v2
+      SIBYL_STORE: surreal
+      SIBYL_AUTH_STORE: surreal
+      SIBYL_PUBLIC_SIGNUPS_ENABLED: "true"
+      SIBYL_LOCAL_AUTH_ENABLED: "true"
+      SIBYL_COORDINATION_BACKEND: local
+      SIBYL_SURREAL_URL: ws://localhost:8000/rpc
+      SIBYL_SURREAL_USERNAME: sibyl_ci
+      SIBYL_SURREAL_PASSWORD: sibyl_ci_password
+      SIBYL_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/checkout@v7
+        with:
+          repository: xiaowu0162/LongMemEval-V2
+          path: .moon/cache/longmemeval-v2-official
+
+      - name: Guard paid-run dependencies
+        run: |
+          set -euo pipefail
+          if [[ -z "${OPENAI_API_KEY}" ]]; then
+            echo "::error::OPENAI_API_KEY repo secret is required for evaluator and Sibyl embeddings."
+            exit 1
+          fi
+          if [[ -z "${READER_BASE_URL}" ]]; then
+            echo "::error::official_reader_base_url must point at the Qwen3.5-9B reader endpoint."
+            exit 1
+          fi
+          curl -fsS "${READER_BASE_URL%/}/models" > /dev/null || {
+            echo "::error::Reader endpoint is not reachable at ${READER_BASE_URL%/}/models."
+            exit 1
+          }
+
+      - name: Start SurrealDB
+        uses: ./.github/actions/start-surrealdb
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt-dev
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6
+        with:
+          auto-install: true
+          auto-setup: true
+          cache-version: longmemeval-v2-official-v1
+
+      - name: Cache moon outputs
+        uses: actions/cache@v6
+        with:
+          path: .moon/cache
+          key:
+            moon-longmemeval-v2-official-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          restore-keys: |
+            moon-longmemeval-v2-official-${{ runner.os }}-
+
+      - name: Cache uv
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/uv
+          key: uv-longmemeval-v2-official-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-longmemeval-v2-official-${{ runner.os }}-
+
+      - name: Start backend server
+        run: |
+          set -euo pipefail
+          cd apps/api
+          uv run sibyld serve > /tmp/sibyld.log 2>&1 &
+          for i in {1..60}; do
+            if curl -fsS http://localhost:3334/api/health > /dev/null; then
+              sleep 2
+              curl -fsS http://localhost:3334/api/health | head -c 200
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/sibyld.log
+          exit 1
+
+      - name: Start background job worker
+        run: |
+          cd apps/api
+          uv run sibyld worker > /tmp/sibyl-worker.log 2>&1 &
+          sleep 2
+
+      - name: Fetch LongMemEval-V2 full dataset
+        run: |
+          set -euo pipefail
+          args=(--data-root "$DATA_ROOT")
+          if [[ -n "$OFFICIAL_DATASET_REVISION" ]]; then
+            args+=(--revision "$OFFICIAL_DATASET_REVISION")
+          fi
+          if [[ "$OFFICIAL_INCLUDE_SCREENSHOTS" == "true" ]]; then
+            args+=(--include-trajectory-screenshots)
+          fi
+          moon run bench-longmemeval-v2-download -- "${args[@]}"
+
+      - name: Run official LongMemEval-V2 domain
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ -n "$OFFICIAL_LIMIT" ]]; then
+            args+=(--limit "$OFFICIAL_LIMIT")
+          fi
+          if [[ "$OFFICIAL_INCLUDE_SCREENSHOTS" == "true" ]]; then
+            args+=(--include-screenshot-refs)
+          fi
+          moon run bench-longmemeval-v2-official-full -- \
+            --official-repo "$OFFICIAL_REPO_DIR" \
+            --data-root "$DATA_ROOT" \
+            --domain "${{ matrix.domain }}" \
+            --tier "$OFFICIAL_TIER" \
+            --output-dir "$OUTPUT_ROOT/${{ matrix.domain }}_${OFFICIAL_TIER}" \
+            --api-url http://127.0.0.1:3334/api \
+            --allow-localhost \
+            --reader-base-url "$READER_BASE_URL" \
+            --reader-model "$READER_MODEL" \
+            --evaluator-model "$EVALUATOR_MODEL" \
+            --evaluator-api-key-env OPENAI_API_KEY \
+            "${args[@]}"
+
+      - name: Upload official domain artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name:
+            longmemeval-v2-${{ matrix.domain }}-${{ inputs.official_tier || 'small' }}-${{
+            github.sha }}
+          path:
+            .moon/cache/evals/longmemeval-v2-official/${{ matrix.domain }}_${{ inputs.official_tier
+            || 'small' }}
+          if-no-files-found: error
+
+  official-package:
+    name: Official combined receipt
+    if: github.event_name == 'workflow_dispatch' && inputs.run_official_full
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: official-full
+    env:
+      DATA_ROOT: .moon/cache/benchmarks/longmemeval-v2-official
+      OFFICIAL_REPO_DIR: .moon/cache/longmemeval-v2-official
+      OUTPUT_ROOT: .moon/cache/evals/longmemeval-v2-official
+      SUBMISSION_ROOT: .moon/cache/evals/longmemeval-v2-submissions
+      SUBMISSION_NAME: sibyl_live_api
+      OPERATING_POINT_NAME: official
+      OFFICIAL_TIER: ${{ inputs.official_tier || 'small' }}
+      OFFICIAL_DATASET_REVISION: ${{ inputs.official_dataset_revision || '' }}
+      OFFICIAL_INCLUDE_SCREENSHOTS: ${{ inputs.official_include_screenshots || false }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/checkout@v7
+        with:
+          repository: xiaowu0162/LongMemEval-V2
+          path: .moon/cache/longmemeval-v2-official
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6
+        with:
+          auto-install: true
+          auto-setup: true
+          cache-version: longmemeval-v2-official-v1
+
+      - name: Cache uv
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/uv
+          key: uv-longmemeval-v2-package-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-longmemeval-v2-package-${{ runner.os }}-
+
+      - name: Download web artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: longmemeval-v2-web-${{ inputs.official_tier || 'small' }}-${{ github.sha }}
+          path: .moon/cache/evals/longmemeval-v2-official/web_${{ inputs.official_tier || 'small' }}
+
+      - name: Download enterprise artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: longmemeval-v2-enterprise-${{ inputs.official_tier || 'small' }}-${{ github.sha }}
+          path:
+            .moon/cache/evals/longmemeval-v2-official/enterprise_${{ inputs.official_tier || 'small'
+            }}
+
+      - name: Fetch LongMemEval-V2 dataset metadata
+        run: |
+          set -euo pipefail
+          args=(--data-root "$DATA_ROOT")
+          if [[ -n "$OFFICIAL_DATASET_REVISION" ]]; then
+            args+=(--revision "$OFFICIAL_DATASET_REVISION")
+          fi
+          if [[ "$OFFICIAL_INCLUDE_SCREENSHOTS" == "true" ]]; then
+            args+=(--include-trajectory-screenshots)
+          fi
+          moon run bench-longmemeval-v2-download -- "${args[@]}"
+
+      - name: Build official submission package and receipt
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUTPUT_ROOT"
+          cat > "$OUTPUT_ROOT/SYSTEM_DESCRIPTION.md" <<'EOF'
+          Sibyl live API memory backend for LongMemEval-V2. The memory adapter
+          writes trajectory chunks into Sibyl and queries Sibyl search for
+          context before the fixed official reader answers each question.
+          EOF
+
+          python "$OFFICIAL_REPO_DIR/leaderboard/build_submission_step_1_single_operating_point.py" \
+            "$OUTPUT_ROOT/web_${OFFICIAL_TIER}" \
+            "$OUTPUT_ROOT/enterprise_${OFFICIAL_TIER}" \
+            "$SUBMISSION_NAME" \
+            "$OPERATING_POINT_NAME" \
+            "$OFFICIAL_TIER" \
+            --method sibyl_live_api \
+            --output-root "$SUBMISSION_ROOT" \
+            --force
+
+          python "$OFFICIAL_REPO_DIR/leaderboard/build_submission_step_2_build_package.py" \
+            "$SUBMISSION_NAME" \
+            "$OUTPUT_ROOT/SYSTEM_DESCRIPTION.md" \
+            benchmarks/longmemeval_v2_memory/sibyl_memory.py \
+            "$SUBMISSION_ROOT/$SUBMISSION_NAME/operating_points/$OPERATING_POINT_NAME" \
+            --output-root "$SUBMISSION_ROOT" \
+            --force
+
+          mkdir -p "$OUTPUT_ROOT/combined_${OFFICIAL_TIER}"
+          python "$OFFICIAL_REPO_DIR/leaderboard/combine_aggregated_metrics.py" \
+            "$OUTPUT_ROOT/web_${OFFICIAL_TIER}/aggregated_metrics.json" \
+            "$OUTPUT_ROOT/enterprise_${OFFICIAL_TIER}/aggregated_metrics.json" \
+            -o "$OUTPUT_ROOT/combined_${OFFICIAL_TIER}/aggregated_metrics.json"
+
+          moon run bench-longmemeval-v2-official -- \
+            --official-repo "$OFFICIAL_REPO_DIR" \
+            --data-root "$DATA_ROOT" \
+            --domain combined \
+            --tier "$OFFICIAL_TIER" \
+            --output-dir "$OUTPUT_ROOT/combined_${OFFICIAL_TIER}" \
+            --receipt-only \
+            --metric-overview "$SUBMISSION_ROOT/$SUBMISSION_NAME/operating_points/$OPERATING_POINT_NAME/metric_overview.json" \
+            --combined-metrics "$OUTPUT_ROOT/combined_${OFFICIAL_TIER}/aggregated_metrics.json" \
+            --submission-overview "$SUBMISSION_ROOT/$SUBMISSION_NAME/submission_overview.json" \
+            --submission-archive "$SUBMISSION_ROOT/$SUBMISSION_NAME.tar.gz" \
+            --web-output-dir "$OUTPUT_ROOT/web_${OFFICIAL_TIER}" \
+            --enterprise-output-dir "$OUTPUT_ROOT/enterprise_${OFFICIAL_TIER}" \
+            --receipt-output "$OUTPUT_ROOT/longmemeval_v2_${OFFICIAL_TIER}_receipt.json"
+
+          moon run bench-gate -- \
+            "$OUTPUT_ROOT/longmemeval_v2_${OFFICIAL_TIER}_receipt.json" \
+            --profile longmemeval-v2
+
+      - name: Upload official combined receipt
+        uses: actions/upload-artifact@v7
+        with:
+          name: longmemeval-v2-combined-${{ inputs.official_tier || 'small' }}-${{ github.sha }}
+          path: |
+            .moon/cache/evals/longmemeval-v2-official/longmemeval_v2_${{ inputs.official_tier || 'small' }}_receipt.json
+            .moon/cache/evals/longmemeval-v2-official/combined_${{ inputs.official_tier || 'small' }}/aggregated_metrics.json
+            .moon/cache/evals/longmemeval-v2-submissions/sibyl_live_api.tar.gz
+            .moon/cache/evals/longmemeval-v2-submissions/sibyl_live_api/submission_overview.json
+            .moon/cache/evals/longmemeval-v2-submissions/sibyl_live_api/operating_points/official/metric_overview.json
           if-no-files-found: error

@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
+import subprocess
 from pathlib import Path
 from types import ModuleType
 
+from tools.bench import eval_gate
+
 EXPECTED_REQUIRED_TRAJECTORIES = 2
+EXPECTED_LAFS_GAIN = 0.125
+EXPECTED_MEMORY_QUERY_AVG_SECONDS = 2.5
 TEST_CONTENT_MAX_CHARS = 420
 
 
@@ -100,6 +106,114 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(tmp_path: Path)
     assert plan["requirements"]["official_repo_configured"] is False
     assert "reader_endpoint_reachable" in plan["requirements"]
     assert "torch_available" in plan["requirements"]
+
+
+def test_official_runner_receipt_only_emits_citable_contract(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    data_root = tmp_path / "data"
+    receipt_dir = tmp_path / "receipt"
+    web_output_dir = tmp_path / "runs" / "web"
+    enterprise_output_dir = tmp_path / "runs" / "enterprise"
+    combined_dir = tmp_path / "combined"
+    official_repo = _write_official_repo(tmp_path / "official")
+    _write_dataset(data_root)
+    _write_official_outputs(web_output_dir, domain="web")
+    _write_official_outputs(enterprise_output_dir, domain="enterprise")
+    _write_combined_outputs(combined_dir)
+
+    assert (
+        module.main(
+            [
+                "--data-root",
+                str(data_root),
+                "--domain",
+                "combined",
+                "--tier",
+                "small",
+                "--output-dir",
+                str(receipt_dir),
+                "--official-repo",
+                str(official_repo),
+                "--receipt-only",
+                "--metric-overview",
+                str(combined_dir / "metric_overview.json"),
+                "--combined-metrics",
+                str(combined_dir / "aggregated_metrics.json"),
+                "--submission-overview",
+                str(combined_dir / "submission_overview.json"),
+                "--web-output-dir",
+                str(web_output_dir),
+                "--enterprise-output-dir",
+                str(enterprise_output_dir),
+            ]
+        )
+        == 0
+    )
+
+    receipt = json.loads(
+        (receipt_dir / "longmemeval_v2_official_receipt.json").read_text(encoding="utf-8")
+    )
+
+    assert receipt["schema_version"] == "sibyl-longmemeval-v2-official-receipt-v1"
+    assert receipt["domain"] == "combined"
+    assert receipt["official_repo"]["commit"]
+    assert receipt["dataset"]["questions_sha256"].startswith("sha256:")
+    assert receipt["source_runs"]["complete"] is True
+    assert set(receipt["source_runs"]["domains"]) == {"web", "enterprise"}
+    assert receipt["metrics"]["lafs_gain"] == EXPECTED_LAFS_GAIN
+    assert receipt["metrics"]["memory_query_avg_seconds"] == EXPECTED_MEMORY_QUERY_AVG_SECONDS
+    assert receipt["metrics"]["latency_p95_ms"] > 0
+    assert {check["status"] for check in receipt["checks"]} == {"PASS"}
+    assert eval_gate.evaluate_report(receipt, profile="longmemeval-v2") == []
+
+
+def test_longmemeval_v2_receipt_gate_rejects_missing_lafs(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    data_root = tmp_path / "data"
+    receipt_dir = tmp_path / "receipt"
+    web_output_dir = tmp_path / "runs" / "web"
+    enterprise_output_dir = tmp_path / "runs" / "enterprise"
+    combined_dir = tmp_path / "combined"
+    official_repo = _write_official_repo(tmp_path / "official")
+    _write_dataset(data_root)
+    _write_official_outputs(web_output_dir, domain="web")
+    _write_official_outputs(enterprise_output_dir, domain="enterprise")
+    _write_combined_outputs(combined_dir, include_submission_overview=False)
+
+    assert (
+        module.main(
+            [
+                "--data-root",
+                str(data_root),
+                "--domain",
+                "combined",
+                "--tier",
+                "small",
+                "--output-dir",
+                str(receipt_dir),
+                "--official-repo",
+                str(official_repo),
+                "--receipt-only",
+                "--metric-overview",
+                str(combined_dir / "metric_overview.json"),
+                "--combined-metrics",
+                str(combined_dir / "aggregated_metrics.json"),
+                "--web-output-dir",
+                str(web_output_dir),
+                "--enterprise-output-dir",
+                str(enterprise_output_dir),
+            ]
+        )
+        == 0
+    )
+
+    receipt = json.loads(
+        (receipt_dir / "longmemeval_v2_official_receipt.json").read_text(encoding="utf-8")
+    )
+    failures = eval_gate.evaluate_report(receipt, profile="longmemeval-v2")
+
+    assert "metrics['lafs_gain'] must be finite numeric" in failures
+    assert "checks[4] status must be 'PASS'" in failures
 
 
 def test_sibyl_memory_payloads_chunk_trajectory_by_state() -> None:
@@ -216,6 +330,143 @@ def _write_dataset(root: Path) -> None:
         "\n".join(json.dumps(_trajectory(trajectory_id)) for trajectory_id in ["t1", "t2", "t3"]),
         encoding="utf-8",
     )
+
+
+def _write_official_repo(root: Path) -> Path:
+    git = shutil.which("git")
+    if git is None:
+        msg = "git is required for official-repo provenance tests"
+        raise RuntimeError(msg)
+    (root / "evaluation").mkdir(parents=True)
+    (root / "evaluation" / "harness.py").write_text(
+        "def main():\n    return None\n", encoding="utf-8"
+    )
+    subprocess.run([git, "init"], cwd=root, check=True, capture_output=True)  # noqa: S603
+    subprocess.run([git, "config", "user.email", "test@example.test"], cwd=root, check=True)  # noqa: S603
+    subprocess.run([git, "config", "user.name", "Test"], cwd=root, check=True)  # noqa: S603
+    subprocess.run([git, "add", "evaluation/harness.py"], cwd=root, check=True)  # noqa: S603
+    subprocess.run(  # noqa: S603
+        [git, "commit", "-m", "add harness"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+    return root
+
+
+def _write_official_outputs(output_dir: Path, *, domain: str = "enterprise") -> None:
+    output_dir.mkdir(parents=True)
+    (output_dir / "run_args.json").write_text(
+        json.dumps(
+            {
+                "domain": domain,
+                "tier": "small",
+                "model": "Qwen/Qwen3.5-9B",
+                "base_url": "http://localhost:8023/v1",
+                "evaluator_model": "gpt-5.2",
+                "evaluator_reasoning_effort": "medium",
+                "method": "sibyl_live_api",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (output_dir / "metric_overview.json").write_text(
+        json.dumps(
+            {
+                "overall_full_set": 0.44,
+                "gotchas_accuracy": 0.5,
+                "static_accuracy": 0.4,
+                "dynamic_accuracy": 0.45,
+                "procedure_accuracy": 0.55,
+                "memory_query_avg_seconds": 2.5,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (output_dir / "aggregated_metrics.json").write_text(
+        json.dumps(
+            {
+                "overall": {
+                    "overall_full_set": 0.44,
+                    "count_all_questions": 2,
+                    "count_non_abstention": 2,
+                    "count_abstention": 0,
+                },
+                "non_abstention_by_category": {
+                    "gotchas": {"pct_correct": 0.5, "count": 1},
+                },
+                "combined_abstention_by_category": {
+                    "static": {"pct_correct": 0.4, "count": 1},
+                    "dynamic": {"pct_correct": 0.45, "count": 1},
+                    "procedure": {"pct_correct": 0.55, "count": 1},
+                },
+                "memory_query": {"avg_seconds": 2.5, "max_seconds": 4.0},
+                "tokens": {"prompt_tokens": 1000, "completion_tokens": 200, "total_tokens": 1200},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (output_dir / "per_question.jsonl").write_text(
+        "\n".join(
+            json.dumps({"id": question_id, "memory_query_seconds": latency})
+            for question_id, latency in (("q1", 1.0), ("q2", 2.0), ("q3", 4.0))
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_combined_outputs(
+    output_dir: Path,
+    *,
+    include_submission_overview: bool = True,
+    include_metric_overview_latency: bool = False,
+) -> None:
+    output_dir.mkdir(parents=True)
+    metric_overview = {
+        "overall_full_set": 0.44,
+        "gotchas_accuracy": 0.5,
+        "static_accuracy": 0.4,
+        "dynamic_accuracy": 0.45,
+        "procedure_accuracy": 0.55,
+    }
+    if include_metric_overview_latency:
+        metric_overview["memory_query_avg_seconds"] = 2.5
+    (output_dir / "metric_overview.json").write_text(
+        json.dumps(metric_overview),
+        encoding="utf-8",
+    )
+    (output_dir / "aggregated_metrics.json").write_text(
+        json.dumps(
+            {
+                "overall": {
+                    "overall_full_set": 0.44,
+                    "count_all_questions": 4,
+                    "count_non_abstention": 4,
+                    "count_abstention": 0,
+                },
+                "non_abstention_by_category": {
+                    "gotchas": {"pct_correct": 0.5, "count": 2},
+                },
+                "combined_abstention_by_category": {
+                    "static": {"pct_correct": 0.4, "count": 2},
+                    "dynamic": {"pct_correct": 0.45, "count": 2},
+                    "procedure": {"pct_correct": 0.55, "count": 2},
+                },
+                "memory_query": {
+                    "avg_seconds": 2.5,
+                    "max_seconds": 4.0,
+                    "total_seconds": 10.0,
+                },
+                "tokens": {"prompt_tokens": 2000, "completion_tokens": 400, "total_tokens": 2400},
+            }
+        ),
+        encoding="utf-8",
+    )
+    if include_submission_overview:
+        (output_dir / "submission_overview.json").write_text(
+            json.dumps({"lafs_gain": EXPECTED_LAFS_GAIN}),
+            encoding="utf-8",
+        )
 
 
 def _trajectory(trajectory_id: str, *, tree: str = "button Priority") -> dict[str, object]:

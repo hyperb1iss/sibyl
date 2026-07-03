@@ -107,13 +107,28 @@ def test_longmemeval_v2_workflow_runs_metadata_only_probe() -> None:
     workflow = (
         Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
     ).read_text(encoding="utf-8")
+    probe_job = workflow.split("official-full:", 1)[0]
 
-    assert "matrix:" in workflow
-    assert "tier: [small, medium]" in workflow
-    assert "trajectories.jsonl" not in workflow
-    assert "SIBYL_OPENAI_API_KEY" not in workflow
-    assert "moon run bench-longmemeval-v2-probe" in workflow
-    assert "sha256sum -c -" in workflow
+    assert "matrix:" in probe_job
+    assert "tier: [small, medium]" in probe_job
+    assert "trajectories.jsonl" not in probe_job
+    assert "SIBYL_OPENAI_API_KEY" not in probe_job
+    assert "moon run bench-longmemeval-v2-probe" in probe_job
+    assert "sha256sum -c -" in probe_job
+
+
+def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
+    workflow = (
+        Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "run_official_full:" in workflow
+    assert "if: github.event_name == 'workflow_dispatch' && inputs.run_official_full" in workflow
+    assert "moon run bench-longmemeval-v2-official-full" in workflow
+    assert "build_submission_step_1_single_operating_point.py" in workflow
+    assert "build_submission_step_2_build_package.py" in workflow
+    assert "--receipt-only" in workflow
+    assert "--profile longmemeval-v2" in workflow
 
 
 def _write_dataset(

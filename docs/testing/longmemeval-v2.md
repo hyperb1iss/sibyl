@@ -85,10 +85,55 @@ A leaderboard-valid operating point needs both domains at the same tier and meth
 moon run bench-longmemeval-v2-official-full -- ... --domain enterprise --tier small
 moon run bench-longmemeval-v2-official-full -- ... --domain web --tier small
 
+python /path/to/LongMemEval-V2/leaderboard/build_submission_step_1_single_operating_point.py \
+  runs/sibyl_web_small \
+  runs/sibyl_enterprise_small \
+  sibyl_live_api \
+  official \
+  small \
+  --method sibyl_live_api \
+  --output-root runs/submissions \
+  --force
+
+python /path/to/LongMemEval-V2/leaderboard/build_submission_step_2_build_package.py \
+  sibyl_live_api \
+  runs/SYSTEM_DESCRIPTION.md \
+  benchmarks/longmemeval_v2_memory/sibyl_memory.py \
+  runs/submissions/sibyl_live_api/operating_points/official \
+  --output-root runs/submissions \
+  --force
+
 python /path/to/LongMemEval-V2/leaderboard/combine_aggregated_metrics.py \
-  runs/sibyl_enterprise_small/aggregated_metrics.json \
   runs/sibyl_web_small/aggregated_metrics.json \
+  runs/sibyl_enterprise_small/aggregated_metrics.json \
   -o runs/sibyl_small_combined_metrics.json
+```
+
+Build the receipt from the official submission package:
+
+```bash
+moon run bench-longmemeval-v2-official -- \
+  --official-repo /path/to/LongMemEval-V2 \
+  --data-root /path/to/longmemeval-v2 \
+  --domain combined \
+  --tier small \
+  --output-dir runs/sibyl_small_combined_receipt \
+  --receipt-only \
+  --metric-overview runs/submissions/sibyl_live_api/operating_points/official/metric_overview.json \
+  --combined-metrics runs/sibyl_small_combined_metrics.json \
+  --submission-overview runs/submissions/sibyl_live_api/submission_overview.json \
+  --submission-archive runs/submissions/sibyl_live_api.tar.gz \
+  --web-output-dir runs/sibyl_web_small \
+  --enterprise-output-dir runs/sibyl_enterprise_small \
+  --receipt-output runs/sibyl_small_combined_receipt.json
+```
+
+Gate the receipt before pinning it as release evidence:
+
+```bash
+moon run bench-gate -- \
+  runs/sibyl_small_combined_receipt.json \
+  --profile longmemeval-v2
 ```
 
 ## Honest-Run Requirements
@@ -100,6 +145,9 @@ python /path/to/LongMemEval-V2/leaderboard/combine_aggregated_metrics.py \
 - Reader model endpoint, normally `Qwen/Qwen3.5-9B`.
 - Evaluator key/model for LLM-graded categories, normally `gpt-5.2`.
 - Same method and tier for `web` and `enterprise` before combining metrics.
+- Combined receipt with official repo SHA, official harness presence, source web/enterprise run
+  artifacts, dataset hashes, reader and evaluator model pins, LAFS gain, latency, token/cost
+  accounting, and PASS checks for every required evidence surface.
 
 ## Adapter Contract
 
@@ -123,6 +171,10 @@ single-user default.
 
 The current V2 path proves we can run Sibyl inside the official full-suite contract. It is not yet a
 published V2 score until both domains complete with the official reader and evaluator.
+
+The PR and push workflow path is intentionally metadata-only. The paid official full-suite path is
+manual-only through `workflow_dispatch` with `run_official_full: true`; it requires a reachable
+Qwen3.5-9B reader endpoint and `OPENAI_API_KEY`.
 
 Known limits:
 
