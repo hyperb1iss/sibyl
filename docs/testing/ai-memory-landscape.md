@@ -127,8 +127,8 @@ and its methodology disclosure is exemplary.
 ## QA-Accuracy Comparison (Different Lane)
 
 These systems report end-to-end QA accuracy on LongMemEval-S with an LLM judge. Sibyl does not
-currently publish a number on this axis. Listing them here so the contrast is explicit and so the
-comparison cannot be misread.
+currently publish a citable number on this axis. Listing them here keeps the contrast explicit and
+keeps the comparison from being misread.
 
 | System                 |   Headline | Reader model   | Judge          | LLM extraction | LLM reranker |
 | ---------------------- | ---------: | -------------- | -------------- | :------------: | :----------: |
@@ -151,8 +151,9 @@ questions:
 - QA accuracy answers: "did the whole pipeline produce a correct answer that GPT-4o agreed with?"
 
 Both matter. Sibyl is the retrieval substrate; a downstream reader model and prompt determine the QA
-accuracy on top of it. Adding a reader pass and judge to publish a comparable QA-accuracy number is
-a deliberate next step, not a hidden gap.
+accuracy on top of it. Sibyl now has a gated LongMemEval-S QA lane with a `gpt-4o` reader, `gpt-5.2`
+judge, pinned prompts, schema, rubric, accounting, and `qa_accuracy` no-regression gate. That lane
+becomes comparable only after a pinned model-backed artifact is published.
 
 ## The Architectural Landscape
 
@@ -291,6 +292,7 @@ If you remember one thing: retrieval R@K and end-to-end QA accuracy are differen
 LongMemEval leaderboard tables mix them. Sibyl's 96.96% strict R@5 is in the retrieval lane. When
 comparing against numbers from Mem0, Mastra, OMEGA, Hindsight, Zep, ByteRover, RetainDB,
 Supermemory, or Emergence AI — those are QA-accuracy numbers and they answer a different question.
+Sibyl's QA lane is wired, but it should not be cited until the pinned artifact exists.
 
 The retrieval-lane comparison Sibyl can defend right now: Sibyl reaches LongMemEval-S retrieval
 ceiling on a stricter metric (full multi-answer recall, not lenient hit-rate), on the live
