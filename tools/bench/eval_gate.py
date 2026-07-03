@@ -178,6 +178,16 @@ _KNOWN_EMBEDDING_DIMENSIONS = {
     ("local", "sentence-transformers/all-minilm-l6-v2"): 384,
     ("openai", "text-embedding-3-small"): 1024,
 }
+ACCOUNTING_SCHEMA_VERSION = "sibyl-eval-accounting-v1"
+_ACCOUNTING_SECTIONS = ("latency", "tokens", "embedding", "reader", "judge", "cost")
+_ACCOUNTING_LATENCY_FIELDS = ("p50_ms", "p95_ms", "max_ms")
+_ACCOUNTING_TOKEN_FIELDS = (
+    "estimated_input_tokens",
+    "estimated_output_tokens",
+    "full_context_baseline_estimated_tokens",
+)
+_ACCOUNTING_COST_FIELDS = ("estimated_cost_usd",)
+_ACCOUNTING_PARTY_TOKEN_FIELDS = ("estimated_input_tokens", "estimated_output_tokens")
 
 
 def load_report(path: Path) -> dict[str, Any]:
@@ -306,6 +316,20 @@ def _validate_positive_integer_field(value: Any, *, path: str) -> list[str]:
     if _is_positive_integer(value):
         return []
     return [f"{path} must be a positive integer"]
+
+
+def _validate_non_negative_number(value: Any, *, path: str) -> list[str]:
+    if _is_finite_number(value) and float(value) >= 0.0:
+        return []
+    return [f"{path} must be a finite non-negative number"]
+
+
+def _validate_non_negative_integer(value: Any, *, path: str) -> list[str]:
+    if isinstance(value, bool):
+        return [f"{path} must be a non-negative integer"]
+    if isinstance(value, int) and value >= 0:
+        return []
+    return [f"{path} must be a non-negative integer"]
 
 
 def _normalize_embedding_provider(value: Any) -> str:
@@ -729,6 +753,275 @@ def _validate_report_runtime_requirements(
     return failures
 
 
+def _validate_accounting_number_fields(
+    record: dict[str, Any],
+    *,
+    path: str,
+    fields: tuple[str, ...],
+) -> list[str]:
+    failures: list[str] = []
+    for field in fields:
+        failures.extend(_validate_non_negative_number(record.get(field), path=f"{path}[{field!r}]"))
+    return failures
+
+
+def _validate_accounting_header(accounting: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    if accounting.get("schema_version") != ACCOUNTING_SCHEMA_VERSION:
+        failures.append(f"accounting['schema_version'] must be {ACCOUNTING_SCHEMA_VERSION!r}")
+    if not _is_present(accounting.get("gate_status")):
+        failures.append("accounting missing non-empty field 'gate_status'")
+    for section in _ACCOUNTING_SECTIONS:
+        if not isinstance(accounting.get(section), dict):
+            failures.append(f"accounting missing object section {section!r}")
+    return failures
+
+
+def _validate_accounting_latency(latency: dict[str, Any]) -> list[str]:
+    failures = _validate_accounting_number_fields(
+        latency,
+        path="accounting['latency']",
+        fields=_ACCOUNTING_LATENCY_FIELDS,
+    )
+    if _is_present(latency.get("elapsed_seconds")):
+        failures.extend(
+            _validate_non_negative_number(
+                latency.get("elapsed_seconds"),
+                path="accounting['latency']['elapsed_seconds']",
+            )
+        )
+    return failures
+
+
+def _validate_accounting_tokens(tokens: dict[str, Any]) -> list[str]:
+    failures = _validate_accounting_number_fields(
+        tokens,
+        path="accounting['tokens']",
+        fields=_ACCOUNTING_TOKEN_FIELDS,
+    )
+    if not _is_present(tokens.get("estimator")):
+        failures.append("accounting['tokens'] missing non-empty field 'estimator'")
+    return failures
+
+
+def _validate_accounting_embedding(embedding: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    failures.extend(
+        _validate_non_negative_integer(
+            embedding.get("calls"),
+            path="accounting['embedding']['calls']",
+        )
+    )
+    failures.extend(
+        _validate_non_negative_number(
+            embedding.get("estimated_input_tokens"),
+            path="accounting['embedding']['estimated_input_tokens']",
+        )
+    )
+    failures.extend(
+        _validate_accounting_number_fields(
+            embedding,
+            path="accounting['embedding']",
+            fields=_ACCOUNTING_COST_FIELDS,
+        )
+    )
+    for field in ("provider", "model", "cost_basis"):
+        if not _is_present(embedding.get(field)):
+            failures.append(f"accounting['embedding'] missing non-empty field {field!r}")
+    return failures
+
+
+def _validate_accounting_party(section: str, party: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    failures.extend(
+        _validate_accounting_number_fields(
+            party,
+            path=f"accounting[{section!r}]",
+            fields=_ACCOUNTING_PARTY_TOKEN_FIELDS,
+        )
+    )
+    failures.extend(
+        _validate_accounting_number_fields(
+            party,
+            path=f"accounting[{section!r}]",
+            fields=_ACCOUNTING_COST_FIELDS,
+        )
+    )
+    if not _is_present(party.get("cost_basis")):
+        failures.append(f"accounting[{section!r}] missing non-empty field 'cost_basis'")
+    return failures
+
+
+def _validate_accounting_cost(cost: dict[str, Any]) -> list[str]:
+    failures = _validate_non_negative_number(
+        cost.get("estimated_total_usd"),
+        path="accounting['cost']['estimated_total_usd']",
+    )
+    for field in ("currency", "enforcement"):
+        if not _is_present(cost.get(field)):
+            failures.append(f"accounting['cost'] missing non-empty field {field!r}")
+    return failures
+
+
+def _validate_accounting(report: dict[str, Any]) -> list[str]:
+    accounting = report.get("accounting")
+    if not isinstance(accounting, dict) or not accounting:
+        return ["missing non-empty field 'accounting'"]
+    failures = _validate_accounting_header(accounting)
+    validators = (
+        ("latency", _validate_accounting_latency),
+        ("tokens", _validate_accounting_tokens),
+        ("embedding", _validate_accounting_embedding),
+        ("reader", lambda record: _validate_accounting_party("reader", record)),
+        ("judge", lambda record: _validate_accounting_party("judge", record)),
+        ("cost", _validate_accounting_cost),
+    )
+    for section, validator in validators:
+        record = accounting.get(section)
+        if isinstance(record, dict):
+            failures.extend(validator(record))
+    return failures
+
+
+def _numbers_match(actual: float, expected: float) -> bool:
+    tolerance = max(1e-6, abs(expected) * 1e-9)
+    return abs(actual - expected) <= tolerance
+
+
+def _validate_accounting_metric_match(
+    metrics: dict[str, float],
+    metric: str,
+    actual: Any,
+    *,
+    path: str,
+) -> list[str]:
+    if metric not in metrics:
+        return []
+    expected = metrics[metric]
+    if _is_finite_number(actual) and _numbers_match(float(actual), expected):
+        return []
+    return [f"{path} must match metric {metric!r}: expected {expected:.4f}, got {actual!r}"]
+
+
+def _accounting_source_metadata(report: dict[str, Any]) -> dict[str, Any]:
+    runtime = report.get("runtime")
+    if isinstance(runtime, dict):
+        return runtime
+    metadata = report.get("metadata")
+    if isinstance(metadata, dict):
+        return metadata
+    return {}
+
+
+def _validate_accounting_consistency(
+    report: dict[str, Any],
+    metrics: dict[str, float],
+) -> list[str]:
+    accounting = report.get("accounting")
+    if not isinstance(accounting, dict):
+        return []
+    latency = accounting.get("latency") if isinstance(accounting.get("latency"), dict) else {}
+    tokens = accounting.get("tokens") if isinstance(accounting.get("tokens"), dict) else {}
+    embedding = accounting.get("embedding") if isinstance(accounting.get("embedding"), dict) else {}
+    cost = accounting.get("cost") if isinstance(accounting.get("cost"), dict) else {}
+    failures: list[str] = []
+    failures.extend(
+        _validate_accounting_metric_match(
+            metrics,
+            "latency_p50_ms",
+            latency.get("p50_ms"),
+            path="accounting['latency']['p50_ms']",
+        )
+    )
+    failures.extend(
+        _validate_accounting_metric_match(
+            metrics,
+            "latency_p95_ms",
+            latency.get("p95_ms"),
+            path="accounting['latency']['p95_ms']",
+        )
+    )
+    failures.extend(
+        _validate_accounting_metric_match(
+            metrics,
+            "max_latency_ms",
+            latency.get("max_ms"),
+            path="accounting['latency']['max_ms']",
+        )
+    )
+    failures.extend(
+        _validate_accounting_metric_match(
+            metrics,
+            "estimated_input_tokens",
+            tokens.get("estimated_input_tokens"),
+            path="accounting['tokens']['estimated_input_tokens']",
+        )
+    )
+    failures.extend(
+        _validate_accounting_metric_match(
+            metrics,
+            "full_context_baseline_estimated_tokens",
+            tokens.get("full_context_baseline_estimated_tokens"),
+            path="accounting['tokens']['full_context_baseline_estimated_tokens']",
+        )
+    )
+
+    source = _accounting_source_metadata(report)
+    provider = _normalize_embedding_provider(source.get("embedding_provider"))
+    expected_model = str(source.get("embedding_model") or "")
+    if provider and _normalize_embedding_provider(embedding.get("provider")) != provider:
+        failures.append(
+            "accounting['embedding']['provider'] must match runtime/metadata "
+            f"embedding_provider {provider!r}"
+        )
+    if expected_model and str(embedding.get("model") or "") != expected_model:
+        failures.append(
+            "accounting['embedding']['model'] must match runtime/metadata "
+            f"embedding_model {expected_model!r}"
+        )
+    expected_calls = (
+        0.0 if provider in _NON_EMBEDDING_PROVIDERS else metrics.get("embedding_call_count")
+    )
+    if expected_calls is not None:
+        failures.extend(
+            _validate_accounting_metric_match(
+                {"embedding_call_count": float(expected_calls)},
+                "embedding_call_count",
+                embedding.get("calls"),
+                path="accounting['embedding']['calls']",
+            )
+        )
+    if provider not in _NON_EMBEDDING_PROVIDERS:
+        failures.extend(
+            _validate_accounting_metric_match(
+                metrics,
+                "embedding_estimated_input_tokens",
+                embedding.get("estimated_input_tokens"),
+                path="accounting['embedding']['estimated_input_tokens']",
+            )
+        )
+
+    section_costs = [
+        section.get("estimated_cost_usd")
+        for section in (
+            embedding,
+            accounting.get("reader") if isinstance(accounting.get("reader"), dict) else {},
+            accounting.get("judge") if isinstance(accounting.get("judge"), dict) else {},
+        )
+    ]
+    if all(_is_finite_number(value) for value in section_costs):
+        expected_total = sum(float(value) for value in section_costs)
+        if not (
+            _is_finite_number(cost.get("estimated_total_usd"))
+            and _numbers_match(float(cost["estimated_total_usd"]), expected_total)
+        ):
+            failures.append(
+                "accounting['cost']['estimated_total_usd'] must equal embedding, reader, "
+                f"and judge costs: expected {expected_total:.6f}"
+            )
+    return failures
+
+
 def _validate_profile_requirements(
     report: dict[str, Any],
     profile: ProfileName,
@@ -843,13 +1136,21 @@ def evaluate_baseline_regressions(
     return failures
 
 
-def evaluate_external_ai_memory_report(report: dict[str, Any]) -> list[str]:
+def evaluate_external_ai_memory_report(
+    report: dict[str, Any],
+    *,
+    require_accounting: bool = False,
+) -> list[str]:
     try:
         metrics = extract_metrics(report)
     except TypeError:
         metrics = {}
     thresholds = build_thresholds(profile="ai-memory", minimums={}, maximums={})
     failures = validate_external_ai_memory_record(report)
+    if require_accounting or _is_present(report.get("accounting")):
+        failures.extend(_validate_accounting(report))
+    if require_accounting:
+        failures.extend(_validate_accounting_consistency(report, metrics))
     failures.extend(_validate_metric_thresholds(metrics, thresholds))
     return failures
 
@@ -898,7 +1199,11 @@ def _validate_external_citable_manifest_entry(
 
     report = load_report(manifest_file)
     failures = [
-        f"{manifest_name}: {failure}" for failure in evaluate_external_ai_memory_report(report)
+        f"{manifest_name}: {failure}"
+        for failure in evaluate_external_ai_memory_report(
+            report,
+            require_accounting=entry.get("accounting_required") is True,
+        )
     ]
     case_result_count = _coerce_positive_integer(report.get("case_results"))
     failures.extend(
@@ -939,7 +1244,12 @@ def _validate_citable_manifest_entry(
 
     report = load_report(artifact_path)
     failures.extend(
-        f"{artifact_name}: {failure}" for failure in evaluate_report(report, profile="ai-memory")
+        f"{artifact_name}: {failure}"
+        for failure in evaluate_report(
+            report,
+            profile="ai-memory",
+            require_accounting=entry.get("accounting_required") is True,
+        )
     )
 
     case_results = report.get("case_results")
@@ -1525,6 +1835,7 @@ def evaluate_report(
     maximums: dict[str, float] | None = None,
     required_metadata: dict[str, str] | None = None,
     required_runtime: dict[str, str] | None = None,
+    require_accounting: bool = False,
 ) -> list[str]:
     try:
         metrics = extract_metrics(report)
@@ -1541,6 +1852,10 @@ def evaluate_report(
     failures.extend(_validate_report_metadata_requirements(report, required_metadata))
     failures.extend(_validate_report_runtime_requirements(report, required_runtime))
     failures.extend(_validate_profile_requirements(report, profile))
+    if require_accounting or _is_present(report.get("accounting")):
+        failures.extend(_validate_accounting(report))
+    if require_accounting:
+        failures.extend(_validate_accounting_consistency(report, metrics))
     failures.extend(_validate_metric_thresholds(metrics, thresholds))
     return failures
 
@@ -1671,7 +1986,7 @@ def _extract_metrics_for_profile(
         return {}
 
 
-def main(argv: list[str] | None = None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Enforce threshold gates on a saved Sibyl eval report."
     )
@@ -1718,6 +2033,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Require report runtime to include exact key/value pairs.",
     )
     parser.add_argument(
+        "--require-accounting",
+        action="store_true",
+        help="Require the W3 cost, latency, token, and embedding accounting block.",
+    )
+    parser.add_argument(
         "--baseline",
         type=Path,
         help="Saved baseline report JSON for no-regression comparison.",
@@ -1736,6 +2056,11 @@ def main(argv: list[str] | None = None) -> int:
         metavar="KEY=VALUE",
         help="Allowed absolute regression for a baseline metric. Defaults to zero.",
     )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
     args = parser.parse_args(argv)
 
     if args.report is None:
@@ -1744,8 +2069,9 @@ def main(argv: list[str] | None = None) -> int:
             or args.baseline_metric
             or args.max_regression
             or args.require_runtime
+            or args.require_accounting
         ):
-            parser.error("--baseline and runtime options require a report argument")
+            parser.error("--baseline, runtime, and accounting options require a report argument")
         return _gate_default_manifest()
     if args.baseline is None and args.baseline_metric:
         parser.error("--baseline-metric requires --baseline")
@@ -1773,6 +2099,7 @@ def main(argv: list[str] | None = None) -> int:
         maximums=maximums,
         required_metadata=required_metadata,
         required_runtime=required_runtime,
+        require_accounting=args.require_accounting,
     )
     if baseline_report is not None:
         failures.extend(

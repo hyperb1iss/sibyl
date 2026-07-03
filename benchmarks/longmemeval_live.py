@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import math
 import os
 import sys
 import time
@@ -57,6 +58,13 @@ DEFAULT_DIAGNOSTIC_SEARCH_LIMIT = 50
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30.0
 DEFAULT_STALL_TIMEOUT_SECONDS = 300.0
 DEFAULT_MEMORY_EXTRACTION_TIMEOUT_SECONDS = 180.0
+APPROX_CHARS_PER_TOKEN = 4.0
+APPROX_TOKEN_SAFETY_MARGIN = 1.2
+ACCOUNTING_SCHEMA_VERSION = "sibyl-eval-accounting-v1"
+ACCOUNTING_GATE_STATUS = "warning-only-until-two-citable-baselines"
+OPENAI_EMBEDDING_COSTS_USD_PER_1M_TOKENS = {
+    "text-embedding-3-small": 0.02,
+}
 
 
 class LongMemEvalLiveError(RuntimeError):
@@ -71,6 +79,65 @@ def _format_ms(value: Any) -> str:
     if not isinstance(value, int | float):
         return "n/a"
     return f"{value:.0f}ms"
+
+
+def _estimate_tokens(text: Any) -> float:
+    if not isinstance(text, str) or not text:
+        return 0.0
+    return float(math.ceil((len(text) / APPROX_CHARS_PER_TOKEN) * APPROX_TOKEN_SAFETY_MARGIN))
+
+
+def _percentile(values: list[float], percentile: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    rank = math.ceil((percentile / 100) * len(ordered))
+    index = min(max(rank - 1, 0), len(ordered) - 1)
+    return ordered[index]
+
+
+def _case_token_accounting(
+    entry: dict[str, Any],
+    *,
+    corpus_text_policy: str,
+) -> dict[str, float]:
+    documents = build_longmemeval_corpus(entry, text_policy=corpus_text_policy)
+    question_tokens = _estimate_tokens(entry.get("question"))
+    corpus_tokens = sum(_estimate_tokens(document.text) for document in documents)
+    return {
+        "question_estimated_input_tokens": question_tokens,
+        "corpus_estimated_input_tokens": corpus_tokens,
+        "full_context_baseline_estimated_tokens": question_tokens + corpus_tokens,
+    }
+
+
+def _embedding_cost_estimate(
+    *,
+    provider: str,
+    model: str,
+    input_tokens: float,
+) -> tuple[float, str]:
+    normalized_provider = provider.strip().lower()
+    normalized_model = model.strip().lower()
+    if (
+        normalized_provider == "openai"
+        and normalized_model in OPENAI_EMBEDDING_COSTS_USD_PER_1M_TOKENS
+    ):
+        cost_per_1m = OPENAI_EMBEDDING_COSTS_USD_PER_1M_TOKENS[normalized_model]
+        return (input_tokens / 1_000_000) * cost_per_1m, (
+            f"openai:{normalized_model}:usd_per_1m_tokens={cost_per_1m}:"
+            "official-model-page-2026-07-03"
+        )
+    if normalized_provider == "local":
+        return 0.0, "local-runtime-excludes-host-hardware-cost"
+    return 0.0, "not-metered-by-runner"
+
+
+def _zero_cost_record() -> dict[str, Any]:
+    return {
+        "estimated_cost_usd": 0.0,
+        "cost_basis": "not-metered-by-runner",
+    }
 
 
 def _sha256_file(path: Path) -> str:
@@ -1012,6 +1079,10 @@ async def _run_case(
     answer_session_ids = sorted(str(value) for value in entry.get("answer_session_ids", []))
     metrics = score_longmemeval_ranking(ranked_session_ids, answer_session_ids, k_values)
     answer_ranks = _answer_ranks(ranked_session_ids, answer_session_ids)
+    token_accounting = _case_token_accounting(entry, corpus_text_policy=corpus_text_policy)
+    readiness_attempts = int(readiness.get("attempts", 0))
+    readiness_tokens = _estimate_tokens("LongMemEval") * readiness_attempts
+    query_embedding_tokens = token_accounting["question_estimated_input_tokens"] + readiness_tokens
     return {
         "case_index": case_index,
         "question_id": entry["question_id"],
@@ -1039,6 +1110,12 @@ async def _run_case(
         "ingest_ms": ingest_ms,
         "latency_ms": (time.perf_counter() - started) * 1000,
         "timings_ms": timings_ms,
+        **token_accounting,
+        "readiness_search_attempt_count": readiness_attempts,
+        "query_embedding_estimated_input_tokens": query_embedding_tokens,
+        "embedding_estimated_input_tokens": (
+            token_accounting["corpus_estimated_input_tokens"] + query_embedding_tokens
+        ),
         "cross_question_result_count": cross_question_count,
         **metrics,
     }
@@ -1220,6 +1297,26 @@ def _aggregate(results: list[dict[str, Any]], k_values: list[int]) -> tuple[dict
         f"{metric}@{k}" for k in k_values for metric in ("hit", "legacy_recall", "recall", "ndcg")
     ]
     overall = {metric: average_metric(results, metric) for metric in metric_names}
+    latencies = [
+        float(result.get("latency_ms", 0.0))
+        for result in results
+        if isinstance(result.get("latency_ms"), int | float)
+    ]
+    search_latencies = [
+        float(result.get("timings_ms", {}).get("search", 0.0))
+        for result in results
+        if isinstance(result.get("timings_ms"), dict)
+        and isinstance(result.get("timings_ms", {}).get("search"), int | float)
+    ]
+    overall["latency_ms"] = sum(latencies) / len(latencies) if latencies else 0.0
+    overall["latency_p50_ms"] = _percentile(latencies, 50)
+    overall["latency_p95_ms"] = _percentile(latencies, 95)
+    overall["max_latency_ms"] = max(latencies) if latencies else 0.0
+    overall["search_latency_ms"] = (
+        sum(search_latencies) / len(search_latencies) if search_latencies else 0.0
+    )
+    overall["search_latency_p50_ms"] = _percentile(search_latencies, 50)
+    overall["search_latency_p95_ms"] = _percentile(search_latencies, 95)
     overall["cross_question_result_count"] = sum(
         float(result["cross_question_result_count"]) for result in results
     )
@@ -1278,6 +1375,34 @@ def _aggregate(results: list[dict[str, Any]], k_values: list[int]) -> tuple[dict
         if result.get("memory_extraction", {}).get("queue_depth_max") is not None
     ]
     overall["memory_extraction_queue_depth_max"] = float(max(queue_depths)) if queue_depths else 0.0
+    overall["question_estimated_input_tokens"] = sum(
+        float(result.get("question_estimated_input_tokens", 0.0)) for result in results
+    )
+    overall["corpus_estimated_input_tokens"] = sum(
+        float(result.get("corpus_estimated_input_tokens", 0.0)) for result in results
+    )
+    overall["full_context_baseline_estimated_tokens"] = sum(
+        float(result.get("full_context_baseline_estimated_tokens", 0.0)) for result in results
+    )
+    overall["query_embedding_estimated_input_tokens"] = sum(
+        float(result.get("query_embedding_estimated_input_tokens", 0.0)) for result in results
+    )
+    overall["estimated_input_tokens"] = (
+        overall["full_context_baseline_estimated_tokens"]
+        + overall["memory_extraction_estimated_input_tokens"]
+    )
+    overall["estimated_output_tokens"] = 0.0
+    overall["readiness_search_attempt_count"] = sum(
+        float(result.get("readiness_search_attempt_count", 0.0)) for result in results
+    )
+    overall["embedding_call_count"] = (
+        overall["created_entity_count"] + len(results) + overall["readiness_search_attempt_count"]
+        if results
+        else 0.0
+    )
+    overall["embedding_estimated_input_tokens"] = sum(
+        float(result.get("embedding_estimated_input_tokens", 0.0)) for result in results
+    )
 
     results_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for result in results:
@@ -1294,6 +1419,66 @@ def _write_report(path: Path, report: dict[str, Any]) -> None:
     tmp_path = path.with_name(f"{path.name}.tmp")
     tmp_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     tmp_path.replace(path)
+
+
+def _build_live_accounting(
+    *,
+    overall: dict[str, float],
+    embedding_runtime: dict[str, Any],
+    elapsed_seconds: float,
+) -> dict[str, Any]:
+    provider = str(embedding_runtime.get("embedding_provider") or "disabled")
+    model = str(embedding_runtime.get("embedding_model") or "not-applicable")
+    embedding_tokens = float(overall.get("embedding_estimated_input_tokens", 0.0))
+    embedding_cost, embedding_cost_basis = _embedding_cost_estimate(
+        provider=provider,
+        model=model,
+        input_tokens=embedding_tokens,
+    )
+    provider_enabled = provider.strip().lower() not in {"disabled", "none", "not-applicable"}
+    embedding_calls = int(overall.get("embedding_call_count", 0.0)) if provider_enabled else 0
+    total_cost = embedding_cost
+    return {
+        "schema_version": ACCOUNTING_SCHEMA_VERSION,
+        "gate_status": ACCOUNTING_GATE_STATUS,
+        "latency": {
+            "p50_ms": overall["latency_p50_ms"],
+            "p95_ms": overall["latency_p95_ms"],
+            "max_ms": overall["max_latency_ms"],
+            "elapsed_seconds": elapsed_seconds,
+        },
+        "tokens": {
+            "estimated_input_tokens": overall["estimated_input_tokens"],
+            "estimated_output_tokens": overall["estimated_output_tokens"],
+            "full_context_baseline_estimated_tokens": overall[
+                "full_context_baseline_estimated_tokens"
+            ],
+            "estimator": "approximate_character_count",
+        },
+        "embedding": {
+            "calls": embedding_calls,
+            "provider": provider,
+            "model": model,
+            "estimated_input_tokens": embedding_tokens if provider_enabled else 0.0,
+            "estimated_cost_usd": embedding_cost if provider_enabled else 0.0,
+            "cost_basis": embedding_cost_basis,
+        },
+        "reader": {
+            "estimated_input_tokens": 0.0,
+            "estimated_output_tokens": 0.0,
+            **_zero_cost_record(),
+        },
+        "judge": {
+            "estimated_input_tokens": 0.0,
+            "estimated_output_tokens": 0.0,
+            **_zero_cost_record(),
+        },
+        "cost": {
+            "estimated_total_usd": total_cost if provider_enabled else 0.0,
+            "currency": "USD",
+            "enforcement": ACCOUNTING_GATE_STATUS,
+        },
+    }
 
 
 def _build_live_report(
@@ -1329,6 +1514,11 @@ def _build_live_report(
         k_values=k_values,
     )
     embedding_runtime = _graph_embedding_runtime_metadata()
+    accounting = _build_live_accounting(
+        overall=overall,
+        embedding_runtime=embedding_runtime,
+        elapsed_seconds=elapsed_seconds,
+    )
 
     provenance = git_provenance(ROOT)
     return {
@@ -1401,6 +1591,7 @@ def _build_live_report(
             ),
         },
         "metadata": metadata or {},
+        "accounting": accounting,
         "repeat_count": 1,
         "auth_manifest_id": AUTH_MANIFEST_ID,
         "k_values": k_values,

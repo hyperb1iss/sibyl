@@ -141,6 +141,7 @@ def _benchmark_metadata(
         "tokenizer_estimate_method": tokenizer_estimate_method,
         "dataset_name": _cases_dataset_name(cases_file),
         "corpus_hash": _sha256_file(cases_file),
+        "repeat_count": str(args.repeat),
         "auth_manifest_id": _auth_manifest_id(args.auth_manifest),
         "runtime_mode": "live-api",
     }

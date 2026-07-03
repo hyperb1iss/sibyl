@@ -24,6 +24,7 @@ def test_context_pack_eval_metadata_includes_git_provenance(
     cases_file.write_text("[]", encoding="utf-8")
     args = SimpleNamespace(
         auth_manifest=None,
+        repeat=20,
         metadata=["sibyl_commit=wrong", "git_dirty=true", "git_status=dirty"],
     )
     monkeypatch.setattr(
@@ -41,6 +42,7 @@ def test_context_pack_eval_metadata_includes_git_provenance(
     assert metadata["sibyl_commit"] == "abc123"
     assert metadata["git_dirty"] == "false"
     assert metadata["git_status"] == "clean"
+    assert metadata["repeat_count"] == "20"
 
 
 def test_context_pack_eval_metadata_uses_local_model_dimensions(
@@ -50,7 +52,7 @@ def test_context_pack_eval_metadata_uses_local_model_dimensions(
     module = _load_context_pack_eval_module()
     cases_file = tmp_path / "context_cases.json"
     cases_file.write_text("[]", encoding="utf-8")
-    args = SimpleNamespace(auth_manifest=None, metadata=[])
+    args = SimpleNamespace(auth_manifest=None, repeat=1, metadata=[])
     monkeypatch.setattr(
         module,
         "settings",

@@ -122,6 +122,65 @@ def _percentile(values: list[float], percentile: float) -> float:
     return ordered[index]
 
 
+ACCOUNTING_SCHEMA_VERSION = "sibyl-eval-accounting-v1"
+ACCOUNTING_GATE_STATUS = "warning-only-until-two-citable-baselines"
+
+
+def _zero_cost_record() -> dict[str, Any]:
+    return {
+        "estimated_cost_usd": 0.0,
+        "cost_basis": "not-metered-by-runner",
+    }
+
+
+def _build_context_pack_accounting(
+    *,
+    metadata: dict[str, Any],
+    metrics: dict[str, Any],
+    latencies: list[float],
+) -> dict[str, Any]:
+    estimated_input_tokens = float(metrics["estimated_input_tokens"])
+    return {
+        "schema_version": ACCOUNTING_SCHEMA_VERSION,
+        "gate_status": ACCOUNTING_GATE_STATUS,
+        "latency": {
+            "p50_ms": _percentile(latencies, 50),
+            "p95_ms": metrics["latency_p95_ms"],
+            "max_ms": metrics["max_latency_ms"],
+        },
+        "tokens": {
+            "estimated_input_tokens": estimated_input_tokens,
+            "estimated_output_tokens": 0.0,
+            "full_context_baseline_estimated_tokens": metrics[
+                "full_context_baseline_estimated_tokens"
+            ],
+            "estimator": "approximate_character_count",
+        },
+        "embedding": {
+            "calls": int(metrics["embedding_call_count"]),
+            "provider": str(metadata.get("embedding_provider") or "not-applicable"),
+            "model": str(metadata.get("embedding_model") or "not-applicable"),
+            "estimated_input_tokens": metrics["embedding_estimated_input_tokens"],
+            **_zero_cost_record(),
+        },
+        "reader": {
+            "estimated_input_tokens": 0.0,
+            "estimated_output_tokens": 0.0,
+            **_zero_cost_record(),
+        },
+        "judge": {
+            "estimated_input_tokens": 0.0,
+            "estimated_output_tokens": 0.0,
+            **_zero_cost_record(),
+        },
+        "cost": {
+            "estimated_total_usd": 0.0,
+            "currency": "USD",
+            "enforcement": ACCOUNTING_GATE_STATUS,
+        },
+    }
+
+
 def _bool_case_rate(cases: list[ContextPackCaseResult], key: str) -> float:
     values = [
         case.result.metrics[key] for case in cases if isinstance(case.result.metrics.get(key), bool)
@@ -181,43 +240,56 @@ class ContextPackEvalReport:
         markdown_chars = _numeric_case_values(self.cases, "markdown_chars")
         estimated_tokens = _numeric_case_values(self.cases, "estimated_tokens")
         budgeted_estimated_tokens = _budgeted_token_values(self.cases)
+        total_estimated_input_tokens = float(sum(budgeted_estimated_tokens or estimated_tokens))
         source_metadata_coverage = _numeric_case_values(self.cases, "source_metadata_coverage")
         forbidden_term_matches = _numeric_case_values(self.cases, "forbidden_term_matches")
         forbidden_item_matches = _numeric_case_values(self.cases, "forbidden_item_matches")
+        metrics = {
+            "cases": case_count,
+            "passed": passed_cases,
+            "failed": case_count - passed_cases,
+            "repeat_count": repeat_count,
+            "case_count_per_repeat": case_count / repeat_count if repeat_count else 0.0,
+            "pass_rate": passed_cases / case_count if case_count else 0.0,
+            "latency_ms": _average(latencies),
+            "latency_p50_ms": _percentile(latencies, 50),
+            "latency_p95_ms": _percentile(latencies, 95),
+            "max_latency_ms": _max(latencies),
+            "avg_items": _average(item_counts),
+            "max_items": _max(item_counts),
+            "avg_markdown_chars": _average(markdown_chars),
+            "max_markdown_chars": _max(markdown_chars),
+            "avg_estimated_tokens": _average(estimated_tokens),
+            "max_estimated_tokens": _max(estimated_tokens),
+            "avg_budgeted_estimated_tokens": _average(budgeted_estimated_tokens),
+            "max_budgeted_estimated_tokens": _max(budgeted_estimated_tokens),
+            "estimated_input_tokens": total_estimated_input_tokens,
+            "estimated_output_tokens": 0.0,
+            "full_context_baseline_estimated_tokens": total_estimated_input_tokens,
+            "embedding_call_count": float(case_count),
+            "embedding_estimated_input_tokens": total_estimated_input_tokens,
+            "source_metadata_coverage": _average(source_metadata_coverage),
+            "facet_order_match_rate": _bool_case_rate(self.cases, "facet_order_matches"),
+            "forbidden_item_matches": sum(forbidden_item_matches),
+            "forbidden_term_matches": sum(forbidden_term_matches),
+            "leak_count": _sum_case_leak_counts(self.cases),
+        }
         return {
             "timestamp": self.timestamp,
             "label": self.label,
             "search_type": "context-pack",
             "metadata": dict(self.metadata),
+            "accounting": _build_context_pack_accounting(
+                metadata=self.metadata,
+                metrics=metrics,
+                latencies=latencies,
+            ),
             "token_estimator": {
                 "method": "approximate_character_count",
                 "characters_per_token": APPROX_CHARS_PER_TOKEN,
                 "safety_margin_multiplier": APPROX_TOKEN_SAFETY_MARGIN,
             },
-            "metrics": {
-                "cases": case_count,
-                "passed": passed_cases,
-                "failed": case_count - passed_cases,
-                "repeat_count": repeat_count,
-                "case_count_per_repeat": case_count / repeat_count if repeat_count else 0.0,
-                "pass_rate": passed_cases / case_count if case_count else 0.0,
-                "latency_ms": _average(latencies),
-                "latency_p95_ms": _percentile(latencies, 95),
-                "max_latency_ms": _max(latencies),
-                "avg_items": _average(item_counts),
-                "max_items": _max(item_counts),
-                "avg_markdown_chars": _average(markdown_chars),
-                "max_markdown_chars": _max(markdown_chars),
-                "avg_estimated_tokens": _average(estimated_tokens),
-                "max_estimated_tokens": _max(estimated_tokens),
-                "avg_budgeted_estimated_tokens": _average(budgeted_estimated_tokens),
-                "max_budgeted_estimated_tokens": _max(budgeted_estimated_tokens),
-                "source_metadata_coverage": _average(source_metadata_coverage),
-                "facet_order_match_rate": _bool_case_rate(self.cases, "facet_order_matches"),
-                "forbidden_item_matches": sum(forbidden_item_matches),
-                "forbidden_term_matches": sum(forbidden_term_matches),
-                "leak_count": _sum_case_leak_counts(self.cases),
-            },
+            "metrics": metrics,
             "per_case": [
                 {
                     "name": case.case.name,

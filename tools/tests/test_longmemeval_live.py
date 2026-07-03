@@ -58,6 +58,8 @@ def test_eval_workflow_full_run_forces_memory_extraction_off() -> None:
     assert '--metadata auto_extract_entities="${SIBYL_AUTO_EXTRACT_ENTITIES}"' in full_job
     assert "--require-runtime embedding_provider=openai" in smoke_job
     assert "--require-runtime embedding_provider=openai" in full_job
+    assert "--require-accounting" in smoke_job
+    assert "--require-accounting" in full_job
     assert 'SIBYL_LOCAL_AUTH_ENABLED: "true"' in smoke_job
     assert 'SIBYL_LOCAL_AUTH_ENABLED: "true"' in local_job
     assert 'SIBYL_LOCAL_AUTH_ENABLED: "true"' in full_job
@@ -79,6 +81,8 @@ def test_eval_workflow_has_pr_safe_local_embedding_slice() -> None:
     assert '".github/actions/start-surrealdb/**"' in workflow
     assert '"packages/python/sibyl-core/pyproject.toml"' in workflow
     assert '"apps/api/pyproject.toml"' in workflow
+    assert '"tools/tests/test_compare_eval_reports.py"' in workflow
+    assert '"tools/tests/test_context_pack_eval_script.py"' in workflow
     assert "bench-longmemeval-live-local:" in moon
     assert "uv run --with sentence-transformers==5.6.0 python benchmarks/longmemeval_live.py" in (
         moon
@@ -100,6 +104,7 @@ def test_eval_workflow_has_pr_safe_local_embedding_slice() -> None:
     assert "--require-runtime embedding_provider=local" in local_job
     assert "--require-runtime embedding_provider_status=enabled" in local_job
     assert "--require-runtime embedding_cache_namespace=graph" in local_job
+    assert "--require-accounting" in local_job
     assert "graph_embeddings_disabled.*provider=local" in local_job
 
 
@@ -125,6 +130,7 @@ def test_eval_workflow_compares_local_and_openai_smoke_receipts() -> None:
     assert "--baseline .moon/cache/evals/openai/longmemeval_live_smoke.json" in comparison_job
     assert "--baseline-metric recall@5" in comparison_job
     assert "--baseline-metric ndcg@5" in comparison_job
+    assert "moon run bench-compare-reports" in comparison_job
     assert "longmemeval_local_vs_openai_comparison.txt" in comparison_job
 
 
@@ -249,11 +255,23 @@ def _assert_gate_valid_report(module: ModuleType, report: dict[str, Any]) -> Non
     assert report["overall"]["chunked_session_count"] == 1.0
     assert report["overall"]["memory_projection_job_count"] == 1.0
     assert report["overall"]["memory_extraction_job_count"] == 1.0
+    assert report["overall"]["latency_p50_ms"] >= 0.0
+    assert report["overall"]["latency_p95_ms"] >= 0.0
+    assert report["overall"]["full_context_baseline_estimated_tokens"] > 0.0
+    assert report["overall"]["embedding_call_count"] == float(EXPECTED_CREATED_ENTITIES + 2)
+    assert report["accounting"]["schema_version"] == "sibyl-eval-accounting-v1"
+    assert report["accounting"]["latency"]["p50_ms"] >= 0.0
+    assert report["accounting"]["latency"]["p95_ms"] >= 0.0
+    assert report["accounting"]["tokens"]["estimated_input_tokens"] > 0.0
+    assert report["accounting"]["embedding"]["calls"] == 0
+    assert report["accounting"]["cost"]["estimated_total_usd"] == 0.0
     assert report["case_results"][0]["ranked_session_ids"] == ["s2", "s1"]
     assert report["case_results"][0]["answer_ranks"] == [{"session_id": "s2", "rank": 1}]
     assert report["case_results"][0]["missed_answer_session_ids"] == []
     assert report["case_results"][0]["created_entity_count"] == EXPECTED_CREATED_ENTITIES
     assert report["case_results"][0]["chunked_session_count"] == 1
+    assert report["case_results"][0]["full_context_baseline_estimated_tokens"] > 0.0
+    assert report["case_results"][0]["readiness_search_attempt_count"] == 1
     assert report["diagnostics"]["case_gap_count"] == 0
 
 

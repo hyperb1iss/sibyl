@@ -52,6 +52,8 @@ This is the live context-pack quality guard.
 - Writes the same JSON report shape used by the comparison and gate tools
 - Adds release metadata for retrieval mode, embedding provider/model/dimensions, tokenizer method,
   dataset name, corpus hash, auth manifest ID, commit, and live runtime mode
+- Adds W3 accounting for p50/p95/max latency, estimated input/output tokens, full-context baseline
+  estimate, embedding calls, and warning-only cost records
 
 Nightly seeds the deterministic baseline corpus first and passes
 `.moon/cache/baseline-runtime-manifest.json` through `--auth-manifest`, so the context benchmark
@@ -162,6 +164,12 @@ It also requires citable release metadata:
   `metadata.runtime_mode`
 - `label` includes the retrieval mode so charts cannot silently mix incompatible runs
 
+New citable context-pack and AI-memory receipts must also pass `--require-accounting`. The
+accounting block uses schema `sibyl-eval-accounting-v1` and records p50/p95 latency, token
+estimates, full-context baseline estimate, embedding calls, embedding cost, reader cost, judge cost,
+and total estimated cost. Cost regression is warning-only until the ledger has two citable
+baselines for the same lane.
+
 `leak_count` is a per-case sentinel: forbidden item and forbidden term matches are reported
 separately, while the summary uses the larger of those two counts for each case so one leaked memory
 is not double-counted when it trips both signals.
@@ -184,6 +192,10 @@ regression. Narrow the comparison with `--baseline-metric <metric>` and allow kn
 noise only by naming it explicitly with `--max-regression <metric>=<amount>`. Custom baseline
 metrics must have a known direction or an obvious lower-is-better suffix such as `_ms`, `_seconds`,
 `_count`, `_chars`, or `_tokens`; unknown names fail closed.
+
+Use `moon run bench-compare-reports -- <baseline.json> <candidate.json>` to render the human-facing
+comparison table. The output includes accuracy, p50, p95, token estimate, embedding calls, estimated
+cost, and accounting schema for every row.
 
 ## Product Gates
 
@@ -256,7 +268,8 @@ Required record fields:
 - exact command, environment variables that affect behavior, and timeout settings
 - overall metrics and the complete per-slice table
 - per-case result records with answer IDs, ranked result IDs, and case metrics
-- ingestion time, query latency, timeout count, error count, and skipped-case count when available
+- ingestion time, query latency, p50/p95 latency, token estimates, embedding call count, warning-only
+  cost estimate, timeout count, error count, and skipped-case count when available
 - competitor version, hosted/self-hosted mode, ingestion path, and tuning when the result compares
   against another memory product
 - claim boundary: what the result supports and what stays unproven

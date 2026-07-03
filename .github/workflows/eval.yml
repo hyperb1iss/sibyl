@@ -29,6 +29,8 @@ on:
       - "pyproject.toml"
       - "tools/bench/**"
       - "tools/tests/test_bench_gate.py"
+      - "tools/tests/test_compare_eval_reports.py"
+      - "tools/tests/test_context_pack_eval_script.py"
       - "tools/tests/test_longmemeval_live.py"
       - "uv.lock"
   workflow_dispatch:
@@ -278,6 +280,7 @@ jobs:
         run: |
           moon run bench-gate -- "${{ steps.eval.outputs.report }}" \
             --profile context-pack \
+            --require-accounting \
             --require-metadata "retrieval_mode=${EVAL_RETRIEVAL_MODE}" \
             --require-metadata "repeat_count=${EVAL_REPEAT}"
 
@@ -446,6 +449,7 @@ jobs:
         run: |
           moon run bench-gate -- .moon/cache/evals/longmemeval_live_smoke.json \
             --profile ai-memory \
+            --require-accounting \
             --require-runtime embedding_provider=openai \
             --require-runtime embedding_provider_status=enabled \
             --require-runtime embedding_cache_namespace=graph
@@ -644,6 +648,7 @@ jobs:
         run: |
           moon run bench-gate -- .moon/cache/evals/longmemeval_local_smoke.json \
             --profile ai-memory \
+            --require-accounting \
             --require-runtime embedding_provider=local \
             --require-runtime embedding_provider_configured=local \
             --require-runtime embedding_provider_status=enabled \
@@ -764,7 +769,10 @@ jobs:
             --max-regression recall@5=1.0 \
             --max-regression ndcg@5=1.0 \
             --max-regression recall@10=1.0 \
-            --max-regression ndcg@10=1.0 \
+            --max-regression ndcg@10=1.0
+          moon run bench-compare-reports -- \
+            .moon/cache/evals/openai/longmemeval_live_smoke.json \
+            .moon/cache/evals/local/longmemeval_local_smoke.json \
             | tee .moon/cache/evals/longmemeval_local_vs_openai_comparison.txt
 
       - name: Upload local vs OpenAI comparison
@@ -926,6 +934,7 @@ jobs:
         run: |
           moon run bench-gate -- .moon/cache/evals/longmemeval_live_full.json \
             --profile ai-memory \
+            --require-accounting \
             --require-runtime embedding_provider=openai \
             --require-runtime embedding_provider_status=enabled \
             --require-runtime embedding_cache_namespace=graph

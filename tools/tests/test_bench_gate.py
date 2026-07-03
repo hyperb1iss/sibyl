@@ -25,6 +25,42 @@ RELEASE_METADATA = {
     "sibyl_commit": "abc123",
     "runtime_mode": "live-api",
 }
+ACCOUNTING = {
+    "schema_version": "sibyl-eval-accounting-v1",
+    "gate_status": "warning-only-until-two-citable-baselines",
+    "latency": {"p50_ms": 100.0, "p95_ms": 120.0, "max_ms": 140.0},
+    "tokens": {
+        "estimated_input_tokens": 500.0,
+        "estimated_output_tokens": 0.0,
+        "full_context_baseline_estimated_tokens": 500.0,
+        "estimator": "approximate_character_count",
+    },
+    "embedding": {
+        "calls": 2,
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "estimated_input_tokens": 500.0,
+        "estimated_cost_usd": 0.00001,
+        "cost_basis": "openai:text-embedding-3-small",
+    },
+    "reader": {
+        "estimated_input_tokens": 0.0,
+        "estimated_output_tokens": 0.0,
+        "estimated_cost_usd": 0.0,
+        "cost_basis": "not-metered-by-runner",
+    },
+    "judge": {
+        "estimated_input_tokens": 0.0,
+        "estimated_output_tokens": 0.0,
+        "estimated_cost_usd": 0.0,
+        "cost_basis": "not-metered-by-runner",
+    },
+    "cost": {
+        "estimated_total_usd": 0.00001,
+        "currency": "USD",
+        "enforcement": "warning-only-until-two-citable-baselines",
+    },
+}
 
 
 def _write_report(
@@ -44,6 +80,9 @@ def _write_report(
 
 
 def _ai_memory_report(mode: str = "raw") -> dict[str, Any]:
+    accounting = _clone_report(ACCOUNTING)
+    accounting["embedding"]["provider"] = "chromadb"
+    accounting["embedding"]["model"] = "chromadb_default"
     return {
         "schema_version": "longmemeval-offline-v2",
         "suite": "LongMemEval-style offline",
@@ -96,6 +135,7 @@ def _ai_memory_report(mode: str = "raw") -> dict[str, Any]:
         "total_questions": 1,
         "elapsed_seconds": 1.25,
         "claim_boundary": "Offline component retrieval baseline only.",
+        "accounting": accounting,
     }
 
 
@@ -309,22 +349,65 @@ def test_evaluate_report_acceptance_profile_passes() -> None:
 
 
 def test_evaluate_report_context_pack_profile_passes() -> None:
+    accounting = _clone_report(ACCOUNTING)
+    accounting["embedding"]["provider"] = RELEASE_METADATA["embedding_provider"]
+    accounting["embedding"]["model"] = RELEASE_METADATA["embedding_model"]
+    accounting["latency"]["p95_ms"] = 500.0
+    accounting["latency"]["max_ms"] = 500.0
     report = {
         "label": "retrieval-native",
         "metrics": {
             "pass_rate": 1.0,
+            "latency_p50_ms": 100.0,
             "latency_p95_ms": 500.0,
+            "max_latency_ms": 500.0,
+            "estimated_input_tokens": 500.0,
+            "estimated_output_tokens": 0.0,
+            "full_context_baseline_estimated_tokens": 500.0,
+            "embedding_call_count": 2.0,
+            "embedding_estimated_input_tokens": 500.0,
             "source_metadata_coverage": 1.0,
             "facet_order_match_rate": 1.0,
             "leak_count": 0.0,
             "forbidden_term_matches": 0.0,
         },
         "metadata": RELEASE_METADATA,
+        "accounting": accounting,
     }
 
-    failures = eval_gate.evaluate_report(report, profile="context-pack")
+    failures = eval_gate.evaluate_report(report, profile="context-pack", require_accounting=True)
 
     assert failures == []
+
+
+def test_evaluate_report_context_pack_require_accounting_rejects_token_mismatch() -> None:
+    accounting = _clone_report(ACCOUNTING)
+    accounting["embedding"]["provider"] = RELEASE_METADATA["embedding_provider"]
+    accounting["embedding"]["model"] = RELEASE_METADATA["embedding_model"]
+    accounting["latency"]["p95_ms"] = 500.0
+    accounting["latency"]["max_ms"] = 500.0
+    accounting["tokens"]["estimated_input_tokens"] = 0.0
+    report = {
+        "label": "retrieval-native",
+        "metrics": {
+            "pass_rate": 1.0,
+            "latency_p95_ms": 500.0,
+            "estimated_input_tokens": 500.0,
+            "full_context_baseline_estimated_tokens": 500.0,
+            "embedding_call_count": 2.0,
+            "embedding_estimated_input_tokens": 500.0,
+            "source_metadata_coverage": 1.0,
+            "facet_order_match_rate": 1.0,
+            "leak_count": 0.0,
+            "forbidden_term_matches": 0.0,
+        },
+        "metadata": RELEASE_METADATA,
+        "accounting": accounting,
+    }
+
+    failures = eval_gate.evaluate_report(report, profile="context-pack", require_accounting=True)
+
+    assert any("estimated_input_tokens" in failure for failure in failures)
 
 
 def test_evaluate_report_context_pack_profile_blocks_leaks() -> None:
@@ -611,6 +694,54 @@ def test_evaluate_report_reports_runtime_requirement_failures() -> None:
     assert "runtime['embedding_provider_status'] expected 'enabled', got None" in failures
 
 
+def test_evaluate_report_require_accounting_rejects_missing_block() -> None:
+    report = _ai_memory_report(mode="hybrid")
+    report.pop("accounting")
+
+    failures = eval_gate.evaluate_report(
+        report,
+        profile="ai-memory",
+        require_accounting=True,
+    )
+
+    assert "missing non-empty field 'accounting'" in failures
+
+
+def test_evaluate_report_validates_present_accounting_block() -> None:
+    report = _ai_memory_report(mode="hybrid")
+    report["accounting"]["latency"].pop("p95_ms")
+    report["accounting"]["embedding"]["calls"] = 1.5
+
+    failures = eval_gate.evaluate_report(report, profile="ai-memory")
+
+    assert "accounting['latency']['p95_ms'] must be a finite non-negative number" in failures
+    assert "accounting['embedding']['calls'] must be a non-negative integer" in failures
+
+
+def test_evaluate_report_require_accounting_rejects_metric_mismatch() -> None:
+    report = _ai_memory_report(mode="hybrid")
+    report["runtime"]["embedding_provider"] = "openai"
+    report["runtime"]["embedding_model"] = "text-embedding-3-small"
+    report["overall"]["latency_p95_ms"] = 125.0
+    report["overall"]["embedding_call_count"] = 3.0
+    report["overall"]["embedding_estimated_input_tokens"] = 800.0
+    report["accounting"]["embedding"]["provider"] = "openai"
+    report["accounting"]["embedding"]["model"] = "text-embedding-3-small"
+    report["accounting"]["embedding"]["calls"] = 0
+    report["accounting"]["embedding"]["estimated_input_tokens"] = 0.0
+
+    failures = eval_gate.evaluate_report(
+        report,
+        profile="ai-memory",
+        require_accounting=True,
+    )
+
+    assert any(
+        "accounting['embedding']['calls'] must match metric" in failure for failure in failures
+    )
+    assert any("embedding_estimated_input_tokens" in failure for failure in failures)
+
+
 def test_evaluate_baseline_regressions_blocks_quality_drop() -> None:
     baseline = _ai_memory_report()
     candidate = _clone_report(baseline)
@@ -812,6 +943,20 @@ def test_validate_ai_memory_manifest_rejects_citable_artifact_drift(tmp_path: Pa
 
     assert "artifact.json: manifest overall does not match artifact" in failures
     assert "artifact.json: manifest repeat_count does not match artifact" in failures
+
+
+def test_validate_ai_memory_manifest_enforces_accounting_when_required(
+    tmp_path: Path,
+) -> None:
+    report = _ai_memory_report()
+    report.pop("accounting")
+    entry = _manifest_entry(report)
+    entry["accounting_required"] = True
+    manifest_path = _write_ai_memory_manifest(tmp_path, report=report, entry=entry)
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert "artifact.json: missing non-empty field 'accounting'" in failures
 
 
 def test_validate_ai_memory_manifest_accepts_external_artifact_manifest(
@@ -1372,7 +1517,7 @@ def test_main_rejects_baseline_without_report(
 
     captured = capsys.readouterr()
     assert exc.value.code == ARGPARSE_USAGE_ERROR
-    assert "--baseline and runtime options require a report argument" in captured.err
+    assert "--baseline, runtime, and accounting options require a report argument" in captured.err
 
 
 def test_ai_memory_manifest_tracks_full_citable_artifacts() -> None:

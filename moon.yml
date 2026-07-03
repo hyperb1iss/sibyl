@@ -633,6 +633,12 @@ tasks:
       - benchmarks/results/ai-memory/**/*.json
       - pyproject.toml
 
+  bench-compare-reports:
+    command: uv run python benchmarks/compare_eval_reports.py
+    inputs:
+      - benchmarks/compare_eval_reports.py
+      - pyproject.toml
+
   eval-skill-trigger:
     command: uv run --with claude-agent-sdk python -m tools.eval.skill_invocation
     inputs:
@@ -651,14 +657,16 @@ tasks:
   bench-gate-test:
     command:
       uv run pytest tools/tests/test_benchmark_git_provenance.py tools/tests/test_bench_gate.py
-      tools/tests/test_context_pack_eval_script.py tools/tests/test_longmemeval_bench.py
-      tools/tests/test_longmemeval_live.py tools/tests/test_longmemeval_replay.py
+      tools/tests/test_compare_eval_reports.py tools/tests/test_context_pack_eval_script.py
+      tools/tests/test_longmemeval_bench.py tools/tests/test_longmemeval_live.py
+      tools/tests/test_longmemeval_replay.py
       tools/tests/test_longmemeval_v2_probe.py tools/tests/test_longmemeval_v2_official.py -v
     inputs:
       - tools/**/*.py
       - .github/workflows/eval.yml
       - .github/workflows/longmemeval-v2.yml
       - benchmarks/context_pack_eval.py
+      - benchmarks/compare_eval_reports.py
       - benchmarks/git_provenance.py
       - benchmarks/longmemeval_bench.py
       - benchmarks/longmemeval_live.py
