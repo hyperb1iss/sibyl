@@ -912,10 +912,11 @@ async def _log_audit_event(
     organization_id: UUID | None,
     request: Request | None,
     details: SurrealRecord,
-) -> None:
+) -> str | None:
     now = _utcnow()
+    audit_id = str(uuid4())
     record = {
-        "uuid": str(uuid4()),
+        "uuid": audit_id,
         "user_id": _uuid_str(user_id),
         "organization_id": _uuid_str(organization_id),
         "action": action,
@@ -934,8 +935,9 @@ async def _log_audit_event(
                 action,
                 exc,
             )
-            return
+            return None
         raise
+    return audit_id
 
 
 async def _list_user_org_records(client: QueryClient, *, user_id: UUID) -> list[SurrealRecord]:

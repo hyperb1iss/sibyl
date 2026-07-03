@@ -117,6 +117,15 @@ class MemorySharePreview:
 
 
 @dataclass(frozen=True, slots=True)
+class MemoryShareResult:
+    applied: bool
+    reason: str
+    preview: MemorySharePreview
+    promotions: tuple[ReflectionPromotionResult, ...] = ()
+    metadata: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryAccessPreview:
     allowed: bool
     reason: str
@@ -207,6 +216,24 @@ _TEMPORAL_INVALIDATION_REASONS = {
     "supersedes_source_ids": "supersession",
     "superseded_source_ids": "supersession",
 }
+_SHARE_SOURCE_METADATA_EXCLUDE = frozenset(
+    {
+        "native_relationship_count",
+        "native_relationship_failed_count",
+        "native_relationship_requested_count",
+        "native_write_path",
+        "policy_actions",
+        "policy_allowed",
+        "policy_reasons",
+        "promote_to_scope",
+        "promote_to_scope_key",
+        "promoted_at",
+        "promoted_entity_id",
+        "promotion_errors",
+        "promotion_state",
+        "review_state",
+    }
+)
 _SCOPE_RANK: dict[MemoryScope, int] = {
     MemoryScope.PRIVATE: 0,
     MemoryScope.DELEGATED: 1,
@@ -250,6 +277,8 @@ async def persist_reflection_source(
     project: str | None = None,
     related_to: Sequence[str] | None = None,
     accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
     memory_scope: MemoryScope | str | None = None,
     scope_key: str | None = None,
 ) -> ReflectionWriteResult:
@@ -271,6 +300,8 @@ async def persist_reflection_source(
         source_id=None,
         related_to=related_to,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         memory_scope=memory_scope,
         scope_key=scope_key,
     )
@@ -286,6 +317,8 @@ async def persist_reflection_candidate(
     source_id: str | None = None,
     related_to: Sequence[str] | None = None,
     accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
     memory_scope: MemoryScope | str | None = None,
     scope_key: str | None = None,
     link_source_entity: bool = True,
@@ -297,6 +330,8 @@ async def persist_reflection_candidate(
         memory_scope=scope,
         scope_key=resolved_scope_key,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     policy_metadata = _policy_metadata(policy_decisions)
     if any(not decision.allowed for decision in policy_decisions):
@@ -435,6 +470,8 @@ async def promote_reflection_candidate_review(
     project: str | None = None,
     related_to: Sequence[str] | None = None,
     accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
 ) -> ReflectionPromotionResult:
     plan = await _resolve_reflection_promotion_plan(
         candidate_id=candidate_id,
@@ -445,6 +482,8 @@ async def promote_reflection_candidate_review(
         domain=domain,
         project=project,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     if isinstance(plan, ReflectionPromotionResult):
         return plan
@@ -456,6 +495,8 @@ async def promote_reflection_candidate_review(
         domain=domain,
         related_to=related_to,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         native_source_id=plan.raw_source_ids[0] if plan.raw_source_ids else None,
         lifecycle_source_id=plan.candidate_memory.id,
         lifecycle_reason="accepted_reflection_candidate",
@@ -473,6 +514,8 @@ async def promote_raw_memory(
     project: str | None = None,
     related_to: Sequence[str] | None = None,
     accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
 ) -> ReflectionPromotionResult:
     plan = await _resolve_raw_memory_promotion_plan(
         raw_memory_id=raw_memory_id,
@@ -483,6 +526,8 @@ async def promote_raw_memory(
         domain=domain,
         project=project,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     if isinstance(plan, ReflectionPromotionResult):
         return plan
@@ -494,6 +539,8 @@ async def promote_raw_memory(
         domain=domain,
         related_to=related_to,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         native_source_id=plan.candidate_memory.id,
         lifecycle_source_id=plan.candidate_memory.id,
         lifecycle_reason="accepted_raw_memory",
@@ -510,6 +557,8 @@ async def preview_reflection_candidate_promotion(
     domain: str | None = None,
     project: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
 ) -> ReflectionPromotionPreview:
     plan = await _resolve_reflection_promotion_plan(
         candidate_id=candidate_id,
@@ -520,6 +569,8 @@ async def preview_reflection_candidate_promotion(
         domain=domain,
         project=project,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     if isinstance(plan, ReflectionPromotionResult):
         return _promotion_preview_from_denial(plan)
@@ -529,6 +580,8 @@ async def preview_reflection_candidate_promotion(
         memory_scope=plan.target_scope,
         scope_key=plan.target_scope_key,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     metadata = {
         **_policy_metadata(policy_decisions),
@@ -561,6 +614,8 @@ async def preview_raw_memory_promotion(
     domain: str | None = None,
     project: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
 ) -> ReflectionPromotionPreview:
     plan = await _resolve_raw_memory_promotion_plan(
         raw_memory_id=raw_memory_id,
@@ -571,6 +626,8 @@ async def preview_raw_memory_promotion(
         domain=domain,
         project=project,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     if isinstance(plan, ReflectionPromotionResult):
         return _promotion_preview_from_denial(plan)
@@ -580,6 +637,8 @@ async def preview_raw_memory_promotion(
         memory_scope=plan.target_scope,
         scope_key=plan.target_scope_key,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     metadata = {
         **_policy_metadata(policy_decisions),
@@ -610,6 +669,8 @@ async def _apply_promotion_plan(
     domain: str | None,
     related_to: Sequence[str] | None,
     accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None,
+    accessible_delegations: Iterable[str] | None,
     native_source_id: str | None,
     lifecycle_source_id: str,
     lifecycle_reason: str,
@@ -623,6 +684,8 @@ async def _apply_promotion_plan(
         source_id=native_source_id,
         related_to=related_to,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         memory_scope=plan.target_scope,
         scope_key=plan.target_scope_key,
         link_source_entity=False,
@@ -726,6 +789,7 @@ async def preview_memory_share(
     target_scope_key: str | None = None,
     recipient_organization_id: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
 ) -> MemorySharePreview:
     requested_source_ids = [str(source_id) for source_id in source_ids]
@@ -737,6 +801,7 @@ async def preview_memory_share(
         recipient_organization_id=recipient_organization_id,
         organization_id=organization_id,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
     decisions: list[MemoryPolicyDecision] = [target_decision]
@@ -771,6 +836,7 @@ async def preview_memory_share(
             memory=memory,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
             accessible_delegations=accessible_delegations,
         )
         decisions.append(read_decision)
@@ -811,6 +877,100 @@ async def preview_memory_share(
         redacted_count=hidden_but_relevant_count,
         hidden_but_relevant_count=hidden_but_relevant_count,
         policy_decisions=tuple(decisions),
+        metadata=metadata,
+    )
+
+
+async def share_memory(
+    *,
+    source_ids: Sequence[str],
+    organization_id: str,
+    principal_id: str | None,
+    target_scope: MemoryScope | str | None,
+    target_scope_key: str | None = None,
+    recipient_organization_id: str | None = None,
+    domain: str | None = None,
+    project: str | None = None,
+    related_to: Sequence[str] | None = None,
+    accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
+) -> MemoryShareResult:
+    preview = await preview_memory_share(
+        source_ids=source_ids,
+        organization_id=organization_id,
+        principal_id=principal_id,
+        target_scope=target_scope,
+        target_scope_key=target_scope_key,
+        recipient_organization_id=recipient_organization_id,
+        accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+    )
+    if preview.reason != "scope_crossing_requires_promotion":
+        return MemoryShareResult(
+            applied=False,
+            reason=preview.reason,
+            preview=preview,
+            metadata={"promotion_count": 0, "target_allowed": False},
+        )
+    if not preview.visible_source_ids:
+        return MemoryShareResult(
+            applied=False,
+            reason="no_visible_sources",
+            preview=preview,
+            metadata={"promotion_count": 0, "target_allowed": True},
+        )
+
+    promotions: list[ReflectionPromotionResult] = []
+    for source_id in preview.visible_source_ids:
+        plan = await _resolve_raw_memory_share_plan(
+            raw_memory_id=source_id,
+            organization_id=organization_id,
+            principal_id=principal_id,
+            promote_to_scope=preview.target_scope,
+            promote_to_scope_key=preview.target_scope_key,
+            domain=domain,
+            project=project,
+            accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+        )
+        if isinstance(plan, ReflectionPromotionResult):
+            promotions.append(plan)
+            continue
+        promotions.append(
+            await _apply_share_plan(
+                plan=plan,
+                organization_id=organization_id,
+                principal_id=principal_id,
+                domain=domain,
+                related_to=related_to,
+                accessible_projects=accessible_projects,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
+            )
+        )
+
+    successful = [promotion for promotion in promotions if promotion.success]
+    if len(successful) == len(promotions):
+        reason = "shared"
+    elif successful:
+        reason = "share_partially_applied"
+    else:
+        reason = promotions[0].reason if promotions else "no_visible_sources"
+    metadata = {
+        "promotion_count": len(promotions),
+        "promoted_count": len(successful),
+        "target_allowed": True,
+        "target_scope": preview.target_scope.value if preview.target_scope else None,
+        "target_scope_key": preview.target_scope_key,
+    }
+    return MemoryShareResult(
+        applied=bool(successful) and len(successful) == len(promotions),
+        reason=reason,
+        preview=preview,
+        promotions=tuple(promotions),
         metadata=metadata,
     )
 
@@ -1424,6 +1584,8 @@ async def _resolve_reflection_promotion_plan(
     domain: str | None = None,
     project: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
 ) -> _ReflectionPromotionPlan | ReflectionPromotionResult:
     candidate_memory = await get_raw_memory(
         organization_id=organization_id,
@@ -1490,6 +1652,8 @@ async def _resolve_reflection_promotion_plan(
         principal_id=principal_id,
         raw_source_ids=raw_source_ids,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     if source_scope_denial is not None:
         return source_scope_denial
@@ -1564,6 +1728,8 @@ async def _resolve_raw_memory_promotion_plan(
     domain: str | None = None,
     project: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
 ) -> _ReflectionPromotionPlan | ReflectionPromotionResult:
     memory = await get_raw_memory(
         organization_id=organization_id,
@@ -1623,6 +1789,8 @@ async def _resolve_raw_memory_promotion_plan(
         principal_id=principal_id,
         raw_source_ids=raw_source_ids,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     if source_scope_denial is not None:
         return source_scope_denial
@@ -1667,6 +1835,159 @@ async def _resolve_raw_memory_promotion_plan(
     )
 
 
+async def _resolve_raw_memory_share_plan(
+    *,
+    raw_memory_id: str,
+    organization_id: str,
+    principal_id: str | None,
+    promote_to_scope: MemoryScope | str | None,
+    promote_to_scope_key: str | None = None,
+    domain: str | None = None,
+    project: str | None = None,
+    accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
+) -> _ReflectionPromotionPlan | ReflectionPromotionResult:
+    memory = await get_raw_memory(
+        organization_id=organization_id,
+        memory_id=raw_memory_id,
+    )
+    if memory is None:
+        return _promotion_denied(
+            candidate_id=raw_memory_id,
+            reason="candidate_not_found",
+            review_state="missing",
+            memory_scope=None,
+            scope_key=None,
+            raw_source_ids=[],
+        )
+    raw_source_ids = [memory.id]
+    if not raw_memory_recallable(memory):
+        return _promotion_denied(
+            candidate_id=memory.id,
+            reason="raw_memory_not_recallable",
+            review_state=memory.review_state,
+            memory_scope=memory.memory_scope,
+            scope_key=memory.scope_key,
+            raw_source_ids=raw_source_ids,
+        )
+
+    input_memories = [memory]
+    ownership_denial = _principal_denial(
+        input_memories,
+        candidate_id=memory.id,
+        principal_id=principal_id,
+        raw_source_ids=raw_source_ids,
+    )
+    if ownership_denial is not None:
+        return ownership_denial
+    source_scope_denial = _source_scope_denial(
+        input_memories,
+        candidate_id=memory.id,
+        principal_id=principal_id,
+        raw_source_ids=raw_source_ids,
+        accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+    )
+    if source_scope_denial is not None:
+        return source_scope_denial
+
+    target_scope = _coerce_promotion_scope(promote_to_scope)
+    if target_scope is None:
+        return _promotion_denied(
+            candidate_id=memory.id,
+            reason="missing_promote_to_scope",
+            review_state=memory.review_state,
+            memory_scope=memory.memory_scope,
+            scope_key=memory.scope_key,
+            raw_source_ids=raw_source_ids,
+            metadata={"input_scopes": _scope_metadata(input_memories)},
+        )
+
+    target_scope_key = _resolve_promotion_scope_key(
+        target_scope=target_scope,
+        promote_to_scope_key=promote_to_scope_key,
+        project=project,
+        candidate_memory=memory,
+    )
+    promotion_candidate = _candidate_from_share_memory(
+        memory,
+        target_scope=target_scope,
+        target_scope_key=target_scope_key,
+        domain=domain,
+    )
+    target_project = project or (
+        target_scope_key
+        if target_scope is MemoryScope.PROJECT
+        else _metadata_str(memory.metadata, "project_id")
+    )
+    return _ReflectionPromotionPlan(
+        candidate_memory=memory,
+        promotion_candidate=promotion_candidate,
+        target_scope=target_scope,
+        target_scope_key=target_scope_key,
+        target_project=target_project,
+        raw_source_ids=raw_source_ids,
+        input_memories=input_memories,
+    )
+
+
+async def _apply_share_plan(
+    *,
+    plan: _ReflectionPromotionPlan,
+    organization_id: str,
+    principal_id: str | None,
+    domain: str | None,
+    related_to: Sequence[str] | None,
+    accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None,
+    accessible_delegations: Iterable[str] | None,
+) -> ReflectionPromotionResult:
+    result = await persist_reflection_candidate(
+        candidate=plan.promotion_candidate,
+        organization_id=organization_id,
+        principal_id=principal_id,
+        domain=domain or _metadata_str(plan.candidate_memory.metadata, "domain"),
+        project=plan.target_project,
+        source_id=plan.candidate_memory.id,
+        related_to=related_to,
+        accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+        memory_scope=plan.target_scope,
+        scope_key=plan.target_scope_key,
+        link_source_entity=False,
+    )
+    if not result.response.success:
+        return _promotion_write_denied(plan=plan, result=result)
+
+    metadata = {
+        **_share_source_metadata(plan.candidate_memory),
+        **result.metadata,
+        "share_applied_at": datetime.now(UTC).isoformat(),
+        "share_source_id": plan.candidate_memory.id,
+        "share_source_scope": plan.candidate_memory.memory_scope.value,
+        "share_source_scope_key": plan.candidate_memory.scope_key,
+        "share_target_scope": plan.target_scope.value,
+        "share_target_scope_key": plan.target_scope_key,
+        "shared_entity_id": result.response.id,
+        "raw_source_ids": plan.raw_source_ids,
+        "source_ids": plan.raw_source_ids,
+    }
+    return ReflectionPromotionResult(
+        success=True,
+        candidate_id=plan.candidate_memory.id,
+        promoted_id=result.response.id,
+        reason="shared",
+        review_state=plan.candidate_memory.review_state,
+        memory_scope=plan.target_scope,
+        scope_key=plan.target_scope_key,
+        raw_source_ids=plan.raw_source_ids,
+        metadata=metadata,
+    )
+
+
 def _resolve_memory_scope(
     memory_scope: MemoryScope | str | None,
     project: str | None,
@@ -1695,18 +2016,24 @@ def _authorize_reflection_write(
     memory_scope: MemoryScope,
     scope_key: str | None,
     accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
 ) -> tuple[MemoryPolicyDecision, MemoryPolicyDecision]:
     reflect_decision = authorize_memory_reflect(
         principal_id=principal_id,
         memory_scope=memory_scope,
         scope_key=scope_key,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     write_decision = authorize_memory_write(
         principal_id=principal_id,
         memory_scope=memory_scope,
         scope_key=scope_key,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     return reflect_decision, write_decision
 
@@ -1820,6 +2147,7 @@ def _authorize_share_target(
     recipient_organization_id: str | None,
     organization_id: str,
     accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None,
     accessible_delegations: Iterable[str] | None,
 ) -> MemoryPolicyDecision:
     if target_scope is None:
@@ -1843,6 +2171,7 @@ def _authorize_share_target(
         memory_scope=target_scope,
         scope_key=target_scope_key,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
 
@@ -1852,7 +2181,8 @@ def _authorize_share_source_read(
     memory: RawMemory,
     principal_id: str | None,
     accessible_projects: Iterable[str] | None,
-    accessible_delegations: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
 ) -> MemoryPolicyDecision:
     if memory.memory_scope is MemoryScope.PRIVATE and memory.principal_id != principal_id:
         return MemoryPolicyDecision(
@@ -1867,6 +2197,7 @@ def _authorize_share_source_read(
         memory_scope=memory.memory_scope,
         scope_key=memory.scope_key,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
 
@@ -2356,6 +2687,8 @@ def _source_scope_denial(
     principal_id: str | None,
     raw_source_ids: list[str],
     accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
 ) -> ReflectionPromotionResult | None:
     for memory in memories:
         read_decision = authorize_memory_read(
@@ -2363,6 +2696,8 @@ def _source_scope_denial(
             memory_scope=memory.memory_scope,
             scope_key=memory.scope_key,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         )
         if not read_decision.allowed:
             return _promotion_denied(
@@ -2507,6 +2842,62 @@ def _candidate_from_raw_memory(
         reason=_metadata_str(memory.metadata, "promotion_reason")
         or "accepted raw memory for promotion",
         confidence=_metadata_float(memory.metadata, "promotion_confidence", 1.0),
+        tags=list(memory.tags),
+        metadata=metadata,
+        raw_source_ids=[memory.id],
+        suggested_memory_scope=target_scope.value,
+        suggested_scope_key=target_scope_key,
+        review_state=memory.review_state,
+    )
+
+
+def _share_source_metadata(memory: RawMemory) -> dict[str, object]:
+    metadata = {
+        key: value
+        for key, value in memory.metadata.items()
+        if key not in _SHARE_SOURCE_METADATA_EXCLUDE
+    }
+    if promoted_id := _metadata_str(memory.metadata, "promoted_entity_id"):
+        metadata["share_source_promoted_entity_id"] = promoted_id
+    return metadata
+
+
+def _candidate_from_share_memory(
+    memory: RawMemory,
+    *,
+    target_scope: MemoryScope,
+    target_scope_key: str | None,
+    domain: str | None,
+) -> ReflectionCandidate:
+    metadata = {
+        **_share_source_metadata(memory),
+        "capture_mode": "share",
+        "imported_capture_id": memory.id,
+        "native_write_path": "memory_share",
+        "promoted_capture_surface": "memory_share",
+        "raw_source_ids": [memory.id],
+        "share_original_provenance": dict(memory.provenance),
+        "share_source_capture_surface": memory.capture_surface,
+        "share_source_created_by_user_id": memory.created_by_user_id,
+        "share_source_id": memory.id,
+        "share_source_principal_id": memory.principal_id,
+        "share_source_scope": memory.memory_scope.value,
+        "share_source_scope_key": memory.scope_key,
+        "share_target_scope": target_scope.value,
+        "share_target_scope_key": target_scope_key,
+        "source_ids": [memory.id],
+        "suggested_memory_scope": target_scope.value,
+        "suggested_scope_key": target_scope_key,
+    }
+    resolved_domain = domain or _metadata_str(memory.metadata, "domain")
+    if resolved_domain:
+        metadata["domain"] = resolved_domain
+    return ReflectionCandidate(
+        kind=memory.entity_type or _metadata_str(memory.metadata, "remember_kind") or "episode",
+        title=memory.title,
+        content=memory.raw_content,
+        reason=_metadata_str(memory.metadata, "share_reason") or "shared memory promotion",
+        confidence=_metadata_float(memory.metadata, "share_confidence", 1.0),
         tags=list(memory.tags),
         metadata=metadata,
         raw_source_ids=[memory.id],
@@ -2666,6 +3057,7 @@ __all__ = [
     "MemoryCorrectionPreview",
     "MemoryCorrectionResult",
     "MemorySharePreview",
+    "MemoryShareResult",
     "ReflectionPromotionPreview",
     "ReflectionPromotionResult",
     "ReflectionWriteResult",
@@ -2682,5 +3074,6 @@ __all__ = [
     "promote_raw_memory",
     "promote_reflection_candidate_review",
     "reflection_write_enabled",
+    "share_memory",
     "write_mode_from_env",
 ]

@@ -573,3 +573,25 @@ class MemorySharePreviewResponse(BaseModel):
     policy_reasons: list[str] = Field(default_factory=list)
     input_scopes: list[MemoryScopeInputResponse] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MemoryShareRequest(MemorySharePreviewRequest):
+    """Request to apply same-org memory sharing through promotion-backed writes."""
+
+
+class MemoryShareResponse(BaseModel):
+    """Applied share outcome with preview, promotion, provenance, and audit receipts."""
+
+    applied: bool
+    reason: str
+    target_scope: MemoryScopeLiteral | None = None
+    target_scope_key: str | None = None
+    source_ids: list[str] = Field(default_factory=list)
+    visible_source_ids: list[str] = Field(default_factory=list)
+    denied_source_ids: list[str] = Field(default_factory=list)
+    missing_source_ids: list[str] = Field(default_factory=list)
+    promoted_ids: list[str] = Field(default_factory=list)
+    audit_event_ids: list[str] = Field(default_factory=list)
+    preview: MemorySharePreviewResponse
+    promotions: list[ReflectionPromotionResponse] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)

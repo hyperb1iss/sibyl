@@ -25,6 +25,8 @@ from sibyl.api.schemas import (
     MemoryScopeLiteral,
     MemorySharePreviewRequest,
     MemorySharePreviewResponse,
+    MemoryShareRequest,
+    MemoryShareResponse,
     MemorySourceInspectResponse,
     MemorySpaceAccessPreviewRequest,
     MemorySpaceAccessPreviewResponse,
@@ -88,6 +90,7 @@ from sibyl_core.services.memory import (
     MemoryCorrectionPreview,
     MemoryCorrectionResult,
     MemorySharePreview,
+    MemoryShareResult,
     ReflectionPromotionPreview,
     ReflectionPromotionResult,
     apply_memory_correction,
@@ -98,6 +101,7 @@ from sibyl_core.services.memory import (
     preview_reflection_candidate_promotion,
     promote_raw_memory,
     promote_reflection_candidate_review,
+    share_memory,
 )
 from sibyl_core.services.memory_autonomy import (
     ReflectionAutonomyDecision,
@@ -184,9 +188,9 @@ async def _log_memory_audit(
     source_ids: list[str] | None = None,
     derived_ids: list[str] | None = None,
     details: dict[str, object] | None = None,
-) -> None:
+) -> str | None:
     try:
-        await log_memory_audit_event(
+        return await log_memory_audit_event(
             action=action,
             user_id=ctx.user_id,
             organization_id=ctx.organization_id,
@@ -203,6 +207,7 @@ async def _log_memory_audit(
         )
     except Exception as exc:
         log.warning("memory_audit_event_failed", action=action, error=str(exc), exc_info=True)
+        return None
 
 
 async def _project_accessible_for_policy(
@@ -783,6 +788,39 @@ def _share_preview_response(result: MemorySharePreview) -> MemorySharePreviewRes
             )
             for item in _metadata_dict_list(metadata.get("input_scopes"))
         ],
+        metadata=metadata,
+    )
+
+
+def _share_response(
+    result: MemoryShareResult,
+    *,
+    audit_event_ids: list[str],
+) -> MemoryShareResponse:
+    preview = _share_preview_response(result.preview)
+    promotions = [_promotion_response(promotion) for promotion in result.promotions]
+    promoted_ids = [
+        str(promotion.promoted_id)
+        for promotion in result.promotions
+        if promotion.success and promotion.promoted_id
+    ]
+    metadata = {
+        **dict(result.metadata or {}),
+        "audit_event_ids": list(audit_event_ids),
+    }
+    return MemoryShareResponse(
+        applied=result.applied,
+        reason=result.reason,
+        target_scope=preview.target_scope,
+        target_scope_key=preview.target_scope_key,
+        source_ids=list(preview.source_ids),
+        visible_source_ids=list(preview.visible_source_ids),
+        denied_source_ids=list(preview.denied_source_ids),
+        missing_source_ids=list(preview.missing_source_ids),
+        promoted_ids=promoted_ids,
+        audit_event_ids=list(audit_event_ids),
+        preview=preview,
+        promotions=promotions,
         metadata=metadata,
     )
 
@@ -1459,6 +1497,17 @@ async def _accessible_projects_for_share_preview(
     projects = {str(project_id) for project_id in accessible_projects or set()}
     projects.update(project_ids)
     return projects
+
+
+async def _accessible_teams_for_share(
+    *,
+    ctx: AuthContext,
+    request: MemorySharePreviewRequest,
+) -> set[str] | None:
+    if request.target_scope != "team":
+        return None
+    accessible_teams = await list_accessible_team_scope_keys(ctx)
+    return {str(team_id) for team_id in accessible_teams or set()}
 
 
 @router.get(
@@ -2233,6 +2282,7 @@ async def preview_memory_share_route(
         target_scope_key=request.target_scope_key,
         recipient_organization_id=request.recipient_organization_id,
         accessible_projects=accessible_projects,
+        accessible_teams=await _accessible_teams_for_share(ctx=ctx, request=request),
     )
     await _log_memory_audit(
         action="memory.share.preview",
@@ -2258,6 +2308,81 @@ async def preview_memory_share_route(
         },
     )
     return _share_preview_response(result)
+
+
+@router.post(
+    "/share",
+    response_model=MemoryShareResponse,
+    dependencies=[Depends(require_org_role(*_WRITE_ROLES))],
+)
+@handle_workflow_errors("share_memory")
+async def share_memory_route(
+    request: MemoryShareRequest,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+) -> MemoryShareResponse:
+    """Apply same-org memory sharing through promotion-backed native writes."""
+    principal_id = ctx.user_id
+    if not principal_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    accessible_projects = await _accessible_projects_for_share_preview(
+        ctx=ctx,
+        request=request,
+        http_request=http_request,
+    )
+    accessible_teams = await _accessible_teams_for_share(ctx=ctx, request=request)
+    project_id = request.project_id or (
+        request.target_scope_key if request.target_scope == "project" else None
+    )
+    result = await share_memory(
+        source_ids=request.source_ids,
+        organization_id=str(org.id),
+        principal_id=principal_id,
+        target_scope=request.target_scope,
+        target_scope_key=request.target_scope_key,
+        recipient_organization_id=request.recipient_organization_id,
+        project=project_id,
+        accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+    )
+    promoted_ids = [
+        str(promotion.promoted_id)
+        for promotion in result.promotions
+        if promotion.success and promotion.promoted_id
+    ]
+    audit_id = await _log_memory_audit(
+        action="memory.share.apply",
+        ctx=ctx,
+        request=http_request,
+        memory_scope=result.preview.target_scope.value
+        if result.preview.target_scope
+        else request.target_scope,
+        scope_key=result.preview.target_scope_key or request.target_scope_key,
+        project_id=project_id,
+        source_surface="memory_share",
+        source_ids=list(result.preview.source_ids),
+        derived_ids=promoted_ids,
+        policy_allowed=result.applied,
+        policy_reason=result.reason,
+        details={
+            "applied": result.applied,
+            "denied_source_count": len(result.preview.denied_source_ids),
+            "hidden_but_relevant_count": result.preview.hidden_but_relevant_count,
+            "preview": False,
+            "promoted_count": len(promoted_ids),
+            "recipient_organization_id": request.recipient_organization_id,
+            "redacted_count": result.preview.redacted_count,
+            "target_policy_reason": (result.preview.metadata or {}).get("target_policy_reason"),
+            "target_scope": result.preview.target_scope.value
+            if result.preview.target_scope
+            else None,
+            "visible_source_count": len(result.preview.visible_source_ids),
+        },
+    )
+    audit_event_ids = [audit_id] if audit_id else []
+    return _share_response(result, audit_event_ids=audit_event_ids)
 
 
 @router.post(

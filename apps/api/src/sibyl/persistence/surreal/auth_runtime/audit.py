@@ -23,9 +23,9 @@ async def log_audit_event(
     organization_id: UUID | None,
     request,
     details: SurrealRecord,
-) -> None:
+) -> str | None:
     async with _auth_client_scope() as client:
-        await _log_audit_event(
+        return await _log_audit_event(
             client,
             action=action,
             user_id=user_id,
@@ -178,7 +178,7 @@ async def log_memory_audit_event(
     policy_allowed: bool | None = None,
     policy_reason: str | None = None,
     details: Mapping[str, object] | None = None,
-) -> None:
+) -> str | None:
     """Record metadata-only memory audit receipts exposed through inspect APIs."""
     bounded_source_ids, source_ids_truncated = _bounded_audit_id_list(source_ids)
     bounded_derived_ids, derived_ids_truncated = _bounded_audit_id_list(derived_ids)
@@ -200,7 +200,7 @@ async def log_memory_audit_event(
         payload["details"] = _bounded_audit_value(details)
 
     async with _auth_client_scope() as client:
-        await _log_audit_event(
+        return await _log_audit_event(
             client,
             action=action,
             user_id=_coerce_optional_uuid(user_id),

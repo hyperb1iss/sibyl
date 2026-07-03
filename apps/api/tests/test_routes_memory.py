@@ -30,12 +30,14 @@ from sibyl.api.routes.memory import (
     promote_reflection_candidate,
     recall_raw,
     remember_raw,
+    share_memory_route,
     update_memory_space_record,
 )
 from sibyl.api.schemas import (
     MemoryCitationRequest,
     MemoryCorrectionRequest,
     MemorySharePreviewRequest,
+    MemoryShareRequest,
     MemorySpaceAccessPreviewRequest,
     MemorySpaceCreateRequest,
     MemorySpaceMemberCreateRequest,
@@ -56,6 +58,7 @@ from sibyl_core.services.memory import (
     MemoryCorrectionPreview,
     MemoryCorrectionResult,
     MemorySharePreview,
+    MemoryShareResult,
     ReflectionPromotionPreview,
     ReflectionPromotionResult,
 )
@@ -1835,6 +1838,7 @@ async def test_preview_memory_share_returns_disabled_contract_and_audit() -> Non
         target_scope_key=None,
         recipient_organization_id="org-2",
         accessible_projects={"project_123"},
+        accessible_teams=None,
     )
     audit.assert_awaited_once_with(
         action="memory.share.preview",
@@ -1870,6 +1874,100 @@ async def test_preview_memory_share_returns_disabled_contract_and_audit() -> Non
         "private_principal_bound",
     ]
     assert response.input_scopes[0].id == "memory-1"
+
+
+@pytest.mark.asyncio
+async def test_share_memory_applies_promotions_and_returns_audit_receipt() -> None:
+    org = _org()
+    ctx = _ctx()
+    http_request = _http_request()
+    preview = MemorySharePreview(
+        allowed=False,
+        reason="scope_crossing_requires_promotion",
+        target_scope=MemoryScope.PROJECT,
+        target_scope_key="project_123",
+        source_ids=["memory-1"],
+        visible_source_ids=["memory-1"],
+        denied_source_ids=[],
+        missing_source_ids=[],
+        redacted_count=0,
+        hidden_but_relevant_count=0,
+        metadata={
+            "policy_reasons": [
+                "scope_crossing_requires_promotion",
+                "private_principal_bound",
+            ],
+            "target_policy_reason": "scope_crossing_requires_promotion",
+        },
+    )
+    promotion = ReflectionPromotionResult(
+        success=True,
+        candidate_id="memory-1",
+        promoted_id="entity-1",
+        reason="shared",
+        review_state="pending",
+        memory_scope=MemoryScope.PROJECT,
+        scope_key="project_123",
+        raw_source_ids=["memory-1"],
+        metadata={
+            "policy_reasons": ["project_access_verified"],
+            "share_source_scope": "private",
+            "share_target_scope": "project",
+        },
+    )
+    result = MemoryShareResult(
+        applied=True,
+        reason="shared",
+        preview=preview,
+        promotions=(promotion,),
+        metadata={"promotion_count": 1, "promoted_count": 1},
+    )
+    with (
+        patch(
+            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"project_123"}),
+        ),
+        patch("sibyl.api.routes.memory._authorize_project_filter", AsyncMock()),
+        patch("sibyl.api.routes.memory.share_memory", AsyncMock(return_value=result)) as share,
+        patch(
+            "sibyl.api.routes.memory.log_memory_audit_event",
+            AsyncMock(return_value="audit-1"),
+        ) as audit,
+    ):
+        response = await share_memory_route(
+            MemoryShareRequest(
+                source_ids=["memory-1"],
+                target_scope="project",
+                target_scope_key="project_123",
+            ),
+            http_request=http_request,
+            org=org,
+            ctx=ctx,
+        )
+
+    share.assert_awaited_once_with(
+        source_ids=["memory-1"],
+        organization_id=str(org.id),
+        principal_id="user-123",
+        target_scope="project",
+        target_scope_key="project_123",
+        recipient_organization_id=None,
+        project="project_123",
+        accessible_projects={"project_123"},
+        accessible_teams=None,
+    )
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["action"] == "memory.share.apply"
+    assert audit.await_args.kwargs["source_ids"] == ["memory-1"]
+    assert audit.await_args.kwargs["derived_ids"] == ["entity-1"]
+    assert audit.await_args.kwargs["policy_allowed"] is True
+    assert audit.await_args.kwargs["policy_reason"] == "shared"
+    assert response.applied is True
+    assert response.reason == "shared"
+    assert response.promoted_ids == ["entity-1"]
+    assert response.audit_event_ids == ["audit-1"]
+    assert response.preview.reason == "scope_crossing_requires_promotion"
+    assert response.promotions[0].metadata["share_target_scope"] == "project"
 
 
 @pytest.mark.asyncio

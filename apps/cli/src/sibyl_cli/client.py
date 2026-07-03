@@ -1608,6 +1608,28 @@ class SibylClient:
             data["project_id"] = project_id
         return await self._request("POST", "/memory/share/preview", json=data)
 
+    async def share_memory(
+        self,
+        *,
+        source_ids: list[str],
+        target_scope: str,
+        target_scope_key: str | None = None,
+        recipient_organization_id: str | None = None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Apply memory sharing through promotion-backed writes."""
+        data: dict[str, Any] = {
+            "source_ids": source_ids,
+            "target_scope": target_scope,
+        }
+        if target_scope_key:
+            data["target_scope_key"] = target_scope_key
+        if recipient_organization_id:
+            data["recipient_organization_id"] = recipient_organization_id
+        if project_id:
+            data["project_id"] = project_id
+        return await self._request("POST", "/memory/share", json=data)
+
     async def preview_memory_space_access(
         self,
         *,

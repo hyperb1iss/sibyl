@@ -130,11 +130,11 @@ class AuditPort(Protocol):
         policy_allowed: bool,
         policy_reason: str,
         details: Mapping[str, Any],
-    ) -> None: ...
+    ) -> str | None: ...
 
 
 class _NoAuditPort:
-    async def log_memory_audit_event(self, **_kwargs: Any) -> None:
+    async def log_memory_audit_event(self, **_kwargs: Any) -> str | None:
         return None
 
 

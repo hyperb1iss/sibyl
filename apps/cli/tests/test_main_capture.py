@@ -2236,17 +2236,48 @@ def test_memory_share_preview_command_renders_redactions(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
 @patch("sibyl_cli.main.get_client")
-def test_memory_share_without_preview_is_denied(mock_get_client: MagicMock) -> None:
+def test_memory_share_applies_without_preview(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.resolve_id_prefix = AsyncMock(return_value={"matches": [{"id": "raw-1"}]})
+    mock_client.share_memory = AsyncMock(
+        return_value={
+            "applied": True,
+            "reason": "shared",
+            "target_scope": "project",
+            "target_scope_key": "project_123",
+            "source_ids": ["raw-1"],
+            "visible_source_ids": ["raw-1"],
+            "denied_source_ids": [],
+            "promoted_ids": ["entity-1"],
+            "audit_event_ids": ["audit-1"],
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["memory-share", "raw-1", "--target-scope", "organization"],
+        ["memory-share", "raw-1", "--target-scope", "project"],
     )
 
-    assert result.exit_code == 1
-    assert "only supports --preview" in result.stdout
-    mock_get_client.assert_not_called()
+    assert result.exit_code == 0
+    assert "Share result" in result.stdout
+    assert "applied" in result.stdout
+    assert "entity-1" in result.stdout
+    assert "audit-1" in result.stdout
+    mock_client.share_memory.assert_awaited_once_with(
+        source_ids=["raw-1"],
+        target_scope="project",
+        target_scope_key="project_123",
+        recipient_organization_id=None,
+        project_id="project_123",
+    )
+    mock_resolve_project_from_cwd.assert_called_once_with()
 
 
 @patch("sibyl_cli.main.get_client")

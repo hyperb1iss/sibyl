@@ -25,6 +25,7 @@ from sibyl_core.services.memory import (
     promote_raw_memory,
     promote_reflection_candidate_review,
     reflection_write_enabled,
+    share_memory,
     write_mode_from_env,
 )
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory, _raw_memory_matches_as_of
@@ -697,6 +698,91 @@ async def test_share_preview_cross_org_remains_disabled(
     assert result.metadata is not None
     assert result.metadata["cross_organization"] is True
     assert result.metadata["target_policy_reason"] == "scope_not_enabled"
+    save.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_share_memory_promotes_same_org_visible_sources_without_marking_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _raw_import_memory(
+        id="source-1",
+        metadata={**_raw_import_memory().metadata, "domain": "sibyl"},
+    )
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=source))
+    persist = AsyncMock(
+        return_value=ReflectionWriteResult(
+            response=AddResponse(
+                success=True,
+                id="entity-1",
+                message="Promoted natively: Mailbox thread",
+                timestamp=datetime.now(UTC),
+            ),
+            metadata={
+                "policy_allowed": True,
+                "policy_reasons": ["same_scope_reflect_allowed", "project_access_verified"],
+            },
+        )
+    )
+    save = AsyncMock()
+    monkeypatch.setattr(memory_module, "persist_reflection_candidate", persist)
+    monkeypatch.setattr(memory_module, "save_raw_memory", save)
+
+    result = await share_memory(
+        source_ids=["source-1"],
+        organization_id="org-1",
+        principal_id="user-1",
+        target_scope="project",
+        target_scope_key="project_123",
+        accessible_projects={"project_123"},
+    )
+
+    assert result.applied is True
+    assert result.reason == "shared"
+    assert result.preview.reason == "scope_crossing_requires_promotion"
+    assert result.preview.visible_source_ids == ["source-1"]
+    assert result.promotions[0].success is True
+    assert result.promotions[0].promoted_id == "entity-1"
+    assert result.promotions[0].reason == "shared"
+    assert result.promotions[0].review_state == source.review_state
+    assert result.promotions[0].metadata is not None
+    assert result.promotions[0].metadata["share_source_scope"] == "private"
+    assert result.promotions[0].metadata["share_target_scope"] == "project"
+    persist.assert_awaited_once()
+    candidate = persist.await_args.kwargs["candidate"]
+    assert candidate.metadata["native_write_path"] == "memory_share"
+    assert candidate.metadata["share_source_id"] == "source-1"
+    assert candidate.metadata["share_target_scope_key"] == "project_123"
+    assert candidate.metadata["share_original_provenance"] == {"source_type": "email"}
+    save.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_share_memory_keeps_cross_org_denied_without_writing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _raw_import_memory(id="source-1")
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=source))
+    persist = AsyncMock()
+    save = AsyncMock()
+    monkeypatch.setattr(memory_module, "persist_reflection_candidate", persist)
+    monkeypatch.setattr(memory_module, "save_raw_memory", save)
+
+    result = await share_memory(
+        source_ids=["source-1"],
+        organization_id="org-1",
+        principal_id="user-1",
+        target_scope="project",
+        target_scope_key="project_123",
+        recipient_organization_id="org-2",
+        accessible_projects={"project_123"},
+    )
+
+    assert result.applied is False
+    assert result.reason == "scope_not_enabled"
+    assert result.preview.metadata is not None
+    assert result.preview.metadata["cross_organization"] is True
+    persist.assert_not_awaited()
     save.assert_not_awaited()
 
 

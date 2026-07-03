@@ -1112,6 +1112,20 @@ def _print_share_preview(data: dict[str, object]) -> None:
     console.print(table)
 
 
+def _print_share_result(data: dict[str, object]) -> None:
+    console.print("\n[bold]Share result[/bold]\n")
+    table = create_table(None, "Field", "Value", expand=False)
+    table.add_row("State", "applied" if data.get("applied") is True else "blocked")
+    table.add_row("Reason", str(data.get("reason") or ""))
+    table.add_row("Target", _preview_target(data.get("target_scope"), data.get("target_scope_key")))
+    table.add_row("Sources", _preview_id_summary(data.get("source_ids")))
+    table.add_row("Visible", _preview_id_summary(data.get("visible_source_ids")))
+    table.add_row("Denied", _preview_id_summary(data.get("denied_source_ids")))
+    table.add_row("Promoted", _preview_id_summary(data.get("promoted_ids")))
+    table.add_row("Audit", _preview_id_summary(data.get("audit_event_ids")))
+    console.print(table)
+
+
 def _print_access_preview(data: dict[str, object]) -> None:
     console.print("\n[bold]Access preview[/bold]\n")
     table = create_table(None, "Field", "Value", expand=False)
@@ -2846,12 +2860,9 @@ def memory_share(
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ) -> None:
-    """Preview memory sharing without enabling share writes."""
-    if not preview:
-        error("memory-share currently only supports --preview.")
-        raise typer.Exit(code=1)
+    """Preview or apply promotion-backed memory sharing."""
     if not target_scope:
-        error("Provide --target-scope for share preview.")
+        error("Provide --target-scope for memory share.")
         raise typer.Exit(code=1)
 
     parsed_source_ids = _parse_id_args(source_ids)
@@ -2875,17 +2886,29 @@ def memory_share(
                     await resolve_raw_memory_id_prefix(client, source_id)
                     for source_id in parsed_source_ids
                 ]
-                data = await client.preview_memory_share(
-                    source_ids=resolved_source_ids,
-                    target_scope=target_scope,
-                    target_scope_key=resolved_target_key,
-                    recipient_organization_id=recipient_organization_id,
-                    project_id=project_id,
-                )
+                if preview:
+                    data = await client.preview_memory_share(
+                        source_ids=resolved_source_ids,
+                        target_scope=target_scope,
+                        target_scope_key=resolved_target_key,
+                        recipient_organization_id=recipient_organization_id,
+                        project_id=project_id,
+                    )
+                else:
+                    data = await client.share_memory(
+                        source_ids=resolved_source_ids,
+                        target_scope=target_scope,
+                        target_scope_key=resolved_target_key,
+                        recipient_organization_id=recipient_organization_id,
+                        project_id=project_id,
+                    )
             if json_output:
                 print_json(data)
                 return
-            _print_share_preview(cast("dict[str, object]", data))
+            if preview:
+                _print_share_preview(cast("dict[str, object]", data))
+            else:
+                _print_share_result(cast("dict[str, object]", data))
         except SibylClientError as e:
             _handle_client_error(e)
 

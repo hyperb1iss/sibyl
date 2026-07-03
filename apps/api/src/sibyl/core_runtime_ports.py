@@ -290,10 +290,10 @@ class ApiGraphLinkPort:
 
 
 class ApiAuditPort:
-    async def log_memory_audit_event(self, **kwargs: Any) -> None:
+    async def log_memory_audit_event(self, **kwargs: Any) -> str | None:
         from sibyl.persistence.auth_runtime import log_memory_audit_event
 
-        await log_memory_audit_event(**kwargs)
+        return await log_memory_audit_event(**kwargs)
 
 
 def install_core_runtime_ports() -> None:
