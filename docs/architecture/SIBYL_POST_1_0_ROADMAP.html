@@ -1,0 +1,2569 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sibyl · Post-1.0 Roadmap (v1.1 → v1.2 → v1.3)</title>
+    <meta
+      name="description"
+      content="Sibyl's post-1.0 vision and roadmap: prove the honest edge, coalesce team memory safely, and lead a field that can't yet measure itself."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fira+Code:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* =========================================================================
+         SilkCircuit tokens — neon (dark) is the committed world; dawn is the light
+         theme. Tokens live on :root; the media query carries the OS preference and
+         the [data-theme] attribute (set by the toggle) overrides it in both directions.
+         ========================================================================= */
+      :root,
+      :root[data-theme="dark"] {
+        --sc-purple: oklch(64% 0.31 328);
+        --sc-magenta: oklch(70% 0.32 328);
+        --sc-cyan: oklch(92% 0.16 180);
+        --sc-coral: oklch(72% 0.22 350);
+        --sc-yellow: oklch(95% 0.13 105);
+        --sc-green: oklch(88% 0.23 145);
+        --sc-red: oklch(68% 0.22 25);
+        --sc-orange: oklch(78% 0.16 60);
+
+        --bg-void: oklch(6% 0.015 285);
+        --bg-base: oklch(10% 0.02 285);
+        --bg-raise: oklch(14% 0.025 285);
+        --bg-card: oklch(17% 0.03 285);
+        --bg-surface: oklch(21% 0.035 285);
+
+        --fg: oklch(98% 0.005 110);
+        --fg-2: oklch(80% 0.02 280);
+        --fg-muted: oklch(64% 0.035 280);
+        --fg-subtle: oklch(46% 0.03 280);
+
+        --hair: color-mix(in oklch, var(--fg) 10%, transparent);
+        --hair-strong: color-mix(in oklch, var(--fg) 18%, transparent);
+        --glow: color-mix(in oklch, var(--sc-purple) 26%, transparent);
+        --grid-line: color-mix(in oklch, var(--sc-purple) 8%, transparent);
+        --shadow-ink: oklch(0% 0 0);
+        color-scheme: dark;
+      }
+
+      @media (prefers-color-scheme: light) {
+        :root {
+          --sc-purple: oklch(42% 0.28 300);
+          --sc-magenta: oklch(40% 0.26 340);
+          --sc-cyan: oklch(45% 0.16 200);
+          --sc-coral: oklch(50% 0.22 350);
+          --sc-yellow: oklch(52% 0.16 85);
+          --sc-green: oklch(45% 0.2 145);
+          --sc-red: oklch(50% 0.24 25);
+          --sc-orange: oklch(52% 0.16 55);
+
+          --bg-void: oklch(95% 0.01 290);
+          --bg-base: oklch(97% 0.008 290);
+          --bg-raise: oklch(94% 0.015 290);
+          --bg-card: oklch(100% 0 0);
+          --bg-surface: oklch(91% 0.02 290);
+
+          --fg: oklch(18% 0.03 290);
+          --fg-2: oklch(30% 0.035 290);
+          --fg-muted: oklch(45% 0.04 290);
+          --fg-subtle: oklch(62% 0.03 290);
+
+          --hair: color-mix(in oklch, var(--fg) 12%, transparent);
+          --hair-strong: color-mix(in oklch, var(--fg) 22%, transparent);
+          --glow: color-mix(in oklch, var(--sc-purple) 16%, transparent);
+          --grid-line: color-mix(in oklch, var(--sc-purple) 7%, transparent);
+          --shadow-ink: oklch(30% 0.05 290);
+          color-scheme: light;
+        }
+      }
+
+      :root[data-theme="light"] {
+        --sc-purple: oklch(42% 0.28 300);
+        --sc-magenta: oklch(40% 0.26 340);
+        --sc-cyan: oklch(45% 0.16 200);
+        --sc-coral: oklch(50% 0.22 350);
+        --sc-yellow: oklch(52% 0.16 85);
+        --sc-green: oklch(45% 0.2 145);
+        --sc-red: oklch(50% 0.24 25);
+        --sc-orange: oklch(52% 0.16 55);
+
+        --bg-void: oklch(95% 0.01 290);
+        --bg-base: oklch(97% 0.008 290);
+        --bg-raise: oklch(94% 0.015 290);
+        --bg-card: oklch(100% 0 0);
+        --bg-surface: oklch(91% 0.02 290);
+
+        --fg: oklch(18% 0.03 290);
+        --fg-2: oklch(30% 0.035 290);
+        --fg-muted: oklch(45% 0.04 290);
+        --fg-subtle: oklch(62% 0.03 290);
+
+        --hair: color-mix(in oklch, var(--fg) 12%, transparent);
+        --hair-strong: color-mix(in oklch, var(--fg) 22%, transparent);
+        --glow: color-mix(in oklch, var(--sc-purple) 16%, transparent);
+        --grid-line: color-mix(in oklch, var(--sc-purple) 7%, transparent);
+        --shadow-ink: oklch(30% 0.05 290);
+        color-scheme: light;
+      }
+
+      /* ---- reset / base -------------------------------------------------------- */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+        -webkit-text-size-adjust: 100%;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+      }
+      body {
+        margin: 0;
+        background: var(--bg-void);
+        color: var(--fg);
+        font-family: "Space Grotesk", system-ui, -apple-system, sans-serif;
+        font-size: 17px;
+        line-height: 1.65;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        overflow-x: hidden;
+      }
+      ::selection {
+        background: color-mix(in oklch, var(--sc-purple) 40%, transparent);
+        color: var(--fg);
+      }
+      :focus-visible {
+        outline: 2px solid var(--sc-cyan);
+        outline-offset: 3px;
+        border-radius: 3px;
+      }
+      a {
+        color: var(--sc-cyan);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+      h1,
+      h2,
+      h3,
+      h4 {
+        font-weight: 600;
+        line-height: 1.1;
+        text-wrap: balance;
+        margin: 0;
+      }
+      code,
+      .mono {
+        font-family: "Fira Code", ui-monospace, "SF Mono", monospace;
+        font-feature-settings: "tnum" 1;
+      }
+
+      /* ---- layout scaffolding -------------------------------------------------- */
+      .wrap {
+        width: min(1140px, 92vw);
+        margin-inline: auto;
+      }
+      .narrow {
+        max-width: 68ch;
+      }
+      section {
+        padding-block: clamp(4rem, 9vw, 8rem);
+        position: relative;
+      }
+      .rule {
+        border: 0;
+        border-top: 1px solid var(--hair);
+        margin: 0;
+      }
+
+      .eyebrow {
+        font-family: "Fira Code", monospace;
+        font-size: 0.72rem;
+        font-weight: 500;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--sc-cyan);
+        display: inline-flex;
+        align-items: center;
+        gap: 0.6em;
+      }
+      .eyebrow::before {
+        content: "";
+        width: 1.6rem;
+        height: 1px;
+        background: currentColor;
+        opacity: 0.7;
+      }
+      .section-title {
+        font-size: clamp(1.9rem, 4.4vw, 3rem);
+        letter-spacing: -0.02em;
+        margin-top: 1.1rem;
+        max-width: 20ch;
+      }
+      .lede {
+        color: var(--fg-2);
+        font-size: clamp(1.05rem, 1.9vw, 1.3rem);
+        line-height: 1.55;
+        max-width: 60ch;
+        margin-top: 1.4rem;
+      }
+      p {
+        margin: 0 0 1.1rem;
+      }
+      .prose p {
+        color: var(--fg-2);
+        max-width: 66ch;
+      }
+      strong {
+        color: var(--fg);
+        font-weight: 600;
+      }
+
+      .gradient-ink {
+        background: linear-gradient(115deg, var(--sc-purple), var(--sc-cyan) 55%, var(--sc-coral));
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        color: transparent;
+      }
+
+      /* ---- top nav ------------------------------------------------------------- */
+      .skip {
+        position: absolute;
+        left: -9999px;
+        top: 0;
+        background: var(--sc-purple);
+        color: var(--sc-on-accent, #fff);
+        padding: 0.6rem 1rem;
+        border-radius: 6px;
+        z-index: 100;
+      }
+      .skip:focus {
+        left: 1rem;
+        top: 1rem;
+      }
+      nav {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        background: color-mix(in oklch, var(--bg-void) 82%, transparent);
+        backdrop-filter: blur(14px) saturate(1.3);
+        -webkit-backdrop-filter: blur(14px) saturate(1.3);
+        border-bottom: 1px solid var(--hair);
+      }
+      .nav-inner {
+        display: flex;
+        align-items: center;
+        gap: 1.2rem;
+        height: 58px;
+      }
+      .nav-mark {
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        font-size: 1.02rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
+      }
+      .nav-mark .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--sc-purple);
+        box-shadow: 0 0 10px var(--sc-purple);
+      }
+      .nav-links {
+        margin-left: auto;
+        display: flex;
+        gap: 0.35rem;
+        align-items: center;
+      }
+      .nav-links a {
+        color: var(--fg-muted);
+        font-family: "Fira Code", monospace;
+        font-size: 0.76rem;
+        letter-spacing: 0.04em;
+        padding: 0.4rem 0.7rem;
+        border-radius: 6px;
+        text-decoration: none;
+        transition:
+          color 0.2s ease,
+          background 0.2s ease;
+      }
+      .nav-links a:hover {
+        color: var(--fg);
+        background: var(--bg-raise);
+        text-decoration: none;
+      }
+      .nav-links a.rel {
+        color: var(--fg-2);
+      }
+      .nav-links a[data-rel="1"]:hover {
+        color: var(--sc-cyan);
+      }
+      .nav-links a[data-rel="2"]:hover {
+        color: var(--sc-purple);
+      }
+      .nav-links a[data-rel="3"]:hover {
+        color: var(--sc-coral);
+      }
+      .theme-btn {
+        background: var(--bg-raise);
+        border: 1px solid var(--hair);
+        color: var(--fg-muted);
+        width: 34px;
+        height: 34px;
+        border-radius: 8px;
+        cursor: pointer;
+        display: grid;
+        place-items: center;
+        transition:
+          color 0.2s,
+          border-color 0.2s;
+      }
+      .theme-btn:hover {
+        color: var(--sc-cyan);
+        border-color: var(--hair-strong);
+      }
+      @media (max-width: 720px) {
+        .nav-links a.rel span {
+          display: none;
+        }
+        .nav-links a:not(.rel) {
+          display: none;
+        }
+      }
+
+      /* ---- hero ---------------------------------------------------------------- */
+      .hero {
+        position: relative;
+        padding-block: clamp(4.5rem, 12vw, 9rem) clamp(3.5rem, 8vw, 6rem);
+        overflow: hidden;
+        border-bottom: 1px solid var(--hair);
+      }
+      #constellation {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 0;
+        opacity: 0.55;
+        pointer-events: none;
+      }
+      .hero-bg {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        background:
+          radial-gradient(
+            60% 55% at 15% 0%,
+            color-mix(in oklch, var(--sc-purple) 22%, transparent),
+            transparent 70%
+          ),
+          radial-gradient(
+            50% 50% at 92% 20%,
+            color-mix(in oklch, var(--sc-cyan) 12%, transparent),
+            transparent 65%
+          );
+        pointer-events: none;
+      }
+      .hero-inner {
+        position: relative;
+        z-index: 2;
+      }
+      .wordmark {
+        font-size: clamp(4.2rem, 17vw, 12rem);
+        font-weight: 700;
+        letter-spacing: -0.04em;
+        line-height: 0.9;
+        margin: 1.5rem 0 0;
+        background: linear-gradient(
+          120deg,
+          var(--sc-purple),
+          var(--sc-magenta) 30%,
+          var(--sc-cyan) 62%,
+          var(--sc-coral)
+        );
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        color: transparent;
+        filter: drop-shadow(0 0 26px color-mix(in oklch, var(--sc-purple) 30%, transparent));
+      }
+      .tagline {
+        font-family: "Fira Code", monospace;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.32em;
+        color: var(--fg-muted);
+        margin-top: 1.1rem;
+      }
+      .tagline b {
+        color: var(--fg-2);
+        font-weight: 500;
+      }
+      .tagline .sep {
+        color: var(--sc-purple);
+        margin: 0 0.5em;
+      }
+      .hero-thesis {
+        font-size: clamp(1.3rem, 3vw, 2.05rem);
+        line-height: 1.32;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+        max-width: 24ch;
+        margin-top: clamp(2rem, 5vw, 3.4rem);
+        color: var(--fg);
+      }
+      .hero-thesis .hl {
+        color: var(--sc-coral);
+      }
+      .hero-thesis code {
+        font-size: 0.86em;
+        color: var(--sc-cyan);
+        background: color-mix(in oklch, var(--sc-cyan) 12%, transparent);
+        padding: 0.05em 0.4em;
+        border-radius: 5px;
+      }
+      .arc-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.8rem;
+        margin-top: clamp(2.2rem, 5vw, 3.2rem);
+      }
+      .arc-chip {
+        display: flex;
+        align-items: baseline;
+        gap: 0.7rem;
+        padding: 0.85rem 1.15rem;
+        border-radius: 12px;
+        background: var(--bg-base);
+        border: 1px solid var(--hair);
+        border-left-width: 3px;
+      }
+      .arc-chip .v {
+        font-family: "Fira Code", monospace;
+        font-weight: 600;
+        font-size: 0.95rem;
+      }
+      .arc-chip .n {
+        color: var(--fg-muted);
+        font-size: 0.92rem;
+      }
+      .arc-chip[data-rel="1"] {
+        border-left-color: var(--sc-cyan);
+      }
+      .arc-chip[data-rel="1"] .v {
+        color: var(--sc-cyan);
+      }
+      .arc-chip[data-rel="2"] {
+        border-left-color: var(--sc-purple);
+      }
+      .arc-chip[data-rel="2"] .v {
+        color: var(--sc-magenta);
+      }
+      .arc-chip[data-rel="3"] {
+        border-left-color: var(--sc-coral);
+      }
+      .arc-chip[data-rel="3"] .v {
+        color: var(--sc-coral);
+      }
+      .hero-meta {
+        margin-top: clamp(2rem, 5vw, 3rem);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem 1.6rem;
+        font-family: "Fira Code", monospace;
+        font-size: 0.74rem;
+        color: var(--fg-subtle);
+        letter-spacing: 0.03em;
+      }
+      .hero-meta b {
+        color: var(--sc-green);
+        font-weight: 500;
+      }
+
+      /* ---- stat gauges --------------------------------------------------------- */
+      .grid {
+        display: grid;
+        gap: 1.1rem;
+      }
+      .stat-grid {
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        margin-top: 2.6rem;
+      }
+      .stat {
+        background: var(--bg-base);
+        border: 1px solid var(--hair);
+        border-radius: 14px;
+        padding: 1.4rem 1.5rem;
+        position: relative;
+        overflow: hidden;
+      }
+      .stat::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: var(--sc-green);
+        opacity: 0.85;
+      }
+      .stat .num {
+        font-family: "Fira Code", monospace;
+        font-size: clamp(1.9rem, 4vw, 2.5rem);
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        color: var(--fg);
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+      }
+      .stat .num .unit {
+        font-size: 0.9rem;
+        color: var(--fg-muted);
+        margin-left: 0.25rem;
+      }
+      .stat .label {
+        margin-top: 0.7rem;
+        color: var(--fg-muted);
+        font-size: 0.86rem;
+        line-height: 1.4;
+      }
+      .stat .sub {
+        font-family: "Fira Code", monospace;
+        font-size: 0.68rem;
+        color: var(--fg-subtle);
+        margin-top: 0.5rem;
+        letter-spacing: 0.02em;
+      }
+
+      /* ---- honest-state ledger ------------------------------------------------- */
+      .ledger {
+        margin-top: 2.6rem;
+        display: grid;
+        gap: 0.7rem;
+      }
+      .ledger-row {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 1rem;
+        align-items: start;
+        padding: 1rem 1.2rem;
+        border: 1px solid var(--hair);
+        border-radius: 12px;
+        background: var(--bg-base);
+      }
+      .chip {
+        font-family: "Fira Code", monospace;
+        font-size: 0.66rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 0.3rem 0.6rem;
+        border-radius: 999px;
+        white-space: nowrap;
+        border: 1px solid transparent;
+      }
+      .chip.ship {
+        color: var(--sc-green);
+        background: color-mix(in oklch, var(--sc-green) 14%, transparent);
+        border-color: color-mix(in oklch, var(--sc-green) 32%, transparent);
+      }
+      .chip.gap {
+        color: var(--sc-yellow);
+        background: color-mix(in oklch, var(--sc-yellow) 12%, transparent);
+        border-color: color-mix(in oklch, var(--sc-yellow) 30%, transparent);
+      }
+      .chip.off {
+        color: var(--sc-coral);
+        background: color-mix(in oklch, var(--sc-coral) 12%, transparent);
+        border-color: color-mix(in oklch, var(--sc-coral) 30%, transparent);
+      }
+      .ledger-row .body {
+        color: var(--fg-2);
+        font-size: 0.96rem;
+      }
+      .ledger-row .body b {
+        color: var(--fg);
+      }
+      .ledger-row .body code {
+        font-size: 0.85em;
+        color: var(--sc-cyan);
+      }
+
+      /* ---- comparison matrix --------------------------------------------------- */
+      .table-scroll {
+        overflow-x: auto;
+        margin-top: 2.6rem;
+        border: 1px solid var(--hair);
+        border-radius: 14px;
+        background: var(--bg-base);
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        min-width: 900px;
+        font-size: 0.9rem;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 0.95rem 1.1rem;
+        border-bottom: 1px solid var(--hair);
+        vertical-align: top;
+      }
+      thead th {
+        font-family: "Fira Code", monospace;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--fg-muted);
+        font-weight: 500;
+        position: sticky;
+        top: 0;
+        background: var(--bg-raise);
+      }
+      tbody th {
+        font-weight: 600;
+        color: var(--fg);
+        white-space: nowrap;
+      }
+      tbody tr:last-child td,
+      tbody tr:last-child th {
+        border-bottom: 0;
+      }
+      tr.sibyl {
+        background: color-mix(in oklch, var(--sc-purple) 9%, transparent);
+      }
+      tr.sibyl th {
+        color: var(--sc-magenta);
+      }
+      td .mk {
+        font-family: "Fira Code", monospace;
+        font-weight: 600;
+      }
+      .mk.y {
+        color: var(--sc-green);
+      }
+      .mk.n {
+        color: var(--fg-subtle);
+      }
+      .mk.p {
+        color: var(--sc-yellow);
+      }
+      td small {
+        color: var(--fg-muted);
+        display: block;
+        font-size: 0.82rem;
+        margin-top: 0.15rem;
+      }
+
+      /* ---- principles ---------------------------------------------------------- */
+      .principles {
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        margin-top: 2.8rem;
+      }
+      .principle {
+        padding: 1.6rem;
+        border: 1px solid var(--hair);
+        border-radius: 14px;
+        background: var(--bg-base);
+        position: relative;
+      }
+      .principle.lead {
+        grid-column: 1 / -1;
+        background: linear-gradient(
+          130deg,
+          color-mix(in oklch, var(--sc-purple) 12%, var(--bg-base)),
+          var(--bg-base) 60%
+        );
+        border-color: color-mix(in oklch, var(--sc-purple) 34%, transparent);
+        box-shadow: 0 0 34px -12px var(--glow);
+      }
+      .principle .pn {
+        font-family: "Fira Code", monospace;
+        font-size: 0.78rem;
+        color: var(--sc-purple);
+        font-weight: 600;
+      }
+      .principle h3 {
+        font-size: 1.16rem;
+        margin: 0.6rem 0 0.55rem;
+        letter-spacing: -0.01em;
+      }
+      .principle.lead h3 {
+        font-size: 1.5rem;
+      }
+      .principle p {
+        color: var(--fg-muted);
+        font-size: 0.92rem;
+        margin: 0;
+        line-height: 1.55;
+      }
+      .principle.lead p {
+        color: var(--fg-2);
+        font-size: 1.02rem;
+        max-width: 62ch;
+      }
+
+      /* ---- release movements --------------------------------------------------- */
+      .movement {
+        border-top: 1px solid var(--hair);
+      }
+      .movement-head {
+        display: flex;
+        align-items: flex-end;
+        gap: 1.4rem;
+        flex-wrap: wrap;
+      }
+      .roman {
+        font-family: "Fira Code", monospace;
+        font-size: clamp(3rem, 9vw, 6.5rem);
+        font-weight: 600;
+        line-height: 0.8;
+        letter-spacing: -0.03em;
+        opacity: 0.9;
+      }
+      .m1 .roman {
+        color: var(--sc-cyan);
+      }
+      .m2 .roman {
+        color: var(--sc-magenta);
+      }
+      .m3 .roman {
+        color: var(--sc-coral);
+      }
+      .movement-titles .ver {
+        font-family: "Fira Code", monospace;
+        font-size: 0.9rem;
+        letter-spacing: 0.06em;
+        color: var(--fg-muted);
+      }
+      .movement-titles h2 {
+        font-size: clamp(2rem, 5vw, 3.2rem);
+        letter-spacing: -0.02em;
+        margin-top: 0.3rem;
+      }
+      .m1 .movement-titles h2 em {
+        font-style: normal;
+        color: var(--sc-cyan);
+      }
+      .m2 .movement-titles h2 em {
+        font-style: normal;
+        color: var(--sc-magenta);
+      }
+      .m3 .movement-titles h2 em {
+        font-style: normal;
+        color: var(--sc-coral);
+      }
+      .movement-theme {
+        color: var(--fg-2);
+        font-size: 1.1rem;
+        line-height: 1.5;
+        max-width: 66ch;
+        margin-top: 1.6rem;
+      }
+      .work-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+        gap: 1.1rem;
+        margin-top: 2.4rem;
+      }
+      .work {
+        border: 1px solid var(--hair);
+        border-radius: 14px;
+        background: var(--bg-base);
+        padding: 1.4rem 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.65rem;
+        transition:
+          border-color 0.25s ease,
+          transform 0.25s ease;
+      }
+      .work:hover {
+        transform: translateY(-3px);
+      }
+      .m1 .work:hover {
+        border-color: color-mix(in oklch, var(--sc-cyan) 40%, transparent);
+      }
+      .m2 .work:hover {
+        border-color: color-mix(in oklch, var(--sc-purple) 40%, transparent);
+      }
+      .m3 .work:hover {
+        border-color: color-mix(in oklch, var(--sc-coral) 40%, transparent);
+      }
+      .work .wid {
+        font-family: "Fira Code", monospace;
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        color: var(--fg-subtle);
+      }
+      .m1 .work .wid {
+        color: color-mix(in oklch, var(--sc-cyan) 78%, var(--fg-muted));
+      }
+      .m2 .work .wid {
+        color: color-mix(in oklch, var(--sc-magenta) 72%, var(--fg-muted));
+      }
+      .m3 .work .wid {
+        color: color-mix(in oklch, var(--sc-coral) 72%, var(--fg-muted));
+      }
+      .work h4 {
+        font-size: 1.06rem;
+        letter-spacing: -0.01em;
+      }
+      .work p {
+        color: var(--fg-muted);
+        font-size: 0.9rem;
+        margin: 0;
+        line-height: 1.55;
+      }
+      .work p code,
+      .movement-theme code {
+        font-size: 0.85em;
+        color: var(--sc-cyan);
+      }
+      .gate {
+        margin-top: 0.4rem;
+        border-top: 1px dashed var(--hair-strong);
+        padding-top: 0.8rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+      .gate .gname {
+        font-family: "Fira Code", monospace;
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: var(--sc-green);
+        letter-spacing: 0.02em;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .gate .gname::before {
+        content: "▸";
+        opacity: 0.7;
+      }
+      .gate .gdef {
+        font-family: "Fira Code", monospace;
+        font-size: 0.74rem;
+        color: var(--fg-muted);
+        line-height: 1.5;
+        letter-spacing: 0.01em;
+      }
+      .gate.blocks .gname {
+        color: var(--sc-red);
+      }
+      .exit {
+        margin-top: 2.4rem;
+        padding: 1.5rem 1.7rem;
+        border-radius: 14px;
+        border: 1px solid var(--hair);
+        background: var(--bg-base);
+        display: flex;
+        gap: 1.1rem;
+        align-items: flex-start;
+      }
+      .exit .k {
+        font-family: "Fira Code", monospace;
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--sc-green);
+        white-space: nowrap;
+        padding-top: 0.2rem;
+      }
+      .exit p {
+        margin: 0;
+        color: var(--fg-2);
+        font-size: 0.98rem;
+      }
+
+      /* ---- sequencing / decisions --------------------------------------------- */
+      .callout {
+        margin-top: 2.4rem;
+        border-left: 3px solid var(--sc-purple);
+        padding: 0.4rem 0 0.4rem 1.6rem;
+        max-width: 72ch;
+      }
+      .callout p {
+        color: var(--fg-2);
+        font-size: 1.08rem;
+        line-height: 1.6;
+      }
+      .decisions {
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        margin-top: 2.6rem;
+      }
+      .decision {
+        border: 1px solid var(--hair);
+        border-radius: 14px;
+        background: var(--bg-base);
+        padding: 1.5rem;
+      }
+      .decision .q {
+        color: var(--sc-yellow);
+        font-family: "Fira Code", monospace;
+        font-size: 0.72rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .decision h4 {
+        font-size: 1.08rem;
+        margin: 0.6rem 0 0.5rem;
+      }
+      .decision p {
+        color: var(--fg-muted);
+        font-size: 0.9rem;
+        margin: 0;
+        line-height: 1.55;
+      }
+
+      /* ---- footer -------------------------------------------------------------- */
+      footer {
+        border-top: 1px solid var(--hair);
+        padding-block: 3.5rem;
+        color: var(--fg-muted);
+      }
+      .foot-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2rem;
+        justify-content: space-between;
+        align-items: flex-start;
+      }
+      footer .mono {
+        font-size: 0.74rem;
+        line-height: 1.7;
+        color: var(--fg-subtle);
+        letter-spacing: 0.02em;
+      }
+      footer b {
+        color: var(--fg-2);
+        font-weight: 500;
+      }
+      .foot-tag {
+        font-family: "Fira Code", monospace;
+        text-transform: uppercase;
+        letter-spacing: 0.3em;
+        font-size: 0.72rem;
+        color: var(--fg-muted);
+      }
+      .foot-tag .sep {
+        color: var(--sc-purple);
+      }
+
+      /* ---- frontier: failure modes, verdict, crystallized thesis --------------- */
+      .fail-grid {
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        margin-top: 2.4rem;
+      }
+      .fail {
+        padding: 1.4rem;
+        border: 1px solid var(--hair);
+        border-left: 3px solid var(--sc-red);
+        border-radius: 12px;
+        background: var(--bg-base);
+      }
+      .fail .fn {
+        font-family: "Fira Code", monospace;
+        font-size: 0.7rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--sc-red);
+      }
+      .fail h4 {
+        font-size: 1.02rem;
+        margin: 0.5rem 0 0.4rem;
+      }
+      .fail p {
+        color: var(--fg-muted);
+        font-size: 0.88rem;
+        margin: 0;
+        line-height: 1.5;
+      }
+      .bigquote {
+        margin: 3rem 0 0;
+        padding: 0 0 0 1.6rem;
+        border-left: 3px solid var(--sc-yellow);
+        font-size: clamp(1.35rem, 3.4vw, 2.05rem);
+        line-height: 1.36;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+        max-width: 26ch;
+        color: var(--fg);
+      }
+      .bigquote .src {
+        display: block;
+        font-family: "Fira Code", monospace;
+        font-size: 0.7rem;
+        letter-spacing: 0.05em;
+        color: var(--fg-subtle);
+        margin-top: 1.1rem;
+        text-transform: uppercase;
+        font-weight: 400;
+        max-width: 44ch;
+      }
+      .thesis-card {
+        margin-top: 3rem;
+        padding: clamp(1.8rem, 4vw, 2.9rem);
+        border-radius: 18px;
+        border: 1px solid color-mix(in oklch, var(--sc-coral) 34%, transparent);
+        background: linear-gradient(
+          135deg,
+          color-mix(in oklch, var(--sc-coral) 13%, var(--bg-base)),
+          color-mix(in oklch, var(--sc-purple) 9%, var(--bg-base)) 72%
+        );
+        box-shadow: 0 0 50px -16px color-mix(in oklch, var(--sc-coral) 45%, transparent);
+      }
+      .thesis-card .k {
+        font-family: "Fira Code", monospace;
+        font-size: 0.72rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--sc-coral);
+      }
+      .thesis-card p.big {
+        font-size: clamp(1.15rem, 2.5vw, 1.55rem);
+        line-height: 1.45;
+        color: var(--fg);
+        margin: 1rem 0 0;
+        max-width: 54ch;
+        font-weight: 500;
+      }
+      .thesis-card p.big b {
+        color: var(--sc-cyan);
+        font-weight: 600;
+      }
+      .thesis-card .note {
+        color: var(--fg-2);
+        font-size: 1rem;
+        margin: 1.4rem 0 0;
+        max-width: 62ch;
+      }
+      .vocab {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 2.4rem;
+      }
+      .vchip {
+        font-family: "Fira Code", monospace;
+        font-size: 0.72rem;
+        color: var(--fg-muted);
+        border: 1px solid var(--hair);
+        background: var(--bg-base);
+        padding: 0.4rem 0.75rem;
+        border-radius: 999px;
+        letter-spacing: 0.01em;
+      }
+
+      /* ---- eval strategy: report / refuse + guards ----------------------------- */
+      .measure-grid {
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        margin-top: 2.6rem;
+      }
+      .measure {
+        padding: 1.6rem;
+        border: 1px solid var(--hair);
+        border-radius: 14px;
+        background: var(--bg-base);
+      }
+      .measure.report {
+        border-left: 3px solid var(--sc-green);
+      }
+      .measure.refuse {
+        border-left: 3px solid var(--sc-red);
+      }
+      .measure h3 {
+        font-size: 1.12rem;
+        margin: 0 0 1.1rem;
+        letter-spacing: -0.01em;
+      }
+      .measure.report h3 {
+        color: var(--sc-green);
+      }
+      .measure.refuse h3 {
+        color: var(--sc-red);
+      }
+      .measure ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 0.9rem;
+      }
+      .measure li {
+        color: var(--fg-2);
+        font-size: 0.92rem;
+        line-height: 1.5;
+        padding-left: 1.1rem;
+        position: relative;
+      }
+      .measure li::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0.55em;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+      }
+      .measure.report li::before {
+        background: var(--sc-green);
+      }
+      .measure.refuse li::before {
+        background: var(--sc-red);
+      }
+      .measure li b {
+        color: var(--fg);
+      }
+      .measure li code {
+        font-size: 0.85em;
+        color: var(--sc-cyan);
+      }
+      .guards {
+        margin-top: 1.6rem;
+        padding: 1.4rem 1.6rem;
+        border: 1px dashed var(--hair-strong);
+        border-radius: 12px;
+        background: color-mix(in oklch, var(--sc-cyan) 5%, var(--bg-base));
+      }
+      .guards .k {
+        font-family: "Fira Code", monospace;
+        font-size: 0.7rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--sc-cyan);
+      }
+      .guards p {
+        margin: 0.6rem 0 0;
+        color: var(--fg-2);
+        font-size: 0.96rem;
+        max-width: 72ch;
+      }
+
+      /* ---- frontier map: solved / progress / open ------------------------------ */
+      .fmap {
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        margin-top: 2.4rem;
+      }
+      .fmap-col {
+        border: 1px solid var(--hair);
+        border-radius: 12px;
+        padding: 1.3rem;
+        background: var(--bg-base);
+      }
+      .fmap-col .h {
+        font-family: "Fira Code", monospace;
+        font-size: 0.72rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        font-weight: 600;
+      }
+      .fmap-col.solved .h {
+        color: var(--fg-subtle);
+      }
+      .fmap-col.progress .h {
+        color: var(--sc-yellow);
+      }
+      .fmap-col.open .h {
+        color: var(--sc-coral);
+      }
+      .fmap-col.open {
+        border-color: color-mix(in oklch, var(--sc-coral) 34%, transparent);
+        box-shadow: 0 0 30px -14px var(--glow);
+      }
+      .fmap-col ul {
+        margin: 0.8rem 0 0;
+        padding-left: 1.1rem;
+        color: var(--fg-muted);
+        font-size: 0.88rem;
+        line-height: 1.6;
+      }
+      .fmap-col.open ul {
+        color: var(--fg-2);
+      }
+
+      /* ---- CoalesceBench task cards -------------------------------------------- */
+      .bench-grid {
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        margin-top: 2.4rem;
+      }
+      .bench {
+        border: 1px solid var(--hair);
+        border-radius: 14px;
+        background: var(--bg-base);
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .bench .bn {
+        font-family: "Fira Code", monospace;
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: var(--sc-coral);
+        letter-spacing: 0.04em;
+      }
+      .bench h4 {
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+      }
+      .bench p {
+        color: var(--fg-muted);
+        font-size: 0.9rem;
+        margin: 0;
+        line-height: 1.55;
+      }
+      .bench p em {
+        color: var(--fg-2);
+        font-style: normal;
+        border-bottom: 1px dotted var(--fg-subtle);
+      }
+      .bench .metric {
+        margin-top: 0.4rem;
+        font-family: "Fira Code", monospace;
+        font-size: 0.72rem;
+        color: var(--sc-cyan);
+        line-height: 1.5;
+        border-top: 1px dashed var(--hair-strong);
+        padding-top: 0.7rem;
+      }
+
+      /* ---- bibliography -------------------------------------------------------- */
+      .biblio {
+        margin-top: 2.6rem;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 1.6rem 2rem;
+      }
+      .biblio-group h4 {
+        font-family: "Fira Code", monospace;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--sc-purple);
+        margin: 0 0 0.7rem;
+      }
+      .biblio-group ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
+      }
+      .biblio-group li {
+        font-size: 0.86rem;
+        color: var(--fg-muted);
+        line-height: 1.4;
+      }
+      .biblio-group li .id {
+        font-family: "Fira Code", monospace;
+        font-size: 0.76rem;
+        color: var(--sc-cyan);
+        white-space: nowrap;
+      }
+
+      /* Content is always visible by default — no JS-gated reveal that could strand
+         a section invisible if an observer never fires. */
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#thesis">Skip to content</a>
+
+    <nav>
+      <div class="wrap nav-inner">
+        <span class="nav-mark"><span class="dot"></span>Sibyl</span>
+        <div class="nav-links">
+          <a href="#thesis">Thesis</a>
+          <a href="#standing">Standing</a>
+          <a href="#field">Field</a>
+          <a href="#measure">Measure</a>
+          <a href="#frontier">Frontier</a>
+          <a href="#bench">Bench</a>
+          <a href="#principles">Principles</a>
+          <a class="rel" href="#v11" data-rel="1">v1.1&nbsp;<span>Prove</span></a>
+          <a class="rel" href="#v12" data-rel="2">v1.2&nbsp;<span>Coalesce</span></a>
+          <a class="rel" href="#v13" data-rel="3">v1.3&nbsp;<span>Lead</span></a>
+          <button
+            class="theme-btn"
+            id="themeToggle"
+            aria-label="Toggle color theme"
+            title="Toggle theme"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"
+                stroke="currentColor"
+                stroke-width="1.7"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- ===================== HERO ===================== -->
+    <header class="hero">
+      <div class="hero-bg"></div>
+      <canvas id="constellation" aria-hidden="true"></canvas>
+      <div class="wrap hero-inner">
+        <span class="eyebrow">Post-1.0 Roadmap · 2026</span>
+        <h1 class="wordmark">Sibyl</h1>
+        <div class="tagline">
+          <b>Collective</b><span class="sep">·</span><b>Intelligence</b>
+        </div>
+        <p class="hero-thesis">
+          In a field where memory systems can't reliably beat
+          <code>cat&nbsp;*.txt</code> on accuracy, Sibyl's edge isn't a bigger number —
+          it's making auth-scoped, <span class="hl">graph-native team memory</span> a
+          database guarantee instead of an application-layer hope: the one layer the
+          frontier labs won't build and the benchmarks say no one has solved.
+        </p>
+
+        <div class="arc-chips">
+          <div class="arc-chip" data-rel="1">
+            <span class="v">v1.1</span><span class="n">Prove It</span>
+          </div>
+          <div class="arc-chip" data-rel="2">
+            <span class="v">v1.2</span><span class="n">Coalesce It — safely</span>
+          </div>
+          <div class="arc-chip" data-rel="3">
+            <span class="v">v1.3</span><span class="n">Lead It</span>
+          </div>
+        </div>
+
+        <div class="hero-meta">
+          <span>RELEASE FLOOR&nbsp;&nbsp;<b>v1.0.2 shipped</b></span>
+          <span>RETRIEVAL&nbsp;&nbsp;<b>96.96% strict R@5</b></span>
+          <span>CONTEXT-PACK&nbsp;&nbsp;<b>p95 84 ms · 0 leaks</b></span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ===================== THESIS ===================== -->
+    <section id="thesis">
+      <div class="wrap">
+        <span class="eyebrow">The Thesis</span>
+        <h2 class="section-title">The honest edge is not a bigger benchmark number.</h2>
+        <div class="prose" style="margin-top: 1.8rem">
+          <p>
+            The AI-memory field in mid-2026 has a credibility problem. Purpose-built memory
+            systems routinely fail to beat a plain full-context baseline on
+            <strong>accuracy</strong>: on LoCoMo a no-memory baseline scores ~73% — matching or
+            beating "sophisticated" systems — and every headline leaderboard number is
+            self-reported on a different harness. When the two most-cited systems (Mem0 and Zep)
+            audited each other, both scores moved by 15–25 points. The honest, defensible wins here
+            are <strong>cost, latency, token-efficiency, and isolation integrity</strong> — not a
+            leaderboard.
+          </p>
+          <p>Two structural facts make Sibyl's position stronger than it looks.</p>
+        </div>
+
+        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-top: 2rem; gap: 1.1rem">
+          <div class="principle" style="background: var(--bg-base)">
+            <div class="pn">Fact 01</div>
+            <h3>The substrate is necessary — but it was never the moat.</h3>
+            <p>
+              A unified engine matters: Mem0 dropped external graph stores, Cognee's isolation works
+              on only three backends, Papr stitches four databases together. But SurrealDB's own
+              <strong>Spectron</strong> ($23M, Feb 2026) now makes the unified-substrate,
+              typed-memory, forgetting-as-a-verb argument on the very engine Sibyl runs on. You
+              can't out-database the database vendor — so Sibyl competes <em>above</em> the
+              substrate: the governed, self-hostable memory <em>product</em>.
+            </p>
+          </div>
+          <div class="principle" style="background: var(--bg-base)">
+            <div class="pn">Fact 02</div>
+            <h3>Team memory is unsolved — and the literature says so.</h3>
+            <p>
+              Almost all "multi-agent memory" is just per-agent namespacing. The 2026 governance
+              literature names four failure modes no system clears (leakage, stale propagation,
+              contradiction persistence, provenance collapse); <strong>GateMem</strong> shows no
+              method achieves utility, access control, and forgetting together; and
+              <strong>no public benchmark measures team memory at all</strong>. Sibyl already ships
+              the two hardest prerequisites: a real auth runtime and a unified graph.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout" style="border-color: var(--sc-coral)">
+          <p>
+            The bet is a three-release arc: <strong>Prove It</strong> — close the table-stakes
+            eval gaps honestly, at PR-gating cadence, and lay the team-memory substrate.
+            <strong>Coalesce It — safely</strong> — ship live, provably-scoped, reversible
+            team-memory coalescence, and build the team benchmark internally.
+            <strong>Lead It</strong> — publish the benchmark the field lacks and push the frontier.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule" />
+
+    <!-- ===================== STANDING ===================== -->
+    <section id="standing">
+      <div class="wrap">
+        <span class="eyebrow">Verified Starting Point</span>
+        <h2 class="section-title">Where we actually stand — receipts, not vibes.</h2>
+        <p class="lede">
+          Every claim below is grounded in verified code reality and a pinned run, not the frozen
+          pre-1.0 planning docs. The honest gaps are listed as plainly as the wins.
+        </p>
+
+        <div class="grid stat-grid">
+          <div class="stat">
+            <div class="num">96.96<span class="unit">%</span></div>
+            <div class="label">Strict Recall@5 on LongMemEval-S</div>
+            <div class="sub">retrieval recall · no LLM in path · run 26304777971</div>
+          </div>
+          <div class="stat">
+            <div class="num">98.90<span class="unit">%</span></div>
+            <div class="label">Recall@10 on the same pinned run</div>
+            <div class="sub">retrieval ceiling, not QA accuracy</div>
+          </div>
+          <div class="stat">
+            <div class="num">84<span class="unit">ms</span></div>
+            <div class="label">Context-pack p95 latency</div>
+            <div class="sub">160/160 packs · zero leaks</div>
+          </div>
+          <div class="stat">
+            <div class="num">0</div>
+            <div class="label">Cross-scope leaks under test</div>
+            <div class="sub">physical namespace-per-org isolation</div>
+          </div>
+        </div>
+
+        <div class="ledger">
+          <div class="ledger-row">
+            <span class="chip ship">Shipped</span>
+            <div class="body">
+              <b>Substrate is healthy.</b> The 2026-05-28 audit (C1–H10 + mediums) is fully
+              remediated: transactions wrap destructive cascades; the per-org query lock is now a
+              per-org connection pool; a shared ranker and shared RRF serve both retrieval surfaces;
+              the empty-API-key-scope hole is closed. W13 (Graphiti / FalkorDB / PostgreSQL
+              removal), W14 (Epic → task-tree), OIDC, Argon2id, Helm, and Ansible all shipped.
+            </div>
+          </div>
+          <div class="ledger-row">
+            <span class="chip gap">Partial</span>
+            <div class="body">
+              <b>Forgetting / decay is uneven.</b> The hybrid path applies temporal decay by
+              default (<code>apply_temporal=True</code>, 365-day half-life); the context/recall path
+              does not (<code>temporal_target=None</code>).
+              <code>priority_decay</code> archives low-importance entities reversibly. Not yet
+              uniform, tuned, or benchmarked.
+            </div>
+          </div>
+          <div class="ledger-row">
+            <span class="chip off">Disabled</span>
+            <div class="body">
+              <b>Team memory: every ingredient exists, all off/unmanaged/offline.</b>
+              <code>MemoryScope.TEAM</code> is hard-disabled in three places. The
+              <code>teams</code> / <code>team_members</code> tables and RBAC resolution exist but
+              there's no team-management route or CLI. Two coalescence engines exist — online
+              <code>retrieval/dedup.py</code> (HNSW + cosine) and offline
+              <code>migrate/merge.py</code> — and the <code>sibyl-consolidation/</code> merge
+              tarballs are a real dogfood of exactly this.
+            </div>
+          </div>
+          <div class="ledger-row">
+            <span class="chip gap">Weak automation</span>
+            <div class="body">
+              <b>Eval infra: strong methodology, weak automation.</b> Honest hit-vs-strict recall,
+              per-question physical isolation, and gate + manifest provenance are in place. But
+              evals don't gate PRs (manual dispatch); the nightly runs on a mock LLM; there's no
+              time-series regression, no end-to-end QA-accuracy number, no scored LongMemEval-V2;
+              the <code>large_corpus_rehearsal</code> is 57 records; zero competitor baselines run.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule" />
+
+    <!-- ===================== FIELD ===================== -->
+    <section id="field">
+      <div class="wrap">
+        <span class="eyebrow">Our Place in the Field</span>
+        <h2 class="section-title">You can't out-database the database. So we compete above it.</h2>
+        <p class="lede">
+          Most rivals bolt memory onto the application layer; the substrate vendors now sell memory
+          too. Sibyl's durable edge isn't the storage engine — it's the governed, self-hostable
+          memory <em>product</em> and the coalesced-team-memory frontier no one has cleared.
+        </p>
+
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">System</th>
+                <th scope="col">Substrate</th>
+                <th scope="col">Isolation</th>
+                <th scope="col">Coalesced team memory</th>
+                <th scope="col">Principled forgetting</th>
+                <th scope="col">Open / self-host</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="sibyl">
+                <th scope="row">Sibyl</th>
+                <td>
+                  <span class="mk y">unified</span>
+                  <small>graph + doc + vector + FTS + auth, one engine</small>
+                </td>
+                <td>
+                  <span class="mk y">physical</span>
+                  <small>namespace-per-org</small>
+                </td>
+                <td>
+                  <span class="mk p">building</span>
+                  <small>substrate ready; coalescence is the v1.2 bet</small>
+                </td>
+                <td>
+                  <span class="mk p">partial</span>
+                  <small>decay + reversible archival; unifying in v1.1</small>
+                </td>
+                <td>
+                  <span class="mk y">OSS product</span>
+                  <small>MCP + CLI + web, self-hostable</small>
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">SurrealDB Spectron</th>
+                <td>
+                  <span class="mk y">unified</span>
+                  <small>same engine class as Sibyl</small>
+                </td>
+                <td>
+                  <span class="mk p">scope grants</span>
+                  <small>DB-enforced, claimed</small>
+                </td>
+                <td>
+                  <span class="mk p">claimed</span>
+                  <small>newest, least-demonstrated</small>
+                </td>
+                <td>
+                  <span class="mk p">forget-verb</span>
+                  <small>first-class, claimed</small>
+                </td>
+                <td>
+                  <span class="mk n">preview</span>
+                  <small>invite-only · commercial TBD</small>
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Neo4j agent-memory</th>
+                <td>
+                  <span class="mk p">graph+vector</span>
+                  <small>no document / time-series model</small>
+                </td>
+                <td><span class="mk p">app-layer</span></td>
+                <td>
+                  <span class="mk y">shared brain</span>
+                  <small>mature, with provenance</small>
+                </td>
+                <td><span class="mk n">none</span><small>provenance, no decay</small></td>
+                <td><span class="mk p">GPLv3 + Aura</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Zep / Graphiti</th>
+                <td>
+                  <span class="mk p">temporal KG</span>
+                  <small>over Neo4j / Falkor</small>
+                </td>
+                <td><span class="mk p">app-layer</span></td>
+                <td>
+                  <span class="mk p">group graphs</span>
+                  <small>shared, coarse</small>
+                </td>
+                <td>
+                  <span class="mk y">bi-temporal</span>
+                  <small>edge invalidation — best-in-class</small>
+                </td>
+                <td>
+                  <span class="mk p">Graphiti OSS</span>
+                  <small>Zep CE deprecated</small>
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Mem0</th>
+                <td>
+                  <span class="mk n">split (BYO)</span>
+                  <small>vector + optional graph</small>
+                </td>
+                <td><span class="mk p">app-layer</span></td>
+                <td><span class="mk n">namespacing</span></td>
+                <td><span class="mk n">minimal</span><small>search-time re-rank</small></td>
+                <td>
+                  <span class="mk p">Apache-2.0 layer</span>
+                  <small>bring your own backends</small>
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Letta / MemGPT</th>
+                <td>
+                  <span class="mk p">runtime</span>
+                  <small>Postgres + pgvector</small>
+                </td>
+                <td><span class="mk p">app-layer</span></td>
+                <td>
+                  <span class="mk y">shared blocks</span>
+                  <small>real coalescence</small>
+                </td>
+                <td>
+                  <span class="mk p">sleep-time</span>
+                  <small>background consolidation</small>
+                </td>
+                <td><span class="mk y">Apache-2.0</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Cognee</th>
+                <td>
+                  <span class="mk p">stitched</span>
+                  <small>relational + vector + graph</small>
+                </td>
+                <td>
+                  <span class="mk p">partial</span>
+                  <small>3 of N backends</small>
+                </td>
+                <td><span class="mk n">no</span></td>
+                <td><span class="mk n">aspirational</span></td>
+                <td><span class="mk y">Apache-2.0</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="mono" style="margin-top: 1rem; font-size: 0.72rem; color: var(--fg-subtle)">
+          Every headline benchmark number in this space is self-reported on a non-standardized
+          harness. Marks: <span class="mk y">green</span> = truthful strength ·
+          <span class="mk p">yellow</span> = partial / claimed / app-layer ·
+          <span class="mk n">grey</span> = absent or unproven.
+        </p>
+
+        <div class="callout" style="border-color: var(--sc-coral); margin-top: 2.8rem">
+          <p>
+            <strong>The sharpest competitor is our own substrate vendor.</strong> SurrealDB's
+            Spectron makes nearly Sibyl's entire differentiator list — on the engine Sibyl depends
+            on. The lesson isn't to out-database the database; it's that the substrate was never the
+            moat. Sibyl's moat is the governed, self-hostable memory <em>product</em> above it — the
+            memory loop as legible verbs, a real auth runtime, task coordination as a first-class
+            memory citizen, and coalesced team memory the benchmarks say no one has solved. Spectron
+            is a preview engine; Sibyl is a complete, installable product on the frontier the labs
+            refuse to build.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule" />
+
+    <!-- ===================== MEASURE ===================== -->
+    <section id="measure">
+      <div class="wrap">
+        <span class="eyebrow">How We Measure · The Honest Instrument</span>
+        <h2 class="section-title">Numbers you can't dismiss — because we report the way no one else does.</h2>
+        <p class="lede">
+          Every headline in this field is self-reported on a different harness. When the two
+          most-cited systems audited each other, both scores moved 15–25 points. Our moat isn't a
+          leaderboard slot — it's a measurement discipline.
+        </p>
+
+        <div class="grid measure-grid">
+          <div class="measure report">
+            <h3>What we report — pinned to a receipt</h3>
+            <ul>
+              <li>
+                <b>LongMemEval-S QA accuracy</b> (official GPT-4o judge), reported <em>separately</em>
+                from our 96.96% retrieval R@5 — never conflated.
+              </li>
+              <li>
+                <b>BEAM-1M / 10M</b> — the honest way to substantiate million-token claims:
+                long-context-alone vs. +memory delta.
+              </li>
+              <li>
+                <b>FAMA &amp; ForgetEval</b> — forgetting quality that penalizes obsolete-memory
+                reuse. Almost no one reports this.
+              </li>
+              <li>
+                <b>MemoryAgentBench</b> — selective forgetting + test-time learning, where most
+                systems collapse.
+              </li>
+              <li>
+                <b>LongMemEval-V2</b> — agentic + multimodal, harder than V1; the current bar is
+                ~72–75%.
+              </li>
+              <li>
+                <b>Cost / latency / tokens at a fixed accuracy budget</b> — the frontier, not raw
+                savings against a strawman.
+              </li>
+            </ul>
+          </div>
+          <div class="measure refuse">
+            <h3>What we refuse to report — and why</h3>
+            <ul>
+              <li>
+                <b>Single-needle NIAH / passkey</b> — saturated; a green heatmap is now an
+                anti-signal (NoLiMa, HELMET, RULER).
+              </li>
+              <li><b>DMR</b> — retired; plain full-context already scores ~98%.</li>
+              <li>
+                <b>Bare LoCoMo</b> — ~6.4% wrong gold answers, judges accept ~63% of wrong answers,
+                and full-context beats "sophisticated" systems. Cite it critically or not at all.
+              </li>
+              <li>
+                <b>Retrieval recall dressed as QA accuracy</b> — the category error we refuse to
+                make.
+              </li>
+              <li><b>Cross-vendor LoCoMo rankings</b> — non-comparable by construction.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="guards">
+          <span class="k">The guard rails every number carries</span>
+          <p>
+            A no-memory control (subtract parametric knowledge, report the <em>memory lift</em>); the
+            judge model and exact prompt disclosed; N ≥ 5 runs with confidence intervals; parallel —
+            not sequential — retrieval for latency; and competitor configs published so they can
+            object. One canonical run, never rounded up.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule" />
+
+    <!-- ===================== FRONTIER ===================== -->
+    <section id="frontier">
+      <div class="wrap">
+        <span class="eyebrow">The Frontier · Where We Aim</span>
+        <h2 class="section-title">
+          Team memory is the field's unsolved problem — and we're built to solve it.
+        </h2>
+        <p class="lede">
+          Single-agent memory has quietly converged on a mature stack: bi-temporal graphs, hybrid
+          retrieval, tiered consolidation. The moment the field turns to <em>shared</em> memory, it
+          falls apart. That is the opening.
+        </p>
+
+        <div class="grid fmap">
+          <div class="fmap-col solved">
+            <div class="h">Solved · commoditized</div>
+            <ul>
+              <li>Hybrid retrieval — BM25 + HNSW + RRF + rerank</li>
+              <li>Bi-temporal validity (valid vs transaction time)</li>
+              <li>OS-style memory tiering &amp; paging</li>
+            </ul>
+          </div>
+          <div class="fmap-col progress">
+            <div class="h">In progress · unsettled</div>
+            <ul>
+              <li>Memory-aware ranking (time · salience · provenance)</li>
+              <li>Sleep-time / background consolidation</li>
+              <li>Outcome-conditioned forgetting</li>
+            </ul>
+          </div>
+          <div class="fmap-col open">
+            <div class="h">Open · we lead here</div>
+            <ul>
+              <li>Team / shared-memory governance</li>
+              <li>Coalescence &amp; convergent merge</li>
+              <li>Provenance &amp; isolation at scale</li>
+            </ul>
+          </div>
+        </div>
+        <p class="mono" style="margin-top: 1rem; font-size: 0.72rem; color: var(--fg-subtle)">
+          We don't compete where it's solved. We lead where it's open.
+        </p>
+
+        <div class="prose" style="margin-top: 2.4rem">
+          <p>
+            The 2026 governance literature has already named the way shared memory breaks. Any
+            system that lets multiple agents or people write into one memory faces the same four
+            failure modes — and current systems trip every one of them.
+          </p>
+        </div>
+
+        <div class="grid fail-grid">
+          <div class="fail">
+            <div class="fn">Failure 01</div>
+            <h4>Unauthorized leakage</h4>
+            <p>Data crosses a tenant or sub-tenant boundary it was never scoped to.</p>
+          </div>
+          <div class="fail">
+            <div class="fn">Failure 02</div>
+            <h4>Stale propagation</h4>
+            <p>Outdated facts keep circulating long after they stopped being true.</p>
+          </div>
+          <div class="fail">
+            <div class="fn">Failure 03</div>
+            <h4>Contradiction persistence</h4>
+            <p>Conflicting facts coexist unresolved, and the system can't say which holds.</p>
+          </div>
+          <div class="fail">
+            <div class="fn">Failure 04</div>
+            <h4>Provenance collapse</h4>
+            <p>Who asserted what, and from where, becomes unrecoverable.</p>
+          </div>
+        </div>
+
+        <blockquote class="bigquote">
+          "No method simultaneously achieves strong utility, robust access control, and reliable
+          forgetting."
+          <span class="src"
+            >— GateMem (arXiv:2606.18829), benchmarking memory governance across multi-principal
+            agents · 2026</span
+          >
+        </blockquote>
+
+        <div class="prose" style="margin-top: 2.4rem">
+          <p>
+            The field's own prescribed cure is four systems primitives — <strong>scoped retrieval,
+            temporal supersession, provenance tracking, and policy-governed propagation</strong> —
+            and its own benchmarks show nobody has assembled them into something that holds. Sibyl
+            already ships the two hardest prerequisites the academic prototypes bolt on after the
+            fact: a real <strong>multi-tenant auth runtime</strong> (namespace-per-org) and a
+            <strong>unified graph</strong>. The primitives aren't a research project for us; they're
+            the substrate we already stand on.
+          </p>
+        </div>
+
+        <div class="thesis-card">
+          <span class="k">The thesis, crystallized</span>
+          <p class="big">
+            A <b>bi-temporal, provenance-carrying, scope-governed unified graph</b> — where
+            compatible knowledge <b>merges by convergence</b>, conflicting knowledge
+            <b>supersedes by valid-time invalidation</b> (never destructive overwrite), forgetting
+            is <b>outcome-conditioned</b>, and a background dream cycle consolidates while keeping
+            every summary linked to its lossless evidence.
+          </p>
+          <p class="note">
+            No published system does all of this together. Governed coalescence over a bi-temporal
+            graph — with forgetting tied to whether a memory actually <em>helped</em>, which only a
+            task-aware system can measure — is the position Sibyl is uniquely shaped to own. The
+            three-release arc below is how we earn the right to claim it.
+          </p>
+        </div>
+
+        <div class="vocab" aria-label="Field vocabulary Sibyl adopts">
+          <span class="vchip">bi-temporal · valid vs transaction time</span>
+          <span class="vchip">temporal supersession</span>
+          <span class="vchip">scoped retrieval</span>
+          <span class="vchip">policy-governed propagation</span>
+          <span class="vchip">provenance-union</span>
+          <span class="vchip">retrospective permission checks</span>
+          <span class="vchip">convergent (CRDT-style) merge</span>
+          <span class="vchip">outcome-conditioned forgetting</span>
+          <span class="vchip">active (verifiable) forgetting</span>
+          <span class="vchip">sleep-time consolidation</span>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule" />
+
+    <!-- ===================== BENCH ===================== -->
+    <section id="bench">
+      <div class="wrap">
+        <span class="eyebrow">Testing It At Scale · The Benchmark The Field Lacks</span>
+        <h2 class="section-title">If team memory is unmeasured, we build the measure.</h2>
+        <p class="lede">
+          No public benchmark scores whether memories written by many agents coalesce into one
+          correct, attributable, isolated graph. <strong>CoalesceBench</strong> is that benchmark —
+          pluggable through a standard Insert/Query API so every existing memory system can be run
+          against it, and co-evolving with Sibyl's own namespace-per-org isolation and provenance
+          edges.
+        </p>
+
+        <div class="grid bench-grid">
+          <div class="bench">
+            <div class="bn">Task 01</div>
+            <h4>Cross-agent coalescence</h4>
+            <p>
+              A fact written by agent A must answer agent B's later query; the hidden-profile variant
+              needs facts uniquely held by ≥2 agents. Does the graph <em>merge</em>, or silo per
+              writer?
+            </p>
+            <div class="metric">
+              Integration Gap = team-memory acc − best single-agent acc. A siloed store scores ≈ 0.
+            </div>
+          </div>
+          <div class="bench">
+            <div class="bn">Task 02</div>
+            <h4>Conflict reconciliation</h4>
+            <p>
+              Contradictory writes — temporal and authority-based. Return the superseded-correct
+              answer, or surface both with provenance when it's genuinely unresolvable.
+            </p>
+            <div class="metric">Reconciliation accuracy · supersession precision / recall.</div>
+          </div>
+          <div class="bench">
+            <div class="bn">Task 03</div>
+            <h4>Provenance &amp; attribution</h4>
+            <p>
+              "Who established fact F, and through what derivation chain?" — including multi-hop
+              derivations. Essentially untested in public today.
+            </p>
+            <div class="metric">Writer-identity accuracy · chain reconstruction @ depth-d.</div>
+          </div>
+          <div class="bench">
+            <div class="bn">Task 04</div>
+            <h4>Isolation under load</h4>
+            <p>
+              Two tenants with deliberately similar facts under concurrent writes; scoped queries
+              must never leak, even under adversarial paraphrase and embedding collision.
+            </p>
+            <div class="metric">Cross-tenant leakage = 0 (a cap, not a tradeoff) · utility retained.</div>
+          </div>
+          <div class="bench">
+            <div class="bn">Task 05</div>
+            <h4>Consolidation fidelity</h4>
+            <p>
+              Overlapping multi-agent experiences dedupe and merge without double-counting;
+              deletions propagate to every reader (no stale propagation).
+            </p>
+            <div class="metric">Merge precision / recall · post-deletion non-recovery across agents.</div>
+          </div>
+          <div class="bench">
+            <div class="bn">Scoring</div>
+            <h4>A radar, not a scalar</h4>
+            <p>
+              Report the five axes as a vector; always include a no-memory and a single-agent control
+              so "team lift" is explicit. Any nonzero cross-tenant leakage caps the composite —
+              isolation is a safety property.
+            </p>
+            <div class="metric">Frozen harness · fixed reader · N ≥ 5 + CIs · public baselines.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule" />
+
+    <!-- ===================== PRINCIPLES ===================== -->
+    <section id="principles">
+      <div class="wrap">
+        <span class="eyebrow">Design Principles</span>
+        <h2 class="section-title">Seven rules that govern sequencing and scope.</h2>
+
+        <div class="grid principles">
+          <div class="principle lead">
+            <div class="pn">Principle 01 · governs everything</div>
+            <h3>Trust and reversibility come first.</h3>
+            <p>
+              One private-memory leak or one irreversible bad merge makes team memory radioactive.
+              Every coalescence action must be scoped-by-construction, attributable, previewable,
+              and undoable. This principle governs the entire sequencing of the arc.
+            </p>
+          </div>
+          <div class="principle">
+            <div class="pn">Principle 02</div>
+            <h3>Lead with cost / latency / isolation.</h3>
+            <p>Not benchmark size — the field's only honest edge and Sibyl's structural strength.</p>
+          </div>
+          <div class="principle">
+            <div class="pn">Principle 03</div>
+            <h3>Honest benchmarks stay the moat.</h3>
+            <p>
+              One canonical run, never round up, and the retrieval-vs-QA-accuracy caveat always
+              travels with the number.
+            </p>
+          </div>
+          <div class="principle">
+            <div class="pn">Principle 04</div>
+            <h3>Eval the write path, not just the read path.</h3>
+            <p>
+              Memory systems accumulate hallucinations during extraction/update that QA-only judging
+              hides (HaluMem).
+            </p>
+          </div>
+          <div class="principle">
+            <div class="pn">Principle 05</div>
+            <h3>Gates carry budgets, not slogans.</h3>
+            <p>Every gate names numeric thresholds: recall, latency, leak, error, cost.</p>
+          </div>
+          <div class="principle">
+            <div class="pn">Principle 06</div>
+            <h3>Do not chase discredited benchmarks.</h3>
+            <p>
+              LoCoMo is saturated, has ~6.4% wrong gold answers, and is harness-dependent. Prioritize
+              LongMemEval-V2 and Sibyl's own team benchmark.
+            </p>
+          </div>
+          <div class="principle">
+            <div class="pn">Principle 07</div>
+            <h3>Turn the platform threat into distribution.</h3>
+            <p>
+              Be the MCP-native, OKF-speaking backend behind others' memory tools rather than
+              competing with client-side file memory.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== v1.1 ===================== -->
+    <section id="v11" class="movement m1">
+      <div class="wrap">
+        <div class="movement-head">
+          <div class="roman">I</div>
+          <div class="movement-titles">
+            <div class="ver">v1.1</div>
+            <h2>Prove <em>It</em></h2>
+          </div>
+        </div>
+        <p class="movement-theme">
+          Make every public claim boring and complete. Move evals from manual to PR-gating, finish
+          the eval story, and enable the team-memory substrate. <strong>No headline claim ships
+          without a receipt.</strong>
+        </p>
+
+        <div class="work-grid">
+          <div class="work">
+            <span class="wid">W1</span>
+            <h4>End-to-end QA-accuracy lane</h4>
+            <p>
+              Add a reader pass over Sibyl's retrieved LongMemEval-S sessions plus the official
+              judge; publish QA accuracy alongside the 96.96% R@5 retrieval number. Closes the
+              miscategorization gap where tables read retrieval recall as QA accuracy.
+            </p>
+            <div class="gate">
+              <span class="gname">qa-accuracy-gate</span>
+              <span class="gdef">publishable QA number from a pinned run; fails if QA accuracy drops &gt; 1.0 pp vs last committed.</span>
+            </div>
+          </div>
+
+          <div class="work">
+            <span class="wid">W2</span>
+            <h4>Eval automation + regression-over-time</h4>
+            <p>
+              Scheduled real-key runs (stratified nightly, full weekly); a committed time-series
+              ledger; and a deterministic local-embedding variant so quality gates run on PRs
+              without OpenAI cost or nondeterminism.
+            </p>
+            <div class="gate blocks">
+              <span class="gname">eval-regression-gate · blocks PRs</span>
+              <span class="gdef">strict recall@5 ≥ (last committed − 0.5 pp); context-pack p95 ≤ 1000 ms; leak_count = 0.</span>
+            </div>
+          </div>
+
+          <div class="work">
+            <span class="wid">W3</span>
+            <h4>Cost / latency / token accounting</h4>
+            <p>
+              Co-report tokens per query, embedding calls, p50/p95, and a dollar estimate against a
+              full-context baseline, in every live artifact.
+            </p>
+            <div class="gate">
+              <span class="gname">cost-latency-gate</span>
+              <span class="gdef">per-query cost and p95 recorded; p95 within budget; cost regression flagged.</span>
+            </div>
+          </div>
+
+          <div class="work">
+            <span class="wid">W4</span>
+            <h4>Write-path integrity (HaluMem-style)</h4>
+            <p>
+              Measure whether extraction and consolidation inject or reduce hallucinations, and gate
+              it. On-trend, under-shipped by competitors, consistent with the honest posture.
+            </p>
+            <div class="gate">
+              <span class="gname">write-path-integrity-gate</span>
+              <span class="gdef">extraction/consolidation hallucination rate ≤ threshold on a seeded fixture.</span>
+            </div>
+          </div>
+
+          <div class="work">
+            <span class="wid">W5</span>
+            <h4>LongMemEval-V2 (published)</h4>
+            <p>
+              Stand up the official-full harness and publish the LAFS-Gain number with a citable
+              receipt. The external leaderboard is empty and the benchmark is agent-shaped — it
+              matches Sibyl's coding/agent use case, so an early credible entry is high-leverage.
+            </p>
+            <div class="gate">
+              <span class="gname">longmemeval-v2-gate</span>
+              <span class="gdef">scored run with committed receipt; regression bound on LAFS Gain.</span>
+            </div>
+          </div>
+
+          <div class="work">
+            <span class="wid">W6</span>
+            <h4>Forgetting: uniform + benchmarked</h4>
+            <p>
+              Apply temporal decay across the context/recall path (not just hybrid); confirm
+              consolidation scheduling; tune <code>priority_decay</code> and benchmark it
+              (FadeMem-style storage-reduction %, recall impact, write-path integrity). Turns the
+              self-named "honest gap" into a measured feature.
+            </p>
+          </div>
+
+          <div class="work">
+            <span class="wid">W7</span>
+            <h4>Team-memory foundation (substrate)</h4>
+            <p>
+              Enable the <code>team</code> scope across its three gates; ship team-management routes
+              + CLI; wire team → memory-space; implement the SHARE/promote action with provenance and
+              attribution retained. Substrate, not coalescence yet.
+            </p>
+            <div class="gate">
+              <span class="gname">team-scope-trust-gate</span>
+              <span class="gdef">private / delegated / project memory provably cannot surface in a team pack; promotion is attributed and preview-shown; leak fixtures = 0.</span>
+            </div>
+          </div>
+
+          <div class="work">
+            <span class="wid">W8</span>
+            <h4>Portability &amp; interchange (OKF export)</h4>
+            <p>
+              <code>sibyl export --format okf</code> — one Markdown + YAML file per entity, edges as
+              Markdown links, the labeled-property-graph preserved losslessly via OKF-legal extension
+              frontmatter so the bundle is valid OKF for other tools yet round-trips back. ~2–4 days,
+              disproportionate payoff: "your memory stays yours, export in one command."
+            </p>
+          </div>
+
+          <div class="work">
+            <span class="wid">W9</span>
+            <h4>Doc &amp; claim truth-up</h4>
+            <p>
+              Land the doc-staleness reconciliation; keep benchmark-claim discipline; keep the
+              AI-memory-landscape doc accurate (retrieval-vs-QA framing, forgetting/decay reality).
+            </p>
+          </div>
+        </div>
+
+        <div class="exit">
+          <span class="k">Exit</span>
+          <p>
+            Published QA-accuracy and LongMemEval-V2 numbers with citable receipts; a regression gate
+            blocks PRs on quality drops; the cost/latency curve is published; forgetting is uniform
+            and benchmarked; the <code>team</code> scope is enabled with proven isolation, a way to
+            create/populate teams, and a promote/SHARE path; OKF export ships.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== v1.2 ===================== -->
+    <section id="v12" class="movement m2">
+      <div class="wrap">
+        <div class="movement-head">
+          <div class="roman">II</div>
+          <div class="movement-titles">
+            <div class="ver">v1.2</div>
+            <h2>Coalesce <em>It</em> — safely</h2>
+          </div>
+        </div>
+        <p class="movement-theme">
+          Turn the offline/online merge primitives into a live, provably-scoped, reversible,
+          provenance-preserving team-memory coalescence engine — with a first-class data model and
+          deterministic conflict states. Cross-user entity resolution is the field's unsolved
+          problem; the differentiator is doing it <strong>without ever leaking scope and always
+          reversibly</strong>.
+        </p>
+
+        <div class="work-grid">
+          <div class="work">
+            <span class="wid">W1 · build first</span>
+            <h4>Coalescence data model &amp; reversibility</h4>
+            <p>
+              Before merging anything, define the model: canonical entity vs contributor aliases vs
+              contributor assertions; an attribution schema; a conflict lifecycle with deterministic
+              states (open / merged / superseded / contested); split/undo (every merge reversible);
+              revocation semantics; redaction/anonymization transforms; and a human review UX for
+              contested merges.
+            </p>
+          </div>
+          <div class="work">
+            <span class="wid">W2</span>
+            <h4>Live coalescence engine</h4>
+            <p>
+              Unify online <code>retrieval/dedup.py</code> and offline <code>migrate/merge.py</code>
+              into a live cross-contributor entity-resolution + relationship-redirection engine
+              scoped to a team space, emitting the W1 records. Provenance-preserving — contributor
+              assertions are never destroyed.
+            </p>
+          </div>
+          <div class="work">
+            <span class="wid">W3</span>
+            <h4>Concurrent multi-writer consistency</h4>
+            <p>
+              Additive-safe vs conflict-checked write semantics (Letta-style
+              <code>memory_insert</code> / <code>memory_replace</code>); bi-temporal edge
+              invalidation for contradictions (Zep-style validity windows — invalidate, don't
+              delete). Deterministic conflict states, not silent merges.
+            </p>
+          </div>
+          <div class="work">
+            <span class="wid">W4</span>
+            <h4>Eval team memory at scale</h4>
+            <p>
+              Wire <code>multi_user.py</code> into a CI gate and define the load matrix explicitly:
+              N orgs × users/org, corpus size, QPS, concurrent writes, with cache/pool under stress
+              (more than <code>surreal_graph_client_cache_size = 64</code> hot orgs). Replace the
+              57-record rehearsal with adoption-grade corpora; resolve the filtered-HNSW
+              <code>recall@k=0.0</code> finding at scale.
+            </p>
+            <div class="gate">
+              <span class="gname">scale-load-gate</span>
+              <span class="gdef">at the defined matrix: p95 ≤ budget, error rate = 0, leak_count = 0, recall ≥ floor.</span>
+            </div>
+            <div class="gate">
+              <span class="gname">team-isolation-under-load-gate</span>
+              <span class="gdef">concurrent multi-tenant load + revocation-under-load produces zero cross-tenant / cross-scope leakage.</span>
+            </div>
+          </div>
+          <div class="work">
+            <span class="wid">W5</span>
+            <h4>TeamMemBench (internal)</h4>
+            <p>
+              Build the internal benchmark for cross-user entity resolution, concurrent multi-writer
+              consistency, and "helped AND stayed scoped" (utility + access control + forgetting,
+              GateMem-style). Dogfood seed: the eternia/macbook merge. Internal-only this release —
+              publication waits for v1.3; synthetic-only risks "benchmark theater."
+            </p>
+          </div>
+        </div>
+
+        <div class="exit">
+          <span class="k">Exit</span>
+          <p>
+            Reversible team coalescence with deterministic conflict states and attribution; isolation
+            proven under concurrent load and revocation; internal TeamMemBench passing with a
+            documented scale envelope (orgs / connections / latency).
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== v1.3 ===================== -->
+    <section id="v13" class="movement m3">
+      <div class="wrap">
+        <div class="movement-head">
+          <div class="roman">III</div>
+          <div class="movement-titles">
+            <div class="ver">v1.3</div>
+            <h2>Lead <em>It</em></h2>
+          </div>
+        </div>
+        <p class="movement-theme">
+          Publish the benchmark the field lacks, and push the frontier — only from a position of
+          proven isolation and honest numbers.
+        </p>
+
+        <div class="work-grid">
+          <div class="work">
+            <span class="wid">Publish</span>
+            <h4>TeamMemBench (dataset + leaderboard)</h4>
+            <p>
+              Only with a defensible dataset (real-team-log or a rigorously-justified hybrid) and at
+              least one external comparator. Category-defining if done right; theater if rushed.
+            </p>
+          </div>
+          <div class="work">
+            <span class="wid">Frontier</span>
+            <h4>Frontier retrieval</h4>
+            <p>
+              MAGMA-style multi-graph disentanglement (seam decided in v1.2); an optional
+              cross-encoder reranker path for diffuse-evidence questions; belief-revision semantics
+              (Kumiho/AGM) <em>if</em> observed conflicts justify it; procedural/skill memory.
+            </p>
+          </div>
+          <div class="work">
+            <span class="wid">Reach</span>
+            <h4>Platform reach</h4>
+            <p>
+              Be the MCP-native, OKF-speaking backend behind Claude's <code>/memories</code> and
+              other agents; SurrealDB live queries → reactive UI; SurrealDB Cloud managed
+              multi-tenant; the Haven lighthouse integration; the adjacent Rust high-throughput
+              runtime.
+            </p>
+          </div>
+          <div class="work">
+            <span class="wid">Interchange</span>
+            <h4>Interchange &amp; round-trip</h4>
+            <p>
+              An OKF importer (needs LLM edge-inference from prose links); watch the W3C "DataBook"
+              RDF/SPARQL profile as a better typed round-trip target than plain OKF. Keep
+              <code>graph.json</code> as the lossless internal archive; OKF is the portable public
+              projection.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule" />
+
+    <!-- ===================== SEQUENCING ===================== -->
+    <section id="sequencing">
+      <div class="wrap">
+        <span class="eyebrow">Sequencing Rationale</span>
+        <h2 class="section-title">Why evals come before the feature.</h2>
+        <div class="callout">
+          <p>
+            Team-memory coalescence <em>is</em> isolation-correctness-under-merge: it cannot ship
+            credibly without the harness (v1.1) to prove isolation and quality, and the eval gaps are
+            table-stakes the field judges on. v1.1 also front-loads the honest-benchmark reputation
+            before the v1.2 bet. v1.1's team substrate (scope enable + team CRUD + promote) is the
+            minimum for v1.2's engine to stand on. Within v1.2, the reversibility/attribution model
+            (W1) precedes the merge engine (W2) so nothing irreversible ships. The public benchmark
+            waits for v1.3 because a bad dataset is worse than none.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule" />
+
+    <!-- ===================== DECISIONS ===================== -->
+    <section id="decisions">
+      <div class="wrap">
+        <span class="eyebrow">Decisions Still to Lock</span>
+        <h2 class="section-title">Four forks that shape the arc.</h2>
+
+        <div class="grid decisions">
+          <div class="decision">
+            <div class="q">Open · team roles</div>
+            <h4>Team role model</h4>
+            <p>Reuse project roles for teams, or define a distinct team-role set?</p>
+          </div>
+          <div class="decision">
+            <div class="q">Open · structure</div>
+            <h4>Memory spaces</h4>
+            <p>Hierarchical, tag-based, or both?</p>
+          </div>
+          <div class="decision">
+            <div class="q">Open · gates v1.3</div>
+            <h4>TeamMemBench dataset</h4>
+            <p>
+              Real-team-logs (privacy-heavy), synthetic, or hybrid — this gates whether v1.3
+              publication is viable.
+            </p>
+          </div>
+          <div class="decision">
+            <div class="q">Open · boundary</div>
+            <h4>Cross-org sharing</h4>
+            <p>
+              In scope for this arc, or explicitly out — org stays the hard boundary and team memory
+              is within-org only?
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule" />
+
+    <!-- ===================== READING ===================== -->
+    <section id="reading">
+      <div class="wrap">
+        <span class="eyebrow">Built On The Literature</span>
+        <h2 class="section-title">The work this vision stands on.</h2>
+        <p class="lede">
+          Every load-bearing claim traces to a source. The 2026 preprints are new and often
+          single-source — we treat their exact numbers as provisional and their structural findings
+          as solid.
+        </p>
+
+        <div class="biblio">
+          <div class="biblio-group">
+            <h4>Team / shared memory</h4>
+            <ul>
+              <li>Governed Shared Memory (ArgusFleet) — <span class="id">arXiv:2606.24535</span></li>
+              <li>GateMem — <span class="id">arXiv:2606.18829</span></li>
+              <li>Collaborative Memory — <span class="id">arXiv:2505.18279</span></li>
+              <li>HiddenBench — <span class="id">arXiv:2505.11556</span></li>
+            </ul>
+          </div>
+          <div class="biblio-group">
+            <h4>Temporal graph &amp; retrieval</h4>
+            <ul>
+              <li>Zep / Graphiti temporal KG — <span class="id">arXiv:2501.13956</span></li>
+              <li>Microsoft GraphRAG — <span class="id">arXiv:2404.16130</span></li>
+              <li>MemGPT · sleep-time — <span class="id">arXiv:2310.08560 · 2504.13171</span></li>
+            </ul>
+          </div>
+          <div class="biblio-group">
+            <h4>Forgetting &amp; consolidation</h4>
+            <ul>
+              <li>Memory Worth (when to forget) — <span class="id">arXiv:2604.12007</span></li>
+              <li>Memora / FAMA — <span class="id">arXiv:2604.20006</span></li>
+              <li>ForgetEval — <span class="id">arXiv:2606.15903</span></li>
+            </ul>
+          </div>
+          <div class="biblio-group">
+            <h4>Benchmarks &amp; field map</h4>
+            <ul>
+              <li>LongMemEval · V2 — <span class="id">arXiv:2410.10813 · 2605.12493</span></li>
+              <li>BEAM (≤10M tokens) — <span class="id">arXiv:2510.27246</span></li>
+              <li>Agent-memory survey — <span class="id">arXiv:2603.07670</span></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== FOOTER ===================== -->
+    <footer>
+      <div class="wrap foot-grid">
+        <div class="mono">
+          <div class="foot-tag"><b>Collective</b><span class="sep"> · </span><b>Intelligence</b></div>
+          <p style="margin-top: 1rem">
+            <b>Sibyl Post-1.0 Roadmap</b> — v1.1 → v1.2 → v1.3<br />
+            Status: active planning baseline · Release floor: v1.0.2<br />
+            Assembled from a full-codebase + competitive-landscape research pass and a cross-model
+            review; grounded in verified code reality.<br />
+            Positioning refreshed against the mid-2026 SOTA scan · 2026-07-02.
+          </p>
+        </div>
+        <div class="mono">
+          Canonical text source:<br />
+          <a href="SIBYL_POST_1_0_ROADMAP.md">SIBYL_POST_1_0_ROADMAP.md</a><br />
+          <a href="SIBYL_NORTHSTAR.md">SIBYL_NORTHSTAR.md</a> · product truth<br />
+          <a href="SIBYL_1_0_ROADMAP.md">SIBYL_1_0_ROADMAP.md</a> · the shipped 1.0 record<br />
+          <a href="../testing/ai-memory-landscape.md">ai-memory-landscape.md</a> · field notes
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      // ---- theme toggle (persists per browser; falls back gracefully) ----------
+      (function () {
+        var root = document.documentElement;
+        var btn = document.getElementById("themeToggle");
+        var stored = null;
+        try {
+          stored = localStorage.getItem("sibyl-roadmap-theme");
+        } catch (e) {}
+        if (stored) root.setAttribute("data-theme", stored);
+        btn.addEventListener("click", function () {
+          var next =
+            root.getAttribute("data-theme") === "light" ? "dark" : "light";
+          root.setAttribute("data-theme", next);
+          try {
+            localStorage.setItem("sibyl-roadmap-theme", next);
+          } catch (e) {}
+        });
+      })();
+
+      // ---- hero constellation (graph-native nod; low-key, reduced-motion aware) --
+      (function () {
+        var canvas = document.getElementById("constellation");
+        if (!canvas) return;
+        var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        var ctx = canvas.getContext("2d");
+        var dpr = Math.min(window.devicePixelRatio || 1, 2);
+        var nodes = [];
+        var W, H, raf;
+
+        function accent() {
+          // read a stable purple-ish stroke from CSS custom prop via a probe
+          return getComputedStyle(document.documentElement)
+            .getPropertyValue("--sc-purple")
+            .trim() || "oklch(64% 0.31 328)";
+        }
+        var stroke = accent();
+
+        function size() {
+          var r = canvas.getBoundingClientRect();
+          W = r.width;
+          H = r.height;
+          canvas.width = W * dpr;
+          canvas.height = H * dpr;
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          var count = Math.max(18, Math.min(46, Math.floor((W * H) / 26000)));
+          nodes = [];
+          for (var i = 0; i < count; i++) {
+            nodes.push({
+              x: Math.random() * W,
+              y: Math.random() * H,
+              vx: (Math.random() - 0.5) * 0.22,
+              vy: (Math.random() - 0.5) * 0.22,
+              r: Math.random() * 1.6 + 0.8,
+            });
+          }
+        }
+
+        function frame() {
+          ctx.clearRect(0, 0, W, H);
+          for (var i = 0; i < nodes.length; i++) {
+            var n = nodes[i];
+            n.x += n.vx;
+            n.y += n.vy;
+            if (n.x < 0 || n.x > W) n.vx *= -1;
+            if (n.y < 0 || n.y > H) n.vy *= -1;
+          }
+          for (var a = 0; a < nodes.length; a++) {
+            for (var b = a + 1; b < nodes.length; b++) {
+              var dx = nodes[a].x - nodes[b].x;
+              var dy = nodes[a].y - nodes[b].y;
+              var d = Math.sqrt(dx * dx + dy * dy);
+              if (d < 150) {
+                ctx.globalAlpha = (1 - d / 150) * 0.28;
+                ctx.strokeStyle = stroke;
+                ctx.lineWidth = 0.6;
+                ctx.beginPath();
+                ctx.moveTo(nodes[a].x, nodes[a].y);
+                ctx.lineTo(nodes[b].x, nodes[b].y);
+                ctx.stroke();
+              }
+            }
+          }
+          ctx.globalAlpha = 0.6;
+          ctx.fillStyle = stroke;
+          for (var k = 0; k < nodes.length; k++) {
+            ctx.beginPath();
+            ctx.arc(nodes[k].x, nodes[k].y, nodes[k].r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+          raf = requestAnimationFrame(frame);
+        }
+
+        function start() {
+          size();
+          if (reduce) {
+            frame();
+            cancelAnimationFrame(raf);
+            // draw a single static frame
+            ctx.clearRect(0, 0, W, H);
+            return;
+          }
+          cancelAnimationFrame(raf);
+          frame();
+        }
+
+        var t;
+        window.addEventListener("resize", function () {
+          clearTimeout(t);
+          t = setTimeout(function () {
+            stroke = accent();
+            start();
+          }, 200);
+        });
+        start();
+      })();
+    </script>
+  </body>
+</html>

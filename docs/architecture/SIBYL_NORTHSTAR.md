@@ -16,6 +16,13 @@ humans and agents collaborate without leaking private memory.
 SurrealDB migration, Graphiti removal, FalkorDB/PostgreSQL deletion, and native retrieval are
 implementation threads inside this larger product direction.
 
+This framing is now load-bearing rather than rhetorical: SurrealDB's own **Spectron** (agent memory;
+~$23M, Feb 2026) sells the unified-substrate story directly. Sibyl cannot — and does not need to —
+win a "better database" argument against the database vendor. Its moat is everything _above_ the
+substrate: the memory loop as legible verbs, the auth/multi-tenancy runtime, task coordination as a
+first-class memory citizen, self-hostability, and governed team memory with provenance that the
+frontier labs refuse to build. See [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md) §1.
+
 Active executable plan:
 
 - post-1.0 releases (v1.1 → v1.3): [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md)
