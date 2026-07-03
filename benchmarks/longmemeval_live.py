@@ -16,7 +16,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -27,6 +27,22 @@ sys.path.insert(0, str(ROOT / "benchmarks"))
 sys.path.insert(0, str(ROOT / "packages" / "python" / "sibyl-core" / "src"))
 
 from git_provenance import git_provenance
+from longmemeval_qa import (
+    DEFAULT_QA_JUDGE_MODEL,
+    DEFAULT_QA_JUDGE_PROVIDER,
+    DEFAULT_QA_MAX_CONTEXT_SESSIONS,
+    DEFAULT_QA_MAX_SESSION_CHARS,
+    DEFAULT_QA_MODE,
+    DEFAULT_QA_READER_MODEL,
+    DEFAULT_QA_READER_PROVIDER,
+    DEFAULT_QA_TIMEOUT_SECONDS,
+    LONGMEMEVAL_QA_MODES,
+    LLMProviderName,
+    LongMemEvalQAConfig,
+    LongMemEvalQAMode,
+    evaluate_longmemeval_case_qa,
+    qa_report_metadata,
+)
 
 from sibyl_core.config import settings
 from sibyl_core.embeddings.providers import (
@@ -559,7 +575,8 @@ async def _signup_throwaway_tenant(
     if not token:
         raise LongMemEvalLiveError("signup did not return an access_token")
     client.headers.update({"Authorization": f"Bearer {token}"})
-    org = signup.get("organization") if isinstance(signup.get("organization"), dict) else {}
+    org_value = signup.get("organization")
+    org = org_value if isinstance(org_value, dict) else {}
     return {
         "organization_id": org.get("id"),
         "organization_slug": org.get("slug"),
@@ -713,8 +730,9 @@ async def _ingest_haystack(
             "/entities/bulk",
             payload={"entities": batch},
         )
+        created_entities_value = created.get("entities")
         created_entities = (
-            created.get("entities") if isinstance(created.get("entities"), list) else []
+            created_entities_value if isinstance(created_entities_value, list) else []
         )
         created_ids.extend(
             str(entity.get("id") or "") for entity in created_entities if isinstance(entity, dict)
@@ -800,7 +818,8 @@ async def _verify_namespace_probe(
                 "limit": 5,
             },
         )
-        results = search.get("results") if isinstance(search.get("results"), list) else []
+        results_value = search.get("results")
+        results = results_value if isinstance(results_value, list) else []
         matched = [
             result
             for result in results
@@ -989,6 +1008,38 @@ def _build_diagnostics(
     }
 
 
+def _qa_config(
+    *,
+    mode: str,
+    reader_provider: str,
+    reader_model: str,
+    judge_provider: str,
+    judge_model: str,
+    max_context_sessions: int,
+    max_session_chars: int,
+    timeout_seconds: float,
+) -> LongMemEvalQAConfig:
+    if mode not in LONGMEMEVAL_QA_MODES:
+        msg = f"Unsupported LongMemEval QA mode: {mode}"
+        raise LongMemEvalLiveError(msg)
+    if reader_provider not in {"anthropic", "gemini", "openai"}:
+        msg = f"Unsupported LongMemEval QA reader provider: {reader_provider}"
+        raise LongMemEvalLiveError(msg)
+    if judge_provider not in {"anthropic", "gemini", "openai"}:
+        msg = f"Unsupported LongMemEval QA judge provider: {judge_provider}"
+        raise LongMemEvalLiveError(msg)
+    return LongMemEvalQAConfig(
+        mode=cast(LongMemEvalQAMode, mode),
+        reader_provider=cast(LLMProviderName, reader_provider),
+        reader_model=reader_model,
+        judge_provider=cast(LLMProviderName, judge_provider),
+        judge_model=judge_model,
+        max_context_sessions=max_context_sessions,
+        max_session_chars=max_session_chars,
+        timeout_seconds=timeout_seconds,
+    )
+
+
 async def _run_case(
     entry: dict[str, Any],
     *,
@@ -1004,6 +1055,7 @@ async def _run_case(
     wait_for_memory_extraction: bool,
     memory_projection_timeout_seconds: float,
     memory_extraction_timeout_seconds: float,
+    qa_config: LongMemEvalQAConfig,
     transport: httpx.AsyncBaseTransport | None = None,
     active_case: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1074,11 +1126,21 @@ async def _run_case(
         )
         timings_ms["search"] = (time.perf_counter() - phase_started) * 1000
 
-    results = search.get("results") if isinstance(search.get("results"), list) else []
+    results_value = search.get("results")
+    results = results_value if isinstance(results_value, list) else []
     ranked_session_ids, ranked_results, cross_question_count = _ranked_sessions(results)
     answer_session_ids = sorted(str(value) for value in entry.get("answer_session_ids", []))
     metrics = score_longmemeval_ranking(ranked_session_ids, answer_session_ids, k_values)
     answer_ranks = _answer_ranks(ranked_session_ids, answer_session_ids)
+    _set_active_phase(active_case, "qa")
+    qa_result = await evaluate_longmemeval_case_qa(
+        entry,
+        ranked_session_ids=ranked_session_ids,
+        corpus_text_policy=corpus_text_policy,
+        config=qa_config,
+    )
+    if qa_result.get("latency_ms"):
+        timings_ms["qa"] = float(qa_result["latency_ms"])
     token_accounting = _case_token_accounting(entry, corpus_text_policy=corpus_text_policy)
     readiness_attempts = int(readiness.get("attempts", 0))
     readiness_tokens = _estimate_tokens("LongMemEval") * readiness_attempts
@@ -1116,6 +1178,7 @@ async def _run_case(
         "embedding_estimated_input_tokens": (
             token_accounting["corpus_estimated_input_tokens"] + query_embedding_tokens
         ),
+        "qa": qa_result,
         "cross_question_result_count": cross_question_count,
         **metrics,
     }
@@ -1139,6 +1202,7 @@ async def _run_cases(
     wait_for_memory_extraction: bool,
     memory_projection_timeout_seconds: float,
     memory_extraction_timeout_seconds: float,
+    qa_config: LongMemEvalQAConfig,
     on_progress: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None,
 ) -> list[dict[str, Any]]:
     worker_count = max(1, concurrency)
@@ -1182,6 +1246,7 @@ async def _run_cases(
                     wait_for_memory_extraction=wait_for_memory_extraction,
                     memory_projection_timeout_seconds=memory_projection_timeout_seconds,
                     memory_extraction_timeout_seconds=memory_extraction_timeout_seconds,
+                    qa_config=qa_config,
                     transport=transport,
                     active_case=active_cases[case_index],
                 )
@@ -1403,6 +1468,45 @@ def _aggregate(results: list[dict[str, Any]], k_values: list[int]) -> tuple[dict
     overall["embedding_estimated_input_tokens"] = sum(
         float(result.get("embedding_estimated_input_tokens", 0.0)) for result in results
     )
+    qa_results: list[dict[str, Any]] = [
+        qa_result
+        for result in results
+        if isinstance((qa_result := result.get("qa")), dict) and qa_result.get("evaluated") is True
+    ]
+    if qa_results:
+        overall["qa_evaluated_count"] = float(len(qa_results))
+        overall["qa_correct_count"] = sum(
+            1.0 for qa_result in qa_results if qa_result.get("correct") is True
+        )
+        overall["qa_accuracy"] = overall["qa_correct_count"] / overall["qa_evaluated_count"]
+        overall["qa_mean_score"] = (
+            sum(float(result.get("score", 0.0)) for result in qa_results)
+            / (overall["qa_evaluated_count"])
+        )
+        overall["qa_latency_ms"] = sum(
+            float(result.get("latency_ms", 0.0)) for result in qa_results
+        )
+        overall["reader_estimated_input_tokens"] = sum(
+            float(result.get("reader_estimated_input_tokens", 0.0)) for result in qa_results
+        )
+        overall["reader_estimated_output_tokens"] = sum(
+            float(result.get("reader_estimated_output_tokens", 0.0)) for result in qa_results
+        )
+        overall["judge_estimated_input_tokens"] = sum(
+            float(result.get("judge_estimated_input_tokens", 0.0)) for result in qa_results
+        )
+        overall["judge_estimated_output_tokens"] = sum(
+            float(result.get("judge_estimated_output_tokens", 0.0)) for result in qa_results
+        )
+        overall["estimated_input_tokens"] += (
+            overall["reader_estimated_input_tokens"] + overall["judge_estimated_input_tokens"]
+        )
+        overall["estimated_output_tokens"] += (
+            overall["reader_estimated_output_tokens"] + overall["judge_estimated_output_tokens"]
+        )
+    else:
+        overall["qa_evaluated_count"] = 0.0
+        overall["qa_correct_count"] = 0.0
 
     results_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for result in results:
@@ -1426,6 +1530,7 @@ def _build_live_accounting(
     overall: dict[str, float],
     embedding_runtime: dict[str, Any],
     elapsed_seconds: float,
+    qa_metadata: dict[str, Any],
 ) -> dict[str, Any]:
     provider = str(embedding_runtime.get("embedding_provider") or "disabled")
     model = str(embedding_runtime.get("embedding_model") or "not-applicable")
@@ -1437,7 +1542,15 @@ def _build_live_accounting(
     )
     provider_enabled = provider.strip().lower() not in {"disabled", "none", "not-applicable"}
     embedding_calls = int(overall.get("embedding_call_count", 0.0)) if provider_enabled else 0
-    total_cost = embedding_cost
+    reader_cost = 0.0
+    judge_cost = 0.0
+    qa_mode = str(qa_metadata.get("mode") or "disabled")
+    qa_cost_basis = "not-metered-by-runner"
+    if qa_mode == "fixture":
+        qa_cost_basis = "deterministic-fixture-no-provider-cost"
+    elif qa_mode == "model":
+        qa_cost_basis = "model-token-estimate-cost-not-configured"
+    total_cost = embedding_cost + reader_cost + judge_cost
     return {
         "schema_version": ACCOUNTING_SCHEMA_VERSION,
         "gate_status": ACCOUNTING_GATE_STATUS,
@@ -1464,14 +1577,16 @@ def _build_live_accounting(
             "cost_basis": embedding_cost_basis,
         },
         "reader": {
-            "estimated_input_tokens": 0.0,
-            "estimated_output_tokens": 0.0,
-            **_zero_cost_record(),
+            "estimated_input_tokens": overall.get("reader_estimated_input_tokens", 0.0),
+            "estimated_output_tokens": overall.get("reader_estimated_output_tokens", 0.0),
+            "estimated_cost_usd": reader_cost,
+            "cost_basis": qa_cost_basis,
         },
         "judge": {
-            "estimated_input_tokens": 0.0,
-            "estimated_output_tokens": 0.0,
-            **_zero_cost_record(),
+            "estimated_input_tokens": overall.get("judge_estimated_input_tokens", 0.0),
+            "estimated_output_tokens": overall.get("judge_estimated_output_tokens", 0.0),
+            "estimated_cost_usd": judge_cost,
+            "cost_basis": qa_cost_basis,
         },
         "cost": {
             "estimated_total_usd": total_cost if provider_enabled else 0.0,
@@ -1504,6 +1619,7 @@ def _build_live_report(
     memory_extraction_timeout_seconds: float,
     elapsed_seconds: float,
     completion_status: str,
+    qa_config: LongMemEvalQAConfig,
 ) -> dict[str, Any]:
     sorted_results = sorted(case_results, key=lambda record: int(record["case_index"]))
     overall, per_type = _aggregate(sorted_results, k_values)
@@ -1514,10 +1630,12 @@ def _build_live_report(
         k_values=k_values,
     )
     embedding_runtime = _graph_embedding_runtime_metadata()
+    qa_metadata = qa_report_metadata(qa_config)
     accounting = _build_live_accounting(
         overall=overall,
         embedding_runtime=embedding_runtime,
         elapsed_seconds=elapsed_seconds,
+        qa_metadata=qa_metadata,
     )
 
     provenance = git_provenance(ROOT)
@@ -1564,6 +1682,14 @@ def _build_live_report(
             "graph_hnsw_m_env": os.environ.get("SIBYL_GRAPH_HNSW_M", ""),
             "graph_knn_ef_env": os.environ.get("SIBYL_GRAPH_KNN_EF", ""),
             "fusion_backend_env": os.environ.get("SIBYL_FUSION_BACKEND", ""),
+            "qa_mode": qa_metadata["mode"],
+            "qa_reader_provider": qa_metadata["reader_provider"],
+            "qa_reader_model": qa_metadata["reader_model"],
+            "qa_judge_provider": qa_metadata["judge_provider"],
+            "qa_judge_model": qa_metadata["judge_model"],
+            "qa_reader_prompt_id": qa_metadata["reader_prompt_id"],
+            "qa_judge_prompt_id": qa_metadata["judge_prompt_id"],
+            "qa_rubric_id": qa_metadata["rubric_id"],
         },
         "dataset": {
             "name": dataset_path.stem,
@@ -1591,6 +1717,7 @@ def _build_live_report(
             ),
         },
         "metadata": metadata or {},
+        "qa": qa_metadata,
         "accounting": accounting,
         "repeat_count": 1,
         "auth_manifest_id": AUTH_MANIFEST_ID,
@@ -1634,6 +1761,14 @@ async def run_benchmark(
     wait_for_memory_extraction: bool = False,
     memory_projection_timeout_seconds: float = 180.0,
     memory_extraction_timeout_seconds: float = DEFAULT_MEMORY_EXTRACTION_TIMEOUT_SECONDS,
+    qa_mode: str = DEFAULT_QA_MODE,
+    qa_reader_provider: str = DEFAULT_QA_READER_PROVIDER,
+    qa_reader_model: str = DEFAULT_QA_READER_MODEL,
+    qa_judge_provider: str = DEFAULT_QA_JUDGE_PROVIDER,
+    qa_judge_model: str = DEFAULT_QA_JUDGE_MODEL,
+    qa_max_context_sessions: int = DEFAULT_QA_MAX_CONTEXT_SESSIONS,
+    qa_max_session_chars: int = DEFAULT_QA_MAX_SESSION_CHARS,
+    qa_timeout_seconds: float = DEFAULT_QA_TIMEOUT_SECONDS,
     verify_sha256: bool = True,
     output_path: Path | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
@@ -1661,6 +1796,16 @@ async def run_benchmark(
     if corpus_text_policy not in CORPUS_TEXT_POLICIES:
         msg = f"Unsupported LongMemEval corpus text policy: {corpus_text_policy}"
         raise LongMemEvalLiveError(msg)
+    qa_config = _qa_config(
+        mode=qa_mode,
+        reader_provider=qa_reader_provider,
+        reader_model=qa_reader_model,
+        judge_provider=qa_judge_provider,
+        judge_model=qa_judge_model,
+        max_context_sessions=qa_max_context_sessions,
+        max_session_chars=qa_max_session_chars,
+        timeout_seconds=qa_timeout_seconds,
+    )
     selected_cases = list(zip(selected_indices, selected_entries, strict=True))
     entries_by_case_index = dict(selected_cases)
 
@@ -1677,6 +1822,7 @@ async def run_benchmark(
     print(f"  Diagnostic search limit: {diagnostic_search_limit}", flush=True)
     print(f"  Wait for memory projection: {wait_for_memory_projection}", flush=True)
     print(f"  Wait for memory extraction: {wait_for_memory_extraction}", flush=True)
+    print(f"  QA mode: {qa_config.mode}", flush=True)
     print(
         "  Memory enrichment consistency: "
         + (
@@ -1731,6 +1877,7 @@ async def run_benchmark(
             memory_extraction_timeout_seconds=memory_extraction_timeout_seconds,
             elapsed_seconds=time.perf_counter() - started,
             completion_status="partial",
+            qa_config=qa_config,
         )
         _write_report(output_path, report)
 
@@ -1753,6 +1900,7 @@ async def run_benchmark(
         wait_for_memory_extraction=wait_for_memory_extraction,
         memory_projection_timeout_seconds=memory_projection_timeout_seconds,
         memory_extraction_timeout_seconds=memory_extraction_timeout_seconds,
+        qa_config=qa_config,
         on_progress=checkpoint,
     )
     elapsed = time.perf_counter() - started
@@ -1778,6 +1926,7 @@ async def run_benchmark(
         memory_extraction_timeout_seconds=memory_extraction_timeout_seconds,
         elapsed_seconds=elapsed,
         completion_status="complete",
+        qa_config=qa_config,
     )
     if output_path is not None:
         _write_report(output_path, report)
@@ -1869,6 +2018,23 @@ def main() -> None:
         default=CORPUS_TEXT_POLICY,
         help="Which conversation roles to project into session entities.",
     )
+    parser.add_argument(
+        "--qa-mode",
+        choices=LONGMEMEVAL_QA_MODES,
+        default=DEFAULT_QA_MODE,
+        help="Optional LongMemEval-S QA pass over retrieved sessions.",
+    )
+    parser.add_argument("--qa-reader-provider", default=DEFAULT_QA_READER_PROVIDER)
+    parser.add_argument("--qa-reader-model", default=DEFAULT_QA_READER_MODEL)
+    parser.add_argument("--qa-judge-provider", default=DEFAULT_QA_JUDGE_PROVIDER)
+    parser.add_argument("--qa-judge-model", default=DEFAULT_QA_JUDGE_MODEL)
+    parser.add_argument(
+        "--qa-max-context-sessions",
+        type=int,
+        default=DEFAULT_QA_MAX_CONTEXT_SESSIONS,
+    )
+    parser.add_argument("--qa-max-session-chars", type=int, default=DEFAULT_QA_MAX_SESSION_CHARS)
+    parser.add_argument("--qa-timeout", type=float, default=DEFAULT_QA_TIMEOUT_SECONDS)
     parser.add_argument("--skip-sha256-check", action="store_true")
     args = parser.parse_args()
 
@@ -1902,6 +2068,14 @@ def main() -> None:
                 wait_for_memory_extraction=args.wait_for_memory_extraction,
                 memory_projection_timeout_seconds=args.memory_projection_timeout,
                 memory_extraction_timeout_seconds=args.memory_extraction_timeout,
+                qa_mode=args.qa_mode,
+                qa_reader_provider=args.qa_reader_provider,
+                qa_reader_model=args.qa_reader_model,
+                qa_judge_provider=args.qa_judge_provider,
+                qa_judge_model=args.qa_judge_model,
+                qa_max_context_sessions=args.qa_max_context_sessions,
+                qa_max_session_chars=args.qa_max_session_chars,
+                qa_timeout_seconds=args.qa_timeout,
                 verify_sha256=not args.skip_sha256_check,
                 output_path=out_path,
             )

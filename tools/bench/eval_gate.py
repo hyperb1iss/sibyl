@@ -165,6 +165,8 @@ HIGHER_IS_BETTER_METRICS = frozenset(
     (
         "mrr",
         "pass_rate",
+        "qa_accuracy",
+        "qa_mean_score",
         "source_metadata_coverage",
         "facet_order_match_rate",
     )
@@ -179,6 +181,7 @@ _KNOWN_EMBEDDING_DIMENSIONS = {
     ("openai", "text-embedding-3-small"): 1024,
 }
 ACCOUNTING_SCHEMA_VERSION = "sibyl-eval-accounting-v1"
+QA_SCHEMA_VERSION = "sibyl-longmemeval-s-qa-v1"
 _ACCOUNTING_SECTIONS = ("latency", "tokens", "embedding", "reader", "judge", "cost")
 _ACCOUNTING_LATENCY_FIELDS = ("p50_ms", "p95_ms", "max_ms")
 _ACCOUNTING_TOKEN_FIELDS = (
@@ -188,6 +191,36 @@ _ACCOUNTING_TOKEN_FIELDS = (
 )
 _ACCOUNTING_COST_FIELDS = ("estimated_cost_usd",)
 _ACCOUNTING_PARTY_TOKEN_FIELDS = ("estimated_input_tokens", "estimated_output_tokens")
+_QA_MODES = frozenset(("disabled", "fixture", "model"))
+_QA_PROVIDER_MODES = frozenset(("fixture", "model"))
+_QA_REQUIRED_FIELDS = (
+    "schema_version",
+    "mode",
+    "enabled",
+    "reader_provider",
+    "reader_model",
+    "reader_prompt_id",
+    "judge_provider",
+    "judge_model",
+    "judge_prompt_id",
+    "rubric_id",
+    "claim_boundary",
+)
+_QA_CASE_REQUIRED_FIELDS = (
+    "schema_version",
+    "mode",
+    "evaluated",
+    "reader_prompt_id",
+    "judge_prompt_id",
+    "rubric_id",
+    "correct",
+    "score",
+    "generated_answer",
+    "reference_answer",
+    "context_session_ids",
+    "answer_session_ids",
+    "judge_rationale",
+)
 
 
 def load_report(path: Path) -> dict[str, Any]:
@@ -595,7 +628,209 @@ def _validate_ai_memory_cases(report: dict[str, Any]) -> list[str]:
     return failures
 
 
-def validate_ai_memory_record(report: dict[str, Any]) -> list[str]:
+def _validate_probability(value: Any, *, path: str) -> list[str]:
+    if not _is_finite_number(value):
+        return [f"{path} must be a finite number between 0 and 1"]
+    numeric = float(value)
+    if numeric < 0.0 or numeric > 1.0:
+        return [f"{path} must be between 0 and 1: {numeric:.4f}"]
+    return []
+
+
+def _validate_applicable_qa_field(
+    qa: dict[str, Any],
+    *,
+    field: str,
+    path: str,
+) -> list[str]:
+    value = str(qa.get(field) or "").strip().lower()
+    if value and value not in {"not-applicable", "n/a", "disabled"}:
+        return []
+    return [f"{path} field {field!r} must be provider-backed when QA is enabled"]
+
+
+def _validate_ai_memory_case_qa(
+    case_qa: dict[str, Any],
+    *,
+    index: int,
+    mode: str,
+    require_qa: bool,
+) -> list[str]:
+    failures: list[str] = []
+    path = f"case_results[{index}]['qa']"
+    failures.extend(_validate_required_fields(case_qa, path=path, fields=_QA_CASE_REQUIRED_FIELDS))
+    if case_qa.get("schema_version") != QA_SCHEMA_VERSION:
+        failures.append(f"{path} schema_version must be {QA_SCHEMA_VERSION!r}")
+    if mode in _QA_PROVIDER_MODES and case_qa.get("mode") != mode:
+        failures.append(f"{path} mode must match top-level qa mode {mode!r}")
+
+    evaluated = case_qa.get("evaluated")
+    if require_qa and evaluated is not True:
+        failures.append(f"{path} evaluated must be true when QA is required")
+    if evaluated is not True:
+        return failures
+
+    if not isinstance(case_qa.get("correct"), bool):
+        failures.append(f"{path} correct must be boolean")
+    failures.extend(_validate_probability(case_qa.get("score"), path=f"{path}['score']"))
+    if not isinstance(case_qa.get("context_session_ids"), list):
+        failures.append(f"{path} context_session_ids must be a list")
+    if not isinstance(case_qa.get("answer_session_ids"), list):
+        failures.append(f"{path} answer_session_ids must be a list")
+    for field in ("reader_prompt_id", "judge_prompt_id", "rubric_id"):
+        failures.extend(_validate_applicable_qa_field(case_qa, field=field, path=path))
+    return failures
+
+
+def _validate_ai_memory_qa_metrics(overall: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    for metric in ("qa_accuracy", "qa_mean_score"):
+        if metric not in overall:
+            failures.append(f"overall missing metric {metric!r}")
+        else:
+            failures.extend(_validate_probability(overall.get(metric), path=f"overall[{metric!r}]"))
+
+    evaluated_count = overall.get("qa_evaluated_count")
+    if not _is_finite_number(evaluated_count) or float(evaluated_count) <= 0.0:
+        failures.append("overall['qa_evaluated_count'] must be a positive number")
+    return failures
+
+
+def _validate_ai_memory_qa_cases(
+    report: dict[str, Any],
+    *,
+    mode: str,
+    require_qa: bool,
+) -> tuple[list[str], int, int]:
+    case_results = report.get("case_results")
+    if not isinstance(case_results, list):
+        return [], 0, 0
+
+    failures: list[str] = []
+    evaluated_cases = 0
+    correct_cases = 0
+    for index, case in enumerate(case_results):
+        if not isinstance(case, dict):
+            continue
+        case_qa = case.get("qa")
+        if not _is_present(case_qa):
+            failures.append(f"case_results[{index}] missing non-empty field 'qa'")
+            continue
+        if not _is_non_empty_mapping(case_qa):
+            failures.append(f"case_results[{index}]['qa'] must be a non-empty object")
+            continue
+        failures.extend(
+            _validate_ai_memory_case_qa(
+                case_qa,
+                index=index,
+                mode=mode,
+                require_qa=require_qa,
+            )
+        )
+        if case_qa.get("evaluated") is True:
+            evaluated_cases += 1
+            if case_qa.get("correct") is True:
+                correct_cases += 1
+    return failures, evaluated_cases, correct_cases
+
+
+def _validate_ai_memory_qa_count_consistency(
+    overall: dict[str, Any],
+    *,
+    evaluated_cases: int,
+    correct_cases: int,
+    require_qa: bool,
+) -> list[str]:
+    failures: list[str] = []
+    if require_qa and evaluated_cases == 0:
+        failures.append("case_results has no evaluated QA cases")
+    if evaluated_cases <= 0:
+        return failures
+
+    expected_accuracy = correct_cases / evaluated_cases
+    actual_accuracy = overall.get("qa_accuracy")
+    if _is_finite_number(actual_accuracy) and not _numbers_match(
+        float(actual_accuracy), expected_accuracy
+    ):
+        failures.append(
+            "overall['qa_accuracy'] must equal evaluated case correctness: "
+            f"expected {expected_accuracy:.6f}"
+        )
+    evaluated_count = overall.get("qa_evaluated_count")
+    if _is_finite_number(evaluated_count) and not _numbers_match(
+        float(evaluated_count), float(evaluated_cases)
+    ):
+        failures.append(
+            "overall['qa_evaluated_count'] must match evaluated case count: "
+            f"expected {evaluated_cases}"
+        )
+    correct_count = overall.get("qa_correct_count")
+    if _is_finite_number(correct_count) and not _numbers_match(
+        float(correct_count), float(correct_cases)
+    ):
+        failures.append(
+            "overall['qa_correct_count'] must match correct QA case count: "
+            f"expected {correct_cases}"
+        )
+    return failures
+
+
+def _validate_ai_memory_qa(report: dict[str, Any], *, require_qa: bool) -> list[str]:
+    qa = report.get("qa")
+    if not _is_present(qa):
+        return ["missing non-empty field 'qa'"] if require_qa else []
+    if not _is_non_empty_mapping(qa):
+        return ["field 'qa' must be a non-empty object"]
+
+    failures: list[str] = []
+    failures.extend(_validate_required_fields(qa, path="qa", fields=_QA_REQUIRED_FIELDS))
+    if qa.get("schema_version") != QA_SCHEMA_VERSION:
+        failures.append(f"qa schema_version must be {QA_SCHEMA_VERSION!r}")
+
+    mode = str(qa.get("mode") or "")
+    if mode not in _QA_MODES:
+        failures.append(f"qa mode must be one of {sorted(_QA_MODES)!r}")
+    if require_qa and mode == "disabled":
+        failures.append("qa mode must not be disabled when QA is required")
+
+    strict_qa = require_qa or mode in _QA_PROVIDER_MODES or qa.get("enabled") is True
+    if not strict_qa:
+        return failures
+
+    if qa.get("enabled") is not True:
+        failures.append("qa['enabled'] must be true when QA is required")
+    for field in ("reader_prompt_id", "judge_prompt_id", "rubric_id"):
+        failures.extend(_validate_applicable_qa_field(qa, field=field, path="qa"))
+
+    overall = report.get("overall")
+    if not _is_non_empty_mapping(overall):
+        failures.append("missing non-empty field 'overall'")
+        return failures
+
+    failures.extend(_validate_ai_memory_qa_metrics(overall))
+    case_failures, evaluated_cases, correct_cases = _validate_ai_memory_qa_cases(
+        report,
+        mode=mode,
+        require_qa=require_qa,
+    )
+    failures.extend(case_failures)
+    failures.extend(
+        _validate_ai_memory_qa_count_consistency(
+            overall,
+            evaluated_cases=evaluated_cases,
+            correct_cases=correct_cases,
+            require_qa=require_qa,
+        )
+    )
+
+    return failures
+
+
+def validate_ai_memory_record(
+    report: dict[str, Any],
+    *,
+    require_qa: bool = False,
+) -> list[str]:
     failures: list[str] = []
     failures.extend(_validate_ai_memory_header(report))
     failures.extend(_validate_ai_memory_scope(report))
@@ -604,6 +839,7 @@ def validate_ai_memory_record(report: dict[str, Any]) -> list[str]:
     failures.extend(_validate_ai_memory_isolation(report))
     failures.extend(_validate_ai_memory_per_slice_thresholds(report))
     failures.extend(_validate_ai_memory_cases(report))
+    failures.extend(_validate_ai_memory_qa(report, require_qa=require_qa))
     return failures
 
 
@@ -1025,9 +1261,11 @@ def _validate_accounting_consistency(
 def _validate_profile_requirements(
     report: dict[str, Any],
     profile: ProfileName,
+    *,
+    require_qa: bool,
 ) -> list[str]:
     if profile == "ai-memory":
-        return validate_ai_memory_record(report)
+        return validate_ai_memory_record(report, require_qa=require_qa)
     if profile == "context-pack":
         return validate_context_pack_release_metadata(report)
     return []
@@ -1140,6 +1378,7 @@ def evaluate_external_ai_memory_report(
     report: dict[str, Any],
     *,
     require_accounting: bool = False,
+    require_qa: bool = False,
 ) -> list[str]:
     try:
         metrics = extract_metrics(report)
@@ -1147,6 +1386,7 @@ def evaluate_external_ai_memory_report(
         metrics = {}
     thresholds = build_thresholds(profile="ai-memory", minimums={}, maximums={})
     failures = validate_external_ai_memory_record(report)
+    failures.extend(_validate_ai_memory_qa(report, require_qa=require_qa))
     if require_accounting or _is_present(report.get("accounting")):
         failures.extend(_validate_accounting(report))
     if require_accounting:
@@ -1203,6 +1443,7 @@ def _validate_external_citable_manifest_entry(
         for failure in evaluate_external_ai_memory_report(
             report,
             require_accounting=entry.get("accounting_required") is True,
+            require_qa=entry.get("qa_required") is True,
         )
     ]
     case_result_count = _coerce_positive_integer(report.get("case_results"))
@@ -1249,6 +1490,7 @@ def _validate_citable_manifest_entry(
             report,
             profile="ai-memory",
             require_accounting=entry.get("accounting_required") is True,
+            require_qa=entry.get("qa_required") is True,
         )
     )
 
@@ -2039,6 +2281,7 @@ def evaluate_report(
     required_metadata: dict[str, str] | None = None,
     required_runtime: dict[str, str] | None = None,
     require_accounting: bool = False,
+    require_qa: bool = False,
 ) -> list[str]:
     try:
         metrics = extract_metrics(report)
@@ -2054,7 +2297,7 @@ def evaluate_report(
     failures: list[str] = []
     failures.extend(_validate_report_metadata_requirements(report, required_metadata))
     failures.extend(_validate_report_runtime_requirements(report, required_runtime))
-    failures.extend(_validate_profile_requirements(report, profile))
+    failures.extend(_validate_profile_requirements(report, profile, require_qa=require_qa))
     if require_accounting or _is_present(report.get("accounting")):
         failures.extend(_validate_accounting(report))
     if require_accounting:
@@ -2241,6 +2484,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Require the W3 cost, latency, token, and embedding accounting block.",
     )
     parser.add_argument(
+        "--require-qa",
+        action="store_true",
+        help="Require the W1 LongMemEval-S QA accuracy block and evaluated cases.",
+    )
+    parser.add_argument(
         "--baseline",
         type=Path,
         help="Saved baseline report JSON for no-regression comparison.",
@@ -2273,8 +2521,11 @@ def main(argv: list[str] | None = None) -> int:
             or args.max_regression
             or args.require_runtime
             or args.require_accounting
+            or args.require_qa
         ):
-            parser.error("--baseline, runtime, and accounting options require a report argument")
+            parser.error(
+                "--baseline, runtime, accounting, and QA options require a report argument"
+            )
         return _gate_default_manifest()
     if args.baseline is None and args.baseline_metric:
         parser.error("--baseline-metric requires --baseline")
@@ -2303,6 +2554,7 @@ def main(argv: list[str] | None = None) -> int:
         required_metadata=required_metadata,
         required_runtime=required_runtime,
         require_accounting=args.require_accounting,
+        require_qa=args.require_qa,
     )
     if baseline_report is not None:
         failures.extend(

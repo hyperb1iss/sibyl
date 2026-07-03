@@ -139,6 +139,59 @@ def _ai_memory_report(mode: str = "raw") -> dict[str, Any]:
     }
 
 
+def _add_qa_report_fields(report: dict[str, Any]) -> dict[str, Any]:
+    report["qa"] = {
+        "schema_version": "sibyl-longmemeval-s-qa-v1",
+        "mode": "fixture",
+        "enabled": True,
+        "reader_provider": "openai",
+        "reader_model": "gpt-4o",
+        "reader_prompt_id": "sibyl-longmemeval-reader-v1",
+        "judge_provider": "openai",
+        "judge_model": "gpt-5.2",
+        "judge_prompt_id": "sibyl-longmemeval-judge-v1",
+        "rubric_id": "longmemeval-s-answer-correctness-v1",
+        "max_context_sessions": 5,
+        "max_session_chars": 4000,
+        "timeout_seconds": 120.0,
+        "claim_boundary": "Deterministic fixture QA validates wiring only.",
+    }
+    report["overall"].update(
+        {
+            "qa_evaluated_count": 1.0,
+            "qa_correct_count": 1.0,
+            "qa_accuracy": 1.0,
+            "qa_mean_score": 1.0,
+        }
+    )
+    report["case_results"][0]["qa"] = {
+        "schema_version": "sibyl-longmemeval-s-qa-v1",
+        "mode": "fixture",
+        "enabled": True,
+        "reader_provider": "openai",
+        "reader_model": "gpt-4o",
+        "reader_prompt_id": "sibyl-longmemeval-reader-v1",
+        "judge_provider": "openai",
+        "judge_model": "gpt-5.2",
+        "judge_prompt_id": "sibyl-longmemeval-judge-v1",
+        "rubric_id": "longmemeval-s-answer-correctness-v1",
+        "evaluated": True,
+        "correct": True,
+        "score": 1.0,
+        "generated_answer": "answer",
+        "reference_answer": "answer",
+        "context_session_ids": ["s1", "s2"],
+        "answer_session_ids": ["s1"],
+        "judge_rationale": "Reference answer session is present.",
+        "latency_ms": 10.0,
+        "reader_estimated_input_tokens": 20.0,
+        "reader_estimated_output_tokens": 2.0,
+        "judge_estimated_input_tokens": 25.0,
+        "judge_estimated_output_tokens": 2.0,
+    }
+    return report
+
+
 def _clone_report(report: dict[str, Any]) -> dict[str, Any]:
     return json.loads(json.dumps(report))
 
@@ -740,6 +793,63 @@ def test_evaluate_report_require_accounting_rejects_metric_mismatch() -> None:
         "accounting['embedding']['calls'] must match metric" in failure for failure in failures
     )
     assert any("embedding_estimated_input_tokens" in failure for failure in failures)
+
+
+def test_evaluate_report_require_qa_accepts_longmemeval_fixture_contract() -> None:
+    report = _add_qa_report_fields(_ai_memory_report(mode="hybrid"))
+
+    failures = eval_gate.evaluate_report(report, profile="ai-memory", require_qa=True)
+
+    assert failures == []
+
+
+def test_evaluate_report_require_qa_rejects_missing_block() -> None:
+    report = _ai_memory_report(mode="hybrid")
+
+    failures = eval_gate.evaluate_report(report, profile="ai-memory", require_qa=True)
+
+    assert "missing non-empty field 'qa'" in failures
+
+
+def test_evaluate_report_require_qa_rejects_disabled_block() -> None:
+    report = _add_qa_report_fields(_ai_memory_report(mode="hybrid"))
+    report["qa"]["mode"] = "disabled"
+    report["qa"]["enabled"] = False
+    report["overall"].pop("qa_accuracy")
+    report["case_results"][0]["qa"]["evaluated"] = False
+
+    failures = eval_gate.evaluate_report(report, profile="ai-memory", require_qa=True)
+
+    assert "qa mode must not be disabled when QA is required" in failures
+    assert "overall missing metric 'qa_accuracy'" in failures
+    assert "case_results[0]['qa'] evaluated must be true when QA is required" in failures
+
+
+def test_evaluate_report_require_qa_rejects_correct_count_mismatch() -> None:
+    report = _add_qa_report_fields(_ai_memory_report(mode="hybrid"))
+    report["overall"]["qa_correct_count"] = 0.0
+
+    failures = eval_gate.evaluate_report(report, profile="ai-memory", require_qa=True)
+
+    assert "overall['qa_correct_count'] must match correct QA case count: expected 1" in failures
+
+
+def test_evaluate_baseline_regressions_supports_qa_accuracy_direction() -> None:
+    baseline = _add_qa_report_fields(_ai_memory_report(mode="hybrid"))
+    candidate = _clone_report(baseline)
+    candidate["overall"]["qa_accuracy"] = 0.98
+
+    failures = eval_gate.evaluate_baseline_regressions(
+        candidate,
+        baseline,
+        profile="ai-memory",
+        metrics=["qa_accuracy"],
+        max_regressions={"qa_accuracy": 0.01},
+    )
+
+    assert failures == [
+        "metric 'qa_accuracy' regressed below baseline 1.0000 by 0.0200; allowed 0.0100"
+    ]
 
 
 def test_evaluate_baseline_regressions_blocks_quality_drop() -> None:
@@ -1699,7 +1809,9 @@ def test_main_rejects_baseline_without_report(
 
     captured = capsys.readouterr()
     assert exc.value.code == ARGPARSE_USAGE_ERROR
-    assert "--baseline, runtime, and accounting options require a report argument" in captured.err
+    assert (
+        "--baseline, runtime, accounting, and QA options require a report argument" in captured.err
+    )
 
 
 def test_ai_memory_manifest_tracks_full_citable_artifacts() -> None:
