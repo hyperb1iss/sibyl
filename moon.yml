@@ -630,7 +630,7 @@ tasks:
       - tools/**/*.py
       - benchmarks/**/*.py
       - benchmarks/context_pack_cases.json
-      - benchmarks/results/ai-memory/*.json
+      - benchmarks/results/ai-memory/**/*.json
       - pyproject.toml
 
   eval-skill-trigger:
@@ -666,7 +666,7 @@ tasks:
       - benchmarks/longmemeval_v2_probe.py
       - benchmarks/longmemeval_v2_official.py
       - benchmarks/longmemeval_v2_memory/**/*.py
-      - benchmarks/results/ai-memory/*.json
+      - benchmarks/results/ai-memory/**/*.json
       - pyproject.toml
 
   vector-index-bench:
