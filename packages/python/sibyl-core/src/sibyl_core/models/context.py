@@ -93,6 +93,7 @@ class ContextPack:
     sections: list[ContextSection]
     total_items: int
     layer: ContextLayer = ContextLayer.RECALL
+    usage_metadata: dict[str, Any] = field(default_factory=dict)
     usage_hint: str = (
         "Use this as the working context pack. Capture new decisions, plans, ideas, "
         "claims, procedures, and artifacts back into Sibyl as they emerge."

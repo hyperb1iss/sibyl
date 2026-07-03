@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from importlib import import_module
 from types import SimpleNamespace
 from typing import Any, Literal
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -10,6 +12,7 @@ from sibyl_core.models.context import (
     ContextIntent,
     ContextItem,
     ContextItemQualityMetadata,
+    ContextLayer,
     ContextPack,
     ContextSection,
 )
@@ -22,6 +25,8 @@ from sibyl_core.models.synthesis import (
     SynthesisVerificationStatus,
 )
 from sibyl_core.services.synthesis import (
+    default_context_pack,
+    default_search,
     draft_synthesis_artifact,
     materialize_synthesis_section_packs,
     plan_synthesis,
@@ -54,6 +59,48 @@ def _result(
 
 async def _empty_related(**kwargs: Any) -> list[SynthesisSourceReference]:
     return []
+
+
+@pytest.mark.asyncio
+async def test_default_synthesis_search_opts_out_of_exposure_stamping() -> None:
+    search = AsyncMock(
+        return_value=SearchResponse(
+            results=[],
+            total=0,
+            query="synthesis roadmap",
+            filters={},
+        )
+    )
+    search_module = import_module("sibyl_core.tools.search")
+
+    with patch.object(search_module, "search", search):
+        await default_search(query="synthesis roadmap", organization_id="org-123")
+
+    search.assert_awaited_once()
+    assert search.await_args.kwargs["record_exposure"] is False
+
+
+@pytest.mark.asyncio
+async def test_default_synthesis_context_pack_opts_out_of_exposure_stamping() -> None:
+    compile_context = AsyncMock(
+        return_value=ContextPack(
+            goal="synthesis roadmap",
+            query="synthesis roadmap",
+            intent=ContextIntent.BUILD,
+            layer=ContextLayer.RECALL,
+            domain=None,
+            project=None,
+            sections=[],
+            total_items=0,
+        )
+    )
+    context_module = import_module("sibyl_core.tools.context")
+
+    with patch.object(context_module, "compile_context", compile_context):
+        await default_context_pack(goal="synthesis roadmap", organization_id="org-123")
+
+    compile_context.assert_awaited_once()
+    assert compile_context.await_args.kwargs["record_exposure"] is False
 
 
 @pytest.mark.asyncio

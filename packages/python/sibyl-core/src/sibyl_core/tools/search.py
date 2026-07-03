@@ -38,6 +38,10 @@ from sibyl_core.tools.helpers import (
     _serialize_enum,
 )
 from sibyl_core.tools.responses import SearchResponse, SearchResult
+from sibyl_core.tools.usage_exposure import (
+    _USAGE_EXPOSURE_SUMMARY_KEY,
+    annotate_search_result_exposures,
+)
 from sibyl_core.utils.log_safety import query_log_fields
 from sibyl_core.utils.resilience import TIMEOUTS, with_timeout
 
@@ -641,6 +645,7 @@ async def search(
     organization_id: str | None = None,
     principal_id: str | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
+    record_exposure: bool = True,
 ) -> SearchResponse:
     """Unified semantic search across knowledge graph AND documentation.
 
@@ -1187,6 +1192,26 @@ async def search(
     paginated_results = all_results[offset : offset + limit]
     has_more = offset + len(paginated_results) < total_count
     _add_source_failure_filters(filters, source_failures)
+    if record_exposure and paginated_results and organization_id:
+        filters[_USAGE_EXPOSURE_SUMMARY_KEY] = await annotate_search_result_exposures(
+            paginated_results,
+            organization_id=organization_id,
+            principal_id=principal_id,
+            project_id=project,
+            source_surface="search",
+            request_metadata={
+                "query": query,
+                "types": types,
+                "limit": limit,
+                "offset": offset,
+                "project": project,
+                "source_id": source_id,
+                "source_name": source_name,
+                "memory_scope": memory_scope,
+                "scope_key": scope_key,
+                "result_ids": [result.id for result in paginated_results],
+            },
+        )
 
     return SearchResponse(
         results=paginated_results,

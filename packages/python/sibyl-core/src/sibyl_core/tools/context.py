@@ -32,6 +32,10 @@ from sibyl_core.services.surreal_content import (
 )
 from sibyl_core.tools.helpers import _project_id_for_policy
 from sibyl_core.tools.responses import SearchResponse, SearchResult
+from sibyl_core.tools.usage_exposure import (
+    _USAGE_EXPOSURE_SUMMARY_KEY,
+    annotate_context_item_exposures,
+)
 
 SearchFn = Callable[..., Awaitable[SearchResponse]]
 RelatedFn = Callable[..., Awaitable[list[ContextRelatedItem]]]
@@ -939,18 +943,21 @@ async def _compile_fallback_sections(
     search_fn: SearchFn,
     audit: bool = False,
 ) -> list[ContextSection]:
-    response = await search_fn(
-        query=query,
-        types=None,
-        category=domain,
-        project=project,
-        accessible_projects=accessible_projects,
-        limit=limit,
-        include_content=True,
-        include_documents=True,
-        include_graph=True,
-        organization_id=organization_id,
-    )
+    search_kwargs: dict[str, Any] = {
+        "query": query,
+        "types": None,
+        "category": domain,
+        "project": project,
+        "accessible_projects": accessible_projects,
+        "limit": limit,
+        "include_content": True,
+        "include_documents": True,
+        "include_graph": True,
+        "organization_id": organization_id,
+    }
+    if search_fn is default_search:
+        search_kwargs["record_exposure"] = False
+    response = await search_fn(**search_kwargs)
 
     grouped: dict[ContextFacet, list[ContextItem]] = {facet: [] for facet in facets}
     for result in response.results:
@@ -1164,6 +1171,7 @@ async def compile_context(
     raw_memory_recall_fn: RawMemoryRecallFn = recall_raw_memory,
     active_work_fn: ActiveWorkFn | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
+    record_exposure: bool = True,
 ) -> ContextPack:
     """Build a small, structured context pack for an agent goal."""
 
@@ -1265,6 +1273,24 @@ async def compile_context(
             related_limit=related_limit,
             related_fn=related_fn,
         )
+    usage_metadata: dict[str, Any] = {}
+    if sections and record_exposure:
+        usage_metadata[_USAGE_EXPOSURE_SUMMARY_KEY] = await annotate_context_item_exposures(
+            [item for section in sections for item in section.items],
+            organization_id=organization_id,
+            principal_id=principal_id,
+            project_id=project,
+            source_surface="context_pack",
+            request_metadata={
+                "goal": goal,
+                "intent": normalized_intent.value,
+                "layer": normalized_layer.value,
+                "domain": domain,
+                "project": project,
+                "limit": limit,
+                "item_ids": [item.id for section in sections for item in section.items],
+            },
+        )
     return ContextPack(
         goal=goal,
         intent=normalized_intent,
@@ -1274,6 +1300,7 @@ async def compile_context(
         project=project,
         sections=sections,
         total_items=sum(len(section.items) for section in sections),
+        usage_metadata=usage_metadata,
     )
 
 

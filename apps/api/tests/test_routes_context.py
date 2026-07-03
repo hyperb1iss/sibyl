@@ -88,6 +88,36 @@ def _pack_with_quality(
     )
 
 
+def _pack_with_usage() -> ContextPack:
+    pack = _pack_with_quality()
+    pack.sections[0].items[0].metadata["usage_exposure"] = {
+        "status": "stamped",
+        "signal_type": "exposure",
+        "source_surface": "context_pack",
+        "item_kind": "graph_entity",
+        "item_id": "decision_1",
+    }
+    return ContextPack(
+        goal=pack.goal,
+        intent=pack.intent,
+        query=pack.query,
+        domain=pack.domain,
+        project=pack.project,
+        sections=pack.sections,
+        total_items=pack.total_items,
+        layer=pack.layer,
+        usage_metadata={
+            "usage_exposure": {
+                "source_surface": "context_pack",
+                "returned_count": 1,
+                "stamped_count": 1,
+                "excluded_count": 0,
+                "coverage_complete": True,
+            }
+        },
+    )
+
+
 def _ctx() -> SimpleNamespace:
     return SimpleNamespace(user_id="user-123", api_key_memory_scope_keys=None)
 
@@ -184,6 +214,29 @@ class TestContextPackRoute:
         assert item.quality.origin == "graph"
         assert item.quality.source == "docs/architecture/SIBYL_NORTHSTAR.md"
         assert item.quality.project_id == "project-sibyl"
+
+    @pytest.mark.asyncio
+    async def test_context_pack_preserves_usage_metadata(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch(
+                "sibyl_core.tools.context.compile_context",
+                AsyncMock(return_value=_pack_with_usage()),
+            ),
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(goal="ship faster"),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        assert response.usage_metadata["usage_exposure"]["coverage_complete"] is True
+        assert response.sections[0].items[0].metadata["usage_exposure"]["status"] == "stamped"
 
     @pytest.mark.asyncio
     async def test_context_pack_uses_requested_accessible_project(self) -> None:
