@@ -107,6 +107,7 @@ app = typer.Typer(
 memory_space_app = typer.Typer(help="Memory-space inspection and preview commands")
 memory_review_app = typer.Typer(help="Memory review queue automation commands")
 synthesis_app = typer.Typer(help="Source-grounded synthesis commands")
+team_app = typer.Typer(help="Team memory management commands")
 
 
 # Register subcommand groups
@@ -136,6 +137,7 @@ app.add_typer(pending_writes_app, name="pending-writes")
 app.add_typer(memory_space_app, name="memory-space")
 app.add_typer(memory_review_app, name="memory-review")
 app.add_typer(synthesis_app, name="synthesis")
+app.add_typer(team_app, name="team")
 app.command("tasks", hidden=True)(list_tasks)
 app.command("doctor")(doctor_cmd)
 app.command("login")(login_cmd)
@@ -1127,6 +1129,39 @@ def _print_access_preview(data: dict[str, object]) -> None:
     table.add_row("Reasons", _preview_id_summary(data.get("policy_reasons")))
     if audit_id := _preview_audit_id(data):
         table.add_row("Audit", audit_id)
+    console.print(table)
+
+
+def _team_count(value: object) -> str:
+    return str(len(value)) if isinstance(value, list) else "0"
+
+
+def _print_team_list(data: dict[str, object]) -> None:
+    teams = data.get("teams")
+    rows = teams if isinstance(teams, list) else []
+    table = create_table("Team", "Slug", "Scope", "Memory space")
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        team = cast("dict[str, object]", item)
+        table.add_row(
+            str(team.get("name") or ""),
+            str(team.get("slug") or ""),
+            str(team.get("memory_scope_key") or team.get("id") or ""),
+            str(team.get("memory_space_id") or ""),
+        )
+    console.print(table)
+
+
+def _print_team(data: dict[str, object]) -> None:
+    table = create_table(None, "Field", "Value", expand=False)
+    table.add_row("Team", str(data.get("name") or ""))
+    table.add_row("Slug", str(data.get("slug") or ""))
+    table.add_row("ID", str(data.get("id") or ""))
+    table.add_row("Memory space", str(data.get("memory_space_id") or ""))
+    table.add_row("Scope key", str(data.get("memory_scope_key") or ""))
+    table.add_row("Members", _team_count(data.get("members")))
+    table.add_row("Projects", _team_count(data.get("projects")))
     console.print(table)
 
 
@@ -2891,6 +2926,166 @@ def memory_space_preview_agent(
             _handle_client_error(e)
 
     run_memory_space_preview_agent()
+
+
+@team_app.command("list")
+def list_teams_cmd(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """List teams in the active organization."""
+
+    @run_async
+    async def run_list_teams() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.list_teams()
+            if json_output:
+                print_json(data)
+                return
+            _print_team_list(cast("dict[str, object]", data))
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_list_teams()
+
+
+@team_app.command("create")
+def create_team_cmd(
+    name: str = typer.Argument(..., help="Team name"),
+    slug: str | None = typer.Option(None, "--slug", help="Stable team slug"),
+    description: str | None = typer.Option(None, "--description", "-d", help="Team description"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Create a team and its team memory space."""
+
+    @run_async
+    async def run_create_team() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.create_team(
+                    name=name,
+                    slug=slug,
+                    description=description,
+                )
+            if json_output:
+                print_json(data)
+                return
+            _print_team(cast("dict[str, object]", data))
+            success(f"Created team: {data.get('slug') or data.get('id')}")
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_create_team()
+
+
+@team_app.command("add-member")
+def add_team_member_cmd(
+    team_id: str = typer.Argument(..., help="Team ID or slug"),
+    user_id: str = typer.Argument(..., help="User UUID"),
+    role: str = typer.Option("member", "--role", "-r", help="Team role"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Add or update a team member."""
+
+    @run_async
+    async def run_add_team_member() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.add_team_member(
+                    team_id=team_id,
+                    user_id=user_id,
+                    role=role,
+                )
+            if json_output:
+                print_json(data)
+                return
+            success(f"Added {data.get('user_id')} to team {team_id} as {data.get('role')}")
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_add_team_member()
+
+
+@team_app.command("remove-member")
+def remove_team_member_cmd(
+    team_id: str = typer.Argument(..., help="Team ID or slug"),
+    user_id: str = typer.Argument(..., help="User UUID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Remove a team member."""
+
+    @run_async
+    async def run_remove_team_member() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.remove_team_member(team_id=team_id, user_id=user_id)
+            if json_output:
+                print_json(data)
+                return
+            success(f"Removed {user_id} from team {team_id}")
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_remove_team_member()
+
+
+@team_app.command("link-project")
+def link_team_project_cmd(
+    team_id: str = typer.Argument(..., help="Team ID or slug"),
+    project_id: str = typer.Argument(..., help="Project UUID or graph project ID"),
+    role: str = typer.Option(
+        "project_contributor",
+        "--role",
+        "-r",
+        help="Project role granted to the team",
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Grant a team access to a project."""
+
+    @run_async
+    async def run_link_team_project() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.link_team_project(
+                    team_id=team_id,
+                    project_id=project_id,
+                    role=role,
+                )
+            if json_output:
+                print_json(data)
+                return
+            success(
+                f"Linked team {team_id} to project "
+                f"{data.get('graph_project_id') or data.get('project_id')}"
+            )
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_link_team_project()
+
+
+@team_app.command("unlink-project")
+def unlink_team_project_cmd(
+    team_id: str = typer.Argument(..., help="Team ID or slug"),
+    project_id: str = typer.Argument(..., help="Project UUID or graph project ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Remove a team's project access."""
+
+    @run_async
+    async def run_unlink_team_project() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.unlink_team_project(team_id=team_id, project_id=project_id)
+            if json_output:
+                print_json(data)
+                return
+            success(f"Unlinked team {team_id} from project {project_id}")
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_unlink_team_project()
 
 
 @app.command("remember")

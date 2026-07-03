@@ -26,6 +26,7 @@ from sibyl.api.routes.settings import router as settings_router
 from sibyl.api.routes.setup import router as setup_router
 from sibyl.api.routes.synthesis import router as synthesis_router
 from sibyl.api.routes.tasks import router as tasks_router
+from sibyl.api.routes.teams import router as teams_router
 from sibyl.api.routes.telemetry import router as telemetry_router
 from sibyl.api.routes.users import router as users_router
 
@@ -58,5 +59,6 @@ __all__ = [
     "synthesis_router",
     "tasks_router",
     "telemetry_router",
+    "teams_router",
     "users_router",
 ]

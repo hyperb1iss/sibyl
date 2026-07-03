@@ -245,6 +245,9 @@ def test_surreal_auth_runtime_exports_neutral_surface() -> None:
     assert "create_memory_space" in surreal_auth_runtime.__all__
     assert "add_memory_space_member" in surreal_auth_runtime.__all__
     assert "list_memory_space_members" in surreal_auth_runtime.__all__
+    assert "create_team_record" in surreal_auth_runtime.__all__
+    assert "add_team_member_record" in surreal_auth_runtime.__all__
+    assert "link_team_project_record" in surreal_auth_runtime.__all__
     assert "resolve_auth_context" in surreal_auth_runtime.__all__
     assert "validate_access_session" in surreal_auth_runtime.__all__
     assert "load_oauth_client_registration" in surreal_auth_runtime.__all__
@@ -2581,6 +2584,117 @@ async def test_team_memory_scope_records_active_state(
 
     assert space.state == "active"
     assert space.disabled_reason is None
+
+
+@pytest.mark.asyncio
+async def test_create_team_record_wires_canonical_team_memory_space(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    user_id = uuid4()
+    written_records: list[dict[str, object]] = []
+
+    async def execute_query(query: str, **kwargs):
+        if "record" in kwargs:
+            written_records.append(kwargs["record"])
+            return [kwargs["record"]]
+        if "FROM teams" in query and "slug" in kwargs:
+            return []
+        return []
+
+    client = SimpleNamespace(execute_query=AsyncMock(side_effect=execute_query))
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(client),
+    )
+
+    team = await surreal_auth_runtime.create_team_record(
+        organization_id=org_id,
+        created_by_user_id=user_id,
+        name="Memory Guild",
+        slug="memory-guild",
+        description="Shared memory",
+    )
+
+    team_record = next(record for record in written_records if record.get("slug") == "memory-guild")
+    space_record = next(
+        record for record in written_records if record.get("memory_scope") == "team"
+    )
+    team_member_record = next(record for record in written_records if record.get("role") == "owner")
+    space_member_record = next(
+        record for record in written_records if record.get("principal_type") == "team"
+    )
+    assert team.id == UUID(str(team_record["uuid"]))
+    assert team.memory_space_id == UUID(str(space_record["uuid"]))
+    assert team.memory_scope_key == str(team.id)
+    assert space_record["scope_key"] == str(team.id)
+    assert space_record["metadata"] == {
+        "team_id": str(team.id),
+        "team_slug": "memory-guild",
+    }
+    assert team_member_record["team_id"] == str(team.id)
+    assert team_member_record["user_id"] == str(user_id)
+    assert space_member_record["space_id"] == space_record["uuid"]
+    assert space_member_record["principal_id"] == str(team.id)
+
+
+@pytest.mark.asyncio
+async def test_link_team_project_record_reuses_project_role_semantics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    team_id = uuid4()
+    project_id = uuid4()
+    written_records: list[dict[str, object]] = []
+    project_lookup = AsyncMock(
+        return_value=SimpleNamespace(id=project_id, graph_project_id="project_alpha")
+    )
+
+    async def execute_query(query: str, **kwargs):
+        if "record" in kwargs:
+            written_records.append(kwargs["record"])
+            return [kwargs["record"]]
+        if "FROM teams" in query:
+            return [
+                {
+                    "uuid": str(team_id),
+                    "organization_id": str(org_id),
+                    "name": "Memory Guild",
+                    "slug": "memory-guild",
+                    "created_at": datetime.now(UTC),
+                    "updated_at": datetime.now(UTC),
+                }
+            ]
+        if "FROM team_projects" in query:
+            return []
+        return []
+
+    client = SimpleNamespace(execute_query=AsyncMock(side_effect=execute_query))
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(client),
+    )
+    monkeypatch.setattr(surreal_auth_runtime, "get_project_record_by_graph_id", project_lookup)
+
+    link = await surreal_auth_runtime.link_team_project_record(
+        organization_id=org_id,
+        team_ref="memory-guild",
+        project_ref="project_alpha",
+        role=ProjectRole.MAINTAINER,
+    )
+
+    project_lookup.assert_awaited_once_with(
+        organization_id=org_id,
+        graph_project_id="project_alpha",
+    )
+    assert link.team_id == team_id
+    assert link.project_id == project_id
+    assert link.graph_project_id == "project_alpha"
+    assert link.role == ProjectRole.MAINTAINER
+    assert written_records[0]["role"] == ProjectRole.MAINTAINER.value
+    assert written_records[0]["project_id"] == str(project_id)
 
 
 @pytest.mark.asyncio

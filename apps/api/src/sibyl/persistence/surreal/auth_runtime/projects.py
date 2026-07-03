@@ -69,6 +69,69 @@ async def _generate_unique_project_slug(
     return f"{base_slug[:55]}-{secrets.token_hex(4)}"
 
 
+async def _generate_unique_team_slug(
+    repo: _SurrealRepository,
+    *,
+    organization_id: UUID,
+    name: str,
+    exclude_uuid: UUID | None = None,
+) -> str:
+    import re
+
+    base_slug = re.sub(r"[^a-z0-9\\s-]", "", name.lower())
+    base_slug = re.sub(r"[\s_]+", "-", base_slug)
+    base_slug = re.sub(r"-+", "-", base_slug).strip("-")[:64] or "team"
+    slug = base_slug
+    suffix = 1
+
+    while suffix <= 100:
+        existing = await repo.select_one(
+            "SELECT * FROM teams WHERE organization_id = $organization_id AND slug = $slug "
+            "LIMIT 1;",
+            organization_id=str(organization_id),
+            slug=slug,
+        )
+        existing_uuid = _coerce_optional_uuid(existing.get("uuid")) if existing else None
+        if existing is None or existing_uuid == exclude_uuid:
+            return slug
+        suffix += 1
+        slug = f"{base_slug}-{suffix}"
+
+    return f"{base_slug[:55]}-{secrets.token_hex(4)}"
+
+
+async def _normalize_team_slug(
+    repo: _SurrealRepository,
+    *,
+    organization_id: UUID,
+    name: str,
+    requested_slug: str | None = None,
+    exclude_uuid: UUID | None = None,
+) -> str:
+    import re
+
+    if not requested_slug:
+        return await _generate_unique_team_slug(
+            repo,
+            organization_id=organization_id,
+            name=name,
+            exclude_uuid=exclude_uuid,
+        )
+    slug = re.sub(r"[^a-z0-9-]", "-", requested_slug.strip().lower())
+    slug = re.sub(r"-+", "-", slug).strip("-")[:64]
+    if not slug:
+        raise HTTPException(status_code=400, detail="invalid_team_slug")
+    existing = await repo.select_one(
+        "SELECT * FROM teams WHERE organization_id = $organization_id AND slug = $slug LIMIT 1;",
+        organization_id=str(organization_id),
+        slug=slug,
+    )
+    existing_uuid = _coerce_optional_uuid(existing.get("uuid")) if existing else None
+    if existing is not None and existing_uuid != exclude_uuid:
+        raise HTTPException(status_code=409, detail="team_slug_exists")
+    return slug
+
+
 def _project_record_namespace(record: SurrealRecord) -> SimpleNamespace:
     owner_user_id = _coerce_optional_uuid(record.get("owner_user_id"))
     return SimpleNamespace(
@@ -130,6 +193,67 @@ def _memory_space_namespace(record: SurrealRecord) -> SimpleNamespace:
             record.get("created_by_user_id"),
             field_name="memory_spaces.created_by_user_id",
         ),
+        created_at=_coerce_datetime(record.get("created_at")),
+        updated_at=_coerce_datetime(record.get("updated_at")),
+    )
+
+
+def _team_record_namespace(
+    record: SurrealRecord,
+    *,
+    memory_space: SurrealRecord | None = None,
+    members: list[SimpleNamespace] | None = None,
+    projects: list[SimpleNamespace] | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=_coerce_uuid(record.get("uuid"), field_name="teams.uuid"),
+        organization_id=_coerce_uuid(
+            record.get("organization_id"), field_name="teams.organization_id"
+        ),
+        name=str(record.get("name") or ""),
+        slug=str(record.get("slug") or ""),
+        description=_optional_str(record.get("description")),
+        is_default=bool(record.get("is_default")),
+        graph_entity_id=_optional_str(record.get("graph_entity_id")),
+        memory_space_id=(
+            _coerce_uuid(memory_space.get("uuid"), field_name="memory_spaces.uuid")
+            if memory_space is not None and memory_space.get("uuid")
+            else None
+        ),
+        memory_scope_key=(
+            str(memory_space.get("scope_key"))
+            if memory_space is not None and str(memory_space.get("scope_key") or "").strip()
+            else str(record.get("uuid") or "")
+        ),
+        created_at=_coerce_datetime(record.get("created_at")),
+        updated_at=_coerce_datetime(record.get("updated_at")),
+        members=members or [],
+        projects=projects or [],
+    )
+
+
+def _team_member_namespace(record: SurrealRecord) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=_coerce_uuid(record.get("uuid"), field_name="team_members.uuid"),
+        team_id=_coerce_uuid(record.get("team_id"), field_name="team_members.team_id"),
+        user_id=_coerce_uuid(record.get("user_id"), field_name="team_members.user_id"),
+        role=str(record.get("role") or "member"),
+        joined_at=_coerce_datetime(record.get("joined_at")),
+        created_at=_coerce_datetime(record.get("created_at")),
+        updated_at=_coerce_datetime(record.get("updated_at")),
+    )
+
+
+def _team_project_namespace(record: SurrealRecord) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=_coerce_uuid(record.get("uuid"), field_name="team_projects.uuid"),
+        organization_id=_coerce_uuid(
+            record.get("organization_id"), field_name="team_projects.organization_id"
+        ),
+        team_id=_coerce_uuid(record.get("team_id"), field_name="team_projects.team_id"),
+        project_id=_coerce_uuid(record.get("project_id"), field_name="team_projects.project_id"),
+        graph_project_id=_optional_str(record.get("graph_project_id")),
+        role=ProjectRole(str(record.get("role") or ProjectRole.CONTRIBUTOR.value)),
         created_at=_coerce_datetime(record.get("created_at")),
         updated_at=_coerce_datetime(record.get("updated_at")),
     )
@@ -544,6 +668,470 @@ async def add_memory_space_member(
             record=record,
         )
         return _memory_space_member_namespace(saved)
+
+
+async def _get_team_record(
+    repo: _SurrealRepository,
+    *,
+    organization_id: UUID,
+    team_ref: str,
+) -> SurrealRecord:
+    record = await repo.select_one(
+        "SELECT * FROM teams "
+        "WHERE organization_id = $organization_id AND (uuid = $team_ref OR slug = $team_ref) "
+        "LIMIT 1;",
+        organization_id=str(organization_id),
+        team_ref=team_ref,
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="team_not_found")
+    return record
+
+
+async def _get_team_memory_space(
+    repo: _SurrealRepository,
+    *,
+    organization_id: UUID,
+    team_id: UUID,
+) -> SurrealRecord | None:
+    return await repo.select_one(
+        "SELECT * FROM memory_spaces "
+        "WHERE organization_id = $organization_id "
+        "AND memory_scope = 'team' "
+        "AND scope_key = $scope_key "
+        "LIMIT 1;",
+        organization_id=str(organization_id),
+        scope_key=str(team_id),
+    )
+
+
+def _team_role_value(role: str) -> str:
+    normalized = role.strip().lower()
+    if normalized not in {"owner", "admin", "member", "viewer"}:
+        raise HTTPException(status_code=400, detail="invalid_team_role")
+    return normalized
+
+
+def _project_link_role_value(role: ProjectRole | str) -> str:
+    raw = _role_value(role) or str(role)
+    try:
+        return ProjectRole(raw).value
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid_project_role") from exc
+
+
+async def list_team_records(*, organization_id: UUID):
+    async with _auth_client_scope() as client:
+        raw_payload = await client.execute_query(
+            """
+                RETURN {
+                    teams: (
+                        SELECT * FROM teams
+                        WHERE organization_id = $organization_id
+                        ORDER BY created_at ASC
+                    ),
+                    spaces: (
+                        SELECT uuid, scope_key FROM memory_spaces
+                        WHERE organization_id = $organization_id
+                        AND memory_scope = 'team'
+                        ORDER BY created_at ASC
+                    ),
+                };
+            """,
+            organization_id=str(organization_id),
+        )
+        payload = _record_payload(raw_payload)
+        spaces_by_scope_key = {
+            str(record.get("scope_key")): record
+            for record in _normalize_records(payload.get("spaces"))
+            if str(record.get("scope_key") or "").strip()
+        }
+        return [
+            _team_record_namespace(
+                record,
+                memory_space=spaces_by_scope_key.get(str(record.get("uuid"))),
+            )
+            for record in _normalize_records(payload.get("teams"))
+        ]
+
+
+async def get_team_record(*, organization_id: UUID, team_ref: str):
+    async with _auth_client_scope() as client:
+        repo = _SurrealRepository(client)
+        team = await _get_team_record(repo, organization_id=organization_id, team_ref=team_ref)
+        team_id = _coerce_uuid(team.get("uuid"), field_name="teams.uuid")
+        memory_space = await _get_team_memory_space(
+            repo,
+            organization_id=organization_id,
+            team_id=team_id,
+        )
+        members = [
+            _team_member_namespace(record)
+            for record in await repo.select_many(
+                "SELECT * FROM team_members WHERE team_id = $team_id ORDER BY created_at ASC;",
+                team_id=str(team_id),
+            )
+        ]
+        project_rows = await repo.select_many(
+            "SELECT * FROM team_projects "
+            "WHERE organization_id = $organization_id AND team_id = $team_id "
+            "ORDER BY created_at ASC;",
+            organization_id=str(organization_id),
+            team_id=str(team_id),
+        )
+        project_ids = [
+            str(record.get("project_id"))
+            for record in project_rows
+            if str(record.get("project_id") or "").strip()
+        ]
+        project_records = (
+            await repo.select_many(
+                "SELECT uuid, graph_project_id FROM projects "
+                "WHERE organization_id = $organization_id AND uuid IN $project_ids;",
+                organization_id=str(organization_id),
+                project_ids=project_ids,
+            )
+            if project_ids
+            else []
+        )
+        graph_ids_by_project = {
+            str(record.get("uuid")): str(record.get("graph_project_id") or "")
+            for record in project_records
+        }
+        for project_row in project_rows:
+            project_row["graph_project_id"] = graph_ids_by_project.get(
+                str(project_row.get("project_id")),
+            )
+        projects = [_team_project_namespace(record) for record in project_rows]
+        return _team_record_namespace(
+            team,
+            memory_space=memory_space,
+            members=members,
+            projects=projects,
+        )
+
+
+async def create_team_record(
+    *,
+    organization_id: UUID,
+    created_by_user_id: UUID,
+    name: str,
+    slug: str | None = None,
+    description: str | None = None,
+):
+    async with _auth_client_scope() as client:
+        repo = _SurrealRepository(client)
+        now = _utcnow()
+        team_id = uuid4()
+        team_slug = await _normalize_team_slug(
+            repo,
+            organization_id=organization_id,
+            name=name,
+            requested_slug=slug,
+        )
+        team_record: SurrealRecord = {
+            "uuid": str(team_id),
+            "organization_id": str(organization_id),
+            "name": name[:200],
+            "slug": team_slug,
+            "description": description[:2000] if description else None,
+            "settings": {},
+            "is_default": False,
+            "graph_entity_id": None,
+            "last_synced_at": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        created_team = await repo.replace_record("teams", uuid=team_id, record=team_record)
+        state, disabled_reason = _memory_space_state("team")
+        space_id = uuid4()
+        space_record: SurrealRecord = {
+            "uuid": str(space_id),
+            "organization_id": str(organization_id),
+            "memory_scope": "team",
+            "scope_key": str(team_id),
+            "name": f"{name[:180]} memory",
+            "description": description[:2000] if description else None,
+            "state": state,
+            "disabled_reason": disabled_reason,
+            "metadata": {"team_id": str(team_id), "team_slug": team_slug},
+            "created_by_user_id": str(created_by_user_id),
+            "created_at": now,
+            "updated_at": now,
+        }
+        memory_space = await repo.replace_record(
+            "memory_spaces",
+            uuid=space_id,
+            record=space_record,
+        )
+        member_record: SurrealRecord = {
+            "uuid": str(uuid4()),
+            "team_id": str(team_id),
+            "user_id": str(created_by_user_id),
+            "role": "owner",
+            "joined_at": now,
+            "created_at": now,
+            "updated_at": now,
+        }
+        created_member = await repo.replace_record(
+            "team_members",
+            uuid=_coerce_uuid(member_record["uuid"], field_name="team_members.uuid"),
+            record=member_record,
+        )
+        space_member_record: SurrealRecord = {
+            "uuid": str(uuid4()),
+            "organization_id": str(organization_id),
+            "space_id": str(space_id),
+            "principal_type": "team",
+            "principal_id": str(team_id),
+            "role": "owner",
+            "permissions": ["read", "write", "reflect"],
+            "expires_at": None,
+            "created_by_user_id": str(created_by_user_id),
+            "created_at": now,
+            "updated_at": now,
+        }
+        await repo.replace_record(
+            "memory_space_members",
+            uuid=_coerce_uuid(
+                space_member_record["uuid"],
+                field_name="memory_space_members.uuid",
+            ),
+            record=space_member_record,
+        )
+        return _team_record_namespace(
+            created_team,
+            memory_space=memory_space,
+            members=[_team_member_namespace(created_member)],
+        )
+
+
+async def update_team_record(
+    *,
+    organization_id: UUID,
+    team_ref: str,
+    name: str | None = None,
+    slug: str | None = None,
+    description: str | None = None,
+):
+    async with _auth_client_scope() as client:
+        repo = _SurrealRepository(client)
+        existing = await _get_team_record(repo, organization_id=organization_id, team_ref=team_ref)
+        team_id = _coerce_uuid(existing.get("uuid"), field_name="teams.uuid")
+        updated = dict(existing)
+        if name is not None:
+            updated["name"] = name[:200]
+        if slug is not None or name is not None:
+            updated["slug"] = await _normalize_team_slug(
+                repo,
+                organization_id=organization_id,
+                name=str(updated.get("name") or name or "team"),
+                requested_slug=slug,
+                exclude_uuid=team_id,
+            )
+        if description is not None:
+            updated["description"] = description[:2000] if description else None
+        updated["updated_at"] = _utcnow()
+        saved = await repo.replace_record("teams", uuid=team_id, record=updated)
+        memory_space = await _get_team_memory_space(
+            repo,
+            organization_id=organization_id,
+            team_id=team_id,
+        )
+        if memory_space is not None:
+            memory_space_update = dict(memory_space)
+            if name is not None:
+                memory_space_update["name"] = f"{name[:180]} memory"
+            if description is not None:
+                memory_space_update["description"] = description[:2000] if description else None
+            metadata = _record_payload(memory_space_update.get("metadata"))
+            metadata.update({"team_id": str(team_id), "team_slug": str(saved.get("slug") or "")})
+            memory_space_update["metadata"] = metadata
+            memory_space_update["updated_at"] = updated["updated_at"]
+            memory_space = await repo.replace_record(
+                "memory_spaces",
+                uuid=_coerce_uuid(memory_space_update.get("uuid"), field_name="memory_spaces.uuid"),
+                record=memory_space_update,
+            )
+        return _team_record_namespace(saved, memory_space=memory_space)
+
+
+async def delete_team_record(*, organization_id: UUID, team_ref: str) -> bool:
+    async with _auth_client_scope() as client:
+        repo = _SurrealRepository(client)
+        team = await _get_team_record(repo, organization_id=organization_id, team_ref=team_ref)
+        team_id = _coerce_uuid(team.get("uuid"), field_name="teams.uuid")
+        await _execute_raw_statement_records(
+            client,
+            """
+                BEGIN TRANSACTION;
+                DELETE FROM memory_space_members
+                WHERE organization_id = $organization_id
+                AND space_id IN (
+                    SELECT VALUE uuid FROM memory_spaces
+                    WHERE organization_id = $organization_id
+                    AND memory_scope = 'team'
+                    AND scope_key = $team_id
+                );
+                DELETE FROM memory_spaces
+                WHERE organization_id = $organization_id
+                AND memory_scope = 'team'
+                AND scope_key = $team_id;
+                DELETE FROM team_projects WHERE organization_id = $organization_id
+                AND team_id = $team_id;
+                DELETE FROM team_members WHERE team_id = $team_id;
+                DELETE FROM teams WHERE organization_id = $organization_id AND uuid = $team_id;
+                COMMIT TRANSACTION;
+            """,
+            organization_id=str(organization_id),
+            team_id=str(team_id),
+        )
+        return True
+
+
+async def add_team_member_record(
+    *,
+    organization_id: UUID,
+    team_ref: str,
+    user_id: UUID,
+    role: str = "member",
+):
+    async with _auth_client_scope() as client:
+        repo = _SurrealRepository(client)
+        team = await _get_team_record(repo, organization_id=organization_id, team_ref=team_ref)
+        team_id = _coerce_uuid(team.get("uuid"), field_name="teams.uuid")
+        existing = await repo.select_one(
+            "SELECT * FROM team_members WHERE team_id = $team_id AND user_id = $user_id LIMIT 1;",
+            team_id=str(team_id),
+            user_id=str(user_id),
+        )
+        now = _utcnow()
+        record: SurrealRecord = dict(existing or {})
+        record.update(
+            {
+                "uuid": str(record.get("uuid") or uuid4()),
+                "team_id": str(team_id),
+                "user_id": str(user_id),
+                "role": _team_role_value(role),
+                "updated_at": now,
+            }
+        )
+        record.setdefault("joined_at", now)
+        record.setdefault("created_at", now)
+        saved = await repo.replace_record(
+            "team_members",
+            uuid=_coerce_uuid(record["uuid"], field_name="team_members.uuid"),
+            record=record,
+        )
+        return _team_member_namespace(saved)
+
+
+async def remove_team_member_record(
+    *,
+    organization_id: UUID,
+    team_ref: str,
+    user_id: UUID,
+) -> bool:
+    async with _auth_client_scope() as client:
+        repo = _SurrealRepository(client)
+        team = await _get_team_record(repo, organization_id=organization_id, team_ref=team_ref)
+        team_id = _coerce_uuid(team.get("uuid"), field_name="teams.uuid")
+        await _execute_raw_statement_records(
+            client,
+            "DELETE FROM team_members WHERE team_id = $team_id AND user_id = $user_id;",
+            team_id=str(team_id),
+            user_id=str(user_id),
+        )
+        return True
+
+
+async def _resolve_project_for_team_link(*, organization_id: UUID, project_ref: str):
+    try:
+        return await get_project_record_by_id(
+            organization_id=organization_id,
+            project_id=UUID(project_ref),
+        )
+    except ValueError:
+        return await get_project_record_by_graph_id(
+            organization_id=organization_id,
+            graph_project_id=project_ref,
+        )
+    except HTTPException:
+        return await get_project_record_by_graph_id(
+            organization_id=organization_id,
+            graph_project_id=project_ref,
+        )
+
+
+async def link_team_project_record(
+    *,
+    organization_id: UUID,
+    team_ref: str,
+    project_ref: str,
+    role: ProjectRole | str = ProjectRole.CONTRIBUTOR,
+):
+    project = await _resolve_project_for_team_link(
+        organization_id=organization_id,
+        project_ref=project_ref,
+    )
+    async with _auth_client_scope() as client:
+        repo = _SurrealRepository(client)
+        team = await _get_team_record(repo, organization_id=organization_id, team_ref=team_ref)
+        team_id = _coerce_uuid(team.get("uuid"), field_name="teams.uuid")
+        existing = await repo.select_one(
+            "SELECT * FROM team_projects "
+            "WHERE organization_id = $organization_id AND team_id = $team_id "
+            "AND project_id = $project_id LIMIT 1;",
+            organization_id=str(organization_id),
+            team_id=str(team_id),
+            project_id=str(project.id),
+        )
+        now = _utcnow()
+        record: SurrealRecord = dict(existing or {})
+        record.update(
+            {
+                "uuid": str(record.get("uuid") or uuid4()),
+                "organization_id": str(organization_id),
+                "team_id": str(team_id),
+                "project_id": str(project.id),
+                "graph_project_id": str(project.graph_project_id),
+                "role": _project_link_role_value(role),
+                "updated_at": now,
+            }
+        )
+        record.setdefault("created_at", now)
+        saved = await repo.replace_record(
+            "team_projects",
+            uuid=_coerce_uuid(record["uuid"], field_name="team_projects.uuid"),
+            record=record,
+        )
+        return _team_project_namespace(saved)
+
+
+async def unlink_team_project_record(
+    *,
+    organization_id: UUID,
+    team_ref: str,
+    project_ref: str,
+) -> bool:
+    project = await _resolve_project_for_team_link(
+        organization_id=organization_id,
+        project_ref=project_ref,
+    )
+    async with _auth_client_scope() as client:
+        repo = _SurrealRepository(client)
+        team = await _get_team_record(repo, organization_id=organization_id, team_ref=team_ref)
+        team_id = _coerce_uuid(team.get("uuid"), field_name="teams.uuid")
+        await _execute_raw_statement_records(
+            client,
+            "DELETE FROM team_projects "
+            "WHERE organization_id = $organization_id AND team_id = $team_id "
+            "AND project_id = $project_id;",
+            organization_id=str(organization_id),
+            team_id=str(team_id),
+            project_id=str(project.id),
+        )
+        return True
 
 
 async def has_owner_membership(*, org_id: str, user_id: str | None) -> bool:
