@@ -1,16 +1,21 @@
 name: Live Runtime Eval
 
-# Manual, on-demand evaluation of the live Sibyl retrieval runtime.
+# Scheduled and manual evaluation of the live Sibyl retrieval runtime.
 #
 # Unlike the nightly regression — which runs deterministically with mock keys
 # to validate plumbing and policy — this workflow runs against the real native
 # embedder (OpenAI text-embedding-3-small) so the numbers reflect actual
-# semantic retrieval quality. Trigger it before an RC cut for fresh receipts.
+# semantic retrieval quality. It runs on a daily cadence and can be triggered
+# manually before an RC cut for fresh receipts.
 #
 # Context-pack and LongMemEval AI-memory jobs require OPENAI_API_KEY so
 # reported quality reflects semantic retrieval, not lexical fallback.
 
 on:
+  schedule:
+    - cron: "0 8 * * 1-6"
+    # Keep this string in sync with the LongMemEval full-job schedule guard.
+    - cron: "0 8 * * 0"
   workflow_dispatch:
     inputs:
       retrieval_mode:
@@ -87,11 +92,28 @@ defaults:
     shell: bash
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 env:
   COMPOSE_PROJECT_NAME: sibyl-eval
+  EVAL_RETRIEVAL_MODE: ${{ inputs.retrieval_mode || 'native' }}
+  EVAL_REPEAT: ${{ inputs.repeat || '20' }}
+  LONGMEMEVAL_SMOKE_LIMIT: ${{ inputs.longmemeval_smoke_limit || '25' }}
+  LONGMEMEVAL_CONCURRENCY: ${{ inputs.longmemeval_concurrency || '1' }}
+  LONGMEMEVAL_CORPUS_TEXT_POLICY:
+    ${{ inputs.longmemeval_corpus_text_policy || 'user-and-assistant-turns-v1' }}
+  LONGMEMEVAL_AUTO_EXTRACT_ENTITIES: ${{ inputs.longmemeval_auto_extract_entities || false }}
+  LONGMEMEVAL_WAIT_FOR_MEMORY_EXTRACTION:
+    ${{ inputs.longmemeval_wait_for_memory_extraction || false }}
+  LONGMEMEVAL_WAIT_FOR_MEMORY_PROJECTION:
+    ${{ inputs.longmemeval_wait_for_memory_projection || false }}
+  LONGMEMEVAL_MEMORY_PROJECTION_TIMEOUT:
+    ${{ inputs.longmemeval_memory_projection_timeout || '180' }}
+  LONGMEMEVAL_GRAPH_HNSW_EFC: ${{ inputs.longmemeval_graph_hnsw_efc || '150' }}
+  LONGMEMEVAL_GRAPH_HNSW_M: ${{ inputs.longmemeval_graph_hnsw_m || '12' }}
+  LONGMEMEVAL_GRAPH_KNN_EF: ${{ inputs.longmemeval_graph_knn_ef || '40' }}
+  LONGMEMEVAL_NATIVE_FUSION_BACKEND: ${{ inputs.longmemeval_native_fusion_backend || 'python_rrf' }}
 
 jobs:
   live-eval:
@@ -109,7 +131,7 @@ jobs:
       SIBYL_SURREAL_URL: ws://localhost:8000/rpc
       SIBYL_SURREAL_USERNAME: sibyl_ci
       SIBYL_SURREAL_PASSWORD: sibyl_ci_password
-      SIBYL_RETRIEVAL_MODE: ${{ inputs.retrieval_mode }}
+      SIBYL_RETRIEVAL_MODE: ${{ inputs.retrieval_mode || 'native' }}
       SIBYL_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SIBYL_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
@@ -199,10 +221,10 @@ jobs:
           moon run core:bench-context -- \
             --cases benchmarks/context_pack_cases.json \
             --auth-manifest .moon/cache/baseline-runtime-manifest.json \
-            --label "retrieval-${{ inputs.retrieval_mode }}" \
+            --label "retrieval-${EVAL_RETRIEVAL_MODE}" \
             --timeout 30 \
-            --repeat "${{ inputs.repeat }}" \
-            --metadata "retrieval_mode=${{ inputs.retrieval_mode }}"
+            --repeat "${EVAL_REPEAT}" \
+            --metadata "retrieval_mode=${EVAL_RETRIEVAL_MODE}"
           bench_status="$?"
           set -e
 
@@ -238,8 +260,8 @@ jobs:
         run: |
           moon run bench-gate -- "${{ steps.eval.outputs.report }}" \
             --profile context-pack \
-            --require-metadata "retrieval_mode=${{ inputs.retrieval_mode }}" \
-            --require-metadata "repeat_count=${{ inputs.repeat }}"
+            --require-metadata "retrieval_mode=${EVAL_RETRIEVAL_MODE}" \
+            --require-metadata "repeat_count=${EVAL_REPEAT}"
 
       - name: Upload eval report
         if: always() && steps.eval.outputs.report != ''
@@ -277,11 +299,11 @@ jobs:
       SIBYL_SURREAL_USERNAME: sibyl_ci
       SIBYL_SURREAL_PASSWORD: sibyl_ci_password
       SIBYL_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      SIBYL_AUTO_EXTRACT_ENTITIES: ${{ inputs.longmemeval_auto_extract_entities }}
-      SIBYL_GRAPH_HNSW_EFC: ${{ inputs.longmemeval_graph_hnsw_efc }}
-      SIBYL_GRAPH_HNSW_M: ${{ inputs.longmemeval_graph_hnsw_m }}
-      SIBYL_GRAPH_KNN_EF: ${{ inputs.longmemeval_graph_knn_ef }}
-      SIBYL_NATIVE_FUSION_BACKEND: ${{ inputs.longmemeval_native_fusion_backend }}
+      SIBYL_AUTO_EXTRACT_ENTITIES: ${{ inputs.longmemeval_auto_extract_entities || false }}
+      SIBYL_GRAPH_HNSW_EFC: ${{ inputs.longmemeval_graph_hnsw_efc || '150' }}
+      SIBYL_GRAPH_HNSW_M: ${{ inputs.longmemeval_graph_hnsw_m || '12' }}
+      SIBYL_GRAPH_KNN_EF: ${{ inputs.longmemeval_graph_knn_ef || '40' }}
+      SIBYL_NATIVE_FUSION_BACKEND: ${{ inputs.longmemeval_native_fusion_backend || 'python_rrf' }}
       SIBYL_LLM_MEMORY_PROVIDER: openai
       SIBYL_LLM_MEMORY_MODEL: gpt-5.4-nano
       PYTHONUNBUFFERED: "1"
@@ -365,27 +387,27 @@ jobs:
       - name: Run LongMemEval live smoke
         run: |
           mkdir -p .moon/cache/evals
-          wait_for_extraction="${{ inputs.longmemeval_wait_for_memory_extraction }}"
+          wait_for_extraction="${LONGMEMEVAL_WAIT_FOR_MEMORY_EXTRACTION}"
           extraction_args=()
           if [[ "$wait_for_extraction" == "true" ]]; then
             extraction_args+=(--wait-for-memory-extraction --memory-extraction-timeout 600)
           fi
-          wait_for_projection="${{ inputs.longmemeval_wait_for_memory_projection }}"
+          wait_for_projection="${LONGMEMEVAL_WAIT_FOR_MEMORY_PROJECTION}"
           projection_args=()
           if [[ "$wait_for_projection" == "true" ]]; then
             projection_args+=(
               --wait-for-memory-projection
-              --memory-projection-timeout "${{ inputs.longmemeval_memory_projection_timeout }}"
+              --memory-projection-timeout "${LONGMEMEVAL_MEMORY_PROJECTION_TIMEOUT}"
             )
           fi
           moon run bench-longmemeval-live -- \
             .moon/cache/benchmarks/longmemeval_s_cleaned.json \
             --api-url http://localhost:3334/api \
             --allow-localhost \
-            --limit "${{ inputs.longmemeval_smoke_limit }}" \
+            --limit "${LONGMEMEVAL_SMOKE_LIMIT}" \
             --sample-strategy stratified \
-            --corpus-text-policy "${{ inputs.longmemeval_corpus_text_policy }}" \
-            --concurrency "${{ inputs.longmemeval_concurrency }}" \
+            --corpus-text-policy "${LONGMEMEVAL_CORPUS_TEXT_POLICY}" \
+            --concurrency "${LONGMEMEVAL_CONCURRENCY}" \
             --heartbeat-interval 30 \
             --stall-timeout 300 \
             --output .moon/cache/evals/longmemeval_live_smoke.json \
@@ -454,7 +476,12 @@ jobs:
 
   longmemeval-live-full:
     name: LongMemEval Live Full
-    if: ${{ inputs.run_longmemeval_full }}
+    # Keep the schedule string in sync with the Sunday cron above.
+    if:
+      ${{
+        inputs.run_longmemeval_full ||
+        (github.event_name == 'schedule' && github.event.schedule == '0 8 * * 0')
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
@@ -471,10 +498,10 @@ jobs:
       SIBYL_SURREAL_PATH: rocksdb:///data/sibyl-longmemeval-full.db
       SIBYL_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SIBYL_AUTO_EXTRACT_ENTITIES: "false"
-      SIBYL_GRAPH_HNSW_EFC: ${{ inputs.longmemeval_graph_hnsw_efc }}
-      SIBYL_GRAPH_HNSW_M: ${{ inputs.longmemeval_graph_hnsw_m }}
-      SIBYL_GRAPH_KNN_EF: ${{ inputs.longmemeval_graph_knn_ef }}
-      SIBYL_NATIVE_FUSION_BACKEND: ${{ inputs.longmemeval_native_fusion_backend }}
+      SIBYL_GRAPH_HNSW_EFC: ${{ inputs.longmemeval_graph_hnsw_efc || '150' }}
+      SIBYL_GRAPH_HNSW_M: ${{ inputs.longmemeval_graph_hnsw_m || '12' }}
+      SIBYL_GRAPH_KNN_EF: ${{ inputs.longmemeval_graph_knn_ef || '40' }}
+      SIBYL_NATIVE_FUSION_BACKEND: ${{ inputs.longmemeval_native_fusion_backend || 'python_rrf' }}
       PYTHONUNBUFFERED: "1"
       LONGMEMEVAL_SHA256: d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442
       LONGMEMEVAL_URL: https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json?download=true
@@ -561,23 +588,23 @@ jobs:
             echo "::error::Full LongMemEval must run with SIBYL_AUTO_EXTRACT_ENTITIES=false."
             exit 1
           fi
-          if [[ "${{ inputs.longmemeval_wait_for_memory_extraction }}" == "true" || "${{ inputs.longmemeval_auto_extract_entities }}" == "true" ]]; then
+          if [[ "${LONGMEMEVAL_WAIT_FOR_MEMORY_EXTRACTION}" == "true" || "${LONGMEMEVAL_AUTO_EXTRACT_ENTITIES}" == "true" ]]; then
             echo "::notice::Full LongMemEval runs are raw-first; extraction applies to the smoke job."
           fi
-          wait_for_projection="${{ inputs.longmemeval_wait_for_memory_projection }}"
+          wait_for_projection="${LONGMEMEVAL_WAIT_FOR_MEMORY_PROJECTION}"
           projection_args=()
           if [[ "$wait_for_projection" == "true" ]]; then
             projection_args+=(
               --wait-for-memory-projection
-              --memory-projection-timeout "${{ inputs.longmemeval_memory_projection_timeout }}"
+              --memory-projection-timeout "${LONGMEMEVAL_MEMORY_PROJECTION_TIMEOUT}"
             )
           fi
           moon run bench-longmemeval-live -- \
             .moon/cache/benchmarks/longmemeval_s_cleaned.json \
             --api-url http://localhost:3334/api \
             --allow-localhost \
-            --corpus-text-policy "${{ inputs.longmemeval_corpus_text_policy }}" \
-            --concurrency "${{ inputs.longmemeval_concurrency }}" \
+            --corpus-text-policy "${LONGMEMEVAL_CORPUS_TEXT_POLICY}" \
+            --concurrency "${LONGMEMEVAL_CONCURRENCY}" \
             --heartbeat-interval 30 \
             --stall-timeout 300 \
             --output .moon/cache/evals/longmemeval_live_full.json \
