@@ -109,8 +109,12 @@ GATE_CHECKS: tuple[GateCheck, ...] = (
     ),
     GateCheck(
         name="api-usage-aware-consolidation",
-        description="consolidation decay distinguishes cited memory from stale uncited memory",
-        surfaces=("usage-aware consolidation", "cited decay divergence"),
+        description="consolidation consumes usage signals before age-only fallback",
+        surfaces=(
+            "usage-aware consolidation",
+            "usage-ordered consolidation input",
+            "cited decay divergence",
+        ),
         command=(
             "moon",
             "run",
@@ -139,6 +143,7 @@ REQUIRED_SURFACES: tuple[str, ...] = (
     "mcp",
     "cli",
     "usage-aware consolidation",
+    "usage-ordered consolidation input",
     "cited decay divergence",
     "manifest",
     "release contract",

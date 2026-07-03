@@ -30,13 +30,24 @@ _PRIORITY_DECAY_ENTITY_TYPES = (
 
 
 class PriorityDecayCandidate:
-    __slots__ = ("created_at", "entity_id", "reason", "score")
+    __slots__ = ("created_at", "entity_id", "last_seen_at", "reason", "retrieval_count", "score")
 
-    def __init__(self, *, entity_id: str, created_at: datetime, score: float, reason: str) -> None:
+    def __init__(
+        self,
+        *,
+        entity_id: str,
+        created_at: datetime,
+        score: float,
+        reason: str,
+        retrieval_count: int,
+        last_seen_at: datetime,
+    ) -> None:
         self.entity_id = entity_id
         self.created_at = created_at
         self.score = score
         self.reason = reason
+        self.retrieval_count = retrieval_count
+        self.last_seen_at = last_seen_at
 
 
 async def _get_graph_runtime(group_id: str) -> Any:
@@ -191,7 +202,7 @@ async def priority_decay(
         for entity_type in target_entity_types:
             type_candidates: list[PriorityDecayCandidate] = []
             offset = 0
-            while len(type_candidates) < max_archives_per_run:
+            while True:
                 batch = await entity_manager.list_by_type(
                     entity_type,
                     limit=page_size,
@@ -203,10 +214,11 @@ async def priority_decay(
 
                 offset += len(batch)
                 for entity in batch:
+                    created_at = _aware_datetime(entity.created_at)
                     if (
                         _is_archived(entity)
                         or _is_pinned_for_retention(entity)
-                        or entity.created_at >= cutoff
+                        or created_at >= cutoff
                     ):
                         continue
                     score = _priority_decay_score(
@@ -219,16 +231,23 @@ async def priority_decay(
                     type_candidates.append(
                         PriorityDecayCandidate(
                             entity_id=entity.id,
-                            created_at=entity.created_at,
+                            created_at=created_at,
                             score=score,
                             reason=_priority_decay_reason(entity),
+                            retrieval_count=_entity_retrieval_count(entity),
+                            last_seen_at=_aware_datetime(_entity_last_seen_at(entity)),
                         )
                     )
-                    if len(type_candidates) >= max_archives_per_run:
-                        break
             candidates.extend(type_candidates)
 
-        candidates.sort(key=lambda candidate: (candidate.score, candidate.created_at))
+        candidates.sort(
+            key=lambda candidate: (
+                candidate.retrieval_count,
+                candidate.last_seen_at,
+                candidate.score,
+                candidate.created_at,
+            )
+        )
         candidates = candidates[:max_archives_per_run]
 
         archived_count = 0
@@ -313,6 +332,11 @@ def _usage_adjusted_importance(entity: Any, importance: float) -> float:
     if _metadata_int(metadata.get("retrieval_count")) > 0:
         return max(importance, 0.40)
     return importance
+
+
+def _entity_retrieval_count(entity: Any) -> int:
+    metadata = entity.metadata or {}
+    return max(_metadata_int(metadata.get("retrieval_count")), 0)
 
 
 def _entity_last_seen_at(entity: Any) -> datetime:
