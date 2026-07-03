@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 import pytest
+from tools.bench import eval_gate
 
 PREFERENCE_CASE_INDEX = 2
 EXPECTED_CREATED_ENTITIES = 3
@@ -275,6 +276,42 @@ def _assert_gate_valid_report(module: ModuleType, report: dict[str, Any]) -> Non
     assert report["diagnostics"]["case_gap_count"] == 0
 
 
+def _assert_fixture_qa_report(report: dict[str, Any]) -> None:
+    assert report["qa"]["schema_version"] == "sibyl-longmemeval-s-qa-v1"
+    assert report["qa"]["mode"] == "fixture"
+    assert report["qa"]["enabled"] is True
+    assert report["qa"]["reader_prompt_id"] == "sibyl-longmemeval-reader-v1"
+    assert report["qa"]["judge_prompt_id"] == "sibyl-longmemeval-judge-v1"
+    assert report["qa"]["rubric_id"] == "longmemeval-s-answer-correctness-v1"
+    assert report["runtime"]["qa_mode"] == "fixture"
+    assert report["runtime"]["qa_reader_model"] == "gpt-4o"
+    assert report["runtime"]["qa_judge_model"] == "gpt-5.2"
+    assert report["overall"]["qa_evaluated_count"] == 1.0
+    assert report["overall"]["qa_correct_count"] == 1.0
+    assert report["overall"]["qa_accuracy"] == 1.0
+    assert report["overall"]["qa_mean_score"] == 1.0
+    assert report["overall"]["qa_latency_ms"] >= 0.0
+    assert report["overall"]["reader_estimated_input_tokens"] > 0.0
+    assert report["overall"]["judge_estimated_input_tokens"] > 0.0
+    assert report["accounting"]["reader"]["estimated_input_tokens"] > 0.0
+    assert report["accounting"]["reader"]["estimated_output_tokens"] > 0.0
+    assert report["accounting"]["reader"]["cost_basis"] == "deterministic-fixture-no-provider-cost"
+    assert report["accounting"]["judge"]["estimated_input_tokens"] > 0.0
+    assert report["accounting"]["judge"]["estimated_output_tokens"] > 0.0
+    assert report["accounting"]["judge"]["cost_basis"] == "deterministic-fixture-no-provider-cost"
+    assert report["accounting"]["tokens"]["estimated_output_tokens"] > 0.0
+
+    case_qa = report["case_results"][0]["qa"]
+    assert case_qa["evaluated"] is True
+    assert case_qa["correct"] is True
+    assert case_qa["score"] == 1.0
+    assert case_qa["context_session_ids"] == ["s2", "s1"]
+    assert case_qa["answer_session_ids"] == ["s2"]
+    assert "markers" in case_qa["generated_answer"]
+    assert "markers" in case_qa["reference_answer"]
+    assert eval_gate.evaluate_report(report, profile="ai-memory", require_qa=True) == []
+
+
 def _assert_chunked_entities(
     module: ModuleType,
     state: dict[str, Any],
@@ -443,18 +480,20 @@ def test_longmemeval_live_builds_gate_valid_report(
             api_url="http://ci-sibyl/api",
             limit=1,
             concurrency=1,
-            k_values=[1, 2],
+            k_values=[1, 2, 5, 10],
             command=["longmemeval_live.py", "fixture.json"],
             verify_sha256=False,
             wait_for_memory_projection=True,
             memory_projection_timeout_seconds=1,
             wait_for_memory_extraction=True,
             memory_extraction_timeout_seconds=1,
+            qa_mode="fixture",
             transport=httpx.MockTransport(handler),
         )
     )
 
     _assert_gate_valid_report(module, report)
+    _assert_fixture_qa_report(report)
     _assert_memory_extraction_stats(report)
     _assert_memory_projection_stats(report)
     _assert_chunked_entities(module, state)
