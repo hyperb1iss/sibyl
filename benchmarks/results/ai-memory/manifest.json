@@ -167,6 +167,7 @@
             "mcp",
             "cli",
             "usage-aware consolidation",
+            "usage-ordered consolidation input",
             "cited decay divergence"
           ]
         },
