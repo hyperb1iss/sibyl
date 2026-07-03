@@ -56,8 +56,10 @@ from sibyl_core.retrieval.reranking import (
 from sibyl_core.retrieval.temporal import (
     TemporalConfig,
     calculate_boost,
+    get_entity_decay_timestamp,
     temporal_boost,
     temporal_boost_single,
+    temporal_decay_multiplier,
 )
 
 _SEARCH_EXPORTS = {
@@ -106,6 +108,7 @@ __all__ = [
     "find_duplicates",
     "fit_feature_weighted_reranker",
     "get_deduplicator",
+    "get_entity_decay_timestamp",
     "hybrid_search",
     "merge_candidate_signals",
     "rerank_by_feature_weights",
@@ -115,6 +118,7 @@ __all__ = [
     "simple_hybrid_search",
     "temporal_boost",
     "temporal_boost_single",
+    "temporal_decay_multiplier",
     "weighted_score_merge",
 ]
 

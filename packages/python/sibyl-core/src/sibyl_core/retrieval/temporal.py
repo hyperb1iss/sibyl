@@ -132,6 +132,58 @@ def get_entity_timestamp(entity: Any, field: str = "auto") -> datetime | None:
     return parse_temporal_datetime(value)
 
 
+def get_entity_decay_timestamp(entity: Any, field: str = "auto") -> datetime | None:
+    """Extract the timestamp ordinary decay should use for an entity."""
+    if field != "auto":
+        return get_entity_timestamp(entity, field)
+
+    usage_timestamps = [
+        timestamp
+        for candidate_field in ("last_used_at", "last_recalled_at", "last_accessed_at")
+        if (timestamp := get_entity_timestamp(entity, candidate_field)) is not None
+    ]
+    if usage_timestamps:
+        return max(_aware_datetime(timestamp) for timestamp in usage_timestamps)
+    return get_entity_timestamp(entity, "auto")
+
+
+def _aware_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value
+
+
+def usage_retention_multiplier(entity: Any) -> float:
+    """Return a bounded half-life multiplier from W6 usage counters."""
+    retrieval_count = _entity_int(entity, "retrieval_count")
+    citation_count = _entity_int(entity, "citation_count")
+    retrieval_bonus = min(max(retrieval_count, 0), 50) * 0.02
+    citation_bonus = min(max(citation_count, 0), 20) * 0.12
+    return min(4.0, 1.0 + retrieval_bonus + citation_bonus)
+
+
+def temporal_decay_multiplier(
+    entity: Any,
+    *,
+    decay_days: float = 365.0,
+    min_boost: float = 0.1,
+    max_age_days: float = 1825.0,
+    timestamp_field: str = "auto",
+    reference_time: datetime | None = None,
+) -> float:
+    """Calculate the usage-aware temporal multiplier for ordinary recency decay."""
+    if reference_time is None:
+        reference_time = datetime.now(UTC)
+
+    timestamp = get_entity_decay_timestamp(entity, timestamp_field)
+    if timestamp is None:
+        return 1.0
+
+    age_days = calculate_age_days(timestamp, reference_time)
+    adjusted_decay_days = max(decay_days * usage_retention_multiplier(entity), 1.0)
+    return calculate_boost(age_days, adjusted_decay_days, min_boost, max_age_days)
+
+
 def parse_temporal_datetime(value: Any) -> datetime | None:
     """Parse datetime values used by graph records and eval metadata."""
     if isinstance(value, datetime):
@@ -314,16 +366,21 @@ def temporal_boost(
     boost_stats = {"boosted": 0, "unchanged": 0, "no_timestamp": 0}
 
     for entity, score in results:
-        timestamp = get_entity_timestamp(entity, timestamp_field)
-
+        timestamp = get_entity_decay_timestamp(entity, timestamp_field)
         if timestamp is None:
             # No timestamp - keep original score
             boosted_results.append((entity, score))
             boost_stats["no_timestamp"] += 1
             continue
 
-        age_days = calculate_age_days(timestamp, reference_time)
-        boost = calculate_boost(age_days, decay_days, min_boost, max_age_days)
+        boost = temporal_decay_multiplier(
+            entity,
+            decay_days=decay_days,
+            min_boost=min_boost,
+            max_age_days=max_age_days,
+            timestamp_field=timestamp_field,
+            reference_time=reference_time,
+        )
         boosted_score = score * boost
 
         boosted_results.append((entity, boosted_score))
@@ -406,17 +463,41 @@ def temporal_boost_single(
     if reference_time is None:
         reference_time = datetime.now(UTC)
 
-    timestamp = get_entity_timestamp(entity, config.timestamp_field)
-
-    if timestamp is None:
-        return score
-
-    age_days = calculate_age_days(timestamp, reference_time)
-    boost = calculate_boost(
-        age_days,
-        config.decay_days,
-        config.min_boost,
-        config.max_age_days,
+    boost = temporal_decay_multiplier(
+        entity,
+        decay_days=config.decay_days,
+        min_boost=config.min_boost,
+        max_age_days=config.max_age_days,
+        timestamp_field=config.timestamp_field,
+        reference_time=reference_time,
     )
 
     return score * boost
+
+
+def _entity_int(entity: Any, field: str) -> int:
+    value: Any = None
+    if isinstance(entity, dict):
+        value = entity.get(field)
+        if value is None:
+            metadata = entity.get("metadata", {})
+            value = metadata.get(field) if isinstance(metadata, dict) else None
+    else:
+        value = getattr(entity, field, None)
+        if value is None:
+            metadata = getattr(entity, "metadata", None)
+            if isinstance(metadata, dict):
+                value = metadata.get(field)
+
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0

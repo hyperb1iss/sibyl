@@ -1349,6 +1349,112 @@ def test_validate_ai_memory_manifest_rejects_blocking_receipt_metric_failure(
     ) in failures
 
 
+def test_validate_ai_memory_manifest_accepts_required_receipt_checks(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    receipt_path = tmp_path / "forgetting-receipt.json"
+    receipt_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "sibyl-forgetting-receipt-v1",
+                "metrics": {"strict_recall_at_5_drop": 0.0},
+                "checks": [
+                    {
+                        "name": "core-usage-aware-ranking",
+                        "status": "PASS",
+                        "surfaces": ["native ranking", "strict recall guard"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["gate_contracts"].append(
+        {
+            "name": "forgetting-gate",
+            "owner_wave": "W7",
+            "status": "blocking",
+            "profile": "product",
+            "blocking": True,
+            "metric_contracts": [
+                {
+                    "metric": "strict_recall_at_5_drop",
+                    "mode": "receipt",
+                    "required_receipt": "forgetting-receipt.json",
+                    "receipt_schema": "sibyl-forgetting-receipt-v1",
+                    "direction": "lower",
+                    "threshold": 0.005,
+                    "require_receipt_checks": True,
+                    "required_surfaces": ["native ranking", "strict recall guard"],
+                }
+            ],
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == []
+
+
+def test_validate_ai_memory_manifest_rejects_required_receipt_check_failures(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    receipt_path = tmp_path / "forgetting-receipt.json"
+    receipt_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "sibyl-forgetting-receipt-v1",
+                "metrics": {"strict_recall_at_5_drop": 0.0},
+                "checks": [
+                    {
+                        "name": "core-usage-aware-ranking",
+                        "status": "FAIL",
+                        "surfaces": ["native ranking"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["gate_contracts"].append(
+        {
+            "name": "forgetting-gate",
+            "owner_wave": "W7",
+            "status": "blocking",
+            "profile": "product",
+            "blocking": True,
+            "metric_contracts": [
+                {
+                    "metric": "strict_recall_at_5_drop",
+                    "mode": "receipt",
+                    "required_receipt": "forgetting-receipt.json",
+                    "receipt_schema": "sibyl-forgetting-receipt-v1",
+                    "direction": "lower",
+                    "threshold": 0.005,
+                    "require_receipt_checks": True,
+                    "required_surfaces": ["strict recall guard"],
+                }
+            ],
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert (
+        "gate_contracts[1].metric_contracts[0] required_receipt checks[0] status must be 'PASS'"
+    ) in failures
+    assert (
+        "gate_contracts[1].metric_contracts[0] required_receipt missing required "
+        "surface 'strict recall guard'"
+    ) in failures
+
+
 def test_validate_ai_memory_manifest_enforces_no_regression_entries(tmp_path: Path) -> None:
     baseline = _ai_memory_report()
     candidate = _clone_report(baseline)

@@ -229,6 +229,7 @@ tasks:
       - ~:workspace-trust-gate-test
       - ~:autonomy-gate-test
       - ~:reflection-quality-gate-test
+      - ~:forgetting-gate-test
       - ~:write-path-integrity-gate-test
       - ~:auth-session-gate-test
       - ~:overview-perf-gate-test
@@ -263,6 +264,7 @@ tasks:
       - ~:workspace-trust-gate-test
       - ~:autonomy-gate-test
       - ~:reflection-quality-gate-test
+      - ~:forgetting-gate-test
       - ~:write-path-integrity-gate-test
       - ~:auth-session-gate-test
       - ~:overview-perf-gate-test
@@ -904,6 +906,22 @@ tasks:
       - apps/api/moon.yml
       - apps/cli/moon.yml
       - apps/web/moon.yml
+      - packages/python/sibyl-core/moon.yml
+
+  forgetting-gate:
+    command: uv run python -m tools.trust.forgetting_gate
+    options:
+      cache: false
+
+  forgetting-gate-test:
+    command: uv run pytest tools/tests/test_forgetting_gate.py -v
+    inputs:
+      - tools/trust/**/*.py
+      - tools/tests/conftest.py
+      - tools/tests/test_forgetting_gate.py
+      - pyproject.toml
+      - moon.yml
+      - apps/api/moon.yml
       - packages/python/sibyl-core/moon.yml
 
   write-path-integrity-gate:

@@ -1,0 +1,111 @@
+{
+  "budgets": {
+    "cited_survival_delta": 0.0,
+    "protected_cited_false_archive_count": 0,
+    "stale_uncited_byte_reduction": 0.2,
+    "strict_recall_at_5_drop": 0.005,
+    "write_integrity_error_count": 0
+  },
+  "cases": {
+    "protected_cited": 1,
+    "stale_uncited": 2,
+    "total": 4
+  },
+  "checks": [
+    {
+      "command": "moon run core:test -- tests/test_retrieval_advanced.py -k 'usage_aware_decay or citation_stamp or latest_usage_stamp or explicit_temporal_target or episode_record_candidates'",
+      "exit_code": 0,
+      "name": "core-usage-aware-ranking",
+      "status": "PASS",
+      "surfaces": [
+        "native ranking",
+        "usage-aware temporal decay",
+        "strict recall guard"
+      ]
+    },
+    {
+      "command": "moon run api:test -- tests/test_jobs_consolidation.py -k priority_decay",
+      "exit_code": 0,
+      "name": "api-priority-decay",
+      "status": "PASS",
+      "surfaces": [
+        "priority decay",
+        "cited survival",
+        "exposure slowdown"
+      ]
+    },
+    {
+      "command": "moon run bench-gate",
+      "exit_code": 0,
+      "name": "ai-memory-contracts",
+      "status": "PASS",
+      "surfaces": [
+        "manifest",
+        "release contract"
+      ]
+    }
+  ],
+  "fixture": "usage-aware-forgetting-v1",
+  "metrics": {
+    "cited_survival_delta": 0,
+    "protected_cited_false_archive_count": 0,
+    "stale_uncited_byte_reduction": 0.6,
+    "strict_recall_at_5_drop": 0.0,
+    "write_integrity_error_count": 0
+  },
+  "observations": [
+    {
+      "archived": true,
+      "bytes_before": 6000,
+      "cited": false,
+      "created_at": "2025-05-09T00:00:00+00:00",
+      "decay_reason": "low_priority_decay_score",
+      "decay_score": 0.019843,
+      "decay_threshold": 0.35,
+      "memory_id": "stale-uncited-a",
+      "stale": true,
+      "strict_recall_after": false,
+      "strict_recall_before": false
+    },
+    {
+      "archived": false,
+      "bytes_before": 4000,
+      "cited": false,
+      "created_at": "2025-05-09T00:00:00+00:00",
+      "decay_reason": "low_priority_decay_score",
+      "decay_score": 0.496164,
+      "decay_threshold": 0.35,
+      "memory_id": "stale-uncited-b",
+      "stale": true,
+      "strict_recall_after": true,
+      "strict_recall_before": true
+    },
+    {
+      "archived": false,
+      "bytes_before": 5000,
+      "cited": true,
+      "created_at": "2025-05-09T00:00:00+00:00",
+      "decay_reason": "low_priority_decay_score",
+      "decay_score": 0.692817,
+      "decay_threshold": 0.35,
+      "memory_id": "protected-cited",
+      "stale": true,
+      "strict_recall_after": true,
+      "strict_recall_before": true
+    },
+    {
+      "archived": false,
+      "bytes_before": 3000,
+      "cited": false,
+      "created_at": "2026-06-26T00:00:00+00:00",
+      "decay_reason": "low_priority_decay_score",
+      "decay_score": 0.486702,
+      "decay_threshold": 0.35,
+      "memory_id": "fresh-control",
+      "stale": false,
+      "strict_recall_after": true,
+      "strict_recall_before": true
+    }
+  ],
+  "schema_version": "sibyl-forgetting-receipt-v1"
+}

@@ -16,6 +16,7 @@ from typing import Any
 import structlog
 
 from sibyl_core.models.entities import EntityType
+from sibyl_core.retrieval.temporal import usage_retention_multiplier
 
 log = structlog.get_logger()
 
@@ -273,12 +274,13 @@ def _priority_decay_score(
     now: datetime,
     recency_half_life_days: int,
 ) -> float:
-    importance = _entity_importance(entity)
+    importance = _usage_adjusted_importance(entity, _entity_importance(entity))
     if _is_superseded_or_stale(entity):
         importance *= 0.25
     last_seen = _entity_last_seen_at(entity)
     age_days = max((now - _aware_datetime(last_seen)).total_seconds() / 86400, 0.0)
-    recency_decay = 0.5 ** (age_days / recency_half_life_days)
+    adjusted_half_life_days = recency_half_life_days * usage_retention_multiplier(entity)
+    recency_decay = 0.5 ** (age_days / adjusted_half_life_days)
     return max(0.0, min(importance * recency_decay, 1.0))
 
 
@@ -304,11 +306,24 @@ def _entity_importance(entity: Any) -> float:
     return 0.5
 
 
+def _usage_adjusted_importance(entity: Any, importance: float) -> float:
+    metadata = entity.metadata or {}
+    if _metadata_int(metadata.get("citation_count")) > 0:
+        return max(importance, 0.70)
+    if _metadata_int(metadata.get("retrieval_count")) > 0:
+        return max(importance, 0.40)
+    return importance
+
+
 def _entity_last_seen_at(entity: Any) -> datetime:
     metadata = entity.metadata or {}
-    for key in ("last_accessed_at", "last_recalled_at", "last_used_at"):
-        if value := _metadata_datetime(metadata.get(key)):
-            return value
+    usage_timestamps = [
+        value
+        for key in ("last_used_at", "last_recalled_at", "last_accessed_at")
+        if (value := _metadata_datetime(metadata.get(key))) is not None
+    ]
+    if usage_timestamps:
+        return max(usage_timestamps)
     return entity.created_at
 
 
@@ -350,6 +365,15 @@ def _metadata_float(metadata: Mapping[str, Any], key: str) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _metadata_int(value: object) -> int:
+    if isinstance(value, bool) or value is None:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _metadata_datetime(value: object) -> datetime | None:
