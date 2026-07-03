@@ -176,6 +176,48 @@ def _external_manifest_entry(
     }
 
 
+def _manifest_payload(
+    *,
+    citable: list[dict[str, Any]],
+    planned: list[dict[str, Any]] | None = None,
+    no_regression: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "sibyl-ai-memory-benchmark-ledger-v2",
+        "updated_at": "2026-07-03",
+        "release_scope": "test",
+        "artifact_policy": "Only citable entries may appear in release notes.",
+        "history": {
+            "directory": "benchmarks/results/ai-memory/history",
+            "summary_schema": "sibyl-ai-memory-history-summary-v1",
+            "append_policy": "immutable-json",
+        },
+        "gate_contracts": [
+            {
+                "name": "eval-regression-gate",
+                "owner_wave": "W2A",
+                "status": "blocking",
+                "profile": "ai-memory",
+                "blocking": True,
+                "metric_contracts": [
+                    {
+                        "metric": "recall@5",
+                        "mode": "no-regression",
+                        "direction": "higher",
+                        "baseline": "latest-citable-hybrid",
+                        "max_regression": 0.005,
+                    }
+                ],
+            }
+        ],
+        "citable": citable,
+        "planned": planned or [],
+    }
+    if no_regression is not None:
+        payload["no_regression"] = no_regression
+    return payload
+
+
 def _write_ai_memory_manifest(
     tmp_path: Path,
     *,
@@ -191,7 +233,7 @@ def _write_ai_memory_manifest(
         artifact.write_text(json.dumps(report), encoding="utf-8")
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text(
-        json.dumps({"citable": [entry], "planned": planned or []}),
+        json.dumps(_manifest_payload(citable=[entry], planned=planned)),
         encoding="utf-8",
     )
     return manifest_path
@@ -649,7 +691,7 @@ def test_validate_ai_memory_manifest_accepts_external_artifact_manifest(
     external_path.parent.mkdir()
     external_path.write_text(json.dumps(report), encoding="utf-8")
     manifest_path = tmp_path / "manifest.json"
-    manifest_path.write_text(json.dumps({"citable": [entry]}), encoding="utf-8")
+    manifest_path.write_text(json.dumps(_manifest_payload(citable=[entry])), encoding="utf-8")
 
     failures = eval_gate.validate_ai_memory_manifest(manifest_path)
 
@@ -667,7 +709,7 @@ def test_validate_ai_memory_manifest_rejects_external_artifact_manifest_drift(
     external_path.parent.mkdir()
     external_path.write_text(json.dumps(report), encoding="utf-8")
     manifest_path = tmp_path / "manifest.json"
-    manifest_path.write_text(json.dumps({"citable": [entry]}), encoding="utf-8")
+    manifest_path.write_text(json.dumps(_manifest_payload(citable=[entry])), encoding="utf-8")
 
     failures = eval_gate.validate_ai_memory_manifest(manifest_path)
 
@@ -684,7 +726,7 @@ def test_validate_ai_memory_manifest_rejects_partial_external_artifact_summary(
     external_path.parent.mkdir()
     external_path.write_text(json.dumps(report), encoding="utf-8")
     manifest_path = tmp_path / "manifest.json"
-    manifest_path.write_text(json.dumps({"citable": [entry]}), encoding="utf-8")
+    manifest_path.write_text(json.dumps(_manifest_payload(citable=[entry])), encoding="utf-8")
 
     failures = eval_gate.validate_ai_memory_manifest(manifest_path)
 
@@ -730,6 +772,177 @@ def test_validate_ai_memory_manifest_rejects_null_no_regression(tmp_path: Path) 
     assert failures == ["no_regression must be a list"]
 
 
+def test_validate_ai_memory_manifest_accepts_v1_without_v2_contracts(tmp_path: Path) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schema_version"] = "sibyl-ai-memory-benchmark-ledger-v1"
+    manifest.pop("history")
+    manifest.pop("gate_contracts")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == []
+
+
+def test_validate_ai_memory_manifest_rejects_invalid_schema_version(tmp_path: Path) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schema_version"] = 2
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert "manifest schema_version must be a supported string" in failures
+
+    manifest["schema_version"] = "sibyl-ai-memory-benchmark-ledger-v99"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert any(
+        "manifest schema_version 'sibyl-ai-memory-benchmark-ledger-v99'" in failure
+        for failure in failures
+    )
+
+
+def test_validate_ai_memory_manifest_rejects_missing_v2_fields(tmp_path: Path) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("history")
+    manifest.pop("gate_contracts")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert "manifest missing non-empty field 'history'" in failures
+    assert "manifest missing non-empty field 'gate_contracts'" in failures
+    assert "manifest history must be an object" in failures
+    assert "manifest gate_contracts must be a non-empty list" in failures
+
+
+def test_validate_ai_memory_manifest_rejects_missing_v2_contracts(tmp_path: Path) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["history"] = {
+        "directory": str(tmp_path / "ai-memory-history"),
+        "summary_schema": "",
+        "append_policy": "mutable",
+    }
+    manifest["gate_contracts"] = [
+        {
+            "name": "eval-regression-gate",
+            "owner_wave": "",
+            "status": "soft",
+            "profile": "unknown",
+            "blocking": "yes",
+            "metric_contracts": [
+                {
+                    "metric": "recall@5",
+                    "mode": "no-regression",
+                    "direction": "higher",
+                    "max_regression": -0.001,
+                },
+                {
+                    "metric": "latency_p95_ms",
+                    "mode": "threshold",
+                    "direction": "lower",
+                },
+                {"metric": "receipt", "mode": "receipt"},
+                {"metric": "unknown", "mode": "mystery"},
+            ],
+        }
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert "manifest history directory must be repository-relative" in failures
+    assert "manifest history missing non-empty summary_schema" in failures
+    assert "manifest history append_policy must be 'immutable-json'" in failures
+    assert "gate_contracts[0] missing non-empty owner_wave" in failures
+    assert any(
+        "gate_contracts[0] has unsupported status 'soft'; expected one of" in failure
+        for failure in failures
+    )
+    assert any(
+        "gate_contracts[0] has unsupported profile 'unknown'; expected one of" in failure
+        for failure in failures
+    )
+    assert "gate_contracts[0] blocking must be boolean" in failures
+    assert "gate_contracts[0].metric_contracts[0] max_regression must be non-negative" in failures
+    assert "gate_contracts[0].metric_contracts[0] missing non-empty baseline" in failures
+    assert "gate_contracts[0].metric_contracts[1] threshold must be finite numeric" in failures
+    assert "gate_contracts[0].metric_contracts[2] missing non-empty required_receipt" in failures
+    assert any(
+        "gate_contracts[0].metric_contracts[3] has unsupported mode 'mystery'" in failure
+        for failure in failures
+    )
+
+
+def test_validate_ai_memory_manifest_rejects_gate_contract_drift(tmp_path: Path) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["gate_contracts"].append(dict(manifest["gate_contracts"][0]))
+    manifest["gate_contracts"][0]["blocking"] = False
+    manifest["gate_contracts"][0]["metric_contracts"][0]["direction"] = "sideways"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert "gate_contracts[0] blocking must match status 'blocking'" in failures
+    assert "gate_contracts[0].metric_contracts[0] direction must be 'higher' or 'lower'" in failures
+    assert "gate_contracts[1] duplicates gate contract 'eval-regression-gate'" in failures
+
+
+def test_validate_ai_memory_manifest_accepts_v11_gate_contracts(tmp_path: Path) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["gate_contracts"] = [
+        {
+            "name": "eval-regression-gate",
+            "owner_wave": "W2A",
+            "status": "blocking",
+            "profile": "ai-memory",
+            "blocking": True,
+            "metric_contracts": [
+                {
+                    "metric": "recall@5",
+                    "mode": "no-regression",
+                    "direction": "higher",
+                    "baseline": "latest-citable-hybrid",
+                    "max_regression": 0.005,
+                },
+                {
+                    "metric": "latency_p95_ms",
+                    "mode": "threshold",
+                    "direction": "lower",
+                    "threshold": 1000,
+                },
+            ],
+        },
+        {
+            "name": "write-path-integrity-gate",
+            "owner_wave": "W4",
+            "status": "planned",
+            "profile": "product",
+            "blocking": False,
+            "metric_contracts": [
+                {
+                    "metric": "receipt",
+                    "mode": "receipt",
+                    "required_receipt": "write-path-integrity report",
+                }
+            ],
+        },
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == []
+
+
 def test_validate_ai_memory_manifest_enforces_no_regression_entries(tmp_path: Path) -> None:
     baseline = _ai_memory_report()
     candidate = _clone_report(baseline)
@@ -739,9 +952,9 @@ def test_validate_ai_memory_manifest_enforces_no_regression_entries(tmp_path: Pa
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text(
         json.dumps(
-            {
-                "citable": [_manifest_entry(candidate, artifact="candidate.json")],
-                "no_regression": [
+            _manifest_payload(
+                citable=[_manifest_entry(candidate, artifact="candidate.json")],
+                no_regression=[
                     {
                         "candidate": "candidate.json",
                         "baseline": "baseline.json",
@@ -749,7 +962,7 @@ def test_validate_ai_memory_manifest_enforces_no_regression_entries(tmp_path: Pa
                         "metrics": ["ndcg@5"],
                     }
                 ],
-            }
+            )
         ),
         encoding="utf-8",
     )

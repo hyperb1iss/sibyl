@@ -115,6 +115,17 @@ using those numbers for a later release candidate.
 for the release and which suites are planned coverage only. The manifest is checked against full
 JSON artifacts or committed external archive manifests by `moon run bench-gate-test`.
 
+The manifest uses `sibyl-ai-memory-benchmark-ledger-v2` for v1.1. In addition to citable and planned
+rows, it carries:
+
+- `gate_contracts`: the blocking, warning-only, and planned release gates that future receipts must
+  satisfy before the claim can move into public docs
+- `history`: the immutable summary directory used by nightly and weekly runs as the previous-run
+  baseline for regression checks
+
+Warning-only contracts, such as the initial cost-latency gate, are still evidence requirements. They
+become blocking only after the manifest has enough citable baselines to compare against.
+
 ## Threshold Gates
 
 Saved runtime artifacts should go through `moon run bench-gate -- <report.json>` before they count

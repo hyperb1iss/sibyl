@@ -13,6 +13,7 @@ from typing import Any, Literal, TypeGuard, cast
 
 ProfileName = Literal["smoke", "acceptance", "context-pack", "ai-memory"]
 MetricDirection = Literal["higher", "lower"]
+ManifestGateMode = Literal["threshold", "no-regression", "receipt"]
 
 
 @dataclass(frozen=True)
@@ -111,6 +112,23 @@ _AI_MEMORY_EXTERNAL_ARTIFACT_FIELDS = (
     "gate_passed",
     "gate_receipt",
 )
+_AI_MEMORY_LEDGER_SCHEMA_VERSIONS = frozenset(
+    (
+        "sibyl-ai-memory-benchmark-ledger-v1",
+        "sibyl-ai-memory-benchmark-ledger-v2",
+    )
+)
+_AI_MEMORY_LEDGER_REQUIRED_FIELDS = (
+    "schema_version",
+    "updated_at",
+    "release_scope",
+    "artifact_policy",
+)
+_AI_MEMORY_LEDGER_V2_REQUIRED_FIELDS = ("history", "gate_contracts")
+_MANIFEST_GATE_STATUSES = frozenset(("planned", "warning", "blocking"))
+_MANIFEST_GATE_CONTRACT_MODES = frozenset(("threshold", "no-regression", "receipt"))
+_MANIFEST_GATE_PROFILES = frozenset((*PROFILE_THRESHOLDS.keys(), "product"))
+_MANIFEST_HISTORY_APPEND_POLICY = "immutable-json"
 SHA256_HEX_LENGTH = 64
 SHA256_HEX_CHARACTERS = frozenset("0123456789abcdef")
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -856,6 +874,240 @@ def _validate_planned_manifest_entries(planned: Any) -> list[str]:
     return failures
 
 
+def _validate_ai_memory_manifest_header(manifest: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    failures.extend(
+        _validate_required_fields(
+            manifest,
+            path="manifest",
+            fields=_AI_MEMORY_LEDGER_REQUIRED_FIELDS,
+        )
+    )
+
+    schema_version = manifest.get("schema_version")
+    if not isinstance(schema_version, str) or not schema_version.strip():
+        failures.append("manifest schema_version must be a supported string")
+        return failures
+    if schema_version not in _AI_MEMORY_LEDGER_SCHEMA_VERSIONS:
+        supported = ", ".join(sorted(_AI_MEMORY_LEDGER_SCHEMA_VERSIONS))
+        failures.append(
+            f"manifest schema_version {schema_version!r} is unsupported; "
+            f"expected one of {supported}"
+        )
+        return failures
+
+    if schema_version == "sibyl-ai-memory-benchmark-ledger-v2":
+        failures.extend(
+            _validate_required_fields(
+                manifest,
+                path="manifest",
+                fields=_AI_MEMORY_LEDGER_V2_REQUIRED_FIELDS,
+            )
+        )
+        failures.extend(_validate_manifest_history(manifest.get("history")))
+        failures.extend(_validate_manifest_gate_contracts(manifest.get("gate_contracts")))
+
+    return failures
+
+
+def _validate_manifest_history(history: Any) -> list[str]:
+    if not _is_mapping(history):
+        return ["manifest history must be an object"]
+
+    failures: list[str] = []
+    directory = history.get("directory")
+    if not isinstance(directory, str) or not directory.strip():
+        failures.append("manifest history missing non-empty directory")
+    elif Path(directory).is_absolute():
+        failures.append("manifest history directory must be repository-relative")
+
+    summary_schema = history.get("summary_schema")
+    if not isinstance(summary_schema, str) or not summary_schema.strip():
+        failures.append("manifest history missing non-empty summary_schema")
+
+    append_policy = history.get("append_policy")
+    if append_policy != _MANIFEST_HISTORY_APPEND_POLICY:
+        failures.append(
+            f"manifest history append_policy must be {_MANIFEST_HISTORY_APPEND_POLICY!r}"
+        )
+
+    return failures
+
+
+def _validate_manifest_contract_direction(
+    contract: dict[str, Any],
+    *,
+    path: str,
+) -> list[str]:
+    direction = contract.get("direction")
+    if direction in ("higher", "lower"):
+        return []
+    return [f"{path} direction must be 'higher' or 'lower'"]
+
+
+def _validate_manifest_threshold_contract(
+    contract: dict[str, Any],
+    *,
+    path: str,
+) -> list[str]:
+    if _is_finite_number(contract.get("threshold")):
+        return []
+    return [f"{path} threshold must be finite numeric"]
+
+
+def _validate_manifest_no_regression_contract(
+    contract: dict[str, Any],
+    *,
+    path: str,
+) -> list[str]:
+    failures: list[str] = []
+    tolerance = contract.get("max_regression")
+    if not _is_finite_number(tolerance):
+        failures.append(f"{path} max_regression must be finite numeric")
+    elif float(tolerance) < 0:
+        failures.append(f"{path} max_regression must be non-negative")
+    baseline = contract.get("baseline")
+    if not isinstance(baseline, str) or not baseline.strip():
+        failures.append(f"{path} missing non-empty baseline")
+    return failures
+
+
+def _validate_manifest_receipt_contract(
+    contract: dict[str, Any],
+    *,
+    path: str,
+) -> list[str]:
+    required_receipt = contract.get("required_receipt")
+    if isinstance(required_receipt, str) and required_receipt.strip():
+        return []
+    return [f"{path} missing non-empty required_receipt"]
+
+
+def _validate_manifest_metric_contract(
+    contract: Any,
+    *,
+    path: str,
+) -> list[str]:
+    if not _is_mapping(contract):
+        return [f"{path} is not an object"]
+
+    failures: list[str] = []
+    metric = contract.get("metric")
+    if not isinstance(metric, str) or not metric.strip():
+        failures.append(f"{path} missing non-empty metric")
+
+    mode = contract.get("mode")
+    if not isinstance(mode, str) or mode not in _MANIFEST_GATE_CONTRACT_MODES:
+        allowed = ", ".join(sorted(_MANIFEST_GATE_CONTRACT_MODES))
+        failures.append(f"{path} has unsupported mode {mode!r}; expected one of {allowed}")
+        return failures
+    gate_mode = cast("ManifestGateMode", mode)
+
+    if gate_mode in {"threshold", "no-regression"}:
+        failures.extend(_validate_manifest_contract_direction(contract, path=path))
+
+    if gate_mode == "threshold":
+        failures.extend(_validate_manifest_threshold_contract(contract, path=path))
+    elif gate_mode == "no-regression":
+        failures.extend(_validate_manifest_no_regression_contract(contract, path=path))
+    else:
+        failures.extend(_validate_manifest_receipt_contract(contract, path=path))
+
+    return failures
+
+
+def _validate_manifest_gate_name(
+    entry: dict[str, Any],
+    *,
+    path: str,
+    seen_names: set[str],
+) -> list[str]:
+    name = entry.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return [f"{path} missing non-empty name"]
+    if name in seen_names:
+        return [f"{path} duplicates gate contract {name!r}"]
+    seen_names.add(name)
+    return []
+
+
+def _validate_manifest_gate_status(entry: dict[str, Any], *, path: str) -> list[str]:
+    status = entry.get("status")
+    if isinstance(status, str) and status in _MANIFEST_GATE_STATUSES:
+        return []
+    allowed = ", ".join(sorted(_MANIFEST_GATE_STATUSES))
+    return [f"{path} has unsupported status {status!r}; expected one of {allowed}"]
+
+
+def _validate_manifest_gate_profile(entry: dict[str, Any], *, path: str) -> list[str]:
+    profile = entry.get("profile")
+    if isinstance(profile, str) and profile in _MANIFEST_GATE_PROFILES:
+        return []
+    allowed = ", ".join(sorted(_MANIFEST_GATE_PROFILES))
+    return [f"{path} has unsupported profile {profile!r}; expected one of {allowed}"]
+
+
+def _validate_manifest_gate_blocking(entry: dict[str, Any], *, path: str) -> list[str]:
+    blocking = entry.get("blocking")
+    if not isinstance(blocking, bool):
+        return [f"{path} blocking must be boolean"]
+
+    status = entry.get("status")
+    if (
+        isinstance(status, str)
+        and status in _MANIFEST_GATE_STATUSES
+        and blocking != (status == "blocking")
+    ):
+        return [f"{path} blocking must match status {status!r}"]
+    return []
+
+
+def _validate_manifest_gate_metric_contracts(
+    entry: dict[str, Any],
+    *,
+    path: str,
+) -> list[str]:
+    metric_contracts = entry.get("metric_contracts")
+    if not isinstance(metric_contracts, list) or not metric_contracts:
+        return [f"{path}.metric_contracts must be a non-empty list"]
+
+    failures: list[str] = []
+    for metric_index, contract in enumerate(metric_contracts):
+        failures.extend(
+            _validate_manifest_metric_contract(
+                contract,
+                path=f"{path}.metric_contracts[{metric_index}]",
+            )
+        )
+    return failures
+
+
+def _validate_manifest_gate_contracts(gate_contracts: Any) -> list[str]:
+    if not isinstance(gate_contracts, list) or not gate_contracts:
+        return ["manifest gate_contracts must be a non-empty list"]
+
+    failures: list[str] = []
+    seen_names: set[str] = set()
+    for index, entry in enumerate(gate_contracts):
+        prefix = f"gate_contracts[{index}]"
+        if not _is_mapping(entry):
+            failures.append(f"{prefix} is not an object")
+            continue
+
+        failures.extend(_validate_manifest_gate_name(entry, path=prefix, seen_names=seen_names))
+
+        owner_wave = entry.get("owner_wave")
+        if not isinstance(owner_wave, str) or not owner_wave.strip():
+            failures.append(f"{prefix} missing non-empty owner_wave")
+
+        failures.extend(_validate_manifest_gate_status(entry, path=prefix))
+        failures.extend(_validate_manifest_gate_profile(entry, path=prefix))
+        failures.extend(_validate_manifest_gate_blocking(entry, path=prefix))
+        failures.extend(_validate_manifest_gate_metric_contracts(entry, path=prefix))
+
+    return failures
+
+
 def _parse_manifest_metric_list(value: Any, *, path: str) -> tuple[list[str] | None, list[str]]:
     if value is None:
         return None, []
@@ -1005,6 +1257,7 @@ def validate_ai_memory_manifest(manifest_path: Path) -> list[str]:
     if not isinstance(citable, list) or not citable:
         failures.append("manifest missing non-empty citable list")
         return failures
+    failures.extend(_validate_ai_memory_manifest_header(manifest))
 
     for index, entry in enumerate(citable):
         if not _is_mapping(entry):

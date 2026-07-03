@@ -1,8 +1,195 @@
 {
-  "schema_version": "sibyl-ai-memory-benchmark-ledger-v1",
-  "updated_at": "2026-06-10",
-  "release_scope": "v1.0.0-rc.1 Surreal-native default release gate",
-  "artifact_policy": "Only citable entries may appear in release notes. Citable entries must name a full raw artifact or a committed external archive manifest with per-slice metrics, provenance, caveats, digest, expiry, verification receipt, and a passing ai-memory gate. Planned entries are not release-note evidence.",
+  "schema_version": "sibyl-ai-memory-benchmark-ledger-v2",
+  "updated_at": "2026-07-03",
+  "release_scope": "v1.1 Prove It evidence substrate",
+  "artifact_policy": "Only citable entries may appear in release notes. Citable entries must name a full raw artifact or a committed external archive manifest with per-slice metrics, provenance, caveats, digest, expiry, verification receipt, and a passing ai-memory gate. Planned entries are not release-note evidence. Gate contracts define which receipts are blocking, warning-only, or planned for v1.1.",
+  "history": {
+    "directory": "benchmarks/results/ai-memory/history",
+    "summary_schema": "sibyl-ai-memory-history-summary-v1",
+    "append_policy": "immutable-json"
+  },
+  "gate_contracts": [
+    {
+      "name": "eval-regression-gate",
+      "owner_wave": "W2A",
+      "status": "blocking",
+      "profile": "ai-memory",
+      "blocking": true,
+      "metric_contracts": [
+        {
+          "metric": "recall@5",
+          "mode": "no-regression",
+          "direction": "higher",
+          "baseline": "latest-citable-hybrid",
+          "max_regression": 0.005
+        },
+        {
+          "metric": "latency_p95_ms",
+          "mode": "threshold",
+          "direction": "lower",
+          "threshold": 1000
+        },
+        {
+          "metric": "leak_count",
+          "mode": "threshold",
+          "direction": "lower",
+          "threshold": 0
+        }
+      ]
+    },
+    {
+      "name": "qa-accuracy-gate",
+      "owner_wave": "W1",
+      "status": "planned",
+      "profile": "product",
+      "blocking": false,
+      "metric_contracts": [
+        {
+          "metric": "qa_accuracy",
+          "mode": "no-regression",
+          "direction": "higher",
+          "baseline": "pinned-longmemeval-s-qa",
+          "max_regression": 0.01
+        }
+      ]
+    },
+    {
+      "name": "cost-latency-gate",
+      "owner_wave": "W3",
+      "status": "warning",
+      "profile": "product",
+      "blocking": false,
+      "metric_contracts": [
+        {
+          "metric": "estimated_query_cost_usd",
+          "mode": "no-regression",
+          "direction": "lower",
+          "baseline": "second-citable-cost-baseline",
+          "max_regression": 0
+        },
+        {
+          "metric": "latency_p95_ms",
+          "mode": "threshold",
+          "direction": "lower",
+          "threshold": 1000
+        }
+      ]
+    },
+    {
+      "name": "write-path-integrity-gate",
+      "owner_wave": "W4",
+      "status": "planned",
+      "profile": "product",
+      "blocking": false,
+      "metric_contracts": [
+        {
+          "metric": "hallucinated_fact_count",
+          "mode": "threshold",
+          "direction": "lower",
+          "threshold": 0
+        },
+        {
+          "metric": "self_referential_write_count",
+          "mode": "threshold",
+          "direction": "lower",
+          "threshold": 0
+        },
+        {
+          "metric": "low_signal_write_count",
+          "mode": "threshold",
+          "direction": "lower",
+          "threshold": 0
+        }
+      ]
+    },
+    {
+      "name": "longmemeval-v2-gate",
+      "owner_wave": "W5",
+      "status": "planned",
+      "profile": "product",
+      "blocking": false,
+      "metric_contracts": [
+        {
+          "metric": "lafs_gain",
+          "mode": "no-regression",
+          "direction": "higher",
+          "baseline": "pinned-longmemeval-v2",
+          "max_regression": 0.005
+        }
+      ]
+    },
+    {
+      "name": "usage-loop-gate",
+      "owner_wave": "W6",
+      "status": "planned",
+      "profile": "product",
+      "blocking": false,
+      "metric_contracts": [
+        {
+          "metric": "exposure_stamp_coverage",
+          "mode": "threshold",
+          "direction": "higher",
+          "threshold": 1
+        },
+        {
+          "metric": "citation_event_count",
+          "mode": "threshold",
+          "direction": "higher",
+          "threshold": 1
+        }
+      ]
+    },
+    {
+      "name": "forgetting-gate",
+      "owner_wave": "W7",
+      "status": "planned",
+      "profile": "product",
+      "blocking": false,
+      "metric_contracts": [
+        {
+          "metric": "cited_survival_delta",
+          "mode": "threshold",
+          "direction": "higher",
+          "threshold": 0
+        },
+        {
+          "metric": "write_integrity_error_count",
+          "mode": "threshold",
+          "direction": "lower",
+          "threshold": 0
+        }
+      ]
+    },
+    {
+      "name": "team-scope-trust-gate",
+      "owner_wave": "W8",
+      "status": "planned",
+      "profile": "product",
+      "blocking": false,
+      "metric_contracts": [
+        {
+          "metric": "leak_count",
+          "mode": "threshold",
+          "direction": "lower",
+          "threshold": 0
+        }
+      ]
+    },
+    {
+      "name": "okf-export-gate",
+      "owner_wave": "W9",
+      "status": "planned",
+      "profile": "product",
+      "blocking": false,
+      "metric_contracts": [
+        {
+          "metric": "receipt",
+          "mode": "receipt",
+          "required_receipt": "byte-stable OKF export and graph-payload reconstruction"
+        }
+      ]
+    }
+  ],
   "citable": [
     {
       "suite": "LongMemEval-style offline",
