@@ -1227,6 +1227,20 @@ def test_validate_ai_memory_manifest_rejects_gate_contract_drift(tmp_path: Path)
 
 def test_validate_ai_memory_manifest_accepts_v11_gate_contracts(tmp_path: Path) -> None:
     manifest_path = _write_ai_memory_manifest(tmp_path)
+    receipt_path = tmp_path / "write-path-integrity-receipt.json"
+    receipt_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "sibyl-write-path-integrity-receipt-v1",
+                "metrics": {
+                    "hallucinated_fact_count": 0,
+                    "self_referential_write_count": 0,
+                    "low_signal_write_count": 0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["gate_contracts"] = [
         {
@@ -1254,15 +1268,34 @@ def test_validate_ai_memory_manifest_accepts_v11_gate_contracts(tmp_path: Path) 
         {
             "name": "write-path-integrity-gate",
             "owner_wave": "W4",
-            "status": "planned",
+            "status": "blocking",
             "profile": "product",
-            "blocking": False,
+            "blocking": True,
             "metric_contracts": [
                 {
-                    "metric": "receipt",
+                    "metric": "hallucinated_fact_count",
                     "mode": "receipt",
-                    "required_receipt": "write-path-integrity report",
-                }
+                    "required_receipt": "write-path-integrity-receipt.json",
+                    "receipt_schema": "sibyl-write-path-integrity-receipt-v1",
+                    "direction": "lower",
+                    "threshold": 0,
+                },
+                {
+                    "metric": "self_referential_write_count",
+                    "mode": "receipt",
+                    "required_receipt": "write-path-integrity-receipt.json",
+                    "receipt_schema": "sibyl-write-path-integrity-receipt-v1",
+                    "direction": "lower",
+                    "threshold": 0,
+                },
+                {
+                    "metric": "low_signal_write_count",
+                    "mode": "receipt",
+                    "required_receipt": "write-path-integrity-receipt.json",
+                    "receipt_schema": "sibyl-write-path-integrity-receipt-v1",
+                    "direction": "lower",
+                    "threshold": 0,
+                },
             ],
         },
     ]
@@ -1271,6 +1304,49 @@ def test_validate_ai_memory_manifest_accepts_v11_gate_contracts(tmp_path: Path) 
     failures = eval_gate.validate_ai_memory_manifest(manifest_path)
 
     assert failures == []
+
+
+def test_validate_ai_memory_manifest_rejects_blocking_receipt_metric_failure(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    receipt_path = tmp_path / "write-path-integrity-receipt.json"
+    receipt_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "sibyl-write-path-integrity-receipt-v1",
+                "metrics": {"low_signal_write_count": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["gate_contracts"].append(
+        {
+            "name": "write-path-integrity-gate",
+            "owner_wave": "W4",
+            "status": "blocking",
+            "profile": "product",
+            "blocking": True,
+            "metric_contracts": [
+                {
+                    "metric": "low_signal_write_count",
+                    "mode": "receipt",
+                    "required_receipt": "write-path-integrity-receipt.json",
+                    "direction": "lower",
+                    "threshold": 0,
+                }
+            ],
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert (
+        "gate_contracts[1].metric_contracts[0] required_receipt metric "
+        "'low_signal_write_count'=1 exceeds threshold 0"
+    ) in failures
 
 
 def test_validate_ai_memory_manifest_enforces_no_regression_entries(tmp_path: Path) -> None:

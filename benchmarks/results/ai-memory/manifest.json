@@ -78,25 +78,31 @@
     {
       "name": "write-path-integrity-gate",
       "owner_wave": "W4",
-      "status": "planned",
+      "status": "blocking",
       "profile": "product",
-      "blocking": false,
+      "blocking": true,
       "metric_contracts": [
         {
           "metric": "hallucinated_fact_count",
-          "mode": "threshold",
+          "mode": "receipt",
+          "required_receipt": "write-path-integrity-receipt.json",
+          "receipt_schema": "sibyl-write-path-integrity-receipt-v1",
           "direction": "lower",
           "threshold": 0
         },
         {
           "metric": "self_referential_write_count",
-          "mode": "threshold",
+          "mode": "receipt",
+          "required_receipt": "write-path-integrity-receipt.json",
+          "receipt_schema": "sibyl-write-path-integrity-receipt-v1",
           "direction": "lower",
           "threshold": 0
         },
         {
           "metric": "low_signal_write_count",
-          "mode": "threshold",
+          "mode": "receipt",
+          "required_receipt": "write-path-integrity-receipt.json",
+          "receipt_schema": "sibyl-write-path-integrity-receipt-v1",
           "direction": "lower",
           "threshold": 0
         }

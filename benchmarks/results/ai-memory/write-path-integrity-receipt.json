@@ -1,0 +1,103 @@
+{
+  "budgets": {
+    "hallucinated_fact_count": 0,
+    "low_signal_write_count": 0,
+    "self_referential_write_count": 0
+  },
+  "cases": {
+    "dream_sources": 5,
+    "extraction": 1,
+    "low_signal": 1
+  },
+  "checks": [
+    {
+      "command": "moon run core:write-path-integrity-test",
+      "exit_code": 0,
+      "name": "core-write-path-integrity",
+      "status": "PASS",
+      "surfaces": [
+        "self-feeding guard",
+        "dream-cycle source selection"
+      ]
+    },
+    {
+      "command": "moon run api:write-path-integrity-test",
+      "exit_code": 0,
+      "name": "api-write-path-integrity",
+      "status": "PASS",
+      "surfaces": [
+        "extraction",
+        "low-signal no-op",
+        "reflection",
+        "consolidation"
+      ]
+    },
+    {
+      "command": "moon run bench-gate",
+      "exit_code": 0,
+      "name": "ai-memory-contracts",
+      "status": "PASS",
+      "surfaces": [
+        "manifest",
+        "release contract"
+      ]
+    }
+  ],
+  "fixture": "observed-write-path-integrity-v1",
+  "metrics": {
+    "hallucinated_fact_count": 0,
+    "low_signal_write_count": 0,
+    "self_referential_write_count": 0
+  },
+  "observations": {
+    "dream_sources": [
+      {
+        "capture_surface": "cli",
+        "selected_for_reflection": true,
+        "source_id": "cli-session"
+      },
+      {
+        "capture_surface": "reflection",
+        "selected_for_reflection": false,
+        "source_id": "reflection-result"
+      },
+      {
+        "capture_surface": "reflection_candidate",
+        "selected_for_reflection": false,
+        "source_id": "reflection-review"
+      },
+      {
+        "capture_surface": "reflection_source",
+        "selected_for_reflection": false,
+        "source_id": "reflection-source"
+      },
+      {
+        "capture_surface": "synthesis_artifact",
+        "selected_for_reflection": false,
+        "source_id": "synthesis-output"
+      }
+    ],
+    "extraction": [
+      {
+        "entities": [
+          {
+            "entity_type": "tool",
+            "evidence": "SurrealDB native RRF powers graph retrieval for the Lumen route.",
+            "name": "SurrealDB native RRF",
+            "summary": "SurrealDB native RRF powers graph retrieval for the Lumen route."
+          }
+        ],
+        "source_id": "seed-source-grounded"
+      }
+    ],
+    "low_signal": [
+      {
+        "extracted_entities": 0,
+        "no_op_sources": 1,
+        "projected_entities": 0,
+        "source_id": "low-signal-ack"
+      }
+    ]
+  },
+  "schema_version": "sibyl-write-path-integrity-receipt-v1"
+}

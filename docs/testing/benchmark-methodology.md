@@ -115,7 +115,7 @@ using those numbers for a later release candidate.
 
 `benchmarks/results/ai-memory/manifest.json` records which AI memory benchmark artifacts are citable
 for the release and which suites are planned coverage only. The manifest is checked against full
-JSON artifacts or committed external archive manifests by `moon run bench-gate-test`.
+JSON artifacts or committed external archive manifests by `moon run bench-gate`.
 
 The manifest uses `sibyl-ai-memory-benchmark-ledger-v2` for v1.1. In addition to citable and planned
 rows, it carries:
@@ -169,6 +169,13 @@ accounting block uses schema `sibyl-eval-accounting-v1` and records p50/p95 late
 estimates, full-context baseline estimate, embedding calls, embedding cost, reader cost, judge cost,
 and total estimated cost. Cost regression is warning-only until the ledger has two citable baselines
 for the same lane.
+
+The W4 write-path integrity gate is blocking for v1.1. It writes
+`benchmarks/results/ai-memory/write-path-integrity-receipt.json` with schema
+`sibyl-write-path-integrity-receipt-v1`, and `moon run bench-gate` enforces
+`hallucinated_fact_count = 0`, `self_referential_write_count = 0`, and `low_signal_write_count = 0`
+from that receipt across extraction, dream-cycle source selection, reflection, and consolidation
+fixtures.
 
 `leak_count` is a per-case sentinel: forbidden item and forbidden term matches are reported
 separately, while the summary uses the larger of those two counts for each case so one leaked memory

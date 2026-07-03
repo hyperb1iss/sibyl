@@ -150,6 +150,16 @@ tasks:
       - tests/test_routes_context.py
       - tests/test_routes_memory.py
 
+  write-path-integrity-test:
+    command:
+      uv run pytest tests/test_jobs_memory_extraction.py tests/test_jobs_reflection.py
+      tests/test_jobs_consolidation.py -v
+    inputs:
+      - "@group(sources)"
+      - tests/test_jobs_memory_extraction.py
+      - tests/test_jobs_reflection.py
+      - tests/test_jobs_consolidation.py
+
   auth-session-test:
     command:
       uv run pytest tests/test_surreal_auth_runtime.py tests/test_auth_session_cache.py

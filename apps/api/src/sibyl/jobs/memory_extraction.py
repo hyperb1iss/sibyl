@@ -37,6 +37,8 @@ from sibyl_core.services.graph import get_surreal_graph_runtime
 log = structlog.get_logger()
 
 _PROJECTABLE_MEMORY_TYPES = frozenset({"document", "episode", "session"})
+_MIN_EXTRACTION_SIGNAL_TOKENS = 3
+_SIGNAL_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9'-]{2,}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +63,13 @@ class _ProjectedEntityLink:
     entity_id: str
     name: str = ""
     evidence: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class _SourcePayloadSelection:
+    projectable: list[_SourcePayload]
+    selected: list[_SourcePayload]
+    low_signal: list[_SourcePayload]
 
 
 _LINK_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9'.-]*")
@@ -189,11 +198,16 @@ async def extract_memory_entities(
 ) -> dict[str, Any]:
     """Run bounded LLM entity extraction for memory source prose."""
     started_at = time.perf_counter()
-    source_payloads = _source_payloads(
+    selection = _source_payload_selection(
         sources_data,
         created_source_ids=created_source_ids,
         max_source_chars=max_source_chars,
     )
+    source_payloads = selection.selected
+    low_signal_sources = [
+        {"source_id": source.source_id, "reason": "low_signal"} for source in selection.low_signal
+    ]
+    no_op_sources = len(low_signal_sources)
     if not source_payloads:
         duration_ms = elapsed_ms(started_at)
         telemetry_registry().record_memory_extraction_run(
@@ -211,6 +225,8 @@ async def extract_memory_entities(
             "relationships": 0,
             "projection_state": "complete",
             "estimated_input_tokens": 0,
+            "no_op_sources": no_op_sources,
+            "low_signal_sources": low_signal_sources,
             "errors": [],
             "projection_errors": [],
             "extractions": [],
@@ -313,6 +329,8 @@ async def extract_memory_entities(
         "projection_state": projection["projection_state"],
         "linked_chunks": chunk_links["linked_chunks"],
         "estimated_input_tokens": estimated_input_tokens,
+        "no_op_sources": no_op_sources,
+        "low_signal_sources": low_signal_sources,
         "errors": errors,
         "projection_errors": projection_errors,
         "extractions": extractions,
@@ -353,6 +371,36 @@ def _source_payloads(
             )
         )
     return payloads
+
+
+def _source_payload_selection(
+    sources_data: list[dict[str, Any]],
+    *,
+    created_source_ids: list[str] | None,
+    max_source_chars: int,
+) -> _SourcePayloadSelection:
+    projectable = _source_payloads(
+        sources_data,
+        created_source_ids=created_source_ids,
+        max_source_chars=max_source_chars,
+    )
+    selected: list[_SourcePayload] = []
+    low_signal: list[_SourcePayload] = []
+    for payload in projectable:
+        if _has_minimum_extraction_signal(str(payload.source.get("content") or "")):
+            selected.append(payload)
+        else:
+            low_signal.append(payload)
+    return _SourcePayloadSelection(
+        projectable=projectable,
+        selected=selected,
+        low_signal=low_signal,
+    )
+
+
+def _has_minimum_extraction_signal(content: str) -> bool:
+    tokens = _SIGNAL_TOKEN_RE.findall(content)
+    return len(tokens) >= _MIN_EXTRACTION_SIGNAL_TOKENS
 
 
 def _batch_source_payloads(
