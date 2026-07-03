@@ -18,12 +18,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from shutil import which
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 from sibyl.jobs import memory_extraction
 from sibyl_core.models.memory_extraction import (
     ExtractedMemoryEntity,
     MemoryBatchEntityExtractionResult,
+    MemoryExtractionEntityType,
     SourceMemoryExtraction,
 )
 from sibyl_core.services import surreal_content as content_service
@@ -305,7 +306,7 @@ async def _observe_extraction_cases(
                             entities=[
                                 ExtractedMemoryEntity(
                                     name=entity.name,
-                                    entity_type=entity.entity_type,
+                                    entity_type=MemoryExtractionEntityType(entity.entity_type),
                                     summary=entity.summary,
                                     evidence=entity.evidence,
                                     confidence=0.99,
@@ -341,9 +342,9 @@ async def _observe_extraction_cases(
     old_provider = memory_extraction.configured_embedding_provider
     old_content_session = memory_extraction.get_content_read_session
     try:
-        memory_extraction.memory_batch_entity_extractor = lambda **_: ProbeExtractor()
-        memory_extraction.get_surreal_graph_runtime = fake_runtime
-        memory_extraction.configured_embedding_provider = lambda: None
+        memory_extraction.memory_batch_entity_extractor = cast(Any, lambda **_: ProbeExtractor())
+        memory_extraction.get_surreal_graph_runtime = cast(Any, fake_runtime)
+        memory_extraction.configured_embedding_provider = cast(Any, lambda: None)
         memory_extraction.get_content_read_session = fake_content_session
         result = await memory_extraction.extract_memory_entities(
             {},
@@ -476,10 +477,11 @@ async def _observe_low_signal_cases(
     old_extractor = memory_extraction.memory_batch_entity_extractor
     old_runtime = memory_extraction.get_surreal_graph_runtime
     try:
-        memory_extraction.memory_batch_entity_extractor = lambda **_: (
-            _raise_low_signal_probe_error()
+        memory_extraction.memory_batch_entity_extractor = cast(
+            Any,
+            lambda **_: _raise_low_signal_probe_error(),
         )
-        memory_extraction.get_surreal_graph_runtime = fail_runtime
+        memory_extraction.get_surreal_graph_runtime = cast(Any, fail_runtime)
         observed: list[LowSignalCase] = []
         for case in cases:
             result = await memory_extraction.extract_memory_entities(

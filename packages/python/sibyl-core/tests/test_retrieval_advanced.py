@@ -17,8 +17,11 @@ import numpy as np
 import pytest
 
 import sibyl_core.retrieval.hybrid as hybrid_module
+import sibyl_core.retrieval.search as search_module
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
+from sibyl_core.models.context import ContextFacet
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.retrieval.candidates import CandidateKind, RetrievalCandidate
 from sibyl_core.retrieval.dedup import (
     DedupConfig,
     DuplicatePair,
@@ -49,6 +52,8 @@ from sibyl_core.retrieval.query_ranking import (
     should_accept_query_coverage_refinement,
 )
 from sibyl_core.retrieval.reranking import RerankResult
+from sibyl_core.retrieval.search import RetrievalPlan, RetrievalSignal, RetrievalWeights
+from sibyl_core.retrieval.temporal import temporal_boost, temporal_decay_multiplier
 from sibyl_core.services.graph import EntityManager, SurrealGraphClient, prepare_graph_schema
 
 # =============================================================================
@@ -79,6 +84,157 @@ def test_query_coverage_keywords_drop_answer_shape_scaffolding() -> None:
     keywords = extract_keywords("What type of rice is my favorite?")
 
     assert keywords == ["rice", "favorite"]
+
+
+def test_temporal_boost_uses_citation_stamp_before_age_fallback() -> None:
+    now = datetime(2026, 7, 3, tzinfo=UTC)
+    cited = make_entity_for_test(
+        "cited",
+        created_at=now - timedelta(days=420),
+        metadata={
+            "last_used_at": (now - timedelta(days=2)).isoformat(),
+            "citation_count": 1,
+        },
+    )
+    uncited = make_entity_for_test(
+        "uncited",
+        created_at=now - timedelta(days=420),
+        metadata={"retrieval_count": 0, "citation_count": 0},
+    )
+
+    boosted = temporal_boost(
+        [(uncited, 0.95), (cited, 0.90)],
+        decay_days=30,
+        reference_time=now,
+    )
+
+    assert boosted[0][0].id == "cited"
+    assert temporal_decay_multiplier(cited, decay_days=30, reference_time=now) > 0.9
+    assert temporal_decay_multiplier(uncited, decay_days=30, reference_time=now) == 0.1
+
+
+def test_temporal_decay_uses_latest_usage_stamp() -> None:
+    now = datetime(2026, 7, 3, tzinfo=UTC)
+    entity = make_entity_for_test(
+        "recently-recalled",
+        created_at=now - timedelta(days=420),
+        metadata={
+            "last_used_at": (now - timedelta(days=240)).isoformat(),
+            "last_recalled_at": (now - timedelta(days=1)).isoformat(),
+            "citation_count": 1,
+            "retrieval_count": 10,
+        },
+    )
+
+    assert temporal_decay_multiplier(entity, decay_days=30, reference_time=now) > 0.9
+
+
+def test_native_candidate_ranking_applies_usage_aware_decay() -> None:
+    now = datetime(2026, 7, 3, tzinfo=UTC)
+
+    def candidate(
+        candidate_id: str,
+        metadata: dict[str, Any],
+    ) -> RetrievalCandidate:
+        return RetrievalCandidate(
+            id=candidate_id,
+            type="note",
+            name=candidate_id,
+            content="usage aware forgetting fixture",
+            score=0.8,
+            source=candidate_id,
+            metadata=metadata,
+            kind=CandidateKind.NODE,
+            created_at=now - timedelta(days=420),
+        )
+
+    uncited = candidate("uncited", {})
+    cited = candidate(
+        "cited",
+        {
+            "last_used_at": (datetime.now(UTC) - timedelta(days=1)).isoformat(),
+            "citation_count": 1,
+        },
+    )
+    plan = RetrievalPlan(
+        query="usage aware forgetting fixture",
+        organization_id="org-123",
+        facets=(ContextFacet.RECENT_MEMORY,),
+        facet_types={ContextFacet.RECENT_MEMORY: ("note",)},
+        scopes=(),
+        denied_scopes=(),
+        weights=RetrievalWeights(freshness_boost_cap=1.0),
+    )
+
+    ranked = search_module._rank_fused_candidates(
+        [(RetrievalSignal.NODE_FULLTEXT, [uncited, cited])],
+        plan=plan,
+        limit=2,
+        rrf_scores={"uncited": 0.8, "cited": 0.79},
+    )
+
+    assert ranked[0][0].id == "cited"
+    assert ranked[0][2]["temporal_decay_multiplier"] > ranked[1][2]["temporal_decay_multiplier"]
+
+
+def test_native_candidate_ranking_preserves_explicit_temporal_target() -> None:
+    target = datetime(2025, 7, 3, tzinfo=UTC)
+    old_target_match = RetrievalCandidate(
+        id="old-target-match",
+        type="note",
+        name="old target match",
+        content="temporal target fixture",
+        score=0.8,
+        source="old-target-match",
+        metadata={"valid_at": target.isoformat()},
+        kind=CandidateKind.NODE,
+        created_at=target,
+    )
+    plan = RetrievalPlan(
+        query="what happened last year in the temporal target fixture",
+        organization_id="org-123",
+        facets=(ContextFacet.RECENT_MEMORY,),
+        facet_types={ContextFacet.RECENT_MEMORY: ("note",)},
+        scopes=(),
+        denied_scopes=(),
+        weights=RetrievalWeights(freshness_boost_cap=1.0),
+    )
+
+    ranked = search_module._rank_fused_candidates(
+        [(RetrievalSignal.NODE_FULLTEXT, [old_target_match])],
+        plan=plan,
+        limit=1,
+        rrf_scores={"old-target-match": 0.8},
+        temporal_target=target,
+    )
+
+    assert ranked[0][0].id == "old-target-match"
+    assert "temporal_decay_multiplier" not in ranked[0][2]
+
+
+def test_episode_record_candidates_keep_usage_metadata() -> None:
+    row = {
+        "uuid": "episode-1",
+        "name": "Episode",
+        "content": "episode content",
+        "group_id": "org-123",
+        "created_at": datetime(2026, 1, 1, tzinfo=UTC),
+        "last_recalled_at": datetime(2026, 7, 1, tzinfo=UTC),
+        "last_used_at": datetime(2026, 6, 1, tzinfo=UTC),
+        "retrieval_count": 4,
+        "citation_count": 1,
+    }
+
+    candidate = search_module._candidate_from_episode_record(
+        row,
+        signal=RetrievalSignal.EPISODE_FULLTEXT,
+        score=1.0,
+    )
+
+    assert candidate.metadata["last_recalled_at"] == row["last_recalled_at"]
+    assert candidate.metadata["last_used_at"] == row["last_used_at"]
+    assert candidate.metadata["retrieval_count"] == 4
+    assert candidate.metadata["citation_count"] == 1
 
 
 def test_query_coverage_keywords_drop_temporal_chatter() -> None:

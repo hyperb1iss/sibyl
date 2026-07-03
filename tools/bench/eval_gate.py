@@ -1010,7 +1010,7 @@ def _validate_accounting_consistency(
         )
     ]
     if all(_is_finite_number(value) for value in section_costs):
-        expected_total = sum(float(value) for value in section_costs)
+        expected_total = sum(float(value) for value in section_costs if _is_finite_number(value))
         if not (
             _is_finite_number(cost.get("estimated_total_usd"))
             and _numbers_match(float(cost["estimated_total_usd"]), expected_total)
@@ -1586,6 +1586,73 @@ def _validate_manifest_receipt_threshold(
     return failures
 
 
+def _validate_required_surfaces(value: Any, *, path: str) -> tuple[list[str], list[str]]:
+    if value is None:
+        return [], []
+    if not isinstance(value, list) or not value:
+        return [], [f"{path} required_surfaces must be a non-empty string list"]
+    surfaces: list[str] = []
+    failures: list[str] = []
+    for index, surface in enumerate(value):
+        if not isinstance(surface, str) or not surface.strip():
+            failures.append(f"{path} required_surfaces[{index}] must be a non-empty string")
+            continue
+        surfaces.append(surface.strip())
+    return surfaces, failures
+
+
+def _validate_manifest_receipt_checks(
+    contract: dict[str, Any],
+    receipt: dict[str, Any],
+    *,
+    path: str,
+) -> list[str]:
+    failures: list[str] = []
+    require_checks = contract.get("require_receipt_checks")
+    if require_checks is not None and not isinstance(require_checks, bool):
+        failures.append(f"{path} require_receipt_checks must be boolean")
+    required_surfaces, surface_failures = _validate_required_surfaces(
+        contract.get("required_surfaces"),
+        path=path,
+    )
+    failures.extend(surface_failures)
+
+    if require_checks is not True and not required_surfaces:
+        return failures
+
+    checks = receipt.get("checks")
+    if not isinstance(checks, list) or not checks:
+        failures.append(f"{path} required_receipt checks must be a non-empty list")
+        return failures
+
+    covered_surfaces: set[str] = set()
+    for index, check in enumerate(checks):
+        check_path = f"{path} required_receipt checks[{index}]"
+        if not isinstance(check, dict):
+            failures.append(f"{check_path} must be an object")
+            continue
+        if require_checks is True and check.get("status") != "PASS":
+            failures.append(f"{check_path} status must be 'PASS'")
+        surfaces = check.get("surfaces")
+        if surfaces is None:
+            continue
+        if not isinstance(surfaces, list):
+            failures.append(f"{check_path}.surfaces must be a list")
+            continue
+        for surface_index, surface in enumerate(surfaces):
+            if not isinstance(surface, str) or not surface.strip():
+                failures.append(
+                    f"{check_path}.surfaces[{surface_index}] must be a non-empty string"
+                )
+                continue
+            covered_surfaces.add(surface.strip())
+
+    for surface in required_surfaces:
+        if surface not in covered_surfaces:
+            failures.append(f"{path} required_receipt missing required surface {surface!r}")
+    return failures
+
+
 def _validate_manifest_receipt_contract(
     contract: dict[str, Any],
     *,
@@ -1604,6 +1671,7 @@ def _validate_manifest_receipt_contract(
 
     failures.extend(_validate_manifest_receipt_schema(contract, receipt, path=path))
     failures.extend(_validate_manifest_receipt_threshold(contract, receipt, path=path))
+    failures.extend(_validate_manifest_receipt_checks(contract, receipt, path=path))
     return failures
 
 
@@ -1621,6 +1689,15 @@ def _validate_manifest_metric_contract(
     metric = contract.get("metric")
     if not isinstance(metric, str) or not metric.strip():
         failures.append(f"{path} missing non-empty metric")
+    if "require_receipt_checks" in contract and not isinstance(
+        contract.get("require_receipt_checks"), bool
+    ):
+        failures.append(f"{path} require_receipt_checks must be boolean")
+    _required_surfaces, surface_failures = _validate_required_surfaces(
+        contract.get("required_surfaces"),
+        path=path,
+    )
+    failures.extend(surface_failures)
 
     mode = contract.get("mode")
     if not isinstance(mode, str) or mode not in _MANIFEST_GATE_CONTRACT_MODES:

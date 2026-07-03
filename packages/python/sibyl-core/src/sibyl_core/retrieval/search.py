@@ -32,7 +32,11 @@ from sibyl_core.retrieval.candidates import (
 )
 from sibyl_core.retrieval.fusion import rrf_merge
 from sibyl_core.retrieval.query_ranking import rank_items_by_query_coverage
-from sibyl_core.retrieval.temporal import get_entity_timestamp
+from sibyl_core.retrieval.temporal import (
+    get_entity_timestamp,
+    resolve_temporal_reference,
+    temporal_decay_multiplier,
+)
 from sibyl_core.services.graph import get_surreal_graph_runtime, normalize_records
 from sibyl_core.services.surreal_content import (
     MemoryScope,
@@ -447,6 +451,7 @@ async def context_search(
         )
         for signal, candidates in source_lists
     ]
+    temporal_target = resolve_temporal_reference(search_plan.query, datetime.now(UTC))
     fusion_backend = fusion_backend_from_env()
     fusion_failures: list[CandidateSourceFailure] = []
     fusion = await _fuse_candidates_for_plan(
@@ -454,6 +459,7 @@ async def context_search(
         source_lists=filtered_lists,
         plan=search_plan,
         limit=limit,
+        temporal_target=temporal_target,
         fusion_backend=fusion_backend,
         fusion_failures=fusion_failures,
     )
@@ -463,7 +469,7 @@ async def context_search(
             _apply_query_coverage_to_fused,
             search_plan.query,
             fused,
-            temporal_target=None,
+            temporal_target=temporal_target,
         )
     results = [
         _search_result_from_candidate(
@@ -1767,6 +1773,12 @@ def _candidate_from_episode_record(
     source = _string_value(row.get("source_description")) or _string_value(row.get("uuid"))
     policy_reason = "graph_projection_allowed"
     visibility = "organization"
+    metadata = {
+        **_selected_record_metadata(row),
+        "entity_type": "episode",
+        "source_id": source,
+        "retrieval_signals": [signal.value],
+    }
     return RetrievalCandidate(
         id=str(row.get("uuid", "")),
         type="episode",
@@ -1774,11 +1786,7 @@ def _candidate_from_episode_record(
         content=str(row.get("content") or ""),
         score=score,
         source=source,
-        metadata={
-            "entity_type": "episode",
-            "source_id": source,
-            "retrieval_signals": [signal.value],
-        },
+        metadata=metadata,
         created_at=_datetime_value(row.get("created_at")),
         policy_reason=policy_reason,
         visibility=visibility,
@@ -1902,6 +1910,10 @@ def _selected_record_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "invalid_at",
         "created_by",
         "modified_by",
+        "last_recalled_at",
+        "last_used_at",
+        "retrieval_count",
+        "citation_count",
         *_GRAPH_EXPANSION_METADATA_KEYS,
     ):
         value = row.get(key)
@@ -2263,12 +2275,14 @@ def _fuse_candidates(
     *,
     plan: RetrievalPlan,
     limit: int,
+    temporal_target: datetime | None = None,
 ) -> list[tuple[RetrievalCandidate, float, dict[str, Any]]]:
     return _rank_fused_candidates(
         source_lists,
         plan=plan,
         limit=limit,
         rrf_scores=_python_rrf_scores(source_lists, rrf_k=plan.weights.rrf_k),
+        temporal_target=temporal_target,
     )
 
 
@@ -2278,6 +2292,7 @@ async def _fuse_candidates_for_plan(
     source_lists: Sequence[tuple[RetrievalSignal, Sequence[RetrievalCandidate]]],
     plan: RetrievalPlan,
     limit: int,
+    temporal_target: datetime | None = None,
     fusion_backend: FusionBackend | None = None,
     fusion_failures: list[CandidateSourceFailure] | None = None,
 ) -> FusionExecutionResult:
@@ -2307,17 +2322,28 @@ async def _fuse_candidates_for_plan(
                     limit=limit,
                     rrf_scores=scores,
                     backend=backend,
+                    temporal_target=temporal_target,
                 ),
                 actual_backend=backend,
             )
         if any(candidates for _signal, candidates in source_lists):
             return FusionExecutionResult(
-                candidates=_fuse_candidates(source_lists, plan=plan, limit=limit),
+                candidates=_fuse_candidates(
+                    source_lists,
+                    plan=plan,
+                    limit=limit,
+                    temporal_target=temporal_target,
+                ),
                 actual_backend=FusionBackend.PYTHON_RRF,
             )
         return FusionExecutionResult(candidates=[], actual_backend=backend)
     return FusionExecutionResult(
-        candidates=_fuse_candidates(source_lists, plan=plan, limit=limit),
+        candidates=_fuse_candidates(
+            source_lists,
+            plan=plan,
+            limit=limit,
+            temporal_target=temporal_target,
+        ),
         actual_backend=FusionBackend.PYTHON_RRF,
     )
 
@@ -2384,6 +2410,7 @@ def _rank_fused_candidates(
     limit: int,
     rrf_scores: Mapping[str, float],
     backend: FusionBackend = FusionBackend.PYTHON_RRF,
+    temporal_target: datetime | None = None,
 ) -> list[tuple[RetrievalCandidate, float, dict[str, Any]]]:
     score_by_id: dict[str, float] = defaultdict(float)
     candidates_by_id: dict[str, RetrievalCandidate] = {}
@@ -2431,7 +2458,14 @@ def _rank_fused_candidates(
         if graph_signal_multiplier > 1.0:
             score *= graph_signal_multiplier
             fusion_metadata["graph_native_signal_boost"] = graph_signal_multiplier
-        boosted = _boost_score(candidate, score, plan=plan)
+        boosted, temporal_multiplier = _boost_score(
+            candidate,
+            score,
+            plan=plan,
+            temporal_target=temporal_target,
+        )
+        if temporal_multiplier != 1.0:
+            fusion_metadata["temporal_decay_multiplier"] = temporal_multiplier
         ranked.append((candidate, boosted, fusion_metadata))
     ranked.sort(key=lambda item: item[1], reverse=True)
     return ranked[:limit]
@@ -2542,7 +2576,8 @@ def _boost_score(
     score: float,
     *,
     plan: RetrievalPlan,
-) -> float:
+    temporal_target: datetime | None,
+) -> tuple[float, float]:
     boosted = score
     status = _string_value(candidate.metadata.get("status"))
     if candidate.type == "task" and status in _ACTIVE_TASK_STATUSES:
@@ -2552,7 +2587,16 @@ def _boost_score(
     if candidate.type == "raw_memory":
         boosted *= plan.weights.direct_raw_source_boost
     boosted *= _freshness_boost(candidate.created_at, cap=plan.weights.freshness_boost_cap)
-    return boosted
+    temporal_multiplier = (
+        1.0
+        if temporal_target is not None
+        else temporal_decay_multiplier(
+            candidate,
+            decay_days=core_config.temporal_decay_days,
+        )
+    )
+    boosted *= temporal_multiplier
+    return boosted, temporal_multiplier
 
 
 def _freshness_boost(created_at: datetime | None, *, cap: float) -> float:
@@ -2598,6 +2642,11 @@ def _search_result_from_candidate(
         )
     if fusion_metadata.get("graph_native_signal_boost"):
         metadata["graph_native_signal_boost"] = fusion_metadata.get("graph_native_signal_boost")
+    if fusion_metadata.get("temporal_decay_multiplier") is not None:
+        metadata["temporal_decay_multiplier"] = round(
+            float(fusion_metadata["temporal_decay_multiplier"]),
+            4,
+        )
     for key in _GRAPH_EXPANSION_METADATA_KEYS:
         if key in fusion_metadata:
             metadata[key] = fusion_metadata[key]

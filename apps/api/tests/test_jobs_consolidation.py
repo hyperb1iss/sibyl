@@ -452,6 +452,74 @@ async def test_priority_decay_scores_importance_recency_and_supersession(
 
 
 @pytest.mark.asyncio
+async def test_priority_decay_protects_cited_twin_before_age_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime.now(UTC)
+
+    def episode(entity_id: str, metadata: dict[str, object]) -> Entity:
+        return Entity(
+            id=entity_id,
+            entity_type=EntityType.EPISODE,
+            name=entity_id,
+            created_at=now - timedelta(days=240),
+            updated_at=now - timedelta(days=240),
+            metadata={"importance": 0.10, **metadata},
+        )
+
+    entity_manager = AsyncMock()
+    entity_manager.list_by_type = AsyncMock(
+        side_effect=[
+            [
+                episode("uncited", {}),
+                episode(
+                    "cited",
+                    {
+                        "last_used_at": (now - timedelta(days=1)).isoformat(),
+                        "citation_count": 1,
+                    },
+                ),
+                episode(
+                    "recalled",
+                    {
+                        "last_recalled_at": (now - timedelta(days=10)).isoformat(),
+                        "retrieval_count": 3,
+                    },
+                ),
+            ],
+            [],
+        ]
+    )
+    entity_manager.update = AsyncMock(return_value=object())
+
+    monkeypatch.setattr(
+        consolidation_module,
+        "_get_graph_runtime",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                client=MagicMock(),
+                entity_manager=entity_manager,
+                relationship_manager=AsyncMock(),
+            )
+        ),
+    )
+
+    result = await consolidation_module.priority_decay(
+        {},
+        group_id="org-123",
+        max_archives_per_run=10,
+        decay_threshold=0.35,
+        recency_half_life_days=180,
+        entity_types=(EntityType.EPISODE,),
+    )
+
+    assert result["candidates_found"] == 1
+    assert result["archived"] == 1
+    entity_manager.update.assert_awaited_once()
+    assert entity_manager.update.await_args.args[0] == "uncited"
+
+
+@pytest.mark.asyncio
 async def test_list_organization_ids_uses_runtime_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
