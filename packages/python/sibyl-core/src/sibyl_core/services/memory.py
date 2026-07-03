@@ -805,6 +805,40 @@ async def preview_memory_share(
         accessible_delegations=accessible_delegations,
     )
     decisions: list[MemoryPolicyDecision] = [target_decision]
+    if _redact_share_sources_for_denied_target(
+        target_scope=normalized_target,
+        target_decision=target_decision,
+    ):
+        metadata: dict[str, Any] = {
+            "cross_organization": bool(
+                recipient_organization_id and str(recipient_organization_id) != str(organization_id)
+            ),
+            "input_scopes": [],
+            "missing_source_ids": [],
+            "policy_reasons": [target_decision.reason],
+            "recipient_organization_id": recipient_organization_id,
+            "source_count": len(requested_source_ids),
+            "source_denial_reasons": {
+                source_id: target_decision.reason for source_id in requested_source_ids
+            },
+            "target_policy_reason": target_decision.reason,
+            "visible_count": 0,
+        }
+        return MemorySharePreview(
+            allowed=False,
+            reason=target_decision.reason,
+            target_scope=normalized_target,
+            target_scope_key=target_scope_key,
+            source_ids=requested_source_ids,
+            visible_source_ids=[],
+            denied_source_ids=requested_source_ids,
+            missing_source_ids=[],
+            redacted_count=len(requested_source_ids),
+            hidden_but_relevant_count=len(requested_source_ids),
+            policy_decisions=tuple(decisions),
+            metadata=metadata,
+        )
+
     visible_source_ids: list[str] = []
     denied_source_ids: list[str] = []
     missing_source_ids: list[str] = []
@@ -980,6 +1014,18 @@ def _space_field(space: Mapping[str, object] | object, key: str) -> object | Non
         mapping = cast(Mapping[str, object], space)
         return mapping.get(key)
     return getattr(space, key, None)
+
+
+def _redact_share_sources_for_denied_target(
+    *,
+    target_scope: MemoryScope | None,
+    target_decision: MemoryPolicyDecision,
+) -> bool:
+    return (
+        target_scope is MemoryScope.TEAM
+        and not target_decision.allowed
+        and target_decision.reason != "scope_crossing_requires_promotion"
+    )
 
 
 def _preview_target_identity(

@@ -702,6 +702,100 @@ async def test_share_preview_cross_org_remains_disabled(
 
 
 @pytest.mark.asyncio
+async def test_share_preview_redacts_sources_for_unverified_team_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    get_raw = AsyncMock()
+    monkeypatch.setattr(memory_module, "get_raw_memory", get_raw)
+    save = AsyncMock()
+    monkeypatch.setattr(memory_module, "save_raw_memory", save)
+
+    result = await preview_memory_share(
+        source_ids=["private-source", "project-source"],
+        organization_id="org-1",
+        principal_id="user-1",
+        target_scope="team",
+        target_scope_key="team_123",
+        accessible_teams={"team_other"},
+    )
+
+    assert not result.allowed
+    assert result.reason == "unverified_membership"
+    assert result.visible_source_ids == []
+    assert result.denied_source_ids == ["private-source", "project-source"]
+    assert result.redacted_count == 2
+    assert result.hidden_but_relevant_count == 2
+    assert result.metadata is not None
+    assert result.metadata["visible_count"] == 0
+    assert result.metadata["source_denial_reasons"] == {
+        "private-source": "unverified_membership",
+        "project-source": "unverified_membership",
+    }
+    get_raw.assert_not_awaited()
+    save.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_reason", "kwargs"),
+    [
+        (
+            _raw_import_memory(id="private-source", principal_id="other-user"),
+            "principal_mismatch",
+            {},
+        ),
+        (
+            _raw_import_memory(
+                id="delegated-source",
+                memory_scope=MemoryScope.DELEGATED,
+                scope_key="delegation_123",
+            ),
+            "unverified_membership",
+            {},
+        ),
+        (
+            _raw_import_memory(
+                id="project-source",
+                memory_scope=MemoryScope.PROJECT,
+                scope_key="project_123",
+            ),
+            "unverified_membership",
+            {"accessible_projects": {"project_other"}},
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_share_preview_redacts_unauthorized_sources_for_team_target(
+    monkeypatch: pytest.MonkeyPatch,
+    source: RawMemory,
+    expected_reason: str,
+    kwargs: dict[str, object],
+) -> None:
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=source))
+    save = AsyncMock()
+    monkeypatch.setattr(memory_module, "save_raw_memory", save)
+
+    result = await preview_memory_share(
+        source_ids=[source.id],
+        organization_id="org-1",
+        principal_id="user-1",
+        target_scope="team",
+        target_scope_key="team_123",
+        accessible_teams={"team_123"},
+        **kwargs,
+    )
+
+    assert not result.allowed
+    assert result.reason == "scope_crossing_requires_promotion"
+    assert result.visible_source_ids == []
+    assert result.denied_source_ids == [source.id]
+    assert result.redacted_count == 1
+    assert result.hidden_but_relevant_count == 1
+    assert result.metadata is not None
+    assert result.metadata["source_denial_reasons"] == {source.id: expected_reason}
+    save.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_share_memory_promotes_same_org_visible_sources_without_marking_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

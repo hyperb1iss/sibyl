@@ -302,15 +302,53 @@
     {
       "name": "team-scope-trust-gate",
       "owner_wave": "W8",
-      "status": "planned",
+      "status": "blocking",
       "profile": "product",
-      "blocking": false,
+      "blocking": true,
       "metric_contracts": [
         {
           "metric": "leak_count",
-          "mode": "threshold",
+          "mode": "receipt",
+          "required_receipt": "team-scope-trust-receipt.json",
+          "receipt_schema": "sibyl-team-scope-trust-receipt-v1",
           "direction": "lower",
-          "threshold": 0
+          "threshold": 0,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "team target redaction",
+            "private source isolation",
+            "delegated source isolation",
+            "project source isolation",
+            "team scope REST recall",
+            "unverified team denial"
+          ]
+        },
+        {
+          "metric": "promotion_attribution_coverage",
+          "mode": "receipt",
+          "required_receipt": "team-scope-trust-receipt.json",
+          "receipt_schema": "sibyl-team-scope-trust-receipt-v1",
+          "direction": "higher",
+          "threshold": 1,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "promotion attribution",
+            "audit receipt"
+          ]
+        },
+        {
+          "metric": "promotion_preview_coverage",
+          "mode": "receipt",
+          "required_receipt": "team-scope-trust-receipt.json",
+          "receipt_schema": "sibyl-team-scope-trust-receipt-v1",
+          "direction": "higher",
+          "threshold": 1,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "promotion preview",
+            "team membership lookup",
+            "canonical team memory space"
+          ]
         }
       ]
     },

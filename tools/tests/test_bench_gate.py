@@ -1509,6 +1509,99 @@ def test_validate_ai_memory_manifest_accepts_required_receipt_checks(
     assert failures == []
 
 
+def test_validate_ai_memory_manifest_accepts_team_scope_receipt_contract(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    receipt_path = tmp_path / "team-scope-trust-receipt.json"
+    receipt_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "sibyl-team-scope-trust-receipt-v1",
+                "metrics": {
+                    "leak_count": 0,
+                    "promotion_attribution_coverage": 1,
+                    "promotion_preview_coverage": 1,
+                },
+                "checks": [
+                    {
+                        "name": "team-target-preview-redaction",
+                        "status": "PASS",
+                        "surfaces": [
+                            "team target redaction",
+                            "private source isolation",
+                            "delegated source isolation",
+                            "project source isolation",
+                        ],
+                    },
+                    {
+                        "name": "share-promotion-apply",
+                        "status": "PASS",
+                        "surfaces": [
+                            "promotion attribution",
+                            "promotion preview",
+                            "audit receipt",
+                        ],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["gate_contracts"].append(
+        {
+            "name": "team-scope-trust-gate",
+            "owner_wave": "W8",
+            "status": "blocking",
+            "profile": "product",
+            "blocking": True,
+            "metric_contracts": [
+                {
+                    "metric": "leak_count",
+                    "mode": "receipt",
+                    "required_receipt": "team-scope-trust-receipt.json",
+                    "receipt_schema": "sibyl-team-scope-trust-receipt-v1",
+                    "direction": "lower",
+                    "threshold": 0,
+                    "require_receipt_checks": True,
+                    "required_surfaces": [
+                        "team target redaction",
+                        "private source isolation",
+                        "delegated source isolation",
+                        "project source isolation",
+                    ],
+                },
+                {
+                    "metric": "promotion_attribution_coverage",
+                    "mode": "receipt",
+                    "required_receipt": "team-scope-trust-receipt.json",
+                    "receipt_schema": "sibyl-team-scope-trust-receipt-v1",
+                    "direction": "higher",
+                    "threshold": 1,
+                    "require_receipt_checks": True,
+                    "required_surfaces": ["promotion attribution", "audit receipt"],
+                },
+                {
+                    "metric": "promotion_preview_coverage",
+                    "mode": "receipt",
+                    "required_receipt": "team-scope-trust-receipt.json",
+                    "receipt_schema": "sibyl-team-scope-trust-receipt-v1",
+                    "direction": "higher",
+                    "threshold": 1,
+                    "require_receipt_checks": True,
+                    "required_surfaces": ["promotion preview"],
+                },
+            ],
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == []
+
+
 def test_validate_ai_memory_manifest_accepts_usage_loop_receipt_contract(
     tmp_path: Path,
 ) -> None:

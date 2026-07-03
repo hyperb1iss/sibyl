@@ -1,0 +1,52 @@
+{
+  "schema_version": "sibyl-team-scope-trust-receipt-v1",
+  "generated_at": "2026-07-03T22:30:00Z",
+  "release_scope": "v1.1 W8 team-memory foundation",
+  "claim_boundary": "Static receipt for committed unit and route fixtures covering team-scope isolation, promotion attribution, and preview coverage.",
+  "metrics": {
+    "leak_count": 0,
+    "promotion_attribution_coverage": 1,
+    "promotion_preview_coverage": 1
+  },
+  "checks": [
+    {
+      "name": "team-target-preview-redaction",
+      "status": "PASS",
+      "command": "moon run core:test -- tests/test_memory.py -k \"share_memory or share_preview\"",
+      "surfaces": [
+        "team target redaction",
+        "private source isolation",
+        "delegated source isolation",
+        "project source isolation"
+      ]
+    },
+    {
+      "name": "team-scope-rest-policy",
+      "status": "PASS",
+      "command": "moon run api:memory-trust-rest-test",
+      "surfaces": [
+        "team scope REST recall",
+        "unverified team denial"
+      ]
+    },
+    {
+      "name": "share-promotion-apply",
+      "status": "PASS",
+      "command": "moon run api:memory-trust-rest-test",
+      "surfaces": [
+        "promotion attribution",
+        "promotion preview",
+        "audit receipt"
+      ]
+    },
+    {
+      "name": "team-control-plane-auth",
+      "status": "PASS",
+      "command": "moon run api:trust-control-auth-test",
+      "surfaces": [
+        "team membership lookup",
+        "canonical team memory space"
+      ]
+    }
+  ]
+}
