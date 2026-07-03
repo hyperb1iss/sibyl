@@ -1465,11 +1465,25 @@
           <div class="ledger-row">
             <span class="chip gap">Partial</span>
             <div class="body">
-              <b>Forgetting / decay is uneven.</b> The hybrid path applies temporal decay by
-              default (<code>apply_temporal=True</code>, 365-day half-life); the context/recall path
-              does not (<code>temporal_target=None</code>).
-              <code>priority_decay</code> archives low-importance entities reversibly. Not yet
-              uniform, tuned, or benchmarked.
+              <b>Forgetting / decay is uneven — and blind.</b> The hybrid path applies temporal
+              decay by default (<code>apply_temporal=True</code>, 365-day half-life); the
+              context/recall path does not (<code>temporal_target=None</code>).
+              <code>priority_decay</code> archives low-importance entities reversibly — but it reads
+              usage fields (<code>last_recalled_at</code> / <code>last_used_at</code>) that
+              <em>nothing writes</em> (verified 2026-07-03), so forgetting is effectively age-only:
+              "old = dead" instead of "unused = dead." No citation contract, no recall stamping, no
+              usage signal anywhere in the loop.
+            </div>
+          </div>
+          <div class="ledger-row">
+            <span class="chip off">Unwired</span>
+            <div class="body">
+              <b>Two compounding loops exist as structure, not as loops.</b> Verbatim raw captures +
+              lineage edges + a versioned extractor (<code>v0.12</code>) mean extraction
+              improvements could replay over the whole historical corpus — but no re-extraction path
+              exists. Tasks and memories share one graph, so memory utility could be grounded in
+              task outcomes — but no outcome signal is derived. Both properties are unique in the
+              field; neither compounds yet.
             </div>
           </div>
           <div class="ledger-row">
@@ -1963,7 +1977,7 @@
     <section id="principles">
       <div class="wrap">
         <span class="eyebrow">Design Principles</span>
-        <h2 class="section-title">Seven rules that govern sequencing and scope.</h2>
+        <h2 class="section-title">Eight rules that govern sequencing and scope.</h2>
 
         <div class="grid principles">
           <div class="principle lead">
@@ -2014,7 +2028,17 @@
             <h3>Turn the platform threat into distribution.</h3>
             <p>
               Be the MCP-native, OKF-speaking backend behind others' memory tools rather than
-              competing with client-side file memory.
+              competing with client-side file memory. Structured substrate, curated projection: the
+              graph is the source of truth; filesystem-native agents get it as curated files.
+            </p>
+          </div>
+          <div class="principle">
+            <div class="pn">Principle 08</div>
+            <h3>Close loops before tuning them.</h3>
+            <p>
+              Linear work improves the system additively; feedback loops compound. Sequence
+              loop-closing (usage signal, re-extraction, outcome grounding) ahead of parameter
+              tuning — never tune a decay function whose input signal does not exist yet.
             </p>
           </div>
         </div>
@@ -2033,8 +2057,8 @@
         </div>
         <p class="movement-theme">
           Make every public claim boring and complete. Move evals from manual to PR-gating, finish
-          the eval story, and enable the team-memory substrate. <strong>No headline claim ships
-          without a receipt.</strong>
+          the eval story, close the usage feedback loop, and enable the team-memory substrate.
+          <strong>No headline claim ships without a receipt.</strong>
         </p>
 
         <div class="work-grid">
@@ -2084,11 +2108,14 @@
             <h4>Write-path integrity (HaluMem-style)</h4>
             <p>
               Measure whether extraction and consolidation inject or reduce hallucinations, and gate
-              it. On-trend, under-shipped by competitors, consistent with the honest posture.
+              it. On-trend, under-shipped by competitors, consistent with the honest posture. Plus
+              two cheap hygiene guards: a <em>self-feeding guard</em> (the dream cycle must never
+              digest its own reflection output) and a <em>no-op gate</em> on background extraction
+              (minimum signal or write nothing).
             </p>
             <div class="gate">
               <span class="gname">write-path-integrity-gate</span>
-              <span class="gdef">extraction/consolidation hallucination rate ≤ threshold on a seeded fixture.</span>
+              <span class="gdef">extraction/consolidation hallucination rate ≤ threshold on a seeded fixture; self-feed fixture produces zero self-referential writes.</span>
             </div>
           </div>
 
@@ -2107,18 +2134,38 @@
           </div>
 
           <div class="work">
-            <span class="wid">W6</span>
+            <span class="wid">W6 · highest leverage</span>
+            <h4>Usage feedback loop (citation contract)</h4>
+            <p>
+              Write the usage fields the decay machinery was designed to read. Context packs
+              already carry stable item IDs; the skill packs ship a citation contract (a
+              <code>cited_ids</code> field on <code>task complete</code> / <code>reflect</code>,
+              or <code>sibyl cite</code>); a server hook records idempotent usage events, stamping
+              <code>last_recalled_at</code> (exposure) and <code>last_used_at</code> (citation).
+              Usage drives both survival and consolidation priority — forgetting becomes
+              <em>"unused = dead,"</em> and every later layer (decay tuning, distillation,
+              TeamMemBench utility) consumes this signal.
+            </p>
+            <div class="gate">
+              <span class="gname">usage-loop-gate</span>
+              <span class="gdef">usage events flow end-to-end from a live session; a cited entity measurably outlives its uncited twin through decay; recall stamping on 100% of pack builds.</span>
+            </div>
+          </div>
+
+          <div class="work">
+            <span class="wid">W7</span>
             <h4>Forgetting: uniform + benchmarked</h4>
             <p>
               Apply temporal decay across the context/recall path (not just hybrid); confirm
               consolidation scheduling; tune <code>priority_decay</code> and benchmark it
               (FadeMem-style storage-reduction %, recall impact, write-path integrity). Turns the
-              self-named "honest gap" into a measured feature.
+              self-named "honest gap" into a measured feature. <strong>Hard-depends on W6</strong> —
+              tuning decay without a usage signal is tuning noise.
             </p>
           </div>
 
           <div class="work">
-            <span class="wid">W7</span>
+            <span class="wid">W8</span>
             <h4>Team-memory foundation (substrate)</h4>
             <p>
               Enable the <code>team</code> scope across its three gates; ship team-management routes
@@ -2132,18 +2179,21 @@
           </div>
 
           <div class="work">
-            <span class="wid">W8</span>
-            <h4>Portability &amp; interchange (OKF export)</h4>
+            <span class="wid">W9</span>
+            <h4>OKF export — doubles as the memory changelog</h4>
             <p>
               <code>sibyl export --format okf</code> — one Markdown + YAML file per entity, edges as
               Markdown links, the labeled-property-graph preserved losslessly via OKF-legal extension
               frontmatter so the bundle is valid OKF for other tools yet round-trips back. ~2–4 days,
-              disproportionate payoff: "your memory stays yours, export in one command."
+              disproportionate payoff: "your memory stays yours, export in one command." And the
+              git-diffability is the feature: a scheduled export committed to a branch makes every
+              consolidation/decay/promotion cycle a reviewable diff — "what did the agent learn this
+              week" becomes <code>git log</code>, and memory gains a rollback story.
             </p>
           </div>
 
           <div class="work">
-            <span class="wid">W9</span>
+            <span class="wid">W10</span>
             <h4>Doc &amp; claim truth-up</h4>
             <p>
               Land the doc-staleness reconciliation; keep benchmark-claim discipline; keep the
@@ -2156,9 +2206,11 @@
           <span class="k">Exit</span>
           <p>
             Published QA-accuracy and LongMemEval-V2 numbers with citable receipts; a regression gate
-            blocks PRs on quality drops; the cost/latency curve is published; forgetting is uniform
-            and benchmarked; the <code>team</code> scope is enabled with proven isolation, a way to
-            create/populate teams, and a promote/SHARE path; OKF export ships.
+            blocks PRs on quality drops; the cost/latency curve is published; the usage loop is
+            closed (cited-vs-uncited decay divergence demonstrated); forgetting is uniform,
+            usage-aware, and benchmarked; the <code>team</code> scope is enabled with proven
+            isolation, a way to create/populate teams, and a promote/SHARE path; OKF export ships
+            with the scheduled memory-changelog mode.
           </p>
         </div>
       </div>
@@ -2179,7 +2231,9 @@
           provenance-preserving team-memory coalescence engine — with a first-class data model and
           deterministic conflict states. Cross-user entity resolution is the field's unsolved
           problem; the differentiator is doing it <strong>without ever leaking scope and always
-          reversibly</strong>.
+          reversibly</strong>. Contributors are <em>writers, not just humans</em>: the wedge is one
+          operator running agent swarms — the same coalescence problem with zero privacy risk,
+          dogfoodable on day one — and human teams land on the same records.
         </p>
 
         <div class="work-grid">
@@ -2240,7 +2294,45 @@
               Build the internal benchmark for cross-user entity resolution, concurrent multi-writer
               consistency, and "helped AND stayed scoped" (utility + access control + forgetting,
               GateMem-style). Dogfood seed: the eternia/macbook merge. Internal-only this release —
-              publication waits for v1.3; synthetic-only risks "benchmark theater."
+              publication waits for v1.3; synthetic-only risks "benchmark theater." The utility axis
+              is <strong>outcome-grounded</strong>: tasks and memories share the graph, so "helped"
+              means <em>cited during tasks that completed</em> — the ground-truth utility metric no
+              public memory benchmark has.
+            </p>
+          </div>
+          <div class="work">
+            <span class="wid">W6</span>
+            <h4>Distillation pass — the per-project handbook</h4>
+            <p>
+              Mechanical merge keeps N records; distillation compresses knowledge. A dream-cycle
+              stage maintains a distilled per-project handbook + wake summary (built with
+              <code>synthesis_plan/draft/verify</code>), regenerated when the graph changes enough.
+              Wake bundles serve the distilled artifact instead of raw top-k; the v1.1 usage signal
+              tells the distiller what earned prominence; the write-path-integrity gate applies to
+              the distiller too.
+            </p>
+          </div>
+          <div class="work">
+            <span class="wid">W7</span>
+            <h4>Materialized memory-as-files</h4>
+            <p>
+              <code>sibyl export --project</code> + a session hook materialize the handbook + recent
+              context pack into <code>.sibyl/memory/</code> read-only files. Filesystem-native
+              agents grep at zero marginal latency and survive server outages; citations still route
+              usage back over the API. <em>Structured substrate, curated projection</em> — Sibyl is
+              the governed source of truth behind the flat-file UX the frontier converged on.
+            </p>
+          </div>
+          <div class="work">
+            <span class="wid">W8</span>
+            <h4>Retroactive re-extraction loop</h4>
+            <p>
+              Verbatim raws + lineage + a versioned extractor mean every extraction improvement can
+              replay over the whole historical corpus — memory quality compounds retroactively, a
+              property no competitor has. <code>sibyl admin re-extract
+              --since-extractor-version</code> re-derives, diffs against current, and scores the
+              delta with the v1.1 regression harness before promoting; supersession edges keep the
+              old derivation for rollback.
             </p>
           </div>
         </div>
@@ -2248,9 +2340,11 @@
         <div class="exit">
           <span class="k">Exit</span>
           <p>
-            Reversible team coalescence with deterministic conflict states and attribution; isolation
-            proven under concurrent load and revocation; internal TeamMemBench passing with a
-            documented scale envelope (orgs / connections / latency).
+            Reversible coalescence with deterministic conflict states and attribution, proven on the
+            agent-swarm dogfood; isolation proven under concurrent load and revocation; internal
+            TeamMemBench passing with a documented scale envelope and an outcome-grounded utility
+            metric; distilled handbook + files projection serving wake bundles; one re-extraction
+            replay executed end-to-end with a scored, gated delta.
           </p>
         </div>
       </div>
@@ -2286,7 +2380,9 @@
             <p>
               MAGMA-style multi-graph disentanglement (seam decided in v1.2); an optional
               cross-encoder reranker path for diffuse-evidence questions; belief-revision semantics
-              (Kumiho/AGM) <em>if</em> observed conflicts justify it; procedural/skill memory.
+              (Kumiho/AGM) <em>if</em> observed conflicts justify it; procedural/skill memory;
+              outcome-conditioned memory valuation — decay driven by task-outcome lift, the
+              strongest form of "unused = dead."
             </p>
           </div>
           <div class="work">
