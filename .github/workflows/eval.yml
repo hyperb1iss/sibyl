@@ -16,6 +16,21 @@ on:
     - cron: "0 8 * * 1-6"
     # Keep this string in sync with the LongMemEval full-job schedule guard.
     - cron: "0 8 * * 0"
+  pull_request:
+    paths:
+      - ".github/workflows/eval.yml"
+      - ".github/actions/start-surrealdb/**"
+      - "apps/api/src/**"
+      - "apps/api/pyproject.toml"
+      - "benchmarks/**"
+      - "moon.yml"
+      - "packages/python/sibyl-core/pyproject.toml"
+      - "packages/python/sibyl-core/src/**"
+      - "pyproject.toml"
+      - "tools/bench/**"
+      - "tools/tests/test_bench_gate.py"
+      - "tools/tests/test_longmemeval_live.py"
+      - "uv.lock"
   workflow_dispatch:
     inputs:
       retrieval_mode:
@@ -100,6 +115,8 @@ env:
   EVAL_RETRIEVAL_MODE: ${{ inputs.retrieval_mode || 'native' }}
   EVAL_REPEAT: ${{ inputs.repeat || '20' }}
   LONGMEMEVAL_SMOKE_LIMIT: ${{ inputs.longmemeval_smoke_limit || '25' }}
+  LONGMEMEVAL_LOCAL_SMOKE_LIMIT:
+    ${{ github.event_name == 'pull_request' && '10' || (inputs.longmemeval_smoke_limit || '25') }}
   LONGMEMEVAL_CONCURRENCY: ${{ inputs.longmemeval_concurrency || '1' }}
   LONGMEMEVAL_CORPUS_TEXT_POLICY:
     ${{ inputs.longmemeval_corpus_text_policy || 'user-and-assistant-turns-v1' }}
@@ -118,6 +135,7 @@ env:
 jobs:
   live-eval:
     name: Live Context-Pack Eval
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -285,6 +303,7 @@ jobs:
 
   longmemeval-live-smoke:
     name: LongMemEval Live Smoke
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -426,7 +445,10 @@ jobs:
       - name: Gate LongMemEval live smoke
         run: |
           moon run bench-gate -- .moon/cache/evals/longmemeval_live_smoke.json \
-            --profile ai-memory
+            --profile ai-memory \
+            --require-runtime embedding_provider=openai \
+            --require-runtime embedding_provider_status=enabled \
+            --require-runtime embedding_cache_namespace=graph
 
       - name: Upload LongMemEval live smoke artifact
         uses: actions/upload-artifact@v7
@@ -474,13 +496,294 @@ jobs:
           echo "=== SurrealDB logs ==="
           docker compose --env-file /dev/null logs surrealdb || true
 
+  longmemeval-local-smoke:
+    name: LongMemEval Local Embedding Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SIBYL_ENVIRONMENT: production
+      SIBYL_JWT_SECRET: test-secret-for-eval
+      SIBYL_STORE: surreal
+      SIBYL_AUTH_STORE: surreal
+      SIBYL_PUBLIC_SIGNUPS_ENABLED: "true"
+      SIBYL_LOCAL_AUTH_ENABLED: "true"
+      SIBYL_COORDINATION_BACKEND: local
+      SIBYL_SURREAL_URL: ws://localhost:8000/rpc
+      SIBYL_SURREAL_USERNAME: sibyl_ci
+      SIBYL_SURREAL_PASSWORD: sibyl_ci_password
+      SIBYL_GRAPH_EMBEDDING_PROVIDER: local
+      SIBYL_GRAPH_EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
+      SIBYL_GRAPH_EMBEDDING_DIMENSIONS: "384"
+      SIBYL_AUTO_EXTRACT_ENTITIES: "false"
+      SIBYL_GRAPH_HNSW_EFC: ${{ inputs.longmemeval_graph_hnsw_efc || '150' }}
+      SIBYL_GRAPH_HNSW_M: ${{ inputs.longmemeval_graph_hnsw_m || '12' }}
+      SIBYL_GRAPH_KNN_EF: ${{ inputs.longmemeval_graph_knn_ef || '40' }}
+      SIBYL_NATIVE_FUSION_BACKEND: ${{ inputs.longmemeval_native_fusion_backend || 'python_rrf' }}
+      PYTHONUNBUFFERED: "1"
+      LONGMEMEVAL_SHA256: d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442
+      LONGMEMEVAL_URL: https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json?download=true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Start SurrealDB
+        uses: ./.github/actions/start-surrealdb
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt-dev
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6
+        with:
+          auto-install: true
+          auto-setup: true
+          cache-version: surreal-ci-v1
+
+      - name: Cache moon outputs
+        uses: actions/cache@v6
+        with:
+          path: .moon/cache
+          key: moon-longmemeval-local-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          restore-keys: |
+            moon-longmemeval-local-${{ runner.os }}-
+
+      - name: Cache uv
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/uv
+          key: uv-longmemeval-local-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-longmemeval-local-${{ runner.os }}-
+
+      - name: Cache local embedding model
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/huggingface
+          key: hf-minilm-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            hf-minilm-${{ runner.os }}-
+
+      - name: Fetch LongMemEval-S cleaned
+        run: |
+          mkdir -p .moon/cache/benchmarks
+          dataset=.moon/cache/benchmarks/longmemeval_s_cleaned.json
+          if [[ ! -f "$dataset" ]]; then
+            curl -L --retry 3 --retry-delay 5 "$LONGMEMEVAL_URL" -o "$dataset"
+          fi
+          echo "$LONGMEMEVAL_SHA256  $dataset" | sha256sum -c -
+
+      - name: Start backend server
+        run: |
+          cd apps/api
+          uv run --with sentence-transformers==5.6.0 sibyld serve > /tmp/sibyld.log 2>&1 &
+          echo "Waiting for backend to start..."
+          ready=false
+          for i in {1..180}; do
+            if curl -fsS http://localhost:3334/api/health > /dev/null; then
+              echo "Backend is ready!"
+              sleep 2
+              ready=true
+              break
+            fi
+            echo "Attempt $i: Backend not ready yet..."
+            sleep 1
+          done
+          if [[ "$ready" != "true" ]]; then
+            echo "::error::Backend did not become ready with local embeddings enabled."
+            tail -n 200 /tmp/sibyld.log || true
+            exit 1
+          fi
+          curl -fsS http://localhost:3334/api/health | head -c 200
+
+      - name: Start background job worker
+        run: |
+          cd apps/api
+          uv run --with sentence-transformers==5.6.0 sibyld worker > /tmp/sibyl-worker.log 2>&1 &
+          echo "Background job worker started"
+          sleep 2
+
+      - name: Run LongMemEval local embedding smoke
+        run: |
+          mkdir -p .moon/cache/evals
+          wait_for_projection="${LONGMEMEVAL_WAIT_FOR_MEMORY_PROJECTION}"
+          projection_args=()
+          if [[ "$wait_for_projection" == "true" ]]; then
+            projection_args+=(
+              --wait-for-memory-projection
+              --memory-projection-timeout "${LONGMEMEVAL_MEMORY_PROJECTION_TIMEOUT}"
+            )
+          fi
+          moon run bench-longmemeval-live-local -- \
+            .moon/cache/benchmarks/longmemeval_s_cleaned.json \
+            --api-url http://localhost:3334/api \
+            --allow-localhost \
+            --limit "${LONGMEMEVAL_LOCAL_SMOKE_LIMIT}" \
+            --sample-strategy stratified \
+            --corpus-text-policy "${LONGMEMEVAL_CORPUS_TEXT_POLICY}" \
+            --concurrency "${LONGMEMEVAL_CONCURRENCY}" \
+            --heartbeat-interval 30 \
+            --stall-timeout 300 \
+            --output .moon/cache/evals/longmemeval_local_smoke.json \
+            --label live-local-minilm \
+            --metadata ci_job=longmemeval-local-smoke \
+            --metadata comparison_peer=longmemeval-live-smoke \
+            --metadata embedding_variant=local-all-MiniLM-L6-v2 \
+            --metadata auto_extract_entities="${SIBYL_AUTO_EXTRACT_ENTITIES}" \
+            --metadata wait_for_memory_projection="$wait_for_projection" \
+            --metadata wait_for_memory_extraction=false \
+            --metadata graph_hnsw_efc="${SIBYL_GRAPH_HNSW_EFC}" \
+            --metadata graph_hnsw_m="${SIBYL_GRAPH_HNSW_M}" \
+            --metadata graph_knn_ef="${SIBYL_GRAPH_KNN_EF}" \
+            --metadata native_fusion_backend="${SIBYL_NATIVE_FUSION_BACKEND}" \
+            "${projection_args[@]}"
+
+      - name: Gate LongMemEval local embedding smoke
+        run: |
+          moon run bench-gate -- .moon/cache/evals/longmemeval_local_smoke.json \
+            --profile ai-memory \
+            --require-runtime embedding_provider=local \
+            --require-runtime embedding_provider_configured=local \
+            --require-runtime embedding_provider_status=enabled \
+            --require-runtime embedding_cache_namespace=graph \
+            --require-runtime embedding_model=sentence-transformers/all-MiniLM-L6-v2
+
+      - name: Assert local graph embeddings stayed enabled
+        run: |
+          if grep -q "graph_embeddings_disabled.*provider=local" /tmp/sibyld.log /tmp/sibyl-worker.log; then
+            echo "::error::Local graph embeddings were disabled during the smoke run."
+            exit 1
+          fi
+
+      - name: Upload LongMemEval local embedding smoke artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: longmemeval-local-smoke-${{ github.sha }}
+          path: .moon/cache/evals/longmemeval_local_smoke.json
+          if-no-files-found: error
+
+      - name: Collect LongMemEval local embedding diagnostics
+        if: always()
+        run: |
+          diagnostics=.moon/cache/evals/longmemeval_local_smoke_diagnostics
+          mkdir -p "$diagnostics"
+          cp .moon/cache/evals/longmemeval_local_smoke.json "$diagnostics/longmemeval_local_smoke.json" || true
+          cp /tmp/sibyld.log "$diagnostics/sibyld.log" || true
+          cp /tmp/sibyl-worker.log "$diagnostics/sibyl-worker.log" || true
+          docker compose --env-file /dev/null ps -a > "$diagnostics/docker-compose-ps.txt" 2>&1 || true
+          container_id="$(docker compose --env-file /dev/null ps -q surrealdb || true)"
+          if [[ -n "$container_id" ]]; then
+            docker inspect "$container_id" \
+              --format 'restartCount={{.RestartCount}} oomKilled={{.State.OOMKilled}} exitCode={{.State.ExitCode}} error={{.State.Error}} startedAt={{.State.StartedAt}} finishedAt={{.State.FinishedAt}}' \
+              > "$diagnostics/surrealdb-container.txt" 2>&1 || true
+            docker stats --no-stream "$container_id" \
+              > "$diagnostics/surrealdb-stats.txt" 2>&1 || true
+          fi
+          docker compose --env-file /dev/null logs surrealdb > "$diagnostics/surrealdb.log" 2>&1 || true
+
+      - name: Upload LongMemEval local embedding diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: longmemeval-local-smoke-diagnostics-${{ github.sha }}
+          path: .moon/cache/evals/longmemeval_local_smoke_diagnostics
+          if-no-files-found: warn
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: |
+          echo "=== Backend server logs ==="
+          tail -n 200 /tmp/sibyld.log || true
+          echo ""
+          echo "=== Worker logs ==="
+          tail -n 200 /tmp/sibyl-worker.log || true
+          echo ""
+          echo "=== SurrealDB logs ==="
+          docker compose --env-file /dev/null logs surrealdb || true
+
+  longmemeval-local-vs-openai:
+    name: LongMemEval Local vs OpenAI Comparison
+    if: github.event_name != 'pull_request'
+    needs:
+      - longmemeval-live-smoke
+      - longmemeval-local-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6
+        with:
+          auto-install: true
+          auto-setup: true
+          cache-version: surreal-ci-v1
+
+      - name: Cache moon outputs
+        uses: actions/cache@v6
+        with:
+          path: .moon/cache
+          key: moon-longmemeval-compare-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          restore-keys: |
+            moon-longmemeval-compare-${{ runner.os }}-
+
+      - name: Cache uv
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/uv
+          key: uv-longmemeval-compare-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-longmemeval-compare-${{ runner.os }}-
+
+      - name: Download OpenAI smoke artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: longmemeval-live-smoke-${{ github.sha }}
+          path: .moon/cache/evals/openai
+
+      - name: Download local smoke artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: longmemeval-local-smoke-${{ github.sha }}
+          path: .moon/cache/evals/local
+
+      - name: Compare local and OpenAI smoke receipts
+        run: |
+          mkdir -p .moon/cache/evals
+          moon run bench-gate -- .moon/cache/evals/local/longmemeval_local_smoke.json \
+            --profile ai-memory \
+            --baseline .moon/cache/evals/openai/longmemeval_live_smoke.json \
+            --baseline-metric recall@5 \
+            --baseline-metric ndcg@5 \
+            --baseline-metric recall@10 \
+            --baseline-metric ndcg@10 \
+            --max-regression recall@5=1.0 \
+            --max-regression ndcg@5=1.0 \
+            --max-regression recall@10=1.0 \
+            --max-regression ndcg@10=1.0 \
+            | tee .moon/cache/evals/longmemeval_local_vs_openai_comparison.txt
+
+      - name: Upload local vs OpenAI comparison
+        uses: actions/upload-artifact@v7
+        with:
+          name: longmemeval-local-vs-openai-${{ github.sha }}
+          path: .moon/cache/evals/longmemeval_local_vs_openai_comparison.txt
+          if-no-files-found: error
+
   longmemeval-live-full:
     name: LongMemEval Live Full
     # Keep the schedule string in sync with the Sunday cron above.
     if:
       ${{
-        inputs.run_longmemeval_full ||
-        (github.event_name == 'schedule' && github.event.schedule == '0 8 * * 0')
+        github.event_name != 'pull_request' &&
+        (
+          inputs.run_longmemeval_full ||
+          (github.event_name == 'schedule' && github.event.schedule == '0 8 * * 0')
+        )
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
@@ -622,7 +925,10 @@ jobs:
       - name: Gate LongMemEval live full
         run: |
           moon run bench-gate -- .moon/cache/evals/longmemeval_live_full.json \
-            --profile ai-memory
+            --profile ai-memory \
+            --require-runtime embedding_provider=openai \
+            --require-runtime embedding_provider_status=enabled \
+            --require-runtime embedding_cache_namespace=graph
 
       - name: Upload LongMemEval live full artifact
         if: always()

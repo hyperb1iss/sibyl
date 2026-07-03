@@ -667,6 +667,7 @@ tasks:
       - benchmarks/longmemeval_v2_official.py
       - benchmarks/longmemeval_v2_memory/**/*.py
       - benchmarks/results/ai-memory/**/*.json
+      - moon.yml
       - pyproject.toml
 
   vector-index-bench:
@@ -1097,6 +1098,11 @@ tasks:
 
   bench-longmemeval-live:
     command: uv run python benchmarks/longmemeval_live.py
+    options:
+      cache: false
+
+  bench-longmemeval-live-local:
+    command: uv run --with sentence-transformers==5.6.0 python benchmarks/longmemeval_live.py
     options:
       cache: false
 

@@ -32,22 +32,100 @@ def test_eval_workflow_full_run_forces_memory_extraction_off() -> None:
         encoding="utf-8"
     )
     smoke_job = workflow.split("  longmemeval-live-smoke:", 1)[1].split(
+        "  longmemeval-local-smoke:",
+        1,
+    )[0]
+    local_job = workflow.split("  longmemeval-local-smoke:", 1)[1].split(
+        "  longmemeval-local-vs-openai:",
+        1,
+    )[0]
+    comparison_job = workflow.split("  longmemeval-local-vs-openai:", 1)[1].split(
         "  longmemeval-live-full:",
         1,
     )[0]
     full_job = workflow.split("  longmemeval-live-full:", 1)[1]
 
     assert "Enable queued LLM memory extraction during LongMemEval smoke only" in workflow
+    assert "pull_request:" in workflow
     assert (
         "SIBYL_AUTO_EXTRACT_ENTITIES: ${{ inputs.longmemeval_auto_extract_entities || false }}"
     ) in smoke_job
+    assert "if: github.event_name != 'pull_request'" in smoke_job
     assert 'SIBYL_AUTO_EXTRACT_ENTITIES: "false"' in full_job
     assert "SIBYL_LLM_MEMORY_PROVIDER" not in full_job
     assert "--wait-for-memory-extraction" not in full_job
     assert "Full LongMemEval must run with SIBYL_AUTO_EXTRACT_ENTITIES=false." in full_job
     assert '--metadata auto_extract_entities="${SIBYL_AUTO_EXTRACT_ENTITIES}"' in full_job
+    assert "--require-runtime embedding_provider=openai" in smoke_job
+    assert "--require-runtime embedding_provider=openai" in full_job
     assert 'SIBYL_LOCAL_AUTH_ENABLED: "true"' in smoke_job
+    assert 'SIBYL_LOCAL_AUTH_ENABLED: "true"' in local_job
     assert 'SIBYL_LOCAL_AUTH_ENABLED: "true"' in full_job
+    assert "longmemeval-live-smoke" in comparison_job
+
+
+def test_eval_workflow_has_pr_safe_local_embedding_slice() -> None:
+    workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "eval.yml").read_text(
+        encoding="utf-8"
+    )
+    local_job = workflow.split("  longmemeval-local-smoke:", 1)[1].split(
+        "  longmemeval-local-vs-openai:",
+        1,
+    )[0]
+    moon = (Path(__file__).parents[2] / "moon.yml").read_text(encoding="utf-8")
+
+    assert '"uv.lock"' in workflow
+    assert '"pyproject.toml"' in workflow
+    assert '".github/actions/start-surrealdb/**"' in workflow
+    assert '"packages/python/sibyl-core/pyproject.toml"' in workflow
+    assert '"apps/api/pyproject.toml"' in workflow
+    assert "bench-longmemeval-live-local:" in moon
+    assert "uv run --with sentence-transformers==5.6.0 python benchmarks/longmemeval_live.py" in (
+        moon
+    )
+    assert "LONGMEMEVAL_LOCAL_SMOKE_LIMIT:" in workflow
+    assert "github.event_name == 'pull_request' && '10'" in workflow
+    assert "SIBYL_GRAPH_EMBEDDING_PROVIDER: local" in local_job
+    assert "SIBYL_GRAPH_EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2" in local_job
+    assert 'SIBYL_GRAPH_EMBEDDING_DIMENSIONS: "384"' in local_job
+    assert "SIBYL_OPENAI_API_KEY" not in local_job
+    assert "secrets.OPENAI_API_KEY" not in local_job
+    assert "for i in {1..180}; do" in local_job
+    assert "uv run --with sentence-transformers==5.6.0 sibyld serve" in local_job
+    assert "uv run --with sentence-transformers==5.6.0 sibyld worker" in local_job
+    assert "moon run bench-longmemeval-live-local" in local_job
+    assert "--metadata comparison_peer=longmemeval-live-smoke" in local_job
+    assert "--metadata embedding_variant=local-all-MiniLM-L6-v2" in local_job
+    assert "moon run bench-gate -- .moon/cache/evals/longmemeval_local_smoke.json" in local_job
+    assert "--require-runtime embedding_provider=local" in local_job
+    assert "--require-runtime embedding_provider_status=enabled" in local_job
+    assert "--require-runtime embedding_cache_namespace=graph" in local_job
+    assert "graph_embeddings_disabled.*provider=local" in local_job
+
+
+def test_eval_workflow_compares_local_and_openai_smoke_receipts() -> None:
+    workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "eval.yml").read_text(
+        encoding="utf-8"
+    )
+    comparison_job = workflow.split("  longmemeval-local-vs-openai:", 1)[1].split(
+        "  longmemeval-live-full:",
+        1,
+    )[0]
+
+    assert "if: github.event_name != 'pull_request'" in comparison_job
+    assert "longmemeval-live-smoke" in comparison_job
+    assert "longmemeval-local-smoke" in comparison_job
+    assert "actions/download-artifact@v7" in comparison_job
+    assert "longmemeval-live-smoke-${{ github.sha }}" in comparison_job
+    assert "longmemeval-local-smoke-${{ github.sha }}" in comparison_job
+    assert (
+        "moon run bench-gate -- .moon/cache/evals/local/longmemeval_local_smoke.json"
+        in comparison_job
+    )
+    assert "--baseline .moon/cache/evals/openai/longmemeval_live_smoke.json" in comparison_job
+    assert "--baseline-metric recall@5" in comparison_job
+    assert "--baseline-metric ndcg@5" in comparison_job
+    assert "longmemeval_local_vs_openai_comparison.txt" in comparison_job
 
 
 def _load_live_module() -> ModuleType:
@@ -149,6 +227,7 @@ def _assert_gate_valid_report(module: ModuleType, report: dict[str, Any]) -> Non
     assert report["mode"] == "hybrid"
     assert report["runtime"]["embedding_provider"] == "disabled"
     assert report["runtime"]["embedding_dimensions"] == 0
+    assert report["runtime"]["embedding_cache_namespace"] == "not-applicable"
     assert report["runtime"]["entity_content_projection_policy"] == (
         module.ENTITY_CONTENT_PROJECTION_POLICY
     )

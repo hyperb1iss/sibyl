@@ -75,6 +75,7 @@ _RELEASE_METADATA_FIELDS = (
     "embedding_provider",
     "embedding_model",
     "embedding_dimensions",
+    "embedding_cache_namespace",
     "tokenizer_estimate_method",
     "dataset_name",
     "corpus_hash",
@@ -169,6 +170,14 @@ HIGHER_IS_BETTER_METRICS = frozenset(
     )
 )
 HIGHER_IS_BETTER_PREFIXES = ("recall@", "ndcg@", "precision@", "success@")
+_NON_EMBEDDING_PROVIDERS = frozenset(("none", "not-applicable", "n/a", "disabled"))
+_GRAPH_EMBEDDING_CACHE_NAMESPACE = "graph"
+_NON_EMBEDDING_CACHE_NAMESPACE = "not-applicable"
+_KNOWN_EMBEDDING_DIMENSIONS = {
+    ("local", "baai/bge-m3"): 1024,
+    ("local", "sentence-transformers/all-minilm-l6-v2"): 384,
+    ("openai", "text-embedding-3-small"): 1024,
+}
 
 
 def load_report(path: Path) -> dict[str, Any]:
@@ -299,18 +308,61 @@ def _validate_positive_integer_field(value: Any, *, path: str) -> list[str]:
     return [f"{path} must be a positive integer"]
 
 
+def _normalize_embedding_provider(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _normalize_embedding_model(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
 def _validate_embedding_dimensions(
     runtime: dict[str, Any],
     *,
     path: str,
 ) -> list[str]:
-    provider = str(runtime.get("embedding_provider") or "").strip().lower()
+    provider = _normalize_embedding_provider(runtime.get("embedding_provider"))
+    model = _normalize_embedding_model(runtime.get("embedding_model"))
     dimensions = runtime.get("embedding_dimensions")
-    if provider in {"none", "not-applicable", "n/a"}:
+    if provider in _NON_EMBEDDING_PROVIDERS:
         if dimensions == 0 or (isinstance(dimensions, str) and dimensions.strip() == "0"):
             return []
         return [f"{path} must be 0 when embedding_provider is {provider!r}"]
-    return _validate_positive_integer_field(dimensions, path=path)
+
+    parsed_dimensions = _coerce_positive_integer(dimensions)
+    if parsed_dimensions is None:
+        return [f"{path} must be a positive integer"]
+
+    expected_dimensions = _KNOWN_EMBEDDING_DIMENSIONS.get((provider, model))
+    if expected_dimensions is not None and parsed_dimensions != expected_dimensions:
+        return [f"{path} must be {expected_dimensions} for {provider} embedding_model {model!r}"]
+    return []
+
+
+def _validate_embedding_cache_namespace(
+    runtime: dict[str, Any],
+    *,
+    path: str,
+) -> list[str]:
+    provider = _normalize_embedding_provider(runtime.get("embedding_provider"))
+    namespace = str(runtime.get("embedding_cache_namespace") or "").strip()
+    if provider in _NON_EMBEDDING_PROVIDERS:
+        if namespace == _NON_EMBEDDING_CACHE_NAMESPACE:
+            return []
+        return [
+            f"{path} must be {_NON_EMBEDDING_CACHE_NAMESPACE!r} "
+            f"when embedding_provider is {provider!r}"
+        ]
+    if provider in {"gemini", "local", "openai"}:
+        if namespace == _GRAPH_EMBEDDING_CACHE_NAMESPACE:
+            return []
+        return [
+            f"{path} must be {_GRAPH_EMBEDDING_CACHE_NAMESPACE!r} "
+            f"when embedding_provider is {provider!r}"
+        ]
+    if namespace:
+        return []
+    return [f"{path} must be a non-empty cache namespace"]
 
 
 def _validate_required_fields(
@@ -398,6 +450,15 @@ def _validate_ai_memory_release_metadata(report: dict[str, Any]) -> list[str]:
         failures.extend(
             _validate_embedding_dimensions(runtime_record, path="runtime['embedding_dimensions']")
         )
+        if _is_present(runtime_record.get("embedding_cache_namespace")) or (
+            _normalize_embedding_provider(runtime_record.get("embedding_provider")) == "local"
+        ):
+            failures.extend(
+                _validate_embedding_cache_namespace(
+                    runtime_record,
+                    path="runtime['embedding_cache_namespace']",
+                )
+            )
 
     if not isinstance(dataset, dict):
         failures.append("missing non-empty field 'dataset' or 'corpus'")
@@ -602,9 +663,15 @@ def validate_context_pack_release_metadata(report: dict[str, Any]) -> list[str]:
         )
     )
     failures.extend(
-        _validate_positive_integer_field(
-            metadata_record.get("embedding_dimensions"),
+        _validate_embedding_dimensions(
+            metadata_record,
             path="metadata['embedding_dimensions']",
+        )
+    )
+    failures.extend(
+        _validate_embedding_cache_namespace(
+            metadata_record,
+            path="metadata['embedding_cache_namespace']",
         )
     )
     failures.extend(
@@ -636,6 +703,29 @@ def _validate_report_metadata_requirements(
         actual = metadata.get(key)
         if actual != expected:
             failures.append(f"metadata[{key!r}] expected {expected!r}, got {actual!r}")
+    return failures
+
+
+def _requirement_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return str(value).lower()
+    return str(value)
+
+
+def _validate_report_runtime_requirements(
+    report: dict[str, Any],
+    required_runtime: dict[str, str] | None,
+) -> list[str]:
+    if not required_runtime:
+        return []
+    runtime = report.get("runtime")
+    if not isinstance(runtime, dict):
+        return ["report runtime is missing or invalid"]
+    failures: list[str] = []
+    for key, expected in required_runtime.items():
+        actual = runtime.get(key)
+        if _requirement_value(actual) != expected:
+            failures.append(f"runtime[{key!r}] expected {expected!r}, got {actual!r}")
     return failures
 
 
@@ -1434,6 +1524,7 @@ def evaluate_report(
     minimums: dict[str, float] | None = None,
     maximums: dict[str, float] | None = None,
     required_metadata: dict[str, str] | None = None,
+    required_runtime: dict[str, str] | None = None,
 ) -> list[str]:
     try:
         metrics = extract_metrics(report)
@@ -1448,6 +1539,7 @@ def evaluate_report(
     )
     failures: list[str] = []
     failures.extend(_validate_report_metadata_requirements(report, required_metadata))
+    failures.extend(_validate_report_runtime_requirements(report, required_runtime))
     failures.extend(_validate_profile_requirements(report, profile))
     failures.extend(_validate_metric_thresholds(metrics, thresholds))
     return failures
@@ -1619,6 +1711,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Require report metadata to include exact key/value pairs.",
     )
     parser.add_argument(
+        "--require-runtime",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Require report runtime to include exact key/value pairs.",
+    )
+    parser.add_argument(
         "--baseline",
         type=Path,
         help="Saved baseline report JSON for no-regression comparison.",
@@ -1640,8 +1739,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.report is None:
-        if args.baseline is not None or args.baseline_metric or args.max_regression:
-            parser.error("--baseline options require a report argument")
+        if (
+            args.baseline is not None
+            or args.baseline_metric
+            or args.max_regression
+            or args.require_runtime
+        ):
+            parser.error("--baseline and runtime options require a report argument")
         return _gate_default_manifest()
     if args.baseline is None and args.baseline_metric:
         parser.error("--baseline-metric requires --baseline")
@@ -1652,6 +1756,7 @@ def main(argv: list[str] | None = None) -> int:
         minimums = parse_kv_pairs(args.min_metric, value_kind="float")
         maximums = parse_kv_pairs(args.max_metric, value_kind="float")
         required_metadata = parse_kv_pairs(args.require_metadata, value_kind="string")
+        required_runtime = parse_kv_pairs(args.require_runtime, value_kind="string")
         max_regressions = parse_kv_pairs(args.max_regression, value_kind="float")
     except ValueError as exc:
         parser.error(str(exc))
@@ -1667,6 +1772,7 @@ def main(argv: list[str] | None = None) -> int:
         minimums=minimums,
         maximums=maximums,
         required_metadata=required_metadata,
+        required_runtime=required_runtime,
     )
     if baseline_report is not None:
         failures.extend(

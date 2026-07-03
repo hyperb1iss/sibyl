@@ -16,6 +16,7 @@ RELEASE_METADATA = {
     "embedding_provider": "gemini",
     "embedding_model": "gemini-embedding-2",
     "embedding_dimensions": "768",
+    "embedding_cache_namespace": "graph",
     "tokenizer_estimate_method": "provider-default",
     "dataset_name": "context_pack_cases",
     "corpus_hash": "sha256:abc123",
@@ -58,6 +59,7 @@ def _ai_memory_report(mode: str = "raw") -> dict[str, Any]:
             "embedding_provider": "chromadb",
             "embedding_model": "chromadb_default",
             "embedding_dimensions": 384,
+            "embedding_cache_namespace": "chromadb",
             "tokenizer_estimate_method": "chromadb_default",
         },
         "dataset": {
@@ -364,8 +366,41 @@ def test_evaluate_report_context_pack_profile_rejects_missing_release_metadata()
     failures = eval_gate.evaluate_report(report, profile="context-pack")
 
     assert "metadata missing non-empty field 'embedding_provider'" in failures
+    assert "metadata missing non-empty field 'embedding_cache_namespace'" in failures
     assert "metadata['repeat_count'] must be a positive integer" in failures
     assert "label 'context-pack' must include retrieval mode 'native'" in failures
+
+
+def test_evaluate_report_context_pack_profile_rejects_embedding_dimension_mismatch() -> None:
+    metadata = dict(RELEASE_METADATA)
+    metadata.update(
+        {
+            "embedding_provider": "local",
+            "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+            "embedding_dimensions": "1024",
+            "embedding_cache_namespace": "graph",
+            "tokenizer_estimate_method": "sentence-transformers",
+        }
+    )
+    report = {
+        "label": "retrieval-native",
+        "metrics": {
+            "pass_rate": 1.0,
+            "latency_p95_ms": 500.0,
+            "source_metadata_coverage": 1.0,
+            "facet_order_match_rate": 1.0,
+            "leak_count": 0.0,
+            "forbidden_term_matches": 0.0,
+        },
+        "metadata": metadata,
+    }
+
+    failures = eval_gate.evaluate_report(report, profile="context-pack")
+
+    assert (
+        "metadata['embedding_dimensions'] must be 384 for local "
+        "embedding_model 'sentence-transformers/all-minilm-l6-v2'"
+    ) in failures
 
 
 def test_evaluate_report_ai_memory_profile_accepts_full_records() -> None:
@@ -383,6 +418,7 @@ def test_evaluate_report_ai_memory_profile_accepts_full_records() -> None:
             "embedding_provider": "chromadb",
             "embedding_model": "chromadb_default",
             "embedding_dimensions": 384,
+            "embedding_cache_namespace": "chromadb",
             "tokenizer_estimate_method": "chromadb_default",
         },
         "dataset": {
@@ -423,6 +459,55 @@ def test_evaluate_report_ai_memory_profile_accepts_full_records() -> None:
     assert failures == []
 
 
+def test_evaluate_report_ai_memory_profile_accepts_local_embedding_runtime() -> None:
+    report = _ai_memory_report(mode="hybrid")
+    report["schema_version"] = "longmemeval-live-v1"
+    report["suite"] = "LongMemEval-S live API"
+    report["runtime"].update(
+        {
+            "runtime_mode": "live-api-ephemeral",
+            "graph_engine": "surreal",
+            "store": "surreal",
+            "retrieval_mode": "hybrid",
+            "embedding_provider": "local",
+            "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+            "embedding_dimensions": 384,
+            "embedding_cache_namespace": "graph",
+            "tokenizer_estimate_method": "sentence-transformers",
+        }
+    )
+
+    failures = eval_gate.evaluate_report(report, profile="ai-memory")
+
+    assert failures == []
+
+
+def test_evaluate_report_ai_memory_profile_rejects_local_embedding_dimension_mismatch() -> None:
+    report = _ai_memory_report(mode="hybrid")
+    report["schema_version"] = "longmemeval-live-v1"
+    report["suite"] = "LongMemEval-S live API"
+    report["runtime"].update(
+        {
+            "runtime_mode": "live-api-ephemeral",
+            "graph_engine": "surreal",
+            "store": "surreal",
+            "retrieval_mode": "hybrid",
+            "embedding_provider": "local",
+            "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+            "embedding_dimensions": 1024,
+            "embedding_cache_namespace": "graph",
+            "tokenizer_estimate_method": "sentence-transformers",
+        }
+    )
+
+    failures = eval_gate.evaluate_report(report, profile="ai-memory")
+
+    assert (
+        "runtime['embedding_dimensions'] must be 384 for local "
+        "embedding_model 'sentence-transformers/all-minilm-l6-v2'"
+    ) in failures
+
+
 def test_evaluate_report_ai_memory_profile_accepts_non_embedding_live_path() -> None:
     report = _ai_memory_report(mode="hybrid")
     report["schema_version"] = "longmemeval-live-v1"
@@ -435,6 +520,7 @@ def test_evaluate_report_ai_memory_profile_accepts_non_embedding_live_path() -> 
         "embedding_provider": "none",
         "embedding_model": "not-applicable",
         "embedding_dimensions": 0,
+        "embedding_cache_namespace": "not-applicable",
         "tokenizer_estimate_method": "not-applicable",
     }
     report["auth_manifest_id"] = "ephemeral-local-signup-v1"
@@ -507,6 +593,22 @@ def test_evaluate_report_reports_threshold_and_metadata_failures() -> None:
     assert "metadata['store'] expected 'surreal', got 'legacy'" in failures
     assert "metric 'latency_ms' above maximum 3000.0000: 4200.0000" in failures
     assert "metric 'mrr' below minimum 0.2500: 0.1000" in failures
+
+
+def test_evaluate_report_reports_runtime_requirement_failures() -> None:
+    report = _ai_memory_report(mode="hybrid")
+
+    failures = eval_gate.evaluate_report(
+        report,
+        profile="ai-memory",
+        required_runtime={
+            "embedding_provider": "local",
+            "embedding_provider_status": "enabled",
+        },
+    )
+
+    assert "runtime['embedding_provider'] expected 'local', got 'chromadb'" in failures
+    assert "runtime['embedding_provider_status'] expected 'enabled', got None" in failures
 
 
 def test_evaluate_baseline_regressions_blocks_quality_drop() -> None:
@@ -621,6 +723,7 @@ def test_main_can_gate_ai_memory_record(tmp_path: Path, capsys: pytest.CaptureFi
                     "embedding_provider": "chromadb",
                     "embedding_model": "chromadb_default",
                     "embedding_dimensions": 384,
+                    "embedding_cache_namespace": "chromadb",
                     "tokenizer_estimate_method": "chromadb_default",
                 },
                 "dataset": {
@@ -1269,7 +1372,7 @@ def test_main_rejects_baseline_without_report(
 
     captured = capsys.readouterr()
     assert exc.value.code == ARGPARSE_USAGE_ERROR
-    assert "--baseline options require a report argument" in captured.err
+    assert "--baseline and runtime options require a report argument" in captured.err
 
 
 def test_ai_memory_manifest_tracks_full_citable_artifacts() -> None:
