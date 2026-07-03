@@ -205,6 +205,7 @@ def test_okf_memory_changelog_workflow_runs_gate_and_exports_when_archive_exists
     assert 'if [[ ! -f "$ARCHIVE_PATH" ]]; then' in workflow
     assert "hashFiles(env.ARCHIVE_PATH)" not in workflow
     assert "uv run --directory apps/api sibyld export okf" in workflow
+    assert "--force" in workflow
     assert "moon run okf-export-gate" in workflow
     assert "okf-memory-changelog.tar.gz" in workflow
     assert "benchmarks/results/ai-memory/okf-export-receipt.json" in workflow
