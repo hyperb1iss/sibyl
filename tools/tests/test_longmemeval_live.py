@@ -38,9 +38,9 @@ def test_eval_workflow_full_run_forces_memory_extraction_off() -> None:
     full_job = workflow.split("  longmemeval-live-full:", 1)[1]
 
     assert "Enable queued LLM memory extraction during LongMemEval smoke only" in workflow
-    assert "SIBYL_AUTO_EXTRACT_ENTITIES: ${{ inputs.longmemeval_auto_extract_entities }}" in (
-        smoke_job
-    )
+    assert (
+        "SIBYL_AUTO_EXTRACT_ENTITIES: ${{ inputs.longmemeval_auto_extract_entities || false }}"
+    ) in smoke_job
     assert 'SIBYL_AUTO_EXTRACT_ENTITIES: "false"' in full_job
     assert "SIBYL_LLM_MEMORY_PROVIDER" not in full_job
     assert "--wait-for-memory-extraction" not in full_job
