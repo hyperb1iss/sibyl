@@ -212,7 +212,7 @@ def _fixture_graph_payload() -> dict[str, Any]:
                 "id": "task-okf-gate",
                 "entity_type": "task",
                 "name": "Ship OKF export",
-                "description": "Fixture task for portable memory export.",
+                "description": "Fixture task for portable memory export.\n\n---\n\nDelimiter guard.",
             },
             {
                 "id": "project-okf-gate",
@@ -234,7 +234,7 @@ def _fixture_graph_payload() -> dict[str, Any]:
             {
                 "uuid": "episode-okf-gate",
                 "name": "OKF gate episode",
-                "content": "W9 exports a valid OKF bundle.",
+                "content": "W9 exports a valid OKF bundle.\n\n---\n\n```yaml\nsafe: true\n---\n```",
             }
         ],
         "mentions": [

@@ -6,13 +6,22 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from shutil import rmtree
 from typing import Any
 
 from sibyl_core.migrate.archive import LoadedArchive, graph_payload_from_archive
 
 OKF_VERSION = "0.1"
 _ARRAY_KEYS = ("entities", "relationships", "episodes", "mentions")
+_ARRAY_KEY_KINDS = {
+    "entities": "entity",
+    "relationships": "relationship",
+    "episodes": "episode",
+    "mentions": "mention",
+}
 _RESERVED_FILENAMES = frozenset({"index.md", "log.md"})
+_OKF_MANAGED_FILES = ("index.md", "log.md", "sibyl-graph.md")
+_OKF_MANAGED_DIRECTORIES = ("entities", "relationships", "episodes", "mentions")
 
 
 @dataclass(frozen=True)
@@ -51,6 +60,7 @@ def build_okf_bundle_from_graph_payload(
                 "okf_version": OKF_VERSION,
                 "sibyl_kind": "graph",
                 "sibyl_id": _optional_str(graph_payload.get("organization_id")) or "graph",
+                "sibyl_array_keys": [key for key in _ARRAY_KEYS if key in graph_payload],
                 "sibyl_payload": {
                     key: value for key, value in graph_payload.items() if key not in _ARRAY_KEYS
                 },
@@ -74,7 +84,17 @@ def build_okf_bundle_from_graph_payload(
     return OkfBundle(files={path: files[path] for path in sorted(files)})
 
 
-def write_okf_bundle(bundle: OkfBundle, output_dir: Path) -> None:
+def write_okf_bundle(bundle: OkfBundle, output_dir: Path, *, replace: bool = False) -> None:
+    if output_dir.exists():
+        if not output_dir.is_dir():
+            msg = f"OKF output path exists and is not a directory: {output_dir}"
+            raise FileExistsError(msg)
+        if any(output_dir.iterdir()):
+            if not replace:
+                msg = f"OKF output directory is not empty: {output_dir}"
+                raise FileExistsError(msg)
+            _clear_managed_okf_paths(output_dir)
+
     output_dir.mkdir(parents=True, exist_ok=True)
     for relative_path, content in bundle.files.items():
         target = output_dir / relative_path
@@ -84,6 +104,7 @@ def write_okf_bundle(bundle: OkfBundle, output_dir: Path) -> None:
 
 def reconstruct_graph_payload_from_okf_bundle(bundle_dir: Path) -> dict[str, Any]:
     root_payload: dict[str, Any] | None = None
+    root_array_keys: tuple[str, ...] = _ARRAY_KEYS
     records: dict[str, list[tuple[int, dict[str, Any]]]] = {
         "entity": [],
         "relationship": [],
@@ -100,6 +121,7 @@ def reconstruct_graph_payload_from_okf_bundle(bundle_dir: Path) -> dict[str, Any
             continue
         if kind == "graph":
             root_payload = dict(payload)
+            root_array_keys = _array_keys_from_frontmatter(frontmatter)
             continue
         if kind in records:
             records[kind].append((int(frontmatter.get("sibyl_order") or 0), payload))
@@ -109,10 +131,8 @@ def reconstruct_graph_payload_from_okf_bundle(bundle_dir: Path) -> dict[str, Any
         raise ValueError(msg)
 
     graph_payload = dict(root_payload)
-    graph_payload["entities"] = _ordered_payloads(records["entity"])
-    graph_payload["relationships"] = _ordered_payloads(records["relationship"])
-    graph_payload["episodes"] = _ordered_payloads(records["episode"])
-    graph_payload["mentions"] = _ordered_payloads(records["mention"])
+    for key in root_array_keys:
+        graph_payload[key] = _ordered_payloads(records[_array_key_to_kind(key)])
     return graph_payload
 
 
@@ -429,7 +449,11 @@ def _parse_json_frontmatter(content: str) -> dict[str, Any]:
     if not content.startswith("---\n"):
         msg = "missing YAML frontmatter delimiter"
         raise ValueError(msg)
-    _, frontmatter, _body = content.split("---", 2)
+    end = content.find("\n---\n", len("---\n"))
+    if end == -1:
+        msg = "missing closing frontmatter delimiter"
+        raise ValueError(msg)
+    frontmatter = content[len("---\n") : end]
     try:
         payload = json.loads(frontmatter)
     except json.JSONDecodeError as exc:
@@ -439,6 +463,30 @@ def _parse_json_frontmatter(content: str) -> dict[str, Any]:
         msg = "frontmatter must be an object"
         raise ValueError(msg)
     return payload
+
+
+def _array_keys_from_frontmatter(frontmatter: dict[str, Any]) -> tuple[str, ...]:
+    raw_keys = frontmatter.get("sibyl_array_keys")
+    if not isinstance(raw_keys, list):
+        return _ARRAY_KEYS
+    return tuple(key for key in _ARRAY_KEYS if key in raw_keys)
+
+
+def _array_key_to_kind(key: str) -> str:
+    return _ARRAY_KEY_KINDS[key]
+
+
+def _clear_managed_okf_paths(output_dir: Path) -> None:
+    for name in _OKF_MANAGED_FILES:
+        path = output_dir / name
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+    for name in _OKF_MANAGED_DIRECTORIES:
+        path = output_dir / name
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+        elif path.is_dir():
+            rmtree(path)
 
 
 def _ordered_payloads(records: list[tuple[int, dict[str, Any]]]) -> list[dict[str, Any]]:

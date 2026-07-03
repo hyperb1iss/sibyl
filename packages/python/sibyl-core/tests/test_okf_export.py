@@ -30,7 +30,7 @@ def _graph_payload() -> dict[str, object]:
                 "id": "entity-alpha",
                 "entity_type": "project",
                 "name": "Alpha Project",
-                "description": "Primary project memory.",
+                "description": 'Primary project memory.\n\n---\n\nKeeps "quoted" marker text.',
                 "created_at": "2026-07-01T12:00:00+00:00",
             },
             {
@@ -55,7 +55,7 @@ def _graph_payload() -> dict[str, object]:
             {
                 "uuid": "episode-alpha",
                 "name": "Alpha episode",
-                "content": "Alpha evidence from a session.",
+                "content": "Alpha evidence from a session.\n\n---\n\n```yaml\nkey: value\n---\n```",
                 "created_at": "2026-07-03T12:00:00+00:00",
             }
         ],
@@ -72,7 +72,9 @@ def _graph_payload() -> dict[str, object]:
 
 def _frontmatter(content: str) -> dict[str, object]:
     assert content.startswith("---\n")
-    _, payload, _body = content.split("---", 2)
+    end = content.find("\n---\n", len("---\n"))
+    assert end != -1
+    payload = content[len("---\n") : end]
     loaded = json.loads(payload)
     assert isinstance(loaded, dict)
     return loaded
@@ -133,6 +135,59 @@ def test_okf_export_is_byte_stable_and_reconstructs_graph_payload(tmp_path: Path
 
     assert validate_okf_bundle(output) == []
     assert reconstruct_graph_payload_from_okf_bundle(output) == payload
+
+
+def test_okf_export_preserves_payloads_with_frontmatter_delimiter_text(
+    tmp_path: Path,
+) -> None:
+    payload = _graph_payload()
+    output = tmp_path / "okf"
+
+    write_okf_bundle(build_okf_bundle_from_graph_payload(payload), output)
+
+    assert validate_okf_bundle(output) == []
+    assert reconstruct_graph_payload_from_okf_bundle(output) == payload
+
+
+def test_okf_export_preserves_optional_array_key_shape(tmp_path: Path) -> None:
+    payload = {
+        "version": "2.0",
+        "created_at": "2026-07-03T12:00:00+00:00",
+        "organization_id": "org-okf",
+        "entity_count": 1,
+        "relationship_count": 0,
+        "entities": [{"id": "entity-alpha", "entity_type": "project"}],
+        "relationships": [],
+    }
+    output = tmp_path / "okf"
+
+    write_okf_bundle(build_okf_bundle_from_graph_payload(payload), output)
+
+    assert reconstruct_graph_payload_from_okf_bundle(output) == payload
+
+
+def test_okf_bundle_write_refuses_non_empty_output_without_replace(tmp_path: Path) -> None:
+    output = tmp_path / "okf"
+    (output / "entities").mkdir(parents=True)
+    stale = output / "entities" / "stale.md"
+    stale.write_text("stale", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="not empty"):
+        write_okf_bundle(build_okf_bundle_from_graph_payload(_graph_payload()), output)
+
+    assert stale.read_text(encoding="utf-8") == "stale"
+
+
+def test_okf_bundle_write_can_replace_existing_output(tmp_path: Path) -> None:
+    output = tmp_path / "okf"
+    (output / "entities").mkdir(parents=True)
+    stale = output / "entities" / "stale.md"
+    stale.write_text("stale", encoding="utf-8")
+
+    write_okf_bundle(build_okf_bundle_from_graph_payload(_graph_payload()), output, replace=True)
+
+    assert not stale.exists()
+    assert (output / "index.md").exists()
 
 
 def test_okf_export_from_archive_requires_graph_payload() -> None:

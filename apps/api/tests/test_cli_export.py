@@ -254,3 +254,52 @@ def test_export_okf_writes_archive_projection(tmp_path: Path) -> None:
     assert "[project-1](/entities/project-1.md)" in (output / "entities/task-1.md").read_text(
         encoding="utf-8"
     )
+
+
+def test_export_okf_requires_force_for_non_empty_output(tmp_path: Path) -> None:
+    graph_payload = {
+        "version": "2.0",
+        "created_at": "2026-07-03T12:00:00+00:00",
+        "organization_id": "org-123",
+        "entity_count": 1,
+        "relationship_count": 0,
+        "episode_count": 0,
+        "mention_count": 0,
+        "entities": [{"id": "task-1", "entity_type": "task", "name": "Export task"}],
+        "relationships": [],
+        "episodes": [],
+        "mentions": [],
+    }
+    graph_bytes = json.dumps(graph_payload).encode("utf-8")
+    archive = tmp_path / "sibyl.tar.gz"
+    write_archive(
+        archive,
+        manifest=build_manifest(
+            organization_id="org-123",
+            source_store="surreal",
+            files={GRAPH_FILENAME: graph_bytes},
+        ),
+        files={GRAPH_FILENAME: graph_bytes},
+    )
+    output = tmp_path / "okf"
+    (output / "entities").mkdir(parents=True)
+    stale = output / "entities" / "stale.md"
+    stale.write_text("stale", encoding="utf-8")
+
+    failed = runner.invoke(
+        export_cli.app,
+        ["okf", "--archive", str(archive), "--output", str(output)],
+    )
+
+    assert failed.exit_code == 1
+    assert "not empty" in failed.stdout
+    assert stale.exists()
+
+    replaced = runner.invoke(
+        export_cli.app,
+        ["okf", "--archive", str(archive), "--output", str(output), "--force"],
+    )
+
+    assert replaced.exit_code == 0
+    assert not stale.exists()
+    assert (output / "entities/task-1.md").exists()

@@ -52,6 +52,10 @@ def export_okf(
         Path,
         typer.Option("--output", "-o", help="Output directory for the OKF bundle"),
     ] = Path("sibyl-okf"),
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Replace a non-empty OKF output directory"),
+    ] = False,
 ) -> None:
     """Export a migration graph archive as an OKF v0.1 markdown bundle."""
     from sibyl_core.export import (
@@ -64,7 +68,7 @@ def export_okf(
     try:
         loaded_archive = load_archive(archive)
         bundle = build_okf_bundle_from_archive(loaded_archive)
-        write_okf_bundle(bundle, output)
+        write_okf_bundle(bundle, output, replace=force)
         errors = validate_okf_bundle(output)
         if errors:
             error("OKF export validation failed")
