@@ -1,6 +1,6 @@
 """Data export CLI commands.
 
-Export graph data to JSON/CSV files.
+Export graph data to JSON/CSV/OKF files.
 """
 
 import json
@@ -21,7 +21,7 @@ from sibyl_core.models.entities import EntityType
 
 app = typer.Typer(
     name="export",
-    help="Export data to files (JSON/CSV)",
+    help="Export data to files (JSON/CSV/OKF)",
     no_args_is_help=True,
 )
 
@@ -36,6 +36,48 @@ GRAPH_ENTITY_TYPES = (
 GRAPH_ENTITY_PAGE_SIZE = 1000
 GRAPH_RELATIONSHIP_PAGE_SIZE = 5000
 EXPLORE_PAGE_SIZE = 200
+
+
+@app.command("okf")
+def export_okf(
+    archive: Annotated[
+        Path,
+        typer.Option(
+            "--archive",
+            "-a",
+            help="Migration archive directory, .tar.gz, or .tgz containing graph.json",
+        ),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", "-o", help="Output directory for the OKF bundle"),
+    ] = Path("sibyl-okf"),
+) -> None:
+    """Export a migration graph archive as an OKF v0.1 markdown bundle."""
+    from sibyl_core.export import (
+        build_okf_bundle_from_archive,
+        validate_okf_bundle,
+        write_okf_bundle,
+    )
+    from sibyl_core.migrate.archive import load_archive
+
+    try:
+        loaded_archive = load_archive(archive)
+        bundle = build_okf_bundle_from_archive(loaded_archive)
+        write_okf_bundle(bundle, output)
+        errors = validate_okf_bundle(output)
+        if errors:
+            error("OKF export validation failed")
+            for validation_error in errors:
+                error(f"- {validation_error}")
+            raise typer.Exit(code=1)
+        success(f"OKF bundle exported to {output}")
+        info(f"Files: {len(bundle.files)}")
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        error(f"OKF export failed: {exc}")
+        raise typer.Exit(code=1) from exc
 
 
 async def _list_entities_by_type_paginated(
