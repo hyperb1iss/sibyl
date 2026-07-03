@@ -34,6 +34,7 @@ from sibyl_core.backends.surreal.content_schema import (
     CONTENT_SCHEMA_CURRENT_VERSION,
     CONTENT_SCHEMA_DEFINITIONS,
     CONTENT_TABLES,
+    CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS,
     _content_schema_migrations,
     bootstrap_content_schema,
 )
@@ -43,6 +44,7 @@ from sibyl_core.backends.surreal.schema import (
     EDGE_DEFINITIONS,
     ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS,
     ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS,
+    ENTITY_USAGE_SIGNAL_DEFINITIONS,
     GRAPH_ENUM_ASSERTION_DEFINITIONS,
     GRAPH_INDEX_PRUNE_DEFINITIONS,
     GRAPH_SCHEMA_MIGRATIONS,
@@ -413,7 +415,7 @@ def test_content_lookup_indexes_are_versioned() -> None:
         statement for migration in migrations for statement in migration.statements
     )
 
-    assert CONTENT_SCHEMA_CURRENT_VERSION == 15
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 15
     assert "content_lookup_indexes" in [migration.name for migration in migrations]
     for index_name in (
         "idx_crawl_sources_org_uuid",
@@ -424,6 +426,35 @@ def test_content_lookup_indexes_are_versioned() -> None:
         assert index_name in CONTENT_SCHEMA_DEFINITIONS
         assert index_name in CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS
         assert index_name in migration_sql
+
+
+def test_content_usage_signals_are_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration_sql = "\n".join(
+        statement for migration in migrations for statement in migration.statements
+    )
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION == 16
+    assert "memory_usage_events" in CONTENT_TABLES
+    assert "content_usage_signals" in [migration.name for migration in migrations]
+    for field in (
+        "last_recalled_at",
+        "last_used_at",
+        "retrieval_count",
+        "citation_count",
+    ):
+        assert f"DEFINE FIELD IF NOT EXISTS {field} ON raw_captures" in (CONTENT_SCHEMA_DEFINITIONS)
+        assert f"DEFINE FIELD IF NOT EXISTS {field} ON raw_captures" in (
+            CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS
+        )
+    assert "DEFINE TABLE IF NOT EXISTS memory_usage_events SCHEMAFULL" in (
+        CONTENT_SCHEMA_DEFINITIONS
+    )
+    assert "idx_memory_usage_events_dedupe" in CONTENT_SCHEMA_DEFINITIONS
+    assert "ALTER TABLE IF EXISTS memory_usage_events PERMISSIONS" in (
+        CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS
+    )
+    assert CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
 
 
 def test_raw_capture_changefeed_cursor_is_versioned() -> None:
@@ -857,6 +888,27 @@ def test_graph_entity_actor_attribution_fields_are_versioned() -> None:
     assert "type::is::string(attributes.modified_by)" in (ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS)
     assert "entity_actor_attribution" in [migration.name for migration in GRAPH_SCHEMA_MIGRATIONS]
     assert ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS.strip().splitlines()[0] in migration_sql
+
+
+def test_graph_entity_usage_signal_fields_are_versioned() -> None:
+    migration_sql = "\n".join(
+        statement for migration in GRAPH_SCHEMA_MIGRATIONS for statement in migration.statements
+    )
+
+    assert GRAPH_SCHEMA_CURRENT_VERSION == 10
+    assert "entity_usage_signals" in [migration.name for migration in GRAPH_SCHEMA_MIGRATIONS]
+    for field in (
+        "last_recalled_at",
+        "last_used_at",
+        "retrieval_count",
+        "citation_count",
+    ):
+        assert f"DEFINE FIELD IF NOT EXISTS {field} ON entity" in NODE_DEFINITIONS
+        assert f"DEFINE FIELD IF NOT EXISTS {field} ON entity" in (ENTITY_USAGE_SIGNAL_DEFINITIONS)
+    assert "idx_entity_last_recalled" in NODE_DEFINITIONS
+    assert "idx_entity_last_used" in NODE_DEFINITIONS
+    assert "UPDATE entity SET" in ENTITY_USAGE_SIGNAL_DEFINITIONS
+    assert ENTITY_USAGE_SIGNAL_DEFINITIONS.strip().splitlines()[0] in migration_sql
 
 
 def test_graph_relation_cleanup_covers_all_relation_tables() -> None:

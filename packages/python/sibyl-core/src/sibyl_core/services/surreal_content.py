@@ -101,12 +101,20 @@ INSERT INTO raw_captures $rows ON DUPLICATE KEY UPDATE
     tags = $input.tags,
     embedding = $input.embedding,
     metadata = $input.metadata,
+    metadata.last_recalled_at = $input.last_recalled_at ?? last_recalled_at,
+    metadata.last_used_at = $input.last_used_at ?? last_used_at,
+    metadata.retrieval_count = $input.retrieval_count ?? retrieval_count ?? 0,
+    metadata.citation_count = $input.citation_count ?? citation_count ?? 0,
     provenance = $input.provenance,
     capture_surface = $input.capture_surface,
     created_by_user_id = $input.created_by_user_id,
     captured_at = $input.captured_at,
     deleted_at = $input.deleted_at,
     purge_after = $input.purge_after,
+    last_recalled_at = $input.last_recalled_at ?? last_recalled_at,
+    last_used_at = $input.last_used_at ?? last_used_at,
+    retrieval_count = $input.retrieval_count ?? retrieval_count ?? 0,
+    citation_count = $input.citation_count ?? citation_count ?? 0,
     created_at = $input.created_at;
 """
 _RAW_MEMORY_RECALL_FIELDS = ", ".join(
@@ -133,6 +141,10 @@ _RAW_MEMORY_RECALL_FIELDS = ", ".join(
         "captured_at",
         "deleted_at",
         "purge_after",
+        "last_recalled_at",
+        "last_used_at",
+        "retrieval_count",
+        "citation_count",
         "created_at",
     )
 )
@@ -436,6 +448,10 @@ class RawMemory:
     captured_at: datetime | None = None
     deleted_at: datetime | None = None
     purge_after: datetime | None = None
+    last_recalled_at: datetime | None = None
+    last_used_at: datetime | None = None
+    retrieval_count: int | None = None
+    citation_count: int | None = None
     created_at: datetime | None = None
     score: float = 0.0
     snippet: str | None = None
@@ -1072,6 +1088,10 @@ def _raw_memory_from_record(record: Mapping[str, object]) -> RawMemory:
         captured_at=_coerce_datetime(record.get("captured_at")),
         deleted_at=_coerce_datetime(record.get("deleted_at")),
         purge_after=_coerce_datetime(record.get("purge_after")),
+        last_recalled_at=_coerce_datetime(record.get("last_recalled_at")),
+        last_used_at=_coerce_datetime(record.get("last_used_at")),
+        retrieval_count=_coerce_int(record.get("retrieval_count")),
+        citation_count=_coerce_int(record.get("citation_count")),
         created_at=_coerce_datetime(record.get("created_at")),
         score=_coerce_float(record.get("score")),
         snippet=_search_snippet_from_values(
@@ -1105,7 +1125,8 @@ def _source_record(source: ContentSource) -> SurrealRecord:
 
 
 def _raw_memory_record(memory: RawMemory) -> SurrealRecord:
-    return {
+    metadata = dict(memory.metadata)
+    record: SurrealRecord = {
         "uuid": memory.id,
         "organization_id": memory.organization_id,
         "source_id": memory.source_id,
@@ -1121,7 +1142,7 @@ def _raw_memory_record(memory: RawMemory) -> SurrealRecord:
         "entity_type": memory.entity_type,
         "tags": list(memory.tags),
         "embedding": list(memory.embedding) if memory.embedding is not None else None,
-        "metadata": dict(memory.metadata),
+        "metadata": metadata,
         "provenance": dict(memory.provenance),
         "capture_surface": memory.capture_surface,
         "created_by_user_id": memory.created_by_user_id or memory.principal_id,
@@ -1130,6 +1151,19 @@ def _raw_memory_record(memory: RawMemory) -> SurrealRecord:
         "purge_after": memory.purge_after,
         "created_at": memory.created_at,
     }
+    if memory.last_recalled_at is not None:
+        record["last_recalled_at"] = memory.last_recalled_at
+        metadata["last_recalled_at"] = memory.last_recalled_at
+    if memory.last_used_at is not None:
+        record["last_used_at"] = memory.last_used_at
+        metadata["last_used_at"] = memory.last_used_at
+    if memory.retrieval_count is not None:
+        record["retrieval_count"] = memory.retrieval_count
+        metadata["retrieval_count"] = memory.retrieval_count
+    if memory.citation_count is not None:
+        record["citation_count"] = memory.citation_count
+        metadata["citation_count"] = memory.citation_count
+    return record
 
 
 async def _select_many(

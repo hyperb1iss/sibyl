@@ -87,6 +87,10 @@ DEFINE FIELD IF NOT EXISTS created_at ON entity TYPE datetime DEFAULT time::now(
 DEFINE FIELD IF NOT EXISTS updated_at ON entity TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS created_by ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS modified_by ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS last_recalled_at ON entity TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS last_used_at ON entity TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS retrieval_count ON entity TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS citation_count ON entity TYPE int DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS project_id ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS epic_id ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS parent_task_id ON entity TYPE option<string>;
@@ -107,6 +111,8 @@ DEFINE INDEX IF NOT EXISTS idx_entity_task ON entity FIELDS task_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_status ON entity FIELDS status;
 DEFINE INDEX IF NOT EXISTS idx_entity_priority ON entity FIELDS priority;
 DEFINE INDEX IF NOT EXISTS idx_entity_updated ON entity FIELDS updated_at, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_entity_last_recalled ON entity FIELDS last_recalled_at, created_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_entity_last_used ON entity FIELDS last_used_at, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_entity_type_updated ON entity FIELDS entity_type, updated_at, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_entity_type_project_updated ON entity FIELDS entity_type, project_id, updated_at, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_entity_type_parent_task_updated ON entity FIELDS entity_type, parent_task_id, updated_at, created_at, uuid;
@@ -385,6 +391,31 @@ WHERE modified_by = NONE
     AND attributes.modified_by != '';
 """
 
+ENTITY_USAGE_SIGNAL_DEFINITIONS = """
+DEFINE FIELD IF NOT EXISTS last_recalled_at ON entity TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS last_used_at ON entity TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS retrieval_count ON entity TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS citation_count ON entity TYPE int DEFAULT 0;
+DEFINE INDEX IF NOT EXISTS idx_entity_last_recalled
+    ON entity FIELDS last_recalled_at, created_at, uuid CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_entity_last_used
+    ON entity FIELDS last_used_at, created_at, uuid CONCURRENTLY;
+UPDATE entity SET
+    last_recalled_at = attributes.last_recalled_at,
+    last_used_at = attributes.last_used_at,
+    retrieval_count = attributes.retrieval_count ?? 0,
+    citation_count = attributes.citation_count ?? 0
+WHERE last_recalled_at = NONE
+    AND last_used_at = NONE
+    AND attributes != NONE
+    AND (
+        attributes.last_recalled_at != NONE
+        OR attributes.last_used_at != NONE
+        OR attributes.retrieval_count != NONE
+        OR attributes.citation_count != NONE
+    );
+"""
+
 
 CURRENT_SCHEMA_MAINTENANCE_DEFINITIONS = ENTITY_DENORMALIZATION_MAINTENANCE_DEFINITIONS
 
@@ -444,6 +475,11 @@ GRAPH_SCHEMA_MIGRATIONS = (
         version=9,
         name="entity_actor_attribution",
         statements=tuple(split_statements(ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS)),
+    ),
+    SchemaMigration(
+        version=10,
+        name="entity_usage_signals",
+        statements=tuple(split_statements(ENTITY_USAGE_SIGNAL_DEFINITIONS)),
     ),
 )
 
@@ -829,6 +865,7 @@ __all__ = [
     "EMBEDDING_VECTOR_FIELDS",
     "ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS",
     "ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS",
+    "ENTITY_USAGE_SIGNAL_DEFINITIONS",
     "GRAPH_EDGES",
     "GRAPH_ENUM_ASSERTION_DEFINITIONS",
     "GRAPH_INDEX_PRUNE_DEFINITIONS",

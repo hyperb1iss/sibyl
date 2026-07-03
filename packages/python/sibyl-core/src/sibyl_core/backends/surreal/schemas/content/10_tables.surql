@@ -137,6 +137,10 @@ DEFINE FIELD IF NOT EXISTS created_by_user_id ON raw_captures TYPE option<string
 DEFINE FIELD IF NOT EXISTS captured_at ON raw_captures TYPE datetime DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS deleted_at ON raw_captures TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS purge_after ON raw_captures TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS last_recalled_at ON raw_captures TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS last_used_at ON raw_captures TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS retrieval_count ON raw_captures TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS citation_count ON raw_captures TYPE int DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS created_at ON raw_captures TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_uuid ON raw_captures FIELDS uuid UNIQUE;
@@ -155,7 +159,33 @@ DEFINE INDEX IF NOT EXISTS idx_raw_captures_content_ft ON raw_captures FIELDS ra
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_embedding ON raw_captures FIELDS embedding
     HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_captured_at ON raw_captures FIELDS captured_at;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_last_recalled ON raw_captures FIELDS organization_id, last_recalled_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_last_used ON raw_captures FIELDS organization_id, last_used_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_created_at ON raw_captures FIELDS created_at;
+
+DEFINE TABLE IF NOT EXISTS memory_usage_events SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS uuid ON memory_usage_events TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON memory_usage_events TYPE string;
+DEFINE FIELD IF NOT EXISTS session_key ON memory_usage_events TYPE string;
+DEFINE FIELD IF NOT EXISTS message_key ON memory_usage_events TYPE string;
+DEFINE FIELD IF NOT EXISTS source_surface ON memory_usage_events TYPE string;
+DEFINE FIELD IF NOT EXISTS item_kind ON memory_usage_events TYPE string;
+DEFINE FIELD IF NOT EXISTS item_id ON memory_usage_events TYPE string;
+DEFINE FIELD IF NOT EXISTS signal_type ON memory_usage_events TYPE string;
+DEFINE FIELD IF NOT EXISTS principal_id ON memory_usage_events TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS project_id ON memory_usage_events TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS metadata ON memory_usage_events TYPE object FLEXIBLE DEFAULT {{}};
+DEFINE FIELD IF NOT EXISTS event_at ON memory_usage_events TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS created_at ON memory_usage_events TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS idx_memory_usage_events_uuid ON memory_usage_events FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_memory_usage_events_dedupe ON memory_usage_events
+    FIELDS organization_id, session_key, message_key, source_surface, item_kind, item_id, signal_type UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_memory_usage_events_item ON memory_usage_events
+    FIELDS organization_id, item_kind, item_id, signal_type, event_at;
+DEFINE INDEX IF NOT EXISTS idx_memory_usage_events_session ON memory_usage_events
+    FIELDS organization_id, session_key, message_key;
+DEFINE INDEX IF NOT EXISTS idx_memory_usage_events_created_at ON memory_usage_events FIELDS created_at;
 
 DEFINE TABLE IF NOT EXISTS api_idempotency_records SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON api_idempotency_records TYPE string;
