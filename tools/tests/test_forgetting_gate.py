@@ -45,20 +45,38 @@ def test_default_receipt_meets_w7_budgets() -> None:
     receipt = forgetting_gate.build_forgetting_receipt()
 
     assert receipt["schema_version"] == forgetting_gate.RECEIPT_SCHEMA_VERSION
+    assert receipt["survival_semantics"] == forgetting_gate.SURVIVAL_SEMANTICS
     assert receipt["metrics"] == {
-        "stale_uncited_byte_reduction": 0.6,
+        "stale_uncited_byte_reduction": 0.5,
         "protected_cited_false_archive_count": 0,
         "strict_recall_at_5_drop": 0.0,
         "write_integrity_error_count": 0,
-        "cited_survival_delta": 0,
+        "cited_survival_delta": 1,
     }
     observations = receipt["observations"]
-    assert observations[0]["memory_id"] == "stale-uncited-a"
-    assert observations[0]["archived"] is True
-    assert observations[0]["decay_score"] < observations[0]["decay_threshold"]
-    assert observations[1]["memory_id"] == "stale-uncited-b"
-    assert observations[1]["archived"] is False
-    assert observations[1]["decay_score"] > observations[1]["decay_threshold"]
+    by_memory_id = {observation["memory_id"]: observation for observation in observations}
+    assert by_memory_id["stale-uncited-a"]["archived"] is True
+    assert (
+        by_memory_id["stale-uncited-a"]["decay_score"]
+        < by_memory_id["stale-uncited-a"]["decay_threshold"]
+    )
+    assert by_memory_id["stale-uncited-b"]["archived"] is False
+    assert (
+        by_memory_id["stale-uncited-b"]["decay_score"]
+        > by_memory_id["stale-uncited-b"]["decay_threshold"]
+    )
+    assert by_memory_id["stale-uncited-b"]["survival_signal"] == "exposure"
+    assert by_memory_id["protected-cited"]["survival_signal"] == "citation"
+    assert by_memory_id["legacy-access-only"]["survival_signal"] == "legacy_access"
+    assert by_memory_id["legacy-access-capped"]["survival_signal"] == (
+        "citation_with_legacy_access_cap"
+    )
+    assert by_memory_id["legacy-access-only"]["archived"] is False
+    assert by_memory_id["legacy-access-capped"]["archived"] is False
+    assert (
+        by_memory_id["legacy-access-only"]["decay_score"]
+        > by_memory_id["legacy-access-capped"]["decay_score"]
+    )
     assert forgetting_gate.validate_forgetting_receipt(receipt) == []
 
 
@@ -113,8 +131,9 @@ def test_gate_checks_use_moon_package_slices() -> None:
             "--",
             "tests/test_retrieval_advanced.py",
             "-k",
-            "usage_aware_decay or citation_stamp or latest_usage_stamp or "
-            "explicit_temporal_target or episode_record_candidates",
+            "usage_aware_decay or citation_stamp or exposure_below_citation or "
+            "last_accessed_compatibility or validity_floor or explicit_temporal_target or "
+            "episode_record_candidates",
         ),
         (
             "moon",
@@ -153,7 +172,7 @@ def test_run_gate_prints_release_receipt(capsys, tmp_path: Path) -> None:
     assert receipt["checks"][2]["command"] == "moon run bench-gate"
     assert "Forgetting Gate Receipt" in captured.out
     assert "status: PASS" in captured.out
-    assert "stale_uncited_byte_reduction=0.6" in captured.out
+    assert "stale_uncited_byte_reduction=0.5" in captured.out
     assert "cited survival" in captured.out
 
 

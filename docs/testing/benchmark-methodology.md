@@ -177,6 +177,12 @@ The W4 write-path integrity gate is blocking for v1.1. It writes
 from that receipt across extraction, dream-cycle source selection, reflection, and consolidation
 fixtures.
 
+The W7 forgetting gate writes `benchmarks/results/ai-memory/forgetting-receipt.json` with schema
+`sibyl-forgetting-receipt-v2`. Its survival semantics are explicit: citation (`last_used_at`) is
+the strong reset, exposure (`last_recalled_at`) is a weighted slowdown, and legacy
+`last_accessed_at` remains compatible but cannot outrank an explicit citation timestamp. Public
+claims must keep cited, exposed-only, and untouched memories separate.
+
 `leak_count` is a per-case sentinel: forbidden item and forbidden term matches are reported
 separately, while the summary uses the larger of those two counts for each case so one leaked memory
 is not double-counted when it trips both signals.

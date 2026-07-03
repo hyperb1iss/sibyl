@@ -1467,7 +1467,7 @@ def test_validate_ai_memory_manifest_accepts_required_receipt_checks(
     receipt_path.write_text(
         json.dumps(
             {
-                "schema_version": "sibyl-forgetting-receipt-v1",
+                "schema_version": "sibyl-forgetting-receipt-v2",
                 "metrics": {"strict_recall_at_5_drop": 0.0},
                 "checks": [
                     {
@@ -1493,7 +1493,7 @@ def test_validate_ai_memory_manifest_accepts_required_receipt_checks(
                     "metric": "strict_recall_at_5_drop",
                     "mode": "receipt",
                     "required_receipt": "forgetting-receipt.json",
-                    "receipt_schema": "sibyl-forgetting-receipt-v1",
+                    "receipt_schema": "sibyl-forgetting-receipt-v2",
                     "direction": "lower",
                     "threshold": 0.005,
                     "require_receipt_checks": True,
@@ -1591,7 +1591,7 @@ def test_validate_ai_memory_manifest_rejects_required_receipt_check_failures(
     receipt_path.write_text(
         json.dumps(
             {
-                "schema_version": "sibyl-forgetting-receipt-v1",
+                "schema_version": "sibyl-forgetting-receipt-v2",
                 "metrics": {"strict_recall_at_5_drop": 0.0},
                 "checks": [
                     {
@@ -1617,7 +1617,7 @@ def test_validate_ai_memory_manifest_rejects_required_receipt_check_failures(
                     "metric": "strict_recall_at_5_drop",
                     "mode": "receipt",
                     "required_receipt": "forgetting-receipt.json",
-                    "receipt_schema": "sibyl-forgetting-receipt-v1",
+                    "receipt_schema": "sibyl-forgetting-receipt-v2",
                     "direction": "lower",
                     "threshold": 0.005,
                     "require_receipt_checks": True,

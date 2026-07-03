@@ -19,9 +19,13 @@ from types import SimpleNamespace
 from typing import Any
 
 from sibyl.jobs.consolidation import _priority_decay_reason, _priority_decay_score
+from sibyl_core.retrieval.temporal import (
+    EXPOSURE_DECAY_TIMESTAMP_WEIGHT,
+    LEGACY_ACCESS_DECAY_TIMESTAMP_WEIGHT,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-RECEIPT_SCHEMA_VERSION = "sibyl-forgetting-receipt-v1"
+RECEIPT_SCHEMA_VERSION = "sibyl-forgetting-receipt-v2"
 DEFAULT_RECEIPT_PATH = (
     REPO_ROOT / "benchmarks" / "results" / "ai-memory" / "forgetting-receipt.json"
 )
@@ -105,7 +109,8 @@ GATE_CHECKS: tuple[GateCheck, ...] = (
             "--",
             "tests/test_retrieval_advanced.py",
             "-k",
-            "usage_aware_decay or citation_stamp or latest_usage_stamp or "
+            "usage_aware_decay or citation_stamp or exposure_below_citation or "
+            "last_accessed_compatibility or validity_floor or "
             "explicit_temporal_target or episode_record_candidates",
         ),
     ),
@@ -147,6 +152,17 @@ MIN_AGE_DAYS = 180
 DECAY_THRESHOLD = 0.35
 RECENCY_HALF_LIFE_DAYS = 180
 RECEIPT_NOW = datetime(2026, 7, 3, tzinfo=UTC)
+SURVIVAL_SEMANTICS_VERSION = "citation-reset-exposure-weighted-v1"
+SURVIVAL_SEMANTICS = {
+    "version": SURVIVAL_SEMANTICS_VERSION,
+    "citation_signal": "last_used_at",
+    "citation_timestamp_weight": 1.0,
+    "exposure_signal": "last_recalled_at",
+    "exposure_timestamp_weight": EXPOSURE_DECAY_TIMESTAMP_WEIGHT,
+    "legacy_access_signal": "last_accessed_at",
+    "legacy_access_timestamp_weight": LEGACY_ACCESS_DECAY_TIMESTAMP_WEIGHT,
+    "legacy_access_cap": "never newer than explicit citation timestamp",
+}
 
 DEFAULT_FIXTURES: tuple[ForgettingFixture, ...] = (
     ForgettingFixture(
@@ -158,7 +174,10 @@ DEFAULT_FIXTURES: tuple[ForgettingFixture, ...] = (
     ForgettingFixture(
         memory_id="stale-uncited-b",
         bytes_before=4_000,
-        metadata={"last_recalled_at": (RECEIPT_NOW - timedelta(days=2)).isoformat()},
+        metadata={
+            "last_recalled_at": (RECEIPT_NOW - timedelta(days=2)).isoformat(),
+            "retrieval_count": 1,
+        },
         strict_recall_before=True,
     ),
     ForgettingFixture(
@@ -168,6 +187,25 @@ DEFAULT_FIXTURES: tuple[ForgettingFixture, ...] = (
         metadata={
             "citation_count": 1,
             "last_used_at": (RECEIPT_NOW - timedelta(days=3)).isoformat(),
+        },
+        strict_recall_before=True,
+    ),
+    ForgettingFixture(
+        memory_id="legacy-access-only",
+        bytes_before=2_000,
+        metadata={
+            "importance": 0.65,
+            "last_accessed_at": (RECEIPT_NOW - timedelta(days=2)).isoformat(),
+        },
+        strict_recall_before=True,
+    ),
+    ForgettingFixture(
+        memory_id="legacy-access-capped",
+        bytes_before=2_000,
+        cited=True,
+        metadata={
+            "last_accessed_at": (RECEIPT_NOW - timedelta(days=2)).isoformat(),
+            "last_used_at": (RECEIPT_NOW - timedelta(days=180)).isoformat(),
         },
         strict_recall_before=True,
     ),
@@ -263,6 +301,7 @@ def build_forgetting_receipt(
     return {
         "schema_version": RECEIPT_SCHEMA_VERSION,
         "fixture": "usage-aware-forgetting-v1",
+        "survival_semantics": dict(SURVIVAL_SEMANTICS),
         "budgets": dict(FORGETTING_BUDGETS),
         "metrics": metrics,
         "cases": {
@@ -283,10 +322,24 @@ def build_forgetting_receipt(
                 "stale": observation.stale,
                 "strict_recall_before": observation.strict_recall_before,
                 "strict_recall_after": observation.strict_recall_after,
+                "survival_signal": _survival_signal(observation.fixture),
             }
             for observation in observations
         ],
     }
+
+
+def _survival_signal(fixture: ForgettingFixture) -> str:
+    metadata = _metadata_for_fixture(fixture)
+    if metadata.get("last_used_at") is not None and metadata.get("last_accessed_at") is not None:
+        return "citation_with_legacy_access_cap"
+    if fixture.cited or metadata.get("last_used_at") is not None:
+        return "citation"
+    if metadata.get("last_recalled_at") is not None:
+        return "exposure"
+    if metadata.get("last_accessed_at") is not None:
+        return "legacy_access"
+    return "none"
 
 
 def validate_forgetting_receipt(receipt: dict[str, Any]) -> list[str]:

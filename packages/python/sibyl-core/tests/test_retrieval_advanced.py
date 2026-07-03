@@ -53,7 +53,11 @@ from sibyl_core.retrieval.query_ranking import (
 )
 from sibyl_core.retrieval.reranking import RerankResult
 from sibyl_core.retrieval.search import RetrievalPlan, RetrievalSignal, RetrievalWeights
-from sibyl_core.retrieval.temporal import temporal_boost, temporal_decay_multiplier
+from sibyl_core.retrieval.temporal import (
+    get_entity_decay_timestamp,
+    temporal_boost,
+    temporal_decay_multiplier,
+)
 from sibyl_core.services.graph import EntityManager, SurrealGraphClient, prepare_graph_schema
 
 # =============================================================================
@@ -113,20 +117,68 @@ def test_temporal_boost_uses_citation_stamp_before_age_fallback() -> None:
     assert temporal_decay_multiplier(uncited, decay_days=30, reference_time=now) == 0.1
 
 
-def test_temporal_decay_uses_latest_usage_stamp() -> None:
+def test_temporal_decay_weights_exposure_below_citation() -> None:
     now = datetime(2026, 7, 3, tzinfo=UTC)
-    entity = make_entity_for_test(
-        "recently-recalled",
+    cited = make_entity_for_test(
+        "cited",
         created_at=now - timedelta(days=420),
         metadata={
-            "last_used_at": (now - timedelta(days=240)).isoformat(),
-            "last_recalled_at": (now - timedelta(days=1)).isoformat(),
+            "last_used_at": (now - timedelta(days=1)).isoformat(),
             "citation_count": 1,
+        },
+    )
+    exposed = make_entity_for_test(
+        "exposed",
+        created_at=now - timedelta(days=420),
+        metadata={
+            "last_recalled_at": (now - timedelta(days=1)).isoformat(),
             "retrieval_count": 10,
         },
     )
+    uncited = make_entity_for_test("uncited", created_at=now - timedelta(days=420))
 
-    assert temporal_decay_multiplier(entity, decay_days=30, reference_time=now) > 0.9
+    cited_multiplier = temporal_decay_multiplier(cited, decay_days=30, reference_time=now)
+    exposed_multiplier = temporal_decay_multiplier(exposed, decay_days=30, reference_time=now)
+
+    assert cited_multiplier > 0.9
+    assert 0.1 < exposed_multiplier < cited_multiplier
+    assert temporal_decay_multiplier(uncited, decay_days=30, reference_time=now) == 0.1
+
+
+def test_last_accessed_compatibility_does_not_outrank_citation() -> None:
+    now = datetime(2026, 7, 3, tzinfo=UTC)
+    cited = make_entity_for_test(
+        "cited",
+        created_at=now - timedelta(days=420),
+        metadata={
+            "last_accessed_at": (now - timedelta(days=1)).isoformat(),
+            "last_used_at": (now - timedelta(days=240)).isoformat(),
+            "citation_count": 1,
+        },
+    )
+    accessed = make_entity_for_test(
+        "accessed",
+        created_at=now - timedelta(days=420),
+        metadata={"last_accessed_at": (now - timedelta(days=1)).isoformat()},
+    )
+
+    assert get_entity_decay_timestamp(cited) == now - timedelta(days=240)
+    assert get_entity_decay_timestamp(accessed) > now - timedelta(days=120)
+
+
+def test_usage_decay_timestamp_never_precedes_validity_floor() -> None:
+    now = datetime(2026, 7, 3, tzinfo=UTC)
+    entity = make_entity_for_test(
+        "valid-newer-than-citation",
+        created_at=now - timedelta(days=420),
+        metadata={
+            "last_accessed_at": (now - timedelta(days=2)).isoformat(),
+            "last_used_at": (now - timedelta(days=100)).isoformat(),
+            "valid_from": (now - timedelta(days=10)).isoformat(),
+        },
+    )
+
+    assert get_entity_decay_timestamp(entity) == now - timedelta(days=10)
 
 
 def test_native_candidate_ranking_applies_usage_aware_decay() -> None:

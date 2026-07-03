@@ -77,6 +77,9 @@ _TEMPORAL_DATETIME_FORMATS = (
     "%Y-%m-%d",
 )
 
+EXPOSURE_DECAY_TIMESTAMP_WEIGHT = 0.90
+LEGACY_ACCESS_DECAY_TIMESTAMP_WEIGHT = 0.75
+
 
 @dataclass
 class TemporalConfig:
@@ -137,20 +140,58 @@ def get_entity_decay_timestamp(entity: Any, field: str = "auto") -> datetime | N
     if field != "auto":
         return get_entity_timestamp(entity, field)
 
-    usage_timestamps = [
-        timestamp
-        for candidate_field in ("last_used_at", "last_recalled_at", "last_accessed_at")
-        if (timestamp := get_entity_timestamp(entity, candidate_field)) is not None
-    ]
+    base_timestamp = get_entity_timestamp(entity, "auto")
+    last_used_at = get_entity_timestamp(entity, "last_used_at")
+    last_recalled_at = get_entity_timestamp(entity, "last_recalled_at")
+    last_accessed_at = get_entity_timestamp(entity, "last_accessed_at")
+
+    usage_timestamps: list[datetime] = []
+    if last_used_at is not None:
+        usage_timestamps.append(_aware_datetime(last_used_at))
+    if last_recalled_at is not None:
+        usage_timestamps.append(
+            _weighted_usage_timestamp(
+                base_timestamp,
+                last_recalled_at,
+                weight=EXPOSURE_DECAY_TIMESTAMP_WEIGHT,
+            )
+        )
+    if last_accessed_at is not None:
+        accessed_timestamp = _weighted_usage_timestamp(
+            base_timestamp,
+            last_accessed_at,
+            weight=LEGACY_ACCESS_DECAY_TIMESTAMP_WEIGHT,
+        )
+        if last_used_at is not None:
+            accessed_timestamp = min(accessed_timestamp, _aware_datetime(last_used_at))
+        usage_timestamps.append(accessed_timestamp)
     if usage_timestamps:
-        return max(_aware_datetime(timestamp) for timestamp in usage_timestamps)
-    return get_entity_timestamp(entity, "auto")
+        usage_timestamp = max(usage_timestamps)
+        if base_timestamp is not None:
+            return max(_aware_datetime(base_timestamp), usage_timestamp)
+        return usage_timestamp
+    return base_timestamp
 
 
 def _aware_datetime(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value
+
+
+def _weighted_usage_timestamp(
+    base_timestamp: datetime | None,
+    usage_timestamp: datetime,
+    *,
+    weight: float,
+) -> datetime:
+    usage_timestamp = _aware_datetime(usage_timestamp)
+    if base_timestamp is None:
+        return usage_timestamp
+    base_timestamp = _aware_datetime(base_timestamp)
+    if usage_timestamp <= base_timestamp:
+        return base_timestamp
+    return base_timestamp + (usage_timestamp - base_timestamp) * weight
 
 
 def usage_retention_multiplier(entity: Any) -> float:

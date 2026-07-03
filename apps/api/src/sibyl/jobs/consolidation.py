@@ -16,7 +16,7 @@ from typing import Any
 import structlog
 
 from sibyl_core.models.entities import EntityType
-from sibyl_core.retrieval.temporal import usage_retention_multiplier
+from sibyl_core.retrieval.temporal import get_entity_decay_timestamp, usage_retention_multiplier
 
 log = structlog.get_logger()
 
@@ -340,15 +340,7 @@ def _entity_retrieval_count(entity: Any) -> int:
 
 
 def _entity_last_seen_at(entity: Any) -> datetime:
-    metadata = entity.metadata or {}
-    usage_timestamps = [
-        value
-        for key in ("last_used_at", "last_recalled_at", "last_accessed_at")
-        if (value := _metadata_datetime(metadata.get(key))) is not None
-    ]
-    if usage_timestamps:
-        return max(usage_timestamps)
-    return entity.created_at
+    return get_entity_decay_timestamp(entity) or entity.created_at
 
 
 def _is_archived(entity: Any) -> bool:
@@ -398,17 +390,6 @@ def _metadata_int(value: object) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
-
-
-def _metadata_datetime(value: object) -> datetime | None:
-    if isinstance(value, datetime):
-        return _aware_datetime(value)
-    if isinstance(value, str):
-        try:
-            return _aware_datetime(datetime.fromisoformat(value))
-        except ValueError:
-            return None
-    return None
 
 
 def _aware_datetime(value: datetime) -> datetime:
