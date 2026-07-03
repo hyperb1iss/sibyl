@@ -19,6 +19,20 @@ _JWT_KEY_FILE = Path.home() / ".sibyl" / "jwt.key"
 _EXTRA_OIDC_PROVIDER_NAMES = {"github", "google"}
 _EXTRA_OIDC_ISSUER_HOSTS = {"github.com", "accounts.google.com"}
 _EMBEDDED_SURREAL_SCHEMES = ("memory://", "surrealkv://", "rocksdb://", "file://")
+DEFAULT_LOCAL_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_LOCAL_EMBEDDING_DIMENSIONS = 384
+_OPENAI_GRAPH_EMBEDDING_MODEL = "text-embedding-3-small"
+_OPENAI_GRAPH_EMBEDDING_DIMENSIONS = 1024
+_LOCAL_EMBEDDING_MODEL_DIMENSIONS = {
+    "all-minilm-l6-v2": DEFAULT_LOCAL_EMBEDDING_DIMENSIONS,
+    DEFAULT_LOCAL_EMBEDDING_MODEL.lower(): DEFAULT_LOCAL_EMBEDDING_DIMENSIONS,
+    "baai/bge-m3": 1024,
+    "bge-m3": 1024,
+}
+
+
+def _local_embedding_dimensions(model: str) -> int | None:
+    return _LOCAL_EMBEDDING_MODEL_DIMENSIONS.get(model.strip().lower())
 
 
 class OIDCProviderSettings(BaseModel):
@@ -530,6 +544,21 @@ class Settings(BaseSettings):
         if self.surreal_url and self.surreal_data_dir:
             raise ValueError("Configure only one of surreal_url or surreal_data_dir")
 
+        if self.graph_embedding_provider == "local":
+            if (
+                "graph_embedding_model" not in self.model_fields_set
+                or self.graph_embedding_model == _OPENAI_GRAPH_EMBEDDING_MODEL
+            ):
+                object.__setattr__(
+                    self,
+                    "graph_embedding_model",
+                    DEFAULT_LOCAL_EMBEDDING_MODEL,
+                )
+            if "graph_embedding_dimensions" not in self.model_fields_set:
+                dimensions = _local_embedding_dimensions(self.graph_embedding_model)
+                if dimensions is not None:
+                    object.__setattr__(self, "graph_embedding_dimensions", dimensions)
+
         if self.rate_limit_storage.startswith("redis://"):
             storage_url = _redis_url_with_password(
                 self.rate_limit_storage,
@@ -553,7 +582,7 @@ class Settings(BaseSettings):
         le=3072,
         description="Document chunk embedding vector dimensions",
     )
-    graph_embedding_provider: Literal["openai", "gemini"] = Field(
+    graph_embedding_provider: Literal["openai", "gemini", "local"] = Field(
         default="openai",
         description="Provider for graph node and relationship embeddings",
     )

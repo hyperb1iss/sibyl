@@ -82,7 +82,7 @@ class UpdateSettingsRequest(BaseModel):
         default=None, ge=128, le=3072, description="Document embedding dimensions"
     )
     graph_embedding_provider: str | None = Field(
-        default=None, pattern="^(openai|gemini)$", description="Graph embedding provider"
+        default=None, pattern="^(openai|gemini|local)$", description="Graph embedding provider"
     )
     graph_embedding_model: str | None = Field(default=None, description="Graph embedding model")
     graph_embedding_dimensions: int | None = Field(

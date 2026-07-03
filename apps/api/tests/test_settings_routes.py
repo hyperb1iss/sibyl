@@ -88,6 +88,24 @@ async def test_update_settings_uses_request_body_for_environment_updates(
 
 
 @pytest.mark.asyncio
+async def test_update_settings_accepts_local_graph_embedding_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings_routes, "require_settings_owner", AsyncMock())
+    monkeypatch.setattr(settings_routes, "_try_reset_graph_client", AsyncMock())
+    service = AsyncMock()
+    monkeypatch.setattr(settings_routes, "get_settings_service", lambda: service)
+    monkeypatch.delenv("SIBYL_GRAPH_EMBEDDING_PROVIDER", raising=False)
+
+    body = settings_routes.UpdateSettingsRequest(graph_embedding_provider="local")
+
+    response = await settings_routes.update_settings(_request(), body=body)
+
+    assert os.environ["SIBYL_GRAPH_EMBEDDING_PROVIDER"] == "local"
+    assert response.updated == ["graph_embedding_provider"]
+
+
+@pytest.mark.asyncio
 async def test_delete_setting_rejects_setup_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings_routes, "is_setup_mode", AsyncMock(return_value=True))
 

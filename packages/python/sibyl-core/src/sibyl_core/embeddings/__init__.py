@@ -28,10 +28,30 @@ _EXPORTS = {
         "sibyl_core.embeddings.providers",
         "OpenAIEmbeddingProvider",
     ),
+    "LocalSentenceTransformerEmbeddingProvider": (
+        "sibyl_core.embeddings.providers",
+        "LocalSentenceTransformerEmbeddingProvider",
+    ),
     "build_gemini_contents": ("sibyl_core.embeddings.gemini", "build_gemini_contents"),
     "create_embedding_provider": (
         "sibyl_core.embeddings.providers",
         "create_embedding_provider",
+    ),
+    "local_embedding_dimensions": (
+        "sibyl_core.embeddings.providers",
+        "local_embedding_dimensions",
+    ),
+    "sentence_transformers_available": (
+        "sibyl_core.embeddings.providers",
+        "sentence_transformers_available",
+    ),
+    "OPENAI_GRAPH_EMBEDDING_MODEL": (
+        "sibyl_core.embeddings.providers",
+        "OPENAI_GRAPH_EMBEDDING_MODEL",
+    ),
+    "OPENAI_GRAPH_EMBEDDING_DIMENSIONS": (
+        "sibyl_core.embeddings.providers",
+        "OPENAI_GRAPH_EMBEDDING_DIMENSIONS",
     ),
     "format_gemini_embedding_text": (
         "sibyl_core.embeddings.gemini",
