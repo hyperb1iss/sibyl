@@ -1630,6 +1630,77 @@ class SibylClient:
             json=data,
         )
 
+    async def list_teams(self) -> dict[str, Any]:
+        """List teams for the active organization."""
+        return await self._request("GET", "/teams")
+
+    async def create_team(
+        self,
+        *,
+        name: str,
+        slug: str | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a team and its team memory space."""
+        data: dict[str, Any] = {"name": name}
+        if slug:
+            data["slug"] = slug
+        if description:
+            data["description"] = description
+        return await self._request("POST", "/teams", json=data)
+
+    async def add_team_member(
+        self,
+        *,
+        team_id: str,
+        user_id: str,
+        role: str = "member",
+    ) -> dict[str, Any]:
+        """Add or update a team member."""
+        return await self._request(
+            "POST",
+            f"/teams/{quote(team_id, safe='')}/members",
+            json={"user_id": user_id, "role": role},
+        )
+
+    async def remove_team_member(
+        self,
+        *,
+        team_id: str,
+        user_id: str,
+    ) -> dict[str, Any]:
+        """Remove a team member."""
+        return await self._request(
+            "DELETE",
+            f"/teams/{quote(team_id, safe='')}/members/{quote(user_id, safe='')}",
+        )
+
+    async def link_team_project(
+        self,
+        *,
+        team_id: str,
+        project_id: str,
+        role: str = "project_contributor",
+    ) -> dict[str, Any]:
+        """Grant a team a project role."""
+        return await self._request(
+            "POST",
+            f"/teams/{quote(team_id, safe='')}/projects",
+            json={"project_id": project_id, "role": role},
+        )
+
+    async def unlink_team_project(
+        self,
+        *,
+        team_id: str,
+        project_id: str,
+    ) -> dict[str, Any]:
+        """Remove a team project grant."""
+        return await self._request(
+            "DELETE",
+            f"/teams/{quote(team_id, safe='')}/projects/{quote(project_id, safe='')}",
+        )
+
     def _synthesis_payload(
         self,
         *,

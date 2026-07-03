@@ -141,6 +141,42 @@ async def test_memory_space_access_client_url_encodes_space_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_team_client_methods_url_encode_references() -> None:
+    client = SibylClient(base_url="http://example.test/api", auth_token="token")
+    client._request = AsyncMock(return_value={"success": True})  # type: ignore[method-assign]
+
+    await client.add_team_member(
+        team_id="team/alpha",
+        user_id="00000000-0000-0000-0000-000000000001",
+        role="admin",
+    )
+    await client.link_team_project(
+        team_id="team/alpha",
+        project_id="project/alpha",
+        role="project_maintainer",
+    )
+    await client.unlink_team_project(team_id="team/alpha", project_id="project/alpha")
+
+    client._request.assert_any_await(  # type: ignore[attr-defined]
+        "POST",
+        "/teams/team%2Falpha/members",
+        json={
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "role": "admin",
+        },
+    )
+    client._request.assert_any_await(  # type: ignore[attr-defined]
+        "POST",
+        "/teams/team%2Falpha/projects",
+        json={"project_id": "project/alpha", "role": "project_maintainer"},
+    )
+    client._request.assert_any_await(  # type: ignore[attr-defined]
+        "DELETE",
+        "/teams/team%2Falpha/projects/project%2Falpha",
+    )
+
+
+@pytest.mark.asyncio
 async def test_create_api_key_client_posts_scope_restrictions() -> None:
     client = SibylClient(base_url="http://example.test/api", auth_token="token")
     client._request = AsyncMock(return_value={"id": "key-1"})  # type: ignore[method-assign]
@@ -2262,6 +2298,77 @@ def test_memory_space_preview_agent_command_renders_access(
         target_principal_id="agent:nova",
         additional_space_ids=["space-2"],
         limit=25,
+    )
+
+
+@patch("sibyl_cli.main.get_client")
+def test_team_create_command_renders_memory_scope_key(mock_get_client: MagicMock) -> None:
+    mock_client = MagicMock()
+    mock_client.create_team = AsyncMock(
+        return_value={
+            "id": "team-1",
+            "organization_id": "org-1",
+            "name": "Memory Guild",
+            "slug": "memory-guild",
+            "memory_space_id": "space-1",
+            "memory_scope_key": "team-1",
+            "members": [],
+            "projects": [],
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["team", "create", "Memory Guild", "--slug", "memory-guild"],
+    )
+
+    assert result.exit_code == 0
+    assert "Memory Guild" in result.stdout
+    assert "space-1" in result.stdout
+    assert "Created team: memory-guild" in result.stdout
+    mock_client.create_team.assert_awaited_once_with(
+        name="Memory Guild",
+        slug="memory-guild",
+        description=None,
+    )
+
+
+@patch("sibyl_cli.main.get_client")
+def test_team_link_project_command_calls_client(mock_get_client: MagicMock) -> None:
+    mock_client = MagicMock()
+    mock_client.link_team_project = AsyncMock(
+        return_value={
+            "id": "link-1",
+            "organization_id": "org-1",
+            "team_id": "team-1",
+            "project_id": "project-row-1",
+            "graph_project_id": "project_alpha",
+            "role": "project_maintainer",
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "team",
+            "link-project",
+            "memory-guild",
+            "project_alpha",
+            "--role",
+            "project_maintainer",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Linked team memory-guild to project project_alpha" in result.stdout
+    mock_client.link_team_project.assert_awaited_once_with(
+        team_id="memory-guild",
+        project_id="project_alpha",
+        role="project_maintainer",
     )
 
 
