@@ -1607,6 +1607,98 @@ def test_validate_ai_memory_manifest_accepts_team_scope_receipt_contract(
     assert failures == []
 
 
+def test_validate_ai_memory_manifest_accepts_okf_export_receipt_contract(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    receipt_path = tmp_path / "okf-export-receipt.json"
+    receipt_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "sibyl-okf-export-receipt-v1",
+                "metrics": {
+                    "valid_okf_projection": 1,
+                    "byte_stable_reexport": 1,
+                    "graph_reconstruction_diff_count": 0,
+                    "memory_changelog_ready": 1,
+                },
+                "checks": [
+                    {
+                        "name": "core-okf-projection",
+                        "status": "PASS",
+                        "surfaces": [
+                            "valid OKF projection",
+                            "byte stable re-export",
+                            "graph payload reconstruction",
+                        ],
+                    },
+                    {
+                        "name": "api-okf-cli",
+                        "status": "PASS",
+                        "surfaces": [
+                            "CLI export",
+                            "archive projection",
+                            "memory changelog",
+                        ],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["gate_contracts"].append(
+        {
+            "name": "okf-export-gate",
+            "owner_wave": "W9",
+            "status": "blocking",
+            "profile": "product",
+            "blocking": True,
+            "metric_contracts": [
+                {
+                    "metric": "valid_okf_projection",
+                    "mode": "receipt",
+                    "required_receipt": "okf-export-receipt.json",
+                    "receipt_schema": "sibyl-okf-export-receipt-v1",
+                    "direction": "higher",
+                    "threshold": 1,
+                    "require_receipt_checks": True,
+                    "required_surfaces": [
+                        "valid OKF projection",
+                        "byte stable re-export",
+                        "graph payload reconstruction",
+                    ],
+                },
+                {
+                    "metric": "graph_reconstruction_diff_count",
+                    "mode": "receipt",
+                    "required_receipt": "okf-export-receipt.json",
+                    "receipt_schema": "sibyl-okf-export-receipt-v1",
+                    "direction": "lower",
+                    "threshold": 0,
+                    "require_receipt_checks": True,
+                    "required_surfaces": ["graph payload reconstruction"],
+                },
+                {
+                    "metric": "memory_changelog_ready",
+                    "mode": "receipt",
+                    "required_receipt": "okf-export-receipt.json",
+                    "receipt_schema": "sibyl-okf-export-receipt-v1",
+                    "direction": "higher",
+                    "threshold": 1,
+                    "require_receipt_checks": True,
+                    "required_surfaces": ["CLI export", "memory changelog"],
+                },
+            ],
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == []
+
+
 def test_validate_ai_memory_manifest_accepts_usage_loop_receipt_contract(
     tmp_path: Path,
 ) -> None:

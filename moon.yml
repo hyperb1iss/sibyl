@@ -237,6 +237,7 @@ tasks:
       - ~:synthesis-gate-test
       - ~:adapter-ingest-gate-test
       - ~:large-corpus-rehearsal-test
+      - ~:okf-export-gate-test
       - ~:backup-restore-gate-test
       - ~:enterprise-readiness-evidence-test
       - ~:release-workflow-test
@@ -273,6 +274,7 @@ tasks:
       - ~:synthesis-gate-test
       - ~:adapter-ingest-gate-test
       - ~:large-corpus-rehearsal-test
+      - ~:okf-export-gate-test
       - ~:backup-restore-gate-test
       - ~:enterprise-readiness-evidence-test
       - ~:release-workflow-test
@@ -1048,6 +1050,38 @@ tasks:
       - pyproject.toml
       - moon.yml
       - packages/python/sibyl-core/pyproject.toml
+
+  okf-export-gate:
+    command: uv run python -m tools.trust.okf_export_gate
+    inputs:
+      - tools/trust/**/*.py
+      - apps/api/src/**/*.py
+      - apps/api/tests/test_cli_export.py
+      - packages/python/sibyl-core/src/**/*.py
+      - packages/python/sibyl-core/tests/test_okf_export.py
+      - .github/workflows/okf-memory-changelog.yml
+      - pyproject.toml
+      - moon.yml
+      - apps/api/moon.yml
+      - packages/python/sibyl-core/moon.yml
+    outputs:
+      - benchmarks/results/ai-memory/okf-export-receipt.json
+    options:
+      cache: false
+
+  okf-export-gate-test:
+    command: uv run pytest tools/tests/test_okf_export_gate.py -v
+    inputs:
+      - tools/trust/**/*.py
+      - tools/tests/conftest.py
+      - tools/tests/test_okf_export_gate.py
+      - .github/workflows/okf-memory-changelog.yml
+      - apps/api/moon.yml
+      - packages/python/sibyl-core/moon.yml
+      - packages/python/sibyl-core/src/**/*.py
+      - packages/python/sibyl-core/tests/test_okf_export.py
+      - pyproject.toml
+      - moon.yml
 
   backup-restore-gate:
     command: uv run python -m tools.trust.backup_restore_gate

@@ -1,0 +1,104 @@
+name: OKF Memory Changelog
+
+on:
+  schedule:
+    - cron: "30 8 * * 1"
+  workflow_dispatch:
+    inputs:
+      archive_path:
+        description: "Optional checked-out archive path to export"
+        type: string
+        default: ".moon/cache/okf-memory/source.tar.gz"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  okf-memory-changelog:
+    name: Build OKF memory changelog
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ARCHIVE_PATH: ${{ inputs.archive_path || '.moon/cache/okf-memory/source.tar.gz' }}
+      OKF_OUTPUT_DIR: .moon/cache/okf-memory/bundle
+      OKF_ARCHIVE_URL: ${{ secrets.SIBYL_OKF_ARCHIVE_URL }}
+      OKF_ARCHIVE_TOKEN: ${{ secrets.SIBYL_OKF_ARCHIVE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6
+        with:
+          auto-install: true
+          auto-setup: true
+          cache-version: okf-memory-changelog-v1
+
+      - name: Cache moon outputs
+        uses: actions/cache@v6
+        with:
+          path: .moon/cache
+          key: moon-okf-memory-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          restore-keys: |
+            moon-okf-memory-${{ runner.os }}-
+
+      - name: Cache uv
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/uv
+          key: uv-okf-memory-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-okf-memory-${{ runner.os }}-
+
+      - name: Download trusted archive when configured
+        if: env.OKF_ARCHIVE_URL != ''
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$ARCHIVE_PATH")"
+          if [[ -n "$OKF_ARCHIVE_TOKEN" ]]; then
+            curl -fsSL --retry 3 \
+              -H "Authorization: Bearer $OKF_ARCHIVE_TOKEN" \
+              "$OKF_ARCHIVE_URL" \
+              -o "$ARCHIVE_PATH"
+          else
+            curl -fsSL --retry 3 "$OKF_ARCHIVE_URL" -o "$ARCHIVE_PATH"
+          fi
+
+      - name: Export OKF memory bundle
+        run: |
+          set -euo pipefail
+          if [[ ! -f "$ARCHIVE_PATH" ]]; then
+            echo "No trusted archive found at $ARCHIVE_PATH; skipping bundle export."
+            exit 0
+          fi
+          uv run --directory apps/api sibyld export okf \
+            --archive "$ARCHIVE_PATH" \
+            --output "$OKF_OUTPUT_DIR"
+          tar -C "$OKF_OUTPUT_DIR" -czf .moon/cache/okf-memory/okf-memory-changelog.tar.gz .
+
+      - name: Run OKF export gate
+        run: moon run okf-export-gate
+
+      - name: Upload OKF memory changelog
+        if: hashFiles('.moon/cache/okf-memory/okf-memory-changelog.tar.gz') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: okf-memory-changelog-${{ github.sha }}
+          path: .moon/cache/okf-memory/okf-memory-changelog.tar.gz
+          if-no-files-found: error
+
+      - name: Upload OKF export receipt
+        uses: actions/upload-artifact@v7
+        with:
+          name: okf-export-receipt-${{ github.sha }}
+          path: benchmarks/results/ai-memory/okf-export-receipt.json
+          if-no-files-found: error
