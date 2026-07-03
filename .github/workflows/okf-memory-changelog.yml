@@ -82,7 +82,8 @@ jobs:
           fi
           uv run --directory apps/api sibyld export okf \
             --archive "$ARCHIVE_PATH" \
-            --output "$OKF_OUTPUT_DIR"
+            --output "$OKF_OUTPUT_DIR" \
+            --force
           tar -C "$OKF_OUTPUT_DIR" -czf .moon/cache/okf-memory/okf-memory-changelog.tar.gz .
 
       - name: Run OKF export gate
