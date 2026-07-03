@@ -356,14 +356,65 @@
     {
       "name": "okf-export-gate",
       "owner_wave": "W9",
-      "status": "planned",
+      "status": "blocking",
       "profile": "product",
-      "blocking": false,
+      "blocking": true,
       "metric_contracts": [
         {
-          "metric": "receipt",
+          "metric": "valid_okf_projection",
           "mode": "receipt",
-          "required_receipt": "byte-stable OKF export and graph-payload reconstruction"
+          "required_receipt": "okf-export-receipt.json",
+          "receipt_schema": "sibyl-okf-export-receipt-v1",
+          "direction": "higher",
+          "threshold": 1,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "valid OKF projection",
+            "byte stable re-export",
+            "graph payload reconstruction"
+          ]
+        },
+        {
+          "metric": "byte_stable_reexport",
+          "mode": "receipt",
+          "required_receipt": "okf-export-receipt.json",
+          "receipt_schema": "sibyl-okf-export-receipt-v1",
+          "direction": "higher",
+          "threshold": 1,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "valid OKF projection",
+            "byte stable re-export",
+            "graph payload reconstruction"
+          ]
+        },
+        {
+          "metric": "graph_reconstruction_diff_count",
+          "mode": "receipt",
+          "required_receipt": "okf-export-receipt.json",
+          "receipt_schema": "sibyl-okf-export-receipt-v1",
+          "direction": "lower",
+          "threshold": 0,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "valid OKF projection",
+            "byte stable re-export",
+            "graph payload reconstruction"
+          ]
+        },
+        {
+          "metric": "memory_changelog_ready",
+          "mode": "receipt",
+          "required_receipt": "okf-export-receipt.json",
+          "receipt_schema": "sibyl-okf-export-receipt-v1",
+          "direction": "higher",
+          "threshold": 1,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "CLI export",
+            "archive projection",
+            "memory changelog"
+          ]
         }
       ]
     }

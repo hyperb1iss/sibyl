@@ -1,0 +1,85 @@
+{
+  "artifact_path": "benchmarks/results/ai-memory/okf-export-receipt.json",
+  "budgets": {
+    "byte_stable_reexport": 1,
+    "graph_reconstruction_diff_count": 0,
+    "memory_changelog_ready": 1,
+    "valid_okf_projection": 1
+  },
+  "checks": [
+    {
+      "command": "moon run core:test -- tests/test_okf_export.py",
+      "description": "OKF bundle generation, validation, byte stability, and reconstruction",
+      "elapsed_seconds": 0.655,
+      "error": null,
+      "exit_code": 0,
+      "name": "core-okf-projection",
+      "status": "PASS",
+      "surfaces": [
+        "valid OKF projection",
+        "byte stable re-export",
+        "graph payload reconstruction"
+      ]
+    },
+    {
+      "command": "moon run api:test -- tests/test_cli_export.py -k okf",
+      "description": "sibyld export okf projects migration archives into OKF bundles",
+      "elapsed_seconds": 0.472,
+      "error": null,
+      "exit_code": 0,
+      "name": "api-okf-cli",
+      "status": "PASS",
+      "surfaces": [
+        "CLI export",
+        "archive projection",
+        "memory changelog"
+      ]
+    },
+    {
+      "command": "moon run bench-gate",
+      "description": "committed AI-memory manifest carries W9 OKF export contracts",
+      "elapsed_seconds": 0.672,
+      "error": null,
+      "exit_code": 0,
+      "name": "ai-memory-contracts",
+      "status": "PASS",
+      "surfaces": [
+        "manifest",
+        "memory changelog"
+      ]
+    }
+  ],
+  "created_at": "2026-07-03T23:23:29.711356+00:00",
+  "fixture": "okf-export-gate-v1",
+  "metrics": {
+    "byte_stable_reexport": 1,
+    "exported_file_count": 8,
+    "graph_reconstruction_diff_count": 0,
+    "memory_changelog_ready": 1,
+    "valid_okf_projection": 1
+  },
+  "okf": {
+    "file_count": 8,
+    "reserved_files": [
+      "index.md",
+      "log.md"
+    ],
+    "version": "0.1"
+  },
+  "reconstruction": {
+    "diff_count": 0,
+    "matches_graph_payload": true
+  },
+  "schema_version": "sibyl-okf-export-receipt-v1",
+  "status": "PASS",
+  "surfaces": [
+    "CLI export",
+    "archive projection",
+    "byte stable re-export",
+    "graph payload reconstruction",
+    "manifest",
+    "memory changelog",
+    "valid OKF projection"
+  ],
+  "validation_errors": []
+}
