@@ -852,6 +852,64 @@ async def test_share_memory_promotes_same_org_visible_sources_without_marking_so
 
 
 @pytest.mark.asyncio
+async def test_share_memory_promotes_visible_source_into_verified_team_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _raw_import_memory(
+        id="source-1",
+        metadata={**_raw_import_memory().metadata, "domain": "sibyl"},
+    )
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=source))
+    persist = AsyncMock(
+        return_value=ReflectionWriteResult(
+            response=AddResponse(
+                success=True,
+                id="entity-1",
+                message="Promoted natively: Mailbox thread",
+                timestamp=datetime.now(UTC),
+            ),
+            metadata={
+                "policy_allowed": True,
+                "policy_reasons": ["team_access_verified"],
+            },
+        )
+    )
+    save = AsyncMock()
+    monkeypatch.setattr(memory_module, "persist_reflection_candidate", persist)
+    monkeypatch.setattr(memory_module, "save_raw_memory", save)
+
+    result = await share_memory(
+        source_ids=["source-1"],
+        organization_id="org-1",
+        principal_id="user-1",
+        target_scope="team",
+        target_scope_key="team_123",
+        accessible_teams={"team_123"},
+    )
+
+    assert result.applied is True
+    assert result.reason == "shared"
+    assert result.preview.reason == "scope_crossing_requires_promotion"
+    assert result.preview.visible_source_ids == ["source-1"]
+    assert result.promotions[0].success is True
+    assert result.promotions[0].promoted_id == "entity-1"
+    assert result.promotions[0].metadata is not None
+    assert result.promotions[0].metadata["share_source_scope"] == "private"
+    assert result.promotions[0].metadata["share_target_scope"] == "team"
+    assert result.promotions[0].metadata["share_target_scope_key"] == "team_123"
+    persist.assert_awaited_once()
+    assert persist.await_args.kwargs["memory_scope"] is MemoryScope.TEAM
+    assert persist.await_args.kwargs["scope_key"] == "team_123"
+    assert persist.await_args.kwargs["accessible_teams"] == {"team_123"}
+    candidate = persist.await_args.kwargs["candidate"]
+    assert candidate.metadata["native_write_path"] == "memory_share"
+    assert candidate.metadata["share_source_id"] == "source-1"
+    assert candidate.metadata["share_target_scope"] == "team"
+    assert candidate.metadata["share_target_scope_key"] == "team_123"
+    save.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_share_memory_keeps_cross_org_denied_without_writing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -333,7 +333,8 @@
           "require_receipt_checks": true,
           "required_surfaces": [
             "promotion attribution",
-            "audit receipt"
+            "audit receipt",
+            "team target promotion"
           ]
         },
         {

@@ -2185,7 +2185,7 @@ async def test_list_accessible_project_graph_ids_batches_project_grants(
 
 
 @pytest.mark.asyncio
-async def test_list_accessible_team_scope_keys_returns_user_team_ids_and_slugs(
+async def test_list_accessible_team_scope_keys_returns_user_team_ids_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     org_id = uuid4()
@@ -2213,11 +2213,12 @@ async def test_list_accessible_team_scope_keys_returns_user_team_ids_and_slugs(
 
     accessible = await surreal_auth_runtime.list_accessible_team_scope_keys(ctx)
 
-    assert accessible == {str(team_id), "team-alpha"}
+    assert accessible == {str(team_id)}
     assert len(client.calls) == 1
     query, params = client.calls[0]
     assert "FROM teams" in query
     assert "FROM team_members" in query
+    assert "slug" not in query
     assert params == {"organization_id": str(org_id), "user_id": str(user_id)}
 
 

@@ -1325,7 +1325,7 @@ async def list_accessible_delegated_scope_keys(ctx) -> set[str]:
 
 
 async def list_accessible_team_scope_keys(ctx) -> set[str]:
-    """Return team memory scope keys the current principal may read."""
+    """Return canonical team memory scope keys the current principal may read."""
     if ctx.organization is None:
         return set()
     async with _auth_client_scope() as client:
@@ -1336,7 +1336,7 @@ async def list_accessible_team_scope_keys(ctx) -> set[str]:
             records = _normalize_records(
                 await client.execute_query(
                     """
-                        SELECT uuid, slug FROM teams
+                        SELECT uuid FROM teams
                         WHERE organization_id = $organization_id
                         ORDER BY created_at ASC;
                     """,
@@ -1347,7 +1347,7 @@ async def list_accessible_team_scope_keys(ctx) -> set[str]:
             records = _normalize_records(
                 await client.execute_query(
                     """
-                        SELECT uuid, slug FROM teams
+                        SELECT uuid FROM teams
                         WHERE organization_id = $organization_id
                         AND uuid IN (
                             SELECT VALUE team_id FROM team_members WHERE user_id = $user_id
@@ -1362,8 +1362,6 @@ async def list_accessible_team_scope_keys(ctx) -> set[str]:
         for record in records:
             if str(record.get("uuid") or "").strip():
                 keys.add(str(record["uuid"]))
-            if str(record.get("slug") or "").strip():
-                keys.add(str(record["slug"]))
         return keys
 
 
