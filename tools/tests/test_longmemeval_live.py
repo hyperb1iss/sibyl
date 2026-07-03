@@ -47,6 +47,10 @@ def test_eval_workflow_full_run_forces_memory_extraction_off() -> None:
     full_job = workflow.split("  longmemeval-live-full:", 1)[1]
 
     assert "Enable queued LLM memory extraction during LongMemEval smoke only" in workflow
+    assert "run_longmemeval_qa:" in workflow
+    assert "LONGMEMEVAL_QA_MODE:" in workflow
+    assert "LONGMEMEVAL_QA_READER_MODEL: gpt-4o" in workflow
+    assert "LONGMEMEVAL_QA_JUDGE_MODEL: gpt-5.2" in workflow
     assert "pull_request:" in workflow
     assert (
         "SIBYL_AUTO_EXTRACT_ENTITIES: ${{ inputs.longmemeval_auto_extract_entities || false }}"
@@ -57,6 +61,18 @@ def test_eval_workflow_full_run_forces_memory_extraction_off() -> None:
     assert "--wait-for-memory-extraction" not in full_job
     assert "Full LongMemEval must run with SIBYL_AUTO_EXTRACT_ENTITIES=false." in full_job
     assert '--metadata auto_extract_entities="${SIBYL_AUTO_EXTRACT_ENTITIES}"' in full_job
+    assert "inputs.run_longmemeval_qa" in full_job
+    assert "--qa-mode model" in full_job
+    assert "--qa-reader-model" in full_job
+    assert "--qa-judge-model" in full_job
+    assert "--require-qa" in full_job
+    assert "--require-runtime qa_mode=model" in full_job
+    assert "pinned-longmemeval-s-qa.json" in full_job
+    assert "QA limit is set; skipping full-dataset qa_accuracy baseline comparison." in full_job
+    assert "--baseline-metric qa_accuracy" in full_job
+    assert "--max-regression qa_accuracy=0.01" in full_job
+    assert "--qa-mode model" not in smoke_job
+    assert "--qa-mode model" not in local_job
     assert "--require-runtime embedding_provider=openai" in smoke_job
     assert "--require-runtime embedding_provider=openai" in full_job
     assert "--require-accounting" in smoke_job
