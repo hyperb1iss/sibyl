@@ -1283,7 +1283,11 @@ def _validate_planned_manifest_entries(planned: Any) -> list[str]:
     return failures
 
 
-def _validate_ai_memory_manifest_header(manifest: dict[str, Any]) -> list[str]:
+def _validate_ai_memory_manifest_header(
+    manifest: dict[str, Any],
+    *,
+    manifest_path: Path,
+) -> list[str]:
     failures: list[str] = []
     failures.extend(
         _validate_required_fields(
@@ -1314,7 +1318,12 @@ def _validate_ai_memory_manifest_header(manifest: dict[str, Any]) -> list[str]:
             )
         )
         failures.extend(_validate_manifest_history(manifest.get("history")))
-        failures.extend(_validate_manifest_gate_contracts(manifest.get("gate_contracts")))
+        failures.extend(
+            _validate_manifest_gate_contracts(
+                manifest.get("gate_contracts"),
+                manifest_path=manifest_path,
+            )
+        )
 
     return failures
 
@@ -1489,21 +1498,121 @@ def _validate_manifest_no_regression_contract(
     return failures
 
 
+def _load_manifest_required_receipt(
+    contract: dict[str, Any],
+    *,
+    path: str,
+    manifest_path: Path,
+    gate_blocking: bool,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    failures: list[str] = []
+    receipt: dict[str, Any] | None = None
+    required_receipt = contract.get("required_receipt")
+    if not isinstance(required_receipt, str) or not required_receipt.strip():
+        failures.append(f"{path} missing non-empty required_receipt")
+    elif gate_blocking:
+        receipt_ref = Path(required_receipt)
+        if receipt_ref.is_absolute():
+            failures.append(f"{path} required_receipt must be repository-relative")
+        else:
+            receipt_path = manifest_path.parent / receipt_ref
+            if not receipt_path.exists():
+                failures.append(f"{path} required_receipt does not exist: {required_receipt!r}")
+            else:
+                try:
+                    loaded_receipt = load_report(receipt_path)
+                except (OSError, json.JSONDecodeError) as exc:
+                    failures.append(f"{path} required_receipt could not be loaded: {exc}")
+                else:
+                    if isinstance(loaded_receipt, dict):
+                        receipt = loaded_receipt
+                    else:
+                        failures.append(f"{path} required_receipt must be an object")
+    return receipt, failures
+
+
+def _validate_manifest_receipt_schema(
+    contract: dict[str, Any],
+    receipt: dict[str, Any],
+    *,
+    path: str,
+) -> list[str]:
+    expected_schema = contract.get("receipt_schema")
+    if not isinstance(expected_schema, str) or not expected_schema.strip():
+        return []
+    actual_schema = receipt.get("schema_version")
+    if actual_schema == expected_schema:
+        return []
+    return [f"{path} required_receipt schema_version must be {expected_schema!r}"]
+
+
+def _validate_manifest_receipt_threshold(
+    contract: dict[str, Any],
+    receipt: dict[str, Any],
+    *,
+    path: str,
+) -> list[str]:
+    failures: list[str] = []
+    metric = contract.get("metric")
+    if metric == "receipt" or not isinstance(metric, str) or not metric.strip():
+        return failures
+
+    metrics = receipt.get("metrics")
+    if not isinstance(metrics, dict):
+        failures.append(f"{path} required_receipt metrics must be an object")
+    else:
+        actual = metrics.get(metric)
+        if not _is_finite_number(actual):
+            failures.append(f"{path} required_receipt missing finite metric {metric!r}")
+        direction = contract.get("direction")
+        if direction not in ("higher", "lower"):
+            failures.append(f"{path} direction must be 'higher' or 'lower'")
+        threshold = contract.get("threshold")
+        if not _is_finite_number(threshold):
+            failures.append(f"{path} threshold must be finite numeric")
+        if not failures and _is_finite_number(actual) and _is_finite_number(threshold):
+            actual_value = float(actual)
+            threshold_value = float(threshold)
+            if direction == "lower" and actual_value > threshold_value:
+                failures.append(
+                    f"{path} required_receipt metric {metric!r}={actual_value:g} exceeds "
+                    f"threshold {threshold_value:g}"
+                )
+            elif direction == "higher" and actual_value < threshold_value:
+                failures.append(
+                    f"{path} required_receipt metric {metric!r}={actual_value:g} is below "
+                    f"threshold {threshold_value:g}"
+                )
+    return failures
+
+
 def _validate_manifest_receipt_contract(
     contract: dict[str, Any],
     *,
     path: str,
+    manifest_path: Path,
+    gate_blocking: bool,
 ) -> list[str]:
-    required_receipt = contract.get("required_receipt")
-    if isinstance(required_receipt, str) and required_receipt.strip():
-        return []
-    return [f"{path} missing non-empty required_receipt"]
+    receipt, failures = _load_manifest_required_receipt(
+        contract,
+        path=path,
+        manifest_path=manifest_path,
+        gate_blocking=gate_blocking,
+    )
+    if failures or receipt is None:
+        return failures
+
+    failures.extend(_validate_manifest_receipt_schema(contract, receipt, path=path))
+    failures.extend(_validate_manifest_receipt_threshold(contract, receipt, path=path))
+    return failures
 
 
 def _validate_manifest_metric_contract(
     contract: Any,
     *,
     path: str,
+    manifest_path: Path,
+    gate_blocking: bool,
 ) -> list[str]:
     if not _is_mapping(contract):
         return [f"{path} is not an object"]
@@ -1528,7 +1637,14 @@ def _validate_manifest_metric_contract(
     elif gate_mode == "no-regression":
         failures.extend(_validate_manifest_no_regression_contract(contract, path=path))
     else:
-        failures.extend(_validate_manifest_receipt_contract(contract, path=path))
+        failures.extend(
+            _validate_manifest_receipt_contract(
+                contract,
+                path=path,
+                manifest_path=manifest_path,
+                gate_blocking=gate_blocking,
+            )
+        )
 
     return failures
 
@@ -1583,23 +1699,27 @@ def _validate_manifest_gate_metric_contracts(
     entry: dict[str, Any],
     *,
     path: str,
+    manifest_path: Path,
 ) -> list[str]:
     metric_contracts = entry.get("metric_contracts")
     if not isinstance(metric_contracts, list) or not metric_contracts:
         return [f"{path}.metric_contracts must be a non-empty list"]
 
     failures: list[str] = []
+    gate_blocking = entry.get("blocking") is True
     for metric_index, contract in enumerate(metric_contracts):
         failures.extend(
             _validate_manifest_metric_contract(
                 contract,
                 path=f"{path}.metric_contracts[{metric_index}]",
+                manifest_path=manifest_path,
+                gate_blocking=gate_blocking,
             )
         )
     return failures
 
 
-def _validate_manifest_gate_contracts(gate_contracts: Any) -> list[str]:
+def _validate_manifest_gate_contracts(gate_contracts: Any, *, manifest_path: Path) -> list[str]:
     if not isinstance(gate_contracts, list) or not gate_contracts:
         return ["manifest gate_contracts must be a non-empty list"]
 
@@ -1620,7 +1740,13 @@ def _validate_manifest_gate_contracts(gate_contracts: Any) -> list[str]:
         failures.extend(_validate_manifest_gate_status(entry, path=prefix))
         failures.extend(_validate_manifest_gate_profile(entry, path=prefix))
         failures.extend(_validate_manifest_gate_blocking(entry, path=prefix))
-        failures.extend(_validate_manifest_gate_metric_contracts(entry, path=prefix))
+        failures.extend(
+            _validate_manifest_gate_metric_contracts(
+                entry,
+                path=prefix,
+                manifest_path=manifest_path,
+            )
+        )
 
     return failures
 
@@ -1867,7 +1993,7 @@ def validate_ai_memory_manifest(manifest_path: Path) -> list[str]:
     if not isinstance(citable, list) or not citable:
         failures.append("manifest missing non-empty citable list")
         return failures
-    failures.extend(_validate_ai_memory_manifest_header(manifest))
+    failures.extend(_validate_ai_memory_manifest_header(manifest, manifest_path=manifest_path))
     history_baselines, history_failures = _load_manifest_history_summaries(
         manifest,
         manifest_path=manifest_path,

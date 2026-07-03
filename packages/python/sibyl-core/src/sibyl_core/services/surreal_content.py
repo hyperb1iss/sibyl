@@ -39,6 +39,14 @@ from sibyl_core.utils.resilience import with_timeout
 _DEFAULT_BATCH_SIZE = 128
 _DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS = 3.0
 _LIFECYCLE_FILTER_OVERFETCH_FACTOR = 4
+_REFLECTION_DREAM_EXCLUDED_CAPTURE_SURFACES = frozenset(
+    {
+        "reflection",
+        "reflection_candidate",
+        "reflection_source",
+        "synthesis_artifact",
+    }
+)
 _RAW_MEMORY_EMBEDDING_TEXT_MAX_CHARS = 12_000
 _RAW_MEMORY_EMBEDDING_TEXT_TRUNCATION_MARKER = "\n...[truncated for raw memory embedding]..."
 _RAW_MEMORY_EMBEDDING_TEXT_VERSION = "raw-capture-v1"
@@ -2974,10 +2982,14 @@ async def list_reflection_dream_source_memories(
             "WHERE organization_id = $organization_id "
             "AND (capture_surface != $candidate_surface OR capture_surface = NONE) "
             "AND (capture_surface != $source_surface OR capture_surface = NONE) "
+            "AND (capture_surface != $reflection_surface OR capture_surface = NONE) "
+            "AND (capture_surface != $synthesis_surface OR capture_surface = NONE) "
             "ORDER BY captured_at ASC LIMIT $limit;",
             organization_id=organization_id,
             candidate_surface="reflection_candidate",
             source_surface="reflection_source",
+            reflection_surface="reflection",
+            synthesis_surface="synthesis_artifact",
             limit=query_limit,
         )
     memories = [_raw_memory_from_record(row) for row in rows]
@@ -2985,7 +2997,7 @@ async def list_reflection_dream_source_memories(
         memory
         for memory in memories
         if raw_memory_currently_recallable(memory)
-        and _raw_memory_capture_surface(memory) not in {"reflection_candidate", "reflection_source"}
+        and _raw_memory_capture_surface(memory) not in _REFLECTION_DREAM_EXCLUDED_CAPTURE_SURFACES
         and not memory.metadata.get("reflection_dream_processed_at")
     ][:limit]
 

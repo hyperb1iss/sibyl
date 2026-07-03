@@ -26,6 +26,7 @@ from sibyl_core.services.surreal_content import (
     get_raw_memory_by_source_id,
     list_raw_memories_for_promotion,
     list_raw_memories_for_scope,
+    list_reflection_dream_source_memories,
     list_unlinked_document_chunks,
     load_search_scope,
     materialize_content_lineage,
@@ -1940,6 +1941,78 @@ class TestSurrealContentHelpers:
         assert saved_record["metadata"]["raw_source_ids"] == ["source-session-1"]
         assert saved_record["metadata"]["suggested_memory_scope"] == "project"
         assert saved_record["metadata"]["extraction_prompt_metadata"] == {"extractor": "test"}
+
+    @pytest.mark.asyncio
+    async def test_list_reflection_dream_source_memories_excludes_self_feeding_surfaces(
+        self,
+    ) -> None:
+        captured_at = datetime(2026, 7, 3, 12, 0, 0, tzinfo=UTC)
+
+        def row(
+            memory_id: str,
+            *,
+            capture_surface: str | None,
+            metadata: dict[str, object] | None = None,
+        ) -> dict[str, object]:
+            return {
+                "uuid": memory_id,
+                "organization_id": "org-1",
+                "source_id": f"{memory_id}:source",
+                "principal_id": "user-bliss",
+                "memory_scope": "private",
+                "review_state": "pending",
+                "entity_type": "raw_memory",
+                "title": memory_id,
+                "raw_content": "A durable source memory with enough signal.",
+                "metadata": metadata or {},
+                "capture_surface": capture_surface,
+                "captured_at": captured_at,
+                "created_at": captured_at,
+            }
+
+        fake_client = FakeClient(
+            [
+                _query_result(
+                    [
+                        row("valid-cli", capture_surface="cli"),
+                        row("candidate", capture_surface="reflection_candidate"),
+                        row("source", capture_surface="reflection_source"),
+                        row("reflection", capture_surface="reflection"),
+                        row("synthesis", capture_surface="synthesis_artifact"),
+                        row(
+                            "metadata-reflection",
+                            capture_surface=None,
+                            metadata={"capture_surface": "reflection"},
+                        ),
+                        row(
+                            "processed",
+                            capture_surface="cli",
+                            metadata={"reflection_dream_processed_at": captured_at.isoformat()},
+                        ),
+                    ]
+                )
+            ]
+        )
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            memories = await list_reflection_dream_source_memories(
+                organization_id="org-1",
+                limit=10,
+            )
+
+        query, params = fake_client.calls[0]
+        assert "capture_surface != $reflection_surface" in query
+        assert "capture_surface != $synthesis_surface" in query
+        assert params["reflection_surface"] == "reflection"
+        assert params["synthesis_surface"] == "synthesis_artifact"
+        assert [memory.id for memory in memories] == ["valid-cli"]
 
     @pytest.mark.asyncio
     async def test_recall_raw_memory_scopes_private_memories_to_principal(self) -> None:

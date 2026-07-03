@@ -83,6 +83,14 @@ tasks:
     - tests/test_native_memory.py
     - tests/test_memory_autonomy.py
     - tests/test_context_pack.py
+  write-path-integrity-test:
+    command:
+      uv run pytest
+      tests/test_services_surreal_content.py::TestSurrealContentHelpers::test_list_reflection_dream_source_memories_excludes_self_feeding_surfaces
+      -v
+    inputs:
+    - '@group(sources)'
+    - tests/test_services_surreal_content.py
   synthesis-gate-test:
     command: uv run pytest tests/test_synthesis.py -v
     inputs:

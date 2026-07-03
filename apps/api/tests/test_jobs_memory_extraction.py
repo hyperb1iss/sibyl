@@ -106,7 +106,7 @@ async def test_extract_memory_entities_runs_bounded_llm_extraction(
         "org-123",
         created_source_ids=["session-created"],
         max_entities_per_source=4,
-        max_source_chars=20,
+        max_source_chars=28,
         max_concurrent=1,
         max_tokens=512,
     )
@@ -120,7 +120,7 @@ async def test_extract_memory_entities_runs_bounded_llm_extraction(
     assert fake.max_concurrent == 1
     assert len(fake.prompts) == 1
     assert "source_id: session-created" in fake.prompts[0]
-    assert "SurrealDB 3.0 adds n" in fake.prompts[0]
+    assert "SurrealDB 3.0 adds native RR" in fake.prompts[0]
     assert "native RRF" not in fake.prompts[0]
     created_entities = entity_manager.create_direct_bulk.await_args.args[0]
     assert created_entities[0].metadata["projection_extractor"] == "llm"
@@ -272,6 +272,92 @@ async def test_extract_memory_entities_rejects_cross_org_chunk_payload(
 
     assert result["linked_chunks"] == 0
     assert "session-created:organization_mismatch" in result["projection_errors"]
+
+
+@pytest.mark.asyncio
+async def test_extract_memory_entities_noops_low_signal_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        memory_extraction,
+        "memory_batch_entity_extractor",
+        lambda **_: pytest.fail("low-signal sources must not call the extractor"),
+    )
+    monkeypatch.setattr(
+        memory_extraction,
+        "get_surreal_graph_runtime",
+        AsyncMock(side_effect=AssertionError("low-signal sources must not project")),
+    )
+
+    result = await memory_extraction.extract_memory_entities(
+        {},
+        [
+            {
+                "id": "session-low-signal",
+                "entity_type": "session",
+                "name": "Tiny acknowledgement",
+                "content": "ok thanks",
+            }
+        ],
+        "org-123",
+        created_source_ids=["created-low-signal"],
+        max_entities_per_source=4,
+        max_source_chars=200,
+        max_concurrent=1,
+        max_tokens=512,
+    )
+
+    assert result["sources"] == 0
+    assert result["extracted_entities"] == 0
+    assert result["projected_entities"] == 0
+    assert result["no_op_sources"] == 1
+    assert result["low_signal_sources"] == [
+        {"source_id": "created-low-signal", "reason": "low_signal"}
+    ]
+    assert result["extractions"] == []
+
+
+@pytest.mark.asyncio
+async def test_extract_memory_entities_noops_trimmed_low_signal_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        memory_extraction,
+        "memory_batch_entity_extractor",
+        lambda **_: pytest.fail("trimmed low-signal sources must not call the extractor"),
+    )
+    monkeypatch.setattr(
+        memory_extraction,
+        "get_surreal_graph_runtime",
+        AsyncMock(side_effect=AssertionError("trimmed low-signal sources must not project")),
+    )
+
+    result = await memory_extraction.extract_memory_entities(
+        {},
+        [
+            {
+                "id": "session-trimmed-low-signal",
+                "entity_type": "session",
+                "name": "Ack then details",
+                "content": "ok thanks. SurrealDB native RRF powers Lumen graph retrieval.",
+            }
+        ],
+        "org-123",
+        created_source_ids=["created-trimmed-low-signal"],
+        max_entities_per_source=4,
+        max_source_chars=9,
+        max_concurrent=1,
+        max_tokens=512,
+    )
+
+    assert result["sources"] == 0
+    assert result["extracted_entities"] == 0
+    assert result["projected_entities"] == 0
+    assert result["no_op_sources"] == 1
+    assert result["low_signal_sources"] == [
+        {"source_id": "created-trimmed-low-signal", "reason": "low_signal"}
+    ]
+    assert result["extractions"] == []
 
 
 @pytest.mark.asyncio
