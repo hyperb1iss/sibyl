@@ -115,6 +115,7 @@ MAX_EXPLICIT_NEIGHBORHOOD_IDS = 100
 async def default_search(**kwargs: Any) -> SearchResponse:
     from sibyl_core.tools.search import search
 
+    kwargs.setdefault("record_exposure", False)
     return await search(**kwargs)
 
 
@@ -140,6 +141,7 @@ async def default_related_sources(
 async def default_context_pack(**kwargs: Any) -> ContextPack:
     from sibyl_core.tools.context import compile_context
 
+    kwargs.setdefault("record_exposure", False)
     return await compile_context(**kwargs)
 
 

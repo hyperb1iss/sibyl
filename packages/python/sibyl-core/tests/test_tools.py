@@ -26,6 +26,11 @@ from sibyl_core.models.context import (
     ContextSection,
 )
 from sibyl_core.models.entities import EntityType, RelationshipType
+from sibyl_core.services.usage import (
+    MemoryUsageItemKind,
+    MemoryUsageStamp,
+    MemoryUsageWriteResult,
+)
 from sibyl_core.tools.helpers import (
     MAX_CONTENT_LENGTH,
     MAX_TITLE_LENGTH,
@@ -1628,6 +1633,184 @@ class TestSearchTool:
         assert isinstance(response.results, list)
         assert isinstance(response.total, int)
         assert isinstance(response.filters, dict)
+
+    @pytest.mark.asyncio
+    async def test_search_exposure_stamps_returned_graph_results(self) -> None:
+        from sibyl_core.tools.search import search
+
+        pattern = MockEntity(
+            id="pattern_exposed",
+            entity_type=EntityType.PATTERN,
+            name="Exposed pattern",
+        )
+        mock_entity_manager = AsyncMock()
+        mock_entity_manager.list_by_type = AsyncMock(return_value=[pattern])
+        recorded_events: list[Any] = []
+
+        async def fake_record_memory_usage(
+            content_client: object,
+            events: list[Any],
+            *,
+            graph_client: object | None = None,
+        ) -> MemoryUsageWriteResult:
+            recorded_events.extend(events)
+            return MemoryUsageWriteResult(
+                events_processed=len(events),
+                stamps=tuple(
+                    MemoryUsageStamp(
+                        item_kind=MemoryUsageItemKind(str(event.item_kind)),
+                        item_id=event.item_id,
+                        retrieval_count=1,
+                        citation_count=0,
+                        last_recalled_at=datetime.now(UTC),
+                        last_used_at=None,
+                    )
+                    for event in events
+                ),
+            )
+
+        with (
+            patch(
+                "sibyl_core.tools.search.get_graph_runtime",
+                AsyncMock(return_value=make_graph_runtime(entity_manager=mock_entity_manager)),
+            ),
+            patch("sibyl_core.tools.usage_exposure.get_shared_surreal_content_client", AsyncMock()),
+            patch("sibyl_core.tools.usage_exposure.get_surreal_graph_client", AsyncMock()),
+            patch(
+                "sibyl_core.tools.usage_exposure.record_memory_usage",
+                AsyncMock(side_effect=fake_record_memory_usage),
+            ),
+        ):
+            response = await search(
+                query="",
+                types=["pattern"],
+                organization_id="org-123",
+                principal_id="user-123",
+                include_documents=False,
+                include_raw_memory=False,
+                limit=1,
+            )
+
+        summary = response.filters["usage_exposure"]
+        assert summary["source_surface"] == "search"
+        assert summary["returned_count"] == 1
+        assert summary["stamped_count"] == 1
+        assert summary["coverage_complete"] is True
+        assert response.results[0].metadata["usage_exposure"]["status"] == "stamped"
+        assert response.results[0].metadata["cite_id"] == "pattern_exposed"
+        assert recorded_events[0].item_kind == MemoryUsageItemKind.GRAPH_ENTITY
+        assert recorded_events[0].item_id == "pattern_exposed"
+
+    @pytest.mark.asyncio
+    async def test_search_exposure_accounts_for_document_exclusions(self) -> None:
+        from sibyl_core.tools.search import search
+
+        async def document_search(**_: object) -> list[SearchResult]:
+            return [
+                SearchResult(
+                    id="document-1",
+                    type="document",
+                    name="Context docs",
+                    content="docs",
+                    score=0.9,
+                    result_origin="document",
+                    metadata={"document_id": "document-1"},
+                )
+            ]
+
+        with patch("sibyl_core.tools.search._search_documents", document_search):
+            response = await search(
+                query="context",
+                types=["document"],
+                organization_id="org-123",
+                include_graph=False,
+                include_documents=True,
+                limit=1,
+            )
+
+        summary = response.filters["usage_exposure"]
+        assert summary["returned_count"] == 1
+        assert summary["stamped_count"] == 0
+        assert summary["excluded_count"] == 1
+        assert summary["coverage_complete"] is True
+        assert response.results[0].metadata["usage_exposure"]["status"] == "excluded"
+        assert response.results[0].metadata["usage_exposure"]["reason"] == "unsupported_item_kind"
+
+    @pytest.mark.asyncio
+    async def test_search_exposure_keeps_raw_stamp_when_graph_stamp_fails(self) -> None:
+        from sibyl_core.tools.usage_exposure import annotate_search_result_exposures
+
+        results = [
+            SearchResult(
+                id="raw_memory:raw-1",
+                type="raw_memory",
+                name="Raw memory",
+                content="raw",
+                score=0.9,
+                result_origin="raw_memory",
+            ),
+            SearchResult(
+                id="pattern-1",
+                type="pattern",
+                name="Pattern",
+                content="graph",
+                score=0.8,
+                result_origin="graph",
+            ),
+        ]
+        recorded_events: list[Any] = []
+
+        async def fake_record_memory_usage(
+            content_client: object,
+            events: list[Any],
+            *,
+            graph_client: object | None = None,
+        ) -> MemoryUsageWriteResult:
+            assert graph_client is None
+            recorded_events.extend(events)
+            return MemoryUsageWriteResult(
+                events_processed=len(events),
+                stamps=tuple(
+                    MemoryUsageStamp(
+                        item_kind=MemoryUsageItemKind(str(event.item_kind)),
+                        item_id=event.item_id,
+                        retrieval_count=1,
+                        citation_count=0,
+                        last_recalled_at=datetime.now(UTC),
+                        last_used_at=None,
+                    )
+                    for event in events
+                ),
+            )
+
+        with (
+            patch("sibyl_core.tools.usage_exposure.get_shared_surreal_content_client", AsyncMock()),
+            patch(
+                "sibyl_core.tools.usage_exposure.get_surreal_graph_client",
+                AsyncMock(side_effect=RuntimeError("graph down")),
+            ),
+            patch(
+                "sibyl_core.tools.usage_exposure.record_memory_usage",
+                AsyncMock(side_effect=fake_record_memory_usage),
+            ),
+        ):
+            summary = await annotate_search_result_exposures(
+                results,
+                organization_id="org-123",
+                principal_id="user-123",
+                project_id="project-123",
+            )
+
+        assert summary["returned_count"] == 2
+        assert summary["stamped_count"] == 1
+        assert summary["excluded_count"] == 1
+        assert summary["coverage_complete"] is True
+        assert recorded_events[0].item_kind == MemoryUsageItemKind.RAW_CAPTURE
+        assert recorded_events[0].item_id == "raw-1"
+        assert results[0].metadata["usage_exposure"]["status"] == "stamped"
+        assert results[1].metadata["usage_exposure"]["status"] == "excluded"
+        assert results[1].metadata["usage_exposure"]["reason"] == "recording_failed"
+        assert results[1].metadata["usage_exposure"]["detail"] == "RuntimeError"
 
     @pytest.mark.asyncio
     async def test_search_document_timeout_returns_without_results(self) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from typing import Any, Literal
 from unittest.mock import AsyncMock, patch
 
@@ -14,6 +15,11 @@ from sibyl_core.models.context import (
     ContextItemQualityMetadata,
     ContextLayer,
     ContextRelatedItem,
+)
+from sibyl_core.services.usage import (
+    MemoryUsageItemKind,
+    MemoryUsageStamp,
+    MemoryUsageWriteResult,
 )
 from sibyl_core.tools.context import (
     FACET_TYPES,
@@ -160,6 +166,109 @@ async def test_compile_context_groups_build_context_by_agent_facets(
 
 
 @pytest.mark.asyncio
+async def test_compile_context_accounts_for_exposed_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded_events: list[Any] = []
+
+    async def fake_record_memory_usage(
+        content_client: object,
+        events: list[Any],
+        *,
+        graph_client: object | None = None,
+    ) -> MemoryUsageWriteResult:
+        recorded_events.extend(events)
+        return MemoryUsageWriteResult(
+            events_processed=len(events),
+            stamps=tuple(
+                MemoryUsageStamp(
+                    item_kind=MemoryUsageItemKind(str(event.item_kind)),
+                    item_id=event.item_id,
+                    retrieval_count=1,
+                    citation_count=0,
+                    last_recalled_at=datetime.now(UTC),
+                    last_used_at=None,
+                )
+                for event in events
+            ),
+        )
+
+    responses = {
+        ContextFacet.DECISIONS: [_result("decision-1", "decision", "Use context packs")],
+        ContextFacet.ARTIFACTS: [
+            _result(
+                "document-1",
+                "document",
+                "Context docs",
+                result_origin="document",
+                metadata={"document_id": "document-1"},
+            )
+        ],
+    }
+    monkeypatch.setattr(context_module, "context_search", _facet_native_search(responses))
+
+    with (
+        patch("sibyl_core.tools.usage_exposure.get_shared_surreal_content_client", AsyncMock()),
+        patch("sibyl_core.tools.usage_exposure.get_surreal_graph_client", AsyncMock()),
+        patch(
+            "sibyl_core.tools.usage_exposure.record_memory_usage",
+            AsyncMock(side_effect=fake_record_memory_usage),
+        ),
+    ):
+        pack = await compile_context(
+            "ship context receipts",
+            intent="build",
+            project="project-123",
+            organization_id="org-123",
+            principal_id="user-123",
+        )
+
+    summary = pack.usage_metadata["usage_exposure"]
+    assert summary["source_surface"] == "context_pack"
+    assert summary["returned_count"] == 2
+    assert summary["stamped_count"] == 1
+    assert summary["excluded_count"] == 1
+    assert summary["coverage_complete"] is True
+    assert recorded_events[0].item_kind == MemoryUsageItemKind.GRAPH_ENTITY
+    assert recorded_events[0].item_id == "decision-1"
+
+    items = {item.id: item for item in pack.items}
+    assert items["decision-1"].metadata["usage_exposure"]["status"] == "stamped"
+    assert items["decision-1"].metadata["cite_id"] == "decision-1"
+    assert items["document-1"].metadata["usage_exposure"] == {
+        "status": "excluded",
+        "signal_type": "exposure",
+        "source_surface": "context_pack",
+        "session_key": summary["session_key"],
+        "message_key": summary["message_key"],
+        "reason": "unsupported_item_kind",
+    }
+
+
+@pytest.mark.asyncio
+async def test_compile_context_can_disable_exposure_recording(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = {
+        ContextFacet.DECISIONS: [_result("decision-1", "decision", "Use context packs")],
+    }
+    recorder = AsyncMock()
+    monkeypatch.setattr(context_module, "context_search", _facet_native_search(responses))
+    monkeypatch.setattr(context_module, "annotate_context_item_exposures", recorder)
+
+    pack = await compile_context(
+        "ship context receipts",
+        intent="decide",
+        organization_id="org-123",
+        record_exposure=False,
+    )
+
+    assert [item.id for item in pack.items] == ["decision-1"]
+    assert pack.usage_metadata == {}
+    recorder.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_compile_context_supports_review_intent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -258,6 +367,37 @@ async def test_compile_context_falls_back_when_batched_native_search_fails(
 
     assert pack.total_items == 1
     assert pack.items[0].id == "decision-1"
+
+
+@pytest.mark.asyncio
+async def test_fallback_sections_disable_default_search_exposure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def fake_default_search(**kwargs: Any) -> SearchResponse:
+        calls.append(kwargs)
+        return SearchResponse(
+            results=[_result("decision-1", "decision", "Fallback decision")],
+            total=1,
+            query=kwargs["query"],
+            filters={},
+        )
+
+    monkeypatch.setattr(context_module, "default_search", fake_default_search)
+
+    await context_module._compile_fallback_sections(
+        query="fallback context",
+        facets=[ContextFacet.DECISIONS],
+        domain=None,
+        project=None,
+        accessible_projects=None,
+        organization_id="org-123",
+        limit=1,
+        search_fn=fake_default_search,
+    )
+
+    assert calls[0]["record_exposure"] is False
 
 
 @pytest.mark.asyncio

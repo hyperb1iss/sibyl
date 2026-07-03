@@ -92,6 +92,7 @@ class ContextPackResponse(BaseModel):
     project: str | None = None
     sections: list[ContextPackSection] = Field(default_factory=list)
     total_items: int = 0
+    usage_metadata: dict[str, Any] = Field(default_factory=dict)
     usage_hint: str
     markdown: str | None = Field(
         default=None,

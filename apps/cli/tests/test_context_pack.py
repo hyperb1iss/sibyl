@@ -57,6 +57,15 @@ def _context_pack() -> dict:
             }
         ],
         "total_items": 1,
+        "usage_metadata": {
+            "usage_exposure": {
+                "source_surface": "context_pack",
+                "returned_count": 1,
+                "stamped_count": 1,
+                "excluded_count": 0,
+                "coverage_complete": True,
+            }
+        },
         "usage_hint": "Capture new memory back into Sibyl.",
         "markdown": "# Sibyl Context Pack: ship faster\n\n## Decisions\n- **Use context packs**",
     }
@@ -268,6 +277,7 @@ def test_context_pack_json_uses_detected_project(
     payload = json.loads(result.stdout)
     assert payload["sections"][0]["items"][0]["id"] == "decision_1"
     assert payload["sections"][0]["items"][0]["quality"]["project_id"] == "project_123"
+    assert payload["usage_metadata"]["usage_exposure"]["coverage_complete"] is True
     mock_client.context_pack.assert_called_once_with(
         goal="ship faster",
         intent="build",
