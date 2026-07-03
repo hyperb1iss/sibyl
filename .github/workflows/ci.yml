@@ -429,6 +429,11 @@ jobs:
       - name: Run package test suites
         run: moon run api:test-cov cli:test-cov core:test-cov web:test-cov
 
+      - name: Run eval regression gates
+        run: |
+          moon run bench-gate
+          moon run bench-gate-test
+
       - name: Upload coverage
         uses: codecov/codecov-action@v7
         with:
