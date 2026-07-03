@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 
 from sibyl.cli import export as export_cli
 from sibyl.cli.main import app as main_cli_app
+from sibyl_core.migrate.archive import GRAPH_FILENAME, build_manifest, write_archive
 from sibyl_core.models.entities import EntityType
 
 
@@ -62,6 +63,7 @@ def test_export_commands_are_registered_on_main_cli() -> None:
 
     assert result.exit_code == 0
     assert "graph" in result.stdout
+    assert "okf" in result.stdout
     assert "tasks" in result.stdout
     assert "entities" in result.stdout
 
@@ -201,3 +203,54 @@ def test_export_graph_pages_entities_and_relationships(tmp_path: Path, monkeypat
         call(limit=3, offset=0),
         call(limit=3, offset=3),
     ]
+
+
+def test_export_okf_writes_archive_projection(tmp_path: Path) -> None:
+    graph_payload = {
+        "version": "2.0",
+        "created_at": "2026-07-03T12:00:00+00:00",
+        "organization_id": "org-123",
+        "entity_count": 2,
+        "relationship_count": 1,
+        "episode_count": 0,
+        "mention_count": 0,
+        "entities": [
+            {"id": "task-1", "entity_type": "task", "name": "Export task"},
+            {"id": "project-1", "entity_type": "project", "name": "Export project"},
+        ],
+        "relationships": [
+            {
+                "id": "rel-1",
+                "source_id": "task-1",
+                "target_id": "project-1",
+                "relationship_type": "BELONGS_TO",
+            }
+        ],
+        "episodes": [],
+        "mentions": [],
+    }
+    graph_bytes = json.dumps(graph_payload).encode("utf-8")
+    archive = tmp_path / "sibyl.tar.gz"
+    write_archive(
+        archive,
+        manifest=build_manifest(
+            organization_id="org-123",
+            source_store="surreal",
+            files={GRAPH_FILENAME: graph_bytes},
+        ),
+        files={GRAPH_FILENAME: graph_bytes},
+    )
+    output = tmp_path / "okf"
+
+    result = runner.invoke(
+        export_cli.app,
+        ["okf", "--archive", str(archive), "--output", str(output)],
+    )
+
+    assert result.exit_code == 0
+    assert "OKF bundle exported" in result.stdout
+    assert (output / "index.md").exists()
+    assert (output / "entities/task-1.md").exists()
+    assert "[project-1](/entities/project-1.md)" in (output / "entities/task-1.md").read_text(
+        encoding="utf-8"
+    )
