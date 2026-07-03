@@ -135,11 +135,19 @@ INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     content = $input.content,
     labels = $input.labels,
     attributes = $input.attributes,
+    attributes.last_recalled_at = $input.last_recalled_at ?? last_recalled_at,
+    attributes.last_used_at = $input.last_used_at ?? last_used_at,
+    attributes.retrieval_count = $input.retrieval_count ?? retrieval_count ?? 0,
+    attributes.citation_count = $input.citation_count ?? citation_count ?? 0,
     group_id = $input.group_id,
     created_at = $input.created_at,
     updated_at = $input.updated_at,
     created_by = created_by ?? $input.created_by,
     modified_by = $input.modified_by ?? modified_by,
+    last_recalled_at = $input.last_recalled_at ?? last_recalled_at,
+    last_used_at = $input.last_used_at ?? last_used_at,
+    retrieval_count = $input.retrieval_count ?? retrieval_count ?? 0,
+    citation_count = $input.citation_count ?? citation_count ?? 0,
     project_id = $input.project_id,
     epic_id = $input.epic_id,
     parent_task_id = $input.parent_task_id,
@@ -1710,6 +1718,10 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
         "invalid_at",
         "created_by",
         "modified_by",
+        "last_recalled_at",
+        "last_used_at",
+        "retrieval_count",
+        "citation_count",
     ):
         value = normalized_row.get(key)
         if value is not None and metadata.get(key) is None:
@@ -2535,6 +2547,10 @@ def _entity_record(
     complexity = _metadata_str(metadata, "complexity")
     feature = _metadata_str(metadata, "feature")
     tags = _metadata_str_list(metadata.get("tags"))
+    last_recalled_at = _metadata_datetime(metadata.get("last_recalled_at"))
+    last_used_at = _metadata_datetime(metadata.get("last_used_at"))
+    retrieval_count = _metadata_optional_int(metadata.get("retrieval_count"))
+    citation_count = _metadata_optional_int(metadata.get("citation_count"))
     attributes: dict[str, object] = {
         **metadata,
         "description": entity.description or "",
@@ -2544,7 +2560,7 @@ def _entity_record(
         "metadata": json.dumps(metadata),
         "entity_type": entity.entity_type.value,
     }
-    return {
+    record: SurrealRecord = {
         "uuid": entity.id,
         "name": entity.name,
         "entity_type": entity.entity_type.value,
@@ -2569,6 +2585,15 @@ def _entity_record(
         "tags": tags,
         "name_embedding": entity.embedding,
     }
+    if last_recalled_at is not None:
+        record["last_recalled_at"] = last_recalled_at
+    if last_used_at is not None:
+        record["last_used_at"] = last_used_at
+    if retrieval_count is not None:
+        record["retrieval_count"] = retrieval_count
+    if citation_count is not None:
+        record["citation_count"] = citation_count
+    return record
 
 
 def _entity_update_patch(updates: Mapping[str, Any], *, updated_at: datetime) -> SurrealRecord:
@@ -2614,8 +2639,16 @@ def _entity_update_patch(updates: Mapping[str, Any], *, updated_at: datetime) ->
         "priority",
         "complexity",
         "feature",
+        "last_recalled_at",
+        "last_used_at",
+        "retrieval_count",
+        "citation_count",
     ):
-        if key in metadata_patch:
+        if key in metadata_patch and key in {"last_recalled_at", "last_used_at"}:
+            patch[key] = _metadata_datetime(metadata_patch.get(key))
+        elif key in metadata_patch and key in {"retrieval_count", "citation_count"}:
+            patch[key] = _metadata_int(metadata_patch.get(key))
+        elif key in metadata_patch:
             patch[key] = _metadata_str(metadata_patch, key)
     if "tags" in metadata_patch:
         patch["tags"] = _metadata_str_list(metadata_patch.get("tags")) or []
@@ -2820,6 +2853,28 @@ def _metadata_str(metadata: dict[str, object], key: str) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _metadata_int(value: object) -> int:
+    coerced = _metadata_optional_int(value)
+    return 0 if coerced is None else coerced
+
+
+def _metadata_optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
 
 
 def _metadata_str_list(value: object) -> list[str] | None:
