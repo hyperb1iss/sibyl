@@ -7,6 +7,36 @@ import pytest
 from sibyl_core.config import CoreConfig
 
 
+def test_core_config_uses_minilm_defaults_for_local_graph_embeddings() -> None:
+    config = CoreConfig(_env_file=None, graph_embedding_provider="local")
+
+    assert config.graph_embedding_model == "sentence-transformers/all-MiniLM-L6-v2"
+    assert config.graph_embedding_dimensions == 384
+
+
+def test_core_config_preserves_explicit_local_graph_embedding_dimensions() -> None:
+    config = CoreConfig(
+        _env_file=None,
+        graph_embedding_provider="local",
+        graph_embedding_model="BAAI/bge-m3",
+        graph_embedding_dimensions=1024,
+    )
+
+    assert config.graph_embedding_model == "BAAI/bge-m3"
+    assert config.graph_embedding_dimensions == 1024
+
+
+def test_core_config_preserves_explicit_local_dimension_mismatch() -> None:
+    config = CoreConfig(
+        _env_file=None,
+        graph_embedding_provider="local",
+        graph_embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+        graph_embedding_dimensions=1024,
+    )
+
+    assert config.graph_embedding_dimensions == 1024
+
+
 def test_core_config_ignores_project_dotenv(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("SIBYL_OPENAI_API_KEY", raising=False)

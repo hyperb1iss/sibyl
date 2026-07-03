@@ -41,3 +41,30 @@ def test_context_pack_eval_metadata_includes_git_provenance(
     assert metadata["sibyl_commit"] == "abc123"
     assert metadata["git_dirty"] == "false"
     assert metadata["git_status"] == "clean"
+
+
+def test_context_pack_eval_metadata_uses_local_model_dimensions(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    module = _load_context_pack_eval_module()
+    cases_file = tmp_path / "context_cases.json"
+    cases_file.write_text("[]", encoding="utf-8")
+    args = SimpleNamespace(auth_manifest=None, metadata=[])
+    monkeypatch.setattr(
+        module,
+        "settings",
+        SimpleNamespace(
+            graph_embedding_provider="local",
+            graph_embedding_model="BAAI/bge-m3",
+            graph_embedding_dimensions=1024,
+        ),
+    )
+    monkeypatch.setattr(module, "git_provenance_metadata", lambda _root: {})
+
+    metadata = module._benchmark_metadata(args=args, cases_file=cases_file)
+
+    assert metadata["embedding_provider"] == "local"
+    assert metadata["embedding_model"] == "BAAI/bge-m3"
+    assert metadata["embedding_dimensions"] == "1024"
+    assert metadata["tokenizer_estimate_method"] == "sentence-transformers"

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+import sibyl_core.embeddings.providers as embedding_providers
 import sibyl_core.retrieval.hybrid as hybrid_module
 import sibyl_core.retrieval.query_ranking as query_ranking_module
 import sibyl_core.retrieval.search as search_module
@@ -13,6 +14,8 @@ from sibyl_core.auth.memory_policy import memory_scope_policy_key
 from sibyl_core.embeddings.providers import (
     DeterministicEmbeddingProvider,
     EmbeddingMetadata,
+    configured_embedding_provider,
+    create_embedding_provider,
 )
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceResult
 from sibyl_core.models.context import ContextFacet
@@ -28,6 +31,122 @@ from sibyl_core.retrieval.search import (
     fusion_backend_from_env,
 )
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory, RawMemoryRecallResult
+
+
+class _FakeSentenceTransformer:
+    def __init__(self, *, dimensions: int = 3) -> None:
+        self.dimensions = dimensions
+        self.requests: list[tuple[list[str], dict[str, object]]] = []
+
+    def get_sentence_embedding_dimension(self) -> int:
+        return self.dimensions
+
+    def encode(self, texts: list[str], **kwargs: object) -> list[list[float]]:
+        self.requests.append((list(texts), dict(kwargs)))
+        return [
+            [float(index + 1), 0.0, 0.0][: self.dimensions] for index, _text in enumerate(texts)
+        ]
+
+
+@pytest.mark.asyncio
+async def test_local_sentence_transformer_provider_embeds_with_metadata() -> None:
+    client = _FakeSentenceTransformer(dimensions=3)
+    provider = create_embedding_provider(
+        provider="local",
+        model="sentence-transformers/all-MiniLM-L6-v2",
+        dimensions=3,
+        cache_namespace="graph-local-test",
+        client=client,
+    )
+
+    embeddings = await provider.embed_texts(["  alpha  ", ""], input_kind="query")
+
+    assert provider.metadata.provider == "local"
+    assert provider.metadata.cache_namespace == "graph-local-test"
+    assert provider.metadata.tokenizer_estimate_method == "sentence-transformers"
+    assert provider.metadata.input_kind_sensitive is False
+    assert embeddings == [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]
+    assert client.requests == [
+        (
+            ["alpha", "[empty]"],
+            {
+                "normalize_embeddings": True,
+                "convert_to_numpy": True,
+                "show_progress_bar": False,
+            },
+        )
+    ]
+
+
+def test_local_sentence_transformer_provider_rejects_dimension_mismatch() -> None:
+    with pytest.raises(ValueError, match="produces 2 dimensions"):
+        create_embedding_provider(
+            provider="local",
+            model="sentence-transformers/all-MiniLM-L6-v2",
+            dimensions=3,
+            cache_namespace="graph-local-test",
+            client=_FakeSentenceTransformer(dimensions=2),
+        )
+
+
+def test_local_sentence_transformer_provider_requires_optional_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(embedding_providers.importlib.util, "find_spec", lambda _name: None)
+
+    with pytest.raises(RuntimeError, match="requires the optional"):
+        create_embedding_provider(
+            provider="local",
+            model="sentence-transformers/all-MiniLM-L6-v2",
+            dimensions=384,
+            cache_namespace="graph-local-test",
+        )
+
+
+def test_configured_local_embedding_provider_uses_minilm_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SIBYL_MOCK_LLM", raising=False)
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_PROVIDER", "local")
+    monkeypatch.delenv("SIBYL_GRAPH_EMBEDDING_MODEL", raising=False)
+    monkeypatch.delenv("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", raising=False)
+    monkeypatch.setattr(embedding_providers.importlib.util, "find_spec", lambda _name: object())
+
+    provider = configured_embedding_provider()
+
+    assert provider is not None
+    assert provider.metadata.provider == "local"
+    assert provider.metadata.model == "sentence-transformers/all-MiniLM-L6-v2"
+    assert provider.metadata.dimensions == 384
+    assert provider.metadata.cache_namespace == "graph"
+
+
+def test_configured_local_embedding_provider_uses_model_dimensions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SIBYL_MOCK_LLM", raising=False)
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_PROVIDER", "local")
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_MODEL", "BAAI/bge-m3")
+    monkeypatch.delenv("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", raising=False)
+    monkeypatch.setattr(embedding_providers.importlib.util, "find_spec", lambda _name: object())
+
+    provider = configured_embedding_provider()
+
+    assert provider is not None
+    assert provider.metadata.model == "BAAI/bge-m3"
+    assert provider.metadata.dimensions == 1024
+
+
+def test_configured_local_embedding_provider_disables_without_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SIBYL_MOCK_LLM", raising=False)
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_PROVIDER", "local")
+    monkeypatch.delenv("SIBYL_GRAPH_EMBEDDING_MODEL", raising=False)
+    monkeypatch.delenv("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", raising=False)
+    monkeypatch.setattr(embedding_providers.importlib.util, "find_spec", lambda _name: None)
+
+    assert configured_embedding_provider() is None
 
 
 def test_fusion_backend_defaults_to_python_rrf() -> None:

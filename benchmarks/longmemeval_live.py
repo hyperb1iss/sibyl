@@ -28,6 +28,13 @@ sys.path.insert(0, str(ROOT / "packages" / "python" / "sibyl-core" / "src"))
 from git_provenance import git_provenance
 
 from sibyl_core.config import settings
+from sibyl_core.embeddings.providers import (
+    DEFAULT_LOCAL_EMBEDDING_MODEL,
+    OPENAI_GRAPH_EMBEDDING_DIMENSIONS,
+    OPENAI_GRAPH_EMBEDDING_MODEL,
+    local_embedding_dimensions,
+    sentence_transformers_available,
+)
 from sibyl_core.evals.longmemeval import (
     CORPUS_TEXT_POLICIES,
     CORPUS_TEXT_POLICY,
@@ -197,13 +204,23 @@ def _graph_embedding_runtime_metadata() -> dict[str, Any]:
     ).strip()
     model = os.environ.get("SIBYL_GRAPH_EMBEDDING_MODEL", "").strip()
     if not model:
-        if provider == "gemini" and settings.graph_embedding_model == "text-embedding-3-small":
+        if provider == "gemini" and settings.graph_embedding_model == OPENAI_GRAPH_EMBEDDING_MODEL:
             model = "gemini-embedding-2"
+        elif provider == "local" and settings.graph_embedding_model == OPENAI_GRAPH_EMBEDDING_MODEL:
+            model = DEFAULT_LOCAL_EMBEDDING_MODEL
         else:
             model = settings.graph_embedding_model
 
     raw_dimensions = os.environ.get("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", "").strip()
-    dimensions = int(raw_dimensions) if raw_dimensions else settings.graph_embedding_dimensions
+    if raw_dimensions:
+        dimensions = int(raw_dimensions)
+    elif (
+        provider == "local"
+        and settings.graph_embedding_dimensions == OPENAI_GRAPH_EMBEDDING_DIMENSIONS
+    ):
+        dimensions = local_embedding_dimensions(model) or settings.graph_embedding_dimensions
+    else:
+        dimensions = settings.graph_embedding_dimensions
     raw_timeout = os.environ.get("SIBYL_GRAPH_EMBEDDING_TIMEOUT_SECONDS", "").strip()
     timeout_seconds = (
         float(raw_timeout) if raw_timeout else settings.graph_embedding_timeout_seconds
@@ -214,19 +231,27 @@ def _graph_embedding_runtime_metadata() -> dict[str, Any]:
         if raw_search_timeout
         else settings.graph_search_embedding_timeout_seconds
     )
-    if provider == "gemini":
+    if provider == "local":
+        api_key_present = sentence_transformers_available()
+        provider_status = "enabled" if api_key_present else "missing_dependency"
+        tokenizer_estimate_method = "sentence-transformers"
+    elif provider == "gemini":
         api_key_present = bool(
             os.environ.get("SIBYL_GEMINI_API_KEY")
             or os.environ.get("GEMINI_API_KEY")
             or os.environ.get("GOOGLE_API_KEY")
             or settings.gemini_api_key.get_secret_value()
         )
+        provider_status = "enabled" if api_key_present else "missing_key"
+        tokenizer_estimate_method = "provider-default"
     else:
         api_key_present = bool(
             os.environ.get("SIBYL_OPENAI_API_KEY")
             or os.environ.get("OPENAI_API_KEY")
             or settings.openai_api_key.get_secret_value()
         )
+        provider_status = "enabled" if api_key_present else "missing_key"
+        tokenizer_estimate_method = "provider-default"
 
     return {
         "retrieval_semantics": (
@@ -236,11 +261,14 @@ def _graph_embedding_runtime_metadata() -> dict[str, Any]:
         "embedding_provider": provider if api_key_present else "disabled",
         "embedding_model": model if api_key_present else "not-applicable",
         "embedding_dimensions": dimensions if api_key_present else 0,
+        "embedding_cache_namespace": "graph" if api_key_present else "not-applicable",
         "embedding_timeout_seconds": timeout_seconds if api_key_present else 0.0,
         "query_embedding_timeout_seconds": (search_timeout_seconds if api_key_present else 0.0),
         "embedding_provider_configured": provider,
-        "embedding_provider_status": "enabled" if api_key_present else "missing_key",
-        "tokenizer_estimate_method": "provider-default" if api_key_present else "not-applicable",
+        "embedding_provider_status": provider_status,
+        "tokenizer_estimate_method": (
+            tokenizer_estimate_method if api_key_present else "not-applicable"
+        ),
         "vector_search_surface": "entity.name_embedding KNN via EntityManager.search",
     }
 

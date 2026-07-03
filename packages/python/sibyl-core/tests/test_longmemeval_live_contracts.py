@@ -31,6 +31,7 @@ def test_longmemeval_report_uses_graph_embedding_runtime(monkeypatch) -> None:
     assert metadata["embedding_provider"] == "openai"
     assert metadata["embedding_model"] == "text-embedding-3-small"
     assert metadata["embedding_dimensions"] == 1024
+    assert metadata["embedding_cache_namespace"] == "graph"
     assert metadata["embedding_timeout_seconds"] == 20.0
     assert metadata["query_embedding_timeout_seconds"] == 5.0
     assert metadata["embedding_provider_status"] == "enabled"
@@ -38,6 +39,52 @@ def test_longmemeval_report_uses_graph_embedding_runtime(monkeypatch) -> None:
     assert metadata["vector_search_surface"] == (
         "entity.name_embedding KNN via EntityManager.search"
     )
+
+
+def test_longmemeval_report_records_local_embedding_runtime(monkeypatch) -> None:
+    module = _load_script("benchmarks/longmemeval_live.py")
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_PROVIDER", "local")
+    monkeypatch.delenv("SIBYL_GRAPH_EMBEDDING_MODEL", raising=False)
+    monkeypatch.delenv("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", raising=False)
+    monkeypatch.setattr(module, "sentence_transformers_available", lambda: True)
+
+    metadata = module._graph_embedding_runtime_metadata()
+
+    assert metadata["embedding_provider"] == "local"
+    assert metadata["embedding_model"] == "sentence-transformers/all-MiniLM-L6-v2"
+    assert metadata["embedding_dimensions"] == 384
+    assert metadata["embedding_cache_namespace"] == "graph"
+    assert metadata["embedding_provider_configured"] == "local"
+    assert metadata["embedding_provider_status"] == "enabled"
+    assert metadata["tokenizer_estimate_method"] == "sentence-transformers"
+
+
+def test_longmemeval_report_records_local_model_dimensions(monkeypatch) -> None:
+    module = _load_script("benchmarks/longmemeval_live.py")
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_PROVIDER", "local")
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_MODEL", "BAAI/bge-m3")
+    monkeypatch.delenv("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", raising=False)
+    monkeypatch.setattr(module, "sentence_transformers_available", lambda: True)
+
+    metadata = module._graph_embedding_runtime_metadata()
+
+    assert metadata["embedding_provider"] == "local"
+    assert metadata["embedding_model"] == "BAAI/bge-m3"
+    assert metadata["embedding_dimensions"] == 1024
+
+
+def test_longmemeval_report_records_missing_local_embedding_dependency(monkeypatch) -> None:
+    module = _load_script("benchmarks/longmemeval_live.py")
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_PROVIDER", "local")
+    monkeypatch.setattr(module, "sentence_transformers_available", lambda: False)
+
+    metadata = module._graph_embedding_runtime_metadata()
+
+    assert metadata["embedding_provider"] == "disabled"
+    assert metadata["embedding_provider_configured"] == "local"
+    assert metadata["embedding_provider_status"] == "missing_dependency"
+    assert metadata["embedding_dimensions"] == 0
+    assert metadata["embedding_cache_namespace"] == "not-applicable"
 
 
 def test_longmemeval_preflight_detects_vector_search_surface() -> None:

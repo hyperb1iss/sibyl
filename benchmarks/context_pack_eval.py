@@ -20,6 +20,12 @@ sys.path.insert(0, str(ROOT / "apps" / "cli" / "src"))
 from git_provenance import git_provenance_metadata
 
 from sibyl_core.config import settings
+from sibyl_core.embeddings.providers import (
+    DEFAULT_LOCAL_EMBEDDING_MODEL,
+    OPENAI_GRAPH_EMBEDDING_DIMENSIONS,
+    OPENAI_GRAPH_EMBEDDING_MODEL,
+    local_embedding_dimensions,
+)
 from sibyl_core.evals import ContextPackEvalReport, EvalConfig, run_context_pack_evaluation_cli
 
 
@@ -115,12 +121,24 @@ def _benchmark_metadata(
     args: argparse.Namespace,
     cases_file: Path | None,
 ) -> dict[str, str]:
+    provider = str(settings.graph_embedding_provider)
+    model = str(settings.graph_embedding_model)
+    dimensions = settings.graph_embedding_dimensions
+    tokenizer_estimate_method = "provider-default"
+    if provider == "local":
+        if model == OPENAI_GRAPH_EMBEDDING_MODEL:
+            model = DEFAULT_LOCAL_EMBEDDING_MODEL
+        if dimensions == OPENAI_GRAPH_EMBEDDING_DIMENSIONS:
+            dimensions = local_embedding_dimensions(model) or dimensions
+        tokenizer_estimate_method = "sentence-transformers"
+
     metadata = {
         "retrieval_mode": "native",
-        "embedding_provider": str(settings.graph_embedding_provider),
-        "embedding_model": str(settings.graph_embedding_model),
-        "embedding_dimensions": str(settings.graph_embedding_dimensions),
-        "tokenizer_estimate_method": "provider-default",
+        "embedding_provider": provider,
+        "embedding_model": model,
+        "embedding_dimensions": str(dimensions),
+        "embedding_cache_namespace": "graph",
+        "tokenizer_estimate_method": tokenizer_estimate_method,
         "dataset_name": _cases_dataset_name(cases_file),
         "corpus_hash": _sha256_file(cases_file),
         "auth_manifest_id": _auth_manifest_id(args.auth_manifest),

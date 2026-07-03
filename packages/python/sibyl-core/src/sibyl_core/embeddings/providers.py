@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
 import math
 import os
 import threading
@@ -26,7 +27,7 @@ from sibyl_core.models.entities import Entity, Relationship
 log = structlog.get_logger()
 
 type EmbeddingInputKind = Literal["query", "document"]
-type EmbeddingProviderName = Literal["openai", "gemini"]
+type EmbeddingProviderName = Literal["openai", "gemini", "local"]
 type _ConfiguredProviderCacheKey = tuple[EmbeddingProviderName, str, int, str]
 
 _OPENAI_EMBEDDING_INPUT_MAX_TOKENS = 6000
@@ -35,6 +36,19 @@ _OPENAI_EMBEDDING_REQUEST_MAX_ITEMS = 2000
 _OPENAI_EMBEDDING_FALLBACK_MAX_CHARS = 12_000
 _OPENAI_EMBEDDING_EMPTY_TEXT = "[empty]"
 _OPENAI_EMBEDDING_TRUNCATION_MARKER = "\n...[truncated for embedding]...\n"
+_LOCAL_EMBEDDING_EMPTY_TEXT = "[empty]"
+DEFAULT_LOCAL_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_LOCAL_EMBEDDING_DIMENSIONS = 384
+OPENAI_GRAPH_EMBEDDING_MODEL = "text-embedding-3-small"
+OPENAI_GRAPH_EMBEDDING_DIMENSIONS = 1024
+_OPENAI_GRAPH_EMBEDDING_MODEL = OPENAI_GRAPH_EMBEDDING_MODEL
+_OPENAI_GRAPH_EMBEDDING_DIMENSIONS = OPENAI_GRAPH_EMBEDDING_DIMENSIONS
+_LOCAL_EMBEDDING_MODEL_DIMENSIONS = {
+    "all-minilm-l6-v2": DEFAULT_LOCAL_EMBEDDING_DIMENSIONS,
+    DEFAULT_LOCAL_EMBEDDING_MODEL.lower(): DEFAULT_LOCAL_EMBEDDING_DIMENSIONS,
+    "baai/bge-m3": 1024,
+    "bge-m3": 1024,
+}
 _configured_provider_cache: weakref.WeakKeyDictionary[
     asyncio.AbstractEventLoop,
     dict[_ConfiguredProviderCacheKey, EmbeddingProvider],
@@ -195,6 +209,90 @@ class GeminiEmbeddingProvider:
         return embeddings
 
 
+class LocalSentenceTransformerEmbeddingProvider:
+    def __init__(
+        self,
+        *,
+        metadata: EmbeddingMetadata,
+        client: Any | None = None,
+    ) -> None:
+        self._metadata = replace(
+            metadata,
+            provider="local",
+            tokenizer_estimate_method="sentence-transformers",
+            input_kind_sensitive=False,
+        )
+        self._client = client
+        self._load_lock = threading.Lock()
+        self._encode_lock = threading.Lock()
+        if self._client is None and not sentence_transformers_available():
+            raise RuntimeError(
+                "local graph embedding provider requires the optional "
+                "`sentence-transformers` dependency; install the `reranking` "
+                "or `runtime` extra, or set SIBYL_GRAPH_EMBEDDING_PROVIDER=openai"
+            )
+        self._validate_client_dimensions(self._client)
+
+    @property
+    def metadata(self) -> EmbeddingMetadata:
+        return self._metadata
+
+    async def embed_texts(
+        self,
+        texts: Sequence[str],
+        *,
+        input_kind: EmbeddingInputKind = "document",
+    ) -> list[list[float]]:
+        del input_kind
+        if not texts:
+            return []
+        prepared = [text.strip() or _LOCAL_EMBEDDING_EMPTY_TEXT for text in texts]
+        return await asyncio.to_thread(self._embed_texts_sync, prepared)
+
+    def _embed_texts_sync(self, texts: Sequence[str]) -> list[list[float]]:
+        client = self._get_client_sync()
+        with self._encode_lock:
+            result = client.encode(
+                list(texts),
+                normalize_embeddings=self.metadata.normalize,
+                convert_to_numpy=True,
+                show_progress_bar=False,
+            )
+        return _coerce_embedding_matrix(
+            result,
+            expected_count=len(texts),
+            dimensions=self.metadata.dimensions,
+        )
+
+    def _get_client_sync(self) -> Any:
+        if self._client is not None:
+            return self._client
+        with self._load_lock:
+            if self._client is None:
+                try:
+                    from sentence_transformers import SentenceTransformer
+                except ImportError as exc:
+                    raise RuntimeError(
+                        "local graph embedding provider requires the optional "
+                        "`sentence-transformers` dependency; install the `reranking` "
+                        "or `runtime` extra, or set SIBYL_GRAPH_EMBEDDING_PROVIDER=openai"
+                    ) from exc
+                self._client = SentenceTransformer(self.metadata.model)
+                self._validate_client_dimensions(self._client)
+        return self._client
+
+    def _validate_client_dimensions(self, client: Any | None) -> None:
+        if client is None:
+            return
+        actual_dimensions = _sentence_transformer_dimensions(client)
+        if actual_dimensions is not None and actual_dimensions != self.metadata.dimensions:
+            raise ValueError(
+                "local embedding model "
+                f"{self.metadata.model!r} produces {actual_dimensions} dimensions, "
+                f"but SIBYL_GRAPH_EMBEDDING_DIMENSIONS is {self.metadata.dimensions}"
+            )
+
+
 class CachedEmbeddingProvider:
     def __init__(
         self,
@@ -322,6 +420,14 @@ def create_embedding_provider(
         cache_namespace=cache_namespace,
         tokenizer_estimate_method=tokenizer_estimate_method,
     )
+    if provider == "local":
+        return CachedEmbeddingProvider(
+            LocalSentenceTransformerEmbeddingProvider(
+                metadata=metadata,
+                client=client,
+            ),
+            max_size=max_cache_size,
+        )
     if provider == "gemini":
         return CachedEmbeddingProvider(
             GeminiEmbeddingProvider(
@@ -344,10 +450,9 @@ def create_embedding_provider(
 def configured_embedding_provider() -> EmbeddingProvider | None:
     from sibyl_core.config import settings
 
-    dimensions_raw = os.getenv("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", "").strip()
-    dimensions = int(dimensions_raw) if dimensions_raw else settings.graph_embedding_dimensions
-
     if os.getenv("SIBYL_MOCK_LLM", "").strip().lower() in {"1", "true", "yes", "on"}:
+        dimensions_raw = os.getenv("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", "").strip()
+        dimensions = int(dimensions_raw) if dimensions_raw else settings.graph_embedding_dimensions
         return DeterministicEmbeddingProvider(
             EmbeddingMetadata(
                 provider="deterministic",
@@ -361,17 +466,19 @@ def configured_embedding_provider() -> EmbeddingProvider | None:
     provider = (
         os.getenv("SIBYL_GRAPH_EMBEDDING_PROVIDER") or settings.graph_embedding_provider
     ).strip()
-    if provider not in ("gemini", "openai"):
+    if provider not in ("gemini", "local", "openai"):
         raise ValueError(f"unsupported native graph embedding provider: {provider}")
 
-    model = os.getenv("SIBYL_GRAPH_EMBEDDING_MODEL", "").strip()
-    if not model:
-        if provider == "gemini" and settings.graph_embedding_model == "text-embedding-3-small":
-            model = "gemini-embedding-2"
-        else:
-            model = settings.graph_embedding_model
+    model = _configured_graph_embedding_model(provider)
+    dimensions = _configured_graph_embedding_dimensions(provider, model)
 
-    if provider == "gemini":
+    if provider == "local" and not sentence_transformers_available():
+        log.info("graph_embeddings_disabled", provider=provider, reason="missing_dependency")
+        return None
+
+    if provider == "local":
+        api_key = ""
+    elif provider == "gemini":
         api_key = (
             os.getenv("SIBYL_GEMINI_API_KEY", "")
             or os.getenv("GEMINI_API_KEY", "")
@@ -385,7 +492,7 @@ def configured_embedding_provider() -> EmbeddingProvider | None:
             or settings.openai_api_key.get_secret_value()
         )
 
-    if not api_key:
+    if provider != "local" and not api_key:
         log.info("graph_embeddings_disabled", provider=provider, reason="missing_key")
         return None
 
@@ -394,7 +501,7 @@ def configured_embedding_provider() -> EmbeddingProvider | None:
         provider=provider_name,
         model=model,
         dimensions=dimensions,
-        api_key=api_key,
+        cache_identity=api_key or "local",
     )
     if cache_entry is None:
         return create_embedding_provider(
@@ -429,14 +536,104 @@ def _configured_provider_cache_entry(
     provider: EmbeddingProviderName,
     model: str,
     dimensions: int,
-    api_key: str,
+    cache_identity: str,
 ) -> tuple[asyncio.AbstractEventLoop, _ConfiguredProviderCacheKey] | None:
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return None
-    api_key_fingerprint = hashlib.sha256(api_key.encode()).hexdigest()
-    return loop, (provider, model, dimensions, api_key_fingerprint)
+    identity_fingerprint = hashlib.sha256(cache_identity.encode()).hexdigest()
+    return loop, (provider, model, dimensions, identity_fingerprint)
+
+
+def _configured_graph_embedding_model(provider: str) -> str:
+    from sibyl_core.config import settings
+
+    model = os.getenv("SIBYL_GRAPH_EMBEDDING_MODEL", "").strip()
+    if model:
+        return model
+    configured = settings.graph_embedding_model.strip()
+    if provider == "gemini" and configured == _OPENAI_GRAPH_EMBEDDING_MODEL:
+        return "gemini-embedding-2"
+    if provider == "local" and configured == _OPENAI_GRAPH_EMBEDDING_MODEL:
+        return DEFAULT_LOCAL_EMBEDDING_MODEL
+    return configured
+
+
+def _configured_graph_embedding_dimensions(provider: str, model: str) -> int:
+    from sibyl_core.config import settings
+
+    dimensions_raw = os.getenv("SIBYL_GRAPH_EMBEDDING_DIMENSIONS", "").strip()
+    if dimensions_raw:
+        return int(dimensions_raw)
+    if provider == "local":
+        local_dimensions = local_embedding_dimensions(model)
+        if (
+            local_dimensions is not None
+            and settings.graph_embedding_dimensions == _OPENAI_GRAPH_EMBEDDING_DIMENSIONS
+        ):
+            return local_dimensions
+    return settings.graph_embedding_dimensions
+
+
+def local_embedding_dimensions(model: str) -> int | None:
+    return _LOCAL_EMBEDDING_MODEL_DIMENSIONS.get(model.strip().lower())
+
+
+def sentence_transformers_available() -> bool:
+    try:
+        return importlib.util.find_spec("sentence_transformers") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _sentence_transformer_dimensions(client: Any) -> int | None:
+    get_dimensions = getattr(client, "get_sentence_embedding_dimension", None)
+    if not callable(get_dimensions):
+        return None
+    dimensions = get_dimensions()
+    if isinstance(dimensions, bool) or dimensions is None:
+        return None
+    return int(dimensions)
+
+
+def _coerce_embedding_matrix(
+    value: Any,
+    *,
+    expected_count: int,
+    dimensions: int,
+) -> list[list[float]]:
+    raw = value.tolist() if hasattr(value, "tolist") else value
+    rows = [raw] if expected_count == 1 and _is_numeric_vector(raw) else list(raw)
+    if len(rows) != expected_count:
+        raise ValueError(
+            f"local embedding provider returned {len(rows)} vectors for {expected_count} texts"
+        )
+    return [_coerce_embedding_vector(row, dimensions=dimensions) for row in rows]
+
+
+def _is_numeric_vector(value: Any) -> bool:
+    if isinstance(value, str | bytes):
+        return False
+    try:
+        values = list(value)
+    except TypeError:
+        return False
+    return all(isinstance(item, int | float) and not isinstance(item, bool) for item in values)
+
+
+def _coerce_embedding_vector(value: Any, *, dimensions: int) -> list[float]:
+    try:
+        vector = list(value)
+    except TypeError as exc:
+        raise ValueError("local embedding provider returned a non-vector result") from exc
+    if len(vector) != dimensions:
+        raise ValueError(
+            f"local embedding provider returned {len(vector)} dimensions, expected {dimensions}"
+        )
+    if any(not isinstance(item, int | float) or isinstance(item, bool) for item in vector):
+        raise ValueError("local embedding provider returned non-numeric vector values")
+    return [float(item) for item in vector]
 
 
 def _prepare_openai_embedding_text(text: str, *, model: str) -> tuple[str, int]:
@@ -612,6 +809,8 @@ def _set_future_exception(
 
 
 __all__ = [
+    "OPENAI_GRAPH_EMBEDDING_DIMENSIONS",
+    "OPENAI_GRAPH_EMBEDDING_MODEL",
     "CachedEmbeddingProvider",
     "DeterministicEmbeddingProvider",
     "EmbeddingInputKind",
@@ -619,10 +818,13 @@ __all__ = [
     "EmbeddingProvider",
     "EmbeddingProviderName",
     "GeminiEmbeddingProvider",
+    "LocalSentenceTransformerEmbeddingProvider",
     "OpenAIEmbeddingProvider",
     "configured_embedding_provider",
     "create_embedding_provider",
     "embedding_cache_key",
     "entity_embedding_text",
+    "local_embedding_dimensions",
     "relationship_embedding_text",
+    "sentence_transformers_available",
 ]
