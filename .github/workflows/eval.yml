@@ -100,6 +100,14 @@ on:
         description: "Run the full 500-question LongMemEval live job"
         type: boolean
         default: false
+      run_longmemeval_qa:
+        description: "Run the GPT-4o/GPT-5.2 LongMemEval-S QA pass on the full job"
+        type: boolean
+        default: false
+      longmemeval_qa_limit:
+        description: "Optional QA question limit; leave blank for the full dataset"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -133,6 +141,12 @@ env:
   LONGMEMEVAL_GRAPH_HNSW_M: ${{ inputs.longmemeval_graph_hnsw_m || '12' }}
   LONGMEMEVAL_GRAPH_KNN_EF: ${{ inputs.longmemeval_graph_knn_ef || '40' }}
   LONGMEMEVAL_NATIVE_FUSION_BACKEND: ${{ inputs.longmemeval_native_fusion_backend || 'python_rrf' }}
+  LONGMEMEVAL_QA_MODE:
+    ${{ ( inputs.run_longmemeval_qa || (github.event_name == 'schedule' && github.event.schedule ==
+    '0 8 * * 0') ) && 'model' || 'disabled' }}
+  LONGMEMEVAL_QA_LIMIT: ${{ inputs.longmemeval_qa_limit || '' }}
+  LONGMEMEVAL_QA_READER_MODEL: gpt-4o
+  LONGMEMEVAL_QA_JUDGE_MODEL: gpt-5.2
 
 jobs:
   live-eval:
@@ -786,13 +800,9 @@ jobs:
     name: LongMemEval Live Full
     # Keep the schedule string in sync with the Sunday cron above.
     if:
-      ${{
-        github.event_name != 'pull_request' &&
-        (
-          inputs.run_longmemeval_full ||
-          (github.event_name == 'schedule' && github.event.schedule == '0 8 * * 0')
-        )
-      }}
+      ${{ github.event_name != 'pull_request' && ( inputs.run_longmemeval_full ||
+      inputs.run_longmemeval_qa || (github.event_name == 'schedule' && github.event.schedule == '0 8
+      * * 0') ) }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
@@ -902,6 +912,22 @@ jobs:
           if [[ "${LONGMEMEVAL_WAIT_FOR_MEMORY_EXTRACTION}" == "true" || "${LONGMEMEVAL_AUTO_EXTRACT_ENTITIES}" == "true" ]]; then
             echo "::notice::Full LongMemEval runs are raw-first; extraction applies to the smoke job."
           fi
+          qa_args=(--qa-mode disabled)
+          if [[ "${LONGMEMEVAL_QA_MODE}" == "model" ]]; then
+            qa_args=(
+              --qa-mode model
+              --qa-reader-provider openai
+              --qa-reader-model "${LONGMEMEVAL_QA_READER_MODEL}"
+              --qa-judge-provider openai
+              --qa-judge-model "${LONGMEMEVAL_QA_JUDGE_MODEL}"
+              --qa-max-context-sessions 5
+              --qa-max-session-chars 4000
+              --qa-timeout 120
+            )
+            if [[ -n "${LONGMEMEVAL_QA_LIMIT}" ]]; then
+              qa_args+=(--limit "${LONGMEMEVAL_QA_LIMIT}" --sample-strategy stratified)
+            fi
+          fi
           wait_for_projection="${LONGMEMEVAL_WAIT_FOR_MEMORY_PROJECTION}"
           projection_args=()
           if [[ "$wait_for_projection" == "true" ]]; then
@@ -928,16 +954,40 @@ jobs:
             --metadata graph_hnsw_m="${SIBYL_GRAPH_HNSW_M}" \
             --metadata graph_knn_ef="${SIBYL_GRAPH_KNN_EF}" \
             --metadata native_fusion_backend="${SIBYL_NATIVE_FUSION_BACKEND}" \
-            "${projection_args[@]}"
+            --metadata qa_mode="${LONGMEMEVAL_QA_MODE}" \
+            "${projection_args[@]}" \
+            "${qa_args[@]}"
 
       - name: Gate LongMemEval live full
         run: |
-          moon run bench-gate -- .moon/cache/evals/longmemeval_live_full.json \
-            --profile ai-memory \
-            --require-accounting \
-            --require-runtime embedding_provider=openai \
-            --require-runtime embedding_provider_status=enabled \
+          gate_args=(
+            --profile ai-memory
+            --require-accounting
+            --require-runtime embedding_provider=openai
+            --require-runtime embedding_provider_status=enabled
             --require-runtime embedding_cache_namespace=graph
+          )
+          if [[ "${LONGMEMEVAL_QA_MODE}" == "model" ]]; then
+            gate_args+=(
+              --require-qa
+              --require-runtime qa_mode=model
+              --require-runtime qa_reader_model="${LONGMEMEVAL_QA_READER_MODEL}"
+              --require-runtime qa_judge_model="${LONGMEMEVAL_QA_JUDGE_MODEL}"
+            )
+            qa_baseline="benchmarks/results/ai-memory/pinned-longmemeval-s-qa.json"
+            if [[ -n "${LONGMEMEVAL_QA_LIMIT}" ]]; then
+              echo "::notice::QA limit is set; skipping full-dataset qa_accuracy baseline comparison."
+            elif [[ -f "$qa_baseline" ]]; then
+              gate_args+=(
+                --baseline "$qa_baseline"
+                --baseline-metric qa_accuracy
+                --max-regression qa_accuracy=0.01
+              )
+            else
+              echo "::notice::No pinned LongMemEval-S QA baseline found; this run can seed it."
+            fi
+          fi
+          moon run bench-gate -- .moon/cache/evals/longmemeval_live_full.json "${gate_args[@]}"
 
       - name: Upload LongMemEval live full artifact
         if: always()
