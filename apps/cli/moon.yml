@@ -39,18 +39,16 @@ tasks:
   memory-trust-test:
     command:
       uv run pytest tests/test_main_capture.py tests/test_main_search.py
-      tests/test_context_pack.py tests/test_session.py tests/test_user_prompt_hook.py -v
+      tests/test_context_pack.py tests/test_session.py -v
     inputs:
     - '@group(sources)'
     - tests/test_main_capture.py
     - tests/test_main_search.py
     - tests/test_context_pack.py
     - tests/test_session.py
-    - tests/test_user_prompt_hook.py
   context-quality-test:
     command:
       uv run pytest tests/test_context_pack.py tests/test_session.py
-      tests/test_user_prompt_hook.py
       tests/test_main_capture.py::test_recall_command_outputs_markdown_context
       tests/test_main_capture.py::test_recall_command_accepts_review_intent
       tests/test_main_capture.py::test_recall_command_can_request_agent_diary_context
@@ -59,7 +57,6 @@ tasks:
     - '@group(sources)'
     - tests/test_context_pack.py
     - tests/test_session.py
-    - tests/test_user_prompt_hook.py
     - tests/test_main_capture.py
   workspace-trust-test:
     command:
@@ -76,13 +73,11 @@ tasks:
     - tests/test_main_capture.py
   trust-control-test:
     command:
-      uv run pytest tests/test_main_capture.py tests/test_context_pack.py
-      tests/test_user_prompt_hook.py -v
+      uv run pytest tests/test_main_capture.py tests/test_context_pack.py -v
     inputs:
     - '@group(sources)'
     - tests/test_main_capture.py
     - tests/test_context_pack.py
-    - tests/test_user_prompt_hook.py
   autonomy-test:
     command:
       uv run pytest
