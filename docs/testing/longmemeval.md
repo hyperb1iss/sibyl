@@ -186,6 +186,45 @@ Runtime Eval" workflow with `run_longmemeval_full=true`. The job provisions its 
 backend, and worker, then tears them down at completion. Localhost mutation is refused unless the
 caller passes `--allow-localhost` to the harness directly.
 
+## QA-Accuracy Lane
+
+LongMemEval-S also has a separate end-to-end QA-accuracy lane. That lane answers a different
+question from retrieval recall: after Sibyl retrieves sessions, can a reader model produce a correct
+answer, and does the judge mark it correct?
+
+Sibyl now has the harness and gate for that lane, but no public QA-accuracy number is citable until
+a pinned model-backed artifact lands. The pinned run uses:
+
+| Field         | Value                                      |
+| ------------- | ------------------------------------------ |
+| Reader        | `gpt-4o`                                   |
+| Judge         | `gpt-5.2`                                  |
+| QA schema     | `sibyl-longmemeval-s-qa-v1`                |
+| Reader prompt | `sibyl-longmemeval-reader-v1`              |
+| Judge prompt  | `sibyl-longmemeval-judge-v1`               |
+| Rubric        | `longmemeval-s-answer-correctness-v1`      |
+| Baseline file | `pinned-longmemeval-s-qa.json` once seeded |
+
+The GitHub workflow enables the paid model-backed QA pass only for the Sunday full run or a manual
+dispatch with `run_longmemeval_qa=true`. Manual sampled QA runs can set `longmemeval_qa_limit`; they
+still validate the QA artifact contract but intentionally skip comparison against the future
+full-dataset baseline.
+
+The gate is:
+
+```bash
+moon run bench-gate -- .moon/cache/evals/longmemeval_live_full.json \
+  --profile ai-memory \
+  --require-accounting \
+  --require-qa \
+  --require-runtime qa_mode=model \
+  --require-runtime qa_reader_model=gpt-4o \
+  --require-runtime qa_judge_model=gpt-5.2
+```
+
+Once `benchmarks/results/ai-memory/pinned-longmemeval-s-qa.json` exists, the same gate also compares
+`qa_accuracy` against that baseline and fails on a regression larger than 1.0 percentage point.
+
 ## Score Progression
 
 These rows trace the live LongMemEval improvements that drove the latest result. Each is a real CI
@@ -254,6 +293,8 @@ intentional:
 
 - The score is from LongMemEval-S (500 questions). LongMemEval-M and a future LongMemEval-V2 are not
   yet covered. The eval ladder is being extended.
+- The QA-accuracy lane is wired and gated, but no QA-accuracy score is public until a pinned
+  model-backed artifact is published.
 - The full run uses OpenAI embeddings. We have not yet published a local-embedding variant. That is
   on the roadmap for direct comparison against systems that report local-embedding numbers (e.g.,
   Memweave).
