@@ -167,8 +167,8 @@ It also requires citable release metadata:
 New citable context-pack and AI-memory receipts must also pass `--require-accounting`. The
 accounting block uses schema `sibyl-eval-accounting-v1` and records p50/p95 latency, token
 estimates, full-context baseline estimate, embedding calls, embedding cost, reader cost, judge cost,
-and total estimated cost. Cost regression is warning-only until the ledger has two citable
-baselines for the same lane.
+and total estimated cost. Cost regression is warning-only until the ledger has two citable baselines
+for the same lane.
 
 `leak_count` is a per-case sentinel: forbidden item and forbidden term matches are reported
 separately, while the summary uses the larger of those two counts for each case so one leaked memory
@@ -268,8 +268,8 @@ Required record fields:
 - exact command, environment variables that affect behavior, and timeout settings
 - overall metrics and the complete per-slice table
 - per-case result records with answer IDs, ranked result IDs, and case metrics
-- ingestion time, query latency, p50/p95 latency, token estimates, embedding call count, warning-only
-  cost estimate, timeout count, error count, and skipped-case count when available
+- ingestion time, query latency, p50/p95 latency, token estimates, embedding call count,
+  warning-only cost estimate, timeout count, error count, and skipped-case count when available
 - competitor version, hosted/self-hosted mode, ingestion path, and tuning when the result compares
   against another memory product
 - claim boundary: what the result supports and what stays unproven
