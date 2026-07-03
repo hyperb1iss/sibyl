@@ -232,6 +232,7 @@ async def reflect_context(
             reflection_pack_to_dict,
             reflection_pack_to_markdown,
         )
+        from sibyl_core.tools.usage_citation import record_cited_item_usages
 
         accessible_projects = await _resolve_accessible_context_projects(
             ctx=ctx,
@@ -267,6 +268,19 @@ async def reflect_context(
         )
         payload = reflection_pack_to_dict(pack)
         payload["markdown"] = reflection_pack_to_markdown(pack)
+        if request.cited_ids:
+            payload["citation_usage"] = await record_cited_item_usages(
+                request.cited_ids,
+                organization_id=str(org.id),
+                principal_id=getattr(ctx, "user_id", None),
+                project_id=request.project,
+                source_surface="context_reflect",
+                request_metadata={
+                    "source_title": request.source_title,
+                    "intent": request.intent.value,
+                    "persist": request.persist,
+                },
+            )
         response = ReflectionResponse.model_validate(payload)
         await log_reflection_audit(
             user_id=ctx.user_id,

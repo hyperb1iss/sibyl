@@ -99,6 +99,7 @@ def main():
 
         if not bundle or not bundle.get("remember_next"):
             lines.append("Suggest 'sibyl remember' when solving something non-obvious.")
+        lines.append("Cite material memory with 'sibyl cite <ids>' or --cited on reflect/complete.")
         print("\n".join(lines))
         sys.exit(0)
 

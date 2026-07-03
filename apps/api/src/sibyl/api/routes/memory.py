@@ -16,6 +16,8 @@ from sibyl.api.raw_capture_events import publish_raw_capture_changed
 from sibyl.api.schemas import (
     MemoryAuditEventResponse,
     MemoryAuditListResponse,
+    MemoryCitationRequest,
+    MemoryCitationResponse,
     MemoryCorrectionRequest,
     MemoryCorrectionResponse,
     MemoryDerivedRecordResponse,
@@ -1921,6 +1923,58 @@ async def list_memory_audit(
         events=[_audit_event_response(row) for row in rows],
         limit=limit,
     )
+
+
+@router.post(
+    "/cite",
+    response_model=MemoryCitationResponse,
+    dependencies=[Depends(require_org_role(*_WRITE_ROLES))],
+)
+async def cite_memory(
+    request: MemoryCitationRequest,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+) -> MemoryCitationResponse:
+    """Record memories that materially informed an answer or action."""
+    from sibyl_core.tools.usage_citation import record_cited_item_usages
+
+    principal_id = ctx.user_id
+    if not principal_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if request.project_id:
+        await verify_entity_project_access(
+            None,
+            ctx,
+            request.project_id,
+            required_role=ProjectRole.VIEWER,
+        )
+
+    usage = await record_cited_item_usages(
+        request.cited_ids,
+        organization_id=str(org.id),
+        principal_id=principal_id,
+        project_id=request.project_id,
+        source_surface=request.source_surface,
+        request_metadata={
+            "route": "memory_cite",
+            "metadata": request.metadata,
+        },
+    )
+    await _log_memory_audit(
+        action="memory.cite",
+        ctx=ctx,
+        request=http_request,
+        memory_scope="project" if request.project_id else None,
+        scope_key=request.project_id,
+        source_surface=request.source_surface,
+        policy_allowed=True,
+        policy_reason="citation_recorded",
+        project_id=request.project_id,
+        source_ids=request.cited_ids,
+        details={"usage": usage, "metadata": request.metadata},
+    )
+    return MemoryCitationResponse(cited_ids=request.cited_ids, usage=usage)
 
 
 @router.get(

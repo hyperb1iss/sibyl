@@ -625,6 +625,7 @@ async def _reflect_mcp_memory(
     persist: bool = False,
     persist_source: bool = True,
     persist_review: bool = False,
+    cited_ids: list[str] | str | None = None,
     limit: int = 12,
 ) -> dict[str, Any]:
     from sibyl_core.tools.core import (
@@ -675,6 +676,22 @@ async def _reflect_mcp_memory(
     )
     payload = reflection_pack_to_dict(pack)
     payload["markdown"] = reflection_pack_to_markdown(pack)
+    if cited_ids:
+        from sibyl_core.tools.usage_citation import record_cited_item_usages
+
+        payload["citation_usage"] = await record_cited_item_usages(
+            cited_ids,
+            organization_id=ctx.org_id,
+            principal_id=ctx.user_id,
+            project_id=project,
+            source_surface="mcp_reflect",
+            request_metadata={
+                "active_task": active_task,
+                "intent": intent,
+                "persist": persist,
+                "source_title": source_title,
+            },
+        )
     await log_reflection_audit(
         user_id=ctx.user_id,
         organization_id=ctx.org_id,
@@ -1107,6 +1124,28 @@ async def _manage_workflow_transition(
     # complete_task with learnings enqueues the same background learning jobs the
     # REST surface does, using the policy context the authz step resolved.
     response_data = dict(result.response_data)
+    cited_ids = data.get("cited_ids") if action == "complete_task" else None
+    if cited_ids:
+        from sibyl_core.tools.usage_citation import record_cited_item_usages
+
+        policy_context = policy_decision.policy_context if policy_decision else None
+        policy_project_id = None
+        if policy_context is not None:
+            policy_project_id = policy_context.project_id or (
+                policy_context.scope_key if policy_context.memory_space == "project" else None
+            )
+        response_data["citation_usage"] = await record_cited_item_usages(
+            cited_ids,
+            organization_id=ctx.org_id,
+            principal_id=ctx.user_id,
+            project_id=result.task_data.get("project_id") or policy_project_id,
+            source_surface="mcp_manage_complete_task",
+            request_metadata={
+                "action": action,
+                "has_learnings": bool(learnings),
+                "task_id": entity_id,
+            },
+        )
     if (
         action == "complete_task"
         and learnings
@@ -1841,6 +1880,7 @@ def _register_tools(mcp: FastMCP) -> None:
         persist: bool = False,
         persist_source: bool = True,
         persist_review: bool = False,
+        cited_ids: list[str] | str | None = None,
         limit: int = 12,
     ) -> dict[str, Any]:
         """Reflect raw notes into reviewable durable memory candidates.
@@ -1851,7 +1891,8 @@ def _register_tools(mcp: FastMCP) -> None:
         written back into Sibyl. Set persist_review=True to store them in the
         raw review queue instead of graph promotion. Provide task_ids for exact
         task context. With persist=True and a project, active_task links
-        persisted output to the single active doing task when one exists.
+        persisted output to the single active doing task when one exists. Use
+        cited_ids for context/search IDs that materially informed the reflection.
         """
         return await _reflect_mcp_memory(
             content=content,
@@ -1865,6 +1906,7 @@ def _register_tools(mcp: FastMCP) -> None:
             persist=persist,
             persist_source=persist_source,
             persist_review=persist_review,
+            cited_ids=cited_ids,
             limit=limit,
         )
 
@@ -1889,6 +1931,7 @@ def _register_tools(mcp: FastMCP) -> None:
             - unblock_task: Remove blocked status, resume work
             - submit_review: Submit for code review (sets status to 'review')
             - complete_task: Mark done (data.learnings optional)
+              Include data.cited_ids to stamp memories that informed completion.
             - archive_task: Archive without completing
             - update_task: Update task fields (data contains updates)
             - add_note: Append a note to a task (data.content required)

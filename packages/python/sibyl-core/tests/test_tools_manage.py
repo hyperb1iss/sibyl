@@ -549,6 +549,58 @@ class TestTaskActions:
             )
 
     @pytest.mark.asyncio
+    async def test_complete_task_records_cited_memories(self) -> None:
+        """complete_task records cited IDs as usage feedback."""
+        mock_client = AsyncMock()
+        mock_task = MagicMock()
+        mock_task.status = TaskStatus.DONE
+        mock_task.project_id = "project-123"
+
+        mock_workflow = AsyncMock()
+        mock_workflow.complete_task = AsyncMock(return_value=mock_task)
+        record_citations = AsyncMock(
+            return_value={"cited_count": 2, "coverage_complete": True, "stamped_count": 2}
+        )
+
+        with (
+            patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
+            patch("sibyl_core.tools.manage._entity_manager_factory"),
+            patch("sibyl_core.tools.manage._relationship_manager_factory"),
+            patch(
+                "sibyl_core.tasks.workflow.TaskWorkflowEngine",
+                return_value=mock_workflow,
+            ),
+            patch(
+                "sibyl_core.tools.usage_citation.record_cited_item_usages",
+                record_citations,
+            ),
+        ):
+            response = await manage(
+                action="complete_task",
+                entity_id="task_123",
+                data={
+                    "cited_ids": ["decision-1", "raw_memory:raw-1"],
+                    "user_id": "user-123",
+                },
+                organization_id="org_123",
+            )
+
+        record_citations.assert_awaited_once_with(
+            ["decision-1", "raw_memory:raw-1"],
+            organization_id="org_123",
+            principal_id="user-123",
+            project_id="project-123",
+            source_surface="manage_complete_task",
+            request_metadata={
+                "action": "complete_task",
+                "actual_hours": None,
+                "has_learnings": False,
+                "task_id": "task_123",
+            },
+        )
+        assert response.data["citation_usage"]["stamped_count"] == 2
+
+    @pytest.mark.asyncio
     async def test_complete_task_with_learnings_requires_policy_context(self) -> None:
         """complete_task refuses learning capture without policy context."""
         mock_client = AsyncMock()

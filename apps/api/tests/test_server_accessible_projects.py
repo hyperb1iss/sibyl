@@ -848,6 +848,63 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service() -> Non
 
 
 @pytest.mark.asyncio
+async def test_manage_mcp_complete_task_records_cited_memories() -> None:
+    from sibyl.services.work_item_workflow import WorkItemAction, WorkItemTransition
+    from sibyl_core.models.entities import EntityType
+
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    manage = AsyncMock()
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(return_value=SimpleNamespace(project_id="project-a", metadata={}))
+    )
+    runtime = SimpleNamespace(entity_manager=entity_manager)
+    transition_result = WorkItemTransition(
+        action=WorkItemAction.COMPLETE_TASK,
+        item_id="task-1",
+        entity_type=EntityType.TASK,
+        status="done",
+        name="Ship it",
+        task_data={"id": "task-1", "title": "Ship it", "project_id": "project-a"},
+    )
+    transition = AsyncMock(return_value=transition_result)
+    record_citations = AsyncMock(
+        return_value={"cited_count": 2, "coverage_complete": True, "stamped_count": 2}
+    )
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch(
+            "sibyl_core.services.graph.get_surreal_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch("sibyl.services.work_item_workflow.transition_work_item", transition),
+        patch("sibyl_core.tools.usage_citation.record_cited_item_usages", record_citations),
+        patch("sibyl_core.tools.manage.manage", manage),
+    ):
+        result = await _manage_mcp_action(
+            action="complete_task",
+            entity_id="task-1",
+            data={"cited_ids": ["decision-1", "raw_memory:raw-1"]},
+        )
+
+    manage.assert_not_awaited()
+    record_citations.assert_awaited_once_with(
+        ["decision-1", "raw_memory:raw-1"],
+        organization_id=ctx.org_id,
+        principal_id=ctx.user_id,
+        project_id="project-a",
+        source_surface="mcp_manage_complete_task",
+        request_metadata={
+            "action": "complete_task",
+            "has_learnings": False,
+            "task_id": "task-1",
+        },
+    )
+    assert result["data"]["citation_usage"]["stamped_count"] == 2
+
+
+@pytest.mark.asyncio
 async def test_manage_workflow_transition_errors_return_structured_response() -> None:
     """H8 parity on the failure path: a missing or locked work item over the MCP
     transition path returns a structured success=False, not a raw exception (the
@@ -1136,6 +1193,54 @@ async def test_reflect_mcp_memory_links_single_active_task_when_persisting() -> 
     assert audit.await_args.kwargs["derived_ids"] == []
     assert audit.await_args.kwargs["details"]["related_to_count"] == 3
     explore.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reflect_mcp_memory_records_cited_memories() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    pack = ReflectionPack(
+        source_title="Planning",
+        source_id="session_1",
+        intent="build",
+        domain="sibyl",
+        project="project-a",
+        candidates=[],
+        total_candidates=0,
+    )
+    record_citations = AsyncMock(
+        return_value={"cited_count": 2, "coverage_complete": True, "stamped_count": 2}
+    )
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl_core.tools.core.reflect_memory", AsyncMock(return_value=pack)),
+        patch(
+            "sibyl_core.tools.core.explore", AsyncMock(return_value=SimpleNamespace(entities=[]))
+        ),
+        patch("sibyl.api.context_audit.log_memory_audit_event", AsyncMock()),
+        patch("sibyl_core.tools.usage_citation.record_cited_item_usages", record_citations),
+    ):
+        result = await _reflect_mcp_memory(
+            content="We cited the retrieved context.",
+            project="project-a",
+            cited_ids=["decision-1", "raw_memory:raw-1"],
+        )
+
+    record_citations.assert_awaited_once_with(
+        ["decision-1", "raw_memory:raw-1"],
+        organization_id=ctx.org_id,
+        principal_id=ctx.user_id,
+        project_id="project-a",
+        source_surface="mcp_reflect",
+        request_metadata={
+            "active_task": True,
+            "intent": "general",
+            "persist": False,
+            "source_title": "Session reflection",
+        },
+    )
+    assert result["citation_usage"]["stamped_count"] == 2
 
 
 @pytest.mark.asyncio

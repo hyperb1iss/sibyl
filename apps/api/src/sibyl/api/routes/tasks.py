@@ -123,6 +123,7 @@ class CompleteTaskRequest(BaseModel):
 
     actual_hours: float | None = None
     learnings: str | None = None
+    cited_ids: list[str] = []
 
 
 class ArchiveTaskRequest(BaseModel):
@@ -559,6 +560,23 @@ async def complete_task(
         WorkItemAction.COMPLETE_TASK,
         payload={"actual_hours": actual_hours, "learnings": learnings},
     )
+    response_data = result.response_data
+    if request and request.cited_ids:
+        from sibyl_core.tools.usage_citation import record_cited_item_usages
+
+        citation_usage = await record_cited_item_usages(
+            request.cited_ids,
+            organization_id=group_id,
+            principal_id=principal_id,
+            project_id=project_id,
+            source_surface="task_complete",
+            request_metadata={
+                "task_id": task_id,
+                "has_learnings": bool(learnings),
+                "actual_hours": actual_hours,
+            },
+        )
+        response_data["citation_usage"] = citation_usage
 
     # Enqueue learning episode creation as background job (fast response)
     if learnings:
@@ -581,7 +599,7 @@ async def complete_task(
         action="complete_task",
         task_id=task_id,
         message="Task completed" + (" with learnings captured" if learnings else ""),
-        data=result.response_data,
+        data=response_data,
     )
     await save_idempotent_response(
         http_request,

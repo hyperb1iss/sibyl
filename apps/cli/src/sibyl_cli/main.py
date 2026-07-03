@@ -2416,6 +2416,56 @@ def memory_audit(
     run_memory_audit()
 
 
+@app.command("cite")
+def cite_memories(
+    cited_ids: Annotated[
+        list[str],
+        typer.Argument(
+            help="Context/search item IDs that materially informed the answer",
+        ),
+    ],
+    project: str | None = typer.Option(None, "--project", "-p", help="Project ID for citation"),
+    all_projects: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Do not attach the current directory project",
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Record cited memories as strong usage feedback."""
+    parsed_ids = _parse_id_args(cited_ids)
+    if not parsed_ids:
+        error("Provide at least one cited memory ID")
+        raise typer.Exit(1)
+    effective_project = None if all_projects else project or resolve_project_from_cwd()
+
+    @run_async
+    async def run_cite_memories() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.cite_memory(
+                    parsed_ids,
+                    project_id=effective_project,
+                    source_surface="cli_cite",
+                    metadata={"command": "sibyl cite"},
+                )
+            if json_output:
+                print_json(data)
+                return
+            usage = data.get("usage", {})
+            cited_count = usage.get("cited_count", len(parsed_ids))
+            stamped_count = usage.get("stamped_count", 0)
+            excluded_count = usage.get("excluded_count", 0)
+            success(f"Recorded {stamped_count}/{cited_count} cited memories")
+            if excluded_count:
+                info(f"{excluded_count} citation(s) were accounted as exclusions")
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_cite_memories()
+
+
 @app.command("memory-inspect")
 def memory_inspect(
     source_id: str = typer.Argument(..., help="Raw memory source ID"),
@@ -3066,6 +3116,11 @@ def reflect_memory(
         "--review",
         help="Store persisted output in the raw review queue instead of graph promotion",
     ),
+    cited: str | None = typer.Option(
+        None,
+        "--cited",
+        help="Comma-separated context/search IDs that informed this reflection",
+    ),
     limit: int = typer.Option(12, "--limit", "-l", min=1, max=25, help="Maximum candidates"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ) -> None:
@@ -3083,6 +3138,7 @@ def reflect_memory(
     effective_project = project or (None if all_projects else resolve_project_from_cwd())
     related_ids = _parse_csv_ids(related_to)
     task_ids = _parse_csv_ids(task)
+    cited_ids = _parse_csv_ids(cited)
 
     @run_async
     async def run_reflect() -> None:
@@ -3105,6 +3161,7 @@ def reflect_memory(
                     persist=persist,
                     persist_source=persist_source,
                     persist_review=persist_review,
+                    cited_ids=cited_ids or None,
                     limit=limit,
                 )
 
@@ -3118,6 +3175,13 @@ def reflect_memory(
                 persist=persist,
                 persist_source=persist_source,
             )
+            citation_usage = data.get("citation_usage", {})
+            if citation_usage:
+                info(
+                    "Citations recorded: "
+                    f"{citation_usage.get('stamped_count', 0)}/"
+                    f"{citation_usage.get('cited_count', len(cited_ids))}"
+                )
         except SibylClientError as e:
             _handle_client_error(e)
 

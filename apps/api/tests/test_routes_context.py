@@ -644,6 +644,65 @@ class TestReflectRoute:
         )
 
     @pytest.mark.asyncio
+    async def test_reflect_records_cited_memories(self) -> None:
+        from sibyl.api.routes.context import reflect_context
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        ctx = _ctx()
+        record_citations = AsyncMock(
+            return_value={
+                "cited_count": 2,
+                "coverage_complete": True,
+                "stamped_count": 2,
+            }
+        )
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl.api.routes.context.verify_entity_project_access", AsyncMock()),
+            patch(
+                "sibyl_core.tools.core.reflect_memory",
+                AsyncMock(return_value=_reflection_pack(project="proj_1")),
+            ),
+            patch(
+                "sibyl_core.tools.core.explore",
+                AsyncMock(return_value=SimpleNamespace(entities=[])),
+            ),
+            patch(
+                "sibyl_core.tools.usage_citation.record_cited_item_usages",
+                record_citations,
+            ),
+        ):
+            response = await reflect_context(
+                request=ReflectionRequest(
+                    content="We decided to add reflect.",
+                    source_title="Planning",
+                    intent=ContextIntent.BUILD,
+                    project="proj_1",
+                    cited_ids=["decision-1", "raw_memory:raw-1"],
+                ),
+                org=org,
+                ctx=ctx,
+            )
+
+        record_citations.assert_awaited_once_with(
+            ["decision-1", "raw_memory:raw-1"],
+            organization_id=str(org.id),
+            principal_id="user-123",
+            project_id="proj_1",
+            source_surface="context_reflect",
+            request_metadata={
+                "intent": "build",
+                "persist": False,
+                "source_title": "Planning",
+            },
+        )
+        assert response.citation_usage["stamped_count"] == 2
+
+    @pytest.mark.asyncio
     async def test_reflect_response_includes_structured_extraction_receipts(self) -> None:
         from sibyl.api.routes.context import reflect_context
 

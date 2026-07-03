@@ -287,6 +287,49 @@ async def _enqueue_task_learning_jobs(
     }
 
 
+async def _record_task_completion_citations(
+    *,
+    cited_ids: Any,
+    organization_id: str | None,
+    principal_id: str | None,
+    task_id: str,
+    task_project_id: str | None,
+    learnings: str,
+    actual_hours: Any,
+    policy_payload: dict[str, Any] | None,
+) -> dict[str, object] | None:
+    from sibyl_core.tools.usage_citation import (
+        normalize_cited_ids,
+        record_cited_item_usages,
+    )
+
+    normalized_ids = normalize_cited_ids(cited_ids)
+    if not normalized_ids:
+        return None
+
+    policy_context = (
+        _memory_policy_context_from_payload(policy_payload) if policy_payload is not None else None
+    )
+    policy_project_id = None
+    if policy_context is not None:
+        policy_project_id = policy_context.project_id or (
+            policy_context.scope_key if policy_context.memory_space == "project" else None
+        )
+    return await record_cited_item_usages(
+        normalized_ids,
+        organization_id=organization_id,
+        principal_id=principal_id or (policy_context.actor_user_id if policy_context else None),
+        project_id=task_project_id or policy_project_id,
+        source_surface="manage_complete_task",
+        request_metadata={
+            "action": "complete_task",
+            "actual_hours": actual_hours,
+            "has_learnings": bool(learnings),
+            "task_id": task_id,
+        },
+    )
+
+
 # =============================================================================
 # Action Types
 # =============================================================================
@@ -628,6 +671,18 @@ async def _handle_task_action(
                 create_episode=False,
             )
             response_data = {"status": task.status.value, "learnings": learnings}
+            citation_usage = await _record_task_completion_citations(
+                cited_ids=data.get("cited_ids"),
+                organization_id=organization_id,
+                principal_id=str(data["user_id"]) if data.get("user_id") else None,
+                task_id=entity_id,
+                task_project_id=task.project_id,
+                learnings=learnings,
+                actual_hours=actual_hours,
+                policy_payload=policy_payload,
+            )
+            if citation_usage is not None:
+                response_data["citation_usage"] = citation_usage
             if learnings and policy_payload is not None:
                 response_data.update(
                     await _enqueue_task_learning_jobs(

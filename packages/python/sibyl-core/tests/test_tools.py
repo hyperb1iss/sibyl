@@ -1813,6 +1813,124 @@ class TestSearchTool:
         assert results[1].metadata["usage_exposure"]["detail"] == "RuntimeError"
 
     @pytest.mark.asyncio
+    async def test_usage_citation_stamps_raw_and_graph_targets(self) -> None:
+        from sibyl_core.tools.usage_citation import record_cited_item_usages
+
+        recorded_events: list[Any] = []
+
+        async def fake_record_memory_usage(
+            content_client: object,
+            events: list[Any],
+            *,
+            graph_client: object | None = None,
+        ) -> MemoryUsageWriteResult:
+            recorded_events.extend(events)
+            return MemoryUsageWriteResult(
+                events_processed=len(events),
+                stamps=tuple(
+                    MemoryUsageStamp(
+                        item_kind=MemoryUsageItemKind(str(event.item_kind)),
+                        item_id=event.item_id,
+                        retrieval_count=0,
+                        citation_count=1,
+                        last_recalled_at=None,
+                        last_used_at=datetime.now(UTC),
+                    )
+                    for event in events
+                ),
+            )
+
+        with (
+            patch("sibyl_core.tools.usage_citation.get_shared_surreal_content_client", AsyncMock()),
+            patch(
+                "sibyl_core.tools.usage_citation.get_surreal_graph_client",
+                AsyncMock(return_value=object()),
+            ),
+            patch(
+                "sibyl_core.tools.usage_citation.record_memory_usage",
+                AsyncMock(side_effect=fake_record_memory_usage),
+            ),
+        ):
+            summary = await record_cited_item_usages(
+                ["raw_memory:raw-1", "decision-1", "decision-1", "document:doc-1"],
+                organization_id="org-123",
+                principal_id="user-123",
+                project_id="project-123",
+                source_surface="test_cite",
+            )
+
+        assert summary["cited_count"] == 3
+        assert summary["stamped_count"] == 2
+        assert summary["excluded_count"] == 1
+        assert summary["coverage_complete"] is True
+        assert [event.item_kind for event in recorded_events] == [
+            MemoryUsageItemKind.RAW_CAPTURE,
+            MemoryUsageItemKind.GRAPH_ENTITY,
+        ]
+        assert [event.item_id for event in recorded_events] == ["raw-1", "decision-1"]
+
+    @pytest.mark.asyncio
+    async def test_usage_citation_keeps_raw_stamp_when_graph_stamp_fails(self) -> None:
+        from sibyl_core.tools.usage_citation import record_cited_item_usages
+
+        recorded_events: list[Any] = []
+
+        async def fake_record_memory_usage(
+            content_client: object,
+            events: list[Any],
+            *,
+            graph_client: object | None = None,
+        ) -> MemoryUsageWriteResult:
+            recorded_events.extend(events)
+            return MemoryUsageWriteResult(
+                events_processed=len(events),
+                stamps=tuple(
+                    MemoryUsageStamp(
+                        item_kind=MemoryUsageItemKind(str(event.item_kind)),
+                        item_id=event.item_id,
+                        retrieval_count=0,
+                        citation_count=1,
+                        last_recalled_at=None,
+                        last_used_at=datetime.now(UTC),
+                    )
+                    for event in events
+                ),
+            )
+
+        with (
+            patch("sibyl_core.tools.usage_citation.get_shared_surreal_content_client", AsyncMock()),
+            patch(
+                "sibyl_core.tools.usage_citation.get_surreal_graph_client",
+                AsyncMock(side_effect=RuntimeError("graph down")),
+            ),
+            patch(
+                "sibyl_core.tools.usage_citation.record_memory_usage",
+                AsyncMock(side_effect=fake_record_memory_usage),
+            ),
+        ):
+            summary = await record_cited_item_usages(
+                "raw_memory:raw-1,decision-1",
+                organization_id="org-123",
+                principal_id="user-123",
+                project_id="project-123",
+                source_surface="test_cite",
+            )
+
+        assert summary["cited_count"] == 2
+        assert summary["stamped_count"] == 1
+        assert summary["excluded_count"] == 1
+        assert summary["coverage_complete"] is True
+        assert summary["exclusions"] == [
+            {
+                "cited_id": "decision-1",
+                "detail": "RuntimeError",
+                "reason": "recording_failed",
+            }
+        ]
+        assert recorded_events[0].item_kind == MemoryUsageItemKind.RAW_CAPTURE
+        assert recorded_events[0].item_id == "raw-1"
+
+    @pytest.mark.asyncio
     async def test_search_document_timeout_returns_without_results(self) -> None:
         search_module = import_module("sibyl_core.tools.search")
 

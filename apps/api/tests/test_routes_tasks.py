@@ -456,6 +456,84 @@ class TestCompleteTaskRoute:
         assert saved.response_body["action"] == "complete_task"
 
     @pytest.mark.asyncio
+    async def test_complete_task_records_cited_memories(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        auth = SimpleNamespace(
+            user_id="user-1",
+            to_memory_policy_context=MagicMock(
+                side_effect=lambda **kwargs: MemoryPolicyContext(
+                    actor_user_id="user-1",
+                    organization_id=str(org.id),
+                    organization_role=OrganizationRole.MEMBER,
+                    **kwargs,
+                )
+            ),
+        )
+        request = CompleteTaskRequest(cited_ids=["decision-1", "raw_memory:raw-1"])
+        transition_result = WorkItemTransition(
+            action=WorkItemAction.COMPLETE_TASK,
+            item_id="task-123",
+            entity_type=EntityType.TASK,
+            status="done",
+            name="Ship the thing",
+            fields={},
+            task_data={"id": "task-123", "title": "Ship the thing", "project_id": "proj-1"},
+        )
+        transition = AsyncMock(return_value=transition_result)
+        record_citations = AsyncMock(
+            return_value={
+                "cited_count": 2,
+                "coverage_complete": True,
+                "stamped_count": 2,
+            }
+        )
+
+        with (
+            patch(
+                "sibyl.api.routes.tasks._verify_task_access",
+                AsyncMock(return_value=SimpleNamespace(metadata={}, project_id="proj-1")),
+            ),
+            patch(
+                "sibyl.api.routes.tasks.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"proj-1"}),
+            ),
+            patch("sibyl.api.routes.tasks.transition_work_item", transition),
+            patch(
+                "sibyl.api.idempotency.content_runtime.get_api_idempotency_record",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "sibyl.api.idempotency.content_runtime.save_api_idempotency_record",
+                AsyncMock(),
+            ),
+            patch(
+                "sibyl_core.tools.usage_citation.record_cited_item_usages",
+                record_citations,
+            ),
+        ):
+            response = await complete_task(
+                "task-123",
+                http_request=_request(),
+                org=org,
+                auth=auth,
+                request=request,
+            )
+
+        record_citations.assert_awaited_once_with(
+            ["decision-1", "raw_memory:raw-1"],
+            organization_id=str(org.id),
+            principal_id="user-1",
+            project_id="proj-1",
+            source_surface="task_complete",
+            request_metadata={
+                "actual_hours": None,
+                "has_learnings": False,
+                "task_id": "task-123",
+            },
+        )
+        assert response.data["citation_usage"]["stamped_count"] == 2
+
+    @pytest.mark.asyncio
     async def test_complete_task_replays_saved_idempotent_response(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         auth = SimpleNamespace(user_id="user-1")

@@ -157,6 +157,12 @@ def _archive_bulk_payload(results: list[dict], archived: int, failed: int) -> di
     }
 
 
+def _parse_csv_ids(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 def _apply_task_filters(
     entities: list[dict],
     status: str | None,
@@ -710,6 +716,10 @@ def complete_task(
             help="Allow --learnings-file to read through symlinks",
         ),
     ] = False,
+    cited: Annotated[
+        str | None,
+        typer.Option("--cited", help="Comma-separated context/search IDs that informed completion"),
+    ] = None,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
@@ -729,8 +739,17 @@ def complete_task(
             )
             resolved_learnings = (resolved_learnings or "").strip() or None
             resolved_id = await _resolve_task_id(client, task_id)
+            cited_ids = _parse_csv_ids(cited)
 
-            response = await client.complete_task(resolved_id, hours, resolved_learnings)
+            if cited_ids:
+                response = await client.complete_task(
+                    resolved_id,
+                    hours,
+                    resolved_learnings,
+                    cited_ids=cited_ids,
+                )
+            else:
+                response = await client.complete_task(resolved_id, hours, resolved_learnings)
 
             if json_out:
                 print_json(response)
@@ -740,6 +759,13 @@ def complete_task(
                 success(f"Task completed: {task_id}")
                 if resolved_learnings:
                     info("Task learning capture queued")
+                citation_usage = response.get("data", {}).get("citation_usage", {})
+                if citation_usage:
+                    info(
+                        "Citations recorded: "
+                        f"{citation_usage.get('stamped_count', 0)}/"
+                        f"{citation_usage.get('cited_count', len(cited_ids))}"
+                    )
             else:
                 error(f"Failed to complete task: {response.get('message', 'Unknown error')}")
 

@@ -46,7 +46,8 @@ Sibyl is the agent's durable brain. Use it as a loop, not a lookup box:
 1. **Recall before acting.** Run `sibyl recall "<goal>" --intent <mode>` to get compact working
    memory: active work, decisions, plans, constraints, related graph context, and recent lessons.
 2. **Act with context in hand.** Use recalled IDs for follow-up retrieval with `sibyl show <id>`
-   when a preview is not enough.
+   when a preview is not enough. If a recalled/search item materially informs your answer or
+   action, record that with `sibyl cite <id...>` or a `--cited` flag on the write you are making.
 3. **Remember while learning.** Run `sibyl remember "Title" "What matters" --kind <type>` whenever
    future agents should not rediscover a decision, plan, idea, claim, artifact, session, procedure,
    or error pattern. In a linked repo, `remember` automatically scopes the memory to that project.
@@ -54,7 +55,7 @@ Sibyl is the agent's durable brain. Use it as a loop, not a lookup box:
    extract reviewable candidates. Add `--persist` to write candidates and preserve the raw session
    source as provenance. On task completion, still use `sibyl task complete --learnings "..."`.
 
-**Perfect interface shape:** `recall -> act -> remember -> reflect`.
+**Perfect interface shape:** `recall -> act -> cite -> remember -> reflect`.
 
 Prefer these verbs:
 
@@ -64,6 +65,7 @@ Prefer these verbs:
   and session checkpoints.
 - `search`: discover candidates when you do not yet know the goal shape.
 - `show`: retrieve full source memory from a graph entity or raw memory ID.
+- `cite`: mark only the memory that materially informed an answer, task completion, or reflection.
 
 ---
 
@@ -114,9 +116,10 @@ sibyl task complete task_a1b2c3d4e5f6 --learnings "OAuth tokens expire..."
 2. RECALL           -> sibyl recall "goal" --intent build
 3. RETRIEVE         -> sibyl show <id>  (get full content by ID from search)
 4. CHECK TASKS      -> sibyl task list --status doing
-5. WORK & REMEMBER  -> sibyl remember "Title" "Decision, plan, idea, or learning..."
-6. REFLECT          -> sibyl reflect "Raw session notes..." --title "Session" --persist
-7. COMPLETE         -> sibyl task complete --learnings "..."
+5. CITE USED MEMORY -> sibyl cite "decision_abc raw_memory:source_123"
+6. WORK & REMEMBER  -> sibyl remember "Title" "Decision, plan, idea, or learning..."
+7. REFLECT          -> sibyl reflect "Raw session notes..." --title "Session" --persist
+8. COMPLETE         -> sibyl task complete --learnings "..."
 ```
 
 **Key insight:** Search shows IDs. Use `sibyl show <id>` to fetch full content.
@@ -285,6 +288,9 @@ sibyl reflect "We decided X. Next we will build Y." --title "Planning checkpoint
 # Persist extracted candidates and the raw source session into the graph
 echo "Raw session notes..." | sibyl reflect --title "Build session" --intent build --persist --task task_abc
 
+# Persist reflection and cite the memory that materially informed it
+echo "Raw session notes..." | sibyl reflect --title "Build session" --persist --cited decision_abc,raw_memory:source_123
+
 # Persist candidates only when the raw transcript should not be stored
 echo "Raw session notes..." | sibyl reflect --title "Private checkpoint" --persist --no-source
 ```
@@ -295,7 +301,8 @@ shift.
 Persisted output shows the stored source ID when one exists, the candidate count, and each persisted
 candidate ID. It links to the single active `doing` task when exactly one exists; use `--task` for
 explicit task links or `--no-active-task` for project memory without task context. `--no-source`
-skips storing the raw notes while keeping extracted candidates.
+skips storing the raw notes while keeping extracted candidates. `--cited` should name only the
+memory IDs that materially shaped the reflection, not every item shown in context.
 
 ---
 
@@ -383,6 +390,7 @@ sibyl task review task_a1b2c3d4e5f6 --pr "github.com/.../pull/42"
 # This marks done AND creates a searchable episode in the knowledge graph
 sibyl task complete task_a1b2c3d4e5f6 --hours 4.5 --learnings "Token refresh needs..."
 sibyl task complete task_a1b2c3d4e5f6 --learnings-file ./writeup.md
+sibyl task complete task_a1b2c3d4e5f6 --learnings "Token refresh needs..." --cited decision_abc,raw_memory:source_123
 
 # Archive single task
 sibyl task archive task_a1b2c3d4e5f6 --reason "Superseded by new approach"
@@ -889,6 +897,9 @@ These are **different things** with different purposes:
 Use task notes for in-flight observations, user clarifications, roadmap breadcrumbs, blockers, and
 review context. Use `task update --description` when intentionally changing the canonical task
 brief.
+
+Use `--cited` on `task complete` when specific recalled/search memory materially informed the
+completion or learning. Do not cite ambient context that did not affect the result.
 
 **Wrong:** Using `task note` when completing a task **Right:** Using `task complete --learnings` -
 this marks done AND creates a searchable episode

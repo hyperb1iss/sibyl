@@ -224,6 +224,7 @@ tasks:
       - ~:storage-access-test
       - ~:baseline-test
       - ~:memory-trust-gate-test
+      - ~:usage-loop-gate-test
       - ~:trust-control-gate-test
       - ~:context-quality-gate-test
       - ~:workspace-trust-gate-test
@@ -259,6 +260,7 @@ tasks:
       - ~:storage-access-test
       - ~:baseline-test
       - ~:memory-trust-gate-test
+      - ~:usage-loop-gate-test
       - ~:trust-control-gate-test
       - ~:context-quality-gate-test
       - ~:workspace-trust-gate-test
@@ -818,6 +820,25 @@ tasks:
       - tools/tests/test_memory_trust_gate.py
       - pyproject.toml
       - moon.yml
+
+  usage-loop-gate:
+    command: uv run python -m tools.trust.usage_loop_gate
+    options:
+      cache: false
+
+  usage-loop-gate-test:
+    command: uv run pytest tools/tests/test_usage_loop_gate.py -v
+    inputs:
+      - tools/trust/**/*.py
+      - tools/tests/conftest.py
+      - tools/tests/test_usage_loop_gate.py
+      - apps/api/src/sibyl/jobs/consolidation.py
+      - packages/python/sibyl-core/src/sibyl_core/retrieval/**/*.py
+      - pyproject.toml
+      - moon.yml
+      - apps/api/moon.yml
+      - apps/cli/moon.yml
+      - packages/python/sibyl-core/moon.yml
 
   trust-control-gate:
     command: uv run python -m tools.trust.trust_control_gate

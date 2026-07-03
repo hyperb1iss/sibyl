@@ -100,6 +100,32 @@ class RawMemoryRecallResponse(BaseModel):
     )
 
 
+class MemoryCitationRequest(BaseModel):
+    """Request to mark memories as materially cited by an agent answer."""
+
+    cited_ids: list[str] = Field(
+        default_factory=list,
+        min_length=1,
+        max_length=100,
+        description="Context/search item IDs that materially informed the answer",
+    )
+    project_id: str | None = Field(default=None, description="Project associated with citation")
+    source_surface: str = Field(
+        default="cli_cite",
+        min_length=1,
+        max_length=100,
+        description="Caller surface recording the citation",
+    )
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Auxiliary metadata")
+
+
+class MemoryCitationResponse(BaseModel):
+    """Citation usage recording summary."""
+
+    cited_ids: list[str] = Field(default_factory=list)
+    usage: dict[str, Any] = Field(default_factory=dict)
+
+
 class MemoryAuditEventResponse(BaseModel):
     """Inspectable memory audit event."""
 

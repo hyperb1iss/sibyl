@@ -145,21 +145,62 @@
     {
       "name": "usage-loop-gate",
       "owner_wave": "W6",
-      "status": "planned",
+      "status": "blocking",
       "profile": "product",
-      "blocking": false,
+      "blocking": true,
       "metric_contracts": [
         {
           "metric": "exposure_stamp_coverage",
-          "mode": "threshold",
+          "mode": "receipt",
+          "required_receipt": "usage-loop-receipt.json",
+          "receipt_schema": "sibyl-usage-loop-receipt-v1",
+          "direction": "higher",
+          "threshold": 1,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "exposure stamping",
+            "citation stamping",
+            "idempotence",
+            "cite endpoint",
+            "task completion",
+            "reflect",
+            "mcp",
+            "cli",
+            "usage-aware consolidation",
+            "cited decay divergence"
+          ]
+        },
+        {
+          "metric": "citation_event_count",
+          "mode": "receipt",
+          "required_receipt": "usage-loop-receipt.json",
+          "receipt_schema": "sibyl-usage-loop-receipt-v1",
           "direction": "higher",
           "threshold": 1
         },
         {
-          "metric": "citation_event_count",
-          "mode": "threshold",
+          "metric": "duplicate_stored_event_count",
+          "mode": "receipt",
+          "required_receipt": "usage-loop-receipt.json",
+          "receipt_schema": "sibyl-usage-loop-receipt-v1",
+          "direction": "lower",
+          "threshold": 0
+        },
+        {
+          "metric": "usage_ordered_consolidation_input_count",
+          "mode": "receipt",
+          "required_receipt": "usage-loop-receipt.json",
+          "receipt_schema": "sibyl-usage-loop-receipt-v1",
           "direction": "higher",
           "threshold": 1
+        },
+        {
+          "metric": "cited_decay_score_advantage",
+          "mode": "receipt",
+          "required_receipt": "usage-loop-receipt.json",
+          "receipt_schema": "sibyl-usage-loop-receipt-v1",
+          "direction": "higher",
+          "threshold": 0.1
         }
       ]
     },

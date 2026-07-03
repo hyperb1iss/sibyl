@@ -1,0 +1,129 @@
+{
+  "budgets": {
+    "citation_event_count": 1,
+    "cited_decay_score_advantage": 0.1,
+    "duplicate_stored_event_count": 0,
+    "exposure_stamp_coverage": 1.0,
+    "usage_ordered_consolidation_input_count": 1
+  },
+  "checks": [
+    {
+      "command": "moon run core:test -- tests/test_usage_service.py tests/test_tools.py -k 'record_memory_usage or usage_exposure or usage_citation'",
+      "exit_code": 0,
+      "name": "core-usage-feedback",
+      "status": "PASS",
+      "surfaces": [
+        "exposure stamping",
+        "citation stamping",
+        "idempotence"
+      ]
+    },
+    {
+      "command": "moon run api:test -- tests/test_routes_tasks.py::TestCompleteTaskRoute::test_complete_task_records_cited_memories tests/test_routes_context.py::TestReflectRoute::test_reflect_records_cited_memories tests/test_routes_memory.py::test_cite_memory_records_usage_and_audit tests/test_server_accessible_projects.py::test_manage_mcp_complete_task_records_cited_memories tests/test_server_accessible_projects.py::test_reflect_mcp_memory_records_cited_memories",
+      "exit_code": 0,
+      "name": "api-usage-citation",
+      "status": "PASS",
+      "surfaces": [
+        "cite endpoint",
+        "task completion",
+        "reflect",
+        "mcp",
+        "citation stamping"
+      ]
+    },
+    {
+      "command": "moon run cli:test -- tests/test_main_capture.py::test_cite_command_records_cited_memories tests/test_main_capture.py::test_reflect_command_passes_cited_ids tests/test_task.py::test_task_complete_with_cited_ids_reports_usage",
+      "exit_code": 0,
+      "name": "cli-usage-citation",
+      "status": "PASS",
+      "surfaces": [
+        "cli",
+        "cite endpoint",
+        "task completion",
+        "reflect"
+      ]
+    },
+    {
+      "command": "moon run api:test -- tests/test_jobs_consolidation.py -k priority_decay",
+      "exit_code": 0,
+      "name": "api-usage-aware-consolidation",
+      "status": "PASS",
+      "surfaces": [
+        "usage-aware consolidation",
+        "cited decay divergence"
+      ]
+    },
+    {
+      "command": "moon run bench-gate",
+      "exit_code": 0,
+      "name": "ai-memory-contracts",
+      "status": "PASS",
+      "surfaces": [
+        "manifest",
+        "release contract"
+      ]
+    }
+  ],
+  "citations": {
+    "duplicate_suppressed_event_count": 1,
+    "received_event_count": 3,
+    "unique_event_count": 2
+  },
+  "consolidation_inputs": [
+    {
+      "latest_usage_at": "2026-06-30T00:00:00+00:00",
+      "memory_id": "protected-cited-twin",
+      "priority_decay_score": 0.692817
+    },
+    {
+      "latest_usage_at": null,
+      "memory_id": "stale-uncited-twin",
+      "priority_decay_score": 0.019843
+    }
+  ],
+  "decay_twins": {
+    "cited": {
+      "citation_count": 1,
+      "last_used_at": "2026-06-30T00:00:00+00:00",
+      "memory_id": "protected-cited-twin",
+      "score": 0.692817
+    },
+    "uncited": {
+      "citation_count": 0,
+      "last_used_at": null,
+      "memory_id": "stale-uncited-twin",
+      "score": 0.019843
+    }
+  },
+  "exposure": {
+    "covered_count": 3,
+    "items": [
+      {
+        "cite_id": "decision-1",
+        "kind": "graph_entity",
+        "status": "stamped"
+      },
+      {
+        "cite_id": "raw_memory:raw-1",
+        "kind": "raw_capture",
+        "status": "stamped"
+      },
+      {
+        "cite_id": "document:doc-1",
+        "kind": "document",
+        "status": "excluded"
+      }
+    ],
+    "returned_count": 3
+  },
+  "fixture": "usage-feedback-loop-v1",
+  "metrics": {
+    "citation_event_count": 2,
+    "cited_decay_score_advantage": 0.672974,
+    "duplicate_stored_event_count": 0,
+    "duplicate_suppressed_event_count": 1,
+    "exposure_stamp_coverage": 1.0,
+    "usage_ordered_consolidation_input_count": 2
+  },
+  "schema_version": "sibyl-usage-loop-receipt-v1"
+}

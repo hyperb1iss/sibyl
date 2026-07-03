@@ -13,6 +13,7 @@ from sibyl.api.routes.memory import (
     add_memory_space_member_record,
     apply_memory_correction_route,
     auto_review_reflection_candidate,
+    cite_memory,
     create_memory_space_record,
     drain_reflection_review,
     get_memory_source_import_status,
@@ -32,6 +33,7 @@ from sibyl.api.routes.memory import (
     update_memory_space_record,
 )
 from sibyl.api.schemas import (
+    MemoryCitationRequest,
     MemoryCorrectionRequest,
     MemorySharePreviewRequest,
     MemorySpaceAccessPreviewRequest,
@@ -253,6 +255,56 @@ async def test_remember_raw_uses_current_org_and_principal() -> None:
         organization_id=str(org.id),
         raw_memory_ids=["memory-1"],
     )
+
+
+@pytest.mark.asyncio
+async def test_cite_memory_records_usage_and_audit() -> None:
+    org = _org()
+    ctx = _ctx()
+    http_request = _http_request()
+    record_citations = AsyncMock(
+        return_value={
+            "cited_count": 2,
+            "coverage_complete": True,
+            "stamped_count": 2,
+        }
+    )
+
+    with (
+        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()) as verify,
+        patch(
+            "sibyl_core.tools.usage_citation.record_cited_item_usages",
+            record_citations,
+        ),
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        response = await cite_memory(
+            MemoryCitationRequest(
+                cited_ids=["decision-1", "raw_memory:raw-1"],
+                project_id="project-123",
+                source_surface="cli_cite",
+                metadata={"command": "sibyl cite"},
+            ),
+            http_request=http_request,
+            org=org,
+            ctx=ctx,
+        )
+
+    verify.assert_awaited_once()
+    record_citations.assert_awaited_once_with(
+        ["decision-1", "raw_memory:raw-1"],
+        organization_id=str(org.id),
+        principal_id="user-123",
+        project_id="project-123",
+        source_surface="cli_cite",
+        request_metadata={
+            "metadata": {"command": "sibyl cite"},
+            "route": "memory_cite",
+        },
+    )
+    audit.assert_awaited_once()
+    assert response.usage["stamped_count"] == 2
+    assert response.cited_ids == ["decision-1", "raw_memory:raw-1"]
 
 
 @pytest.mark.asyncio

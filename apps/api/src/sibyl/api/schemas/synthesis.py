@@ -167,6 +167,11 @@ class ReflectionRequest(BaseModel):
     intent: ContextIntent = Field(default=ContextIntent.GENERAL, description="Reflection intent")
     domain: str | None = Field(default=None, description="Domain or category for candidates")
     project: str | None = Field(default=None, description="Project ID to scope candidates")
+    cited_ids: list[str] = Field(
+        default_factory=list,
+        max_length=100,
+        description="Context/search IDs that materially informed this reflection",
+    )
     related_to: list[str] | None = Field(
         default=None, description="Entity IDs to link persisted candidates to"
     )
@@ -222,6 +227,7 @@ class ReflectionResponse(BaseModel):
     candidates: list[ReflectionCandidateResponse] = Field(default_factory=list)
     total_candidates: int = 0
     persisted_count: int = 0
+    citation_usage: dict[str, Any] = Field(default_factory=dict)
     usage_hint: str
     markdown: str | None = Field(
         default=None,

@@ -1509,6 +1509,80 @@ def test_validate_ai_memory_manifest_accepts_required_receipt_checks(
     assert failures == []
 
 
+def test_validate_ai_memory_manifest_accepts_usage_loop_receipt_contract(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    receipt_path = tmp_path / "usage-loop-receipt.json"
+    receipt_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "sibyl-usage-loop-receipt-v1",
+                "metrics": {
+                    "citation_event_count": 2,
+                    "cited_decay_score_advantage": 0.6,
+                    "duplicate_stored_event_count": 0,
+                    "exposure_stamp_coverage": 1.0,
+                    "usage_ordered_consolidation_input_count": 2,
+                },
+                "checks": [
+                    {
+                        "name": "core-usage-feedback",
+                        "status": "PASS",
+                        "surfaces": [
+                            "exposure stamping",
+                            "citation stamping",
+                            "idempotence",
+                            "cited decay divergence",
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["gate_contracts"].append(
+        {
+            "name": "usage-loop-gate",
+            "owner_wave": "W6",
+            "status": "blocking",
+            "profile": "product",
+            "blocking": True,
+            "metric_contracts": [
+                {
+                    "metric": "exposure_stamp_coverage",
+                    "mode": "receipt",
+                    "required_receipt": "usage-loop-receipt.json",
+                    "receipt_schema": "sibyl-usage-loop-receipt-v1",
+                    "direction": "higher",
+                    "threshold": 1,
+                    "require_receipt_checks": True,
+                    "required_surfaces": [
+                        "exposure stamping",
+                        "citation stamping",
+                        "idempotence",
+                        "cited decay divergence",
+                    ],
+                },
+                {
+                    "metric": "duplicate_stored_event_count",
+                    "mode": "receipt",
+                    "required_receipt": "usage-loop-receipt.json",
+                    "receipt_schema": "sibyl-usage-loop-receipt-v1",
+                    "direction": "lower",
+                    "threshold": 0,
+                },
+            ],
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == []
+
+
 def test_validate_ai_memory_manifest_rejects_required_receipt_check_failures(
     tmp_path: Path,
 ) -> None:

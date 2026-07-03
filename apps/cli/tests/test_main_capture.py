@@ -54,6 +54,38 @@ def test_parse_id_args_accepts_csv_and_positional_values() -> None:
     ]
 
 
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_cite_command_records_cited_memories(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.cite_memory = AsyncMock(
+        return_value={
+            "usage": {
+                "cited_count": 2,
+                "excluded_count": 0,
+                "stamped_count": 2,
+            }
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["cite", "decision-1,raw_memory:raw-1"])
+
+    assert result.exit_code == 0
+    assert "Recorded 2/2 cited memories" in result.stdout
+    mock_client.cite_memory.assert_awaited_once_with(
+        ["decision-1", "raw_memory:raw-1"],
+        project_id="project_123",
+        source_surface="cli_cite",
+        metadata={"command": "sibyl cite"},
+    )
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
 @pytest.mark.asyncio
 async def test_memory_inspect_client_url_encodes_source_id() -> None:
     client = SibylClient(base_url="http://example.test/api", auth_token="token")
@@ -2316,6 +2348,7 @@ def test_reflect_command_outputs_markdown_candidates(
         persist=True,
         persist_source=True,
         persist_review=False,
+        cited_ids=None,
         limit=12,
     )
     mock_client.explore.assert_awaited_once_with(
@@ -2325,6 +2358,43 @@ def test_reflect_command_outputs_markdown_candidates(
         project="project_123",
         limit=2,
     )
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_reflect_command_passes_cited_ids(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.reflect = AsyncMock(
+        return_value={
+            "source_title": "Planning",
+            "citation_usage": {"cited_count": 2, "stamped_count": 2},
+            "markdown": "# Sibyl Reflection: Planning",
+        }
+    )
+    mock_client.explore = AsyncMock()
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "reflect",
+            "We decided to build reflect.",
+            "--cited",
+            "decision-1,raw_memory:raw-1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Citations recorded: 2/2" in result.stdout
+    assert mock_client.reflect.await_args.kwargs["cited_ids"] == [
+        "decision-1",
+        "raw_memory:raw-1",
+    ]
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
@@ -2359,6 +2429,7 @@ def test_reflect_command_reads_notes_from_stdin(
         persist=False,
         persist_source=True,
         persist_review=False,
+        cited_ids=None,
         limit=12,
     )
     mock_client.explore.assert_not_called()
@@ -2412,6 +2483,7 @@ def test_reflect_command_can_persist_candidates_without_source(
         persist=True,
         persist_source=False,
         persist_review=False,
+        cited_ids=None,
         limit=12,
     )
     mock_client.explore.assert_awaited_once_with(

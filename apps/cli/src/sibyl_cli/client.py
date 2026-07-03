@@ -1017,6 +1017,8 @@ class SibylClient:
         task_id: str,
         actual_hours: float | None = None,
         learnings: str | None = None,
+        *,
+        cited_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """Complete a task."""
         data: dict[str, Any] = {}
@@ -1024,6 +1026,8 @@ class SibylClient:
             data["actual_hours"] = actual_hours
         if learnings:
             data["learnings"] = learnings
+        if cited_ids:
+            data["cited_ids"] = cited_ids
         return await self._request("POST", f"/tasks/{task_id}/complete", json=data or None)
 
     async def archive_task(self, task_id: str, reason: str | None = None) -> dict[str, Any]:
@@ -1298,6 +1302,24 @@ class SibylClient:
         if policy_allowed is not None:
             params["policy_allowed"] = policy_allowed
         return await self._request("GET", "/memory/audit", params=params)
+
+    async def cite_memory(
+        self,
+        cited_ids: list[str],
+        *,
+        project_id: str | None = None,
+        source_surface: str = "cli_cite",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Record cited memories as strong usage feedback."""
+        data: dict[str, Any] = {
+            "cited_ids": cited_ids,
+            "source_surface": source_surface,
+            "metadata": metadata or {},
+        }
+        if project_id:
+            data["project_id"] = project_id
+        return await self._request("POST", "/memory/cite", json=data)
 
     async def memory_inspect(self, source_id: str) -> dict[str, Any]:
         """Inspect a raw memory source."""
@@ -1788,6 +1810,7 @@ class SibylClient:
         persist: bool = False,
         persist_source: bool = True,
         persist_review: bool = False,
+        cited_ids: list[str] | None = None,
         limit: int = 12,
     ) -> dict[str, Any]:
         """Reflect raw notes into durable memory candidates."""
@@ -1806,6 +1829,8 @@ class SibylClient:
             data["project"] = project
         if related_to:
             data["related_to"] = related_to
+        if cited_ids:
+            data["cited_ids"] = cited_ids
         return await self._request("POST", "/context/reflect", json=data)
 
     async def explore(

@@ -100,6 +100,8 @@ from .ingestion import (
 from .memory import (
     MemoryAuditEventResponse,
     MemoryAuditListResponse,
+    MemoryCitationRequest,
+    MemoryCitationResponse,
     MemoryCorrectionRequest,
     MemoryCorrectionResponse,
     MemoryDerivedRecordResponse,
@@ -244,6 +246,8 @@ __all__ = [
     "LinkGraphStatusResponse",
     "MemoryAuditEventResponse",
     "MemoryAuditListResponse",
+    "MemoryCitationRequest",
+    "MemoryCitationResponse",
     "MemoryCorrectionActionLiteral",
     "MemoryCorrectionRequest",
     "MemoryCorrectionResponse",

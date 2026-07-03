@@ -178,6 +178,45 @@ def test_task_complete_with_learnings_reports_queued_capture(
 
 
 @patch("sibyl_cli.task.get_client")
+def test_task_complete_with_cited_ids_reports_usage(mock_get_client: MagicMock) -> None:
+    mock_client = MagicMock()
+    mock_client.complete_task = AsyncMock(
+        return_value={
+            "success": True,
+            "message": "Task completed",
+            "data": {
+                "citation_usage": {
+                    "cited_count": 2,
+                    "stamped_count": 2,
+                },
+                "status": "done",
+            },
+        }
+    )
+    mock_get_client.return_value = mock_client
+
+    runner = CliRunner()
+    result = runner.invoke(
+        task.app,
+        [
+            "complete",
+            "task_123456789abc",
+            "--cited",
+            "decision-1,raw_memory:raw-1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Citations recorded: 2/2" in result.stdout
+    mock_client.complete_task.assert_awaited_once_with(
+        "task_123456789abc",
+        None,
+        None,
+        cited_ids=["decision-1", "raw_memory:raw-1"],
+    )
+
+
+@patch("sibyl_cli.task.get_client")
 def test_task_complete_accepts_note_alias(mock_get_client: MagicMock) -> None:
     mock_client = MagicMock()
     mock_client.complete_task = AsyncMock(return_value={"success": True})
