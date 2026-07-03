@@ -59,6 +59,7 @@ from sibyl.persistence.auth_runtime import (
     create_memory_space,
     get_memory_space,
     list_accessible_project_graph_ids,
+    list_accessible_team_scope_keys,
     list_memory_audit_events,
     list_memory_space_members,
     list_memory_spaces,
@@ -216,6 +217,18 @@ async def _project_accessible_for_policy(
     return {str(project_id) for project_id in accessible_projects or set()}
 
 
+async def _team_accessible_for_policy(
+    *,
+    ctx: AuthContext,
+    memory_scope: str,
+    scope_key: str | None,
+) -> set[str] | None:
+    if memory_scope != "team" or not scope_key:
+        return None
+    accessible_teams = await list_accessible_team_scope_keys(ctx)
+    return {str(team_id) for team_id in accessible_teams or set()}
+
+
 async def _authorize_project_scope_write(
     *,
     ctx: AuthContext,
@@ -286,6 +299,11 @@ async def _authorize_memory_policy(
         memory_scope=memory_scope,
         scope_key=scope_key,
     )
+    accessible_teams = await _team_accessible_for_policy(
+        ctx=ctx,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+    )
     policy_context = MemoryPolicyContext(
         actor_user_id=ctx.user_id,
         organization_id=ctx.organization_id,
@@ -294,6 +312,7 @@ async def _authorize_memory_policy(
         scope_key=scope_key,
         project_id=project_id,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         agent_id=agent_id,
         source_surface=surface,
     )
@@ -941,6 +960,11 @@ async def _inspect_content_policy(
         memory_scope=memory.memory_scope.value,
         scope_key=memory.scope_key,
     )
+    accessible_teams = await _team_accessible_for_policy(
+        ctx=ctx,
+        memory_scope=memory.memory_scope.value,
+        scope_key=memory.scope_key,
+    )
     policy_context = MemoryPolicyContext(
         actor_user_id=ctx.user_id,
         organization_id=ctx.organization_id,
@@ -949,6 +973,7 @@ async def _inspect_content_policy(
         scope_key=memory.scope_key,
         project_id=project_id,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         agent_id=memory.agent_id,
         source_surface="memory_inspect",
     )

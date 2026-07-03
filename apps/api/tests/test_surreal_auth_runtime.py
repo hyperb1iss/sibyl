@@ -2182,6 +2182,43 @@ async def test_list_accessible_project_graph_ids_batches_project_grants(
 
 
 @pytest.mark.asyncio
+async def test_list_accessible_team_scope_keys_returns_user_team_ids_and_slugs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    user_id = uuid4()
+    team_id = uuid4()
+    client = _RecordingAuthClient(
+        [
+            {
+                "uuid": str(team_id),
+                "slug": "team-alpha",
+            }
+        ]
+    )
+    ctx = SimpleNamespace(
+        organization=SimpleNamespace(id=org_id),
+        user=SimpleNamespace(id=user_id),
+        org_role="member",
+    )
+
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(client),
+    )
+
+    accessible = await surreal_auth_runtime.list_accessible_team_scope_keys(ctx)
+
+    assert accessible == {str(team_id), "team-alpha"}
+    assert len(client.calls) == 1
+    query, params = client.calls[0]
+    assert "FROM teams" in query
+    assert "FROM team_members" in query
+    assert params == {"organization_id": str(org_id), "user_id": str(user_id)}
+
+
+@pytest.mark.asyncio
 async def test_list_accessible_project_graph_ids_intersects_api_key_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2516,7 +2553,7 @@ async def test_create_project_memory_space_requires_canonical_project(
 
 
 @pytest.mark.asyncio
-async def test_disabled_memory_scope_records_stable_reason(
+async def test_team_memory_scope_records_active_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     org_id = uuid4()
@@ -2542,8 +2579,8 @@ async def test_disabled_memory_scope_records_stable_reason(
         name="Team memory",
     )
 
-    assert space.state == "disabled"
-    assert space.disabled_reason == "scope_not_enabled"
+    assert space.state == "active"
+    assert space.disabled_reason is None
 
 
 @pytest.mark.asyncio

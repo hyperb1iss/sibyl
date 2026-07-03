@@ -20,6 +20,11 @@ from sibyl_core.auth import (
     SessionRepository,
     UserRepository,
 )
+from sibyl_core.auth.memory_policy import (
+    authorize_memory_read,
+    authorize_memory_share,
+    authorize_memory_write,
+)
 
 
 class FakeUserRepository:
@@ -315,6 +320,7 @@ def test_auth_context_builds_memory_policy_context() -> None:
         memory_space="project",
         scope_key="project_123",
         accessible_projects=["project_123"],
+        accessible_teams=["team-alpha"],
         delegated_authority="agent:nova",
         agent_id="nova",
         source_surface="rest_recall",
@@ -324,11 +330,52 @@ def test_auth_context_builds_memory_policy_context() -> None:
     assert policy_context.organization_id == str(org_id)
     assert policy_context.organization_role is OrganizationRole.ADMIN
     assert policy_context.accessible_projects == frozenset({"project_123"})
+    assert policy_context.accessible_teams == frozenset({"team-alpha"})
     assert policy_context.delegated_authority == "agent:nova"
     assert policy_context.agent_id == "nova"
     assert policy_context.memory_space == "project"
     assert policy_context.scope_key == "project_123"
     assert policy_context.source_surface == "rest_recall"
+
+
+def test_memory_policy_allows_verified_team_scope() -> None:
+    read_decision = authorize_memory_read(
+        principal_id="user-1",
+        memory_scope="team",
+        scope_key="team-alpha",
+        accessible_teams={"team-alpha"},
+    )
+    write_decision = authorize_memory_write(
+        principal_id="user-1",
+        memory_scope="team",
+        scope_key="team-alpha",
+        accessible_teams={"team-alpha"},
+    )
+    share_decision = authorize_memory_share(
+        principal_id="user-1",
+        memory_scope="team",
+        scope_key="team-alpha",
+        accessible_teams={"team-alpha"},
+    )
+
+    assert read_decision.allowed is True
+    assert read_decision.reason == "team_access_verified"
+    assert write_decision.allowed is True
+    assert write_decision.reason == "same_scope_write_allowed"
+    assert share_decision.allowed is False
+    assert share_decision.reason == "scope_crossing_requires_promotion"
+
+
+def test_memory_policy_denies_unverified_team_scope() -> None:
+    decision = authorize_memory_read(
+        principal_id="user-1",
+        memory_scope="team",
+        scope_key="team-alpha",
+        accessible_teams={"team-beta"},
+    )
+
+    assert decision.allowed is False
+    assert decision.reason == "unverified_membership"
 
 
 def test_github_identity_accepts_alias() -> None:

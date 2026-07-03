@@ -736,6 +736,49 @@ async def list_accessible_delegated_scope_keys(ctx) -> set[str]:
         }
 
 
+async def list_accessible_team_scope_keys(ctx) -> set[str]:
+    """Return team memory scope keys the current principal may read."""
+    if ctx.organization is None:
+        return set()
+    async with _auth_client_scope() as client:
+        org_id = str(ctx.organization.id)
+        org_role = _role_value(ctx.org_role)
+        user_id = str(ctx.user.id)
+        if org_role in _ORG_ADMIN_ROLE_VALUES:
+            records = _normalize_records(
+                await client.execute_query(
+                    """
+                        SELECT uuid, slug FROM teams
+                        WHERE organization_id = $organization_id
+                        ORDER BY created_at ASC;
+                    """,
+                    organization_id=org_id,
+                )
+            )
+        else:
+            records = _normalize_records(
+                await client.execute_query(
+                    """
+                        SELECT uuid, slug FROM teams
+                        WHERE organization_id = $organization_id
+                        AND uuid IN (
+                            SELECT VALUE team_id FROM team_members WHERE user_id = $user_id
+                        )
+                        ORDER BY created_at ASC;
+                    """,
+                    organization_id=org_id,
+                    user_id=user_id,
+                )
+            )
+        keys: set[str] = set()
+        for record in records:
+            if str(record.get("uuid") or "").strip():
+                keys.add(str(record["uuid"]))
+            if str(record.get("slug") or "").strip():
+                keys.add(str(record["slug"]))
+        return keys
+
+
 async def resolve_accessible_project_graph_ids(
     *,
     user_id: str,

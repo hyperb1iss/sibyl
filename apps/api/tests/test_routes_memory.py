@@ -941,8 +941,12 @@ async def test_recall_raw_allows_matching_api_key_memory_space() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recall_raw_blocks_keyed_team_scope_for_non_admin() -> None:
+async def test_recall_raw_denies_unverified_team_scope() -> None:
     with (
+        patch(
+            "sibyl.api.routes.memory.list_accessible_team_scope_keys",
+            AsyncMock(return_value={"team_other"}),
+        ) as accessible_teams,
         patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock()) as recall,
         pytest.raises(HTTPException) as exc,
     ):
@@ -952,9 +956,35 @@ async def test_recall_raw_blocks_keyed_team_scope_for_non_admin() -> None:
             ctx=_ctx(),
         )
 
+    accessible_teams.assert_awaited_once()
     assert exc.value.status_code == 403
-    assert exc.value.detail == "scope_not_enabled"
+    assert exc.value.detail == "unverified_membership"
     recall.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recall_raw_uses_shared_policy_for_team_scope_read() -> None:
+    org = _org()
+    ctx = _ctx()
+    with (
+        patch(
+            "sibyl.api.routes.memory.list_accessible_team_scope_keys",
+            AsyncMock(return_value={"team_123"}),
+        ) as accessible_teams,
+        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock(return_value=[])),
+    ):
+        response = await recall_raw(
+            RawMemoryRecallRequest(
+                query="team memory",
+                memory_scope="team",
+                scope_key="team_123",
+            ),
+            org=org,
+            ctx=ctx,
+        )
+
+    accessible_teams.assert_awaited_once_with(ctx)
+    assert response.policy_reason == "team_access_verified"
 
 
 @pytest.mark.asyncio

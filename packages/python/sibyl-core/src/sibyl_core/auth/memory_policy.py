@@ -35,6 +35,7 @@ class _PolicyInputs:
     project_id: str | None
     agent_id: str | None
     accessible_projects: Iterable[str] | None
+    accessible_teams: Iterable[str] | None
     accessible_delegations: Iterable[str] | None
 
 
@@ -107,6 +108,7 @@ def _resolve_policy_inputs(
     project_id: str | None,
     agent_id: str | None,
     accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None,
     accessible_delegations: Iterable[str] | None,
 ) -> _PolicyInputs:
     if policy_context is None:
@@ -117,6 +119,7 @@ def _resolve_policy_inputs(
             project_id=project_id,
             agent_id=agent_id,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
             accessible_delegations=accessible_delegations,
         )
 
@@ -129,6 +132,9 @@ def _resolve_policy_inputs(
         accessible_projects=accessible_projects
         if accessible_projects is not None
         else policy_context.accessible_projects,
+        accessible_teams=accessible_teams
+        if accessible_teams is not None
+        else policy_context.accessible_teams,
         accessible_delegations=accessible_delegations
         if accessible_delegations is not None
         else policy_context.accessible_delegations,
@@ -159,6 +165,7 @@ def authorize_memory_read(
     project_id: str | None = None,
     agent_id: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     policy_context: MemoryPolicyContext | None = None,
 ) -> MemoryPolicyDecision:
@@ -170,6 +177,7 @@ def authorize_memory_read(
         project_id=project_id,
         agent_id=agent_id,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
     if inputs.memory_scope is None:
@@ -259,6 +267,29 @@ def authorize_memory_read(
             policy_context=policy_context,
         )
 
+    if normalized_scope is MemoryScope.TEAM:
+        if not inputs.scope_key:
+            return _deny(
+                reason="missing_scope_key",
+                memory_scope=normalized_scope,
+                scope_key=inputs.scope_key,
+                policy_context=policy_context,
+            )
+        teams = _string_set(inputs.accessible_teams)
+        if teams is None or inputs.scope_key not in teams:
+            return _deny(
+                reason="unverified_membership",
+                memory_scope=normalized_scope,
+                scope_key=inputs.scope_key,
+                policy_context=policy_context,
+            )
+        return _allow(
+            reason="team_access_verified",
+            memory_scope=normalized_scope,
+            scope_key=inputs.scope_key,
+            policy_context=policy_context,
+        )
+
     return _deny(
         reason="scope_not_enabled",
         memory_scope=normalized_scope,
@@ -274,6 +305,7 @@ def _authorize_mutating_action(
     memory_scope: MemoryScope | str | None = None,
     scope_key: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     policy_context: MemoryPolicyContext | None = None,
 ) -> MemoryPolicyDecision:
@@ -285,6 +317,7 @@ def _authorize_mutating_action(
         project_id=None,
         agent_id=None,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
     if inputs.memory_scope is None:
@@ -315,7 +348,6 @@ def _authorize_mutating_action(
         )
 
     if normalized_scope in {
-        MemoryScope.TEAM,
         MemoryScope.SHARED,
         MemoryScope.ORGANIZATION,
         MemoryScope.PUBLIC,
@@ -323,6 +355,40 @@ def _authorize_mutating_action(
         return _deny(
             action=action,
             reason="scope_not_enabled",
+            memory_scope=normalized_scope,
+            scope_key=inputs.scope_key,
+            policy_context=policy_context,
+        )
+
+    if normalized_scope is MemoryScope.TEAM:
+        if not inputs.scope_key:
+            return _deny(
+                action=action,
+                reason="missing_scope_key",
+                memory_scope=normalized_scope,
+                scope_key=inputs.scope_key,
+                policy_context=policy_context,
+            )
+        teams = _string_set(inputs.accessible_teams)
+        if teams is None or inputs.scope_key not in teams:
+            return _deny(
+                action=action,
+                reason="unverified_membership",
+                memory_scope=normalized_scope,
+                scope_key=inputs.scope_key,
+                policy_context=policy_context,
+            )
+        if action is MemoryPolicyAction.SHARE:
+            return _deny(
+                action=action,
+                reason="scope_crossing_requires_promotion",
+                memory_scope=normalized_scope,
+                scope_key=inputs.scope_key,
+                policy_context=policy_context,
+            )
+        return _allow(
+            action=action,
+            reason=f"same_scope_{action.value}_allowed",
             memory_scope=normalized_scope,
             scope_key=inputs.scope_key,
             policy_context=policy_context,
@@ -428,6 +494,7 @@ def authorize_memory_write(
     memory_scope: MemoryScope | str | None = None,
     scope_key: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     policy_context: MemoryPolicyContext | None = None,
 ) -> MemoryPolicyDecision:
@@ -437,6 +504,7 @@ def authorize_memory_write(
         memory_scope=memory_scope,
         scope_key=scope_key,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
         policy_context=policy_context,
     )
@@ -448,6 +516,7 @@ def authorize_memory_share(
     memory_scope: MemoryScope | str | None = None,
     scope_key: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     policy_context: MemoryPolicyContext | None = None,
 ) -> MemoryPolicyDecision:
@@ -457,6 +526,7 @@ def authorize_memory_share(
         memory_scope=memory_scope,
         scope_key=scope_key,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
         policy_context=policy_context,
     )
@@ -468,6 +538,7 @@ def authorize_memory_reflect(
     memory_scope: MemoryScope | str | None = None,
     scope_key: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     policy_context: MemoryPolicyContext | None = None,
 ) -> MemoryPolicyDecision:
@@ -477,6 +548,7 @@ def authorize_memory_reflect(
         memory_scope=memory_scope,
         scope_key=scope_key,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
         policy_context=policy_context,
     )

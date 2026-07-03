@@ -159,7 +159,7 @@ _UPSERT_QUERY_BY_TABLE = {
     "user_sessions": "UPSERT user_sessions CONTENT $record WHERE uuid = $uuid;",
     "users": "UPSERT users CONTENT $record WHERE uuid = $uuid;",
 }
-_ENABLED_MEMORY_SPACE_SCOPES = {"private", "delegated", "project"}
+_ENABLED_MEMORY_SPACE_SCOPES = {"private", "delegated", "project", "team"}
 _MEMORY_SPACE_SCOPES = {
     "private",
     "delegated",

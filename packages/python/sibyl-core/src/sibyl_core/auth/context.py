@@ -32,6 +32,7 @@ class MemoryPolicyContext:
     organization_role: OrganizationRole | str | None = None
     is_global_admin: bool = False
     accessible_projects: frozenset[str] | None = None
+    accessible_teams: frozenset[str] | None = None
     accessible_delegations: frozenset[str] | None = None
     delegated_authority: str | None = None
     agent_id: str | None = None
@@ -53,6 +54,11 @@ class MemoryPolicyContext:
             self,
             "accessible_projects",
             _frozen_string_set(self.accessible_projects),
+        )
+        object.__setattr__(
+            self,
+            "accessible_teams",
+            _frozen_string_set(self.accessible_teams),
         )
         object.__setattr__(
             self,
@@ -129,6 +135,7 @@ class AuthContext:
         scope_key: str | None = None,
         project_id: str | None = None,
         accessible_projects: Iterable[str] | None = None,
+        accessible_teams: Iterable[str] | None = None,
         accessible_delegations: Iterable[str] | None = None,
         delegated_authority: str | None = None,
         agent_id: str | None = None,
@@ -140,6 +147,7 @@ class AuthContext:
             organization_role=self.org_role,
             is_global_admin=self.user.is_admin,
             accessible_projects=_frozen_string_set(accessible_projects),
+            accessible_teams=_frozen_string_set(accessible_teams),
             accessible_delegations=_frozen_string_set(accessible_delegations),
             delegated_authority=delegated_authority,
             agent_id=agent_id,

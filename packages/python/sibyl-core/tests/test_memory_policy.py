@@ -217,7 +217,7 @@ def test_delegated_read_allows_explicit_delegation_access() -> None:
 
 @pytest.mark.parametrize(
     "memory_scope",
-    [MemoryScope.TEAM, MemoryScope.ORGANIZATION, MemoryScope.SHARED, MemoryScope.PUBLIC],
+    [MemoryScope.ORGANIZATION, MemoryScope.SHARED, MemoryScope.PUBLIC],
 )
 def test_unenabled_scopes_are_denied(memory_scope: MemoryScope) -> None:
     decision = authorize_memory_read(
