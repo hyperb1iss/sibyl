@@ -339,23 +339,24 @@ def test_auth_context_builds_memory_policy_context() -> None:
 
 
 def test_memory_policy_allows_verified_team_scope() -> None:
+    team_scope_key = str(uuid4())
     read_decision = authorize_memory_read(
         principal_id="user-1",
         memory_scope="team",
-        scope_key="team-alpha",
-        accessible_teams={"team-alpha"},
+        scope_key=team_scope_key,
+        accessible_teams={team_scope_key},
     )
     write_decision = authorize_memory_write(
         principal_id="user-1",
         memory_scope="team",
-        scope_key="team-alpha",
-        accessible_teams={"team-alpha"},
+        scope_key=team_scope_key,
+        accessible_teams={team_scope_key},
     )
     share_decision = authorize_memory_share(
         principal_id="user-1",
         memory_scope="team",
-        scope_key="team-alpha",
-        accessible_teams={"team-alpha"},
+        scope_key=team_scope_key,
+        accessible_teams={team_scope_key},
     )
 
     assert read_decision.allowed is True

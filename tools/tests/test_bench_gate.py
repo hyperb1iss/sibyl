@@ -1541,6 +1541,7 @@ def test_validate_ai_memory_manifest_accepts_team_scope_receipt_contract(
                             "promotion attribution",
                             "promotion preview",
                             "audit receipt",
+                            "team target promotion",
                         ],
                     },
                 ],
@@ -1580,7 +1581,11 @@ def test_validate_ai_memory_manifest_accepts_team_scope_receipt_contract(
                     "direction": "higher",
                     "threshold": 1,
                     "require_receipt_checks": True,
-                    "required_surfaces": ["promotion attribution", "audit receipt"],
+                    "required_surfaces": [
+                        "promotion attribution",
+                        "audit receipt",
+                        "team target promotion",
+                    ],
                 },
                 {
                     "metric": "promotion_preview_coverage",

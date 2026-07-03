@@ -1473,6 +1473,111 @@ async def _authorize_raw_promotion_api_key_scopes(
         )
 
 
+def _share_target_policy_scope(
+    request: MemorySharePreviewRequest,
+) -> tuple[str, str | None, str | None]:
+    target_scope = str(request.target_scope)
+    target_scope_key = request.target_scope_key
+    project_id = request.project_id
+    if target_scope == "project":
+        target_scope_key = target_scope_key or request.project_id
+        project_id = project_id or target_scope_key
+    return target_scope, target_scope_key, project_id
+
+
+async def _authorize_share_api_key_scopes(
+    *,
+    ctx: AuthContext,
+    request: MemorySharePreviewRequest,
+    organization_id: str,
+    accessible_projects: set[str],
+    accessible_teams: set[str] | None,
+    http_request: Request | None,
+    surface: str,
+) -> None:
+    allowed_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+    if allowed_scope_keys is None or not isinstance(
+        allowed_scope_keys, list | tuple | set | frozenset
+    ):
+        return
+
+    target_scope, target_scope_key, target_project_id = _share_target_policy_scope(request)
+    target_denied = not _api_key_memory_scope_allowed(
+        ctx,
+        memory_scope=target_scope,
+        scope_key=target_scope_key,
+    )
+    checks: list[tuple[MemoryPolicyAction, str, str | None, str | None, str | None]] = (
+        [
+            (
+                MemoryPolicyAction.WRITE,
+                target_scope,
+                target_scope_key,
+                target_project_id,
+                None,
+            )
+        ]
+        if target_denied
+        else []
+    )
+    if not target_denied:
+        for source_id in request.source_ids:
+            memory = await get_raw_memory(
+                organization_id=organization_id,
+                memory_id=source_id,
+            )
+            if memory is None:
+                continue
+            checks.append(
+                (
+                    MemoryPolicyAction.READ,
+                    memory.memory_scope.value,
+                    memory.scope_key,
+                    _memory_project_id(memory),
+                    source_id,
+                )
+            )
+
+    for action, memory_scope, scope_key, project_id, source_id in checks:
+        if _api_key_memory_scope_allowed(ctx, memory_scope=memory_scope, scope_key=scope_key):
+            continue
+        policy_context = MemoryPolicyContext(
+            actor_user_id=ctx.user_id,
+            organization_id=ctx.organization_id,
+            organization_role=ctx.org_role,
+            memory_space=memory_scope,
+            scope_key=scope_key,
+            project_id=project_id,
+            accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            source_surface=surface,
+        )
+        deny_decision = _api_key_memory_scope_denial(
+            action=action,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            policy_context=policy_context,
+        )
+        _log_policy_decision(ctx=ctx, decision=deny_decision, surface=surface)
+        await _log_memory_audit(
+            action="memory.policy_deny",
+            ctx=ctx,
+            request=http_request,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            project_id=project_id,
+            source_surface=surface,
+            source_ids=[source_id] if source_id else list(request.source_ids),
+            policy_allowed=False,
+            policy_reason=deny_decision.reason,
+            details={"policy_action": deny_decision.action.value},
+        )
+        raise HTTPException(
+            status_code=_policy_http_status(deny_decision.reason),
+            detail=deny_decision.reason,
+        )
+
+
 async def _accessible_projects_for_share_preview(
     *,
     ctx: AuthContext,
@@ -2274,6 +2379,16 @@ async def preview_memory_share_route(
         request=request,
         http_request=http_request,
     )
+    accessible_teams = await _accessible_teams_for_share(ctx=ctx, request=request)
+    await _authorize_share_api_key_scopes(
+        ctx=ctx,
+        request=request,
+        organization_id=str(org.id),
+        accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        http_request=http_request,
+        surface="memory_share_preview",
+    )
     result = await preview_memory_share(
         source_ids=request.source_ids,
         organization_id=str(org.id),
@@ -2282,7 +2397,7 @@ async def preview_memory_share_route(
         target_scope_key=request.target_scope_key,
         recipient_organization_id=request.recipient_organization_id,
         accessible_projects=accessible_projects,
-        accessible_teams=await _accessible_teams_for_share(ctx=ctx, request=request),
+        accessible_teams=accessible_teams,
     )
     await _log_memory_audit(
         action="memory.share.preview",
@@ -2333,6 +2448,15 @@ async def share_memory_route(
         http_request=http_request,
     )
     accessible_teams = await _accessible_teams_for_share(ctx=ctx, request=request)
+    await _authorize_share_api_key_scopes(
+        ctx=ctx,
+        request=request,
+        organization_id=str(org.id),
+        accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        http_request=http_request,
+        surface="memory_share",
+    )
     project_id = request.project_id or (
         request.target_scope_key if request.target_scope == "project" else None
     )

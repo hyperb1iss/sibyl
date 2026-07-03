@@ -1877,6 +1877,46 @@ async def test_preview_memory_share_returns_disabled_contract_and_audit() -> Non
 
 
 @pytest.mark.asyncio
+async def test_preview_memory_share_denies_disallowed_api_key_target_space() -> None:
+    org = _org()
+    ctx = _ctx()
+    ctx.api_key_memory_scope_keys = [api_key_memory_scope_key("project", "project_allowed")]
+    http_request = _http_request()
+
+    with (
+        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
+        patch(
+            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"project_secret"}),
+        ),
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock()) as get_raw,
+        patch("sibyl.api.routes.memory.preview_memory_share", AsyncMock()) as preview,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        pytest.raises(HTTPException) as exc,
+    ):
+        await preview_memory_share_route(
+            MemorySharePreviewRequest(
+                source_ids=["memory-1"],
+                target_scope="project",
+                target_scope_key="project_secret",
+            ),
+            http_request=http_request,
+            org=org,
+            ctx=ctx,
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "api_key_memory_space_denied"
+    get_raw.assert_not_awaited()
+    preview.assert_not_awaited()
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["memory_scope"] == "project"
+    assert audit.await_args.kwargs["scope_key"] == "project_secret"
+    assert audit.await_args.kwargs["source_surface"] == "memory_share_preview"
+    assert audit.await_args.kwargs["policy_reason"] == "api_key_memory_space_denied"
+
+
+@pytest.mark.asyncio
 async def test_share_memory_applies_promotions_and_returns_audit_receipt() -> None:
     org = _org()
     ctx = _ctx()
@@ -1968,6 +2008,151 @@ async def test_share_memory_applies_promotions_and_returns_audit_receipt() -> No
     assert response.audit_event_ids == ["audit-1"]
     assert response.preview.reason == "scope_crossing_requires_promotion"
     assert response.promotions[0].metadata["share_target_scope"] == "project"
+
+
+@pytest.mark.asyncio
+async def test_share_memory_applies_team_promotions_with_membership_scope() -> None:
+    org = _org()
+    ctx = _ctx()
+    http_request = _http_request()
+    preview = MemorySharePreview(
+        allowed=False,
+        reason="scope_crossing_requires_promotion",
+        target_scope=MemoryScope.TEAM,
+        target_scope_key="team_123",
+        source_ids=["memory-1"],
+        visible_source_ids=["memory-1"],
+        denied_source_ids=[],
+        missing_source_ids=[],
+        redacted_count=0,
+        hidden_but_relevant_count=0,
+        metadata={
+            "policy_reasons": [
+                "scope_crossing_requires_promotion",
+                "private_principal_bound",
+            ],
+            "target_policy_reason": "scope_crossing_requires_promotion",
+        },
+    )
+    promotion = ReflectionPromotionResult(
+        success=True,
+        candidate_id="memory-1",
+        promoted_id="entity-1",
+        reason="shared",
+        review_state="pending",
+        memory_scope=MemoryScope.TEAM,
+        scope_key="team_123",
+        raw_source_ids=["memory-1"],
+        metadata={
+            "policy_reasons": ["team_access_verified"],
+            "share_source_scope": "private",
+            "share_target_scope": "team",
+        },
+    )
+    result = MemoryShareResult(
+        applied=True,
+        reason="shared",
+        preview=preview,
+        promotions=(promotion,),
+        metadata={"promotion_count": 1, "promoted_count": 1},
+    )
+    with (
+        patch(
+            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"project_123"}),
+        ),
+        patch(
+            "sibyl.api.routes.memory.list_accessible_team_scope_keys",
+            AsyncMock(return_value={"team_123"}),
+        ) as accessible_teams,
+        patch("sibyl.api.routes.memory.share_memory", AsyncMock(return_value=result)) as share,
+        patch(
+            "sibyl.api.routes.memory.log_memory_audit_event",
+            AsyncMock(return_value="audit-1"),
+        ) as audit,
+    ):
+        response = await share_memory_route(
+            MemoryShareRequest(
+                source_ids=["memory-1"],
+                target_scope="team",
+                target_scope_key="team_123",
+            ),
+            http_request=http_request,
+            org=org,
+            ctx=ctx,
+        )
+
+    accessible_teams.assert_awaited_once_with(ctx)
+    share.assert_awaited_once_with(
+        source_ids=["memory-1"],
+        organization_id=str(org.id),
+        principal_id="user-123",
+        target_scope="team",
+        target_scope_key="team_123",
+        recipient_organization_id=None,
+        project=None,
+        accessible_projects={"project_123"},
+        accessible_teams={"team_123"},
+    )
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["memory_scope"] == "team"
+    assert audit.await_args.kwargs["scope_key"] == "team_123"
+    assert audit.await_args.kwargs["source_ids"] == ["memory-1"]
+    assert audit.await_args.kwargs["derived_ids"] == ["entity-1"]
+    assert audit.await_args.kwargs["policy_allowed"] is True
+    assert response.applied is True
+    assert response.promoted_ids == ["entity-1"]
+    assert response.promotions[0].metadata["share_target_scope"] == "team"
+
+
+@pytest.mark.asyncio
+async def test_share_memory_denies_disallowed_api_key_source_space() -> None:
+    org = _org()
+    ctx = _ctx()
+    ctx.api_key_memory_scope_keys = [api_key_memory_scope_key("project", "project_allowed")]
+    http_request = _http_request()
+
+    with (
+        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
+        patch(
+            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"project_allowed"}),
+        ),
+        patch(
+            "sibyl.api.routes.memory.get_raw_memory",
+            AsyncMock(
+                return_value=_memory(
+                    id="memory-1",
+                    memory_scope=MemoryScope.PROJECT,
+                    scope_key="project_secret",
+                    metadata={"project_id": "project_secret"},
+                )
+            ),
+        ),
+        patch("sibyl.api.routes.memory.share_memory", AsyncMock()) as share,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        pytest.raises(HTTPException) as exc,
+    ):
+        await share_memory_route(
+            MemoryShareRequest(
+                source_ids=["memory-1"],
+                target_scope="project",
+                target_scope_key="project_allowed",
+            ),
+            http_request=http_request,
+            org=org,
+            ctx=ctx,
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "api_key_memory_space_denied"
+    share.assert_not_awaited()
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["memory_scope"] == "project"
+    assert audit.await_args.kwargs["scope_key"] == "project_secret"
+    assert audit.await_args.kwargs["source_surface"] == "memory_share"
+    assert audit.await_args.kwargs["source_ids"] == ["memory-1"]
+    assert audit.await_args.kwargs["policy_reason"] == "api_key_memory_space_denied"
 
 
 @pytest.mark.asyncio
