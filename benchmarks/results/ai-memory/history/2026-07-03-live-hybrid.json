@@ -1,0 +1,21 @@
+{
+  "schema_version": "sibyl-ai-memory-history-summary-v1",
+  "baseline_key": "latest-citable-hybrid",
+  "generated_at": "2026-07-03T00:00:00Z",
+  "source": {
+    "external_artifact_manifest": "external/longmemeval_sibyl_live_full_26304777971.json",
+    "suite": "LongMemEval-S live API",
+    "mode": "hybrid",
+    "sibyl_commit": "36032a25b2893f2fbcbc074bd0c212fb829dd975"
+  },
+  "profile": "ai-memory",
+  "metrics": {
+    "recall@5": 0.9696333333333333,
+    "ndcg@5": 0.9462810537817574,
+    "recall@10": 0.989,
+    "ndcg@10": 0.9548390414314692,
+    "cross_question_result_count": 0.0
+  },
+  "gate_command": "moon run bench-gate",
+  "gate_passed": true
+}

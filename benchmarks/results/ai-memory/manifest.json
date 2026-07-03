@@ -993,6 +993,17 @@
         "ndcg@10"
       ],
       "max_regression": {}
+    },
+    {
+      "candidate": "external/longmemeval_sibyl_live_full_26304777971.json",
+      "baseline_history": "latest-citable-hybrid",
+      "profile": "ai-memory",
+      "metrics": [
+        "recall@5"
+      ],
+      "max_regression": {
+        "recall@5": 0.005
+      }
     }
   ],
   "planned": [

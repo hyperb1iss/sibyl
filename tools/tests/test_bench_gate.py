@@ -188,7 +188,7 @@ def _manifest_payload(
         "release_scope": "test",
         "artifact_policy": "Only citable entries may appear in release notes.",
         "history": {
-            "directory": "benchmarks/results/ai-memory/history",
+            "directory": "history",
             "summary_schema": "sibyl-ai-memory-history-summary-v1",
             "append_policy": "immutable-json",
         },
@@ -218,6 +218,34 @@ def _manifest_payload(
     return payload
 
 
+def _write_history_summary(
+    tmp_path: Path,
+    *,
+    baseline_key: str = "previous-run",
+    metrics: dict[str, float] | None = None,
+    gate_passed: bool = True,
+) -> Path:
+    history_dir = tmp_path / "history"
+    history_dir.mkdir(exist_ok=True)
+    history_path = history_dir / f"{baseline_key}.json"
+    history_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "sibyl-ai-memory-history-summary-v1",
+                "baseline_key": baseline_key,
+                "generated_at": "2026-07-03T00:00:00Z",
+                "source": {"artifact": "baseline.json"},
+                "profile": "ai-memory",
+                "metrics": metrics or {"recall@5": 1.0, "ndcg@5": 1.0},
+                "gate_command": "moon run bench-gate",
+                "gate_passed": gate_passed,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return history_path
+
+
 def _write_ai_memory_manifest(
     tmp_path: Path,
     *,
@@ -231,6 +259,7 @@ def _write_ai_memory_manifest(
     if write_artifact:
         artifact = tmp_path / str(entry["artifact"])
         artifact.write_text(json.dumps(report), encoding="utf-8")
+    _write_history_summary(tmp_path)
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text(
         json.dumps(_manifest_payload(citable=[entry], planned=planned)),
@@ -691,6 +720,7 @@ def test_validate_ai_memory_manifest_accepts_external_artifact_manifest(
     external_path.parent.mkdir()
     external_path.write_text(json.dumps(report), encoding="utf-8")
     manifest_path = tmp_path / "manifest.json"
+    _write_history_summary(tmp_path)
     manifest_path.write_text(json.dumps(_manifest_payload(citable=[entry])), encoding="utf-8")
 
     failures = eval_gate.validate_ai_memory_manifest(manifest_path)
@@ -709,6 +739,7 @@ def test_validate_ai_memory_manifest_rejects_external_artifact_manifest_drift(
     external_path.parent.mkdir()
     external_path.write_text(json.dumps(report), encoding="utf-8")
     manifest_path = tmp_path / "manifest.json"
+    _write_history_summary(tmp_path)
     manifest_path.write_text(json.dumps(_manifest_payload(citable=[entry])), encoding="utf-8")
 
     failures = eval_gate.validate_ai_memory_manifest(manifest_path)
@@ -726,6 +757,7 @@ def test_validate_ai_memory_manifest_rejects_partial_external_artifact_summary(
     external_path.parent.mkdir()
     external_path.write_text(json.dumps(report), encoding="utf-8")
     manifest_path = tmp_path / "manifest.json"
+    _write_history_summary(tmp_path)
     manifest_path.write_text(json.dumps(_manifest_payload(citable=[entry])), encoding="utf-8")
 
     failures = eval_gate.validate_ai_memory_manifest(manifest_path)
@@ -880,6 +912,56 @@ def test_validate_ai_memory_manifest_rejects_missing_v2_contracts(tmp_path: Path
     )
 
 
+def test_validate_ai_memory_manifest_rejects_missing_history_directory(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["history"]["directory"] = "missing-history"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert "manifest history directory does not exist: 'missing-history'" in failures
+
+
+def test_validate_ai_memory_manifest_rejects_malformed_history_summary(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    history_path = tmp_path / "history" / "previous-run.json"
+    summary = json.loads(history_path.read_text(encoding="utf-8"))
+    summary.pop("gate_command")
+    summary["schema_version"] = "future-schema"
+    summary["metrics"] = {"recall@5": "nan"}
+    summary["gate_passed"] = False
+    history_path.write_text(json.dumps(summary), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert "history/previous-run.json missing non-empty field 'gate_command'" in failures
+    assert (
+        "history/previous-run.json schema_version must be 'sibyl-ai-memory-history-summary-v1'"
+    ) in failures
+    assert "history/previous-run.json metrics['recall@5'] must be finite numeric" in failures
+    assert "history/previous-run.json gate_passed must be true" in failures
+
+
+def test_validate_ai_memory_manifest_rejects_duplicate_history_baselines(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    duplicate_path = tmp_path / "history" / "duplicate.json"
+    duplicate_path.write_text(
+        (tmp_path / "history" / "previous-run.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert "history/previous-run.json duplicates history baseline 'previous-run'" in failures
+
+
 def test_validate_ai_memory_manifest_rejects_gate_contract_drift(tmp_path: Path) -> None:
     manifest_path = _write_ai_memory_manifest(tmp_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -949,6 +1031,7 @@ def test_validate_ai_memory_manifest_enforces_no_regression_entries(tmp_path: Pa
     candidate["overall"]["ndcg@5"] = 0.95
     (tmp_path / "baseline.json").write_text(json.dumps(baseline), encoding="utf-8")
     (tmp_path / "candidate.json").write_text(json.dumps(candidate), encoding="utf-8")
+    _write_history_summary(tmp_path)
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text(
         json.dumps(
@@ -972,6 +1055,150 @@ def test_validate_ai_memory_manifest_enforces_no_regression_entries(tmp_path: Pa
     assert failures == [
         "no_regression[0] candidate.json: metric 'ndcg@5' regressed below "
         "baseline 1.0000 by 0.0500; allowed 0.0000"
+    ]
+
+
+def test_validate_ai_memory_manifest_uses_history_baseline(tmp_path: Path) -> None:
+    baseline = _ai_memory_report()
+    candidate = _clone_report(baseline)
+    candidate["overall"]["ndcg@5"] = 0.99
+    (tmp_path / "candidate.json").write_text(json.dumps(candidate), encoding="utf-8")
+    _write_history_summary(
+        tmp_path,
+        baseline_key="previous-run",
+        metrics={"ndcg@5": baseline["overall"]["ndcg@5"]},
+    )
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            _manifest_payload(
+                citable=[_manifest_entry(candidate, artifact="candidate.json")],
+                no_regression=[
+                    {
+                        "candidate": "candidate.json",
+                        "baseline_history": "previous-run",
+                        "profile": "ai-memory",
+                        "metrics": ["ndcg@5"],
+                        "max_regression": {"ndcg@5": 0.02},
+                    }
+                ],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == []
+
+
+def test_validate_ai_memory_manifest_uses_external_artifact_history_baseline(
+    tmp_path: Path,
+) -> None:
+    baseline = _ai_memory_report(mode="hybrid")
+    candidate = _external_ai_memory_report(baseline)
+    external_path = tmp_path / "external" / "candidate.json"
+    external_path.parent.mkdir()
+    external_path.write_text(json.dumps(candidate), encoding="utf-8")
+    _write_history_summary(
+        tmp_path,
+        baseline_key="previous-run",
+        metrics={"recall@5": baseline["overall"]["recall@5"]},
+    )
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            _manifest_payload(
+                citable=[
+                    _external_manifest_entry(
+                        candidate,
+                        external_artifact_manifest="external/candidate.json",
+                    )
+                ],
+                no_regression=[
+                    {
+                        "candidate": "external/candidate.json",
+                        "baseline_history": "previous-run",
+                        "profile": "ai-memory",
+                        "metrics": ["recall@5"],
+                        "max_regression": {"recall@5": 0.005},
+                    }
+                ],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == []
+
+
+def test_validate_ai_memory_manifest_rejects_missing_history_baseline(
+    tmp_path: Path,
+) -> None:
+    candidate = _ai_memory_report()
+    (tmp_path / "candidate.json").write_text(json.dumps(candidate), encoding="utf-8")
+    _write_history_summary(tmp_path, baseline_key="previous-run")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            _manifest_payload(
+                citable=[_manifest_entry(candidate, artifact="candidate.json")],
+                no_regression=[
+                    {
+                        "candidate": "candidate.json",
+                        "baseline_history": "missing-run",
+                        "profile": "ai-memory",
+                        "metrics": ["recall@5"],
+                    }
+                ],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == ["no_regression[0] history baseline does not exist: missing-run"]
+
+
+def test_validate_ai_memory_manifest_rejects_history_baseline_regression(
+    tmp_path: Path,
+) -> None:
+    baseline = _ai_memory_report()
+    candidate = _clone_report(baseline)
+    candidate["overall"]["ndcg@5"] = 0.95
+    (tmp_path / "candidate.json").write_text(json.dumps(candidate), encoding="utf-8")
+    _write_history_summary(
+        tmp_path,
+        baseline_key="previous-run",
+        metrics={"ndcg@5": baseline["overall"]["ndcg@5"]},
+    )
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            _manifest_payload(
+                citable=[_manifest_entry(candidate, artifact="candidate.json")],
+                no_regression=[
+                    {
+                        "candidate": "candidate.json",
+                        "baseline_history": "previous-run",
+                        "profile": "ai-memory",
+                        "metrics": ["ndcg@5"],
+                        "max_regression": {"ndcg@5": 0.02},
+                    }
+                ],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == [
+        "no_regression[0] candidate.json: metric 'ndcg@5' regressed below "
+        "baseline 1.0000 by 0.0500; allowed 0.0200"
     ]
 
 
@@ -1091,3 +1318,17 @@ def test_ai_memory_manifest_tracks_full_citable_artifacts() -> None:
         assert entry["status"] == "planned"
         assert "artifact" not in entry
         assert "external_artifact_manifest" not in entry
+
+    history_regressions = [
+        entry for entry in manifest["no_regression"] if "baseline_history" in entry
+    ]
+    assert history_regressions == [
+        {
+            "candidate": "external/longmemeval_sibyl_live_full_26304777971.json",
+            "baseline_history": "latest-citable-hybrid",
+            "profile": "ai-memory",
+            "metrics": ["recall@5"],
+            "max_regression": {"recall@5": 0.005},
+        }
+    ]
+    assert eval_gate.validate_ai_memory_manifest(manifest_path) == []

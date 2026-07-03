@@ -125,6 +125,15 @@ _AI_MEMORY_LEDGER_REQUIRED_FIELDS = (
     "artifact_policy",
 )
 _AI_MEMORY_LEDGER_V2_REQUIRED_FIELDS = ("history", "gate_contracts")
+_AI_MEMORY_HISTORY_REQUIRED_FIELDS = (
+    "schema_version",
+    "baseline_key",
+    "generated_at",
+    "source",
+    "profile",
+    "metrics",
+    "gate_command",
+)
 _MANIFEST_GATE_STATUSES = frozenset(("planned", "warning", "blocking"))
 _MANIFEST_GATE_CONTRACT_MODES = frozenset(("threshold", "no-regression", "receipt"))
 _MANIFEST_GATE_PROFILES = frozenset((*PROFILE_THRESHOLDS.keys(), "product"))
@@ -934,6 +943,114 @@ def _validate_manifest_history(history: Any) -> list[str]:
     return failures
 
 
+def _resolve_manifest_history_directory(
+    history: dict[str, Any],
+    *,
+    manifest_path: Path,
+) -> Path | None:
+    directory = history.get("directory")
+    if not isinstance(directory, str) or not directory.strip():
+        return None
+    if Path(directory).is_absolute():
+        return None
+
+    manifest_root = (
+        REPO_ROOT if manifest_path.resolve().is_relative_to(REPO_ROOT) else manifest_path.parent
+    )
+    candidate = manifest_root / directory
+    return candidate if candidate.is_dir() else None
+
+
+def _validate_ai_memory_history_summary(
+    summary: dict[str, Any],
+    *,
+    expected_schema: str,
+    path: str,
+) -> list[str]:
+    failures: list[str] = []
+    failures.extend(
+        _validate_required_fields(
+            summary,
+            path=path,
+            fields=_AI_MEMORY_HISTORY_REQUIRED_FIELDS,
+        )
+    )
+
+    if summary.get("schema_version") != expected_schema:
+        failures.append(f"{path} schema_version must be {expected_schema!r}")
+
+    profile = summary.get("profile")
+    if not isinstance(profile, str) or profile not in PROFILE_THRESHOLDS:
+        allowed = ", ".join(sorted(PROFILE_THRESHOLDS))
+        failures.append(f"{path} has unsupported profile {profile!r}; expected one of {allowed}")
+
+    source = summary.get("source")
+    if not _is_mapping(source):
+        failures.append(f"{path} source must be an object")
+    elif not (
+        isinstance(source.get("artifact"), str)
+        or isinstance(source.get("external_artifact_manifest"), str)
+    ):
+        failures.append(f"{path} source must name artifact or external_artifact_manifest")
+
+    metrics = summary.get("metrics")
+    if not _is_non_empty_mapping(metrics):
+        failures.append(f"{path} metrics must be a non-empty object")
+    else:
+        for metric, value in metrics.items():
+            if not isinstance(metric, str) or not metric.strip():
+                failures.append(f"{path} metrics contains a non-string metric key")
+            if not _is_finite_number(value):
+                failures.append(f"{path} metrics[{metric!r}] must be finite numeric")
+
+    if summary.get("gate_passed") is not True:
+        failures.append(f"{path} gate_passed must be true")
+
+    return failures
+
+
+def _load_manifest_history_summaries(
+    manifest: dict[str, Any],
+    *,
+    manifest_path: Path,
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    history = manifest.get("history")
+    if not _is_mapping(history):
+        return {}, []
+
+    directory = _resolve_manifest_history_directory(history, manifest_path=manifest_path)
+    if directory is None:
+        return {}, [f"manifest history directory does not exist: {history.get('directory')!r}"]
+
+    expected_schema = str(history.get("summary_schema") or "")
+    baselines: dict[str, dict[str, Any]] = {}
+    failures: list[str] = []
+    for summary_path in sorted(directory.glob("*.json")):
+        label = (
+            str(summary_path.relative_to(REPO_ROOT))
+            if summary_path.is_relative_to(REPO_ROOT)
+            else str(summary_path.relative_to(directory.parent))
+        )
+        summary = load_report(summary_path)
+        if not _is_mapping(summary):
+            failures.append(f"{label} is not an object")
+            continue
+        failures.extend(
+            _validate_ai_memory_history_summary(
+                summary,
+                expected_schema=expected_schema,
+                path=label,
+            )
+        )
+        baseline_key = summary.get("baseline_key")
+        if isinstance(baseline_key, str) and baseline_key.strip():
+            if baseline_key in baselines:
+                failures.append(f"{label} duplicates history baseline {baseline_key!r}")
+                continue
+            baselines[baseline_key] = {"metrics": summary.get("metrics", {})}
+    return baselines, failures
+
+
 def _validate_manifest_contract_direction(
     contract: dict[str, Any],
     *,
@@ -1147,9 +1264,146 @@ def _parse_manifest_regression_tolerances(
     return tolerances, failures
 
 
+def _manifest_citable_artifacts(manifest: dict[str, Any]) -> set[str]:
+    citable = manifest.get("citable")
+    citable_entries = citable if isinstance(citable, list) else []
+    artifacts: set[str] = set()
+    for citable_entry in citable_entries:
+        if not isinstance(citable_entry, dict):
+            continue
+        for artifact_key in ("artifact", "external_artifact_manifest"):
+            artifact_name = citable_entry.get(artifact_key)
+            if isinstance(artifact_name, str) and artifact_name.strip():
+                artifacts.add(artifact_name)
+    return artifacts
+
+
+def _validate_manifest_regression_target(
+    entry: dict[str, Any],
+    *,
+    path: str,
+    citable_artifacts: set[str],
+) -> tuple[str | None, str | None, str | None, list[str]]:
+    candidate_name = entry.get("candidate")
+    baseline_name = entry.get("baseline")
+    baseline_history = entry.get("baseline_history")
+    failures: list[str] = []
+
+    if not isinstance(candidate_name, str) or not candidate_name.strip():
+        failures.append(f"{path} missing non-empty candidate")
+        candidate = None
+    else:
+        candidate = candidate_name
+        if candidate not in citable_artifacts:
+            failures.append(f"{path} candidate {candidate!r} is not citable")
+
+    has_baseline = isinstance(baseline_name, str) and bool(baseline_name.strip())
+    has_history_baseline = isinstance(baseline_history, str) and bool(baseline_history.strip())
+    if has_baseline == has_history_baseline:
+        failures.append(f"{path} must include exactly one of baseline or baseline_history")
+
+    return (
+        candidate,
+        baseline_name if has_baseline else None,
+        baseline_history if has_history_baseline else None,
+        failures,
+    )
+
+
+def _load_manifest_regression_reports(
+    *,
+    path: str,
+    manifest_path: Path,
+    candidate_name: str,
+    baseline_name: str | None,
+    baseline_history: str | None,
+    history_baselines: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, list[str]]:
+    candidate_path = manifest_path.parent / candidate_name
+    if not candidate_path.exists():
+        return None, None, [f"{path} candidate does not exist: {candidate_name}"]
+
+    candidate_report = load_report(candidate_path)
+    if baseline_history is not None:
+        baseline_report = history_baselines.get(baseline_history)
+        if baseline_report is None:
+            return None, None, [f"{path} history baseline does not exist: {baseline_history}"]
+        return candidate_report, baseline_report, []
+
+    baseline_path = manifest_path.parent / str(baseline_name)
+    if not baseline_path.exists():
+        return None, None, [f"{path} baseline does not exist: {baseline_name}"]
+    return candidate_report, load_report(baseline_path), []
+
+
+def _validate_no_regression_manifest_entry(
+    entry: Any,
+    *,
+    path: str,
+    manifest_path: Path,
+    citable_artifacts: set[str],
+    history_baselines: dict[str, dict[str, Any]],
+) -> list[str]:
+    if not _is_mapping(entry):
+        return [f"{path} is not an object"]
+
+    candidate_name, baseline_name, baseline_history, failures = (
+        _validate_manifest_regression_target(
+            entry,
+            path=path,
+            citable_artifacts=citable_artifacts,
+        )
+    )
+
+    profile_value = entry.get("profile", "ai-memory")
+    if not isinstance(profile_value, str) or profile_value not in PROFILE_THRESHOLDS:
+        return [*failures, f"{path} has unsupported profile {profile_value!r}"]
+    profile = cast("ProfileName", profile_value)
+
+    metrics, metric_failures = _parse_manifest_metric_list(
+        entry.get("metrics"),
+        path=f"{path}.metrics",
+    )
+    tolerances, tolerance_failures = _parse_manifest_regression_tolerances(
+        entry.get("max_regression"),
+        path=f"{path}.max_regression",
+    )
+    failures.extend(metric_failures)
+    failures.extend(tolerance_failures)
+    if candidate_name is None or (baseline_name is None) == (baseline_history is None):
+        return failures
+
+    candidate_report, baseline_report, report_failures = _load_manifest_regression_reports(
+        path=path,
+        manifest_path=manifest_path,
+        candidate_name=candidate_name,
+        baseline_name=baseline_name,
+        baseline_history=baseline_history,
+        history_baselines=history_baselines,
+    )
+    if report_failures:
+        return report_failures
+    if candidate_report is None or baseline_report is None:
+        return failures
+
+    failures.extend(
+        f"{path} {candidate_name}: {failure}"
+        for failure in evaluate_baseline_regressions(
+            candidate_report,
+            baseline_report,
+            profile=profile,
+            metrics=metrics,
+            max_regressions=tolerances,
+        )
+    )
+    return failures
+
+
 def _validate_no_regression_manifest_entries(
     manifest: dict[str, Any],
     manifest_path: Path,
+    *,
+    history_baselines: dict[str, dict[str, Any]],
 ) -> list[str]:
     if "no_regression" not in manifest:
         return []
@@ -1157,67 +1411,16 @@ def _validate_no_regression_manifest_entries(
     if not isinstance(entries, list):
         return ["no_regression must be a list"]
 
-    citable = manifest.get("citable")
-    citable_entries = citable if isinstance(citable, list) else []
-    citable_artifacts = {
-        entry.get("artifact") for entry in citable_entries if isinstance(entry, dict)
-    }
+    citable_artifacts = _manifest_citable_artifacts(manifest)
     failures: list[str] = []
     for index, entry in enumerate(entries):
-        prefix = f"no_regression[{index}]"
-        if not _is_mapping(entry):
-            failures.append(f"{prefix} is not an object")
-            continue
-
-        candidate_name = entry.get("candidate")
-        baseline_name = entry.get("baseline")
-        if not isinstance(candidate_name, str) or not candidate_name.strip():
-            failures.append(f"{prefix} missing non-empty candidate")
-        if not isinstance(baseline_name, str) or not baseline_name.strip():
-            failures.append(f"{prefix} missing non-empty baseline")
-        if isinstance(candidate_name, str) and candidate_name not in citable_artifacts:
-            failures.append(f"{prefix} candidate {candidate_name!r} is not citable")
-
-        profile_value = entry.get("profile", "ai-memory")
-        if not isinstance(profile_value, str) or profile_value not in PROFILE_THRESHOLDS:
-            failures.append(f"{prefix} has unsupported profile {profile_value!r}")
-            continue
-        profile = cast("ProfileName", profile_value)
-
-        metrics, metric_failures = _parse_manifest_metric_list(
-            entry.get("metrics"),
-            path=f"{prefix}.metrics",
-        )
-        tolerances, tolerance_failures = _parse_manifest_regression_tolerances(
-            entry.get("max_regression"),
-            path=f"{prefix}.max_regression",
-        )
-        failures.extend(metric_failures)
-        failures.extend(tolerance_failures)
-        if metric_failures or tolerance_failures:
-            continue
-        if not isinstance(candidate_name, str) or not isinstance(baseline_name, str):
-            continue
-
-        candidate_path = manifest_path.parent / candidate_name
-        baseline_path = manifest_path.parent / baseline_name
-        if not candidate_path.exists():
-            failures.append(f"{prefix} candidate does not exist: {candidate_name}")
-            continue
-        if not baseline_path.exists():
-            failures.append(f"{prefix} baseline does not exist: {baseline_name}")
-            continue
-
-        candidate_report = load_report(candidate_path)
-        baseline_report = load_report(baseline_path)
         failures.extend(
-            f"{prefix} {candidate_name}: {failure}"
-            for failure in evaluate_baseline_regressions(
-                candidate_report,
-                baseline_report,
-                profile=profile,
-                metrics=metrics,
-                max_regressions=tolerances,
+            _validate_no_regression_manifest_entry(
+                entry,
+                path=f"no_regression[{index}]",
+                manifest_path=manifest_path,
+                citable_artifacts=citable_artifacts,
+                history_baselines=history_baselines,
             )
         )
 
@@ -1258,6 +1461,11 @@ def validate_ai_memory_manifest(manifest_path: Path) -> list[str]:
         failures.append("manifest missing non-empty citable list")
         return failures
     failures.extend(_validate_ai_memory_manifest_header(manifest))
+    history_baselines, history_failures = _load_manifest_history_summaries(
+        manifest,
+        manifest_path=manifest_path,
+    )
+    failures.extend(history_failures)
 
     for index, entry in enumerate(citable):
         if not _is_mapping(entry):
@@ -1271,7 +1479,13 @@ def validate_ai_memory_manifest(manifest_path: Path) -> list[str]:
             )
         )
 
-    failures.extend(_validate_no_regression_manifest_entries(manifest, manifest_path))
+    failures.extend(
+        _validate_no_regression_manifest_entries(
+            manifest,
+            manifest_path,
+            history_baselines=history_baselines,
+        )
+    )
     failures.extend(_validate_planned_manifest_entries(manifest.get("planned")))
     return failures
 
