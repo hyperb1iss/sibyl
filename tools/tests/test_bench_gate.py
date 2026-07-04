@@ -1773,6 +1773,191 @@ def test_validate_ai_memory_manifest_accepts_usage_loop_receipt_contract(
     assert failures == []
 
 
+def test_validate_ai_memory_manifest_accepts_planned_dogfood_contracts_without_receipts(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["gate_contracts"].extend(
+        [
+            {
+                "name": "usage-loop-dogfood-gate",
+                "owner_wave": "W6E",
+                "status": "planned",
+                "profile": "product",
+                "blocking": False,
+                "metric_contracts": [
+                    {
+                        "metric": "deployed_version_match",
+                        "mode": "receipt",
+                        "required_receipt": "usage-loop-dogfood-receipt.json",
+                        "receipt_schema": "sibyl-usage-loop-dogfood-receipt-v1",
+                        "direction": "higher",
+                        "threshold": 1,
+                        "require_receipt_checks": True,
+                        "required_surfaces": ["live deployment provenance"],
+                    }
+                ],
+            },
+            {
+                "name": "forgetting-dogfood-gate",
+                "owner_wave": "W7B",
+                "status": "planned",
+                "profile": "product",
+                "blocking": False,
+                "metric_contracts": [
+                    {
+                        "metric": "dry_run_mode",
+                        "mode": "receipt",
+                        "required_receipt": "forgetting-dogfood-receipt.json",
+                        "receipt_schema": "sibyl-forgetting-dogfood-receipt-v1",
+                        "direction": "higher",
+                        "threshold": 1,
+                        "require_receipt_checks": True,
+                        "required_surfaces": ["live forgetting dry run"],
+                    }
+                ],
+            },
+        ]
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == []
+
+
+def test_validate_ai_memory_manifest_accepts_blocking_dogfood_receipts(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    (tmp_path / "usage-loop-dogfood-receipt.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "sibyl-usage-loop-dogfood-receipt-v1",
+                "metrics": {
+                    "deployed_version_match": 1,
+                    "citation_event_count": 1,
+                    "duplicate_stored_event_count": 0,
+                },
+                "checks": [
+                    {
+                        "name": "live-usage-loop-observation",
+                        "status": "PASS",
+                        "surfaces": [
+                            "live deployment provenance",
+                            "live citation events",
+                            "live dedupe",
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "forgetting-dogfood-receipt.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "sibyl-forgetting-dogfood-receipt-v1",
+                "metrics": {
+                    "deployed_version_match": 1,
+                    "dry_run_mode": 1,
+                    "stale_uncited_reduction_count": 1,
+                    "protected_cited_false_archive_count": 0,
+                },
+                "checks": [
+                    {
+                        "name": "live-forgetting-observation",
+                        "status": "PASS",
+                        "surfaces": [
+                            "live deployment provenance",
+                            "live forgetting dry run",
+                            "stale uncited reduction",
+                            "protected cited survival",
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["gate_contracts"].extend(
+        [
+            {
+                "name": "usage-loop-dogfood-gate",
+                "owner_wave": "W6E",
+                "status": "blocking",
+                "profile": "product",
+                "blocking": True,
+                "metric_contracts": [
+                    {
+                        "metric": "deployed_version_match",
+                        "mode": "receipt",
+                        "required_receipt": "usage-loop-dogfood-receipt.json",
+                        "receipt_schema": "sibyl-usage-loop-dogfood-receipt-v1",
+                        "direction": "higher",
+                        "threshold": 1,
+                        "require_receipt_checks": True,
+                        "required_surfaces": ["live deployment provenance"],
+                    },
+                    {
+                        "metric": "duplicate_stored_event_count",
+                        "mode": "receipt",
+                        "required_receipt": "usage-loop-dogfood-receipt.json",
+                        "direction": "lower",
+                        "threshold": 0,
+                        "require_receipt_checks": True,
+                        "required_surfaces": ["live dedupe"],
+                    },
+                ],
+            },
+            {
+                "name": "forgetting-dogfood-gate",
+                "owner_wave": "W7B",
+                "status": "blocking",
+                "profile": "product",
+                "blocking": True,
+                "metric_contracts": [
+                    {
+                        "metric": "dry_run_mode",
+                        "mode": "receipt",
+                        "required_receipt": "forgetting-dogfood-receipt.json",
+                        "receipt_schema": "sibyl-forgetting-dogfood-receipt-v1",
+                        "direction": "higher",
+                        "threshold": 1,
+                        "require_receipt_checks": True,
+                        "required_surfaces": ["live forgetting dry run"],
+                    },
+                    {
+                        "metric": "stale_uncited_reduction_count",
+                        "mode": "receipt",
+                        "required_receipt": "forgetting-dogfood-receipt.json",
+                        "direction": "higher",
+                        "threshold": 1,
+                        "require_receipt_checks": True,
+                        "required_surfaces": ["stale uncited reduction"],
+                    },
+                    {
+                        "metric": "protected_cited_false_archive_count",
+                        "mode": "receipt",
+                        "required_receipt": "forgetting-dogfood-receipt.json",
+                        "direction": "lower",
+                        "threshold": 0,
+                        "require_receipt_checks": True,
+                        "required_surfaces": ["protected cited survival"],
+                    },
+                ],
+            },
+        ]
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == []
+
+
 def test_validate_ai_memory_manifest_accepts_doc_claim_receipt_contract(
     tmp_path: Path,
 ) -> None:

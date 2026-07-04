@@ -300,6 +300,158 @@
       ]
     },
     {
+      "name": "usage-loop-dogfood-gate",
+      "owner_wave": "W6E",
+      "status": "planned",
+      "profile": "product",
+      "blocking": false,
+      "metric_contracts": [
+        {
+          "metric": "deployed_version_match",
+          "mode": "receipt",
+          "required_receipt": "usage-loop-dogfood-receipt.json",
+          "receipt_schema": "sibyl-usage-loop-dogfood-receipt-v1",
+          "direction": "higher",
+          "threshold": 1,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "live deployment provenance",
+            "dogfood approval boundary"
+          ]
+        },
+        {
+          "metric": "image_digest_match",
+          "mode": "receipt",
+          "required_receipt": "usage-loop-dogfood-receipt.json",
+          "receipt_schema": "sibyl-usage-loop-dogfood-receipt-v1",
+          "direction": "higher",
+          "threshold": 1
+        },
+        {
+          "metric": "required_source_commit_coverage",
+          "mode": "receipt",
+          "required_receipt": "usage-loop-dogfood-receipt.json",
+          "receipt_schema": "sibyl-usage-loop-dogfood-receipt-v1",
+          "direction": "higher",
+          "threshold": 1
+        },
+        {
+          "metric": "exposure_event_count",
+          "mode": "receipt",
+          "required_receipt": "usage-loop-dogfood-receipt.json",
+          "receipt_schema": "sibyl-usage-loop-dogfood-receipt-v1",
+          "direction": "higher",
+          "threshold": 1,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "live exposure events",
+            "live usage stamps"
+          ]
+        },
+        {
+          "metric": "citation_event_count",
+          "mode": "receipt",
+          "required_receipt": "usage-loop-dogfood-receipt.json",
+          "receipt_schema": "sibyl-usage-loop-dogfood-receipt-v1",
+          "direction": "higher",
+          "threshold": 1,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "live citation events",
+            "live decay divergence"
+          ]
+        },
+        {
+          "metric": "duplicate_stored_event_count",
+          "mode": "receipt",
+          "required_receipt": "usage-loop-dogfood-receipt.json",
+          "receipt_schema": "sibyl-usage-loop-dogfood-receipt-v1",
+          "direction": "lower",
+          "threshold": 0,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "live dedupe"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "forgetting-dogfood-gate",
+      "owner_wave": "W7B",
+      "status": "planned",
+      "profile": "product",
+      "blocking": false,
+      "metric_contracts": [
+        {
+          "metric": "deployed_version_match",
+          "mode": "receipt",
+          "required_receipt": "forgetting-dogfood-receipt.json",
+          "receipt_schema": "sibyl-forgetting-dogfood-receipt-v1",
+          "direction": "higher",
+          "threshold": 1,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "live deployment provenance",
+            "dogfood approval boundary"
+          ]
+        },
+        {
+          "metric": "image_digest_match",
+          "mode": "receipt",
+          "required_receipt": "forgetting-dogfood-receipt.json",
+          "receipt_schema": "sibyl-forgetting-dogfood-receipt-v1",
+          "direction": "higher",
+          "threshold": 1
+        },
+        {
+          "metric": "required_source_commit_coverage",
+          "mode": "receipt",
+          "required_receipt": "forgetting-dogfood-receipt.json",
+          "receipt_schema": "sibyl-forgetting-dogfood-receipt-v1",
+          "direction": "higher",
+          "threshold": 1
+        },
+        {
+          "metric": "stale_uncited_reduction_count",
+          "mode": "receipt",
+          "required_receipt": "forgetting-dogfood-receipt.json",
+          "receipt_schema": "sibyl-forgetting-dogfood-receipt-v1",
+          "direction": "higher",
+          "threshold": 1,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "live forgetting dry run",
+            "stale uncited reduction"
+          ]
+        },
+        {
+          "metric": "protected_cited_false_archive_count",
+          "mode": "receipt",
+          "required_receipt": "forgetting-dogfood-receipt.json",
+          "receipt_schema": "sibyl-forgetting-dogfood-receipt-v1",
+          "direction": "lower",
+          "threshold": 0,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "protected cited survival",
+            "write path integrity"
+          ]
+        },
+        {
+          "metric": "strict_recall_at_5_drop",
+          "mode": "receipt",
+          "required_receipt": "forgetting-dogfood-receipt.json",
+          "receipt_schema": "sibyl-forgetting-dogfood-receipt-v1",
+          "direction": "lower",
+          "threshold": 0.005,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "live context recall decay"
+          ]
+        }
+      ]
+    },
+    {
       "name": "team-scope-trust-gate",
       "owner_wave": "W8",
       "status": "blocking",

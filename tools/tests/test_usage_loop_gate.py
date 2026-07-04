@@ -15,6 +15,8 @@ EXPECTED_CITATION_EVENT_COUNT = 2
 EXPECTED_CONSOLIDATION_INPUT_COUNT = 2
 CITED_DECAY_ADVANTAGE_BUDGET = 0.1
 REPO_ROOT = Path(__file__).resolve().parents[2]
+API_DIGEST = f"sha256:{'a' * 64}"
+WEB_DIGEST = f"sha256:{'b' * 64}"
 
 
 class MoonTask(TypedDict):
@@ -45,6 +47,49 @@ def _root_moon_tasks() -> dict[str, MoonTask]:
     return payload["tasks"]["root"]
 
 
+def _dogfood_evidence() -> dict[str, object]:
+    return {
+        "deployment": {
+            "version": "1.1.0-rc.1",
+            "expected_version": "1.1.0-rc.1",
+            "image_digests": {"api": API_DIGEST, "web": WEB_DIGEST},
+            "expected_image_digests": {"api": API_DIGEST, "web": WEB_DIGEST},
+            "source_commits": [
+                "36094084",
+                "e59e9be1",
+                "b9e3ade8",
+                "6bf8881f",
+                "4bf80afd",
+                "2095b616",
+            ],
+        },
+        "usage": {
+            "exposure_events": [
+                {
+                    "memory_id": "entity:live-exposed",
+                    "dedupe_key": "ctx:entity:live-exposed:exposure",
+                    "last_recalled_at": "2026-07-04T12:00:00+00:00",
+                }
+            ],
+            "citation_events": [
+                {
+                    "memory_id": "entity:live-cited",
+                    "dedupe_key": "ctx:entity:live-cited:citation",
+                    "last_used_at": "2026-07-04T12:05:00+00:00",
+                }
+            ],
+            "cited_decay_score_advantage": 0.2,
+        },
+        "checks": [
+            {
+                "name": "live-usage-loop-observation",
+                "status": "PASS",
+                "surfaces": list(usage_loop_gate.DOGFOOD_REQUIRED_SURFACES),
+            }
+        ],
+    }
+
+
 def test_default_receipt_meets_usage_loop_budgets() -> None:
     receipt = usage_loop_gate.build_usage_loop_receipt()
 
@@ -60,6 +105,43 @@ def test_default_receipt_meets_usage_loop_budgets() -> None:
     assert receipt["metrics"]["cited_decay_score_advantage"] > CITED_DECAY_ADVANTAGE_BUDGET
     assert receipt["consolidation_inputs"][0]["memory_id"] == "protected-cited-twin"
     assert usage_loop_gate.validate_usage_loop_receipt(receipt) == []
+
+
+def test_dogfood_receipt_meets_live_usage_contract() -> None:
+    receipt = usage_loop_gate.build_usage_loop_dogfood_receipt(_dogfood_evidence())
+
+    assert receipt["schema_version"] == usage_loop_gate.DOGFOOD_RECEIPT_SCHEMA_VERSION
+    assert receipt["metrics"]["deployed_version_match"] == 1.0
+    assert receipt["metrics"]["image_digest_match"] == 1.0
+    assert receipt["metrics"]["required_source_commit_coverage"] == 1.0
+    assert receipt["metrics"]["exposure_event_count"] == 1
+    assert receipt["metrics"]["citation_event_count"] == 1
+    assert receipt["metrics"]["duplicate_stored_event_count"] == 0
+    assert receipt["metrics"]["dedupe_key_coverage"] == 1.0
+    assert receipt["metrics"]["usage_stamp_coverage"] == 1.0
+    assert usage_loop_gate.validate_usage_loop_dogfood_receipt(receipt) == []
+
+
+def test_dogfood_receipt_rejects_stale_or_incomplete_live_evidence() -> None:
+    evidence = _dogfood_evidence()
+    deployment = cast(dict[str, object], evidence["deployment"])
+    usage = cast(dict[str, object], evidence["usage"])
+    checks = cast(list[dict[str, object]], evidence["checks"])
+    deployment["version"] = "1.0.2"
+    deployment["source_commits"] = ["5150d2de"]
+    citation_events = cast(list[dict[str, object]], usage["citation_events"])
+    citation_events[0].pop("dedupe_key")
+    usage["cited_decay_score_advantage"] = 0.0
+    checks[0]["status"] = "FAIL"
+
+    receipt = usage_loop_gate.build_usage_loop_dogfood_receipt(evidence)
+    failures = usage_loop_gate.validate_usage_loop_dogfood_receipt(receipt)
+
+    assert "metric 'deployed_version_match' below budget 1: 0.0" in failures
+    assert "metric 'required_source_commit_coverage' below budget 1: 0.0" in failures
+    assert "metric 'dedupe_key_coverage' below budget 1: 0.5" in failures
+    assert "metric 'cited_decay_score_advantage' below budget 0.1: 0.0" in failures
+    assert "dogfood receipt checks[0] did not pass" in failures
 
 
 def test_receipt_validation_rejects_budget_failures() -> None:
@@ -240,6 +322,31 @@ def test_main_lists_gate_checks(capsys: pytest.CaptureFixture[str]) -> None:
     assert exit_code == 0
     assert "core-usage-feedback: moon run core:test" in captured.out
     assert "ai-memory-contracts: moon run bench-gate" in captured.out
+
+
+def test_main_writes_dogfood_receipt_from_evidence(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    evidence_path = tmp_path / "usage-evidence.json"
+    receipt_path = tmp_path / "usage-loop-dogfood-receipt.json"
+    evidence_path.write_text(json.dumps(_dogfood_evidence()), encoding="utf-8")
+
+    exit_code = usage_loop_gate.main(
+        [
+            "--dogfood-evidence",
+            str(evidence_path),
+            "--dogfood-receipt",
+            str(receipt_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Usage Loop Dogfood Receipt" in captured.out
+    assert "status: PASS" in captured.out
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["schema_version"] == usage_loop_gate.DOGFOOD_RECEIPT_SCHEMA_VERSION
 
 
 def test_root_moon_tasks_expose_usage_loop_gate() -> None:

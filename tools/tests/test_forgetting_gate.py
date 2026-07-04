@@ -10,7 +10,11 @@ from typing import NotRequired, TypedDict, cast
 from tools.trust import forgetting_gate
 
 MISSING_SURFACE_EXIT_CODE = 2
+EXPECTED_PROTECTED_DOGFOOD_SAMPLE_COUNT = 2.0
+EXPECTED_CITED_SURVIVAL_DOGFOOD_DELTA = 2.0
 REPO_ROOT = Path(__file__).resolve().parents[2]
+API_DIGEST = f"sha256:{'a' * 64}"
+WEB_DIGEST = f"sha256:{'b' * 64}"
 
 
 class MoonTask(TypedDict):
@@ -39,6 +43,64 @@ def _root_moon_tasks() -> dict[str, MoonTask]:
     assert result.returncode == 0, result.stderr
     payload = cast(MoonTaskQuery, json.loads(result.stdout))
     return payload["tasks"]["root"]
+
+
+def _dogfood_evidence() -> dict[str, object]:
+    return {
+        "deployment": {
+            "version": "1.1.0-rc.1",
+            "expected_version": "1.1.0-rc.1",
+            "image_digests": {"api": API_DIGEST, "web": WEB_DIGEST},
+            "expected_image_digests": {"api": API_DIGEST, "web": WEB_DIGEST},
+            "source_commits": [
+                "36094084",
+                "e59e9be1",
+                "b9e3ade8",
+                "6bf8881f",
+                "4bf80afd",
+                "2095b616",
+            ],
+        },
+        "forgetting": {
+            "dry_run": True,
+            "strict_recall_at_5_before": 200,
+            "strict_recall_at_5_after": 200,
+            "write_integrity_error_count": 0,
+            "context_recall_decay_applied": True,
+            "observations": [
+                {
+                    "memory_id": "entity:stale-uncited",
+                    "stale": True,
+                    "cited": False,
+                    "archived": True,
+                    "last_recalled_at": "2026-01-01T00:00:00+00:00",
+                },
+                {
+                    "memory_id": "entity:protected-cited",
+                    "stale": True,
+                    "cited": True,
+                    "protected": True,
+                    "archived": False,
+                    "last_used_at": "2026-07-04T12:00:00+00:00",
+                },
+                {
+                    "memory_id": "entity:protected-cited-2",
+                    "stale": True,
+                    "cited": True,
+                    "protected": True,
+                    "archived": False,
+                    "last_used_at": "2026-07-04T12:05:00+00:00",
+                },
+            ],
+        },
+        "checks": [
+            {
+                "name": "live-forgetting-observation",
+                "status": "PASS",
+                "surfaces": list(forgetting_gate.DOGFOOD_REQUIRED_SURFACES),
+            }
+        ],
+    }
 
 
 def test_default_receipt_meets_w7_budgets() -> None:
@@ -78,6 +140,57 @@ def test_default_receipt_meets_w7_budgets() -> None:
         > by_memory_id["legacy-access-capped"]["decay_score"]
     )
     assert forgetting_gate.validate_forgetting_receipt(receipt) == []
+
+
+def test_dogfood_receipt_meets_live_forgetting_contract() -> None:
+    receipt = forgetting_gate.build_forgetting_dogfood_receipt(_dogfood_evidence())
+
+    assert receipt["schema_version"] == forgetting_gate.DOGFOOD_RECEIPT_SCHEMA_VERSION
+    assert receipt["metrics"]["deployed_version_match"] == 1.0
+    assert receipt["metrics"]["image_digest_match"] == 1.0
+    assert receipt["metrics"]["required_source_commit_coverage"] == 1.0
+    assert receipt["metrics"]["stale_uncited_sample_count"] == 1.0
+    assert receipt["metrics"]["stale_uncited_reduction_count"] == 1.0
+    assert (
+        receipt["metrics"]["cited_protected_sample_count"]
+        == EXPECTED_PROTECTED_DOGFOOD_SAMPLE_COUNT
+    )
+    assert receipt["metrics"]["cited_survival_delta"] == EXPECTED_CITED_SURVIVAL_DOGFOOD_DELTA
+    assert receipt["metrics"]["protected_cited_false_archive_count"] == 0
+    assert receipt["metrics"]["strict_recall_at_5_drop"] == 0.0
+    assert receipt["metrics"]["dry_run_mode"] == 1.0
+    assert receipt["metrics"]["write_integrity_error_count"] == 0.0
+    assert receipt["metrics"]["context_recall_decay_applied"] == 1.0
+    assert forgetting_gate.validate_forgetting_dogfood_receipt(receipt) == []
+
+
+def test_dogfood_receipt_rejects_apply_or_protected_archive_evidence() -> None:
+    evidence = _dogfood_evidence()
+    deployment = cast(dict[str, object], evidence["deployment"])
+    forgetting = cast(dict[str, object], evidence["forgetting"])
+    checks = cast(list[dict[str, object]], evidence["checks"])
+    deployment["version"] = "1.0.2"
+    deployment["source_commits"] = ["5150d2de"]
+    forgetting["dry_run"] = False
+    forgetting["strict_recall_at_5_after"] = 198
+    forgetting["write_integrity_error_count"] = 1
+    observations = cast(list[dict[str, object]], forgetting["observations"])
+    observations[0]["archived"] = False
+    observations[1]["archived"] = True
+    checks[0]["status"] = "FAIL"
+
+    receipt = forgetting_gate.build_forgetting_dogfood_receipt(evidence)
+    failures = forgetting_gate.validate_forgetting_dogfood_receipt(receipt)
+
+    assert "metric 'deployed_version_match' below budget 1: 0.0" in failures
+    assert "metric 'required_source_commit_coverage' below budget 1: 0.0" in failures
+    assert "metric 'stale_uncited_reduction_count' below budget 1: 0.0" in failures
+    assert "metric 'cited_survival_delta' below budget 1: 0.0" in failures
+    assert "metric 'protected_cited_false_archive_count' exceeds budget 0: 1" in failures
+    assert "metric 'strict_recall_at_5_drop' exceeds budget 0.005: 0.01" in failures
+    assert "metric 'dry_run_mode' below budget 1: 0.0" in failures
+    assert "metric 'write_integrity_error_count' exceeds budget 0: 1.0" in failures
+    assert "dogfood receipt checks[0] did not pass" in failures
 
 
 def test_receipt_validation_rejects_budget_failures() -> None:
@@ -205,6 +318,28 @@ def test_main_lists_gate_checks(capsys) -> None:
     assert "core-usage-aware-ranking: moon run core:test" in captured.out
     assert "api-priority-decay: moon run api:test" in captured.out
     assert "ai-memory-contracts: moon run bench-gate" in captured.out
+
+
+def test_main_writes_dogfood_receipt_from_evidence(capsys, tmp_path: Path) -> None:
+    evidence_path = tmp_path / "forgetting-evidence.json"
+    receipt_path = tmp_path / "forgetting-dogfood-receipt.json"
+    evidence_path.write_text(json.dumps(_dogfood_evidence()), encoding="utf-8")
+
+    exit_code = forgetting_gate.main(
+        [
+            "--dogfood-evidence",
+            str(evidence_path),
+            "--dogfood-receipt",
+            str(receipt_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Forgetting Dogfood Receipt" in captured.out
+    assert "status: PASS" in captured.out
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["schema_version"] == forgetting_gate.DOGFOOD_RECEIPT_SCHEMA_VERSION
 
 
 def test_root_moon_tasks_expose_forgetting_gate() -> None:
