@@ -23,11 +23,26 @@ from sibyl_core.retrieval.temporal import (
     EXPOSURE_DECAY_TIMESTAMP_WEIGHT,
     LEGACY_ACCESS_DECAY_TIMESTAMP_WEIGHT,
 )
+from tools.trust.dogfood_receipts import (
+    DOGFOOD_DEPLOYMENT_BUDGETS,
+    build_deployment_metrics,
+    evidence_checks,
+    list_of_mappings,
+    load_dogfood_evidence,
+    string_value,
+    truth_metric,
+    validate_metric_budgets,
+    validate_required_checks,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RECEIPT_SCHEMA_VERSION = "sibyl-forgetting-receipt-v2"
+DOGFOOD_RECEIPT_SCHEMA_VERSION = "sibyl-forgetting-dogfood-receipt-v1"
 DEFAULT_RECEIPT_PATH = (
     REPO_ROOT / "benchmarks" / "results" / "ai-memory" / "forgetting-receipt.json"
+)
+DEFAULT_DOGFOOD_RECEIPT_PATH = (
+    REPO_ROOT / "benchmarks" / "results" / "ai-memory" / "forgetting-dogfood-receipt.json"
 )
 
 Runner = Callable[[tuple[str, ...]], int]
@@ -40,6 +55,34 @@ FORGETTING_BUDGETS = {
     "write_integrity_error_count": 0,
     "cited_survival_delta": 0.0,
 }
+DOGFOOD_FORGETTING_BUDGETS = {
+    **DOGFOOD_DEPLOYMENT_BUDGETS,
+    "stale_uncited_sample_count": 1.0,
+    "stale_uncited_reduction_count": 1.0,
+    "cited_protected_sample_count": 1.0,
+    "cited_survival_delta": 1.0,
+    "protected_cited_false_archive_count": 0.0,
+    "strict_recall_at_5_drop": 0.005,
+    "dry_run_mode": 1.0,
+    "write_integrity_error_count": 0.0,
+    "context_recall_decay_applied": 1.0,
+}
+DOGFOOD_LOWER_IS_BETTER = frozenset(
+    (
+        "protected_cited_false_archive_count",
+        "strict_recall_at_5_drop",
+        "write_integrity_error_count",
+    )
+)
+DOGFOOD_REQUIRED_SURFACES: tuple[str, ...] = (
+    "live deployment provenance",
+    "live forgetting dry run",
+    "live context recall decay",
+    "protected cited survival",
+    "stale uncited reduction",
+    "write path integrity",
+    "dogfood approval boundary",
+)
 
 
 @dataclass(frozen=True)
@@ -329,6 +372,76 @@ def build_forgetting_receipt(
     }
 
 
+def build_forgetting_dogfood_receipt(evidence: dict[str, Any]) -> dict[str, Any]:
+    forgetting = evidence.get("forgetting")
+    forgetting_evidence = forgetting if isinstance(forgetting, dict) else {}
+    observations = list_of_mappings(forgetting_evidence.get("observations"))
+    metrics = {
+        **build_deployment_metrics(evidence),
+        "stale_uncited_sample_count": _count_or_metric(
+            forgetting_evidence,
+            metric="stale_uncited_sample_count",
+            observations=observations,
+            predicate=lambda observation: (
+                observation.get("stale") is True and observation.get("cited") is not True
+            ),
+        ),
+        "stale_uncited_reduction_count": _count_or_metric(
+            forgetting_evidence,
+            metric="stale_uncited_reduction_count",
+            observations=observations,
+            predicate=lambda observation: (
+                observation.get("stale") is True
+                and observation.get("cited") is not True
+                and observation.get("archived") is True
+            ),
+        ),
+        "cited_protected_sample_count": _count_or_metric(
+            forgetting_evidence,
+            metric="cited_protected_sample_count",
+            observations=observations,
+            predicate=lambda observation: (
+                observation.get("cited") is True and observation.get("protected") is not False
+            ),
+        ),
+        "cited_survival_delta": _numeric_metric(
+            forgetting_evidence.get("cited_survival_delta"),
+            default=_cited_survival_delta(observations),
+        ),
+        "protected_cited_false_archive_count": _numeric_metric(
+            forgetting_evidence.get("protected_cited_false_archive_count"),
+            default=sum(
+                1
+                for observation in observations
+                if observation.get("cited") is True
+                and observation.get("protected") is not False
+                and observation.get("archived") is True
+            ),
+        ),
+        "strict_recall_at_5_drop": _strict_recall_drop(forgetting_evidence),
+        "dry_run_mode": truth_metric(forgetting_evidence.get("dry_run") is True),
+        "write_integrity_error_count": _numeric_metric(
+            forgetting_evidence.get("write_integrity_error_count"),
+            default=0.0,
+        ),
+        "context_recall_decay_applied": truth_metric(
+            forgetting_evidence.get("context_recall_decay_applied") is True
+            or any(
+                string_value(observation.get("last_recalled_at")) for observation in observations
+            )
+        ),
+    }
+    return {
+        "schema_version": DOGFOOD_RECEIPT_SCHEMA_VERSION,
+        "evidence_kind": "live-dogfood-forgetting",
+        "deployment": evidence.get("deployment", {}),
+        "budgets": dict(DOGFOOD_FORGETTING_BUDGETS),
+        "metrics": metrics,
+        "observations": observations,
+        "checks": evidence_checks(evidence),
+    }
+
+
 def _survival_signal(fixture: ForgettingFixture) -> str:
     metadata = _metadata_for_fixture(fixture)
     if metadata.get("last_used_at") is not None and metadata.get("last_accessed_at") is not None:
@@ -355,6 +468,30 @@ def validate_forgetting_receipt(receipt: dict[str, Any]) -> list[str]:
     return failures
 
 
+def validate_forgetting_dogfood_receipt(receipt: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    if receipt.get("schema_version") != DOGFOOD_RECEIPT_SCHEMA_VERSION:
+        failures.append(f"receipt schema_version must be {DOGFOOD_RECEIPT_SCHEMA_VERSION}")
+    metrics = receipt.get("metrics")
+    if not isinstance(metrics, dict):
+        return [*failures, "receipt metrics must be an object"]
+
+    failures.extend(
+        validate_metric_budgets(
+            metrics,
+            DOGFOOD_FORGETTING_BUDGETS,
+            lower_is_better=DOGFOOD_LOWER_IS_BETTER,
+        )
+    )
+    failures.extend(
+        validate_required_checks(
+            receipt,
+            required_surfaces=DOGFOOD_REQUIRED_SURFACES,
+        )
+    )
+    return failures
+
+
 def _validate_receipt_metrics(metrics: dict[str, Any]) -> list[str]:
     failures: list[str] = []
     for metric, budget in FORGETTING_BUDGETS.items():
@@ -368,6 +505,60 @@ def _validate_receipt_metrics(metrics: dict[str, Any]) -> list[str]:
         elif float(value) > float(budget):
             failures.append(f"metric {metric!r} exceeds budget {budget}: {value}")
     return failures
+
+
+def _count_or_metric(
+    evidence: dict[str, Any],
+    *,
+    metric: str,
+    observations: Sequence[dict[str, Any]],
+    predicate: Callable[[dict[str, Any]], bool],
+) -> float:
+    value = evidence.get(metric)
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    return float(sum(1 for observation in observations if predicate(observation)))
+
+
+def _numeric_metric(value: Any, *, default: float) -> float:
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    return default
+
+
+def _cited_survival_delta(observations: Sequence[dict[str, Any]]) -> float:
+    protected_cited_survivors = sum(
+        1
+        for observation in observations
+        if observation.get("cited") is True
+        and observation.get("protected") is not False
+        and observation.get("archived") is not True
+    )
+    protected_cited_false_archives = sum(
+        1
+        for observation in observations
+        if observation.get("cited") is True
+        and observation.get("protected") is not False
+        and observation.get("archived") is True
+    )
+    return float(protected_cited_survivors - protected_cited_false_archives)
+
+
+def _strict_recall_drop(evidence: dict[str, Any]) -> float:
+    explicit = evidence.get("strict_recall_at_5_drop")
+    if isinstance(explicit, int | float) and not isinstance(explicit, bool):
+        return float(explicit)
+    before = evidence.get("strict_recall_at_5_before")
+    after = evidence.get("strict_recall_at_5_after")
+    if (
+        isinstance(before, int | float)
+        and not isinstance(before, bool)
+        and float(before) > 0.0
+        and isinstance(after, int | float)
+        and not isinstance(after, bool)
+    ):
+        return max(0.0, (float(before) - float(after)) / float(before))
+    return 1.0
 
 
 def _validate_receipt_checks(checks: Any) -> list[str]:
@@ -538,6 +729,37 @@ def run_gate(
     return 0 if all(result.passed for result in results) else 1
 
 
+def run_dogfood_receipt(
+    evidence_path: Path,
+    *,
+    receipt_path: Path | None = DEFAULT_DOGFOOD_RECEIPT_PATH,
+    echo: Echo = _echo,
+) -> int:
+    try:
+        evidence = load_dogfood_evidence(evidence_path)
+    except (OSError, TypeError, json.JSONDecodeError, ValueError) as exc:
+        echo(f"Forgetting dogfood evidence failed to load: {exc}")
+        return 1
+
+    receipt = build_forgetting_dogfood_receipt(evidence)
+    failures = validate_forgetting_dogfood_receipt(receipt)
+    if receipt_path is not None:
+        write_receipt(receipt, receipt_path)
+
+    status = "PASS" if not failures else "FAIL"
+    echo("Forgetting Dogfood Receipt")
+    echo(f"status: {status}")
+    echo(f"receipt_schema: {receipt['schema_version']}")
+    echo(
+        "metrics: " + ", ".join(f"{metric}={value}" for metric, value in receipt["metrics"].items())
+    )
+    if receipt_path is not None:
+        echo(f"receipt: {display_path(receipt_path)}")
+    for failure in failures:
+        echo(f"- {failure}")
+    return 0 if not failures else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run focused usage-aware forgetting checks.")
     parser.add_argument(
@@ -545,12 +767,28 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="List checks and exit without running them.",
     )
+    parser.add_argument(
+        "--dogfood-evidence",
+        type=Path,
+        help="Normalize and validate a live dogfood evidence JSON file.",
+    )
+    parser.add_argument(
+        "--dogfood-receipt",
+        type=Path,
+        default=DEFAULT_DOGFOOD_RECEIPT_PATH,
+        help="Dogfood receipt path written when --dogfood-evidence is set.",
+    )
     args = parser.parse_args(argv)
 
     if args.list:
         for check in GATE_CHECKS:
             _echo(f"{check.name}: {format_command(check.command)}")
         return 0
+    if args.dogfood_evidence is not None:
+        return run_dogfood_receipt(
+            args.dogfood_evidence,
+            receipt_path=args.dogfood_receipt,
+        )
 
     return run_gate()
 

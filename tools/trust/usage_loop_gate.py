@@ -19,11 +19,25 @@ from types import SimpleNamespace
 from typing import Any
 
 from sibyl.jobs.consolidation import _priority_decay_score
+from tools.trust.dogfood_receipts import (
+    DOGFOOD_DEPLOYMENT_BUDGETS,
+    build_deployment_metrics,
+    evidence_checks,
+    list_of_mappings,
+    load_dogfood_evidence,
+    string_value,
+    validate_metric_budgets,
+    validate_required_checks,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RECEIPT_SCHEMA_VERSION = "sibyl-usage-loop-receipt-v1"
+DOGFOOD_RECEIPT_SCHEMA_VERSION = "sibyl-usage-loop-dogfood-receipt-v1"
 DEFAULT_RECEIPT_PATH = (
     REPO_ROOT / "benchmarks" / "results" / "ai-memory" / "usage-loop-receipt.json"
+)
+DEFAULT_DOGFOOD_RECEIPT_PATH = (
+    REPO_ROOT / "benchmarks" / "results" / "ai-memory" / "usage-loop-dogfood-receipt.json"
 )
 
 Runner = Callable[[tuple[str, ...]], int]
@@ -36,6 +50,25 @@ USAGE_LOOP_BUDGETS = {
     "usage_ordered_consolidation_input_count": 1,
     "cited_decay_score_advantage": 0.1,
 }
+DOGFOOD_USAGE_LOOP_BUDGETS = {
+    **DOGFOOD_DEPLOYMENT_BUDGETS,
+    "exposure_event_count": 1.0,
+    "citation_event_count": 1.0,
+    "duplicate_stored_event_count": 0.0,
+    "dedupe_key_coverage": 1.0,
+    "usage_stamp_coverage": 1.0,
+    "cited_decay_score_advantage": 0.1,
+}
+DOGFOOD_LOWER_IS_BETTER = frozenset(("duplicate_stored_event_count",))
+DOGFOOD_REQUIRED_SURFACES: tuple[str, ...] = (
+    "live deployment provenance",
+    "live exposure events",
+    "live citation events",
+    "live dedupe",
+    "live usage stamps",
+    "live decay divergence",
+    "dogfood approval boundary",
+)
 
 
 @dataclass(frozen=True)
@@ -272,6 +305,44 @@ def build_usage_loop_receipt() -> dict[str, Any]:
     }
 
 
+def build_usage_loop_dogfood_receipt(evidence: dict[str, Any]) -> dict[str, Any]:
+    usage = evidence.get("usage")
+    usage_evidence = usage if isinstance(usage, dict) else {}
+    exposure_events = list_of_mappings(usage_evidence.get("exposure_events"))
+    citation_events = list_of_mappings(usage_evidence.get("citation_events"))
+    events = [*exposure_events, *citation_events]
+    stored_dedupe_keys = []
+    for event in events:
+        key = _dedupe_key(event)
+        if key and event_stored(event):
+            stored_dedupe_keys.append(key)
+    duplicate_stored_count = len(stored_dedupe_keys) - len(set(stored_dedupe_keys))
+    usage_stamp_count = sum(
+        1 for event in exposure_events if string_value(event.get("last_recalled_at"))
+    ) + sum(1 for event in citation_events if string_value(event.get("last_used_at")))
+    metrics = {
+        **build_deployment_metrics(evidence),
+        "exposure_event_count": len(exposure_events),
+        "citation_event_count": len(citation_events),
+        "duplicate_stored_event_count": duplicate_stored_count,
+        "dedupe_key_coverage": _coverage(events, stored_dedupe_keys),
+        "usage_stamp_coverage": _coverage(events, range(usage_stamp_count)),
+        "cited_decay_score_advantage": _cited_decay_score_advantage(usage_evidence),
+    }
+    return {
+        "schema_version": DOGFOOD_RECEIPT_SCHEMA_VERSION,
+        "evidence_kind": "live-dogfood-usage-loop",
+        "deployment": evidence.get("deployment", {}),
+        "budgets": dict(DOGFOOD_USAGE_LOOP_BUDGETS),
+        "metrics": metrics,
+        "events": {
+            "exposure": exposure_events,
+            "citation": citation_events,
+        },
+        "checks": evidence_checks(evidence),
+    }
+
+
 def validate_usage_loop_receipt(receipt: dict[str, Any]) -> list[str]:
     failures: list[str] = []
     if receipt.get("schema_version") != RECEIPT_SCHEMA_VERSION:
@@ -281,6 +352,30 @@ def validate_usage_loop_receipt(receipt: dict[str, Any]) -> list[str]:
         return [*failures, "receipt metrics must be an object"]
     failures.extend(_validate_receipt_metrics(metrics))
     failures.extend(_validate_receipt_checks(receipt.get("checks")))
+    return failures
+
+
+def validate_usage_loop_dogfood_receipt(receipt: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    if receipt.get("schema_version") != DOGFOOD_RECEIPT_SCHEMA_VERSION:
+        failures.append(f"receipt schema_version must be {DOGFOOD_RECEIPT_SCHEMA_VERSION}")
+    metrics = receipt.get("metrics")
+    if not isinstance(metrics, dict):
+        return [*failures, "receipt metrics must be an object"]
+
+    failures.extend(
+        validate_metric_budgets(
+            metrics,
+            DOGFOOD_USAGE_LOOP_BUDGETS,
+            lower_is_better=DOGFOOD_LOWER_IS_BETTER,
+        )
+    )
+    failures.extend(
+        validate_required_checks(
+            receipt,
+            required_surfaces=DOGFOOD_REQUIRED_SURFACES,
+        )
+    )
     return failures
 
 
@@ -297,6 +392,44 @@ def _validate_receipt_metrics(metrics: dict[str, Any]) -> list[str]:
         elif float(value) < float(budget):
             failures.append(f"metric {metric!r} below budget {budget}: {value}")
     return failures
+
+
+def event_stored(event: dict[str, Any]) -> bool:
+    return event.get("stored") is not False
+
+
+def _dedupe_key(event: dict[str, Any]) -> str:
+    return string_value(event.get("dedupe_key") or event.get("event_key"))
+
+
+def _coverage(items: Sequence[Any], covered_items: Sequence[Any]) -> float:
+    if not items:
+        return 0.0
+    return len(covered_items) / len(items)
+
+
+def _cited_decay_score_advantage(usage_evidence: dict[str, Any]) -> float:
+    explicit = usage_evidence.get("cited_decay_score_advantage")
+    if isinstance(explicit, int | float) and not isinstance(explicit, bool):
+        return float(explicit)
+
+    twins = usage_evidence.get("decay_twins")
+    if not isinstance(twins, dict):
+        return 0.0
+    cited = twins.get("cited")
+    uncited = twins.get("uncited")
+    if not isinstance(cited, dict) or not isinstance(uncited, dict):
+        return 0.0
+    cited_score = cited.get("score")
+    uncited_score = uncited.get("score")
+    if (
+        isinstance(cited_score, int | float)
+        and not isinstance(cited_score, bool)
+        and isinstance(uncited_score, int | float)
+        and not isinstance(uncited_score, bool)
+    ):
+        return float(cited_score) - float(uncited_score)
+    return 0.0
 
 
 def _validate_receipt_checks(checks: Any) -> list[str]:
@@ -462,6 +595,37 @@ def run_gate(
     return 0 if all(result.passed for result in results) else 1
 
 
+def run_dogfood_receipt(
+    evidence_path: Path,
+    *,
+    receipt_path: Path | None = DEFAULT_DOGFOOD_RECEIPT_PATH,
+    echo: Echo = _echo,
+) -> int:
+    try:
+        evidence = load_dogfood_evidence(evidence_path)
+    except (OSError, TypeError, json.JSONDecodeError, ValueError) as exc:
+        echo(f"Usage loop dogfood evidence failed to load: {exc}")
+        return 1
+
+    receipt = build_usage_loop_dogfood_receipt(evidence)
+    failures = validate_usage_loop_dogfood_receipt(receipt)
+    if receipt_path is not None:
+        write_receipt(receipt, receipt_path)
+
+    status = "PASS" if not failures else "FAIL"
+    echo("Usage Loop Dogfood Receipt")
+    echo(f"status: {status}")
+    echo(f"receipt_schema: {receipt['schema_version']}")
+    echo(
+        "metrics: " + ", ".join(f"{metric}={value}" for metric, value in receipt["metrics"].items())
+    )
+    if receipt_path is not None:
+        echo(f"receipt: {display_path(receipt_path)}")
+    for failure in failures:
+        echo(f"- {failure}")
+    return 0 if not failures else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run focused usage-loop release-gate checks.")
     parser.add_argument(
@@ -469,12 +633,28 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="List checks and exit without running them.",
     )
+    parser.add_argument(
+        "--dogfood-evidence",
+        type=Path,
+        help="Normalize and validate a live dogfood evidence JSON file.",
+    )
+    parser.add_argument(
+        "--dogfood-receipt",
+        type=Path,
+        default=DEFAULT_DOGFOOD_RECEIPT_PATH,
+        help="Dogfood receipt path written when --dogfood-evidence is set.",
+    )
     args = parser.parse_args(argv)
 
     if args.list:
         for check in GATE_CHECKS:
             _echo(f"{check.name}: {format_command(check.command)}")
         return 0
+    if args.dogfood_evidence is not None:
+        return run_dogfood_receipt(
+            args.dogfood_evidence,
+            receipt_path=args.dogfood_receipt,
+        )
 
     return run_gate()
 
