@@ -30,6 +30,7 @@ jobs:
       contents: read
     outputs:
       image_tag: ${{ steps.version.outputs.image_tag }}
+      required_commits: ${{ steps.required.outputs.commits }}
       source_sha: ${{ steps.source.outputs.sha }}
       source_created: ${{ steps.source.outputs.created }}
     steps:
@@ -37,6 +38,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: "△ Validate dogfood tag"
         id: version
@@ -58,6 +61,7 @@ jobs:
           echo "created=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: "◇ Verify required v1.1 commits"
+        id: required
         run: |
           set -euo pipefail
           required=(
@@ -77,6 +81,7 @@ jobs:
               exit 1
             fi
           done
+          echo "commits=${required[*]}" >> "$GITHUB_OUTPUT"
 
       - name: "◇ Install system dependencies"
         run: |
@@ -125,6 +130,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.source_sha }}
+          persist-credentials: false
 
       - name: "◇ Setup Docker Buildx"
         uses: docker/setup-buildx-action@v4
@@ -160,11 +166,12 @@ jobs:
 
       - name: "△ Export digest"
         if: ${{ !inputs.dry_run }}
+        env:
+          BUILD_DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
+          touch "/tmp/digests/${BUILD_DIGEST#sha256:}"
 
       - name: "► Upload digest"
         if: ${{ !inputs.dry_run }}
@@ -290,9 +297,7 @@ jobs:
       - name: "◇ Build deployment receipt"
         env:
           IMAGE_TAG: ${{ needs.gate.outputs.image_tag }}
-          REQUIRED_SOURCE_COMMITS: >-
-            36094084 e59e9be1 b9e3ade8 6bf8881f 4bf80afd 2095b616
-            dcb8d340 98d9043c f74f23f4
+          REQUIRED_SOURCE_COMMITS: ${{ needs.gate.outputs.required_commits }}
           SOURCE_SHA: ${{ needs.gate.outputs.source_sha }}
         run: |
           set -euo pipefail
@@ -362,12 +367,16 @@ jobs:
           retention-days: 90
 
       - name: "► Summary"
+        env:
+          IMAGE_TAG: ${{ needs.gate.outputs.image_tag }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          SOURCE_SHA: ${{ needs.gate.outputs.source_sha }}
         run: |
           {
-            echo "## Dogfood images ${{ needs.gate.outputs.image_tag }}"
+            echo "## Dogfood images ${IMAGE_TAG}"
             echo ""
-            echo "- Source: \`${{ needs.gate.outputs.source_sha }}\`"
-            echo "- API: \`ghcr.io/${{ github.repository_owner }}/sibyl-api:${{ needs.gate.outputs.image_tag }}\`"
-            echo "- Web: \`ghcr.io/${{ github.repository_owner }}/sibyl-web:${{ needs.gate.outputs.image_tag }}\`"
+            echo "- Source: \`${SOURCE_SHA}\`"
+            echo "- API: \`ghcr.io/${REPOSITORY_OWNER}/sibyl-api:${IMAGE_TAG}\`"
+            echo "- Web: \`ghcr.io/${REPOSITORY_OWNER}/sibyl-web:${IMAGE_TAG}\`"
             echo "- Receipt: \`sibyl-dogfood-deployment-image-receipt.json\`"
           } >> "$GITHUB_STEP_SUMMARY"

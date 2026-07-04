@@ -216,22 +216,13 @@ _TEMPORAL_INVALIDATION_REASONS = {
     "supersedes_source_ids": "supersession",
     "superseded_source_ids": "supersession",
 }
-_SHARE_SOURCE_METADATA_EXCLUDE = frozenset(
+_SHARE_SOURCE_METADATA_ALLOWLIST = frozenset(
     {
-        "native_relationship_count",
-        "native_relationship_failed_count",
-        "native_relationship_requested_count",
-        "native_write_path",
-        "policy_actions",
-        "policy_allowed",
-        "policy_reasons",
-        "promote_to_scope",
-        "promote_to_scope_key",
-        "promoted_at",
-        "promoted_entity_id",
-        "promotion_errors",
-        "promotion_state",
-        "review_state",
+        "category",
+        "domain",
+        "remember_kind",
+        "share_confidence",
+        "share_reason",
     }
 )
 _SCOPE_RANK: dict[MemoryScope, int] = {
@@ -2901,7 +2892,7 @@ def _share_source_metadata(memory: RawMemory) -> dict[str, object]:
     metadata = {
         key: value
         for key, value in memory.metadata.items()
-        if key not in _SHARE_SOURCE_METADATA_EXCLUDE
+        if key in _SHARE_SOURCE_METADATA_ALLOWLIST
     }
     if promoted_id := _metadata_str(memory.metadata, "promoted_entity_id"):
         metadata["share_source_promoted_entity_id"] = promoted_id
@@ -2922,11 +2913,8 @@ def _candidate_from_share_memory(
         "native_write_path": "memory_share",
         "promoted_capture_surface": "memory_share",
         "raw_source_ids": [memory.id],
-        "share_original_provenance": dict(memory.provenance),
         "share_source_capture_surface": memory.capture_surface,
-        "share_source_created_by_user_id": memory.created_by_user_id,
         "share_source_id": memory.id,
-        "share_source_principal_id": memory.principal_id,
         "share_source_scope": memory.memory_scope.value,
         "share_source_scope_key": memory.scope_key,
         "share_target_scope": target_scope.value,

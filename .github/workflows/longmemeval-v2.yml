@@ -201,11 +201,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/checkout@v7
         with:
           repository: xiaowu0162/LongMemEval-V2
           path: .moon/cache/longmemeval-v2-official
+          persist-credentials: false
 
       - name: Guard paid-run dependencies
         run: |
@@ -344,11 +346,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/checkout@v7
         with:
           repository: xiaowu0162/LongMemEval-V2
           path: .moon/cache/longmemeval-v2-official
+          persist-credentials: false
 
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6

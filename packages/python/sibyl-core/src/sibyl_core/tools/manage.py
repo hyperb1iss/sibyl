@@ -671,16 +671,25 @@ async def _handle_task_action(
                 create_episode=False,
             )
             response_data = {"status": task.status.value, "learnings": learnings}
-            citation_usage = await _record_task_completion_citations(
-                cited_ids=data.get("cited_ids"),
-                organization_id=organization_id,
-                principal_id=str(data["user_id"]) if data.get("user_id") else None,
-                task_id=entity_id,
-                task_project_id=task.project_id,
-                learnings=learnings,
-                actual_hours=actual_hours,
-                policy_payload=policy_payload,
-            )
+            try:
+                citation_usage = await _record_task_completion_citations(
+                    cited_ids=data.get("cited_ids"),
+                    organization_id=organization_id,
+                    principal_id=str(data["user_id"]) if data.get("user_id") else None,
+                    task_id=entity_id,
+                    task_project_id=task.project_id,
+                    learnings=learnings,
+                    actual_hours=actual_hours,
+                    policy_payload=policy_payload,
+                )
+            except Exception as exc:
+                log.warning(
+                    "task_completion_citation_recording_failed",
+                    task_id=entity_id,
+                    error_type=type(exc).__name__,
+                    exc_info=True,
+                )
+                citation_usage = None
             if citation_usage is not None:
                 response_data["citation_usage"] = citation_usage
             if learnings and policy_payload is not None:

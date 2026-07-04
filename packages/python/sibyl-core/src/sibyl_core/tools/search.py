@@ -1193,25 +1193,36 @@ async def search(
     has_more = offset + len(paginated_results) < total_count
     _add_source_failure_filters(filters, source_failures)
     if record_exposure and paginated_results and organization_id:
-        filters[_USAGE_EXPOSURE_SUMMARY_KEY] = await annotate_search_result_exposures(
-            paginated_results,
-            organization_id=organization_id,
-            principal_id=principal_id,
-            project_id=project,
-            source_surface="search",
-            request_metadata={
-                "query": query,
-                "types": types,
-                "limit": limit,
-                "offset": offset,
-                "project": project,
-                "source_id": source_id,
-                "source_name": source_name,
-                "memory_scope": memory_scope,
-                "scope_key": scope_key,
-                "result_ids": [result.id for result in paginated_results],
-            },
-        )
+        try:
+            filters[_USAGE_EXPOSURE_SUMMARY_KEY] = await with_timeout(
+                annotate_search_result_exposures(
+                    paginated_results,
+                    organization_id=organization_id,
+                    principal_id=principal_id,
+                    project_id=project,
+                    source_surface="search",
+                    request_metadata={
+                        "query": query,
+                        "types": types,
+                        "limit": limit,
+                        "offset": offset,
+                        "project": project,
+                        "source_id": source_id,
+                        "source_name": source_name,
+                        "memory_scope": memory_scope,
+                        "scope_key": scope_key,
+                        "result_ids": [result.id for result in paginated_results],
+                    },
+                ),
+                timeout_seconds=TIMEOUTS["search"],
+                operation_name="usage_exposure_annotation",
+            )
+        except Exception as exc:
+            log.warning(
+                "usage_exposure_annotation_failed",
+                error_type=type(exc).__name__,
+                exc_info=True,
+            )
 
     return SearchResponse(
         results=paginated_results,

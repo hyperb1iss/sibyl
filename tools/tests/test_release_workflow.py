@@ -274,8 +274,9 @@ def test_dogfood_image_workflow_is_docker_only_and_rc_scoped() -> None:
     assert "Publish Dogfood Images" in workflow
     assert "image_tag:" in workflow
     assert r"^1\.1\.[0-9]+-rc\.[0-9]+$" in workflow
-    assert "ghcr.io/${{ github.repository_owner }}/sibyl-api" in workflow
-    assert "ghcr.io/${{ github.repository_owner }}/sibyl-web" in workflow
+    assert "REPOSITORY_OWNER: ${{ github.repository_owner }}" in workflow
+    assert "ghcr.io/${REPOSITORY_OWNER}/sibyl-api" in workflow
+    assert "ghcr.io/${REPOSITORY_OWNER}/sibyl-web" in workflow
     assert "moon run :check" in workflow
     assert "moon run python-package-build" not in workflow
     assert "gh-action-pypi-publish" not in workflow

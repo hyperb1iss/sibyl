@@ -3,7 +3,7 @@
 Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 
 ## Summary
-- REST routers: 29
+- REST routers: 30
 - Top-level HTTP routes: 3
 - WebSocket routes: 1
 - MCP tools: 11
@@ -44,6 +44,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - `metrics_router`
 - `settings_router`
 - `synthesis_router`
+- `teams_router`
 - `telemetry_router`
 - `setup_router`
 - `users_router`

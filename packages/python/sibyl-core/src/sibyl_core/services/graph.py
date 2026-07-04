@@ -2645,13 +2645,21 @@ def _entity_update_patch(updates: Mapping[str, Any], *, updated_at: datetime) ->
         "citation_count",
     ):
         if key in metadata_patch and key in {"last_recalled_at", "last_used_at"}:
-            patch[key] = _metadata_datetime(metadata_patch.get(key))
+            value = _metadata_datetime(metadata_patch.get(key))
+            patch[key] = value
+            attributes_patch[key] = value
         elif key in metadata_patch and key in {"retrieval_count", "citation_count"}:
-            patch[key] = _metadata_int(metadata_patch.get(key))
+            value = _metadata_int(metadata_patch.get(key))
+            patch[key] = value
+            attributes_patch[key] = value
         elif key in metadata_patch:
-            patch[key] = _metadata_str(metadata_patch, key)
+            value = _metadata_str(metadata_patch, key)
+            patch[key] = value
+            attributes_patch[key] = value
     if "tags" in metadata_patch:
-        patch["tags"] = _metadata_str_list(metadata_patch.get("tags")) or []
+        tags = _metadata_str_list(metadata_patch.get("tags")) or []
+        patch["tags"] = tags
+        attributes_patch["tags"] = tags
     return patch
 
 

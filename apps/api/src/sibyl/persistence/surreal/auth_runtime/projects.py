@@ -1336,7 +1336,7 @@ async def list_accessible_team_scope_keys(ctx) -> set[str]:
             records = _normalize_records(
                 await client.execute_query(
                     """
-                        SELECT uuid FROM teams
+                        SELECT uuid, created_at FROM teams
                         WHERE organization_id = $organization_id
                         ORDER BY created_at ASC;
                     """,
@@ -1347,7 +1347,7 @@ async def list_accessible_team_scope_keys(ctx) -> set[str]:
             records = _normalize_records(
                 await client.execute_query(
                     """
-                        SELECT uuid FROM teams
+                        SELECT uuid, created_at FROM teams
                         WHERE organization_id = $organization_id
                         AND uuid IN (
                             SELECT VALUE team_id FROM team_members WHERE user_id = $user_id

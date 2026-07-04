@@ -2238,7 +2238,7 @@ def test_memory_share_preview_command_renders_redactions(
 
 @patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
 @patch("sibyl_cli.main.get_client")
-def test_memory_share_applies_without_preview(
+def test_memory_share_applies_with_apply(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
 ) -> None:
@@ -2262,7 +2262,7 @@ def test_memory_share_applies_without_preview(
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["memory-share", "raw-1", "--target-scope", "project"],
+        ["memory-share", "raw-1", "--target-scope", "project", "--apply"],
     )
 
     assert result.exit_code == 0
@@ -2277,6 +2277,51 @@ def test_memory_share_applies_without_preview(
         recipient_organization_id=None,
         project_id="project_123",
     )
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_memory_share_defaults_to_preview(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.resolve_id_prefix = AsyncMock(return_value={"matches": [{"id": "raw-1"}]})
+    mock_client.preview_memory_share = AsyncMock(
+        return_value={
+            "allowed": True,
+            "reason": "same_scope",
+            "target_scope": "project",
+            "target_scope_key": "project_123",
+            "source_ids": ["raw-1"],
+            "visible_source_ids": ["raw-1"],
+            "denied_source_ids": [],
+            "missing_source_ids": [],
+            "redacted_count": 0,
+            "hidden_but_relevant_count": 0,
+            "policy_reasons": ["project_access_verified"],
+        }
+    )
+    mock_client.share_memory = AsyncMock()
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["memory-share", "raw-1", "--target-scope", "project"],
+    )
+
+    assert result.exit_code == 0
+    assert "Share preview" in result.stdout
+    mock_client.preview_memory_share.assert_awaited_once_with(
+        source_ids=["raw-1"],
+        target_scope="project",
+        target_scope_key="project_123",
+        recipient_organization_id=None,
+        project_id="project_123",
+    )
+    mock_client.share_memory.assert_not_awaited()
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 

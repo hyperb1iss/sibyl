@@ -2844,6 +2844,7 @@ def memory_share(
         list[str],
         typer.Argument(help="Raw memory IDs to share-preview"),
     ],
+    apply: bool = typer.Option(False, "--apply", help="Apply sharing writes"),
     preview: bool = typer.Option(False, "--preview", help="Preview without sharing"),
     target_scope: str | None = typer.Option(None, "--target-scope", help="Intended target scope"),
     target_scope_key: str | None = typer.Option(None, "--target-key", help="Target scope key"),
@@ -2863,6 +2864,9 @@ def memory_share(
     """Preview or apply promotion-backed memory sharing."""
     if not target_scope:
         error("Provide --target-scope for memory share.")
+        raise typer.Exit(code=1)
+    if apply and preview:
+        error("Use either --apply or --preview, not both.")
         raise typer.Exit(code=1)
 
     parsed_source_ids = _parse_id_args(source_ids)
@@ -2886,7 +2890,7 @@ def memory_share(
                     await resolve_raw_memory_id_prefix(client, source_id)
                     for source_id in parsed_source_ids
                 ]
-                if preview:
+                if not apply:
                     data = await client.preview_memory_share(
                         source_ids=resolved_source_ids,
                         target_scope=target_scope,
@@ -2905,7 +2909,7 @@ def memory_share(
             if json_output:
                 print_json(data)
                 return
-            if preview:
+            if not apply:
                 _print_share_preview(cast("dict[str, object]", data))
             else:
                 _print_share_result(cast("dict[str, object]", data))
