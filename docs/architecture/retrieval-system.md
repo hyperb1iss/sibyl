@@ -53,9 +53,10 @@ Practical consequences:
 - **Per-question LongMemEval haystacks fit naturally.** The eval harness signs up a throwaway user
   per question; their personal graph org becomes a throwaway namespace, with content rows scoped to
   the same organization.
-- **One driver instance per org.** The SurrealDB Python driver serializes websocket queries through
-  a per-client `asyncio.Lock`. Sharing a single driver across orgs would serialize unrelated work;
-  `driver.clone(group_id)` is the supported isolation primitive.
+- **One pooled graph client per org.** `get_surreal_graph_client(group_id)` scopes the client to the
+  org namespace and hands queries independent pooled sockets. That keeps unrelated orgs isolated and
+  lets queries within a hot org run concurrently. Embedded `memory://` mode intentionally clamps to
+  one connection because a pool would fragment the in-memory state.
 
 Every graph operation requires `group_id` (the org ID). There is no implicit "default org" path.
 Forgetting `group_id` queries the wrong namespace or refuses the operation.

@@ -8,6 +8,8 @@
 - Current release floor: v1.0.2 (1.0 shipped)
 - Supersedes the post-1.0 "future work" framing in [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md);
   the product truth remains [`SIBYL_NORTHSTAR.md`](SIBYL_NORTHSTAR.md).
+- Concrete v1.1 execution plan:
+  [`SIBYL_1_1_IMPLEMENTATION_PLAN.md`](SIBYL_1_1_IMPLEMENTATION_PLAN.md).
 
 This roadmap covers the three releases after 1.0. It was assembled from a full-codebase +
 competitive-landscape research pass and a cross-model review, and it is grounded in verified code
@@ -230,11 +232,12 @@ existing memory-space member APIs); wire team → memory-space; implement the SH
 `sibyl export --format okf` — a Sibyl → OKF (Google Open Knowledge Format v0.1) exporter: one
 Markdown + YAML file per entity, relationships as Markdown links, with the labeled-property-graph
 preserved losslessly via OKF-legal extension frontmatter (`sibyl_id`, an `edges:` list carrying
-type/weight/target) so the bundle is valid OKF for other tools yet round-trips back into Sibyl.
-Small (~2–4 days; reuses `graph_payload_from_archive()` and OKF's `visualize`), with
-disproportionate payoff: it turns the "your memory stays yours, export in one command" sovereignty
-pillar into a Google-blessed, vendor-neutral, git-diffable artifact and reinforces the MCP-backend
-play.
+type/weight/target) so the bundle is valid OKF for other tools and carries enough metadata for a
+future lossless Sibyl re-import. v1.1 verifies graph-payload reconstruction in test tooling; the
+product importer remains v1.3 scope. Small (~2–4 days; reuses `graph_payload_from_archive()` and
+OKF's `visualize`), with disproportionate payoff: it turns the "your memory stays yours, export in
+one command" sovereignty pillar into a Google-blessed, vendor-neutral, git-diffable artifact and
+reinforces the MCP-backend play.
 
 The git-diffability is a feature, not a side effect: a scheduled export committed to a branch makes
 every consolidation, decay, and promotion cycle a **reviewable diff** — "what did the agent learn
@@ -245,7 +248,33 @@ consolidation designs get from git-baseline sandboxes, obtained here for the cos
 ### W10. Doc & claim truth-up
 
 Land the doc-staleness reconciliation; keep benchmark-claim discipline; keep the AI-memory-landscape
-doc accurate (retrieval-vs-QA framing, forgetting/decay reality).
+doc accurate (retrieval-vs-QA framing, forgetting/decay reality). W10 is a truth gate, not a claim
+escalator: approval-bound lanes stay labeled until their receipts exist. The doc surface must keep
+retrieval recall, QA accuracy, LongMemEval-V2 LAFS Gain, cost/latency, local-embedding, and
+self-reported citation usage as distinct evidence axes.
+
+- Gate `doc-claim-gate`: scans public claim docs for unsupported phrases, writes a
+  `sibyl-doc-claim-receipt-v1` receipt, builds the docs, and lets `bench-gate` enforce the manifest
+  contract.
+
+Locked v1.1 scope decisions:
+
+- **Cross-org sharing is out of v1.1.** Team memory is same-organization only, and the organization
+  remains the hard isolation boundary. Published packs, shared spaces across orgs, or federated
+  cross-org collaboration are v1.3+ research unless a later design explicitly changes that.
+- **TeamMemBench dataset decision: hybrid real-plus-synthetic.** Real dogfood traces define the
+  shapes and failure modes; synthetic fixtures make the first internal benchmark reproducible,
+  shareable, and privacy-safe. A public v1.3 dataset needs either redacted real-team logs or a
+  rigorously justified hybrid corpus plus at least one external comparator.
+- **Ontology pruning is deferred.** The 2026-07-03 dogfood audit shows 18 live entity types and 6
+  live relationship types (`BELONGS_TO`, `RELATED_TO`, `MENTIONS`, `DERIVED_FROM`, `USES_PROCEDURE`,
+  `DEPENDS_ON`). That is not enough evidence to delete enum values safely in W10. The invariant
+  stays: types route memories _within_ context packs, but must never gate _whether_ a memory
+  surfaces — classification errors stay mis-shelvings, never silent retrieval failures.
+- **v1.2 handoffs are explicit.** Coalescence data model and reversibility, concurrent multi-writer
+  consistency, `scale-load-gate`, TeamMemBench, distillation pass, materialized memory-as-files,
+  retroactive re-extraction loop, and the v1.3 OKF importer all remain handoffs, not hidden v1.1
+  scope.
 
 Exit criteria: published QA-accuracy and LongMemEval-V2 numbers with citable receipts; a regression
 gate blocks PRs on quality drops; the cost/latency curve is published; **the usage loop is closed
@@ -392,21 +421,24 @@ harness because a replay without a scoring gate is a corpus-wide unreviewed rewr
 Agents-as-contributors precede human teams because it is the same engine with zero privacy risk,
 dogfoodable on day one.
 
-## 8. Decisions still to lock
+## 8. Decisions locked vs still open
 
-- **Citation contract shape** — explicit verb (`sibyl cite <ids>`), completion-field
-  (`task complete --cited`), or both; and whether recall-time exposure stamping counts toward
-  survival or only citation does (recommendation: exposure slows decay, citation resets it).
+Locked for v1.1:
+
+- **Citation contract shape:** both. v1.1 keeps the explicit `sibyl cite <ids>` verb and the
+  `cited_ids` completion field on task completion / reflection paths. Exposure slows decay; citation
+  resets it.
+- **Cross-org sharing:** out of v1.1. The org boundary stays hard; team memory is same-org only.
+- **TeamMemBench dataset:** hybrid real-plus-synthetic for v1.2 internal work, with public release
+  held for v1.3 only if the dataset can be defended.
+- **Ontology pruning:** no enum deletion in W10. The dogfood graph proves current usage, not safe
+  absence. Keep the invariant from W10: types route memories but never decide whether memory can
+  surface.
+
+Still open for v1.2 design:
+
 - **Team role model** — reuse project roles for teams, or a distinct team-role set?
 - **Memory spaces** — hierarchical, tag-based, or both?
-- **TeamMemBench dataset** — real-team-logs (privacy-heavy), synthetic, or hybrid; this gates
-  whether v1.3 publication is viable.
-- **Cross-org sharing** — in scope for this arc, or explicitly out (org stays the hard boundary and
-  team memory is within-org only)?
-- **Ontology pruning** — audit type/edge usage on the dogfood graph (`sibyl debug schema`): of ~25
-  entity types and ~40 relationship types, which do write paths actually create? Collapse the four
-  overlapping classification axes (`entity_type`, `labels[]`, `tags[]`, per-type `category`) to two
-  — `entity_type` drives behavior (facets, lifecycle, policy), `tags` boost retrieval — and drop
-  dead enum entries (e.g. `COMMUNITY`, whose detection was removed). Standing invariant: types route
-  memories _within_ a context pack, they must never gate _whether_ a memory surfaces —
-  classification errors must stay mis-shelvings, never silent retrieval failures.
+- **Ontology axis collapse** — whether the live model should reduce the overlapping axes to
+  `entity_type` for behavior and `tags` for retrieval boosts after v1.2 gathers enough usage and
+  migration evidence.
