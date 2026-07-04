@@ -1378,6 +1378,8 @@ async def test_content_schema_migration_normalizes_legacy_enum_values() -> None:
         assert source_rows[0]["crawl_status"] == "pending"
         assert capture_rows[0]["memory_scope"] == "private"
         assert capture_rows[0]["review_state"] == "pending"
+        assert capture_rows[0]["retrieval_count"] == 0
+        assert capture_rows[0]["citation_count"] == 0
         assert version_rows[0]["version"] == CONTENT_SCHEMA_CURRENT_VERSION
 
         await client.execute_query(
