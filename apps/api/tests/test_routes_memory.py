@@ -1813,6 +1813,10 @@ async def test_preview_memory_share_returns_disabled_contract_and_audit() -> Non
             AsyncMock(return_value={"project_123"}),
         ) as accessible,
         patch(
+            "sibyl.api.routes.memory.list_accessible_team_scope_keys",
+            AsyncMock(return_value=set()),
+        ) as accessible_teams,
+        patch(
             "sibyl.api.routes.memory.preview_memory_share",
             AsyncMock(return_value=result),
         ) as preview,
@@ -1830,6 +1834,7 @@ async def test_preview_memory_share_returns_disabled_contract_and_audit() -> Non
         )
 
     accessible.assert_awaited_once_with(ctx)
+    accessible_teams.assert_awaited_once_with(ctx)
     preview.assert_awaited_once_with(
         source_ids=["memory-1"],
         organization_id=str(org.id),
@@ -1838,7 +1843,7 @@ async def test_preview_memory_share_returns_disabled_contract_and_audit() -> Non
         target_scope_key=None,
         recipient_organization_id="org-2",
         accessible_projects={"project_123"},
-        accessible_teams=None,
+        accessible_teams=set(),
     )
     audit.assert_awaited_once_with(
         action="memory.share.preview",
@@ -1967,6 +1972,10 @@ async def test_share_memory_applies_promotions_and_returns_audit_receipt() -> No
             "sibyl.api.routes.memory.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_123"}),
         ),
+        patch(
+            "sibyl.api.routes.memory.list_accessible_team_scope_keys",
+            AsyncMock(return_value=set()),
+        ) as accessible_teams,
         patch("sibyl.api.routes.memory._authorize_project_filter", AsyncMock()),
         patch("sibyl.api.routes.memory.share_memory", AsyncMock(return_value=result)) as share,
         patch(
@@ -1985,6 +1994,7 @@ async def test_share_memory_applies_promotions_and_returns_audit_receipt() -> No
             ctx=ctx,
         )
 
+    accessible_teams.assert_awaited_once_with(ctx)
     share.assert_awaited_once_with(
         source_ids=["memory-1"],
         organization_id=str(org.id),
@@ -1994,7 +2004,7 @@ async def test_share_memory_applies_promotions_and_returns_audit_receipt() -> No
         recipient_organization_id=None,
         project="project_123",
         accessible_projects={"project_123"},
-        accessible_teams=None,
+        accessible_teams=set(),
     )
     audit.assert_awaited_once()
     assert audit.await_args.kwargs["action"] == "memory.share.apply"
@@ -2119,6 +2129,10 @@ async def test_share_memory_denies_disallowed_api_key_source_space() -> None:
             AsyncMock(return_value={"project_allowed"}),
         ),
         patch(
+            "sibyl.api.routes.memory.list_accessible_team_scope_keys",
+            AsyncMock(return_value=set()),
+        ) as accessible_teams,
+        patch(
             "sibyl.api.routes.memory.get_raw_memory",
             AsyncMock(
                 return_value=_memory(
@@ -2146,6 +2160,7 @@ async def test_share_memory_denies_disallowed_api_key_source_space() -> None:
 
     assert exc.value.status_code == 403
     assert exc.value.detail == "api_key_memory_space_denied"
+    accessible_teams.assert_awaited_once_with(ctx)
     share.assert_not_awaited()
     audit.assert_awaited_once()
     assert audit.await_args.kwargs["memory_scope"] == "project"

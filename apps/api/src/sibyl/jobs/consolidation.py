@@ -190,8 +190,17 @@ async def priority_decay(
         runtime = await _get_graph_runtime(group_id)
         entity_manager = runtime.entity_manager
 
+        archive_limit = max(int(max_archives_per_run), 0)
+        if archive_limit == 0:
+            return {
+                "group_id": group_id,
+                "candidates_found": 0,
+                "archived": 0,
+                "min_age_days": min_age_days,
+            }
+
         cutoff = datetime.now(UTC) - timedelta(days=min_age_days)
-        page_size = max(200, min(max_archives_per_run * 2, 1000))
+        page_size = max(200, min(archive_limit * 2, 1000))
         threshold = max(0.0, min(float(decay_threshold), 1.0))
         half_life_days = max(int(recency_half_life_days), 1)
         candidates: list[PriorityDecayCandidate] = []
@@ -238,6 +247,8 @@ async def priority_decay(
                             last_seen_at=_aware_datetime(_entity_last_seen_at(entity)),
                         )
                     )
+                if len(batch) < page_size:
+                    break
             candidates.extend(type_candidates)
 
         candidates.sort(
@@ -248,7 +259,7 @@ async def priority_decay(
                 candidate.created_at,
             )
         )
-        candidates = candidates[:max_archives_per_run]
+        candidates = candidates[:archive_limit]
 
         archived_count = 0
         now_iso = datetime.now(UTC).isoformat()

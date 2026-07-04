@@ -1903,8 +1903,9 @@ class SibylClient:
         persist: bool = False,
         persist_source: bool = True,
         persist_review: bool = False,
-        cited_ids: list[str] | None = None,
         limit: int = 12,
+        *,
+        cited_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """Reflect raw notes into durable memory candidates."""
         data: dict[str, Any] = {

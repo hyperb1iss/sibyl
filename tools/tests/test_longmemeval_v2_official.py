@@ -216,6 +216,26 @@ def test_longmemeval_v2_receipt_gate_rejects_missing_lafs(tmp_path: Path) -> Non
     assert "checks[4] status must be 'PASS'" in failures
 
 
+def test_longmemeval_v2_receipt_redacts_sensitive_command_args() -> None:
+    module = _load_runner_module()
+
+    assert module._redacted_command_args(
+        [
+            "--api-token",
+            "sibyl-secret-token",
+            "--password=hunter2",
+            "--domain",
+            "web",
+        ]
+    ) == [
+        "--api-token",
+        "<redacted>",
+        "--password=<redacted>",
+        "--domain",
+        "web",
+    ]
+
+
 def test_sibyl_memory_payloads_chunk_trajectory_by_state() -> None:
     module = _load_memory_module()
 

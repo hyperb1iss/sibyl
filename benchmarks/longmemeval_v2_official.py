@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,16 @@ OFFICIAL_HARNESS_PATH = "evaluation/harness.py"
 QWEN_READER_MODEL_FRAGMENT = "qwen3.5-9b"
 GPT_EVALUATOR_MODEL_FRAGMENT = "gpt-5.2"
 DEFAULT_METHOD = "sibyl_live_api"
+_SENSITIVE_COMMAND_FLAGS = frozenset(
+    {
+        "--api-token",
+        "--password",
+        "--reader-api-key",
+        "--evaluator-api-key",
+        "--token",
+    }
+)
+_SENSITIVE_COMMAND_SUBSTRINGS = ("secret", "token", "password", "api-key", "apikey")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -113,6 +124,33 @@ def main(argv: list[str] | None = None) -> int:
     receipt = build_receipt_from_artifacts(args=args, data_root=data_root, output_dir=output_dir)
     write_json(resolve_receipt_output(args, output_dir), receipt)
     return 0
+
+
+def _redacted_command_args(command_args: Sequence[str]) -> list[str]:
+    redacted: list[str] = []
+    redact_next = False
+    for arg in command_args:
+        if redact_next:
+            redacted.append("<redacted>")
+            redact_next = False
+            continue
+        if "=" in arg:
+            flag, _value = arg.split("=", 1)
+            lowered_flag = flag.lower()
+            if flag in _SENSITIVE_COMMAND_FLAGS or any(
+                token in lowered_flag for token in _SENSITIVE_COMMAND_SUBSTRINGS
+            ):
+                redacted.append(f"{flag}=<redacted>")
+                continue
+        lowered_arg = arg.lower()
+        if arg in _SENSITIVE_COMMAND_FLAGS or any(
+            token in lowered_arg for token in _SENSITIVE_COMMAND_SUBSTRINGS
+        ):
+            redacted.append(arg)
+            redact_next = True
+            continue
+        redacted.append(arg)
+    return redacted
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PLR0915
@@ -587,7 +625,10 @@ def build_receipt_from_artifacts(
         "suite_version": "official-harness-v1",
         "generated_at": datetime.now(UTC).isoformat(),
         "sibyl_commit": git_commit(ROOT),
-        "command": ["benchmarks/longmemeval_v2_official.py", *args.command_args],
+        "command": [
+            "benchmarks/longmemeval_v2_official.py",
+            *_redacted_command_args(args.command_args),
+        ],
         "domain": args.domain,
         "tier": args.tier,
         "method": method,

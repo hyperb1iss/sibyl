@@ -1607,10 +1607,7 @@ async def _accessible_projects_for_share_preview(
 async def _accessible_teams_for_share(
     *,
     ctx: AuthContext,
-    request: MemorySharePreviewRequest,
 ) -> set[str] | None:
-    if request.target_scope != "team":
-        return None
     accessible_teams = await list_accessible_team_scope_keys(ctx)
     return {str(team_id) for team_id in accessible_teams or set()}
 
@@ -2379,7 +2376,7 @@ async def preview_memory_share_route(
         request=request,
         http_request=http_request,
     )
-    accessible_teams = await _accessible_teams_for_share(ctx=ctx, request=request)
+    accessible_teams = await _accessible_teams_for_share(ctx=ctx)
     await _authorize_share_api_key_scopes(
         ctx=ctx,
         request=request,
@@ -2447,7 +2444,7 @@ async def share_memory_route(
         request=request,
         http_request=http_request,
     )
-    accessible_teams = await _accessible_teams_for_share(ctx=ctx, request=request)
+    accessible_teams = await _accessible_teams_for_share(ctx=ctx)
     await _authorize_share_api_key_scopes(
         ctx=ctx,
         request=request,

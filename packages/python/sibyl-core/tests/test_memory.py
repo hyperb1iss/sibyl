@@ -847,7 +847,9 @@ async def test_share_memory_promotes_same_org_visible_sources_without_marking_so
     assert candidate.metadata["native_write_path"] == "memory_share"
     assert candidate.metadata["share_source_id"] == "source-1"
     assert candidate.metadata["share_target_scope_key"] == "project_123"
-    assert candidate.metadata["share_original_provenance"] == {"source_type": "email"}
+    assert "share_original_provenance" not in candidate.metadata
+    assert "share_source_created_by_user_id" not in candidate.metadata
+    assert "share_source_principal_id" not in candidate.metadata
     save.assert_not_awaited()
 
 

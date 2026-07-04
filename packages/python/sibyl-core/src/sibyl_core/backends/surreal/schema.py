@@ -400,20 +400,18 @@ DEFINE INDEX IF NOT EXISTS idx_entity_last_recalled
     ON entity FIELDS last_recalled_at, created_at, uuid CONCURRENTLY;
 DEFINE INDEX IF NOT EXISTS idx_entity_last_used
     ON entity FIELDS last_used_at, created_at, uuid CONCURRENTLY;
-UPDATE entity SET
-    last_recalled_at = attributes.last_recalled_at,
-    last_used_at = attributes.last_used_at,
-    retrieval_count = attributes.retrieval_count ?? 0,
-    citation_count = attributes.citation_count ?? 0
+UPDATE entity SET last_recalled_at = attributes.last_recalled_at
 WHERE last_recalled_at = NONE
-    AND last_used_at = NONE
-    AND attributes != NONE
-    AND (
-        attributes.last_recalled_at != NONE
-        OR attributes.last_used_at != NONE
-        OR attributes.retrieval_count != NONE
-        OR attributes.citation_count != NONE
-    );
+    AND attributes.last_recalled_at != NONE;
+UPDATE entity SET last_used_at = attributes.last_used_at
+WHERE last_used_at = NONE
+    AND attributes.last_used_at != NONE;
+UPDATE entity SET retrieval_count = attributes.retrieval_count ?? 0
+WHERE retrieval_count = 0
+    AND attributes.retrieval_count != NONE;
+UPDATE entity SET citation_count = attributes.citation_count ?? 0
+WHERE citation_count = 0
+    AND attributes.citation_count != NONE;
 """
 
 

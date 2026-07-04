@@ -248,7 +248,6 @@ async def test_priority_decay_archives_only_old_unarchived_episodes(
     }
     assert entity_manager.list_by_type.await_args_list == [
         call(EntityType.EPISODE, limit=200, offset=0, include_archived=False),
-        call(EntityType.EPISODE, limit=200, offset=3, include_archived=False),
     ]
     entity_manager.update.assert_awaited_once()
     assert entity_manager.update.await_args.args[0] == "episode-old"
@@ -325,6 +324,43 @@ async def test_priority_decay_defaults_to_derived_memory_entities(
 
 
 @pytest.mark.asyncio
+async def test_priority_decay_returns_without_scan_for_zero_or_negative_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entity_manager = AsyncMock()
+    entity_manager.list_by_type = AsyncMock()
+    entity_manager.update = AsyncMock()
+
+    monkeypatch.setattr(
+        consolidation_module,
+        "_get_graph_runtime",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                client=MagicMock(),
+                entity_manager=entity_manager,
+                relationship_manager=AsyncMock(),
+            )
+        ),
+    )
+
+    result = await consolidation_module.priority_decay(
+        {},
+        group_id="org-123",
+        max_archives_per_run=-5,
+        entity_types=(EntityType.EPISODE,),
+    )
+
+    assert result == {
+        "group_id": "org-123",
+        "candidates_found": 0,
+        "archived": 0,
+        "min_age_days": 180,
+    }
+    entity_manager.list_by_type.assert_not_awaited()
+    entity_manager.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_priority_decay_respects_archive_cap_across_pages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -339,11 +375,15 @@ async def test_priority_decay_respects_archive_cap_across_pages(
         )
 
     entity_manager = AsyncMock()
+    first_page = [
+        episode("episode-1", 240),
+        episode("episode-2", 220),
+        *(episode(f"episode-filler-{index}", 181) for index in range(198)),
+    ]
     entity_manager.list_by_type = AsyncMock(
         side_effect=[
-            [episode("episode-1", 240), episode("episode-2", 220)],
+            first_page,
             [episode("episode-3", 200)],
-            [],
         ]
     )
     entity_manager.update = AsyncMock(return_value=object())
@@ -371,8 +411,7 @@ async def test_priority_decay_respects_archive_cap_across_pages(
     assert result["archived"] == 3
     assert entity_manager.list_by_type.await_args_list == [
         call(EntityType.EPISODE, limit=200, offset=0, include_archived=False),
-        call(EntityType.EPISODE, limit=200, offset=2, include_archived=False),
-        call(EntityType.EPISODE, limit=200, offset=3, include_archived=False),
+        call(EntityType.EPISODE, limit=200, offset=200, include_archived=False),
     ]
     assert [await_call.args[0] for await_call in entity_manager.update.await_args_list] == [
         "episode-1",

@@ -679,19 +679,26 @@ async def _reflect_mcp_memory(
     if cited_ids:
         from sibyl_core.tools.usage_citation import record_cited_item_usages
 
-        payload["citation_usage"] = await record_cited_item_usages(
-            cited_ids,
-            organization_id=ctx.org_id,
-            principal_id=ctx.user_id,
-            project_id=project,
-            source_surface="mcp_reflect",
-            request_metadata={
-                "active_task": active_task,
-                "intent": intent,
-                "persist": persist,
-                "source_title": source_title,
-            },
-        )
+        try:
+            payload["citation_usage"] = await record_cited_item_usages(
+                cited_ids,
+                organization_id=ctx.org_id,
+                principal_id=ctx.user_id,
+                project_id=project,
+                source_surface="mcp_reflect",
+                request_metadata={
+                    "active_task": active_task,
+                    "intent": intent,
+                    "persist": persist,
+                    "source_title": source_title,
+                },
+            )
+        except Exception as exc:
+            log.warning(
+                "mcp_reflect_citation_usage_failed",
+                error_type=type(exc).__name__,
+                exc_info=True,
+            )
     await log_reflection_audit(
         user_id=ctx.user_id,
         organization_id=ctx.org_id,
@@ -1134,18 +1141,26 @@ async def _manage_workflow_transition(
             policy_project_id = policy_context.project_id or (
                 policy_context.scope_key if policy_context.memory_space == "project" else None
             )
-        response_data["citation_usage"] = await record_cited_item_usages(
-            cited_ids,
-            organization_id=ctx.org_id,
-            principal_id=ctx.user_id,
-            project_id=result.task_data.get("project_id") or policy_project_id,
-            source_surface="mcp_manage_complete_task",
-            request_metadata={
-                "action": action,
-                "has_learnings": bool(learnings),
-                "task_id": entity_id,
-            },
-        )
+        try:
+            response_data["citation_usage"] = await record_cited_item_usages(
+                cited_ids,
+                organization_id=ctx.org_id,
+                principal_id=ctx.user_id,
+                project_id=result.task_data.get("project_id") or policy_project_id,
+                source_surface="mcp_manage_complete_task",
+                request_metadata={
+                    "action": action,
+                    "has_learnings": bool(learnings),
+                    "task_id": entity_id,
+                },
+            )
+        except Exception as exc:
+            log.warning(
+                "mcp_complete_task_citation_usage_failed",
+                task_id=entity_id,
+                error_type=type(exc).__name__,
+                exc_info=True,
+            )
     if (
         action == "complete_task"
         and learnings
