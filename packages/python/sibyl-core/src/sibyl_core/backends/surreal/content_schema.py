@@ -365,8 +365,14 @@ DEFINE INDEX IF NOT EXISTS idx_document_chunks_org_uuid
 CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS = """
 DEFINE FIELD IF NOT EXISTS last_recalled_at ON raw_captures TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS last_used_at ON raw_captures TYPE option<datetime>;
-DEFINE FIELD IF NOT EXISTS retrieval_count ON raw_captures TYPE int DEFAULT 0;
-DEFINE FIELD IF NOT EXISTS citation_count ON raw_captures TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS retrieval_count ON raw_captures TYPE option<int> DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS citation_count ON raw_captures TYPE option<int> DEFAULT 0;
+UPDATE raw_captures SET
+    retrieval_count = retrieval_count ?? metadata.retrieval_count ?? 0,
+    citation_count = citation_count ?? metadata.citation_count ?? 0
+WHERE retrieval_count = NONE OR citation_count = NONE;
+DEFINE FIELD OVERWRITE retrieval_count ON raw_captures TYPE int DEFAULT 0;
+DEFINE FIELD OVERWRITE citation_count ON raw_captures TYPE int DEFAULT 0;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_last_recalled
     ON raw_captures FIELDS organization_id, last_recalled_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_last_used
