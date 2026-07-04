@@ -514,7 +514,11 @@ def _usage_event_with_stamp(
     item_kind = string_value(event.get("item_kind"))
     item_id = string_value(event.get("item_id"))
     signal_type = string_value(event.get("signal_type"))
-    stamp = raw_by_id.get(item_id) if item_kind == "raw_capture" else graph_by_id.get(item_id, {})
+    stamp: dict[str, Any] = {}
+    if item_kind == "raw_capture":
+        stamp = raw_by_id.get(item_id) or {}
+    else:
+        stamp = graph_by_id.get(item_id) or {}
     observed = {
         "memory_id": item_id,
         "item_kind": item_kind,
