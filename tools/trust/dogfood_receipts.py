@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from shutil import which
 from typing import Any
+
+DebugQueryRunner = Callable[[str], list[dict[str, Any]]]
 
 REQUIRED_V11_SOURCE_COMMITS: tuple[str, ...] = (
     "36094084",  # W6A usage-event schema/service foundation
@@ -31,6 +36,47 @@ def load_dogfood_evidence(path: Path) -> dict[str, Any]:
         msg = "dogfood evidence must be a JSON object"
         raise TypeError(msg)
     return payload
+
+
+def load_deployment_evidence(path: Path) -> dict[str, Any]:
+    payload = load_dogfood_evidence(path)
+    deployment = payload.get("deployment", payload)
+    if not isinstance(deployment, dict):
+        msg = "deployment evidence must be a JSON object"
+        raise TypeError(msg)
+    return dict(deployment)
+
+
+def run_sibyl_debug_query(query: str) -> list[dict[str, Any]]:
+    sibyl = which("sibyl")
+    if sibyl is None:
+        msg = "Required executable not found on PATH: sibyl"
+        raise RuntimeError(msg)
+
+    completed = subprocess.run(  # noqa: S603
+        (sibyl, "debug", "query", query, "--json"),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        msg = f"sibyl debug query failed with exit {completed.returncode}: {detail}"
+        raise RuntimeError(msg)
+
+    payload = json.loads(completed.stdout)
+    if not isinstance(payload, dict):
+        msg = "sibyl debug query JSON output must be an object"
+        raise TypeError(msg)
+    error = payload.get("error")
+    if error:
+        msg = f"sibyl debug query failed: {error}"
+        raise RuntimeError(msg)
+    rows = payload.get("rows")
+    if not isinstance(rows, list):
+        msg = "sibyl debug query JSON output missing rows list"
+        raise TypeError(msg)
+    return [dict(row) for row in rows if isinstance(row, dict)]
 
 
 def build_deployment_metrics(evidence: dict[str, Any]) -> dict[str, float]:

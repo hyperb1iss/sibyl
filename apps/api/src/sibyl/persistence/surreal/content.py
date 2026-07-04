@@ -63,6 +63,7 @@ _UPSERT_RECORD = {
         "WHERE uuid = $uuid AND organization_id = $organization_id;"
     ),
 }
+_READ_ONLY_DEBUG_TABLES = ("memory_usage_events",)
 _CRAWL_SOURCE_FIELDS = (
     "uuid, organization_id, name, url, source_type, description, crawl_depth, "
     "include_patterns, exclude_patterns, respect_robots, crawl_status, "
@@ -76,7 +77,7 @@ def _table_name_length(table: str) -> int:
 
 
 _CONTENT_DEBUG_TABLE_NAMES: tuple[str, ...] = tuple(
-    sorted(_UPSERT_RECORD.keys(), key=_table_name_length, reverse=True)
+    sorted((*_UPSERT_RECORD.keys(), *_READ_ONLY_DEBUG_TABLES), key=_table_name_length, reverse=True)
 )
 _CONTENT_DEBUG_TABLES: frozenset[str] = frozenset(_CONTENT_DEBUG_TABLE_NAMES)
 _CONTENT_DEBUG_TABLE_PATTERN = "|".join(re.escape(table) for table in _CONTENT_DEBUG_TABLE_NAMES)

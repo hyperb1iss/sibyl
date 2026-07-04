@@ -103,6 +103,27 @@ def _dogfood_evidence() -> dict[str, object]:
     }
 
 
+def _deployment_evidence() -> dict[str, object]:
+    return cast(dict[str, object], _dogfood_evidence()["deployment"])
+
+
+def _write_integrity_receipt(path: Path, *, passed: bool = True) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "sibyl-write-path-integrity-receipt-v1",
+                "metrics": {
+                    "hallucinated_fact_count": 0 if passed else 1,
+                    "self_referential_write_count": 0,
+                    "low_signal_write_count": 0,
+                },
+                "checks": [{"name": "write-path", "status": "PASS" if passed else "FAIL"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_default_receipt_meets_w7_budgets() -> None:
     receipt = forgetting_gate.build_forgetting_receipt()
 
@@ -162,6 +183,81 @@ def test_dogfood_receipt_meets_live_forgetting_contract() -> None:
     assert receipt["metrics"]["write_integrity_error_count"] == 0.0
     assert receipt["metrics"]["context_recall_decay_applied"] == 1.0
     assert forgetting_gate.validate_forgetting_dogfood_receipt(receipt) == []
+
+
+def test_collect_forgetting_dogfood_evidence_from_debug_query(tmp_path: Path) -> None:
+    queries: list[str] = []
+    write_integrity_path = tmp_path / "write-path-integrity-receipt.json"
+    _write_integrity_receipt(write_integrity_path)
+
+    def query_runner(query: str) -> list[dict[str, object]]:
+        queries.append(query)
+        assert "FROM entity" in query
+        return [
+            {
+                "uuid": "entity-stale-uncited",
+                "created_at": "2025-01-01T00:00:00+00:00",
+                "metadata": {"importance": 0.1},
+            },
+            {
+                "uuid": "entity-protected-cited",
+                "created_at": "2025-01-01T00:00:00+00:00",
+                "last_used_at": "2026-07-04T12:00:00+00:00",
+                "citation_count": 1,
+            },
+            {
+                "uuid": "entity-exposed",
+                "created_at": "2025-01-01T00:00:00+00:00",
+                "last_recalled_at": "2026-07-04T12:05:00+00:00",
+                "retrieval_count": 1,
+            },
+        ]
+
+    evidence = forgetting_gate.collect_forgetting_dogfood_evidence(
+        _deployment_evidence(),
+        query_runner=query_runner,
+        write_integrity_receipt_path=write_integrity_path,
+    )
+    receipt = forgetting_gate.build_forgetting_dogfood_receipt(evidence)
+
+    assert len(queries) == 1
+    assert evidence["forgetting"]["dry_run"] is True
+    assert receipt["metrics"]["stale_uncited_reduction_count"] == 1.0
+    assert receipt["metrics"]["protected_cited_false_archive_count"] == 0.0
+    assert receipt["metrics"]["context_recall_decay_applied"] == 1.0
+    assert receipt["metrics"]["write_integrity_error_count"] == 0.0
+    assert forgetting_gate.validate_forgetting_dogfood_receipt(receipt) == []
+
+
+def test_collect_forgetting_dogfood_evidence_requires_write_integrity(
+    tmp_path: Path,
+) -> None:
+    write_integrity_path = tmp_path / "write-path-integrity-receipt.json"
+    _write_integrity_receipt(write_integrity_path, passed=False)
+
+    evidence = forgetting_gate.collect_forgetting_dogfood_evidence(
+        _deployment_evidence(),
+        query_runner=lambda _: [
+            {
+                "uuid": "entity-stale-uncited",
+                "created_at": "2025-01-01T00:00:00+00:00",
+                "metadata": {"importance": 0.1},
+            },
+            {
+                "uuid": "entity-protected-cited",
+                "created_at": "2025-01-01T00:00:00+00:00",
+                "last_used_at": "2026-07-04T12:00:00+00:00",
+                "citation_count": 1,
+                "last_recalled_at": "2026-07-04T12:00:00+00:00",
+            },
+        ],
+        write_integrity_receipt_path=write_integrity_path,
+    )
+    receipt = forgetting_gate.build_forgetting_dogfood_receipt(evidence)
+    failures = forgetting_gate.validate_forgetting_dogfood_receipt(receipt)
+
+    assert "metric 'write_integrity_error_count' exceeds budget 0: 1.0" in failures
+    assert "dogfood receipt checks[1] did not pass" in failures
 
 
 def test_dogfood_receipt_rejects_apply_or_protected_archive_evidence() -> None:

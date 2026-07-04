@@ -13,6 +13,7 @@ from tools.trust import usage_loop_gate
 MISSING_SURFACE_EXIT_CODE = 2
 EXPECTED_CITATION_EVENT_COUNT = 2
 EXPECTED_CONSOLIDATION_INPUT_COUNT = 2
+EXPECTED_USAGE_COLLECTOR_QUERY_COUNT = 3
 CITED_DECAY_ADVANTAGE_BUDGET = 0.1
 REPO_ROOT = Path(__file__).resolve().parents[2]
 API_DIGEST = f"sha256:{'a' * 64}"
@@ -90,6 +91,10 @@ def _dogfood_evidence() -> dict[str, object]:
     }
 
 
+def _deployment_evidence() -> dict[str, object]:
+    return cast(dict[str, object], _dogfood_evidence()["deployment"])
+
+
 def test_default_receipt_meets_usage_loop_budgets() -> None:
     receipt = usage_loop_gate.build_usage_loop_receipt()
 
@@ -119,6 +124,68 @@ def test_dogfood_receipt_meets_live_usage_contract() -> None:
     assert receipt["metrics"]["duplicate_stored_event_count"] == 0
     assert receipt["metrics"]["dedupe_key_coverage"] == 1.0
     assert receipt["metrics"]["usage_stamp_coverage"] == 1.0
+    assert usage_loop_gate.validate_usage_loop_dogfood_receipt(receipt) == []
+
+
+def test_collect_usage_loop_dogfood_evidence_from_debug_queries() -> None:
+    queries: list[str] = []
+
+    def query_runner(query: str) -> list[dict[str, object]]:
+        queries.append(query)
+        if "FROM memory_usage_events" in query:
+            return [
+                {
+                    "session_key": "ctx",
+                    "message_key": "msg",
+                    "source_surface": "context",
+                    "item_kind": "graph_entity",
+                    "item_id": "entity-exposed",
+                    "signal_type": "exposure",
+                    "event_at": "2026-07-04T12:00:00+00:00",
+                },
+                {
+                    "session_key": "ctx",
+                    "message_key": "msg",
+                    "source_surface": "cli",
+                    "item_kind": "graph_entity",
+                    "item_id": "entity-cited",
+                    "signal_type": "citation",
+                    "event_at": "2026-07-04T12:05:00+00:00",
+                },
+            ]
+        if "FROM raw_captures" in query:
+            return []
+        assert "FROM entity" in query
+        return [
+            {
+                "uuid": "entity-exposed",
+                "created_at": "2025-01-01T00:00:00+00:00",
+                "last_recalled_at": "2026-07-04T12:00:00+00:00",
+                "retrieval_count": 1,
+            },
+            {
+                "uuid": "entity-cited",
+                "created_at": "2025-01-01T00:00:00+00:00",
+                "last_used_at": "2026-07-04T12:05:00+00:00",
+                "citation_count": 1,
+            },
+            {
+                "uuid": "entity-uncited",
+                "created_at": "2025-01-01T00:00:00+00:00",
+                "metadata": {"importance": 0.1},
+            },
+        ]
+
+    evidence = usage_loop_gate.collect_usage_loop_dogfood_evidence(
+        _deployment_evidence(),
+        query_runner=query_runner,
+    )
+    receipt = usage_loop_gate.build_usage_loop_dogfood_receipt(evidence)
+
+    assert len(queries) == EXPECTED_USAGE_COLLECTOR_QUERY_COUNT
+    assert evidence["usage"]["exposure_events"][0]["last_recalled_at"]
+    assert evidence["usage"]["citation_events"][0]["last_used_at"]
+    assert receipt["metrics"]["cited_decay_score_advantage"] > CITED_DECAY_ADVANTAGE_BUDGET
     assert usage_loop_gate.validate_usage_loop_dogfood_receipt(receipt) == []
 
 

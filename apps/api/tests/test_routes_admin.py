@@ -279,6 +279,28 @@ async def test_admin_execute_debug_query_routes_unscoped_content_queries() -> No
 
 
 @pytest.mark.asyncio
+async def test_admin_execute_debug_query_routes_memory_usage_events_to_content_runtime() -> None:
+    content_execute = AsyncMock(return_value=[{"uuid": "usage-1"}])
+    graph_execute = AsyncMock(return_value=[])
+    query = "SELECT * FROM memory_usage_events ORDER BY event_at DESC LIMIT 1"
+
+    with (
+        patch("sibyl.persistence.content_runtime.execute_debug_query", content_execute),
+        patch("sibyl.persistence.graph_runtime.execute_debug_query", graph_execute),
+    ):
+        rows = await admin_routes.execute_debug_query(query, group_id="org-1")
+
+    assert rows == [{"uuid": "usage-1"}]
+    content_execute.assert_awaited_once_with(
+        query,
+        organization_id="org-1",
+        group_id="org-1",
+        org_id="org-1",
+    )
+    graph_execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_admin_execute_debug_query_rejects_cross_content_table_reads() -> None:
     content_execute = AsyncMock(return_value=[])
 

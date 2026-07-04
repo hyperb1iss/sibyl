@@ -13,6 +13,17 @@ def test_scope_content_debug_query_adds_org_filter_before_limit() -> None:
     )
 
 
+def test_scope_content_debug_query_allows_memory_usage_events() -> None:
+    query = "SELECT uuid, event_at FROM memory_usage_events ORDER BY event_at DESC LIMIT 1"
+
+    scoped = content_persistence._scope_content_debug_query(query)
+
+    assert (
+        scoped == "SELECT uuid, event_at FROM memory_usage_events "
+        "WHERE organization_id = $organization_id ORDER BY event_at DESC LIMIT 1"
+    )
+
+
 def test_scope_content_debug_query_wraps_existing_where_clause() -> None:
     query = "SELECT * FROM raw_captures WHERE organization_id = $group_id OR true LIMIT 5"
 

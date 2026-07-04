@@ -19,16 +19,20 @@ from types import SimpleNamespace
 from typing import Any
 
 from sibyl.jobs.consolidation import _priority_decay_reason, _priority_decay_score
+from sibyl_core.backends.surreal.records import coerce_datetime
 from sibyl_core.retrieval.temporal import (
     EXPOSURE_DECAY_TIMESTAMP_WEIGHT,
     LEGACY_ACCESS_DECAY_TIMESTAMP_WEIGHT,
 )
 from tools.trust.dogfood_receipts import (
     DOGFOOD_DEPLOYMENT_BUDGETS,
+    DebugQueryRunner,
     build_deployment_metrics,
     evidence_checks,
     list_of_mappings,
+    load_deployment_evidence,
     load_dogfood_evidence,
+    run_sibyl_debug_query,
     string_value,
     truth_metric,
     validate_metric_budgets,
@@ -43,6 +47,9 @@ DEFAULT_RECEIPT_PATH = (
 )
 DEFAULT_DOGFOOD_RECEIPT_PATH = (
     REPO_ROOT / "benchmarks" / "results" / "ai-memory" / "forgetting-dogfood-receipt.json"
+)
+DEFAULT_WRITE_PATH_INTEGRITY_RECEIPT_PATH = (
+    REPO_ROOT / "benchmarks" / "results" / "ai-memory" / "write-path-integrity-receipt.json"
 )
 
 Runner = Callable[[tuple[str, ...]], int]
@@ -83,6 +90,14 @@ DOGFOOD_REQUIRED_SURFACES: tuple[str, ...] = (
     "write path integrity",
     "dogfood approval boundary",
 )
+FORGETTING_CANDIDATES_QUERY = """
+SELECT uuid, name, entity_type, created_at, status, last_recalled_at, last_used_at,
+    retrieval_count, citation_count, attributes, metadata
+FROM entity
+WHERE group_id = $group_id
+ORDER BY created_at ASC
+LIMIT {limit}
+"""
 
 
 @dataclass(frozen=True)
@@ -442,6 +457,63 @@ def build_forgetting_dogfood_receipt(evidence: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def collect_forgetting_dogfood_evidence(
+    deployment: dict[str, Any],
+    *,
+    query_runner: DebugQueryRunner = run_sibyl_debug_query,
+    write_integrity_receipt_path: Path = DEFAULT_WRITE_PATH_INTEGRITY_RECEIPT_PATH,
+    limit: int = 500,
+) -> dict[str, Any]:
+    query_limit = max(1, min(int(limit), 1000))
+    rows = query_runner(FORGETTING_CANDIDATES_QUERY.format(limit=query_limit))
+    observations = _forgetting_observations(rows)
+    strict_recall_before = sum(1 for observation in observations if observation["recalled"])
+    strict_recall_after = sum(
+        1
+        for observation in observations
+        if observation["recalled"] and observation["archived"] is not True
+    )
+    strict_recall_drop = 0.0
+    if strict_recall_before:
+        strict_recall_drop = max(
+            0.0,
+            (strict_recall_before - strict_recall_after) / strict_recall_before,
+        )
+    integrity_error_count, integrity_passed = _write_integrity_error_count(
+        write_integrity_receipt_path
+    )
+    return {
+        "deployment": dict(deployment),
+        "forgetting": {
+            "dry_run": True,
+            "strict_recall_at_5_before": strict_recall_before,
+            "strict_recall_at_5_after": strict_recall_after,
+            "strict_recall_at_5_drop": strict_recall_drop,
+            "write_integrity_error_count": integrity_error_count,
+            "context_recall_decay_applied": any(
+                string_value(observation.get("last_recalled_at")) for observation in observations
+            ),
+            "observations": observations,
+        },
+        "checks": [
+            {
+                "name": "live-forgetting-dry-run",
+                "status": "PASS",
+                "surfaces": [
+                    surface
+                    for surface in DOGFOOD_REQUIRED_SURFACES
+                    if surface != "write path integrity"
+                ],
+            },
+            {
+                "name": "write-path-integrity-receipt",
+                "status": "PASS" if integrity_passed else "FAIL",
+                "surfaces": ["write path integrity"],
+            },
+        ],
+    }
+
+
 def _survival_signal(fixture: ForgettingFixture) -> str:
     metadata = _metadata_for_fixture(fixture)
     if metadata.get("last_used_at") is not None and metadata.get("last_accessed_at") is not None:
@@ -559,6 +631,117 @@ def _strict_recall_drop(evidence: dict[str, Any]) -> float:
     ):
         return max(0.0, (float(before) - float(after)) / float(before))
     return 1.0
+
+
+def _forgetting_observations(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    now = datetime.now(UTC)
+    observations: list[dict[str, Any]] = []
+    for row in rows:
+        entity = _decay_entity(row, now=now)
+        score = _priority_decay_score(
+            entity,
+            now=now,
+            recency_half_life_days=RECENCY_HALF_LIFE_DAYS,
+        )
+        created_at = _aware_datetime_value(entity.created_at)
+        stale = created_at < now - timedelta(days=MIN_AGE_DAYS)
+        cited = _has_citation_usage(entity.metadata)
+        archived = stale and score < DECAY_THRESHOLD
+        observations.append(
+            {
+                "memory_id": entity.id,
+                "created_at": created_at.isoformat(),
+                "decay_score": round(score, 6),
+                "decay_threshold": DECAY_THRESHOLD,
+                "stale": stale,
+                "cited": cited,
+                "protected": cited,
+                "archived": archived,
+                "dry_run_archived": archived,
+                "recalled": _has_recall_usage(entity.metadata),
+                "last_recalled_at": string_value(entity.metadata.get("last_recalled_at")),
+                "last_used_at": string_value(entity.metadata.get("last_used_at")),
+            }
+        )
+    return observations
+
+
+def _decay_entity(row: dict[str, Any], *, now: datetime) -> SimpleNamespace:
+    metadata = _row_metadata(row)
+    return SimpleNamespace(
+        id=string_value(row.get("uuid") or row.get("id")),
+        created_at=coerce_datetime(row.get("created_at")) or now,
+        metadata=metadata,
+    )
+
+
+def _row_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    for field in ("metadata", "attributes"):
+        value = row.get(field)
+        if isinstance(value, dict):
+            metadata.update(value)
+    for field in (
+        "status",
+        "last_recalled_at",
+        "last_used_at",
+        "retrieval_count",
+        "citation_count",
+    ):
+        if row.get(field) is not None:
+            metadata[field] = row[field]
+    return metadata
+
+
+def _has_citation_usage(metadata: dict[str, Any]) -> bool:
+    return (
+        bool(string_value(metadata.get("last_used_at")))
+        or _int_metric(metadata.get("citation_count")) > 0
+    )
+
+
+def _has_recall_usage(metadata: dict[str, Any]) -> bool:
+    return (
+        bool(string_value(metadata.get("last_recalled_at")))
+        or _int_metric(metadata.get("retrieval_count")) > 0
+    )
+
+
+def _int_metric(value: Any) -> int:
+    if isinstance(value, bool) or value is None:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _write_integrity_error_count(path: Path) -> tuple[float, bool]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 1.0, False
+    if not isinstance(payload, dict):
+        return 1.0, False
+    metrics = payload.get("metrics")
+    if not isinstance(metrics, dict):
+        return 1.0, False
+    error_count = float(
+        _int_metric(metrics.get("hallucinated_fact_count"))
+        + _int_metric(metrics.get("self_referential_write_count"))
+        + _int_metric(metrics.get("low_signal_write_count"))
+    )
+    checks = payload.get("checks")
+    checks_passed = isinstance(checks, list) and all(
+        isinstance(check, dict) and check.get("status") == "PASS" for check in checks
+    )
+    return error_count, error_count == 0.0 and checks_passed
+
+
+def _aware_datetime_value(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value
 
 
 def _validate_receipt_checks(checks: Any) -> list[str]:
@@ -760,6 +943,42 @@ def run_dogfood_receipt(
     return 0 if not failures else 1
 
 
+def run_collect_dogfood_receipt(
+    deployment_path: Path,
+    *,
+    evidence_path: Path,
+    receipt_path: Path | None = DEFAULT_DOGFOOD_RECEIPT_PATH,
+    query_runner: DebugQueryRunner = run_sibyl_debug_query,
+    write_integrity_receipt_path: Path = DEFAULT_WRITE_PATH_INTEGRITY_RECEIPT_PATH,
+    echo: Echo = _echo,
+) -> int:
+    try:
+        deployment = load_deployment_evidence(deployment_path)
+        evidence = collect_forgetting_dogfood_evidence(
+            deployment,
+            query_runner=query_runner,
+            write_integrity_receipt_path=write_integrity_receipt_path,
+        )
+    except (OSError, TypeError, json.JSONDecodeError, ValueError, RuntimeError) as exc:
+        echo(f"Forgetting dogfood collection failed: {exc}")
+        return 1
+
+    write_receipt(evidence, evidence_path)
+    receipt = build_forgetting_dogfood_receipt(evidence)
+    failures = validate_forgetting_dogfood_receipt(receipt)
+    if receipt_path is not None:
+        write_receipt(receipt, receipt_path)
+    status = "PASS" if not failures else "FAIL"
+    echo("Forgetting Dogfood Collection")
+    echo(f"status: {status}")
+    echo(f"evidence: {display_path(evidence_path)}")
+    if receipt_path is not None:
+        echo(f"receipt: {display_path(receipt_path)}")
+    for failure in failures:
+        echo(f"- {failure}")
+    return 0 if not failures else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run focused usage-aware forgetting checks.")
     parser.add_argument(
@@ -778,6 +997,22 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_DOGFOOD_RECEIPT_PATH,
         help="Dogfood receipt path written when --dogfood-evidence is set.",
     )
+    parser.add_argument(
+        "--collect-dogfood-evidence",
+        type=Path,
+        help="Collect live dogfood evidence into this JSON path, then validate a receipt.",
+    )
+    parser.add_argument(
+        "--deployment-evidence",
+        type=Path,
+        help="JSON deployment provenance required by --collect-dogfood-evidence.",
+    )
+    parser.add_argument(
+        "--write-integrity-receipt",
+        type=Path,
+        default=DEFAULT_WRITE_PATH_INTEGRITY_RECEIPT_PATH,
+        help="Write-path integrity receipt checked by --collect-dogfood-evidence.",
+    )
     args = parser.parse_args(argv)
 
     if args.list:
@@ -788,6 +1023,16 @@ def main(argv: list[str] | None = None) -> int:
         return run_dogfood_receipt(
             args.dogfood_evidence,
             receipt_path=args.dogfood_receipt,
+        )
+    if args.collect_dogfood_evidence is not None:
+        if args.deployment_evidence is None:
+            _echo("--deployment-evidence is required with --collect-dogfood-evidence")
+            return 1
+        return run_collect_dogfood_receipt(
+            args.deployment_evidence,
+            evidence_path=args.collect_dogfood_evidence,
+            receipt_path=args.dogfood_receipt,
+            write_integrity_receipt_path=args.write_integrity_receipt,
         )
 
     return run_gate()

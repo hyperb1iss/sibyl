@@ -19,12 +19,16 @@ from types import SimpleNamespace
 from typing import Any
 
 from sibyl.jobs.consolidation import _priority_decay_score
+from sibyl_core.backends.surreal.records import coerce_datetime
 from tools.trust.dogfood_receipts import (
     DOGFOOD_DEPLOYMENT_BUDGETS,
+    DebugQueryRunner,
     build_deployment_metrics,
     evidence_checks,
     list_of_mappings,
+    load_deployment_evidence,
     load_dogfood_evidence,
+    run_sibyl_debug_query,
     string_value,
     validate_metric_budgets,
     validate_required_checks,
@@ -69,6 +73,28 @@ DOGFOOD_REQUIRED_SURFACES: tuple[str, ...] = (
     "live decay divergence",
     "dogfood approval boundary",
 )
+USAGE_EVENTS_QUERY = """
+SELECT uuid, session_key, message_key, source_surface, item_kind, item_id,
+    signal_type, event_at, created_at
+FROM memory_usage_events
+ORDER BY event_at DESC
+LIMIT {limit}
+"""
+RAW_USAGE_STAMPS_QUERY = """
+SELECT uuid, created_at, last_recalled_at, last_used_at, retrieval_count, citation_count
+FROM raw_captures
+WHERE last_recalled_at != NONE OR last_used_at != NONE
+ORDER BY created_at DESC
+LIMIT {limit}
+"""
+GRAPH_USAGE_STAMPS_QUERY = """
+SELECT uuid, name, entity_type, created_at, status, last_recalled_at, last_used_at,
+    retrieval_count, citation_count, attributes, metadata
+FROM entity
+WHERE group_id = $group_id
+ORDER BY created_at DESC
+LIMIT {limit}
+"""
 
 
 @dataclass(frozen=True)
@@ -343,6 +369,45 @@ def build_usage_loop_dogfood_receipt(evidence: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def collect_usage_loop_dogfood_evidence(
+    deployment: dict[str, Any],
+    *,
+    query_runner: DebugQueryRunner = run_sibyl_debug_query,
+    limit: int = 200,
+) -> dict[str, Any]:
+    query_limit = max(1, min(int(limit), 1000))
+    usage_events = query_runner(USAGE_EVENTS_QUERY.format(limit=query_limit))
+    raw_stamps = query_runner(RAW_USAGE_STAMPS_QUERY.format(limit=query_limit))
+    graph_rows = query_runner(GRAPH_USAGE_STAMPS_QUERY.format(limit=query_limit))
+    raw_by_id = _rows_by_uuid(raw_stamps)
+    graph_by_id = _rows_by_uuid(graph_rows)
+    exposure_events = [
+        _usage_event_with_stamp(event, raw_by_id=raw_by_id, graph_by_id=graph_by_id)
+        for event in usage_events
+        if string_value(event.get("signal_type")) == "exposure"
+    ]
+    citation_events = [
+        _usage_event_with_stamp(event, raw_by_id=raw_by_id, graph_by_id=graph_by_id)
+        for event in usage_events
+        if string_value(event.get("signal_type")) == "citation"
+    ]
+    return {
+        "deployment": dict(deployment),
+        "usage": {
+            "exposure_events": exposure_events,
+            "citation_events": citation_events,
+            "cited_decay_score_advantage": _live_cited_decay_score_advantage(graph_rows),
+        },
+        "checks": [
+            {
+                "name": "live-usage-loop-observer",
+                "status": "PASS",
+                "surfaces": list(DOGFOOD_REQUIRED_SURFACES),
+            }
+        ],
+    }
+
+
 def validate_usage_loop_receipt(receipt: dict[str, Any]) -> list[str]:
     failures: list[str] = []
     if receipt.get("schema_version") != RECEIPT_SCHEMA_VERSION:
@@ -430,6 +495,116 @@ def _cited_decay_score_advantage(usage_evidence: dict[str, Any]) -> float:
     ):
         return float(cited_score) - float(uncited_score)
     return 0.0
+
+
+def _rows_by_uuid(rows: Sequence[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        row_uuid: row
+        for row in rows
+        if (row_uuid := string_value(row.get("uuid") or row.get("id")))
+    }
+
+
+def _usage_event_with_stamp(
+    event: dict[str, Any],
+    *,
+    raw_by_id: dict[str, dict[str, Any]],
+    graph_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    item_kind = string_value(event.get("item_kind"))
+    item_id = string_value(event.get("item_id"))
+    signal_type = string_value(event.get("signal_type"))
+    stamp = raw_by_id.get(item_id) if item_kind == "raw_capture" else graph_by_id.get(item_id, {})
+    observed = {
+        "memory_id": item_id,
+        "item_kind": item_kind,
+        "signal_type": signal_type,
+        "source_surface": string_value(event.get("source_surface")),
+        "event_at": string_value(event.get("event_at")),
+        "dedupe_key": _usage_event_dedupe_key(event),
+        "stored": True,
+    }
+    if signal_type == "exposure":
+        observed["last_recalled_at"] = string_value(stamp.get("last_recalled_at"))
+    elif signal_type == "citation":
+        observed["last_used_at"] = string_value(stamp.get("last_used_at"))
+    return observed
+
+
+def _usage_event_dedupe_key(event: dict[str, Any]) -> str:
+    return ":".join(
+        (
+            string_value(event.get("session_key")),
+            string_value(event.get("message_key")),
+            string_value(event.get("source_surface")),
+            string_value(event.get("item_kind")),
+            string_value(event.get("item_id")),
+            string_value(event.get("signal_type")),
+        )
+    )
+
+
+def _live_cited_decay_score_advantage(graph_rows: Sequence[dict[str, Any]]) -> float:
+    now = datetime.now(UTC)
+    cited_scores: list[float] = []
+    uncited_scores: list[float] = []
+    for row in graph_rows:
+        entity = _decay_entity(row, now=now)
+        score = _priority_decay_score(
+            entity,
+            now=now,
+            recency_half_life_days=RECENCY_HALF_LIFE_DAYS,
+        )
+        if _has_citation_usage(entity.metadata):
+            cited_scores.append(score)
+        else:
+            uncited_scores.append(score)
+    if not cited_scores or not uncited_scores:
+        return 0.0
+    return round(max(cited_scores) - min(uncited_scores), 6)
+
+
+def _decay_entity(row: dict[str, Any], *, now: datetime) -> SimpleNamespace:
+    metadata = _row_metadata(row)
+    return SimpleNamespace(
+        id=string_value(row.get("uuid") or row.get("id")),
+        created_at=coerce_datetime(row.get("created_at")) or now,
+        metadata=metadata,
+    )
+
+
+def _row_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    for field in ("metadata", "attributes"):
+        value = row.get(field)
+        if isinstance(value, dict):
+            metadata.update(value)
+    for field in (
+        "status",
+        "last_recalled_at",
+        "last_used_at",
+        "retrieval_count",
+        "citation_count",
+    ):
+        if row.get(field) is not None:
+            metadata[field] = row[field]
+    return metadata
+
+
+def _has_citation_usage(metadata: dict[str, Any]) -> bool:
+    return (
+        bool(string_value(metadata.get("last_used_at")))
+        or _int_metric(metadata.get("citation_count")) > 0
+    )
+
+
+def _int_metric(value: Any) -> int:
+    if isinstance(value, bool) or value is None:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _validate_receipt_checks(checks: Any) -> list[str]:
@@ -626,6 +801,40 @@ def run_dogfood_receipt(
     return 0 if not failures else 1
 
 
+def run_collect_dogfood_receipt(
+    deployment_path: Path,
+    *,
+    evidence_path: Path,
+    receipt_path: Path | None = DEFAULT_DOGFOOD_RECEIPT_PATH,
+    query_runner: DebugQueryRunner = run_sibyl_debug_query,
+    echo: Echo = _echo,
+) -> int:
+    try:
+        deployment = load_deployment_evidence(deployment_path)
+        evidence = collect_usage_loop_dogfood_evidence(
+            deployment,
+            query_runner=query_runner,
+        )
+    except (OSError, TypeError, json.JSONDecodeError, ValueError, RuntimeError) as exc:
+        echo(f"Usage loop dogfood collection failed: {exc}")
+        return 1
+
+    write_receipt(evidence, evidence_path)
+    receipt = build_usage_loop_dogfood_receipt(evidence)
+    failures = validate_usage_loop_dogfood_receipt(receipt)
+    if receipt_path is not None:
+        write_receipt(receipt, receipt_path)
+    status = "PASS" if not failures else "FAIL"
+    echo("Usage Loop Dogfood Collection")
+    echo(f"status: {status}")
+    echo(f"evidence: {display_path(evidence_path)}")
+    if receipt_path is not None:
+        echo(f"receipt: {display_path(receipt_path)}")
+    for failure in failures:
+        echo(f"- {failure}")
+    return 0 if not failures else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run focused usage-loop release-gate checks.")
     parser.add_argument(
@@ -644,6 +853,16 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_DOGFOOD_RECEIPT_PATH,
         help="Dogfood receipt path written when --dogfood-evidence is set.",
     )
+    parser.add_argument(
+        "--collect-dogfood-evidence",
+        type=Path,
+        help="Collect live dogfood evidence into this JSON path, then validate a receipt.",
+    )
+    parser.add_argument(
+        "--deployment-evidence",
+        type=Path,
+        help="JSON deployment provenance required by --collect-dogfood-evidence.",
+    )
     args = parser.parse_args(argv)
 
     if args.list:
@@ -653,6 +872,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.dogfood_evidence is not None:
         return run_dogfood_receipt(
             args.dogfood_evidence,
+            receipt_path=args.dogfood_receipt,
+        )
+    if args.collect_dogfood_evidence is not None:
+        if args.deployment_evidence is None:
+            _echo("--deployment-evidence is required with --collect-dogfood-evidence")
+            return 1
+        return run_collect_dogfood_receipt(
+            args.deployment_evidence,
+            evidence_path=args.collect_dogfood_evidence,
             receipt_path=args.dogfood_receipt,
         )
 
