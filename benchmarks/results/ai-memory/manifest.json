@@ -417,6 +417,69 @@
           ]
         }
       ]
+    },
+    {
+      "name": "doc-claim-gate",
+      "owner_wave": "W10",
+      "status": "blocking",
+      "profile": "product",
+      "blocking": true,
+      "metric_contracts": [
+        {
+          "metric": "unsupported_public_claim_count",
+          "mode": "receipt",
+          "required_receipt": "doc-claim-receipt.json",
+          "receipt_schema": "sibyl-doc-claim-receipt-v1",
+          "direction": "lower",
+          "threshold": 0,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "claim axis map",
+            "unsupported claim scan",
+            "approval boundary labels"
+          ]
+        },
+        {
+          "metric": "documented_claim_axis_count",
+          "mode": "receipt",
+          "required_receipt": "doc-claim-receipt.json",
+          "receipt_schema": "sibyl-doc-claim-receipt-v1",
+          "direction": "higher",
+          "threshold": 10,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "claim axis map",
+            "ontology invariant",
+            "TeamMemBench decision",
+            "cross-org boundary",
+            "OKF importer boundary"
+          ]
+        },
+        {
+          "metric": "v12_handoff_count",
+          "mode": "receipt",
+          "required_receipt": "doc-claim-receipt.json",
+          "receipt_schema": "sibyl-doc-claim-receipt-v1",
+          "direction": "higher",
+          "threshold": 8,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "v1.2 handoff ledger"
+          ]
+        },
+        {
+          "metric": "approval_boundary_label_count",
+          "mode": "receipt",
+          "required_receipt": "doc-claim-receipt.json",
+          "receipt_schema": "sibyl-doc-claim-receipt-v1",
+          "direction": "higher",
+          "threshold": 5,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "approval boundary labels"
+          ]
+        }
+      ]
     }
   ],
   "citable": [

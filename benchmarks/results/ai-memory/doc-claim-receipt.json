@@ -1,0 +1,259 @@
+{
+  "approval_boundaries": [
+    {
+      "locations": [
+        "docs/testing/longmemeval.md"
+      ],
+      "phrase": "no public QA-accuracy number is citable"
+    },
+    {
+      "locations": [
+        "docs/testing/longmemeval-v2.md"
+      ],
+      "phrase": "published V2 score"
+    },
+    {
+      "locations": [
+        "docs/testing/benchmark-methodology.md"
+      ],
+      "phrase": "warning-only"
+    },
+    {
+      "locations": [
+        "docs/testing/ai-memory-landscape.md"
+      ],
+      "phrase": "No public local-embedding variant"
+    },
+    {
+      "locations": [
+        "docs/testing/benchmark-methodology.md"
+      ],
+      "phrase": "self-reported by the agent"
+    }
+  ],
+  "budgets": {
+    "approval_boundary_label_count": 5,
+    "documented_claim_axis_count": 10,
+    "unsupported_public_claim_count": 0,
+    "v12_handoff_count": 8
+  },
+  "checks": [
+    {
+      "command": "internal doc-claim-scan",
+      "exit_code": 0,
+      "name": "doc-claim-scan",
+      "status": "PASS",
+      "surfaces": [
+        "claim axis map",
+        "unsupported claim scan",
+        "approval boundary labels",
+        "v1.2 handoff ledger",
+        "ontology invariant",
+        "TeamMemBench decision",
+        "cross-org boundary",
+        "OKF importer boundary"
+      ]
+    },
+    {
+      "command": "moon run docs:lint",
+      "exit_code": 0,
+      "name": "docs-claim-lint",
+      "status": "PASS",
+      "surfaces": [
+        "public docs formatting"
+      ]
+    },
+    {
+      "command": "moon run docs:build",
+      "exit_code": 0,
+      "name": "docs-claim-build",
+      "status": "PASS",
+      "surfaces": [
+        "public docs build"
+      ]
+    },
+    {
+      "command": "moon run bench-gate",
+      "exit_code": 0,
+      "name": "ai-memory-contracts",
+      "status": "PASS",
+      "surfaces": [
+        "manifest",
+        "release contract"
+      ]
+    }
+  ],
+  "docs": [
+    "docs/architecture/MARKETING_POSITIONING.md",
+    "docs/architecture/SIBYL_NORTHSTAR.md",
+    "docs/architecture/SIBYL_POST_1_0_ROADMAP.md",
+    "docs/architecture/retrieval-system.md",
+    "docs/testing/ai-memory-landscape.md",
+    "docs/testing/benchmark-methodology.md",
+    "docs/testing/longmemeval-v2.md",
+    "docs/testing/longmemeval.md"
+  ],
+  "fixture": "doc-claim-truth-up-v1",
+  "generated_at": "2026-07-04T00:02:17.054690+00:00",
+  "handoffs": [
+    {
+      "locations": [
+        "docs/architecture/SIBYL_POST_1_0_ROADMAP.md"
+      ],
+      "phrase": "Coalescence data model & reversibility"
+    },
+    {
+      "locations": [
+        "docs/architecture/SIBYL_POST_1_0_ROADMAP.md"
+      ],
+      "phrase": "Concurrent multi-writer consistency"
+    },
+    {
+      "locations": [
+        "docs/architecture/SIBYL_POST_1_0_ROADMAP.md"
+      ],
+      "phrase": "scale-load-gate"
+    },
+    {
+      "locations": [
+        "docs/architecture/SIBYL_POST_1_0_ROADMAP.md",
+        "docs/testing/benchmark-methodology.md"
+      ],
+      "phrase": "TeamMemBench"
+    },
+    {
+      "locations": [
+        "docs/architecture/SIBYL_POST_1_0_ROADMAP.md"
+      ],
+      "phrase": "Distillation pass"
+    },
+    {
+      "locations": [
+        "docs/architecture/SIBYL_POST_1_0_ROADMAP.md"
+      ],
+      "phrase": "Materialized memory-as-files"
+    },
+    {
+      "locations": [
+        "docs/architecture/SIBYL_POST_1_0_ROADMAP.md"
+      ],
+      "phrase": "Retroactive re-extraction loop"
+    },
+    {
+      "locations": [
+        "docs/architecture/SIBYL_POST_1_0_ROADMAP.md"
+      ],
+      "phrase": "OKF importer"
+    }
+  ],
+  "metrics": {
+    "approval_boundary_label_count": 5,
+    "documented_claim_axis_count": 10,
+    "unsupported_public_claim_count": 0,
+    "v12_handoff_count": 8
+  },
+  "requirements": [
+    {
+      "missing_phrases": [],
+      "name": "retrieval-recall-axis",
+      "path": "docs/testing/longmemeval.md",
+      "status": "PASS",
+      "surfaces": [
+        "retrieval recall",
+        "canonical LongMemEval-S receipt"
+      ]
+    },
+    {
+      "missing_phrases": [],
+      "name": "qa-accuracy-boundary",
+      "path": "docs/testing/longmemeval.md",
+      "status": "PASS",
+      "surfaces": [
+        "QA accuracy boundary",
+        "approval boundary labels"
+      ]
+    },
+    {
+      "missing_phrases": [],
+      "name": "longmemeval-v2-boundary",
+      "path": "docs/testing/longmemeval-v2.md",
+      "status": "PASS",
+      "surfaces": [
+        "LAFS Gain boundary",
+        "approval boundary labels"
+      ]
+    },
+    {
+      "missing_phrases": [],
+      "name": "cost-latency-axis",
+      "path": "docs/testing/benchmark-methodology.md",
+      "status": "PASS",
+      "surfaces": [
+        "cost and latency accounting",
+        "approval boundary labels"
+      ]
+    },
+    {
+      "missing_phrases": [],
+      "name": "local-embedding-boundary",
+      "path": "docs/testing/ai-memory-landscape.md",
+      "status": "PASS",
+      "surfaces": [
+        "local embedding boundary",
+        "approval boundary labels"
+      ]
+    },
+    {
+      "missing_phrases": [],
+      "name": "self-reported-citation-axis",
+      "path": "docs/testing/benchmark-methodology.md",
+      "status": "PASS",
+      "surfaces": [
+        "self-reported citation usage",
+        "approval boundary labels"
+      ]
+    },
+    {
+      "missing_phrases": [],
+      "name": "okf-importer-boundary",
+      "path": "docs/architecture/SIBYL_POST_1_0_ROADMAP.md",
+      "status": "PASS",
+      "surfaces": [
+        "OKF export boundary",
+        "OKF importer boundary"
+      ]
+    },
+    {
+      "missing_phrases": [],
+      "name": "cross-org-boundary",
+      "path": "docs/architecture/SIBYL_POST_1_0_ROADMAP.md",
+      "status": "PASS",
+      "surfaces": [
+        "cross-org boundary",
+        "approval boundary labels"
+      ]
+    },
+    {
+      "missing_phrases": [],
+      "name": "teammembench-dataset-decision",
+      "path": "docs/architecture/SIBYL_POST_1_0_ROADMAP.md",
+      "status": "PASS",
+      "surfaces": [
+        "TeamMemBench decision",
+        "v1.2 handoff ledger"
+      ]
+    },
+    {
+      "missing_phrases": [],
+      "name": "ontology-invariant",
+      "path": "docs/architecture/SIBYL_POST_1_0_ROADMAP.md",
+      "status": "PASS",
+      "surfaces": [
+        "ontology invariant",
+        "v1.2 handoff ledger"
+      ]
+    }
+  ],
+  "schema_version": "sibyl-doc-claim-receipt-v1",
+  "unsupported_claims": []
+}

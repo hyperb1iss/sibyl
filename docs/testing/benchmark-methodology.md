@@ -128,6 +128,14 @@ rows, it carries:
 Warning-only contracts, such as the initial cost-latency gate, are still evidence requirements. They
 become blocking only after the manifest has enough citable baselines to compare against.
 
+The W10 `doc-claim-gate` writes `benchmarks/results/ai-memory/doc-claim-receipt.json` with schema
+`sibyl-doc-claim-receipt-v1`. It keeps retrieval recall, QA accuracy, LongMemEval-V2 LAFS Gain,
+cost/latency, local-embedding runs, and self-reported citation usage as separate evidence axes. Docs
+may cite an axis only when the matching manifest contract has a citable receipt or when the text
+labels the axis as planned, warning-only, approval-bound, or deferred. Cost records use the
+accounting field `estimated_total_usd`; the cost-latency gate stays warning-only until the ledger
+has enough citable baselines for regression enforcement.
+
 ## Threshold Gates
 
 Saved runtime artifacts should go through `moon run bench-gate -- <report.json>` before they count
@@ -178,10 +186,12 @@ from that receipt across extraction, dream-cycle source selection, reflection, a
 fixtures.
 
 The W7 forgetting gate writes `benchmarks/results/ai-memory/forgetting-receipt.json` with schema
-`sibyl-forgetting-receipt-v2`. Its survival semantics are explicit: citation (`last_used_at`) is
-the strong reset, exposure (`last_recalled_at`) is a weighted slowdown, and legacy
-`last_accessed_at` remains compatible but cannot outrank an explicit citation timestamp. Public
-claims must keep cited, exposed-only, and untouched memories separate.
+`sibyl-forgetting-receipt-v2`. Its survival semantics are explicit: citation (`last_used_at`) is the
+strong reset, exposure (`last_recalled_at`) is a weighted slowdown, and legacy `last_accessed_at`
+remains compatible but cannot outrank an explicit citation timestamp. Public claims must keep cited,
+exposed-only, and untouched memories separate. Citation usage is self-reported by the agent or
+client and means "this memory informed an answer"; it is not an outcome-lift metric until
+TeamMemBench consumes task completion data in v1.2.
 
 `leak_count` is a per-case sentinel: forbidden item and forbidden term matches are reported
 separately, while the summary uses the larger of those two counts for each case so one leaked memory

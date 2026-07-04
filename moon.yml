@@ -238,6 +238,7 @@ tasks:
       - ~:adapter-ingest-gate-test
       - ~:large-corpus-rehearsal-test
       - ~:okf-export-gate-test
+      - ~:doc-claim-gate-test
       - ~:backup-restore-gate-test
       - ~:enterprise-readiness-evidence-test
       - ~:release-workflow-test
@@ -275,6 +276,7 @@ tasks:
       - ~:adapter-ingest-gate-test
       - ~:large-corpus-rehearsal-test
       - ~:okf-export-gate-test
+      - ~:doc-claim-gate-test
       - ~:backup-restore-gate-test
       - ~:enterprise-readiness-evidence-test
       - ~:release-workflow-test
@@ -1082,6 +1084,33 @@ tasks:
       - packages/python/sibyl-core/tests/test_okf_export.py
       - pyproject.toml
       - moon.yml
+
+  doc-claim-gate:
+    command: uv run python -m tools.trust.doc_claim_gate
+    inputs:
+      - tools/trust/doc_claim_gate.py
+      - docs/**/*.md
+      - docs/.vitepress/**/*
+      - benchmarks/results/ai-memory/**/*.json
+      - pyproject.toml
+      - moon.yml
+      - docs/moon.yml
+    outputs:
+      - benchmarks/results/ai-memory/doc-claim-receipt.json
+    options:
+      cache: false
+
+  doc-claim-gate-test:
+    command: uv run pytest tools/tests/test_doc_claim_gate.py -v
+    inputs:
+      - tools/trust/doc_claim_gate.py
+      - tools/tests/conftest.py
+      - tools/tests/test_doc_claim_gate.py
+      - docs/**/*.md
+      - benchmarks/results/ai-memory/**/*.json
+      - pyproject.toml
+      - moon.yml
+      - docs/moon.yml
 
   backup-restore-gate:
     command: uv run python -m tools.trust.backup_restore_gate

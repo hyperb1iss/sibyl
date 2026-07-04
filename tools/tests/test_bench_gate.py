@@ -1773,6 +1773,84 @@ def test_validate_ai_memory_manifest_accepts_usage_loop_receipt_contract(
     assert failures == []
 
 
+def test_validate_ai_memory_manifest_accepts_doc_claim_receipt_contract(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_ai_memory_manifest(tmp_path)
+    receipt_path = tmp_path / "doc-claim-receipt.json"
+    receipt_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "sibyl-doc-claim-receipt-v1",
+                "metrics": {
+                    "approval_boundary_label_count": 5,
+                    "documented_claim_axis_count": 10,
+                    "unsupported_public_claim_count": 0,
+                    "v12_handoff_count": 8,
+                },
+                "checks": [
+                    {
+                        "name": "doc-claim-scan",
+                        "status": "PASS",
+                        "surfaces": [
+                            "claim axis map",
+                            "unsupported claim scan",
+                            "approval boundary labels",
+                            "v1.2 handoff ledger",
+                            "ontology invariant",
+                            "TeamMemBench decision",
+                            "cross-org boundary",
+                            "OKF importer boundary",
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["gate_contracts"].append(
+        {
+            "name": "doc-claim-gate",
+            "owner_wave": "W10",
+            "status": "blocking",
+            "profile": "product",
+            "blocking": True,
+            "metric_contracts": [
+                {
+                    "metric": "unsupported_public_claim_count",
+                    "mode": "receipt",
+                    "required_receipt": "doc-claim-receipt.json",
+                    "receipt_schema": "sibyl-doc-claim-receipt-v1",
+                    "direction": "lower",
+                    "threshold": 0,
+                    "require_receipt_checks": True,
+                    "required_surfaces": [
+                        "claim axis map",
+                        "unsupported claim scan",
+                        "approval boundary labels",
+                    ],
+                },
+                {
+                    "metric": "v12_handoff_count",
+                    "mode": "receipt",
+                    "required_receipt": "doc-claim-receipt.json",
+                    "receipt_schema": "sibyl-doc-claim-receipt-v1",
+                    "direction": "higher",
+                    "threshold": 8,
+                    "require_receipt_checks": True,
+                    "required_surfaces": ["v1.2 handoff ledger"],
+                },
+            ],
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = eval_gate.validate_ai_memory_manifest(manifest_path)
+
+    assert failures == []
+
+
 def test_validate_ai_memory_manifest_rejects_required_receipt_check_failures(
     tmp_path: Path,
 ) -> None:
