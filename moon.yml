@@ -549,6 +549,7 @@ tasks:
       - apps/cli/pyproject.toml
       - .github/workflows/release.yml
       - .github/workflows/publish.yml
+      - .github/workflows/publish-dogfood-images.yml
       - moon.yml
 
   python-package-build:

@@ -1,0 +1,373 @@
+name: Publish Dogfood Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Dogfood Docker tag to publish (for example, 1.1.0-rc.1)"
+        required: true
+        type: string
+      ref:
+        description: "Git ref or SHA to build. Defaults to the dispatch SHA."
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: "Dry run (build but don't publish)"
+        required: false
+        type: boolean
+        default: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  gate:
+    name: "◇ Dogfood Image Gate"
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    outputs:
+      image_tag: ${{ steps.version.outputs.image_tag }}
+      source_sha: ${{ steps.source.outputs.sha }}
+      source_created: ${{ steps.source.outputs.created }}
+    steps:
+      - name: "◆ Checkout"
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: "△ Validate dogfood tag"
+        id: version
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$IMAGE_TAG" =~ ^1\.1\.[0-9]+-rc\.[0-9]+$ ]]; then
+            echo "::error::Dogfood image tag must look like 1.1.0-rc.1"
+            exit 1
+          fi
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: "△ Record source revision"
+        id: source
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "created=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: "◇ Verify required v1.1 commits"
+        run: |
+          set -euo pipefail
+          required=(
+            36094084 # W6A usage-event schema/service foundation
+            e59e9be1 # W6B exposure stamping on read surfaces
+            b9e3ade8 # W6C citation surfaces and usage-loop fixture gate
+            6bf8881f # W6D usage-ordered consolidation input
+            4bf80afd # W7A usage-aware temporal ranking and forgetting gate
+            2095b616 # W7C exposure-vs-citation survival semantics
+            dcb8d340 # W8 team-share authorization hardening
+            98d9043c # W9 cached OKF workflow exports
+            f74f23f4 # W10 local claim gate
+          )
+          for commit in "${required[@]}"; do
+            if ! git merge-base --is-ancestor "$commit" HEAD; then
+              echo "::error::Dogfood image source is missing required commit $commit"
+              exit 1
+            fi
+          done
+
+      - name: "◇ Install system dependencies"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt-dev
+
+      - name: "◇ Setup moonrepo toolchain"
+        uses: moonrepo/setup-toolchain@v0.6
+        with:
+          auto-install: true
+          auto-setup: true
+          cache-version: dogfood-image-gate-v1
+
+      - name: "◇ Verify toolchain"
+        run: |
+          chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
+          chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
+          moon --version
+          proto --version
+          uv --version
+
+      - name: "◇ Install Node dependencies"
+        run: cd apps/web && pnpm install --frozen-lockfile
+
+      - name: "◇ Sync Python workspace"
+        run: uv sync --locked --all-packages
+
+      - name: "◇ Run RC gate bundle"
+        run: moon run :check
+
+  docker-build:
+    name: "△ Docker: ${{ matrix.image }} (${{ matrix.platform }})"
+    needs: gate
+    runs-on: ${{ matrix.platform == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [api, web]
+        platform: [amd64, arm64]
+    steps:
+      - name: "◆ Checkout"
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.gate.outputs.source_sha }}
+
+      - name: "◇ Setup Docker Buildx"
+        uses: docker/setup-buildx-action@v4
+
+      - name: "◇ Login to GHCR"
+        if: ${{ !inputs.dry_run }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "△ Build & push by digest"
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/${{ matrix.image }}/Dockerfile
+          platforms: linux/${{ matrix.platform }}
+          labels: |
+            org.opencontainers.image.title=sibyl-${{ matrix.image }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ needs.gate.outputs.source_sha }}
+            org.opencontainers.image.version=${{ needs.gate.outputs.image_tag }}
+            org.opencontainers.image.created=${{ needs.gate.outputs.source_created }}
+            org.opencontainers.image.vendor=hyperb1iss
+            org.opencontainers.image.licenses=MIT
+          outputs: >-
+            type=image,name=${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-${{
+            matrix.image }},push-by-digest=true,name-canonical=true,push=${{ !inputs.dry_run }}
+          cache-from: type=gha,scope=dogfood-${{ matrix.image }}-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=dogfood-${{ matrix.image }}-${{ matrix.platform }}
+
+      - name: "△ Export digest"
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: "► Upload digest"
+        if: ${{ !inputs.dry_run }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: dogfood-digests-${{ matrix.image }}-${{ matrix.platform }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  docker-merge:
+    name: "► Docker: Merge ${{ matrix.image }}"
+    needs: [gate, docker-build]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        image: [api, web]
+    steps:
+      - name: "► Download digests"
+        uses: actions/download-artifact@v8
+        with:
+          path: /tmp/digests
+          pattern: dogfood-digests-${{ matrix.image }}-*
+          merge-multiple: true
+
+      - name: "◇ Setup Docker Buildx"
+        uses: docker/setup-buildx-action@v4
+
+      - name: "◇ Login to GHCR"
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "► Create manifest list"
+        working-directory: /tmp/digests
+        env:
+          IMAGE: ${{ matrix.image }}
+          IMAGE_TAG: ${{ needs.gate.outputs.image_tag }}
+          REPO: ${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}
+          SOURCE_SHA: ${{ needs.gate.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          refs=()
+          for digest in *; do
+            refs+=("${REPO}@sha256:${digest}")
+          done
+          docker buildx imagetools create \
+            -t "${REPO}:${IMAGE_TAG}" \
+            "${refs[@]}"
+
+          final_digest="$(
+            docker buildx imagetools inspect "${REPO}:${IMAGE_TAG}" \
+              --format '{{json .Manifest.Digest}}' \
+              | tr -d '"'
+          )"
+          test -n "$final_digest"
+          mkdir -p image-receipts
+          RECEIPT="image-receipts/sibyl-${IMAGE}-${IMAGE_TAG}-image-receipt.json"
+          IMAGE="$IMAGE" IMAGE_TAG="$IMAGE_TAG" REPO="$REPO" \
+            DIGEST="$final_digest" SOURCE_SHA="$SOURCE_SHA" RECEIPT="$RECEIPT" \
+            python - <<'PY'
+          import json
+          import os
+          from datetime import UTC, datetime
+          from pathlib import Path
+
+          payload = {
+              "schema_version": "sibyl-dogfood-image-receipt-v1",
+              "status": "PASS",
+              "image": os.environ["IMAGE"],
+              "repository": os.environ["REPO"],
+              "tag": os.environ["IMAGE_TAG"],
+              "digest": os.environ["DIGEST"],
+              "image_ref": f'{os.environ["REPO"]}@{os.environ["DIGEST"]}',
+              "source_revision": os.environ["SOURCE_SHA"],
+              "workflow_run_id": os.environ["GITHUB_RUN_ID"],
+              "workflow_sha": os.environ["GITHUB_SHA"],
+              "created_at": datetime.now(UTC).isoformat(),
+          }
+          Path(os.environ["RECEIPT"]).write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: "△ Inspect image"
+        env:
+          REPO: ${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}
+          IMAGE_TAG: ${{ needs.gate.outputs.image_tag }}
+        run: docker buildx imagetools inspect "${REPO}:${IMAGE_TAG}"
+
+      - name: "► Upload image receipt"
+        uses: actions/upload-artifact@v7
+        with:
+          name: sibyl-${{ matrix.image }}-${{ needs.gate.outputs.image_tag }}-image-receipt
+          path: image-receipts/sibyl-${{ matrix.image }}-${{ needs.gate.outputs.image_tag }}-image-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+  deployment-receipt:
+    name: "◆ Dogfood Image Receipt"
+    needs: [gate, docker-merge]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: "► Download image receipts"
+        uses: actions/download-artifact@v8
+        with:
+          path: image-receipts
+          pattern: sibyl-*-${{ needs.gate.outputs.image_tag }}-image-receipt
+          merge-multiple: true
+
+      - name: "◇ Build deployment receipt"
+        env:
+          IMAGE_TAG: ${{ needs.gate.outputs.image_tag }}
+          REQUIRED_SOURCE_COMMITS: >-
+            36094084 e59e9be1 b9e3ade8 6bf8881f 4bf80afd 2095b616
+            dcb8d340 98d9043c f74f23f4
+          SOURCE_SHA: ${{ needs.gate.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from datetime import UTC, datetime
+          from pathlib import Path
+
+          receipts = {}
+          for path in Path("image-receipts").glob("*.json"):
+              payload = json.loads(path.read_text(encoding="utf-8"))
+              receipts[payload["image"]] = payload
+
+          expected = {"api", "web"}
+          missing = sorted(expected - receipts.keys())
+          if missing:
+              raise SystemExit(f"missing image receipts: {missing}")
+
+          source_revision = os.environ["SOURCE_SHA"]
+          required_commits = os.environ["REQUIRED_SOURCE_COMMITS"].split()
+          image_digests = {
+              "api": receipts["api"]["digest"],
+              "web": receipts["web"]["digest"],
+          }
+          deployment = {
+              "version": os.environ["IMAGE_TAG"],
+              "expected_version": os.environ["IMAGE_TAG"],
+              "target_version": os.environ["IMAGE_TAG"],
+              "source_revision": source_revision,
+              "source_commits": [source_revision, *required_commits],
+              "required_source_commits": required_commits,
+              "image_digests": image_digests,
+              "expected_image_digests": image_digests,
+          }
+          payload = {
+              "schema_version": "sibyl-dogfood-deployment-image-receipt-v1",
+              "status": "PASS",
+              **deployment,
+              "deployment": deployment,
+              "api": {
+                  "image": receipts["api"]["repository"],
+                  "digest": receipts["api"]["digest"],
+                  "source_revision": receipts["api"]["source_revision"],
+              },
+              "web": {
+                  "image": receipts["web"]["repository"],
+                  "digest": receipts["web"]["digest"],
+                  "source_revision": receipts["web"]["source_revision"],
+              },
+              "workflow_run_id": os.environ["GITHUB_RUN_ID"],
+              "workflow_sha": os.environ["GITHUB_SHA"],
+              "created_at": datetime.now(UTC).isoformat(),
+          }
+          Path("sibyl-dogfood-deployment-image-receipt.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: "► Upload deployment receipt"
+        uses: actions/upload-artifact@v7
+        with:
+          name: sibyl-dogfood-deployment-${{ needs.gate.outputs.image_tag }}-receipt
+          path: sibyl-dogfood-deployment-image-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: "► Summary"
+        run: |
+          {
+            echo "## Dogfood images ${{ needs.gate.outputs.image_tag }}"
+            echo ""
+            echo "- Source: \`${{ needs.gate.outputs.source_sha }}\`"
+            echo "- API: \`ghcr.io/${{ github.repository_owner }}/sibyl-api:${{ needs.gate.outputs.image_tag }}\`"
+            echo "- Web: \`ghcr.io/${{ github.repository_owner }}/sibyl-web:${{ needs.gate.outputs.image_tag }}\`"
+            echo "- Receipt: \`sibyl-dogfood-deployment-image-receipt.json\`"
+          } >> "$GITHUB_STEP_SUMMARY"

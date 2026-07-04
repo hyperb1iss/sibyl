@@ -157,6 +157,10 @@ def _publish_workflow() -> str:
     return (REPO_ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8")
 
 
+def _dogfood_image_workflow() -> str:
+    return (REPO_ROOT / ".github/workflows/publish-dogfood-images.yml").read_text(encoding="utf-8")
+
+
 def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     workflow = _publish_workflow()
 
@@ -262,6 +266,55 @@ def test_publish_workflow_summary_links_all_package_channels() -> None:
 
     assert "[sibyld](https://pypi.org/project/sibyld/" in workflow
     assert "[sibyl](https://aur.archlinux.org/packages/sibyl)" in workflow
+
+
+def test_dogfood_image_workflow_is_docker_only_and_rc_scoped() -> None:
+    workflow = _dogfood_image_workflow()
+
+    assert "Publish Dogfood Images" in workflow
+    assert "image_tag:" in workflow
+    assert r"^1\.1\.[0-9]+-rc\.[0-9]+$" in workflow
+    assert "ghcr.io/${{ github.repository_owner }}/sibyl-api" in workflow
+    assert "ghcr.io/${{ github.repository_owner }}/sibyl-web" in workflow
+    assert "moon run :check" in workflow
+    assert "moon run python-package-build" not in workflow
+    assert "gh-action-pypi-publish" not in workflow
+    assert "homebrew_formula.py" not in workflow
+    assert "aur_pkgbuild.py" not in workflow
+    assert '-t "${REPO}:latest"' not in workflow
+    assert "make_latest" not in workflow
+    assert "softprops/action-gh-release" not in workflow
+
+
+def test_dogfood_image_workflow_records_deployment_provenance() -> None:
+    workflow = _dogfood_image_workflow()
+
+    required_commits = (
+        "36094084",
+        "e59e9be1",
+        "b9e3ade8",
+        "6bf8881f",
+        "4bf80afd",
+        "2095b616",
+        "dcb8d340",
+        "98d9043c",
+        "f74f23f4",
+    )
+    assert all(commit in workflow for commit in required_commits)
+    assert 'git merge-base --is-ancestor "$commit" HEAD' in workflow
+    assert "org.opencontainers.image.revision=${{ needs.gate.outputs.source_sha }}" in workflow
+    assert "org.opencontainers.image.version=${{ needs.gate.outputs.image_tag }}" in workflow
+    assert "sibyl-dogfood-image-receipt-v1" in workflow
+    assert "sibyl-dogfood-deployment-image-receipt-v1" in workflow
+    assert "source_revision" in workflow
+    assert "source_commits" in workflow
+    assert "required_source_commits" in workflow
+    assert "image_digests" in workflow
+    assert "expected_image_digests" in workflow
+    assert "expected_version" in workflow
+    assert '"deployment": deployment' in workflow
+    assert "dogfood-digests-${{ matrix.image }}-${{ matrix.platform }}" in workflow
+    assert "sibyl-dogfood-deployment-${{ needs.gate.outputs.image_tag }}-receipt" in workflow
 
 
 def test_install_script_defaults_to_server_ui_story() -> None:
