@@ -927,8 +927,8 @@ Your directory is not linked. Run `sibyl context` — if `Project: none`, link i
 | `sibyl task add "..."`              | `sibyl task create --title "..."`                |
 | `sibyl task list --todo`            | `sibyl task list --status todo`                  |
 | `sibyl task create -t "..."`        | `sibyl task create --title "..."` (no `-t` flag) |
-| `sibyl task update --learnings`     | `sibyl task complete --learnings` (!)            |
-| `sibyl task note` for completion    | `sibyl task complete --learnings` (!)            |
+| `sibyl task update --learnings`     | `sibyl task complete <id> --learnings "..."` (!) |
+| `sibyl task note` for completion    | `sibyl task complete <id> --learnings "..."` (!) |
 | `sibyl add note "content..."`       | `sibyl add "Title" "content..." --type note`     |
 | `sibyl search ... 2>/dev/null`      | `sibyl search ...` (never suppress stderr)       |
 | `sibyl search ... \|\| true`        | `sibyl search ...` (let errors surface)          |
