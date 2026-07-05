@@ -109,7 +109,7 @@ function GradientSpinner({ size = 'md' }: { size: SpinnerSize }) {
       style={{
         backgroundClip: 'padding-box, border-box',
         backgroundOrigin: 'padding-box, border-box',
-        borderImage: 'linear-gradient(135deg, #e135ff, #80ffea, #ff6ac1) 1',
+        borderImage: 'linear-gradient(135deg, var(--sc-purple), var(--sc-cyan), var(--sc-coral)) 1',
       }}
       role="status"
       aria-label="Loading"

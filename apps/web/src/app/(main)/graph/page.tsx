@@ -24,6 +24,7 @@ import {
   X,
 } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/spinner';
+import { ErrorState } from '@/components/ui/tooltip';
 import type {
   GraphResolution,
   HierarchicalCluster,
@@ -868,7 +869,7 @@ function GraphPageContent() {
   const {
     data,
     isLoading,
-    error: _error,
+    error: graphError,
   } = useHierarchicalGraph({
     max_nodes: GRAPH_DEFAULTS.MAX_NODES,
     max_edges: GRAPH_DEFAULTS.MAX_EDGES,
@@ -1629,8 +1630,26 @@ function GraphPageContent() {
             </div>
           )}
 
+          {/* Error state */}
+          {!isLoading && graphError && graphData.nodes.length === 0 && (
+            <div
+              className="flex items-center justify-center h-full"
+              style={{ backgroundColor: colors.bg }}
+              suppressHydrationWarning
+            >
+              <ErrorState
+                title="Couldn't load the graph"
+                message={
+                  graphError instanceof Error
+                    ? graphError.message
+                    : 'The graph request failed. Check your connection and try again.'
+                }
+              />
+            </div>
+          )}
+
           {/* Empty state */}
-          {!isLoading && graphData.nodes.length === 0 && (
+          {!isLoading && !graphError && graphData.nodes.length === 0 && (
             <div
               className="flex items-center justify-center h-full"
               style={{ backgroundColor: colors.bg }}
