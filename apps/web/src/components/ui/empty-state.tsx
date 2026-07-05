@@ -227,7 +227,7 @@ export function GraphEmptyState() {
       title="Graph is empty"
       description="Add some knowledge to see your connections visualized. Entities and their relationships will appear here."
       actions={[
-        { label: 'Add Knowledge', href: '/entities' },
+        { label: 'Add Knowledge', href: '/memory' },
         { label: 'Browse Entities', href: '/entities', variant: 'secondary' },
       ]}
     />
