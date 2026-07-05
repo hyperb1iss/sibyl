@@ -1,34 +1,21 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { SettingsPageHeader } from '@/components/settings/primitives';
 import { Button, IconButton } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { Check, Edit, Plus, Trash, User, Users } from '@/components/ui/icons';
+import { Check, Edit, Plus, Trash, Users } from '@/components/ui/icons';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Spinner } from '@/components/ui/spinner';
 import {
   useCreateOrg,
   useDeleteOrg,
   useMe,
-  useOrgMembers,
   useOrgs,
-  useRemoveOrgMember,
   useSwitchOrg,
   useUpdateOrg,
-  useUpdateOrgMemberRole,
 } from '@/lib/hooks';
-
-const ROLES = ['owner', 'admin', 'member', 'viewer'] as const;
-const NON_OWNER_ROLES = ['admin', 'member', 'viewer'] as const;
 
 function OrgSkeleton() {
   return (
@@ -109,141 +96,6 @@ function CreateOrgForm({ onSuccess, onCancel }: CreateOrgFormProps) {
   );
 }
 
-interface OrgMembersListProps {
-  slug: string;
-  currentUserId: string;
-  userRole: string | null;
-}
-
-function OrgMembersList({ slug, currentUserId, userRole }: OrgMembersListProps) {
-  const { data, isLoading } = useOrgMembers(slug);
-  const updateRole = useUpdateOrgMemberRole();
-  const removeMember = useRemoveOrgMember();
-  const canManage = userRole === 'owner' || userRole === 'admin';
-  const canManageOwnerRoles = userRole === 'owner';
-  const [pendingRemove, setPendingRemove] = useState<{ id: string; name: string } | null>(null);
-
-  const handleRoleChange = async (userId: string, newRole: string) => {
-    try {
-      await updateRole.mutateAsync({ slug, userId, role: newRole });
-      toast.success('Role updated');
-    } catch {
-      toast.error('Failed to update role');
-    }
-  };
-
-  const handleConfirmRemove = async () => {
-    if (!pendingRemove) return;
-    try {
-      await removeMember.mutateAsync({ slug, userId: pendingRemove.id });
-      toast.success('Member removed');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to remove member');
-    } finally {
-      setPendingRemove(null);
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center p-4">
-        <Spinner size="sm" />
-      </div>
-    );
-  }
-
-  if (!data?.members.length) {
-    return <p className="text-sc-fg-muted text-sm p-4">No members found.</p>;
-  }
-
-  return (
-    <div className="divide-y divide-sc-fg-subtle/10">
-      {data.members.map(member => (
-        <div key={member.user.id} className="flex items-center gap-3 py-3 px-1">
-          {member.user.avatar_url ? (
-            <img
-              src={member.user.avatar_url}
-              alt=""
-              className="w-8 h-8 rounded-full border border-sc-fg-subtle/20"
-            />
-          ) : (
-            <div className="w-8 h-8 rounded-full bg-sc-bg-highlight flex items-center justify-center">
-              <User width={14} height={14} className="text-sc-fg-muted" />
-            </div>
-          )}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-sc-fg-primary truncate">
-              {member.user.name || member.user.email || 'Unknown'}
-              {member.user.id === currentUserId && (
-                <span className="ml-2 text-xs text-sc-purple">(you)</span>
-              )}
-            </p>
-            <p className="text-xs text-sc-fg-muted truncate">{member.user.email}</p>
-          </div>
-          {canManage &&
-          member.user.id !== currentUserId &&
-          (canManageOwnerRoles || member.role !== 'owner') ? (
-            <div className="flex items-center gap-2">
-              <Select
-                value={member.role}
-                onValueChange={value => handleRoleChange(member.user.id, value)}
-              >
-                <SelectTrigger
-                  className="h-8 min-w-[120px] py-1 text-xs"
-                  aria-label={`Role for ${member.user.name || member.user.email || 'member'}`}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(canManageOwnerRoles ? ROLES : NON_OWNER_ROLES).map(role => (
-                    <SelectItem key={role} value={role} className="capitalize">
-                      {role}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <IconButton
-                icon={<Trash width={14} height={14} />}
-                label={`Remove ${member.user.name || 'member'}`}
-                size="sm"
-                variant="ghost"
-                onClick={() =>
-                  setPendingRemove({
-                    id: member.user.id,
-                    name: member.user.name || member.user.email || 'this member',
-                  })
-                }
-                className="text-sc-red hover:text-sc-red"
-              />
-            </div>
-          ) : (
-            <span className="text-xs text-sc-fg-muted capitalize px-2 py-1 bg-sc-bg-highlight rounded-full">
-              {member.role}
-            </span>
-          )}
-        </div>
-      ))}
-
-      <ConfirmDialog
-        open={!!pendingRemove}
-        onOpenChange={open => {
-          if (!open) setPendingRemove(null);
-        }}
-        title="Remove member?"
-        description={
-          pendingRemove
-            ? `${pendingRemove.name} will lose access to this organization's knowledge graph.`
-            : undefined
-        }
-        confirmLabel="Remove"
-        variant="danger"
-        loading={removeMember.isPending}
-        onConfirm={handleConfirmRemove}
-      />
-    </div>
-  );
-}
-
 interface OrgCardProps {
   org: {
     id: string;
@@ -253,12 +105,10 @@ interface OrgCardProps {
     role: string | null;
   };
   isCurrent: boolean;
-  currentUserId: string;
 }
 
-function OrgCard({ org, isCurrent, currentUserId }: OrgCardProps) {
+function OrgCard({ org, isCurrent }: OrgCardProps) {
   const [isEditing, setIsEditing] = useState(false);
-  const [showMembers, setShowMembers] = useState(false);
   const [editName, setEditName] = useState(org.name);
   const [editSlug, setEditSlug] = useState(org.slug);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -400,10 +250,13 @@ function OrgCard({ org, isCurrent, currentUserId }: OrgCardProps) {
             </>
           ) : (
             <>
-              <Button variant="ghost" size="sm" onClick={() => setShowMembers(!showMembers)}>
+              <Link
+                href="/settings/teams"
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-sc-fg-muted transition-colors hover:bg-sc-bg-highlight hover:text-sc-fg-primary"
+              >
                 <Users width={14} height={14} />
                 Members
-              </Button>
+              </Link>
               {canEdit && (
                 <IconButton
                   icon={<Edit width={14} height={14} />}
@@ -427,13 +280,6 @@ function OrgCard({ org, isCurrent, currentUserId }: OrgCardProps) {
           )}
         </div>
       </div>
-
-      {/* Members panel */}
-      {showMembers && (
-        <div className="mt-3 pt-3 border-t border-sc-fg-subtle/10">
-          <OrgMembersList slug={org.slug} currentUserId={currentUserId} userRole={org.role} />
-        </div>
-      )}
 
       <ConfirmDialog
         open={confirmDelete}
@@ -526,12 +372,7 @@ export default function OrganizationsPage() {
       ) : (
         <div className="space-y-4">
           {orgs.map(org => (
-            <OrgCard
-              key={org.id}
-              org={org}
-              isCurrent={org.id === currentOrgId}
-              currentUserId={me?.user?.id || ''}
-            />
+            <OrgCard key={org.id} org={org} isCurrent={org.id === currentOrgId} />
           ))}
         </div>
       )}
