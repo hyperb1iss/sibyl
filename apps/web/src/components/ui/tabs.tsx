@@ -78,7 +78,7 @@ const TabsTrigger = forwardRef<
       /* Pills variant */
       [div[data-variant=pills]_&]:rounded-lg
       [div[data-variant=pills]_&]:data-[state=active]:bg-sc-purple
-      [div[data-variant=pills]_&]:data-[state=active]:text-white
+      [div[data-variant=pills]_&]:data-[state=active]:text-sc-on-accent
       [div[data-variant=pills]_&]:data-[state=active]:shadow-sm
 
       /* Enclosed variant */

@@ -1,15 +1,21 @@
 'use client';
 
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 import {
+  AlertTriangle,
+  BarChart3,
   Check,
+  CheckCircle2,
   Cube,
   Database,
   Flash,
   Globe,
   KanbanBoard,
   List,
+  PlusCircle,
   Search,
+  WifiOff,
 } from '@/components/ui/icons';
 
 interface EmptyStateAction {
@@ -64,7 +70,7 @@ export function EnhancedEmptyState({
           {actions.map(action => {
             const isPrimary = action.variant !== 'secondary';
             const className = isPrimary
-              ? 'px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg font-medium transition-colors'
+              ? 'px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-sc-on-accent rounded-lg font-medium transition-colors'
               : 'px-4 py-2 bg-sc-bg-highlight hover:bg-sc-bg-elevated text-sc-fg-muted rounded-lg transition-colors';
 
             if (action.href) {
@@ -262,5 +268,122 @@ export function EpicsEmptyState({
         { label: 'View Tasks', href: '/tasks', variant: 'secondary' },
       ]}
     />
+  );
+}
+
+// Basic empty state for when there's no data - with personality.
+// (Relocated from tooltip.tsx; tooltip.tsx re-exports these for compatibility.)
+interface EmptyStateProps {
+  icon?: ReactNode;
+  title: string;
+  description?: string;
+  action?: ReactNode;
+  variant?: 'default' | 'search' | 'data' | 'create';
+}
+
+const EMPTY_STATE_DEFAULTS = {
+  search: {
+    icon: <Search width={48} height={48} className="text-sc-cyan" />,
+    floatingClass: 'animate-float',
+  },
+  data: {
+    icon: <BarChart3 width={48} height={48} className="text-sc-purple" />,
+    floatingClass: 'animate-wiggle',
+  },
+  create: {
+    icon: <PlusCircle width={48} height={48} className="text-sc-yellow" />,
+    floatingClass: 'animate-bounce-in',
+  },
+  default: {
+    icon: <Cube width={48} height={48} className="text-sc-coral" />,
+    floatingClass: 'animate-float',
+  },
+};
+
+export function EmptyState({
+  icon,
+  title,
+  description,
+  action,
+  variant = 'default',
+}: EmptyStateProps) {
+  const defaults = EMPTY_STATE_DEFAULTS[variant];
+  const displayIcon = icon ?? defaults.icon;
+
+  return (
+    <div className="text-center py-16 animate-fade-in">
+      {displayIcon && (
+        <div className={`text-6xl mb-4 opacity-80 ${defaults.floatingClass}`}>{displayIcon}</div>
+      )}
+      <p className="text-sc-fg-muted text-lg font-medium">{title}</p>
+      {description && (
+        <p className="text-sc-fg-subtle text-sm mt-2 max-w-md mx-auto">{description}</p>
+      )}
+      {action && <div className="mt-6 animate-slide-up">{action}</div>}
+    </div>
+  );
+}
+
+// Error state component - friendly and helpful
+interface ErrorStateProps {
+  title?: string;
+  message: string;
+  action?: ReactNode;
+  variant?: 'error' | 'warning' | 'offline';
+}
+
+const ERROR_VARIANTS = {
+  error: {
+    icon: <AlertTriangle width={32} height={32} className="text-sc-red" />,
+    title: 'Oops, something went sideways',
+    color: 'text-sc-red',
+    iconClass: 'animate-wiggle',
+  },
+  warning: {
+    icon: <Flash width={32} height={32} className="text-sc-yellow" />,
+    title: 'Heads up',
+    color: 'text-sc-yellow',
+    iconClass: 'animate-pulse',
+  },
+  offline: {
+    icon: <WifiOff width={32} height={32} className="text-sc-coral" />,
+    title: 'Connection lost',
+    color: 'text-sc-coral',
+    iconClass: 'animate-float',
+  },
+};
+
+export function ErrorState({ title, message, action, variant = 'error' }: ErrorStateProps) {
+  const variantConfig = ERROR_VARIANTS[variant];
+  const displayTitle = title ?? variantConfig.title;
+
+  return (
+    <div className="text-center py-12 animate-fade-in">
+      <div className={`text-4xl mb-4 ${variantConfig.iconClass}`}>{variantConfig.icon}</div>
+      <p className={`text-lg font-medium ${variantConfig.color}`}>{displayTitle}</p>
+      <p className="text-sc-fg-muted text-sm mt-1 max-w-md mx-auto">{message}</p>
+      {action && <div className="mt-4 animate-slide-up">{action}</div>}
+    </div>
+  );
+}
+
+// Success celebration component
+interface SuccessStateProps {
+  title: string;
+  message?: string;
+  action?: ReactNode;
+  celebratory?: boolean;
+}
+
+export function SuccessState({ title, message, action, celebratory = true }: SuccessStateProps) {
+  return (
+    <div className="text-center py-12 animate-bounce-in">
+      <div className={`mb-4 flex justify-center ${celebratory ? 'animate-glow-pulse' : ''}`}>
+        <CheckCircle2 width={48} height={48} className="text-sc-green" />
+      </div>
+      <p className="text-sc-green text-xl font-semibold gradient-text">{title}</p>
+      {message && <p className="text-sc-fg-muted text-sm mt-2 max-w-md mx-auto">{message}</p>}
+      {action && <div className="mt-6 animate-slide-up">{action}</div>}
+    </div>
   );
 }

@@ -32,7 +32,7 @@ export default function NotFound() {
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
           <Link
             href="/"
-            className="inline-flex items-center justify-center px-6 py-3 rounded-xl bg-gradient-to-r from-sc-purple to-sc-purple/80 text-white font-medium transition-all hover:opacity-90 hover:scale-[0.98]"
+            className="inline-flex items-center justify-center px-6 py-3 rounded-xl bg-gradient-to-r from-sc-purple to-sc-purple/80 text-sc-on-accent font-medium transition-all hover:opacity-90 hover:scale-[0.98]"
           >
             Return to safety
           </Link>

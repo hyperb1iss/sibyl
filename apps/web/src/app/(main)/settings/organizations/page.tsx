@@ -27,8 +27,8 @@ import {
   useUpdateOrgMemberRole,
 } from '@/lib/hooks';
 
-const ROLES = ['owner', 'admin', 'member'] as const;
-const NON_OWNER_ROLES = ['admin', 'member'] as const;
+const ROLES = ['owner', 'admin', 'member', 'viewer'] as const;
+const NON_OWNER_ROLES = ['admin', 'member', 'viewer'] as const;
 
 function OrgSkeleton() {
   return (

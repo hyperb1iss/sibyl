@@ -241,7 +241,7 @@ function TasksPageContent() {
                           placeholder="Search tags..."
                           // biome-ignore lint/a11y/noAutofocus: focus the search when the menu opens
                           autoFocus
-                          className="w-full pl-7 pr-2 py-1.5 text-xs bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary placeholder:text-sc-fg-subtle focus-visible:outline-none focus-visible:border-sc-purple/50"
+                          className="w-full pl-7 pr-2 py-1.5 text-xs bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary placeholder:text-sc-fg-subtle focus-visible:outline-none focus-visible:border-sc-cyan focus-visible:ring-2 focus-visible:ring-sc-cyan/20"
                         />
                       </div>
                     </div>

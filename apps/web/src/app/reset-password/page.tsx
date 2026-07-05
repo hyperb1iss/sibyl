@@ -90,7 +90,7 @@ function ResetPasswordContent() {
                 </div>
                 <a
                   href="/login"
-                  className="flex w-full items-center justify-center rounded-lg bg-sc-purple px-4 py-2 text-sm font-medium text-white shadow-lg shadow-sc-purple/20 transition-all duration-200 hover:bg-sc-purple/80 hover:shadow-xl hover:shadow-sc-purple/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
+                  className="flex w-full items-center justify-center rounded-lg bg-sc-purple px-4 py-2 text-sm font-medium text-sc-on-accent shadow-lg shadow-sc-purple/20 transition-all duration-200 hover:bg-sc-purple/80 hover:shadow-xl hover:shadow-sc-purple/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                 >
                   Back to Sign In
                 </a>
@@ -102,7 +102,7 @@ function ResetPasswordContent() {
                 </div>
                 <a
                   href="/login?reset=complete"
-                  className="flex w-full items-center justify-center rounded-lg bg-sc-purple px-4 py-2 text-sm font-medium text-white shadow-lg shadow-sc-purple/20 transition-all duration-200 hover:bg-sc-purple/80 hover:shadow-xl hover:shadow-sc-purple/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
+                  className="flex w-full items-center justify-center rounded-lg bg-sc-purple px-4 py-2 text-sm font-medium text-sc-on-accent shadow-lg shadow-sc-purple/20 transition-all duration-200 hover:bg-sc-purple/80 hover:shadow-xl hover:shadow-sc-purple/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
                 >
                   Sign In
                 </a>

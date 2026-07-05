@@ -12,11 +12,15 @@ interface PageProps {
 export default function MemorySourcePage({ params }: PageProps) {
   const { sourceId } = use(params);
   const decodedSourceId = decodeURIComponent(sourceId);
+  const crumbLabel =
+    decodedSourceId.length > 28
+      ? `${decodedSourceId.slice(0, 14)}…${decodedSourceId.slice(-8)}`
+      : decodedSourceId;
 
   useSetBreadcrumb([
     { label: 'Home', href: '/' },
     { label: 'Memory', href: '/memory' },
-    { label: decodedSourceId },
+    { label: crumbLabel },
   ]);
 
   return (

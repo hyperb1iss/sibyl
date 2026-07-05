@@ -18,6 +18,7 @@ import {
   RefreshDouble,
   Xmark,
 } from '@/components/ui/icons';
+import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import type { AdminAuditEvent, AdminAuditExportFormat, AdminAuditParams } from '@/lib/api';
 import { api } from '@/lib/api';
@@ -199,74 +200,79 @@ export default function AdminAuditPage() {
 
       <SettingsSection title="Filters" icon={Filter} iconColor="text-sc-purple">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <label className="block">
+          <label className="block" htmlFor="audit-filter-action">
             <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.06em] text-sc-fg-subtle">
               Action
             </span>
-            <input
+            <Input
+              id="audit-filter-action"
               value={action}
               onChange={event => {
                 setAction(event.target.value);
                 setOffset(0);
               }}
-              className="w-full rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-highlight px-3 py-2 text-sm text-sc-fg-primary outline-none transition-colors focus:border-sc-purple"
+              className="text-sm"
               placeholder="memory.recall"
             />
           </label>
-          <label className="block">
+          <label className="block" htmlFor="audit-filter-user">
             <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.06em] text-sc-fg-subtle">
               User
             </span>
-            <input
+            <Input
+              id="audit-filter-user"
               value={userId}
               onChange={event => {
                 setUserId(event.target.value);
                 setOffset(0);
               }}
-              className="w-full rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-highlight px-3 py-2 text-sm text-sc-fg-primary outline-none transition-colors focus:border-sc-purple"
+              className="text-sm"
               placeholder="user UUID"
             />
           </label>
-          <label className="block">
+          <label className="block" htmlFor="audit-filter-resource">
             <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.06em] text-sc-fg-subtle">
               Resource
             </span>
-            <input
+            <Input
+              id="audit-filter-resource"
               value={resource}
               onChange={event => {
                 setResource(event.target.value);
                 setOffset(0);
               }}
-              className="w-full rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-highlight px-3 py-2 text-sm text-sc-fg-primary outline-none transition-colors focus:border-sc-purple"
+              className="text-sm"
               placeholder="project or source"
             />
           </label>
-          <label className="block">
+          <label className="block" htmlFor="audit-filter-start">
             <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.06em] text-sc-fg-subtle">
               Start
             </span>
-            <input
+            <Input
+              id="audit-filter-start"
               type="datetime-local"
               value={startTime}
               onChange={event => {
                 setStartTime(event.target.value);
                 setOffset(0);
               }}
-              className="w-full rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-highlight px-3 py-2 text-sm text-sc-fg-primary outline-none transition-colors focus:border-sc-purple"
+              className="text-sm"
             />
           </label>
-          <label className="block">
+          <label className="block" htmlFor="audit-filter-end">
             <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.06em] text-sc-fg-subtle">
               End
             </span>
-            <input
+            <Input
+              id="audit-filter-end"
               type="datetime-local"
               value={endTime}
               onChange={event => {
                 setEndTime(event.target.value);
                 setOffset(0);
               }}
-              className="w-full rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-highlight px-3 py-2 text-sm text-sc-fg-primary outline-none transition-colors focus:border-sc-purple"
+              className="text-sm"
             />
           </label>
         </div>

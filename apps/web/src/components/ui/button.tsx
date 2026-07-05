@@ -15,7 +15,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variants: Record<ButtonVariant, string> = {
   primary:
-    'bg-sc-purple text-white hover:bg-sc-purple/80 active:scale-[0.98] shadow-lg shadow-sc-purple/20 hover:shadow-xl hover:shadow-sc-purple/30',
+    'bg-sc-purple text-sc-on-accent hover:bg-sc-purple/80 active:scale-[0.98] shadow-lg shadow-sc-purple/20 hover:shadow-xl hover:shadow-sc-purple/30',
   secondary:
     'bg-sc-bg-highlight border border-sc-fg-subtle/20 text-sc-fg-primary hover:border-sc-purple/50 hover:text-sc-purple hover:shadow-lg hover:shadow-sc-purple/10',
   ghost: 'bg-transparent text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight',
@@ -220,7 +220,7 @@ export function GradientButton({
       disabled={disabled || loading}
       className={`
         inline-flex items-center justify-center font-medium
-        text-white shadow-lg
+        text-sc-on-accent shadow-lg
         transition-all duration-200 ease-out
         active:scale-[0.98]
         disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none

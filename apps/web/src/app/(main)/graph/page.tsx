@@ -577,7 +577,7 @@ function GraphToolbar({
               placeholder="Search nodes..."
               value={searchTerm}
               onChange={e => onSearchChange(e.target.value)}
-              className="pl-7 pr-7 py-1 w-44 text-xs bg-sc-bg-base border border-sc-fg-subtle/20 rounded-lg focus:border-sc-purple/50 focus:outline-none text-sc-fg-primary placeholder:text-sc-fg-subtle"
+              className="pl-7 pr-7 py-1 w-44 text-xs bg-sc-bg-base border border-sc-fg-subtle/20 rounded-lg focus-visible:outline-none focus-visible:border-sc-cyan focus-visible:ring-2 focus-visible:ring-sc-cyan/20 text-sc-fg-primary placeholder:text-sc-fg-subtle"
             />
             {searchTerm && (
               <button

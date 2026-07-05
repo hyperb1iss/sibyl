@@ -200,9 +200,10 @@ export function SourceImportProgress({ status }: { status: SourceImportStatusRes
                 <Link
                   key={id}
                   href={`/memory/sources/${encodeURIComponent(id)}`}
-                  className="rounded border border-sc-cyan/20 bg-sc-cyan/10 px-2 py-1 text-xs text-sc-cyan transition-colors hover:border-sc-purple/40 hover:text-sc-purple"
+                  title={id}
+                  className="rounded border border-sc-cyan/20 bg-sc-cyan/10 px-2 py-1 font-mono text-xs text-sc-cyan transition-colors hover:border-sc-cyan/50 hover:bg-sc-cyan/20"
                 >
-                  {id}
+                  {id.length > 16 ? `…${id.slice(-12)}` : id}
                 </Link>
               ))}
             </div>

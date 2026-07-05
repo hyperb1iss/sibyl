@@ -32,7 +32,7 @@ const Checkbox = forwardRef<ElementRef<typeof CheckboxPrimitive.Root>, CheckboxP
         `}
         {...props}
       >
-        <CheckboxPrimitive.Indicator className="flex items-center justify-center text-white">
+        <CheckboxPrimitive.Indicator className="flex items-center justify-center text-sc-on-accent">
           {props.checked === 'indeterminate' ? (
             <span className="h-0.5 w-2.5 bg-current rounded-full" />
           ) : (

@@ -93,7 +93,7 @@ export function Pagination({
 
   const buttonVariant = (isActive: boolean) =>
     isActive
-      ? 'bg-sc-purple text-white'
+      ? 'bg-sc-purple text-sc-on-accent'
       : 'bg-sc-bg-highlight text-sc-fg-muted hover:bg-sc-bg-elevated hover:text-sc-fg-primary';
 
   return (

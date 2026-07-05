@@ -18,6 +18,7 @@ import {
   User,
   Users,
 } from '@/components/ui/icons';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -45,9 +46,9 @@ const ROLE_CONFIG = {
   viewer: { icon: Eye, color: 'text-sc-fg-muted', label: 'Viewer' },
 } as const;
 
-const ROLES = ['owner', 'admin', 'member'] as const;
-const NON_OWNER_ROLES = ['admin', 'member'] as const;
-const INVITE_ROLES = ['member', 'admin'] as const;
+const ROLES = ['owner', 'admin', 'member', 'viewer'] as const;
+const NON_OWNER_ROLES = ['admin', 'member', 'viewer'] as const;
+const INVITE_ROLES = ['member', 'admin', 'viewer'] as const;
 
 function inviteSignupUrl(acceptUrl: string | null): string {
   if (!acceptUrl) return '';
@@ -243,13 +244,13 @@ function OrgMembersCard({ org, currentUserId, isCurrentOrg }: OrgMembersCardProp
                 onSubmit={handleInvite}
                 className="grid gap-2 sm:grid-cols-[minmax(12rem,1fr)_180px_auto]"
               >
-                <input
+                <Input
                   type="email"
                   value={inviteEmail}
                   onChange={event => setInviteEmail(event.target.value)}
                   placeholder="teammate@example.com"
                   aria-label={`Invite email for ${org.name}`}
-                  className="min-w-0 w-full rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-highlight px-3 py-2 text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
+                  className="min-w-0 text-sm"
                 />
                 <Select
                   value={inviteRole}

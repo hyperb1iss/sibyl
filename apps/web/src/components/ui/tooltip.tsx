@@ -8,18 +8,7 @@ import {
   type ReactNode,
   useState,
 } from 'react';
-import {
-  AlertTriangle,
-  BarChart3,
-  CheckCircle2,
-  Cube,
-  Flash,
-  InfoCircle,
-  LightBulb,
-  PlusCircle,
-  Search,
-  WifiOff,
-} from '@/components/ui/icons';
+import { Flash, InfoCircle, LightBulb } from '@/components/ui/icons';
 
 // Radix Tooltip primitives with SilkCircuit styling
 const TooltipProvider = TooltipPrimitive.Provider;
@@ -70,124 +59,11 @@ export function Tooltip({ content, children, side = 'top', delay = 200 }: Toolti
   );
 }
 
+// EmptyState, ErrorState, and SuccessState moved to empty-state.tsx with the
+// rest of the feedback components; re-exported here so existing imports keep working.
+export { EmptyState, ErrorState, SuccessState } from './empty-state';
 // Export primitives for advanced usage
 export { TooltipContent, TooltipProvider, TooltipRoot, TooltipTrigger };
-
-// Empty state component for when there's no data - with personality
-interface EmptyStateProps {
-  icon?: ReactNode;
-  title: string;
-  description?: string;
-  action?: ReactNode;
-  variant?: 'default' | 'search' | 'data' | 'create';
-}
-
-const EMPTY_STATE_DEFAULTS = {
-  search: {
-    icon: <Search width={48} height={48} className="text-sc-cyan" />,
-    floatingClass: 'animate-float',
-  },
-  data: {
-    icon: <BarChart3 width={48} height={48} className="text-sc-purple" />,
-    floatingClass: 'animate-wiggle',
-  },
-  create: {
-    icon: <PlusCircle width={48} height={48} className="text-sc-yellow" />,
-    floatingClass: 'animate-bounce-in',
-  },
-  default: {
-    icon: <Cube width={48} height={48} className="text-sc-coral" />,
-    floatingClass: 'animate-float',
-  },
-};
-
-export function EmptyState({
-  icon,
-  title,
-  description,
-  action,
-  variant = 'default',
-}: EmptyStateProps) {
-  const defaults = EMPTY_STATE_DEFAULTS[variant];
-  const displayIcon = icon ?? defaults.icon;
-
-  return (
-    <div className="text-center py-16 animate-fade-in">
-      {displayIcon && (
-        <div className={`text-6xl mb-4 opacity-80 ${defaults.floatingClass}`}>{displayIcon}</div>
-      )}
-      <p className="text-sc-fg-muted text-lg font-medium">{title}</p>
-      {description && (
-        <p className="text-sc-fg-subtle text-sm mt-2 max-w-md mx-auto">{description}</p>
-      )}
-      {action && <div className="mt-6 animate-slide-up">{action}</div>}
-    </div>
-  );
-}
-
-// Error state component - friendly and helpful
-interface ErrorStateProps {
-  title?: string;
-  message: string;
-  action?: ReactNode;
-  variant?: 'error' | 'warning' | 'offline';
-}
-
-const ERROR_VARIANTS = {
-  error: {
-    icon: <AlertTriangle width={32} height={32} className="text-sc-red" />,
-    title: 'Oops, something went sideways',
-    color: 'text-sc-red',
-    iconClass: 'animate-wiggle',
-  },
-  warning: {
-    icon: <Flash width={32} height={32} className="text-sc-yellow" />,
-    title: 'Heads up',
-    color: 'text-sc-yellow',
-    iconClass: 'animate-pulse',
-  },
-  offline: {
-    icon: <WifiOff width={32} height={32} className="text-sc-coral" />,
-    title: 'Connection lost',
-    color: 'text-sc-coral',
-    iconClass: 'animate-float',
-  },
-};
-
-export function ErrorState({ title, message, action, variant = 'error' }: ErrorStateProps) {
-  const variantConfig = ERROR_VARIANTS[variant];
-  const displayTitle = title ?? variantConfig.title;
-
-  return (
-    <div className="text-center py-12 animate-fade-in">
-      <div className={`text-4xl mb-4 ${variantConfig.iconClass}`}>{variantConfig.icon}</div>
-      <p className={`text-lg font-medium ${variantConfig.color}`}>{displayTitle}</p>
-      <p className="text-sc-fg-muted text-sm mt-1 max-w-md mx-auto">{message}</p>
-      {action && <div className="mt-4 animate-slide-up">{action}</div>}
-    </div>
-  );
-}
-
-// Success celebration component
-interface SuccessStateProps {
-  title: string;
-  message?: string;
-  action?: ReactNode;
-  celebratory?: boolean;
-}
-
-export function SuccessState({ title, message, action, celebratory = true }: SuccessStateProps) {
-  return (
-    <div className="text-center py-12 animate-bounce-in">
-      <div className={`mb-4 flex justify-center ${celebratory ? 'animate-glow-pulse' : ''}`}>
-        <CheckCircle2 width={48} height={48} className="text-sc-green" />
-      </div>
-      <p className="text-sc-green text-xl font-semibold gradient-text">{title}</p>
-      {message && <p className="text-sc-fg-muted text-sm mt-2 max-w-md mx-auto">{message}</p>}
-      {action && <div className="mt-6 animate-slide-up">{action}</div>}
-    </div>
-  );
-}
 
 // Info/help tooltip component
 interface InfoTooltipProps {
