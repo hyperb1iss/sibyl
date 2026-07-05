@@ -82,8 +82,9 @@ mkdir -p contexts/<name>-$(date +%F)/triage
 cd contexts/<name>-$(date +%F)
 
 # Last 30 days
-find ~/.claude/projects -name '*.jsonl' -newermt "$(date -d '30 days ago' +%F)" > triage/claude_files.txt
-find ~/.codex/sessions -name '*.jsonl' -newermt "$(date -d '30 days ago' +%F)" > triage/codex_files.txt
+CUTOFF=$(date -v-30d +%F 2>/dev/null || date -d '30 days ago' +%F)  # BSD (macOS) or GNU date
+find ~/.claude/projects -name '*.jsonl' -newermt "$CUTOFF" > triage/claude_files.txt
+find ~/.codex/sessions -name '*.jsonl' -newermt "$CUTOFF" > triage/codex_files.txt
 cat triage/claude_files.txt triage/codex_files.txt > triage/all_files.txt
 
 wc -l triage/*.txt
@@ -97,7 +98,7 @@ tool-call counts, error counts, user corrections. Runs in parallel.
 ```bash
 SKILL_DIR=$(dirname "$(realpath "$0")")  # or hard-code the path
 cat triage/all_files.txt | xargs -P 12 -n 5 python3 "$SKILL_DIR/scripts/scan.py" \
-  --target-name <tool-or-skill-keyword> > triage/scan_results.jsonl
+  --target <tool-or-skill-keyword> > triage/scan_results.jsonl
 ```
 
 The scanner detects three shapes of usage:

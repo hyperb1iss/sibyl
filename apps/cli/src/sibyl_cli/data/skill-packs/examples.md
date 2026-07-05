@@ -213,7 +213,8 @@ sibyl entity related ptrn_a1b2c3d4e5f6
 ### Delete Entity
 
 ```bash
-sibyl entity delete epsd_a1b2c3d4e5f6 --yes
+# Deletes immediately — there is no confirmation prompt
+sibyl entity delete epsd_a1b2c3d4e5f6
 ```
 
 ---

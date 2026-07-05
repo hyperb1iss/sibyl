@@ -309,18 +309,24 @@ memory IDs that materially shaped the reflection, not every item shown in contex
 ### Synthesis - Source-Grounded Artifacts
 
 ```bash
-# Plan a synthesis from authorized memory
-sibyl synthesis plan "launch readiness brief" --intent plan
+# Plan a synthesis from authorized memory (positional goal; no --intent flag)
+sibyl synthesis plan "launch readiness brief" --type documentation --depth standard
 
-# Draft, verify, and optionally remember the artifact
-sibyl synthesis draft "launch readiness brief" --intent plan
+# Draft a verified synthesis artifact (markdown by default; --format json for scripting)
+sibyl synthesis draft "launch readiness brief" --audience "release team"
 
-# Verify citations, freshness, hidden context, and gap coverage on a draft
-sibyl synthesis verify --content-file ./draft.md
+# Verify citations, freshness, redaction, and gap coverage (re-drafts internally
+# from the same goal — it cannot verify a local file)
+sibyl synthesis verify "launch readiness brief"
 
-# Persist a verified synthesis artifact into memory
-sibyl synthesis remember "Launch readiness brief" --content-file ./draft.md
+# Draft, verify, and persist the artifact into memory in one step
+sibyl synthesis remember "launch readiness brief" --scope project
 ```
+
+All four subcommands take the synthesis goal as a positional argument. Useful scoping flags:
+`--project/-p`, `--all-projects`, `--domain/-d`, `--seed`, and comma-separated `--entity`,
+`--decision`, `--task`, `--artifact` ID lists. There is no `--intent` and no `--content-file`
+anywhere in this group.
 
 **When to use:** When you need a cited, verifiable artifact built from memory rather than a raw
 recall dump. `plan`/`draft`/`verify` mirror the
@@ -494,7 +500,7 @@ sibyl entity create --type episode --name "Redis insight" --content "Discovered 
 # Find related entities
 sibyl entity related epsd_a1b2c3d4e5f6
 
-# Delete (with confirmation)
+# Delete (immediate — there is NO confirmation prompt)
 sibyl entity delete epsd_a1b2c3d4e5f6
 ```
 
@@ -690,7 +696,8 @@ sibyl task complete task_a1b2c3d4e5f6 --hours 4.5 --learnings "Key insight: The 
 
 If a local install still has legacy FalkorDB + PostgreSQL data — typical signs are `moon run dev`
 aborting with `⚠️  Local legacy data detected`, the Sibyl server unreachable, and writes piling up
-in `~/.config/sibyl/pending_writes/` — follow the agent playbook in [MIGRATION.md](MIGRATION.md).
+in `~/.config/sibyl/pending_writes/` — follow the agent playbook in the migration pack
+(`sibyl skill get migration`).
 
 The playbook covers:
 
@@ -874,16 +881,15 @@ Your directory is not linked. Run `sibyl context` — if `Project: none`, link i
 | ----------------------------------- | ------------------------------------------------ |
 | `sibyl task add "..."`              | `sibyl task create --title "..."`                |
 | `sibyl task list --todo`            | `sibyl task list --status todo`                  |
-| `sibyl task create -t "..."`        | `sibyl task create --title "..."` (`-t` is type) |
+| `sibyl task create -t "..."`        | `sibyl task create --title "..."` (no `-t` flag) |
 | `sibyl task update --learnings`     | `sibyl task complete --learnings` (!)            |
 | `sibyl task note` for completion    | `sibyl task complete --learnings` (!)            |
 | `sibyl add note "content..."`       | `sibyl add "Title" "content..." --type note`     |
 | `sibyl search ... 2>/dev/null`      | `sibyl search ...` (never suppress stderr)       |
 | `sibyl search ... \|\| true`        | `sibyl search ...` (let errors surface)          |
 | `sibyl config`                      | `sibyl config show`                              |
-| `sibyl explore path A B` (no depth) | `sibyl explore path <id-a> <id-b> --depth N`     |
 | `sibyl auth token`                  | Not a real command — use `sibyl auth status`     |
-| Using `--kind gotcha` or `learning` | Use `error_pattern` or `note`                    |
+| Using `--kind gotcha` or `learning` | Deprecated aliases — use `error_pattern`/`note`  |
 
 ### Notes vs Learnings
 
