@@ -14,13 +14,18 @@ These rules exist because real agent sessions consistently fail without them.
    Capture the output first, check the exit code, then parse. Error messages contain diagnostic
    information you need; suppressing them causes silent failures and blind retry spirals.
 
-2. **Link your project BEFORE doing anything else.** Run `sibyl context` first. Use
-   `sibyl context --quick` only as a local link/auth status check later in the same session, not as
-   a replacement for full context or recall. If context shows `Project: none` or
-   `Project: not linked`, you MUST run `sibyl project link <id>` before searching or listing tasks.
-   Without a link, searches return results from unrelated projects and task lists show global noise.
-   Use `sibyl skill get core` when you need to read this canonical skill contract instead of
-   guessing a filesystem path.
+2. **Link your project BEFORE doing anything else — this is a blocking gate.** Run `sibyl context`
+   first. Use `sibyl context --quick` only as a local link/auth status check later in the same
+   session, not as a replacement for full context or recall. If context shows `Project: none` or
+   `Project: not linked`, resolve it before any recall/search/task command, in this order:
+   (a) `sibyl project list` → if the project exists, `sibyl project link <project_id>`;
+   (b) if `sibyl project relink` finds no candidate, `sibyl project create --name <dirname>` then
+   link the new ID; (c) only if the user explicitly declined linking, use `--all-projects` and say
+   so — it orphans memories from the project. `--project` takes a `project_xxx` ID, never a
+   directory name. Links are cwd-scoped: a git worktree of a linked repo shows `Project: none` —
+   relink there too. Unscoped recall returns cross-project noise; never treat unrelated hits as
+   context. Use `sibyl skill get core` when you need to read this canonical skill contract instead
+   of guessing a filesystem path.
 
 3. **Always complete the retrieval pattern.** Search returns truncated previews. When you need
    details, follow up with `sibyl show <id>` using the ID from the search result. Working from
@@ -30,12 +35,44 @@ These rules exist because real agent sessions consistently fail without them.
    `--learnings` on task completion. Do not ask permission first—the whole point is building
    institutional memory.
 
-5. **Check health before retrying.** If a command fails with a connection error, run `sibyl health`.
-   If the server is down, don't retry the same command. Report it and move on.
+5. **Check health before retrying, and follow the auth ladder.** If a command fails with a
+   connection error, run `sibyl health` once. If the server is down, don't retry the same command —
+   report it and move on. On `authentication_required` or `token_refresh_failed`: check
+   `printenv SIBYL_AUTH_TOKEN`, run `sibyl auth status` once, and if it is not recoverable
+   non-interactively, STOP treating memory as available — state in your final output that memory
+   was unavailable and list any learnings that could not be captured. In a sandboxed environment,
+   `sibyl context` succeeding (local cache) while recall/health cannot connect means blocked
+   network egress, not a server outage.
 
-6. **Never invent subcommands.** If you're unsure whether a command exists, run
-   `sibyl <group> --help`. Do not guess. Commands like `sibyl auth token` and `sibyl db backup` do
-   not exist.
+6. **Never invent subcommands, flags, or enum values.** If you're unsure whether a command exists,
+   run `sibyl <group> --help`. Do not guess, and do not pass any flag you have not seen in this
+   document or in this session's `--help` output. Commands like `sibyl auth token` and
+   `sibyl db backup` do not exist. After a context compaction, reload `sibyl skill get quick` (or
+   re-check `--help`) before your first write verb — corrections learned earlier do not survive
+   compaction, but wrong habits do.
+
+7. **Guard shell-special content.** A memory body containing backticks, `$()`, or `<`/`>` must be
+   passed via stdin (`echo ... | sibyl remember "Title" --kind ...`), a single-quoted heredoc, or
+   `--content-file` — never as an inline double-quoted argument. Backticks inside double quotes
+   execute as shell commands; this has re-run real build commands as a side effect of saving a
+   memory. Run sibyl writes as standalone commands, never chained with `&&` after builds or tests.
+
+8. **A failed write is lost knowledge.** A non-zero exit from `remember`/`add` means nothing was
+   saved. Retry exactly once after applying the printed remediation; if it still fails, include the
+   unsaved learning verbatim in your final message so the user can capture it. Never claim a memory
+   was stored unless you can quote the returned entity ID (e.g. `error_pattern_5f40ca...`) as the
+   receipt.
+
+9. **Fetch IDs fresh.** Re-run the list command immediately before `show`/`update`/`complete`;
+   never reuse an entity or task UUID remembered from earlier in a long session, and never run the
+   list and its dependent show in the same parallel batch. `task show` accepts task IDs only —
+   every other entity kind goes through `sibyl show <id>`. A `not_found` means re-list, not retry.
+
+10. **Probe availability once (non-Claude hosts).** If `command -v sibyl` fails, note
+    "sibyl unavailable in this environment — proceeding without memory" once and move on; do not
+    re-derive absence per command. Expect recall/remember to take 1–10 s over the network — in
+    harnesses with exec yield windows (e.g. Codex `exec_command`), use a generous yield
+    (≥ 5000 ms) and poll the same session instead of re-running the command.
 
 ---
 
@@ -210,6 +247,10 @@ sibyl recall "plan the launch" --intent plan --json
 sibyl recall "resume the migration" --budget 1200
 ```
 
+Valid `--intent` values: `build, plan, ideate, research, review, debug, decide, learn, general`.
+There is no `verify` or `audit` intent — verification work uses `review`. `recall` takes one quoted
+GOAL; size the output with `--budget` (tokens) or `--limit` (items). There is no `--max-items`.
+
 **When to use:** Before acting. This is the agent-ready working memory view. The Active Work section
 is grounded in a direct status lookup, so in-flight tasks always lead it; completed work appears
 under Prior Art with its learnings as the content.
@@ -270,7 +311,11 @@ sibyl remember "Planning session" --content-file ./notes.md --kind session
 sibyl add "CSS diagnostic" --content-file ./snippet.css
 ```
 
-**When to use:** During work, whenever future agents should not have to rediscover a detail. Project
+`remember` has **no** `--title`, `--type`, or `--summary` flags — title and body are positional
+(`sibyl remember "TITLE" "BODY" --kind <kind>`), with stdin, `--content`, or `--content-file` as
+body alternatives. If a flag is rejected (exit 2), switch to the positional form — do not retry
+flag variants. `--kind` values are snake_case; `gotcha` and `learning` are deprecated aliases that
+remap to `error_pattern` and `note` with a warning (full 33-kind list: `sibyl remember --help`). whenever future agents should not have to rediscover a detail. Project
 scoping stores both `metadata.project_id` and a project edge, and `remember` links to the single
 active `doing` task when exactly one exists. Future recall can find the memory from structured
 search, graph traversal, or task context. Use `--no-active-task` when the memory belongs to the
