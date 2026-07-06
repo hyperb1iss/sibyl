@@ -84,7 +84,7 @@ dev = [
     # Heavy extras (sentence-transformers, crawl4ai) are left out on purpose;
     # their tests importorskip so CI stays fast.
     "surrealdb>=2.0.0,<3.0",
-    "numpy>=2.4.1",
+    "numpy>=2.5.1",
     "pydantic-ai-slim[anthropic,google,openai]>=1.107.0,<2",
 ]
 
