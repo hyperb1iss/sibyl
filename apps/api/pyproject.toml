@@ -35,7 +35,7 @@ dependencies = [
     # Sibyl Core Library with daemon/runtime extras
     "sibyl-core[crawler,embeddings,graph,graphrag,llm]==1.0.2",
     # Core Framework
-    "fastapi>=0.115.0",
+    "fastapi>=0.139.0",
     "mcp>=1.27.2",
     "starlette>=1.3.1",
     "uvicorn[standard]>=0.38",
