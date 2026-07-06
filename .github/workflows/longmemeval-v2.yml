@@ -370,13 +370,13 @@ jobs:
             uv-longmemeval-v2-package-${{ runner.os }}-
 
       - name: Download web artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: longmemeval-v2-web-${{ inputs.official_tier || 'small' }}-${{ github.sha }}
           path: .moon/cache/evals/longmemeval-v2-official/web_${{ inputs.official_tier || 'small' }}
 
       - name: Download enterprise artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: longmemeval-v2-enterprise-${{ inputs.official_tier || 'small' }}-${{ github.sha }}
           path:

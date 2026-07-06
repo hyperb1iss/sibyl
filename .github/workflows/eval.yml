@@ -759,13 +759,13 @@ jobs:
             uv-longmemeval-compare-${{ runner.os }}-
 
       - name: Download OpenAI smoke artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: longmemeval-live-smoke-${{ github.sha }}
           path: .moon/cache/evals/openai
 
       - name: Download local smoke artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: longmemeval-local-smoke-${{ github.sha }}
           path: .moon/cache/evals/local
