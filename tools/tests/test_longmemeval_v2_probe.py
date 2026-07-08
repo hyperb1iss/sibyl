@@ -134,6 +134,16 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     assert "--profile longmemeval-v2" in workflow
 
 
+def test_longmemeval_v2_full_moon_task_installs_official_harness_deps() -> None:
+    moon = (Path(__file__).parents[2] / "moon.yml").read_text(encoding="utf-8")
+    task = moon.split("bench-longmemeval-v2-official-full:", 1)[1].split(
+        "bench-live-smoke:",
+        1,
+    )[0]
+
+    assert "--with openai-agents" in task
+
+
 def _write_dataset(
     root: Path,
     *,

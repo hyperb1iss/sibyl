@@ -1257,8 +1257,8 @@ tasks:
 
   bench-longmemeval-v2-official-full:
     command:
-      uv run --with huggingface-hub --with numpy --with openai --with pillow --with tqdm --with
-      transformers --with torch python benchmarks/longmemeval_v2_official.py
+      uv run --with huggingface-hub --with numpy --with openai --with openai-agents --with pillow
+      --with tqdm --with transformers --with torch python benchmarks/longmemeval_v2_official.py
     options:
       cache: false
 
