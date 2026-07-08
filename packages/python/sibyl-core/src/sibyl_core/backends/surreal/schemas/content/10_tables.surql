@@ -146,6 +146,8 @@ DEFINE FIELD IF NOT EXISTS created_at ON raw_captures TYPE datetime DEFAULT time
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_uuid ON raw_captures FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_org ON raw_captures FIELDS organization_id;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_source ON raw_captures FIELDS source_id;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_lookup ON raw_captures
+    FIELDS source_id, organization_id, memory_scope, scope_key;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_principal ON raw_captures FIELDS principal_id;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_scope ON raw_captures FIELDS organization_id, memory_scope, scope_key;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_agent ON raw_captures FIELDS organization_id, agent_id;
@@ -154,6 +156,8 @@ DEFINE INDEX IF NOT EXISTS idx_raw_captures_review ON raw_captures FIELDS organi
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_purge_after ON raw_captures FIELDS purge_after;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_entity_id ON raw_captures FIELDS entity_id;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_org_dedupe ON raw_captures FIELDS organization_id, metadata.dedupe_key;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_dedupe_lookup ON raw_captures
+    FIELDS metadata.dedupe_key, organization_id, memory_scope, scope_key;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_title_ft ON raw_captures FIELDS title FULLTEXT ANALYZER title_analyzer BM25 HIGHLIGHTS;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_content_ft ON raw_captures FIELDS raw_content FULLTEXT ANALYZER content_analyzer BM25 HIGHLIGHTS;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_embedding ON raw_captures FIELDS embedding

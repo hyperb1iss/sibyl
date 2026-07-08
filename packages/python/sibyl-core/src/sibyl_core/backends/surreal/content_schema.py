@@ -49,7 +49,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 17
+CONTENT_SCHEMA_CURRENT_VERSION = 18
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -428,6 +428,13 @@ DEFINE FIELD OVERWRITE skipped_records.* ON source_imports TYPE object FLEXIBLE;
 DEFINE FIELD OVERWRITE errors.* ON source_imports TYPE object FLEXIBLE;
 """
 
+CONTENT_RAW_CAPTURE_LOOKUP_MIGRATION_DEFINITIONS = """
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_dedupe_lookup
+    ON raw_captures FIELDS metadata.dedupe_key, organization_id, memory_scope, scope_key;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_lookup
+    ON raw_captures FIELDS source_id, organization_id, memory_scope, scope_key;
+"""
+
 
 def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
     compatible_schema = render_fulltext_compatible_sql(
@@ -532,6 +539,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=17,
             name="content_source_import_receipt_arrays",
             statements=tuple(split_statements(CONTENT_SOURCE_IMPORT_RECEIPT_MIGRATION_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=18,
+            name="content_raw_capture_lookup_indexes",
+            statements=tuple(split_statements(CONTENT_RAW_CAPTURE_LOOKUP_MIGRATION_DEFINITIONS)),
         ),
     )
 
@@ -874,13 +886,14 @@ __all__ = [
     "CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS",
     "CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS",
     "CONTENT_PERMISSION_MIGRATION_DEFINITIONS",
+    "CONTENT_RAW_CAPTURE_LOOKUP_MIGRATION_DEFINITIONS",
     "CONTENT_RELATION_TABLES",
     "CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS",
     "CONTENT_SCHEMA_CURRENT_VERSION",
     "CONTENT_SCHEMA_DEFINITIONS",
     "CONTENT_SCHEMA_NAME",
-    "CONTENT_SOURCE_URL_SCOPE_MIGRATION_DEFINITIONS",
     "CONTENT_SOURCE_IMPORT_RECEIPT_MIGRATION_DEFINITIONS",
+    "CONTENT_SOURCE_URL_SCOPE_MIGRATION_DEFINITIONS",
     "CONTENT_TABLES",
     "CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS",
     "bootstrap_content_schema",
