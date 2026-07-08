@@ -927,6 +927,42 @@ async def test_device_verify_get_uses_runtime_helpers(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
+async def test_device_verify_get_offers_oidc_provider_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = FakeRequest(query_params={"user_code": "ABCD-EFGH"})
+    get_request = AsyncMock(
+        return_value=SimpleNamespace(
+            client_name="sibyl-cli",
+            scope="mcp",
+            expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=10),
+            status="pending",
+        )
+    )
+    provider = SimpleNamespace(
+        name="entra",
+        label="Entra ID",
+        login_url="/api/auth/oidc/entra/login",
+    )
+
+    monkeypatch.setattr(
+        auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests"
+    )
+    monkeypatch.setattr(auth_routes, "resolve_request_user", AsyncMock(return_value=None))
+    monkeypatch.setattr(auth_routes, "get_device_request_by_user_code", get_request)
+    monkeypatch.setattr(auth_routes, "enabled_oidc_providers", lambda: [provider])
+
+    response = await _call_route(auth_routes.device_verify_get, request=request)
+    body = response.body.decode()
+
+    redirect = "%2Fapi%2Fauth%2Fdevice%2Fverify%3Fuser_code%3DABCD-EFGH"
+    assert "Continue with Entra ID" in body
+    assert f"/api/auth/oidc/entra/login?redirect={redirect}" in body
+    assert "Application:" not in body
+    get_request.assert_awaited_once_with("ABCD-EFGH")
+
+
+@pytest.mark.asyncio
 async def test_device_verify_post_login_uses_runtime_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from html import escape
 from ipaddress import ip_address, ip_network
 from typing import Protocol
 from urllib.parse import quote, urlencode, urlparse
@@ -1092,6 +1093,7 @@ def _render_device_verify_page(
 ) -> HTMLResponse:
     """Render the device verification page with SilkCircuit styling."""
     safe_code = user_code or ""
+    safe_code_attr = escape(safe_code, quote=True)
     err = error_code or ""
     is_authed = authed_user is not None
 
@@ -1241,15 +1243,54 @@ def _render_device_verify_page(
       text-decoration: none;
     }
     .link:hover { text-decoration: underline; }
+    .provider-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 20px 0 0;
+      color: #686888;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .provider-divider::before,
+    .provider-divider::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: #2a2640;
+    }
+    .provider-actions {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .provider-link {
+      display: block;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid #2a2640;
+      background: #1a1624;
+      color: #f0f0f8;
+      font-size: 14px;
+      font-weight: 600;
+      text-align: center;
+      text-decoration: none;
+    }
+    .provider-link:hover {
+      border-color: #80ffea;
+      background: #221e30;
+    }
     """
 
     # Page content varies by state
     if err:
         # Error state: show message with option to try again
+        error_html = escape(error_message)
         body_html = f"""
         <div class="err">
           <div class="err-icon">⚠</div>
-          {error_message}
+          {error_html}
         </div>
         <a href="/api/auth/device/verify" class="link">← Enter a different code</a>
         """
@@ -1278,7 +1319,7 @@ def _render_device_verify_page(
         body_html = f"""
         <form method="post" action="/api/auth/device/verify">
           <input type="hidden" name="action" value="login" />
-          <input type="hidden" name="user_code" value="{safe_code}" />
+          <input type="hidden" name="user_code" value="{safe_code_attr}" />
           <label>Email</label>
           <input name="email" type="email" autocomplete="username" required autofocus />
           <label>Password</label>
@@ -1286,25 +1327,28 @@ def _render_device_verify_page(
           {break_glass_reason_field}
           <button type="submit">Sign in & Continue</button>
         </form>
+        {_render_device_verify_oidc_links(safe_code)}
         """
         title = "Sign In to Approve"
     else:
         # Logged in with valid code: show approve/deny
         client_name = str(pending.get("client_name") or "sibyl-cli") if pending else "sibyl-cli"
         scope = str(pending.get("scope") or "mcp") if pending else "mcp"
+        client_name_html = escape(client_name)
+        scope_html = escape(scope)
         body_html = f"""
         <div class="card">
-          <div><strong>Application:</strong> {client_name}</div>
-          <div><strong>Permissions:</strong> <code>{scope}</code></div>
+          <div><strong>Application:</strong> {client_name_html}</div>
+          <div><strong>Permissions:</strong> <code>{scope_html}</code></div>
         </div>
         <form method="post" action="/api/auth/device/verify">
           <input type="hidden" name="action" value="approve" />
-          <input type="hidden" name="user_code" value="{safe_code}" />
+          <input type="hidden" name="user_code" value="{safe_code_attr}" />
           <button type="submit">Approve Device</button>
         </form>
         <form method="post" action="/api/auth/device/verify">
           <input type="hidden" name="action" value="deny" />
-          <input type="hidden" name="user_code" value="{safe_code}" />
+          <input type="hidden" name="user_code" value="{safe_code_attr}" />
           <button type="submit" class="secondary">Deny</button>
         </form>
         """
@@ -1312,7 +1356,8 @@ def _render_device_verify_page(
 
     # Auth status banner
     if authed_user is not None and not err:
-        authed_banner = f"<div class='sub'>Signed in as <strong>{authed_user.email or authed_user.name}</strong></div>"
+        identity = escape(str(authed_user.email or authed_user.name))
+        authed_banner = f"<div class='sub'>Signed in as <strong>{identity}</strong></div>"
     elif not safe_code:
         authed_banner = "<div class='sub'>Enter the code shown in your terminal</div>"
     elif not err:
@@ -1340,6 +1385,28 @@ def _render_device_verify_page(
 </body>
 </html>"""
     return HTMLResponse(html, status_code=200)
+
+
+def _render_device_verify_oidc_links(user_code: str) -> str:
+    providers = enabled_oidc_providers()
+    if not providers:
+        return ""
+
+    redirect = f"/api/auth/device/verify?{urlencode({'user_code': user_code}, quote_via=quote)}"
+    links = []
+    for provider in providers:
+        separator = "&" if "?" in provider.login_url else "?"
+        query = urlencode({"redirect": redirect}, quote_via=quote)
+        href = escape(f"{provider.login_url}{separator}{query}", quote=True)
+        label = escape(provider.label or provider.name)
+        links.append(f'<a class="provider-link" href="{href}">Continue with {label}</a>')
+
+    return f"""
+        <div class="provider-divider">or</div>
+        <div class="provider-actions">
+          {"".join(links)}
+        </div>
+        """
 
 
 @router.get("/device/verify", response_model=None)
