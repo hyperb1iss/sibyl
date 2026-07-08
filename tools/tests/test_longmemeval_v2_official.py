@@ -6,6 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from types import ModuleType
+from typing import TypedDict
 
 import pytest
 from tools.bench import eval_gate
@@ -18,6 +19,13 @@ EXPECTED_BULK_MAX_ENTITIES = 16
 EXPECTED_BULK_MAX_CONTENT_CHARS = 200_000
 EXPECTED_EMBEDDING_BACKFILL_MAX_PENDING_JOBS = 8
 TEST_CONTENT_MAX_CHARS = 420
+
+
+class _RequestCall(TypedDict):
+    method: str
+    path: str
+    json: dict[str, object]
+    params: dict[str, object]
 
 
 def _load_module(path: Path, name: str) -> ModuleType:
@@ -331,7 +339,7 @@ def test_sibyl_memory_insert_defers_embeddings_and_tracks_backfill_job() -> None
     module = _load_memory_module()
     memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
     module.Memory.__init__(memory, {})
-    calls: list[dict[str, object]] = []
+    calls: list[_RequestCall] = []
 
     def fake_request(
         method: str,
@@ -465,7 +473,7 @@ def test_sibyl_memory_query_waits_for_embedding_backfill_before_search() -> None
     module = _load_memory_module()
     memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
     module.Memory.__init__(memory, {})
-    status_responses = [
+    status_responses: list[dict[str, object]] = [
         {"status": "queued"},
         {"status": "complete", "error": None},
     ]
