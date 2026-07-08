@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from typing import Literal
 
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
@@ -31,7 +32,7 @@ def build_model(config: LLMConfig) -> Model:
         case "gemini":
             return GoogleModel(
                 provider_model_id,
-                provider=GoogleProvider(api_key=api_key),
+                provider=_google_provider(api_key),
                 settings=GoogleModelSettings(**_settings(config)),
             )
         case "openai":
@@ -67,6 +68,12 @@ def _settings(config: LLMConfig) -> dict[str, float | int]:
     if config.max_tokens is not None:
         settings["max_tokens"] = config.max_tokens
     return settings
+
+
+def _google_provider(api_key: str | None) -> GoogleProvider | Literal["google"]:
+    if api_key is None:
+        return "google"
+    return GoogleProvider(api_key=api_key)
 
 
 def _pin_snapshots() -> bool:

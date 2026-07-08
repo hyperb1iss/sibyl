@@ -124,6 +124,17 @@ def test_build_model_resolves_registry_alias_and_settings() -> None:
     assert model.settings == {"temperature": 0.2, "timeout": 3, "max_tokens": 42}
 
 
+def test_build_model_uses_google_env_fallback_for_gemini(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-key")
+
+    model = build_model(LLMConfig(provider="gemini", model="gemini-3-1-flash-lite"))
+
+    assert model.model_name == "gemini-3.1-flash-lite-preview"
+    assert model.system == "google"
+
+
 def test_provider_output_type_uses_prompted_output_for_gemini_structured_schema() -> None:
     output_type = _provider_output_type(
         LLMConfig(provider="gemini", model="gemini-3-1-flash-lite"),
