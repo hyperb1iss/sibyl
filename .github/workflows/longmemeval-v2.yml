@@ -83,8 +83,11 @@ defaults:
     shell: bash
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group:
+    ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' &&
+    inputs.run_official_full && 'official-full' || 'standard' }}
+  cancel-in-progress:
+    ${{ github.event_name != 'workflow_dispatch' || !inputs.run_official_full }}
 
 jobs:
   probe:
@@ -278,7 +281,7 @@ jobs:
           set -euo pipefail
           cd apps/api
           uv run sibyld serve > /tmp/sibyld.log 2>&1 &
-          for i in {1..60}; do
+          for _ in {1..60}; do
             if curl -fsS http://localhost:3334/api/health > /dev/null; then
               sleep 2
               curl -fsS http://localhost:3334/api/health | head -c 200

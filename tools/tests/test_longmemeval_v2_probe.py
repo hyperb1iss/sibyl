@@ -124,6 +124,8 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
 
     assert "run_official_full:" in workflow
     assert "if: github.event_name == 'workflow_dispatch' && inputs.run_official_full" in workflow
+    assert "'official-full' || 'standard'" in workflow
+    assert "github.event_name != 'workflow_dispatch' || !inputs.run_official_full" in workflow
     assert "moon run bench-longmemeval-v2-official-full" in workflow
     assert "OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}" in workflow
     assert '--reader-api-key-env "$READER_API_KEY_ENV"' in workflow
