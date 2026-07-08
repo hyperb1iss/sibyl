@@ -29,6 +29,7 @@ from sibyl_core.backends.surreal.content_schema import (
     CONTENT_PERMISSION_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_CHANGEFEED_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS,
+    CONTENT_RAW_CAPTURE_LOOKUP_MIGRATION_DEFINITIONS,
     CONTENT_RELATION_TABLES,
     CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS,
     CONTENT_SCHEMA_CURRENT_VERSION,
@@ -464,10 +465,8 @@ def test_content_source_import_receipt_arrays_are_versioned() -> None:
         statement for migration in migrations for statement in migration.statements
     )
 
-    assert CONTENT_SCHEMA_CURRENT_VERSION == 17
-    assert "content_source_import_receipt_arrays" in [
-        migration.name for migration in migrations
-    ]
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 17
+    assert "content_source_import_receipt_arrays" in [migration.name for migration in migrations]
     for field in ("skipped_records", "errors"):
         assert f"DEFINE FIELD IF NOT EXISTS {field}.* ON source_imports" in (
             CONTENT_SCHEMA_DEFINITIONS
@@ -476,6 +475,23 @@ def test_content_source_import_receipt_arrays_are_versioned() -> None:
             CONTENT_SOURCE_IMPORT_RECEIPT_MIGRATION_DEFINITIONS
         )
         assert f"DEFINE FIELD OVERWRITE {field}.* ON source_imports" in migration_sql
+
+
+def test_content_raw_capture_lookup_indexes_are_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration_sql = "\n".join(
+        statement for migration in migrations for statement in migration.statements
+    )
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION == 18
+    assert "content_raw_capture_lookup_indexes" in [migration.name for migration in migrations]
+    for index_name in (
+        "idx_raw_captures_dedupe_lookup",
+        "idx_raw_captures_source_lookup",
+    ):
+        assert index_name in CONTENT_SCHEMA_DEFINITIONS
+        assert index_name in CONTENT_RAW_CAPTURE_LOOKUP_MIGRATION_DEFINITIONS
+        assert index_name in migration_sql
 
 
 def test_raw_capture_changefeed_cursor_is_versioned() -> None:
