@@ -33,6 +33,7 @@ from sibyl_core.backends.surreal.content_schema import (
     CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS,
     CONTENT_SCHEMA_CURRENT_VERSION,
     CONTENT_SCHEMA_DEFINITIONS,
+    CONTENT_SOURCE_IMPORT_RECEIPT_MIGRATION_DEFINITIONS,
     CONTENT_TABLES,
     CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS,
     _content_schema_migrations,
@@ -434,7 +435,7 @@ def test_content_usage_signals_are_versioned() -> None:
         statement for migration in migrations for statement in migration.statements
     )
 
-    assert CONTENT_SCHEMA_CURRENT_VERSION == 16
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 16
     assert "memory_usage_events" in CONTENT_TABLES
     assert "content_usage_signals" in [migration.name for migration in migrations]
     for field in (
@@ -455,6 +456,26 @@ def test_content_usage_signals_are_versioned() -> None:
         CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS
     )
     assert CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
+
+
+def test_content_source_import_receipt_arrays_are_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration_sql = "\n".join(
+        statement for migration in migrations for statement in migration.statements
+    )
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION == 17
+    assert "content_source_import_receipt_arrays" in [
+        migration.name for migration in migrations
+    ]
+    for field in ("skipped_records", "errors"):
+        assert f"DEFINE FIELD IF NOT EXISTS {field}.* ON source_imports" in (
+            CONTENT_SCHEMA_DEFINITIONS
+        )
+        assert f"DEFINE FIELD OVERWRITE {field}.* ON source_imports" in (
+            CONTENT_SOURCE_IMPORT_RECEIPT_MIGRATION_DEFINITIONS
+        )
+        assert f"DEFINE FIELD OVERWRITE {field}.* ON source_imports" in migration_sql
 
 
 def test_raw_capture_changefeed_cursor_is_versioned() -> None:

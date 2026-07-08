@@ -226,7 +226,9 @@ DEFINE FIELD IF NOT EXISTS source_ids ON source_imports TYPE array<string> DEFAU
 DEFINE FIELD IF NOT EXISTS dedupe_keys ON source_imports TYPE array<string> DEFAULT [];
 DEFINE FIELD IF NOT EXISTS duplicate_dedupe_keys ON source_imports TYPE array<string> DEFAULT [];
 DEFINE FIELD IF NOT EXISTS skipped_records ON source_imports TYPE array<object> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS skipped_records.* ON source_imports TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS errors ON source_imports TYPE array<object> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS errors.* ON source_imports TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS raw_memory_by_source_id ON source_imports TYPE object FLEXIBLE DEFAULT {{}};
 DEFINE FIELD IF NOT EXISTS batch_size ON source_imports TYPE int DEFAULT 100;
 DEFINE FIELD IF NOT EXISTS promotion_preview_approved ON source_imports TYPE bool DEFAULT false;
