@@ -38,7 +38,7 @@ dependencies = [
     "fastapi>=0.139.0",
     "mcp>=1.27.2",
     "starlette>=1.3.1",
-    "uvicorn[standard]>=0.38",
+    "uvicorn[standard]>=0.50.2",
     # Database (server-only)
     "surrealdb>=2.0.0,<3.0",
     # Auth & HTTP (server-specific deps)
