@@ -137,7 +137,7 @@ def test_eval_workflow_compares_local_and_openai_smoke_receipts() -> None:
     assert "if: github.event_name != 'pull_request'" in comparison_job
     assert "longmemeval-live-smoke" in comparison_job
     assert "longmemeval-local-smoke" in comparison_job
-    assert "actions/download-artifact@v7" in comparison_job
+    assert "actions/download-artifact@v8" in comparison_job
     assert "longmemeval-live-smoke-${{ github.sha }}" in comparison_job
     assert "longmemeval-local-smoke-${{ github.sha }}" in comparison_job
     assert (
