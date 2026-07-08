@@ -196,6 +196,50 @@ class TestBackfillEntityEmbeddingsJob:
             relationship_manager.create_direct_bulk.await_args.kwargs["generate_embeddings"] is True
         )
 
+    @pytest.mark.asyncio
+    async def test_retries_surreal_write_conflicts(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        entity = Entity(
+            id="session-123",
+            entity_type="session",
+            name="Lexical session",
+            content="Persisted before embeddings were available.",
+        )
+        entity_manager = MagicMock()
+        entity_manager.create_direct_bulk = AsyncMock(
+            side_effect=[
+                RuntimeError(
+                    "Transaction conflict: Write conflict, retry the transaction. "
+                    "This transaction can be retried"
+                ),
+                ["session-123"],
+            ]
+        )
+        relationship_manager = MagicMock()
+        runtime = SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+        )
+        sleep_calls: list[float] = []
+
+        async def fake_sleep(delay_seconds: float) -> None:
+            sleep_calls.append(delay_seconds)
+
+        monkeypatch.setattr("sibyl.jobs.entities.asyncio.sleep", fake_sleep)
+
+        with patch(
+            "sibyl.jobs.entities.get_surreal_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ):
+            result = await backfill_entity_embeddings(
+                {},
+                [entity.model_dump(mode="json")],
+                "org-1",
+            )
+
+        assert result["entities"] == 1
+        assert entity_manager.create_direct_bulk.await_count == 2
+        assert sleep_calls == [0.25]
+
 
 class TestCreateLearningEpisodeJob:
     @pytest.mark.asyncio

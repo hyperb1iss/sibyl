@@ -4,6 +4,8 @@ These jobs handle async entity operations via SurrealDB, allowing
 the API to return quickly while background processing continues.
 """
 
+import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import structlog
@@ -19,6 +21,9 @@ from sibyl_core.services.surreal_content import MemoryScope
 from sibyl_core.tasks.distillation import build_learning_episode, build_learning_procedure
 
 log = structlog.get_logger()
+
+_EMBEDDING_BACKFILL_MAX_ATTEMPTS = 4
+_EMBEDDING_BACKFILL_RETRY_BASE_SECONDS = 0.25
 
 
 def serialize_memory_policy_context(
@@ -74,6 +79,42 @@ def _policy_context_project_id(policy_context: MemoryPolicyContext) -> str | Non
     if policy_context.memory_space == MemoryScope.PROJECT.value:
         return policy_context.scope_key
     return None
+
+
+def _is_retryable_surreal_write_conflict(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return (
+        "transaction conflict" in message
+        and "write conflict" in message
+        and "can be retried" in message
+    )
+
+
+async def _retry_surreal_write_conflict[T](
+    operation: str,
+    callback: Callable[[], Awaitable[T]],
+) -> T:
+    for attempt in range(1, _EMBEDDING_BACKFILL_MAX_ATTEMPTS + 1):
+        try:
+            return await callback()
+        except Exception as exc:
+            if (
+                attempt >= _EMBEDDING_BACKFILL_MAX_ATTEMPTS
+                or not _is_retryable_surreal_write_conflict(exc)
+            ):
+                raise
+            delay_seconds = _EMBEDDING_BACKFILL_RETRY_BASE_SECONDS * attempt
+            log.warning(
+                "entity_embedding_backfill_write_conflict_retry",
+                operation=operation,
+                attempt=attempt,
+                max_attempts=_EMBEDDING_BACKFILL_MAX_ATTEMPTS,
+                delay_seconds=delay_seconds,
+                error=str(exc),
+            )
+            await asyncio.sleep(delay_seconds)
+    msg = f"{operation} retry loop exhausted without returning"
+    raise RuntimeError(msg)
 
 
 async def _safe_broadcast(event: str, data: dict[str, Any], *, org_id: str | None) -> None:
@@ -714,9 +755,12 @@ async def backfill_entity_embeddings(
         embedding_provider=configured_embedding_provider(),
     )
     entities = [Entity.model_validate(entity_data) for entity_data in entities_data]
-    created_ids = await runtime.entity_manager.create_direct_bulk(
-        entities,
-        generate_embeddings=True,
+    created_ids = await _retry_surreal_write_conflict(
+        "entity_embedding_backfill_entities",
+        lambda: runtime.entity_manager.create_direct_bulk(
+            entities,
+            generate_embeddings=True,
+        ),
     )
 
     relationship_ids: list[str] = []
@@ -727,9 +771,12 @@ async def backfill_entity_embeddings(
         create_direct_bulk = getattr(runtime.relationship_manager, "create_direct_bulk", None)
         if callable(create_direct_bulk):
             relationship_ids = list(
-                await create_direct_bulk(
-                    relationship_models,
-                    generate_embeddings=True,
+                await _retry_surreal_write_conflict(
+                    "entity_embedding_backfill_relationships",
+                    lambda: create_direct_bulk(
+                        relationship_models,
+                        generate_embeddings=True,
+                    ),
                 )
             )
         else:
