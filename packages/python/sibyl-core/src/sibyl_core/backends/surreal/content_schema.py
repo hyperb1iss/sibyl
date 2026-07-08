@@ -49,7 +49,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 16
+CONTENT_SCHEMA_CURRENT_VERSION = 17
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -421,6 +421,13 @@ WHERE last_recalled_at = NONE
     );
 """
 
+CONTENT_SOURCE_IMPORT_RECEIPT_MIGRATION_DEFINITIONS = """
+DEFINE FIELD IF NOT EXISTS skipped_records.* ON source_imports TYPE object FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS errors.* ON source_imports TYPE object FLEXIBLE;
+DEFINE FIELD OVERWRITE skipped_records.* ON source_imports TYPE object FLEXIBLE;
+DEFINE FIELD OVERWRITE errors.* ON source_imports TYPE object FLEXIBLE;
+"""
+
 
 def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
     compatible_schema = render_fulltext_compatible_sql(
@@ -520,6 +527,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=16,
             name="content_usage_signals",
             statements=tuple(split_statements(CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=17,
+            name="content_source_import_receipt_arrays",
+            statements=tuple(split_statements(CONTENT_SOURCE_IMPORT_RECEIPT_MIGRATION_DEFINITIONS)),
         ),
     )
 
@@ -868,6 +880,7 @@ __all__ = [
     "CONTENT_SCHEMA_DEFINITIONS",
     "CONTENT_SCHEMA_NAME",
     "CONTENT_SOURCE_URL_SCOPE_MIGRATION_DEFINITIONS",
+    "CONTENT_SOURCE_IMPORT_RECEIPT_MIGRATION_DEFINITIONS",
     "CONTENT_TABLES",
     "CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS",
     "bootstrap_content_schema",
