@@ -1,0 +1,53 @@
+apiVersion: v1
+entries:
+  sibyl:
+  - apiVersion: v2
+    appVersion: 1.0.2
+    created: "2026-07-08T10:25:08.327156-07:00"
+    description: Knowledge graph and task workflow for durable development memory
+    digest: dc9c5c905e843b6e9fd5ef1ea48f6e1fe3626dfe2d2bfab2dfae5a5668897c92
+    home: https://github.com/hyperb1iss/sibyl
+    keywords:
+    - knowledge-graph
+    - mcp
+    - ai
+    - graphrag
+    - surrealdb
+    - valkey
+    maintainers:
+    - name: hyperb1iss
+      url: https://github.com/hyperb1iss
+    name: sibyl
+    sources:
+    - https://github.com/hyperb1iss/sibyl
+    type: application
+    urls:
+    - https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages/sibyl-1.0.2.tgz
+    version: 1.0.2
+  sibyl-surrealdb:
+  - apiVersion: v2
+    appVersion: 3.1.0
+    created: "2026-07-08T10:25:08.329628-07:00"
+    dependencies:
+    - name: surrealdb
+      repository: https://helm.surrealdb.com
+      version: 0.4.0
+    description: Sibyl-owned SurrealDB wrapper with backup and restore operations
+    digest: 62b5e2f165b08b480d61194921a71a4cfb5710054c48b973b9f9da20e41add61
+    home: https://github.com/hyperb1iss/sibyl
+    keywords:
+    - surrealdb
+    - backup
+    - restore
+    - sibyl
+    maintainers:
+    - name: hyperb1iss
+      url: https://github.com/hyperb1iss
+    name: sibyl-surrealdb
+    sources:
+    - https://github.com/hyperb1iss/sibyl
+    type: application
+    urls:
+    - https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages/sibyl-surrealdb-1.0.2.tgz
+    version: 1.0.2
+generated: "2026-07-08T10:25:08.325671-07:00"
