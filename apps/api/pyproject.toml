@@ -61,7 +61,7 @@ dependencies = [
 
 [project.optional-dependencies]
 generator = [
-    "anthropic>=0.75",
+    "anthropic>=0.116.0",
 ]
 graphrag = [
     "networkx>=3.0",
