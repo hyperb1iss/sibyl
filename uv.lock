@@ -969,15 +969,15 @@ wheels = [
 
 [[package]]
 name = "genai-prices"
-version = "0.0.66"
+version = "0.0.70"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx2" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0e/7c/c50fc8d18b283e9b56ff625d45dbe9577c676e1d16636c1011967182d813/genai_prices-0.0.66.tar.gz", hash = "sha256:f087dfe56da28a4c3933dcf846cf2b7111ba733cef674c0cbc66de80212bcd6b", size = 71130, upload-time = "2026-06-09T21:51:14.561Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/08/7c/e8bdd653fb9b292a920b6568b3949176b8de98ad2f84fede2ce44bf318d9/genai_prices-0.0.70.tar.gz", hash = "sha256:62d495aa867bb360ea359866b01d89932365417ba3bd013e0ba7c1d884e09ef9", size = 81827, upload-time = "2026-07-07T18:11:03.667Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5c/87/1a36166f91906e47f430f6d4150ec6bfc0001032a363e49fc389021c0609/genai_prices-0.0.66-py3-none-any.whl", hash = "sha256:86b83f107c1cf04bb449a120cd8d4439ceb6843660d9128cde560eb511686d7b", size = 73745, upload-time = "2026-06-09T21:51:13.523Z" },
+    { url = "https://files.pythonhosted.org/packages/34/09/02ec13cb9108862a514cf05ea10ff7f18e523698606ed2976e2cbfa484fa/genai_prices-0.0.70-py3-none-any.whl", hash = "sha256:c7cb9da4944860329450b086dad402f17237b7552165fd3b61b24e291d1ddb88", size = 84312, upload-time = "2026-07-07T18:11:02.373Z" },
 ]
 
 [[package]]
@@ -2563,7 +2563,7 @@ wheels = [
 
 [[package]]
 name = "pydantic-ai-slim"
-version = "1.107.0"
+version = "2.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "genai-prices" },
@@ -2574,9 +2574,9 @@ dependencies = [
     { name = "pydantic-graph" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4c/26/ced63dfaabbc77f3beb86d59689cdea748e7ccffb6b419dbaf4780f211e8/pydantic_ai_slim-1.107.0.tar.gz", hash = "sha256:4616f689a92fcfecfecf2a7af27aca22f139a873cf6d7a8929eaeee9c0eedbb4", size = 779902, upload-time = "2026-06-10T14:53:10.574Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d8/ed/ead2f430f20e001408e1b91fa910cacf4a39271470d55093c1e01ac9ff4c/pydantic_ai_slim-2.6.0.tar.gz", hash = "sha256:d6b6a473eaf58d0b54cfd71e94e9ee27aa149a1f7899be6ee880f1dcfddd958f", size = 780428, upload-time = "2026-07-08T01:34:56.021Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/15/57/71044e17f931b08cc3930bc0fe5a1e1fd37fa474ae826be004729ef1cb4a/pydantic_ai_slim-1.107.0-py3-none-any.whl", hash = "sha256:1af49bbae06a6c598f72c54d4734ba377100cac493c9a05fa8e089bebeae0da6", size = 964046, upload-time = "2026-06-10T14:53:03.333Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/5b/9c135d22d641e7cda457e86f065a246232ed02b529a5ea66b2e62d3e4ed6/pydantic_ai_slim-2.6.0-py3-none-any.whl", hash = "sha256:133764bd45a72db1bad38a2eaf136c73b0b51130e50a95bf328fe03be0197dbe", size = 956698, upload-time = "2026-07-08T01:34:48.298Z" },
 ]
 
 [package.optional-dependencies]
@@ -2649,7 +2649,7 @@ wheels = [
 
 [[package]]
 name = "pydantic-graph"
-version = "1.107.0"
+version = "2.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -2657,9 +2657,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/dd/c3/6e8c2d13b8701041f1b3eac5deb41f25d4dbfa479a190d5c6becc23f2a49/pydantic_graph-1.107.0.tar.gz", hash = "sha256:278dd89b3e33f3a2963ac949f27a53aef705c5d883a8ce5d06d23e6e3cfbd972", size = 62564, upload-time = "2026-06-10T14:53:13.366Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f1/36/ffa7fd44e7ec25ac00e82392ea0466a0a2f366ae492e5d534baa1113ef57/pydantic_graph-2.6.0.tar.gz", hash = "sha256:208e85a8c4e3767c535ab0971c77d659880652b8c116d2e7c07bca1ac8b9d097", size = 43902, upload-time = "2026-07-08T01:34:58.566Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fc/72/621556e3f5068400d43a0375d38e5963de30256eaa5a702aba12e82ed0ff/pydantic_graph-1.107.0-py3-none-any.whl", hash = "sha256:71add94fe7e14c703977a895117c475aae6c0b02a774a036c4d00d9a63c78b00", size = 80106, upload-time = "2026-06-10T14:53:06.543Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/47/944a2d9b46160a8c34ff74e59dd4b586113dfcae445fd08b4fa4b6d80db0/pydantic_graph-2.6.0-py3-none-any.whl", hash = "sha256:28b06ca1d96f896b1e606760edf04b7db321c035eadeb0e9fbcccebddfe125eb", size = 51646, upload-time = "2026-07-08T01:34:51.67Z" },
 ]
 
 [[package]]
@@ -3415,8 +3415,8 @@ requires-dist = [
     { name = "mistune", marker = "extra == 'crawler'", specifier = ">=3.0" },
     { name = "mistune", marker = "extra == 'runtime'", specifier = ">=3.0" },
     { name = "pydantic", specifier = ">=2.0" },
-    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'llm'", specifier = ">=1.107.0,<2" },
-    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'runtime'", specifier = ">=1.107.0,<2" },
+    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'llm'", specifier = ">=2.6.0,<3" },
+    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'runtime'", specifier = ">=2.6.0,<3" },
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "pyjwt", specifier = ">=2.10" },
     { name = "python-louvain", marker = "extra == 'graphrag'", specifier = ">=0.16" },
@@ -3432,7 +3432,7 @@ provides-extras = ["crawler", "embeddings", "graph", "graphrag", "llm", "reranki
 [package.metadata.requires-dev]
 dev = [
     { name = "numpy", specifier = ">=2.5.1" },
-    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], specifier = ">=1.107.0,<2" },
+    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], specifier = ">=2.6.0,<3" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
