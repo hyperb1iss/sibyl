@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import importlib.util
 import json
@@ -44,6 +45,14 @@ OFFICIAL_HARNESS_PATH = "evaluation/harness.py"
 QWEN_READER_MODEL_FRAGMENT = "qwen3.5-9b"
 GPT_EVALUATOR_MODEL_FRAGMENT = "gpt-5.2"
 DEFAULT_METHOD = "sibyl_live_api"
+TRANSIENT_READER_EXCEPTION_NAMES = frozenset(
+    {
+        "APIConnectionError",
+        "APITimeoutError",
+        "InternalServerError",
+        "RateLimitError",
+    }
+)
 _SENSITIVE_COMMAND_FLAGS = frozenset(
     {
         "--api-token",
@@ -107,7 +116,9 @@ def main(argv: list[str] | None = None) -> int:
     ensure_official_harness(official_repo)
     sys.path.insert(0, str(official_repo))
     import benchmarks.longmemeval_v2_memory.sibyl_memory  # noqa: F401, PLC0415
-    from evaluation.harness import main as harness_main  # noqa: PLC0415
+    import evaluation.harness as official_harness  # noqa: PLC0415
+
+    install_reader_retry(official_harness, args=args)
 
     old_argv = sys.argv
     try:
@@ -118,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
             runtime_dir=runtime_dir,
             memory_config_path=memory_config_path,
         )
-        harness_main()
+        official_harness.main()
     finally:
         sys.argv = old_argv
     receipt = build_receipt_from_artifacts(args=args, data_root=data_root, output_dir=output_dir)
@@ -151,6 +162,52 @@ def _redacted_command_args(command_args: Sequence[str]) -> list[str]:
             continue
         redacted.append(arg)
     return redacted
+
+
+def install_reader_retry(official_harness: Any, *, args: argparse.Namespace) -> None:
+    attempts = int(args.reader_retry_attempts)
+    if attempts <= 1:
+        return
+    original = official_harness.call_reader_model_async
+
+    async def call_reader_model_async_with_retry(
+        client: Any,
+        harness_args: argparse.Namespace,
+        messages: list[dict[str, Any]],
+    ) -> tuple[str, dict[str, int]]:
+        for attempt in range(1, attempts + 1):
+            try:
+                return await original(client, harness_args, messages)
+            except Exception as exc:
+                if attempt >= attempts or not is_transient_reader_exception(exc):
+                    raise
+                delay = reader_retry_delay_seconds(args, failed_attempt=attempt)
+                print(
+                    f"Reader request failed with {exc.__class__.__name__}; "
+                    f"retrying attempt {attempt + 1}/{attempts} after {delay:.1f}s.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                await asyncio.sleep(delay)
+        msg = "Reader retry loop exhausted unexpectedly"
+        raise RuntimeError(msg)
+
+    official_harness.call_reader_model_async = call_reader_model_async_with_retry
+
+
+def is_transient_reader_exception(exc: Exception) -> bool:
+    if isinstance(exc, json.JSONDecodeError):
+        return True
+    if exc.__class__.__name__ in TRANSIENT_READER_EXCEPTION_NAMES:
+        return True
+    status_code = getattr(exc, "status_code", None)
+    return isinstance(status_code, int) and (status_code == 429 or status_code >= 500)
+
+
+def reader_retry_delay_seconds(args: argparse.Namespace, *, failed_attempt: int) -> float:
+    base = float(args.reader_retry_base_delay_seconds)
+    max_delay = float(args.reader_retry_max_delay_seconds)
+    return min(max_delay, base * (2 ** max(0, failed_attempt - 1)))
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PLR0915
@@ -208,6 +265,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--reader-top-p", type=float, default=0.95)
     parser.add_argument("--reader-top-k", type=int, default=20)
     parser.add_argument("--reader-max-concurrent-requests", type=int, default=16)
+    parser.add_argument("--reader-retry-attempts", type=int, default=4)
+    parser.add_argument("--reader-retry-base-delay-seconds", type=float, default=2.0)
+    parser.add_argument("--reader-retry-max-delay-seconds", type=float, default=30.0)
     parser.add_argument("--max-completion-tokens", type=int, default=20_000)
     parser.add_argument("--memory-context-max-tokens", type=int, default=200_000)
     parser.add_argument("--timeout-seconds", type=float, default=43_200.0)
@@ -227,6 +287,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     args = parser.parse_args(argv)
     if not args.receipt_only and args.domain == "combined":
         parser.error("--domain combined is only valid with --receipt-only")
+    if args.reader_retry_attempts < 1:
+        parser.error("--reader-retry-attempts must be positive")
+    if args.reader_retry_base_delay_seconds < 0:
+        parser.error("--reader-retry-base-delay-seconds must be non-negative")
+    if args.reader_retry_max_delay_seconds < 0:
+        parser.error("--reader-retry-max-delay-seconds must be non-negative")
     return args
 
 
@@ -382,6 +448,10 @@ def build_run_plan(
         "llm_eval_count": llm_eval_count,
         "reader_model": args.reader_model,
         "reader_base_url": args.reader_base_url,
+        "reader_max_concurrent_requests": args.reader_max_concurrent_requests,
+        "reader_retry_attempts": args.reader_retry_attempts,
+        "reader_retry_base_delay_seconds": args.reader_retry_base_delay_seconds,
+        "reader_retry_max_delay_seconds": args.reader_retry_max_delay_seconds,
         "evaluator_model": args.evaluator_model,
         "requirements": build_requirement_status(args=args, data_root=data_root),
         "summary": summarize_longmemeval_v2_inputs(

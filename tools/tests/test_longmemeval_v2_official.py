@@ -5,7 +5,7 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import TypedDict
 
 import pytest
@@ -18,6 +18,9 @@ EXPECTED_EMBEDDING_JOB_WAIT_TIMEOUT_SECONDS = 1_800.0
 EXPECTED_BULK_MAX_ENTITIES = 16
 EXPECTED_BULK_MAX_CONTENT_CHARS = 200_000
 EXPECTED_EMBEDDING_BACKFILL_MAX_PENDING_JOBS = 8
+EXPECTED_READER_MAX_CONCURRENT_REQUESTS = 16
+EXPECTED_READER_RETRY_ATTEMPTS = 4
+EXPECTED_TRANSIENT_READER_ATTEMPTS = 2
 TEST_CONTENT_MAX_CHARS = 420
 
 
@@ -126,6 +129,8 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(tmp_path: Path)
         memory_config["memory_params"]["embedding_backfill_max_pending_jobs"]
         == EXPECTED_EMBEDDING_BACKFILL_MAX_PENDING_JOBS
     )
+    assert plan["reader_max_concurrent_requests"] == EXPECTED_READER_MAX_CONCURRENT_REQUESTS
+    assert plan["reader_retry_attempts"] == EXPECTED_READER_RETRY_ATTEMPTS
     assert plan["honesty_contract"]["answer_gold_visible_to_memory"] is False
     assert plan["required_trajectory_count"] == EXPECTED_REQUIRED_TRAJECTORIES
     assert plan["requirements"]["trajectories_jsonl_exists"] is True
@@ -260,6 +265,76 @@ def test_longmemeval_v2_receipt_redacts_sensitive_command_args() -> None:
         "--domain",
         "web",
     ]
+
+
+@pytest.mark.asyncio
+async def test_official_runner_retries_transient_reader_parse_failure(capsys) -> None:
+    module = _load_runner_module()
+    harness = ModuleType("harness")
+    attempts = 0
+
+    async def flaky_reader(
+        client: object,
+        args: object,
+        messages: list[dict[str, object]],
+    ) -> tuple[str, dict[str, int]]:
+        nonlocal attempts
+        del client, args, messages
+        attempts += 1
+        if attempts == 1:
+            raise json.JSONDecodeError("Expecting value", "\n", 0)
+        return "boxed answer", {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+
+    harness.call_reader_model_async = flaky_reader
+    module.install_reader_retry(
+        harness,
+        args=SimpleNamespace(
+            reader_retry_attempts=3,
+            reader_retry_base_delay_seconds=0.0,
+            reader_retry_max_delay_seconds=0.0,
+        ),
+    )
+
+    result = await harness.call_reader_model_async(None, SimpleNamespace(), [])
+
+    assert result == (
+        "boxed answer",
+        {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    )
+    assert attempts == EXPECTED_TRANSIENT_READER_ATTEMPTS
+    assert "retrying attempt 2/3" in capsys.readouterr().err
+
+
+@pytest.mark.asyncio
+async def test_official_runner_does_not_retry_non_transient_reader_failure() -> None:
+    module = _load_runner_module()
+    harness = ModuleType("harness")
+    attempts = 0
+
+    async def broken_reader(
+        client: object,
+        args: object,
+        messages: list[dict[str, object]],
+    ) -> tuple[str, dict[str, int]]:
+        nonlocal attempts
+        del client, args, messages
+        attempts += 1
+        raise ValueError("bad request shape")
+
+    harness.call_reader_model_async = broken_reader
+    module.install_reader_retry(
+        harness,
+        args=SimpleNamespace(
+            reader_retry_attempts=3,
+            reader_retry_base_delay_seconds=0.0,
+            reader_retry_max_delay_seconds=0.0,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="bad request shape"):
+        await harness.call_reader_model_async(None, SimpleNamespace(), [])
+
+    assert attempts == 1
 
 
 def test_sibyl_memory_payloads_chunk_trajectory_by_state() -> None:
