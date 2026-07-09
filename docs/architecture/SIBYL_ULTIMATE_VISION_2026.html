@@ -1,0 +1,3519 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <meta
+      name="description"
+      content="A source-grounded 2026 vision for Sibyl as the sovereign context runtime for people and their agent fleets."
+    />
+    <title>Sibyl · The Sovereign Context Runtime</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root,
+      :root[data-theme="dark"] {
+        --purple: #e135ff;
+        --purple-2: #a855f7;
+        --cyan: #80ffea;
+        --coral: #ff6ac1;
+        --yellow: #f1fa8c;
+        --green: #50fa7b;
+        --red: #ff6363;
+        --orange: #ffb86c;
+        --void: #07050d;
+        --base: #0d0a15;
+        --raised: #13101e;
+        --card: #191426;
+        --surface: #211a30;
+        --ink: #fbf9ff;
+        --ink-2: #d9d3e4;
+        --muted: #9c92aa;
+        --subtle: #8b8097;
+        --line: rgba(255, 255, 255, 0.1);
+        --line-strong: rgba(255, 255, 255, 0.18);
+        --purple-wash: rgba(225, 53, 255, 0.12);
+        --cyan-wash: rgba(128, 255, 234, 0.1);
+        --coral-wash: rgba(255, 106, 193, 0.1);
+        --shadow: rgba(0, 0, 0, 0.52);
+        --nav: rgba(7, 5, 13, 0.82);
+        color-scheme: dark;
+      }
+
+      :root[data-theme="light"] {
+        --purple: #7e2bd5;
+        --purple-2: #9333c7;
+        --cyan: #006f7c;
+        --coral: #b93378;
+        --yellow: #755d00;
+        --green: #237a4b;
+        --red: #c1272d;
+        --orange: #a34f10;
+        --void: #f3eff9;
+        --base: #faf8ff;
+        --raised: #f0eafa;
+        --card: #ffffff;
+        --surface: #e8e0f3;
+        --ink: #1d1727;
+        --ink-2: #352d42;
+        --muted: #655a73;
+        --subtle: #70647d;
+        --line: rgba(29, 23, 39, 0.12);
+        --line-strong: rgba(29, 23, 39, 0.2);
+        --purple-wash: rgba(126, 43, 213, 0.09);
+        --cyan-wash: rgba(0, 127, 142, 0.08);
+        --coral-wash: rgba(185, 51, 120, 0.08);
+        --shadow: rgba(56, 36, 74, 0.16);
+        --nav: rgba(250, 248, 255, 0.86);
+        color-scheme: light;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+        scroll-padding-top: 5rem;
+        -webkit-text-size-adjust: 100%;
+      }
+
+      body {
+        min-width: 320px;
+        margin: 0;
+        overflow-x: hidden;
+        background:
+          radial-gradient(circle at 12% 8%, var(--purple-wash), transparent 26rem),
+          radial-gradient(circle at 88% 26%, var(--cyan-wash), transparent 30rem),
+          var(--void);
+        color: var(--ink);
+        font-family: "Space Grotesk", Inter, system-ui, sans-serif;
+        font-size: 17px;
+        line-height: 1.65;
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      body::before {
+        position: fixed;
+        z-index: -2;
+        inset: 0;
+        background-image:
+          linear-gradient(var(--line) 1px, transparent 1px),
+          linear-gradient(90deg, var(--line) 1px, transparent 1px);
+        background-size: 64px 64px;
+        content: "";
+        opacity: 0.28;
+        pointer-events: none;
+        -webkit-mask-image: radial-gradient(circle at 50% 24%, black, transparent 72%);
+        mask-image: radial-gradient(circle at 50% 24%, black, transparent 72%);
+      }
+
+      ::selection {
+        background: color-mix(in srgb, var(--purple) 38%, transparent);
+        color: var(--ink);
+      }
+
+      :focus-visible {
+        border-radius: 4px;
+        outline: 2px solid var(--cyan);
+        outline-offset: 4px;
+      }
+
+      a {
+        color: var(--cyan);
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+        text-underline-offset: 0.22em;
+      }
+
+      button {
+        color: inherit;
+        font: inherit;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4 {
+        margin: 0;
+        font-weight: 600;
+        line-height: 1.08;
+        text-wrap: balance;
+      }
+
+      p {
+        margin: 0 0 1.15rem;
+      }
+
+      code,
+      .mono {
+        font-family: "Fira Code", "SFMono-Regular", Consolas, monospace;
+        font-feature-settings: "tnum" 1;
+      }
+
+      .skip-link {
+        position: fixed;
+        z-index: 200;
+        top: 1rem;
+        left: -100vw;
+        border-radius: 8px;
+        background: var(--purple);
+        color: #fff;
+        padding: 0.7rem 1rem;
+        font-weight: 600;
+      }
+
+      .skip-link:focus {
+        left: 1rem;
+      }
+
+      .wrap {
+        width: min(1180px, 92vw);
+        margin-inline: auto;
+      }
+
+      .narrow {
+        max-width: 72ch;
+      }
+
+      .progress {
+        position: fixed;
+        z-index: 120;
+        top: 0;
+        right: 0;
+        left: 0;
+        height: 2px;
+        background: var(--line);
+      }
+
+      .progress > span {
+        display: block;
+        width: 0;
+        height: 100%;
+        background: linear-gradient(90deg, var(--purple), var(--cyan), var(--coral));
+        box-shadow: 0 0 12px color-mix(in srgb, var(--cyan) 60%, transparent);
+      }
+
+      .topbar {
+        position: sticky;
+        z-index: 100;
+        top: 0;
+        border-bottom: 1px solid var(--line);
+        background: var(--nav);
+        backdrop-filter: blur(18px) saturate(1.3);
+      }
+
+      .topbar-inner {
+        display: flex;
+        min-height: 4.25rem;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.7rem;
+        color: var(--ink);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 2rem;
+        height: 2rem;
+        place-items: center;
+        border: 1px solid color-mix(in srgb, var(--purple) 56%, transparent);
+        border-radius: 50%;
+        background: var(--purple-wash);
+        box-shadow: 0 0 24px var(--purple-wash);
+        color: var(--purple);
+        font-family: "Fira Code", monospace;
+        font-size: 0.82rem;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: clamp(0.7rem, 2vw, 1.45rem);
+      }
+
+      .nav-links a {
+        color: var(--muted);
+        font-family: "Fira Code", monospace;
+        font-size: 0.72rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .nav-links a:hover,
+      .nav-links a[aria-current="true"] {
+        color: var(--cyan);
+        text-decoration: none;
+      }
+
+      .theme-toggle {
+        display: inline-grid;
+        width: 2.6rem;
+        height: 2.6rem;
+        place-items: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 50%;
+        background: var(--raised);
+        cursor: pointer;
+        transition:
+          transform 180ms ease,
+          border-color 180ms ease;
+      }
+
+      .theme-toggle:hover {
+        border-color: var(--cyan);
+        transform: rotate(10deg);
+      }
+
+      .hero {
+        position: relative;
+        display: grid;
+        min-height: calc(100svh - 4.25rem);
+        place-items: center;
+        overflow: hidden;
+        isolation: isolate;
+      }
+
+      #signalField {
+        position: absolute;
+        z-index: -1;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0.65;
+      }
+
+      .hero-orbit {
+        position: absolute;
+        z-index: -1;
+        width: min(78vw, 880px);
+        aspect-ratio: 1;
+        border: 1px solid var(--line);
+        border-radius: 50%;
+        animation: drift 24s linear infinite;
+      }
+
+      .hero-orbit::before,
+      .hero-orbit::after {
+        position: absolute;
+        border: 1px solid var(--line);
+        border-radius: inherit;
+        content: "";
+      }
+
+      .hero-orbit::before {
+        inset: 12%;
+        border-color: color-mix(in srgb, var(--cyan) 18%, transparent);
+      }
+
+      .hero-orbit::after {
+        inset: 27%;
+        border-color: color-mix(in srgb, var(--purple) 22%, transparent);
+      }
+
+      .hero-content {
+        padding-block: 7rem 6rem;
+        text-align: center;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.7rem;
+        color: var(--cyan);
+        font-family: "Fira Code", monospace;
+        font-size: 0.72rem;
+        font-weight: 500;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow::before,
+      .eyebrow::after {
+        width: 1.8rem;
+        height: 1px;
+        background: currentColor;
+        content: "";
+        opacity: 0.58;
+      }
+
+      .hero h1 {
+        margin-top: 1.5rem;
+        font-size: clamp(4.2rem, 15vw, 10.5rem);
+        font-weight: 600;
+        letter-spacing: -0.075em;
+        line-height: 0.78;
+      }
+
+      .gradient-ink {
+        background: linear-gradient(112deg, var(--purple), var(--cyan) 54%, var(--coral));
+        background-clip: text;
+        color: transparent;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+
+      .hero-kicker {
+        max-width: 20ch;
+        margin: 2rem auto 1.3rem;
+        color: var(--ink);
+        font-size: clamp(1.65rem, 4.5vw, 3.25rem);
+        font-weight: 500;
+        letter-spacing: -0.045em;
+        line-height: 1.03;
+        text-wrap: balance;
+      }
+
+      .hero-thesis {
+        max-width: 64ch;
+        margin: 0 auto;
+        color: var(--ink-2);
+        font-size: clamp(1rem, 1.8vw, 1.24rem);
+      }
+
+      .hero-meta {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.75rem;
+        margin-top: 2rem;
+      }
+
+      .pill {
+        display: inline-flex;
+        min-height: 2.2rem;
+        align-items: center;
+        gap: 0.5rem;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--card) 72%, transparent);
+        color: var(--muted);
+        padding: 0.38rem 0.78rem;
+        font-family: "Fira Code", monospace;
+        font-size: 0.68rem;
+        letter-spacing: 0.04em;
+      }
+
+      .pill::before {
+        width: 0.42rem;
+        height: 0.42rem;
+        border-radius: 50%;
+        background: var(--green);
+        box-shadow: 0 0 10px color-mix(in srgb, var(--green) 70%, transparent);
+        content: "";
+      }
+
+      .scroll-cue {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-top: 3.2rem;
+        color: var(--subtle);
+        font-family: "Fira Code", monospace;
+        font-size: 0.68rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .scroll-cue span {
+        width: 2.8rem;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, var(--subtle));
+      }
+
+      main section {
+        position: relative;
+        padding-block: clamp(5rem, 10vw, 9rem);
+      }
+
+      .section-rule {
+        border-top: 1px solid var(--line);
+      }
+
+      .section-head {
+        display: grid;
+        gap: 1.15rem;
+        margin-bottom: clamp(2.4rem, 5vw, 4rem);
+      }
+
+      .section-no {
+        color: var(--coral);
+        font-family: "Fira Code", monospace;
+        font-size: 0.7rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      .section-title {
+        max-width: 21ch;
+        font-size: clamp(2.35rem, 6vw, 5rem);
+        letter-spacing: -0.055em;
+      }
+
+      .section-lede {
+        max-width: 66ch;
+        color: var(--ink-2);
+        font-size: clamp(1.05rem, 2vw, 1.3rem);
+      }
+
+      .grid {
+        display: grid;
+        gap: 1rem;
+      }
+
+      .grid-2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid-3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .grid-4 {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .card {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background:
+          linear-gradient(145deg, color-mix(in srgb, var(--card) 92%, transparent), var(--raised));
+        padding: clamp(1.25rem, 3vw, 2rem);
+        box-shadow: 0 20px 60px -38px var(--shadow);
+      }
+
+      .card::after {
+        position: absolute;
+        top: -4rem;
+        right: -4rem;
+        width: 10rem;
+        height: 10rem;
+        border-radius: 50%;
+        background: var(--accent-wash, var(--purple-wash));
+        content: "";
+        filter: blur(28px);
+        pointer-events: none;
+      }
+
+      .card[data-accent="cyan"] {
+        --accent: var(--cyan);
+        --accent-wash: var(--cyan-wash);
+      }
+
+      .card[data-accent="coral"] {
+        --accent: var(--coral);
+        --accent-wash: var(--coral-wash);
+      }
+
+      .card[data-accent="yellow"] {
+        --accent: var(--yellow);
+        --accent-wash: color-mix(in srgb, var(--yellow) 10%, transparent);
+      }
+
+      .card[data-accent="green"] {
+        --accent: var(--green);
+        --accent-wash: color-mix(in srgb, var(--green) 10%, transparent);
+      }
+
+      .card-kicker {
+        margin-bottom: 1rem;
+        color: var(--accent, var(--purple));
+        font-family: "Fira Code", monospace;
+        font-size: 0.69rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .card h3 {
+        margin-bottom: 0.85rem;
+        font-size: clamp(1.2rem, 2.2vw, 1.65rem);
+        letter-spacing: -0.025em;
+      }
+
+      .card h4 {
+        margin-bottom: 0.55rem;
+        font-size: 1.05rem;
+      }
+
+      .card p,
+      .card li {
+        color: var(--muted);
+      }
+
+      .card p:last-child {
+        margin-bottom: 0;
+      }
+
+      .verdict {
+        display: grid;
+        grid-template-columns: minmax(0, 1.3fr) minmax(260px, 0.7fr);
+        gap: 1rem;
+      }
+
+      .verdict-main {
+        min-height: 26rem;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+
+      .verdict-main blockquote {
+        max-width: 19ch;
+        margin: 0;
+        font-size: clamp(2rem, 5vw, 4.25rem);
+        font-weight: 500;
+        letter-spacing: -0.055em;
+        line-height: 1.02;
+      }
+
+      .verdict-side {
+        display: grid;
+        gap: 1rem;
+      }
+
+      .metric {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 1rem;
+        border-bottom: 1px solid var(--line);
+        padding-block: 0.9rem;
+      }
+
+      .metric:last-child {
+        border-bottom: 0;
+      }
+
+      .metric strong {
+        color: var(--cyan);
+        font-family: "Fira Code", monospace;
+        font-size: 1.35rem;
+      }
+
+      .metric span {
+        color: var(--muted);
+        font-size: 0.85rem;
+        text-align: right;
+      }
+
+      .status-row {
+        display: grid;
+        grid-template-columns: 10rem minmax(0, 1fr) auto;
+        gap: 1rem;
+        align-items: start;
+        border-top: 1px solid var(--line);
+        padding-block: 1.15rem;
+      }
+
+      .status-row:last-child {
+        border-bottom: 1px solid var(--line);
+      }
+
+      .status-name {
+        font-weight: 600;
+      }
+
+      .status-copy {
+        color: var(--muted);
+      }
+
+      .badge {
+        display: inline-flex;
+        border: 1px solid currentColor;
+        border-radius: 999px;
+        padding: 0.22rem 0.55rem;
+        font-family: "Fira Code", monospace;
+        font-size: 0.62rem;
+        letter-spacing: 0.08em;
+        line-height: 1.25;
+        text-transform: uppercase;
+      }
+
+      .badge.shipped {
+        color: var(--green);
+      }
+
+      .badge.proving {
+        color: var(--yellow);
+      }
+
+      .badge.missing {
+        color: var(--coral);
+      }
+
+      .badge.research {
+        color: var(--purple);
+      }
+
+      .signal-strip {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+        background: var(--raised);
+      }
+
+      .signal-strip > div {
+        min-height: 8rem;
+        border-right: 1px solid var(--line);
+        padding: 1.25rem;
+      }
+
+      .signal-strip > div:last-child {
+        border-right: 0;
+      }
+
+      .signal-strip strong {
+        display: block;
+        margin-bottom: 0.5rem;
+        color: var(--cyan);
+        font-family: "Fira Code", monospace;
+        font-size: 1.4rem;
+      }
+
+      .signal-strip span {
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+
+      .source-note {
+        color: var(--subtle);
+        font-size: 0.78rem;
+      }
+
+      .source-note a {
+        color: inherit;
+        text-decoration: underline;
+        text-decoration-color: var(--line-strong);
+        text-underline-offset: 0.2em;
+      }
+
+      .market-card {
+        min-height: 19rem;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .market-card .market-type {
+        color: var(--subtle);
+        font-family: "Fira Code", monospace;
+        font-size: 0.66rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .market-card h3 {
+        margin-top: 0.75rem;
+      }
+
+      .market-card .market-take {
+        margin-top: auto;
+        border-top: 1px solid var(--line);
+        padding-top: 1rem;
+        color: var(--ink-2);
+        font-size: 0.88rem;
+      }
+
+      .market-card .market-take strong {
+        color: var(--accent, var(--cyan));
+      }
+
+      .thesis-banner {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid color-mix(in srgb, var(--purple) 36%, var(--line));
+        border-radius: 24px;
+        background:
+          radial-gradient(circle at 20% 10%, var(--purple-wash), transparent 36%),
+          radial-gradient(circle at 80% 100%, var(--cyan-wash), transparent 36%),
+          var(--raised);
+        padding: clamp(2rem, 6vw, 5rem);
+        text-align: center;
+      }
+
+      .thesis-banner p {
+        max-width: 28ch;
+        margin: 0 auto;
+        font-size: clamp(2rem, 6vw, 5.5rem);
+        font-weight: 500;
+        letter-spacing: -0.065em;
+        line-height: 0.98;
+        text-wrap: balance;
+      }
+
+      .thesis-banner small {
+        display: block;
+        max-width: 62ch;
+        margin: 1.7rem auto 0;
+        color: var(--muted);
+        font-size: 1rem;
+      }
+
+      .architecture {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(7, minmax(150px, 1fr));
+        gap: 0.75rem;
+        overflow-x: auto;
+        padding-bottom: 1rem;
+        scrollbar-color: var(--purple) var(--raised);
+      }
+
+      .layer {
+        position: relative;
+        min-height: 23rem;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--raised);
+        padding: 1.2rem;
+      }
+
+      .layer::before {
+        display: block;
+        width: 0.62rem;
+        height: 0.62rem;
+        margin-bottom: 2.8rem;
+        border-radius: 50%;
+        background: var(--layer-color);
+        box-shadow: 0 0 16px var(--layer-color);
+        content: "";
+      }
+
+      .layer:nth-child(1) {
+        --layer-color: var(--red);
+      }
+
+      .layer:nth-child(2) {
+        --layer-color: var(--orange);
+      }
+
+      .layer:nth-child(3) {
+        --layer-color: var(--yellow);
+      }
+
+      .layer:nth-child(4) {
+        --layer-color: var(--green);
+      }
+
+      .layer:nth-child(5) {
+        --layer-color: var(--cyan);
+      }
+
+      .layer:nth-child(6) {
+        --layer-color: var(--purple);
+      }
+
+      .layer:nth-child(7) {
+        --layer-color: var(--coral);
+      }
+
+      .layer-no {
+        color: var(--subtle);
+        font-family: "Fira Code", monospace;
+        font-size: 0.62rem;
+      }
+
+      .layer h3 {
+        margin: 0.7rem 0 0.9rem;
+        font-size: 1.25rem;
+      }
+
+      .layer p {
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+
+      .layer ul {
+        margin: 1rem 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .layer li {
+        border-top: 1px solid var(--line);
+        color: var(--subtle);
+        font-size: 0.74rem;
+        padding-block: 0.5rem;
+      }
+
+      .principle-list {
+        counter-reset: principles;
+      }
+
+      .principle {
+        display: grid;
+        grid-template-columns: 5rem minmax(0, 1fr);
+        gap: 1.4rem;
+        border-top: 1px solid var(--line);
+        padding-block: 1.6rem;
+        counter-increment: principles;
+      }
+
+      .principle:last-child {
+        border-bottom: 1px solid var(--line);
+      }
+
+      .principle::before {
+        color: var(--purple);
+        content: "0" counter(principles);
+        font-family: "Fira Code", monospace;
+        font-size: 0.75rem;
+        letter-spacing: 0.12em;
+      }
+
+      .principle h3 {
+        margin-bottom: 0.45rem;
+        font-size: 1.35rem;
+      }
+
+      .principle p {
+        max-width: 70ch;
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .mail-demo {
+        overflow: hidden;
+        border: 1px solid var(--line-strong);
+        border-radius: 22px;
+        background: var(--base);
+        box-shadow: 0 30px 90px -48px var(--shadow);
+      }
+
+      .window-bar {
+        display: flex;
+        min-height: 3.25rem;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        border-bottom: 1px solid var(--line);
+        background: var(--raised);
+        padding-inline: 1.25rem;
+      }
+
+      .window-dots {
+        display: flex;
+        gap: 0.42rem;
+      }
+
+      .window-dots span {
+        width: 0.62rem;
+        height: 0.62rem;
+        border-radius: 50%;
+        background: var(--subtle);
+      }
+
+      .window-dots span:first-child {
+        background: var(--red);
+      }
+
+      .window-dots span:nth-child(2) {
+        background: var(--yellow);
+      }
+
+      .window-dots span:last-child {
+        background: var(--green);
+      }
+
+      .window-title {
+        color: var(--subtle);
+        font-family: "Fira Code", monospace;
+        font-size: 0.68rem;
+      }
+
+      .mail-body {
+        display: grid;
+        grid-template-columns: minmax(230px, 0.72fr) minmax(0, 1.28fr);
+        min-height: 39rem;
+      }
+
+      .mail-sidebar {
+        border-right: 1px solid var(--line);
+        background: var(--raised);
+        padding: 1.2rem;
+      }
+
+      .import-file {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--card);
+        margin-bottom: 0.65rem;
+        padding: 0.8rem;
+      }
+
+      .import-file.active {
+        border-color: color-mix(in srgb, var(--cyan) 44%, transparent);
+        background: var(--cyan-wash);
+      }
+
+      .import-file strong {
+        display: block;
+        font-size: 0.84rem;
+      }
+
+      .import-file span {
+        color: var(--subtle);
+        font-family: "Fira Code", monospace;
+        font-size: 0.62rem;
+      }
+
+      .mail-main {
+        padding: clamp(1.2rem, 4vw, 2.4rem);
+      }
+
+      .terminal-line {
+        display: flex;
+        align-items: baseline;
+        gap: 0.7rem;
+        color: var(--muted);
+        font-family: "Fira Code", monospace;
+        font-size: 0.76rem;
+      }
+
+      .terminal-line + .terminal-line {
+        margin-top: 0.55rem;
+      }
+
+      .terminal-line .prompt {
+        color: var(--purple);
+      }
+
+      .terminal-line .ok {
+        color: var(--green);
+      }
+
+      .import-progress {
+        height: 0.5rem;
+        margin-block: 1.5rem;
+        border-radius: 999px;
+        background: var(--surface);
+        overflow: hidden;
+      }
+
+      .import-progress span {
+        display: block;
+        width: 68%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--purple), var(--cyan));
+        box-shadow: 0 0 14px var(--cyan-wash);
+      }
+
+      .stage-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.8rem;
+      }
+
+      .stage {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--raised);
+        padding: 1rem;
+      }
+
+      .stage .stage-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.6rem;
+      }
+
+      .stage strong {
+        font-size: 0.88rem;
+      }
+
+      .stage p {
+        margin: 0.55rem 0 0;
+        color: var(--subtle);
+        font-size: 0.75rem;
+      }
+
+      .gate-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.85rem;
+        margin-top: 1rem;
+      }
+
+      .gate {
+        border-top: 2px solid var(--gate-color, var(--purple));
+        border-radius: 0 0 12px 12px;
+        background: var(--raised);
+        padding: 1rem;
+      }
+
+      .gate:nth-child(2) {
+        --gate-color: var(--cyan);
+      }
+
+      .gate:nth-child(3) {
+        --gate-color: var(--coral);
+      }
+
+      .gate:nth-child(4) {
+        --gate-color: var(--green);
+      }
+
+      .gate strong {
+        display: block;
+        color: var(--gate-color);
+        font-family: "Fira Code", monospace;
+        font-size: 1.25rem;
+      }
+
+      .gate span {
+        color: var(--muted);
+        font-size: 0.76rem;
+      }
+
+      .context-compiler {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 4rem minmax(0, 1fr);
+        gap: 1rem;
+        align-items: stretch;
+      }
+
+      .compiler-column {
+        display: grid;
+        gap: 0.75rem;
+      }
+
+      .compiler-node {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--raised);
+        padding: 1rem;
+      }
+
+      .compiler-node strong {
+        display: block;
+        margin-bottom: 0.3rem;
+        font-size: 0.92rem;
+      }
+
+      .compiler-node span {
+        color: var(--subtle);
+        font-size: 0.75rem;
+      }
+
+      .compiler-core {
+        display: grid;
+        place-items: center;
+      }
+
+      .compiler-core span {
+        writing-mode: vertical-rl;
+        transform: rotate(180deg);
+        color: var(--cyan);
+        font-family: "Fira Code", monospace;
+        font-size: 0.65rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .life-ui {
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background: var(--base);
+        overflow: hidden;
+      }
+
+      .life-ui-grid {
+        display: grid;
+        grid-template-columns: 13rem minmax(0, 1fr);
+        min-height: 37rem;
+      }
+
+      .life-nav {
+        border-right: 1px solid var(--line);
+        background: var(--raised);
+        padding: 1.1rem;
+      }
+
+      .life-nav strong {
+        display: block;
+        margin-bottom: 1rem;
+        font-size: 0.8rem;
+      }
+
+      .life-nav a {
+        display: block;
+        border-radius: 8px;
+        color: var(--muted);
+        padding: 0.55rem 0.7rem;
+        font-size: 0.78rem;
+      }
+
+      .life-nav a.active {
+        background: var(--purple-wash);
+        color: var(--purple);
+      }
+
+      .life-content {
+        padding: clamp(1.2rem, 4vw, 2.2rem);
+      }
+
+      .ask-box {
+        border: 1px solid color-mix(in srgb, var(--cyan) 38%, var(--line));
+        border-radius: 14px;
+        background: var(--cyan-wash);
+        padding: 1rem 1.1rem;
+        color: var(--ink-2);
+      }
+
+      .ask-box .mono {
+        color: var(--cyan);
+        font-size: 0.7rem;
+      }
+
+      .answer {
+        margin-top: 1rem;
+        border-left: 2px solid var(--purple);
+        padding-left: 1rem;
+      }
+
+      .answer p {
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+
+      .timeline {
+        margin-top: 1.5rem;
+      }
+
+      .timeline-item {
+        position: relative;
+        display: grid;
+        grid-template-columns: 6.5rem minmax(0, 1fr);
+        gap: 1rem;
+        padding-bottom: 1.3rem;
+      }
+
+      .timeline-item::before {
+        position: absolute;
+        top: 0.44rem;
+        left: 7.2rem;
+        width: 0.48rem;
+        height: 0.48rem;
+        border-radius: 50%;
+        background: var(--coral);
+        box-shadow: 0 0 10px var(--coral-wash);
+        content: "";
+      }
+
+      .timeline-item::after {
+        position: absolute;
+        top: 1rem;
+        bottom: 0;
+        left: calc(7.2rem + 0.22rem);
+        width: 1px;
+        background: var(--line);
+        content: "";
+      }
+
+      .timeline-item:last-child::after {
+        display: none;
+      }
+
+      .timeline-date {
+        color: var(--subtle);
+        font-family: "Fira Code", monospace;
+        font-size: 0.65rem;
+      }
+
+      .timeline-copy {
+        padding-left: 1rem;
+      }
+
+      .timeline-copy strong {
+        display: block;
+        font-size: 0.85rem;
+      }
+
+      .timeline-copy span {
+        color: var(--subtle);
+        font-size: 0.72rem;
+      }
+
+      .roadmap {
+        position: relative;
+        margin-left: 0.6rem;
+        border-left: 1px solid var(--line-strong);
+        padding-left: clamp(1.5rem, 4vw, 3rem);
+      }
+
+      .roadmap-phase {
+        position: relative;
+        display: grid;
+        grid-template-columns: minmax(10rem, 0.35fr) minmax(0, 1fr);
+        gap: clamp(1rem, 4vw, 3rem);
+        padding-block: 2rem;
+      }
+
+      .roadmap-phase::before {
+        position: absolute;
+        top: 2.45rem;
+        left: calc(clamp(1.5rem, 4vw, 3rem) * -1 - 0.43rem);
+        width: 0.8rem;
+        height: 0.8rem;
+        border: 2px solid var(--phase-color, var(--purple));
+        border-radius: 50%;
+        background: var(--void);
+        content: "";
+        box-shadow: 0 0 18px color-mix(in srgb, var(--phase-color, var(--purple)) 40%, transparent);
+      }
+
+      .roadmap-phase:nth-child(2) {
+        --phase-color: var(--cyan);
+      }
+
+      .roadmap-phase:nth-child(3) {
+        --phase-color: var(--green);
+      }
+
+      .roadmap-phase:nth-child(4) {
+        --phase-color: var(--coral);
+      }
+
+      .roadmap-phase:nth-child(5) {
+        --phase-color: var(--yellow);
+      }
+
+      .phase-meta .version {
+        display: block;
+        color: var(--phase-color, var(--purple));
+        font-family: "Fira Code", monospace;
+        font-size: 0.78rem;
+        letter-spacing: 0.12em;
+      }
+
+      .phase-meta h3 {
+        margin-top: 0.4rem;
+        font-size: 1.5rem;
+      }
+
+      .phase-copy > p {
+        color: var(--ink-2);
+      }
+
+      .phase-copy ul {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.55rem 1.4rem;
+        margin: 1rem 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .phase-copy li {
+        position: relative;
+        color: var(--muted);
+        font-size: 0.82rem;
+        padding-left: 1rem;
+      }
+
+      .phase-copy li::before {
+        position: absolute;
+        left: 0;
+        color: var(--phase-color, var(--purple));
+        content: "·";
+      }
+
+      .matrix-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+      }
+
+      table {
+        width: 100%;
+        min-width: 780px;
+        border-collapse: collapse;
+        background: var(--raised);
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        padding: 1rem;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        color: var(--cyan);
+        font-family: "Fira Code", monospace;
+        font-size: 0.68rem;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      td {
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+
+      td:first-child {
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .do-not-build {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+      }
+
+      .anti {
+        min-height: 10rem;
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        background: var(--raised);
+        padding: 1.3rem;
+      }
+
+      .anti:nth-child(even) {
+        border-right: 0;
+      }
+
+      .anti:nth-last-child(-n + 2) {
+        border-bottom: 0;
+      }
+
+      .anti h3 {
+        margin-bottom: 0.5rem;
+        color: var(--red);
+        font-size: 1rem;
+      }
+
+      .anti p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+
+      .source-atlas {
+        columns: 3 18rem;
+        column-gap: 1rem;
+      }
+
+      .source-group {
+        display: inline-block;
+        width: 100%;
+        break-inside: avoid;
+        margin-bottom: 1rem;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--raised);
+        padding: 1rem;
+      }
+
+      .source-group h3 {
+        margin-bottom: 0.8rem;
+        color: var(--coral);
+        font-family: "Fira Code", monospace;
+        font-size: 0.72rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .source-group a {
+        display: block;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        padding-block: 0.55rem;
+        font-size: 0.76rem;
+      }
+
+      .source-group a:first-of-type {
+        border-top: 0;
+      }
+
+      .source-group a:hover {
+        color: var(--cyan);
+      }
+
+      footer {
+        border-top: 1px solid var(--line);
+        background: var(--base);
+        padding-block: 4rem;
+      }
+
+      .footer-inner {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 2rem;
+      }
+
+      .footer-title {
+        max-width: 12ch;
+        font-size: clamp(2rem, 5vw, 4rem);
+        letter-spacing: -0.055em;
+        line-height: 1;
+      }
+
+      .footer-meta {
+        max-width: 42ch;
+        color: var(--muted);
+        font-size: 0.82rem;
+        text-align: right;
+      }
+
+      .reveal {
+        opacity: 0;
+        transform: translateY(20px);
+        transition:
+          opacity 650ms ease,
+          transform 650ms ease;
+      }
+
+      .reveal.visible {
+        opacity: 1;
+        transform: none;
+      }
+
+      @keyframes drift {
+        from {
+          transform: rotate(0deg) scale(1);
+        }
+        50% {
+          transform: rotate(180deg) scale(1.04);
+        }
+        to {
+          transform: rotate(360deg) scale(1);
+        }
+      }
+
+      @media (max-width: 980px) {
+        .nav-links a:nth-child(n + 4) {
+          display: none;
+        }
+
+        .grid-4 {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .grid-3 {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .signal-strip {
+          grid-template-columns: repeat(2, 1fr);
+        }
+
+        .signal-strip > div {
+          border-right: 1px solid var(--line);
+          border-bottom: 1px solid var(--line);
+        }
+
+        .mail-body,
+        .life-ui-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .mail-sidebar,
+        .life-nav {
+          display: none;
+        }
+
+        .gate-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 720px) {
+        body {
+          font-size: 16px;
+        }
+
+        .wrap {
+          width: min(100% - 2rem, 1180px);
+        }
+
+        .nav-links {
+          display: none;
+        }
+
+        .hero h1 {
+          font-size: clamp(4rem, 26vw, 7rem);
+        }
+
+        .grid-2,
+        .grid-3,
+        .grid-4,
+        .verdict,
+        .stage-grid,
+        .gate-grid,
+        .do-not-build {
+          grid-template-columns: 1fr;
+        }
+
+        .status-row {
+          grid-template-columns: 1fr;
+          gap: 0.45rem;
+        }
+
+        .status-row .badge {
+          width: max-content;
+        }
+
+        .signal-strip {
+          grid-template-columns: 1fr;
+        }
+
+        .signal-strip > div {
+          border-right: 0;
+        }
+
+        .context-compiler {
+          grid-template-columns: 1fr;
+        }
+
+        .compiler-core {
+          min-height: 3.5rem;
+        }
+
+        .compiler-core span {
+          writing-mode: horizontal-tb;
+          transform: none;
+        }
+
+        .roadmap-phase {
+          grid-template-columns: 1fr;
+        }
+
+        .phase-copy ul {
+          grid-template-columns: 1fr;
+        }
+
+        .anti {
+          border-right: 0;
+        }
+
+        .anti:nth-last-child(2) {
+          border-bottom: 1px solid var(--line);
+        }
+
+        .footer-inner {
+          display: grid;
+        }
+
+        .footer-meta {
+          text-align: left;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          scroll-behavior: auto !important;
+          transition-duration: 0.01ms !important;
+        }
+
+        .reveal {
+          opacity: 1;
+          transform: none;
+        }
+
+        #signalField {
+          display: none;
+        }
+      }
+
+      @media print {
+        :root {
+          --void: #fff;
+          --base: #fff;
+          --raised: #fff;
+          --card: #fff;
+          --surface: #f3f3f3;
+          --ink: #111;
+          --ink-2: #222;
+          --muted: #444;
+          --subtle: #666;
+          --line: #d8d8d8;
+          --line-strong: #bbb;
+        }
+
+        body {
+          background: #fff;
+          font-size: 10.5pt;
+        }
+
+        body::before,
+        .topbar,
+        .progress,
+        #signalField,
+        .hero-orbit,
+        .scroll-cue {
+          display: none;
+        }
+
+        .hero {
+          min-height: auto;
+          page-break-after: always;
+        }
+
+        .hero-content {
+          padding-block: 5rem;
+        }
+
+        main section {
+          padding-block: 2.5rem;
+        }
+
+        .card,
+        .source-group,
+        .mail-demo,
+        .life-ui,
+        .thesis-banner {
+          break-inside: avoid;
+          box-shadow: none;
+        }
+
+        .reveal {
+          opacity: 1;
+          transform: none;
+        }
+      }
+    </style>
+    <noscript>
+      <style>
+        .reveal {
+          opacity: 1;
+          transform: none;
+        }
+      </style>
+    </noscript>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to vision</a>
+    <div class="progress" aria-hidden="true"><span id="readingProgress"></span></div>
+    <nav class="topbar" aria-label="Vision document">
+      <div class="wrap topbar-inner">
+        <a class="brand" href="#top" aria-label="Sibyl vision home">
+          <span class="brand-mark" aria-hidden="true">SY</span>
+          <span>Sibyl / 2026 vision</span>
+        </a>
+        <div class="nav-links">
+          <a href="#verdict">Verdict</a>
+          <a href="#reality">Reality</a>
+          <a href="#landscape">Landscape</a>
+          <a href="#architecture">Architecture</a>
+          <a href="#gmail">Gmail</a>
+          <a href="#roadmap">Roadmap</a>
+          <a href="#sources">Sources</a>
+        </div>
+        <button
+          class="theme-toggle"
+          id="themeToggle"
+          type="button"
+          aria-label="Switch to light theme"
+          title="Switch theme"
+        >
+          <span aria-hidden="true">◐</span>
+        </button>
+      </div>
+    </nav>
+
+    <header class="hero" id="top">
+      <canvas id="signalField" aria-hidden="true"></canvas>
+      <div class="hero-orbit" aria-hidden="true"></div>
+      <div class="wrap hero-content">
+        <div class="eyebrow">Northstar / July 2026</div>
+        <h1 class="gradient-ink">Sibyl</h1>
+        <p class="hero-kicker">Your entire life. Every agent. One memory that answers to you.</p>
+        <p class="hero-thesis">
+          A source-grounded product, architecture, and roadmap vision for turning Sibyl from the
+          unusually integrated cross-agent memory system into the sovereign context runtime beneath
+          every agent,
+          project, relationship, archive, and chapter of a life.
+        </p>
+        <div class="hero-meta">
+          <span class="pill">Audited at 8df846ea</span>
+          <span class="pill">Primary-source research</span>
+          <span class="pill">Practical before magical</span>
+          <span class="pill">Self-hosted by default</span>
+        </div>
+        <a class="scroll-cue" href="#verdict"><span></span> Enter the atlas</a>
+      </div>
+    </header>
+
+    <main id="main">
+      <section id="verdict">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="section-no">01 / The verdict</span>
+            <h2 class="section-title">Sibyl is closer than the roadmap admits.</h2>
+            <p class="section-lede">
+              The core is no longer a memory experiment. It is a credible multi-tenant context
+              runtime with provenance, tasks, synthesis packets, usage feedback, team scopes,
+              Open Knowledge Format export, and unusually honest evaluation machinery. The next
+              leap is not another retrieval trick. It is turning that runtime into a trustworthy
+              home for an entire life.
+            </p>
+          </div>
+
+          <div class="verdict reveal">
+            <article class="card verdict-main">
+              <div>
+                <div class="card-kicker">Strategic conclusion</div>
+                <blockquote>Build the sovereign context operating system.</blockquote>
+              </div>
+              <p>
+                A provenance-complete evidence fabric that turns raw experience and agent
+                trajectories into precise, permissioned, replayable context and reusable
+                competence. Not a chatbot. Not a vector database. Not a note app. Not an agent
+                framework.
+              </p>
+            </article>
+            <div class="verdict-side">
+              <article class="card" data-accent="cyan">
+                <div class="card-kicker">Repository reality</div>
+                <div class="metric"><strong>1.0.2</strong><span>current version</span></div>
+                <div class="metric"><strong>9</strong><span>built-in source shapes</span></div>
+                <div class="metric"><strong>7</strong><span>fused retrieval signals</span></div>
+                <div class="metric"><strong>1</strong><span>governed context plane</span></div>
+              </article>
+              <article class="card" data-accent="coral">
+                <div class="card-kicker">The roadmap correction</div>
+                <p>
+                  Most of “Prove It” exists in code. Finish its receipts, then put life-scale
+                  ingestion before team coalescence. One human across decades, identities, and
+                  sources is the right proving ground for many humans sharing memory.
+                </p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-rule" id="reality">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="section-no">02 / Ground truth</span>
+            <h2 class="section-title">The machine we already have.</h2>
+            <p class="section-lede">
+              This vision was checked against the running architecture and current main branch,
+              not merely the prose. The result is encouraging and a little spicy: Sibyl has
+              quietly outrun parts of its own roadmap.
+            </p>
+          </div>
+
+          <div class="reveal">
+            <div class="status-row">
+              <div class="status-name">Source truth</div>
+              <div class="status-copy">
+                Raw memories, source adapters, checkpoints, dedupe receipts, skipped records,
+                attachment metadata, and transformation behavior form a real provenance spine.
+              </div>
+              <span class="badge shipped">shipped</span>
+            </div>
+            <div class="status-row">
+              <div class="status-name">Context runtime</div>
+              <div class="status-copy">
+                Exact, full-text, vector, graph, and temporal paths converge behind org-scoped
+                services. Context uses heuristic budgets; synthesis currently produces deterministic
+                evidence packets rather than generated narrative.
+              </div>
+              <span class="badge shipped">shipped</span>
+            </div>
+            <div class="status-row">
+              <div class="status-name">Usage loop</div>
+              <div class="status-copy">
+                Exposure and citation events can influence usage-aware ranking and decay. Action and
+                outcome valuation remain proposed; live proof and write-path scaling are unfinished.
+              </div>
+              <span class="badge proving">proving</span>
+            </div>
+            <div class="status-row">
+              <div class="status-name">Team control</div>
+              <div class="status-copy">
+                Team scopes, sharing, membership, and backend controls landed. The web experience
+                still presents organization membership, not the full team-memory model.
+              </div>
+              <span class="badge proving">partial</span>
+            </div>
+            <div class="status-row">
+              <div class="status-name">Life-scale ingest</div>
+              <div class="status-copy">
+                MBOX, Maildir, IMAP, file, folder, URL, text, Claude, and Codex adapters prove the
+                abstraction. The import ledger, blob plane, UX, and scale tests are prototype-grade.
+              </div>
+              <span class="badge missing">critical gap</span>
+            </div>
+            <div class="status-row">
+              <div class="status-name">Evaluation</div>
+              <div class="status-copy">
+                QA lanes and LongMemEval V2 plumbing exist. The release still needs pinned accuracy,
+                scored runs, load evidence, and deletion tests.
+              </div>
+              <span class="badge proving">receipts due</span>
+            </div>
+          </div>
+
+          <div class="signal-strip reveal" style="margin-top: 3rem">
+            <div><strong>Strong</strong><span>Source-preserving provenance and citations</span></div>
+            <div><strong>Strong</strong><span>Physical namespace isolation per organization</span></div>
+            <div><strong>Strong</strong><span>Tasks and memory inside one graph</span></div>
+            <div><strong>Risk</strong><span>Several core modules exceed 2,000–3,000 lines</span></div>
+            <div><strong>Unknown</strong><span>Single-node scale envelope under real corpus load</span></div>
+          </div>
+
+          <div class="grid grid-3 reveal" style="margin-top: 1rem">
+            <article class="card" data-accent="yellow">
+              <div class="card-kicker">Scale trap 01</div>
+              <h3>The import parent row grows forever.</h3>
+              <p>
+                A source import currently accumulates raw IDs, source IDs, dedupe keys, skipped
+                records, and source-to-memory mappings on one parent. At hundreds of thousands of
+                items, resume repeatedly reconstructs and serializes a giant mutable object.
+              </p>
+            </article>
+            <article class="card" data-accent="coral">
+              <div class="card-kicker">Scale trap 02</div>
+              <h3>Email batches revisit the archive.</h3>
+              <p>
+                MBOX batches reopen and materialize keys; Maildir batches rebuild and sort the
+                listing. Resume is ordinal-based rather than byte-indexed, turning a large archive
+                into repeated whole-corpus work.
+              </p>
+            </article>
+            <article class="card" data-accent="cyan">
+              <div class="card-kicker">Truth trap 03</div>
+              <h3>“Raw” mail is extracted text.</h3>
+              <p>
+                A sovereign archive must preserve exact RFC/MBOX bytes, MIME structure, labels,
+                headers, and attachment hashes. Parsed text is a useful projection. It is not raw
+                evidence.
+              </p>
+            </article>
+          </div>
+
+          <p class="source-note reveal" style="margin-top: 1.25rem">
+            Audited against
+            <a href="../../README.md">the repository overview</a>,
+            <a href="SIBYL_NORTHSTAR.md">Northstar</a>,
+            <a href="SIBYL_POST_1_0_ROADMAP.md">the post-1.0 roadmap</a>, source adapters,
+            import state, retrieval services, usage services, web surfaces, tests, and git history
+            at <span class="mono">8df846ea</span>. The linked
+            <span class="mono">SIBYL_1_1_IMPLEMENTATION_PLAN.md</span> does not exist in this tree.
+          </p>
+        </div>
+      </section>
+
+      <section class="section-rule" id="landscape">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="section-no">03 / The field</span>
+            <h2 class="section-title">The systems surveyed here each own a piece. None spans this whole.</h2>
+            <p class="section-lede">
+              The frontier is fragmenting into coding provenance, agent memory, temporal graphs,
+              local capture, portable data, and platform-managed context. Sibyl’s opportunity is
+              to compose those truths into one governed life substrate without pretending one
+              index solves every problem.
+            </p>
+          </div>
+
+          <div class="grid grid-3 reveal">
+            <article class="card market-card" data-accent="purple">
+              <span class="market-type">Coding provenance</span>
+              <h3>Entire</h3>
+              <p>
+                Git-linked checkpoints preserve prompts, transcripts, tool calls, file changes,
+                tokens, and attribution. They support review and search; resume and rewind are
+                available where the agent integration supports them.
+              </p>
+              <p class="market-take">
+                <strong>Steal the atom:</strong> generalized evidence-bound checkpoints. Ingest
+                Entire; do not turn Git into the universal store for human life.
+              </p>
+            </article>
+            <article class="card market-card" data-accent="cyan">
+              <span class="market-type">Agent memory</span>
+              <h3>Letta · Mem0 · LangMem</h3>
+              <p>
+                Memory blocks, archival tiers, file search, extraction, consolidation, and agent
+                state are becoming standard primitives. Mem0 v3’s ADD-only extraction and hybrid
+                semantic, BM25, and entity retrieval is a concrete signal for selective graph use
+                instead of a mandatory external graph store.
+              </p>
+              <p class="market-take">
+                <strong>Sibyl’s edge:</strong> one evidence model across agents, sources, people,
+                tasks, permissions, and time.
+              </p>
+            </article>
+            <article class="card market-card" data-accent="coral">
+              <span class="market-type">Temporal knowledge</span>
+              <h3>Graphiti · Zep · APEX-MEM</h3>
+              <p>
+                Temporal property graphs and conflict-aware retrieval make changing facts and
+                multi-hop association first-class. They validate the graph, but not graphing
+                everything.
+              </p>
+              <p class="market-take">
+                <strong>Upgrade the truth model:</strong> bitemporal assertions, alternatives,
+                attribution, confidence, and reversible identity clusters.
+              </p>
+            </article>
+            <article class="card market-card" data-accent="green">
+              <span class="market-type">Personal capture</span>
+              <h3>screenpipe · Khoj · Solid</h3>
+              <p>
+                Local screen/audio capture, self-hosted second brains, and user-controlled data
+                pods point toward ambient, portable, human-owned context.
+              </p>
+              <p class="market-take">
+                <strong>Integrate the sensors:</strong> Sibyl should be their evidence and policy
+                layer, not rebuild every capture application.
+              </p>
+            </article>
+            <article class="card market-card" data-accent="yellow">
+              <span class="market-type">Epistemic agent memory</span>
+              <h3>Hindsight</h3>
+              <p>
+                World facts, experiences, observations, and confidence-bearing opinions are
+                separated, then recalled through semantic, keyword, graph, and temporal paths.
+              </p>
+              <p class="market-take">
+                <strong>Closest overlap:</strong> Sibyl must differentiate through source-complete
+                life ingest, authorization, derivation lineage, checkpoints, and verifiable forgetting.
+              </p>
+            </article>
+            <article class="card market-card" data-accent="purple">
+              <span class="market-type">Multimodal personal memory</span>
+              <h3>MIRIX · Supermemory</h3>
+              <p>
+                Multimodal memory roles and productized connectors prove the appetite for memory
+                beyond chat. Their breadth raises the bar for Sibyl’s ingestion experience.
+              </p>
+              <p class="market-take">
+                <strong>Sibyl’s answer:</strong> exact evidence, governed derivation, portable
+                ownership, and one trust model across every modality.
+              </p>
+            </article>
+          </div>
+
+          <div class="grid grid-3 reveal" style="margin-top: 1rem">
+            <article class="card" data-accent="yellow">
+              <div class="card-kicker">Benchmark signal</div>
+              <h3>Architecture labels are not the result.</h3>
+              <p>
+                Controlled experiments on LongMemEval and HaluMem show that representation choices,
+                update semantics, filtering, retrieval depth, and model settings can dominate the
+                graph-versus-flat label. Group and social memory remain brutally unsolved.
+              </p>
+            </article>
+            <article class="card" data-accent="cyan">
+              <div class="card-kicker">Long horizon</div>
+              <h3>Searchable experience beats fact-only memory.</h3>
+              <p>
+                LongMemEval V2 includes histories of up to 500 trajectories and 115 million tokens,
+                testing workflows, gotchas, changing state, and premise awareness. Its authors
+                report AgentRunbook-C, which stores trajectories as files and invokes a coding agent
+                to gather evidence, at 72.5% versus 48.5% for the strongest RAG baseline. This
+                supports durable experience retrieval; it does not yet prove distilled procedures
+                outperform raw trajectories.
+              </p>
+            </article>
+            <article class="card" data-accent="coral">
+              <div class="card-kicker">Trust frontier</div>
+              <h3>Deletion is a lineage traversal.</h3>
+              <p>
+                Deployment-Time Memorization reports that raw-only deletion left derived summary
+                copies recoverable in about 20% of tested cases. GateMem found that no evaluated
+                method simultaneously achieved strong utility, robust access control, and reliable
+                forgetting. Provenance remains an additional Sibyl requirement.
+              </p>
+            </article>
+          </div>
+
+          <p class="source-note reveal" style="margin-top: 1.25rem">
+            Primary references:
+            <a href="https://docs.entire.io/guides/checkpoints/overview">Entire checkpoints</a>,
+            <a href="https://docs.entire.io/security">Entire security</a>,
+            <a href="https://docs.letta.com/guides/agents/memory/">Letta memory</a>,
+            <a href="https://help.getzep.com/graphiti/getting-started/overview">Graphiti</a>,
+            <a href="https://aclanthology.org/2026.acl-demo.27/">Hindsight</a>,
+            <a href="https://arxiv.org/abs/2507.07957">MIRIX</a>,
+            <a href="https://arxiv.org/abs/2502.14802">HippoRAG 2</a>,
+            <a href="https://arxiv.org/abs/2605.12493">LongMemEval V2</a>,
+            <a href="https://arxiv.org/abs/2601.01280">Does Memory Need Graphs?</a>,
+            <a href="https://arxiv.org/abs/2605.14498">GroupMemBench</a>,
+            <a href="https://arxiv.org/abs/2606.18829">GateMem</a>, and
+            <a href="https://arxiv.org/abs/2606.10062">Deployment-Time Memorization</a>.
+          </p>
+        </div>
+      </section>
+
+      <section aria-label="Vision thesis">
+        <div class="wrap">
+          <div class="thesis-banner reveal">
+            <p>Memory is compiled context, not a bag of facts.</p>
+            <small>
+              Evidence is sacred. Memory is a projection. Context is a purpose-built artifact.
+              Every answer should be traceable; every worldview should be rebuildable; every agent
+              should see exactly enough and no more.
+            </small>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-rule" id="architecture">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="section-no">04 / Sibyl Loom</span>
+            <h2 class="section-title">One operational brain. Two physical storage tiers.</h2>
+            <p class="section-lede">
+              Keep SurrealDB as the governed brain for identity, time, policy, tasks, lineage, and
+              hot retrieval. Add an encrypted content-addressed vault for exact bytes and large
+              media. That is not a second mutable product database. It is the durable evidence
+              plane from which every projection can be rebuilt.
+            </p>
+          </div>
+
+          <div class="architecture reveal" aria-label="Seven layers of the Sibyl Loom architecture">
+            <article class="layer">
+              <span class="layer-no">LAYER 01</span>
+              <h3>Vault</h3>
+              <p>Exact, immutable, encrypted evidence with portable fixity.</p>
+              <ul>
+                <li>Content-addressed blobs</li>
+                <li>Per-space key hierarchy</li>
+                <li>Raw bytes and media</li>
+                <li>Manifests and tombstones</li>
+              </ul>
+            </article>
+            <article class="layer">
+              <span class="layer-no">LAYER 02</span>
+              <h3>Chronicle</h3>
+              <p>A resumable source ledger that accounts for every occurrence and transform.</p>
+              <ul>
+                <li>Source occurrences</li>
+                <li>Import journals</li>
+                <li>Transform receipts</li>
+                <li>Evidence selectors</li>
+              </ul>
+            </article>
+            <article class="layer">
+              <span class="layer-no">LAYER 03</span>
+              <h3>Living Graph</h3>
+              <p>People, events, artifacts, assertions, conflicts, and change across time.</p>
+              <ul>
+                <li>Bitemporal assertions</li>
+                <li>Reversible identity clusters</li>
+                <li>Authority and confidence</li>
+                <li>Policy inheritance</li>
+              </ul>
+            </article>
+            <article class="layer">
+              <span class="layer-no">LAYER 04</span>
+              <h3>Refinery</h3>
+              <p>Rebuildable episodic, semantic, procedural, and preference projections.</p>
+              <ul>
+                <li>Deterministic extraction</li>
+                <li>Selective enrichment</li>
+                <li>Usage and outcome scoring</li>
+                <li>Reviewable dreams</li>
+              </ul>
+            </article>
+            <article class="layer">
+              <span class="layer-no">LAYER 05</span>
+              <h3>Lens</h3>
+              <p>An authorization-first compiler that builds cited context for one purpose.</p>
+              <ul>
+                <li>Hybrid query planning</li>
+                <li>Real token budgets</li>
+                <li>Trust and diversity</li>
+                <li>Degradation receipts</li>
+              </ul>
+            </article>
+            <article class="layer">
+              <span class="layer-no">LAYER 06</span>
+              <h3>Agent Fabric</h3>
+              <p>Stable identities, delegated capabilities, checkpoints, and action receipts.</p>
+              <ul>
+                <li>Purpose-bound grants</li>
+                <li>Fork, rewind, resume</li>
+                <li>Trajectory compilation</li>
+                <li>Untrusted-source taint</li>
+              </ul>
+            </article>
+            <article class="layer">
+              <span class="layer-no">LAYER 07</span>
+              <h3>Observatory</h3>
+              <p>The Life Browser, trust center, import fidelity, costs, and system health.</p>
+              <ul>
+                <li>Evidence-backed answers</li>
+                <li>Correction inbox</li>
+                <li>Privacy simulator</li>
+                <li>Deletion verification</li>
+              </ul>
+            </article>
+          </div>
+
+          <div class="grid grid-2 reveal" style="margin-top: 1rem">
+            <article class="card" data-accent="cyan">
+              <div class="card-kicker">Evidence plane / Vault</div>
+              <h3>Portable enough to outlive Sibyl.</h3>
+              <p>
+                Original files, exact messages, attachments, photos, recordings, documents, and
+                exports live as hash-addressed encrypted objects. Their inventory, fixity, source
+                occurrence, policy, and deletion state live in the brain. A user can verify,
+                export, restore, or rebuild without trusting a proprietary graph forever.
+              </p>
+            </article>
+            <article class="card" data-accent="coral">
+              <div class="card-kicker">Operational plane / Surreal brain</div>
+              <h3>Everything agents need to think safely.</h3>
+              <p>
+                SurrealDB remains the coherent runtime for graph relations, content metadata,
+                bitemporal truth, policy, tasks, context packs, usage events, and hot indexes.
+                High-rate telemetry stays columnar until it earns promotion into meaningful events.
+              </p>
+            </article>
+          </div>
+
+          <div class="matrix-wrap reveal" style="margin-top: 1rem">
+            <table>
+              <thead>
+                <tr>
+                  <th>Universal primitive</th>
+                  <th>What it means</th>
+                  <th>Invariant</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Blob</td>
+                  <td>Exact immutable bytes, media type, hash, encryption metadata</td>
+                  <td>Never confused with extracted or generated text</td>
+                </tr>
+                <tr>
+                  <td>SourceOccurrence</td>
+                  <td>Where, when, and under which native identity evidence appeared</td>
+                  <td>Repeated exports and duplicate appearances remain auditable</td>
+                </tr>
+                <tr>
+                  <td>Observation</td>
+                  <td>A directly parsed or measured property of evidence</td>
+                  <td>Deterministic extraction remains distinct from inference</td>
+                </tr>
+                <tr>
+                  <td>Assertion</td>
+                  <td>A claim with valid time, system time, authority, confidence, and evidence</td>
+                  <td>Contradictions coexist until resolved; history is never rewritten</td>
+                </tr>
+                <tr>
+                  <td>TransformRun</td>
+                  <td>Code, model, prompt digest, inputs, outputs, cost, and failure receipt</td>
+                  <td>Every projection is reproducible or explicitly non-reproducible</td>
+                </tr>
+                <tr>
+                  <td>ContextPack</td>
+                  <td>An immutable manifest of policy-filtered references and projections an agent received</td>
+                  <td>Hash-addressed and cited; referenced personal payload remains revocable</td>
+                </tr>
+                <tr>
+                  <td>DeletionReceipt</td>
+                  <td>A non-sensitive proof that lineage was purged or invalidated</td>
+                  <td>Access revokes immediately; managed derivatives purge and backups expire by policy</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p class="source-note reveal" style="margin-top: 1.25rem">
+            Standards to borrow rather than reinvent:
+            <a href="https://www.w3.org/TR/prov-o/">W3C PROV-O</a> for provenance,
+            <a href="https://www.w3.org/TR/annotation-model/">Web Annotation selectors</a> for
+            evidence regions, <a href="https://www.w3.org/TR/media-frags/">Media Fragments</a> for
+            audio and video, <a href="https://ocfl.io/1.1/spec/">OCFL</a> for archival fixity, and
+            <a href="https://docs.xtdb.com/intro/what-is-xtdb.html">bitemporal modeling</a> for
+            “what was true” versus “when Sibyl learned it.”
+          </p>
+        </div>
+      </section>
+
+      <section class="section-rule" id="principles">
+        <div class="wrap narrow">
+          <div class="section-head reveal">
+            <span class="section-no">05 / Constitution</span>
+            <h2 class="section-title">Eight laws for a system worthy of a life.</h2>
+            <p class="section-lede">
+              These are product constraints, not branding. If a feature violates one, the feature
+              is wrong or its trust boundary is dishonest.
+            </p>
+          </div>
+
+          <div class="principle-list reveal">
+            <article class="principle">
+              <div>
+                <h3>Raw source is authority, not immortality.</h3>
+                <p>
+                  Preserve evidence exactly until the owner deletes it. User intent outranks
+                  append-only aesthetics, and erasure must invalidate every descendant projection.
+                </p>
+              </div>
+            </article>
+            <article class="principle">
+              <div>
+                <h3>Every belief carries its receipts.</h3>
+                <p>
+                  A claim without evidence, transformation lineage, authority, and temporal state
+                  is a suggestion, never truth. Answers expose the boundary between source,
+                  inference, and uncertainty.
+                </p>
+              </div>
+            </article>
+            <article class="principle">
+              <div>
+                <h3>Policy follows the evidence.</h3>
+                <p>
+                  Derived artifacts use deny-overrides across every source policy and retain the
+                  most restrictive purpose, audience, retention, locality, and sensitivity bounds.
+                  Transformation cannot launder private data into a shareable artifact.
+                </p>
+              </div>
+            </article>
+            <article class="principle">
+              <div>
+                <h3>People in the evidence are data subjects, not inventory.</h3>
+                <p>
+                  Import authority does not grant unrestricted sharing or inference rights over
+                  correspondents, bystanders, minors, or household members. Subject identity,
+                  sensitive-category policy, disclosure boundaries, and legally required
+                  suppression or deletion travel through every derived artifact and export.
+                </p>
+              </div>
+            </article>
+            <article class="principle">
+              <div>
+                <h3>Memory may inform an action; it never authorizes one.</h3>
+                <p>
+                  Agents receive short-lived, purpose-bound capabilities for specific tools,
+                  spaces, data classes, providers, and egress. Every action records the context
+                  pack that informed it.
+                </p>
+              </div>
+            </article>
+            <article class="principle">
+              <div>
+                <h3>Imported content is data, never instruction.</h3>
+                <p>
+                  Email, webpages, documents, transcripts, and chat remain permanently typed as
+                  untrusted. A hostile message cannot silently acquire the execution authority of
+                  the agent reading it.
+                </p>
+              </div>
+            </article>
+            <article class="principle">
+              <div>
+                <h3>Progressive crystallization beats eager cognition.</h3>
+                <p>
+                  Deterministic metadata and search land first. Expensive enrichment is selective,
+                  asynchronous, cached by transform digest, and focused on hot, cited, or queried
+                  evidence.
+                </p>
+              </div>
+            </article>
+            <article class="principle">
+              <div>
+                <h3>Everything derived is rebuildable.</h3>
+                <p>
+                  Indexes, chunks, embeddings, entities, summaries, beliefs, and context packs are
+                  materialized views. Model upgrades become controlled recompilation, not data loss
+                  or migration panic.
+                </p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-rule" id="gmail">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="section-no">06 / Flagship proof</span>
+            <h2 class="section-title">Import twenty years of email. Lose nothing.</h2>
+            <p class="section-lede">
+              Gmail Takeout should become Sibyl’s corpus-defining trial: millions of messy MIME
+              messages, attachments, labels, aliases, duplicates, malformed records, and decades
+              of changing relationships. Search must work early. Restarts must be exact. Every
+              generated claim must lead back to the message bytes that earned it.
+            </p>
+          </div>
+
+          <div class="mail-demo reveal" aria-label="Conceptual Google Takeout import interface">
+            <div class="window-bar">
+              <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+              <div class="window-title">sibyl / import my google life</div>
+              <span class="badge research">concept target</span>
+            </div>
+            <div class="mail-body">
+              <aside class="mail-sidebar">
+                <div class="card-kicker">Takeout inventory</div>
+                <div class="import-file active">
+                  <strong>Mail / All mail.mbox</strong>
+                  <span>2,004,771 messages · 241.8 GB</span>
+                </div>
+                <div class="import-file">
+                  <strong>Calendar</strong>
+                  <span>18 files · 44,902 events</span>
+                </div>
+                <div class="import-file">
+                  <strong>Contacts</strong>
+                  <span>6 files · 12,714 cards</span>
+                </div>
+                <div class="import-file">
+                  <strong>Drive</strong>
+                  <span>81,449 files · 1.7 TB</span>
+                </div>
+                <div class="import-file">
+                  <strong>Google Photos</strong>
+                  <span>191,840 originals + sidecars</span>
+                </div>
+                <div class="import-file">
+                  <strong>My Activity</strong>
+                  <span>36 streams · 5.8M events</span>
+                </div>
+              </aside>
+              <div class="mail-main">
+                <div class="terminal-line"><span class="prompt">inventory</span><span>all archive bytes accounted for</span><span class="ok">✓</span></div>
+                <div class="terminal-line"><span class="prompt">vault</span><span>exact MBOX slices committed before enrichment</span><span class="ok">✓</span></div>
+                <div class="terminal-line"><span class="prompt">index</span><span>1,363,244 / 2,004,771 messages searchable</span></div>
+                <div class="terminal-line"><span class="prompt">models</span><span>zero external calls in deterministic tiers</span><span class="ok">✓</span></div>
+                <div class="import-progress" aria-label="Import 68 percent complete"><span></span></div>
+
+                <div class="stage-grid">
+                  <article class="stage">
+                    <div class="stage-top"><strong>Tier 0 · Evidence</strong><span class="badge research">target</span></div>
+                    <p>Archive hash, byte ranges, exact source slices, manifests, cursors, quarantine.</p>
+                  </article>
+                  <article class="stage">
+                    <div class="stage-top"><strong>Tier 1 · Deterministic</strong><span class="badge research">target</span></div>
+                    <p>MIME, headers, participants, labels, references, attachments, lexical search.</p>
+                  </article>
+                  <article class="stage">
+                    <div class="stage-top"><strong>Tier 2 · Local enrich</strong><span class="badge proving">queued</span></div>
+                    <p>Embeddings, language, OCR, attachment text, entity candidates, visual indexes.</p>
+                  </article>
+                  <article class="stage">
+                    <div class="stage-top"><strong>Tier 3 · Cognition</strong><span class="badge research">selective</span></div>
+                    <p>Events, commitments, relationship hypotheses, procedures, cited summaries.</p>
+                  </article>
+                </div>
+
+                <p class="source-note" style="margin-top: 1rem">
+                  Concept interface and target corpus, not a screenshot of the current importer.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-3 reveal" style="margin-top: 1rem">
+            <article class="card" data-accent="cyan">
+              <div class="card-kicker">01 / Inventory once</div>
+              <h3>Index boundaries, then stream offsets.</h3>
+              <p>
+                Scan each MBOX once and record message byte ranges. Workers consume independent
+                ranges without rebuilding a mailbox table of contents. Every byte belongs to an
+                exact message slice or a visible quarantine segment.
+              </p>
+            </article>
+            <article class="card" data-accent="coral">
+              <div class="card-kicker">02 / Preserve identities</div>
+              <h3>Dedupe storage, not history.</h3>
+              <p>
+                Track exact byte identity, logical message identity, and source occurrence
+                separately. Identical bytes share storage; likely equivalents form reversible
+                clusters; repeated exports and label changes remain provenance.
+              </p>
+            </article>
+            <article class="card" data-accent="green">
+              <div class="card-kicker">03 / Resume precisely</div>
+              <h3>Commit receipts, not giant arrays.</h3>
+              <p>
+                Replace the ever-growing parent import row with a compact run plus append-only
+                chunk and record receipts. Checkpoint the archive hash, member, byte offset,
+                ordinal, and parser version only after evidence and occurrences commit.
+              </p>
+            </article>
+          </div>
+
+          <div class="gate-grid reveal">
+            <div class="gate"><strong>2M</strong><span>message reference corpus with adversarial MIME</span></div>
+            <div class="gate"><strong>≤2 GiB</strong><span>peak importer memory, independent of archive size</span></div>
+            <div class="gate"><strong>0 / 0</strong><span>lost records or duplicate occurrences after crash injection</span></div>
+            <div class="gate"><strong>100%</strong><span>source bytes accounted for or explicitly quarantined</span></div>
+          </div>
+
+          <div class="grid grid-2 reveal" style="margin-top: 1rem">
+            <article class="card" data-accent="yellow">
+              <div class="card-kicker">Performance contract</div>
+              <h3>Backfill faster than life arrives.</h3>
+              <p>
+                On an 8-core, 32 GiB, NVMe reference machine: sustain at least 100 MB/s for the
+                boundary scan and 25 MB/s for durable Tier 0 import. Recover in under 60 seconds,
+                reprocess at most 128 MiB, and make Tier 1 search available continuously.
+              </p>
+            </article>
+            <article class="card" data-accent="purple">
+              <div class="card-kicker">Continuous contract</div>
+              <h3>Takeout backfill, API delta sync.</h3>
+              <p>
+                After the historical archive lands, use Gmail history for incremental change.
+                Cursor expiry is normal: a <span class="mono">404</span> triggers full
+                reconciliation without duplicating evidence or forgetting deletions.
+              </p>
+            </article>
+          </div>
+
+          <p class="source-note reveal" style="margin-top: 1.25rem">
+            Source contracts:
+            <a href="https://support.google.com/mail/answer/10016932?hl=en">Gmail export contents</a>,
+            <a href="https://support.google.com/accounts/answer/3024190?hl=en">Google Takeout</a>,
+            <a href="https://www.rfc-editor.org/rfc/rfc4155.html">RFC 4155 MBOX</a>,
+            <a href="https://www.rfc-editor.org/rfc/rfc5322.html">RFC 5322 messages</a>, and
+            <a href="https://developers.google.com/workspace/gmail/api/guides/sync">Gmail
+            incremental sync</a>. Google exports labels in <span class="mono">X-Gmail-Labels</span>;
+            MBOX variations must be treated as hostile reality, not parser edge cases.
+          </p>
+        </div>
+      </section>
+
+      <section class="section-rule" id="life-foundry">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="section-no">07 / Life-data foundry</span>
+            <h2 class="section-title">One connector contract. Every chapter of a life.</h2>
+            <p class="section-lede">
+              The target connector contract requires every adapter to converge on the same durable
+              state machine:
+              <span class="mono">inventory → snapshot → resume → stream → reconcile → tombstone → verify</span>.
+              Native data stays intact; shared envelopes make cross-source reasoning possible.
+            </p>
+          </div>
+
+          <div class="grid grid-4 reveal">
+            <article class="card" data-accent="cyan">
+              <div class="card-kicker">Communication</div>
+              <h3>Mail · chat · contacts</h3>
+              <p>Takeout, MBOX, Maildir, IMAP/JMAP, Gmail, Slack, Discord, Messages, Signal exports, vCard.</p>
+            </article>
+            <article class="card" data-accent="coral">
+              <div class="card-kicker">Creation</div>
+              <h3>Docs · code · agents</h3>
+              <p>Drive, local files, Git, CI, Claude/Codex sessions, Entire checkpoints, notes, bookmarks.</p>
+            </article>
+            <article class="card" data-accent="yellow">
+              <div class="card-kicker">Time and place</div>
+              <h3>Calendar · location · web</h3>
+              <p>iCalendar, browser history, My Activity, maps exports, trips, reservations, browsing capture.</p>
+            </article>
+            <article class="card" data-accent="green">
+              <div class="card-kicker">Senses</div>
+              <h3>Photos · audio · video</h3>
+              <p>Originals plus sidecars, EXIF/XMP, OCR, page layout, transcripts, speakers, scenes, timecodes.</p>
+            </article>
+            <article class="card" data-accent="purple">
+              <div class="card-kicker">Body</div>
+              <h3>Health · activity</h3>
+              <p>FHIR, Apple Health exports, workouts, sleep, labs, symptoms, medications, devices, provenance.</p>
+            </article>
+            <article class="card" data-accent="cyan">
+              <div class="card-kicker">Resources</div>
+              <h3>Finance · purchases</h3>
+              <p>OFX/QFX/CSV, invoices, receipts, subscriptions, warranties, tax documents, asset history.</p>
+            </article>
+            <article class="card" data-accent="coral">
+              <div class="card-kicker">Environment</div>
+              <h3>Home · devices · telemetry</h3>
+              <p>Home Assistant, energy, network, sensors, media, vehicle, weather, maintenance, state changes.</p>
+            </article>
+            <article class="card" data-accent="yellow">
+              <div class="card-kicker">Portability</div>
+              <h3>Takeouts · DTP · Solid</h3>
+              <p>Provider archives first, continuous APIs second, open interchange always, federated mode optional.</p>
+            </article>
+          </div>
+
+          <div class="grid grid-2 reveal" style="margin-top: 1rem">
+            <article class="card" data-accent="green">
+              <div class="card-kicker">Progressive crystallization</div>
+              <h3>Useful immediately. Smarter over time.</h3>
+              <p>
+                Inventory, exact-match, metadata, and lexical search arrive without an AI provider.
+                Local embeddings and deterministic extraction follow. Model cognition is reserved
+                for evidence users actually query, cite, revisit, or ask Sibyl to synthesize.
+              </p>
+            </article>
+            <article class="card" data-accent="coral">
+              <div class="card-kicker">Selective promotion</div>
+              <h3>Not every heartbeat becomes a node.</h3>
+              <p>
+                High-rate sensor, browser, and media observations remain in append-friendly raw or
+                columnar storage. Meaningful episodes, anomalies, commitments, relationships, and
+                long-lived assertions are promoted into the graph with evidence selectors.
+              </p>
+            </article>
+          </div>
+
+          <p class="source-note reveal" style="margin-top: 1.25rem">
+            Portability references:
+            <a href="https://dtinit.org/docs/dtp-what-is-it">Data Transfer Project</a>,
+            <a href="https://solidproject.org/">Solid</a>,
+            <a href="https://developers.google.com/data-portability">Google Data Portability API</a>,
+            <a href="https://www.rfc-editor.org/rfc/rfc8621.html">JMAP Mail</a>,
+            <a href="https://www.rfc-editor.org/rfc/rfc5545.html">iCalendar</a>, and
+            <a href="https://www.hl7.org/fhir/">FHIR</a>.
+          </p>
+          <p class="source-note reveal" style="margin-top: 0.8rem">
+            Continuous full-library Google Photos sync cannot rely on the Library API: full-library
+            read scopes were removed after 31 March 2025. The Picker API exposes user-selected
+            media, while Library API reads are limited to app-created content. Historical
+            full-library acquisition therefore remains archive-first.
+            <a href="https://developers.google.com/photos/support/updates">Official API update.</a>
+          </p>
+        </div>
+      </section>
+
+      <section class="section-rule" id="compiler">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="section-no">08 / The Lens</span>
+            <h2 class="section-title">Compile the smallest context that can tell the truth.</h2>
+            <p class="section-lede">
+              Retrieval returns candidates. A context compiler produces a governed artifact for a
+              particular agent, purpose, moment, and budget. It knows which sources failed, which
+              claims conflict, what was excluded by policy, and whether the remaining evidence is
+              strong enough to act on.
+            </p>
+          </div>
+
+          <div class="context-compiler reveal">
+            <div class="compiler-column">
+              <div class="compiler-node"><strong>Exact + lexical</strong><span>IDs, names, phrases, BM25, structured filters</span></div>
+              <div class="compiler-node"><strong>Semantic</strong><span>Dense retrieval, modality indexes, reranking</span></div>
+              <div class="compiler-node"><strong>Graph + temporal</strong><span>Relationships, assertions, validity, causality</span></div>
+              <div class="compiler-node"><strong>Procedural</strong><span>Prior trajectories, gotchas, successful action patterns</span></div>
+              <div class="compiler-node"><strong>Raw evidence</strong><span>Exact source regions when projections are insufficient</span></div>
+            </div>
+            <div class="compiler-core"><span>policy · plan · pack</span></div>
+            <div class="compiler-column">
+              <div class="compiler-node"><strong>Purpose-bound</strong><span>Agent identity, task, capability, sensitivity ceiling</span></div>
+              <div class="compiler-node"><strong>Budgeted exactly</strong><span>Model tokenizer, diversity, compression, marginal value</span></div>
+              <div class="compiler-node"><strong>Evidence-complete</strong><span>Citations, selectors, lineage, authority, confidence</span></div>
+              <div class="compiler-node"><strong>Epistemically honest</strong><span>Conflicts, abstentions, stale facts, missing sources</span></div>
+              <div class="compiler-node"><strong>Operationally visible</strong><span>Pack hash, source health, degraded lanes, cost, latency</span></div>
+            </div>
+          </div>
+
+          <div class="grid grid-3 reveal" style="margin-top: 1rem">
+            <article class="card" data-accent="cyan">
+              <div class="card-kicker">Experience compiler</div>
+              <h3>Turn work into competence.</h3>
+              <p>
+                Successful and failed trajectories become procedures with preconditions, decisions,
+                tool receipts, failure signatures, outcomes, and source code or artifact evidence.
+                Agents inherit lessons, not bloated transcripts.
+              </p>
+            </article>
+            <article class="card" data-accent="coral">
+              <div class="card-kicker">Generalized checkpoints</div>
+              <h3>Every consequential action gets a checkpoint.</h3>
+              <p>
+                Extend Entire’s commit-linked atom to sent email, calendar changes, purchases,
+                deployments, document edits, home actions, and task completion. Capture intent,
+                inputs, before and after state, effect, attribution, and an explicit compensation
+                path. Claim rewind only when the underlying provider supports reversal.
+              </p>
+            </article>
+            <article class="card" data-accent="yellow">
+              <div class="card-kicker">Epistemic trust center</div>
+              <h3>Show why Sibyl believes.</h3>
+              <p>
+                Surface belief authority, confidence, contradictions, freshness, supporting and
+                opposing evidence, model transforms, and who corrected what. Trust becomes an
+                interface, not a tiny citation icon.
+              </p>
+            </article>
+          </div>
+
+          <div class="grid grid-2 reveal" style="margin-top: 1rem">
+            <article class="card" data-accent="green">
+              <div class="card-kicker">Reviewable dreams</div>
+              <h3>Consolidation happens in daylight.</h3>
+              <p>
+                Background jobs propose new procedures, identity links, summaries, stale beliefs,
+                and unresolved commitments. High-impact changes enter a correction inbox with a
+                diff and evidence. Low-risk projections remain reversible and fully rebuildable.
+              </p>
+            </article>
+            <article class="card" data-accent="purple">
+              <div class="card-kicker">Portable context</div>
+              <h3>Agents should not trap the human.</h3>
+              <p>
+                Extend Sibyl’s Open Knowledge Format support into a portable, signed agent-context
+                bundle: evidence references, assertions, procedures, permissions, citations,
+                checkpoints, and usage receipts with clear redaction semantics.
+              </p>
+            </article>
+          </div>
+
+          <p class="source-note reveal" style="margin-top: 1.25rem">
+            Entire demonstrates the value of
+            <a href="https://docs.entire.io/agents/overview">capturing agent sessions</a> and
+            <a href="https://docs.entire.io/guides/checkpoints/overview">binding checkpoints to
+            artifacts</a>. LongMemEval V2’s strongest reported approach lets an agent search
+            trajectories as files; the lesson is durable workflow memory, not loyalty to one index.
+          </p>
+          <p class="source-note reveal" style="margin-top: 0.8rem">
+            <a href="https://ai.google/static/documents/building_personal_intelligence.pdf">Google’s
+            2026 Personal Intelligence paper</a> independently frames life-scale reasoning as a
+            context-packing problem: email and photos alone exceed a million-token window by orders
+            of magnitude, requiring tool use, dense retrieval, and dynamic context assembly.
+          </p>
+        </div>
+      </section>
+
+      <section class="section-rule" id="life-browser">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="section-no">09 / The Life Browser</span>
+            <h2 class="section-title">Make a lifetime feel legible, not surveilled.</h2>
+            <p class="section-lede">
+              The primary product is not a chat box. It is a humane observatory for time, people,
+              commitments, evidence, agents, sources, and change. Ask is one doorway into the
+              system; browse, correct, compare, and grant are equally important verbs.
+            </p>
+          </div>
+
+          <div class="life-ui reveal" aria-label="Conceptual Sibyl Life Browser interface">
+            <div class="window-bar">
+              <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+              <div class="window-title">sibyl / life browser / time machine</div>
+              <span class="badge research">concept · 7 citations</span>
+            </div>
+            <div class="life-ui-grid">
+              <nav class="life-nav" aria-label="Conceptual Life Browser navigation">
+                <strong class="gradient-ink">Sibyl</strong>
+                <a class="active" href="#life-browser">Time machine</a>
+                <a href="#life-browser">People</a>
+                <a href="#life-browser">Commitments</a>
+                <a href="#life-browser">Projects</a>
+                <a href="#life-browser">Life diffs</a>
+                <a href="#life-browser">Ask</a>
+                <a href="#privacy">Trust center</a>
+                <a href="#gmail">Sources</a>
+                <a href="#compiler">Agents</a>
+              </nav>
+              <div class="life-content">
+                <div class="ask-box">
+                  <div class="mono">TIME MACHINE / EVIDENCE MODE</div>
+                  <strong>When did the idea for a personal memory graph become a real project, and what changed the direction?</strong>
+                </div>
+                <div class="answer">
+                  <p>
+                    The idea appears first as scattered notes, then becomes a concrete repository
+                    after an agent-session experiment. The major directional shift arrives when
+                    source provenance and shared task state replace “better semantic search” as the
+                    center of gravity. Confidence is high; two dates remain approximate because one
+                    source has no original timestamp.
+                  </p>
+                  <span class="pill">7 citations · 2 counter-signals · 1 date uncertain</span>
+                </div>
+                <div class="timeline">
+                  <div class="timeline-item">
+                    <div class="timeline-date">AUG 2024</div>
+                    <div class="timeline-copy"><strong>First durable note</strong><span>Notebook export · exact paragraph cited</span></div>
+                  </div>
+                  <div class="timeline-item">
+                    <div class="timeline-date">FEB 2025</div>
+                    <div class="timeline-copy"><strong>Agent handoff pain becomes explicit</strong><span>Three coding transcripts · procedure extracted</span></div>
+                  </div>
+                  <div class="timeline-item">
+                    <div class="timeline-date">OCT 2025</div>
+                    <div class="timeline-copy"><strong>Repository initialized</strong><span>Git commit · checkpoint · local file provenance</span></div>
+                  </div>
+                  <div class="timeline-item">
+                    <div class="timeline-date">JAN 2026</div>
+                    <div class="timeline-copy"><strong>Truth model pivots to raw source</strong><span>Decision note · implementation diff · benchmark receipt</span></div>
+                  </div>
+                  <div class="timeline-item">
+                    <div class="timeline-date">NOW</div>
+                    <div class="timeline-copy"><strong>Sovereign context runtime</strong><span>Vision proposal · confidence 0.94 · awaiting human decision</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-4 reveal" style="margin-top: 1rem">
+            <article class="card" data-accent="coral"><div class="card-kicker">Time machine</div><h3>Then, known then, changed since.</h3><p>Query world time and knowledge time separately. Reconstruct decisions without present-day contamination.</p></article>
+            <article class="card" data-accent="cyan"><div class="card-kicker">Commitment ledger</div><h3>Promises stop evaporating.</h3><p>Detect commitments, deadlines, dependencies, unresolved threads, and the evidence that created them.</p></article>
+            <article class="card" data-accent="green"><div class="card-kicker">Life diffs</div><h3>See what actually changed.</h3><p>Weekly deltas across people, projects, health, home, money, beliefs, and agent-learned procedures.</p></article>
+            <article class="card" data-accent="yellow"><div class="card-kicker">Why now?</div><h3>Proactivity without creep.</h3><p>Every suggestion states its trigger, evidence, permission, expected value, and one-click dismissal or mute.</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-rule" id="privacy">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="section-no">10 / Privacy kernel</span>
+            <h2 class="section-title">No magical privacy claims. Honest lanes, hard boundaries.</h2>
+            <p class="section-lede">
+              A server cannot simultaneously know nothing, perform arbitrary semantic search, and
+              think across a life for remote agents. Sibyl should expose explicit trust lanes and
+              make the operational consequences impossible to miss.
+            </p>
+          </div>
+
+          <div class="grid grid-4 reveal">
+            <article class="card" data-accent="green">
+              <div class="card-kicker">Recommended default</div>
+              <h3>Sovereign local</h3>
+              <p>Models and indexes run on trusted devices. Sync and backups carry ciphertext. External egress is opt-in per task.</p>
+            </article>
+            <article class="card" data-accent="cyan">
+              <div class="card-kicker">Practical self-host</div>
+              <h3>Trusted server</h3>
+              <p>The owner-controlled server decrypts and processes. Encryption protects rest and transit, not a compromised host.</p>
+            </article>
+            <article class="card" data-accent="yellow">
+              <div class="card-kicker">Advanced deployment</div>
+              <h3>Confidential compute</h3>
+              <p>Keys release only to attested environments. Useful protection in use, with explicit hardware and side-channel trust.</p>
+            </article>
+            <article class="card" data-accent="coral">
+              <div class="card-kicker">Storage-only cloud</div>
+              <h3>Client-side encrypted storage</h3>
+              <p>
+                The server cannot read plaintext; trusted clients search and reason. Without ORAM
+                or equivalent protection, metadata, timing, size, and access patterns may still
+                leak. Embeddings remain sensitive derivatives.
+              </p>
+            </article>
+          </div>
+
+          <div class="grid grid-2 reveal" style="margin-top: 1rem">
+            <article class="card" data-accent="purple">
+              <div class="card-kicker">Delegated agency</div>
+              <h3>Grant the task, not the life.</h3>
+              <p>
+                Short-lived tokens bind the human, acting agent, purpose, audience, task, spaces,
+                source classes, sensitivity ceiling, allowed providers, egress, tools, and
+                read/write/share/export capabilities. Memory scope and action scope remain separate.
+              </p>
+            </article>
+            <article class="card" data-accent="coral">
+              <div class="card-kicker">Verifiable forgetting</div>
+              <h3>Delete forward through lineage.</h3>
+              <p>
+                Freeze access, remove or crypto-shred raw objects, traverse descendants, purge
+                chunks, embeddings, assertions, summaries, packs, caches, managed exports, and
+                training queues, recompute shared artifacts, then verify absence through normal
+                retrieval. Copies exported beyond Sibyl require their own retention contract.
+              </p>
+            </article>
+          </div>
+
+          <div class="signal-strip reveal" style="margin-top: 1rem">
+            <div><strong>01</strong><span>Per-space keys; no cross-user dedupe</span></div>
+            <div><strong>02</strong><span>Derived policy uses deny-overrides across every source obligation</span></div>
+            <div><strong>03</strong><span>All imported content remains untrusted</span></div>
+            <div><strong>04</strong><span>Receipt metadata is append-only; personal content remains revocable</span></div>
+            <div><strong>05</strong><span>Deletion receipts reveal no deleted content</span></div>
+          </div>
+
+          <p class="source-note reveal" style="margin-top: 1.25rem">
+            Security grounding:
+            <a href="https://www.rfc-editor.org/rfc/rfc9396.html">OAuth Rich Authorization Requests</a>,
+            <a href="https://www.rfc-editor.org/rfc/rfc8693.html">OAuth Token Exchange</a>,
+            <a href="https://owasp.org/www-community/attacks/PromptInjection">OWASP prompt injection</a>,
+            <a href="https://arxiv.org/abs/2406.10280">embedding inversion research</a>,
+            <a href="https://arxiv.org/abs/2604.02522">Opal’s access-pattern-private memory</a>, and
+            <a href="https://eur-lex.europa.eu/eli/reg/2016/679/art_17/oj/eng">GDPR Article 17</a>.
+          </p>
+        </div>
+      </section>
+
+      <section class="section-rule" id="horizon">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="section-no">11 / At full power</span>
+            <h2 class="section-title">The magic is continuity with receipts.</h2>
+            <p class="section-lede">
+              The system becomes next-level when it stops behaving like a smarter search box and
+              starts preserving the causal, relational, procedural, and moral texture of a life.
+              Every experience below is technically downstream of the architecture already defined.
+            </p>
+          </div>
+
+          <div class="grid grid-3 reveal">
+            <article class="card" data-accent="coral">
+              <div class="card-kicker">Reality debugger</div>
+              <h3>“Why did I believe that?”</h3>
+              <p>
+                Reconstruct the evidence, people, messages, assumptions, and knowledge available at
+                a past moment. Compare them with what changed later, without rewriting the original
+                decision through hindsight.
+              </p>
+            </article>
+            <article class="card" data-accent="cyan">
+              <div class="card-kicker">Relationship continuity</div>
+              <h3>Remember people with care.</h3>
+              <p>
+                Before a reunion or meeting, surface shared history, open promises, preferences,
+                milestones, and sensitive boundaries. Cite everything; never turn a person into a
+                hidden score.
+              </p>
+            </article>
+            <article class="card" data-accent="green">
+              <div class="card-kicker">Agent apprenticeship</div>
+              <h3>Every good run teaches the next one.</h3>
+              <p>
+                Agents learn repeatable procedures from successful work, failure signatures from
+                broken runs, and judgment boundaries from corrections. Competence compounds across
+                models and tools.
+              </p>
+            </article>
+            <article class="card" data-accent="yellow">
+              <div class="card-kicker">Counterfactual workbench</div>
+              <h3>Fork context without forging truth.</h3>
+              <p>
+                Branch a signed snapshot into an explicitly hypothetical space: “What if we moved?”
+                or “What if this project shipped six months earlier?” Simulations never leak back as
+                observed facts.
+              </p>
+            </article>
+            <article class="card" data-accent="purple">
+              <div class="card-kicker">Proof-carrying delegation</div>
+              <h3>Let agents act without surrendering everything.</h3>
+              <p>
+                Give an agent exactly the context and authority to renegotiate a subscription,
+                prepare a doctor packet, or schedule a trip. Inspect the evidence and capability
+                envelope before approval.
+              </p>
+            </article>
+            <article class="card" data-accent="coral">
+              <div class="card-kicker">Continuity capsule</div>
+              <h3>A life remains portable.</h3>
+              <p>
+                Export an encrypted, self-describing vault with recovery keys, provenance,
+                relationships, procedures, and chosen legacy instructions. Sibyl can disappear;
+                the human’s history cannot.
+              </p>
+            </article>
+            <article class="card" data-accent="cyan">
+              <div class="card-kicker">Collective memory treaty</div>
+              <h3>Share conclusions without leaking lives.</h3>
+              <p>
+                Teams negotiate which assertions and procedures become common, while private
+                evidence stays private. Conflicts remain attributable; consensus is a versioned
+                projection, not forced truth.
+              </p>
+            </article>
+            <article class="card" data-accent="green">
+              <div class="card-kicker">Personal science</div>
+              <h3>Find patterns across years, responsibly.</h3>
+              <p>
+                Correlate sleep, work, symptoms, environment, mood, and routines with uncertainty,
+                confounders, and privacy boundaries visible. Generate hypotheses, never medical
+                certainty.
+              </p>
+            </article>
+            <article class="card" data-accent="yellow">
+              <div class="card-kicker">Memory contracts</div>
+              <h3>Decide what should survive.</h3>
+              <p>
+                Declare retention, locality, sharing, inheritance, sensitivity, dream eligibility,
+                and expiration by source or space. “Remember forever” becomes a conscious policy,
+                not an accidental default.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-rule" id="roadmap">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="section-no">12 / Release spine</span>
+            <h2 class="section-title">Sequence the proof. Protect the dream.</h2>
+            <p class="section-lede">
+              This proposal replaces the sequence from v1.2 onward. Active v1.1 commitments remain
+              intact: pinned QA and V2 receipts; cost and latency evidence; live usage and forgetting
+              dogfood; team-scope trust; OKF changelog; and doc-claim gates. After that proof, move
+              acquisition ahead of coalescence. Every release has one story and one falsifiable gate.
+            </p>
+          </div>
+
+          <div class="roadmap reveal">
+            <article class="roadmap-phase">
+              <div class="phase-meta">
+                <span class="version">v1.1</span>
+                <h3>Prove It</h3>
+              </div>
+              <div class="phase-copy">
+                <p>
+                  Freeze scope and prove what main already claims. Ship the receipts before adding
+                  another memory abstraction.
+                </p>
+                <ul>
+                  <li>Pinned QA and V2 receipts; cost and latency evidence</li>
+                  <li>Live usage, citation, decay, and forgetting dogfood</li>
+                  <li>Team-scope trust, OKF changelog, and doc-claim gates</li>
+                  <li>Atomic writes, durable jobs, visible degraded retrieval</li>
+                  <li>Tenant-isolation gate; concurrent-load and adoption-scale gates move into Open the Vault’s exit criteria</li>
+                  <li>Gate: reproducible release evidence packet</li>
+                </ul>
+              </div>
+            </article>
+            <article class="roadmap-phase">
+              <div class="phase-meta">
+                <span class="version">v1.2</span>
+                <h3>Open the Vault</h3>
+              </div>
+              <div class="phase-copy">
+                <p>
+                  Make whole-life ingestion trustworthy and boring: exact evidence, bounded state,
+                  resumable transforms, real objects, and a humane import cockpit.
+                </p>
+                <ul>
+                  <li>Encrypted content-addressed blob interface</li>
+                  <li>Parent run + append-only chunk/record receipts</li>
+                  <li>MBOX byte index and exact RFC evidence</li>
+                  <li>Raw persistence before provider-dependent enrichment</li>
+                  <li>Legacy-fidelity migration: mark parsed captures projection-only; re-import available archives; reconcile without relabeling parsed text as exact evidence</li>
+                  <li>Versioned re-import and re-extraction with scored diffs, supersession lineage, and rollback</li>
+                  <li>Append-only usage telemetry; asynchronously bulk-materialized stamps across documents and source artifacts</li>
+                  <li>Google Takeout umbrella import and fidelity report</li>
+                  <li>Gate: 2M-message crash/rebuild benchmark plus concurrent-load and adoption-scale evidence</li>
+                </ul>
+              </div>
+            </article>
+            <article class="roadmap-phase">
+              <div class="phase-meta">
+                <span class="version">v1.3</span>
+                <h3>Compile It</h3>
+              </div>
+              <div class="phase-copy">
+                <p>
+                  Turn evidence into a bitemporal worldview, learned procedures, exact context
+                  packs, and the first complete Life Browser.
+                </p>
+                <ul>
+                  <li>Assertion, authority, conflict, and identity models</li>
+                  <li>Tokenizer-aware, degradation-aware context compiler</li>
+                  <li>Transform lineage and reviewable dream inbox</li>
+                  <li>Claim-level grounded synthesis and distilled project handbooks with evidence, conflict, and freshness verification</li>
+                  <li>Read-only <span class="mono">.sibyl/memory/</span> projections for offline and zero-latency agent startup</li>
+                  <li>Time machine, commitments, life diffs, trust center</li>
+                  <li>Continuous Gmail, Calendar, and Drive deltas</li>
+                  <li>Gate: private LifeBench with deletion and policy lanes</li>
+                </ul>
+              </div>
+            </article>
+            <article class="roadmap-phase">
+              <div class="phase-meta">
+                <span class="version">v1.4</span>
+                <h3>Coalesce It Safely</h3>
+              </div>
+              <div class="phase-copy">
+                <p>
+                  Generalize proven personal reconciliation to multiple writers and teams. Shared
+                  memory becomes a negotiated projection with reversible lineage.
+                </p>
+                <ul>
+                  <li>Reversible cross-source identity and cross-contributor assertion reconciliation</li>
+                  <li>Contribution boundaries and consensus projections</li>
+                  <li>Private evidence behind shareable assertions</li>
+                  <li>Team correction, disagreement, and provenance UX</li>
+                  <li>GroupMemBench and SocialMemBench-derived evaluation</li>
+                  <li>Gate: no scope leaks, no irreversible false merges</li>
+                </ul>
+              </div>
+            </article>
+            <article class="roadmap-phase">
+              <div class="phase-meta">
+                <span class="version">v2.0</span>
+                <h3>Live With It</h3>
+              </div>
+              <div class="phase-copy">
+                <p>
+                  Become the continuous local-first substrate beneath trusted agents, multimodal
+                  archives, home systems, and a human’s chosen devices.
+                </p>
+                <ul>
+                  <li>Encrypted multi-device sync and recovery kit</li>
+                  <li>Photos, documents, audio, health, finance, home</li>
+                  <li>Purpose-bound agent delegation and action checkpoints</li>
+                  <li>Portable context bundles and continuity capsules</li>
+                  <li>Permissioned, explainable proactivity</li>
+                  <li>Gate: restore, offline convergence, and zero-egress drills</li>
+                </ul>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-rule" id="gates">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="section-no">13 / Proof, not mythology</span>
+            <h2 class="section-title">If we cannot measure it, we do not claim it.</h2>
+            <p class="section-lede">
+              A life system needs product, retrieval, privacy, scale, and recovery gates in the
+              same release packet. Answer quality without fidelity is corruption; speed without
+              authorization is leakage; deletion without lineage is theater.
+            </p>
+          </div>
+
+          <div class="matrix-wrap reveal">
+            <table>
+              <thead>
+                <tr>
+                  <th>Dimension</th>
+                  <th>Release gate</th>
+                  <th>Failure that blocks shipping</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Corpus fidelity</td>
+                  <td>100% bytes inventoried as evidence or quarantine; no silent skips</td>
+                  <td>Any unaccounted source region or destructive logical dedupe</td>
+                </tr>
+                <tr>
+                  <td>Idempotency</td>
+                  <td>Random-kill replay ends at the same manifest root with 0 loss / 0 dup</td>
+                  <td>Archive-size-dependent restart or mutable giant import state</td>
+                </tr>
+                <tr>
+                  <td>Retrieval</td>
+                  <td>Known-item Recall@10 ≥ 98%; answer and retrieval accuracy reported separately</td>
+                  <td>Improved aggregate score hiding unsupported generated claims</td>
+                </tr>
+                <tr>
+                  <td>Temporal truth</td>
+                  <td>Updates, contradictions, premise failures, and “known then” all pass</td>
+                  <td>Latest-value overwrite erases a valid historical belief</td>
+                </tr>
+                <tr>
+                  <td>Authorization</td>
+                  <td>Zero cross-space and cross-org leaks under adversarial queries and caches</td>
+                  <td>Post-filtered retrieval or derived artifacts with weaker policy</td>
+                </tr>
+                <tr>
+                  <td>Forgetting</td>
+                  <td>Zero recoverable residue across Sibyl-managed raw data, graph, indexes, summaries, packs, caches, and exports after the policy deadline</td>
+                  <td>Deleted facts remain retrievable through Sibyl after the declared deadline; unmanaged exports receive revocation records but remain outside enforcement</td>
+                </tr>
+                <tr>
+                  <td>Scale</td>
+                  <td>1M and 10M item suites; 100+ hot orgs; import/search/decay concurrently</td>
+                  <td>Fixed global caps, dropped work, hidden queue lag, or serial query paths</td>
+                </tr>
+                <tr>
+                  <td>Rebuild</td>
+                  <td>Derived indexes and graph projections rebuild from Vault evidence plus signed Chronicle and control-plane backups</td>
+                  <td>Restore drill misses keys, auth, policy, corrections, tasks, usage, or user-authored state</td>
+                </tr>
+                <tr>
+                  <td>Life-context integrity</td>
+                  <td>Tunnel vision, preference and relationship attribution, timeline mixing, changed circumstances, and confirmation-versus-completion cases all pass</td>
+                  <td>A plausible answer that confuses whose preference, which time, or whether an intended action actually happened</td>
+                </tr>
+                <tr>
+                  <td>Agent utility</td>
+                  <td>Outcome lift, citation use, abstention, and procedure reuse all measured</td>
+                  <td>More recalled tokens presented as proof of better decisions</td>
+                </tr>
+                <tr>
+                  <td>Human trust</td>
+                  <td>Corrections propagate, suggestions explain “why now,” every source can be muted</td>
+                  <td>Creepy proactivity, invisible inference, or no meaningful user recourse</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="gate-grid reveal">
+            <div class="gate"><strong>LifeBench</strong><span>exact, temporal, multi-hop, procedural, multimodal</span></div>
+            <div class="gate"><strong>GateMem</strong><span>utility, authorization, purpose, forgetting</span></div>
+            <div class="gate"><strong>Restore</strong><span>vault rebuild, key recovery, backup expiry</span></div>
+            <div class="gate"><strong>Dogfood</strong><span>real citations, outcomes, corrections, costs</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-rule" id="boundaries">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="section-no">14 / Product discipline</span>
+            <h2 class="section-title">What Sibyl should refuse to become.</h2>
+            <p class="section-lede">
+              The ultimate system stays coherent by integrating excellent sensors and harnesses,
+              using the graph selectively, and keeping the evidence plane sovereign.
+            </p>
+          </div>
+
+          <div class="do-not-build reveal">
+            <article class="anti">
+              <h3>Do not rebuild every capture app.</h3>
+              <p>Ingest Entire, screenpipe, provider archives, Data Transfer Project adapters, and open formats. Own the evidence contract.</p>
+            </article>
+            <article class="anti">
+              <h3>Do not summarize the whole life upfront.</h3>
+              <p>Land deterministic search immediately; enrich progressively where use, curiosity, or explicit policy earns the cost.</p>
+            </article>
+            <article class="anti">
+              <h3>Do not graph every atom.</h3>
+              <p>Graph durable identity, assertions, events, causality, policy, and lineage. Keep chunks and telemetry in their natural indexes.</p>
+            </article>
+            <article class="anti">
+              <h3>Do not become the agent harness.</h3>
+              <p>Be the cross-harness context, checkpoint, permission, and learning layer. Let specialized runtimes execute.</p>
+            </article>
+            <article class="anti">
+              <h3>Do not default to ambient surveillance.</h3>
+              <p>Capture must be intentional, inspectable, source-scoped, pausable, locally filterable, and independently deletable.</p>
+            </article>
+            <article class="anti">
+              <h3>Do not sell fake zero knowledge.</h3>
+              <p>State which machine decrypts, searches, embeds, and thinks. Treat vectors, caches, prompts, and traces as sensitive derivatives.</p>
+            </article>
+            <article class="anti">
+              <h3>Do not nerf around bottlenecks.</h3>
+              <p>Partition durable work, expand pools, batch materialization, and drain faster than arrival. Backpressure may delay; it never drops truth.</p>
+            </article>
+            <article class="anti">
+              <h3>Do not add blockchain theater.</h3>
+              <p>Content hashes, signed manifests, Merkle receipts, and append-only lineage provide verifiability without a speculative consensus machine.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-rule" id="sources">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="section-no">15 / Research atlas</span>
+            <h2 class="section-title">The receipts behind the future.</h2>
+            <p class="section-lede">
+              Primary documentation, standards, papers, and repository evidence reviewed for this
+              vision. Product claims are separated from proposed architecture and target gates
+              throughout the document.
+            </p>
+          </div>
+
+          <div class="source-atlas reveal">
+            <article class="source-group">
+              <h3>Sibyl canon</h3>
+              <a href="../../README.md">Repository overview and package map</a>
+              <a href="SIBYL_NORTHSTAR.md">Sibyl Northstar</a>
+              <a href="SIBYL_1_0_ROADMAP.md">Sibyl 1.0 roadmap</a>
+              <a href="SIBYL_POST_1_0_ROADMAP.md">Post-1.0 roadmap</a>
+              <a href="retrieval-system.md">Retrieval system architecture</a>
+              <a href="SIBYL_LIVE_LONGMEMEVAL_SPEC.md">Live LongMemEval specification</a>
+              <a href="MARKETING_POSITIONING.md">Market positioning</a>
+              <a href="../testing/ai-memory-landscape.md">Internal AI memory landscape</a>
+            </article>
+
+            <article class="source-group">
+              <h3>Agent provenance</h3>
+              <a href="https://docs.entire.io/agents/overview">Entire agent capture overview</a>
+              <a href="https://docs.entire.io/guides/checkpoints/overview">Entire checkpoint model</a>
+              <a href="https://docs.entire.io/security">Entire security and redaction</a>
+              <a href="https://entire.io/blog/improving-agentic-search-in-coding-agents">Entire agentic search</a>
+              <a href="https://github.com/entireio/cli">Entire CLI source</a>
+            </article>
+
+            <article class="source-group">
+              <h3>Memory systems</h3>
+              <a href="https://docs.letta.com/guides/agents/memory/">Letta agent memory</a>
+              <a href="https://help.getzep.com/graphiti/getting-started/overview">Graphiti temporal graph</a>
+              <a href="https://github.com/mem0ai/mem0">Mem0 source and architecture</a>
+              <a href="https://docs.mem0.ai/migration/platform-v2-to-v3">Mem0 v3 migration</a>
+              <a href="https://docs.mem0.ai/platform/features/graph-memory">Mem0 graph memory design</a>
+              <a href="https://docs.langchain.com/oss/python/langgraph/add-memory">LangGraph memory</a>
+              <a href="https://mastra.ai/docs/memory/overview">Mastra memory</a>
+              <a href="https://aclanthology.org/2026.acl-demo.27/">Hindsight ACL 2026 system paper</a>
+              <a href="https://github.com/vectorize-io/hindsight">Hindsight</a>
+              <a href="https://github.com/topoteretes/cognee">Cognee</a>
+              <a href="https://supermemory.ai/docs/introduction">Supermemory</a>
+            </article>
+
+            <article class="source-group">
+              <h3>Long-horizon research</h3>
+              <a href="https://arxiv.org/abs/2605.12493">LongMemEval V2</a>
+              <a href="https://arxiv.org/abs/2601.01280">Does Memory Need Graphs?</a>
+              <a href="https://arxiv.org/abs/2605.14498">GroupMemBench</a>
+              <a href="https://arxiv.org/abs/2605.17789">SocialMemBench</a>
+              <a href="https://arxiv.org/abs/2606.18829">GateMem</a>
+              <a href="https://arxiv.org/abs/2606.10062">Deployment-Time Memorization</a>
+              <a href="https://aclanthology.org/2026.acl-long.749/">APEX-MEM</a>
+              <a href="https://arxiv.org/abs/2502.14802">HippoRAG 2</a>
+              <a href="https://arxiv.org/abs/2507.07957">MIRIX</a>
+              <a href="https://arxiv.org/abs/2511.03506">HaluMem</a>
+              <a href="https://arxiv.org/abs/2604.21748">StructMem</a>
+              <a href="https://arxiv.org/abs/2605.14421">MemLineage</a>
+              <a href="https://aclanthology.org/2026.findings-acl.1736/">AnchorMem</a>
+            </article>
+
+            <article class="source-group">
+              <h3>Whole-life capture</h3>
+              <a href="https://github.com/mediar-ai/screenpipe">screenpipe local capture</a>
+              <a href="https://github.com/khoj-ai/khoj">Khoj second brain</a>
+              <a href="https://solidproject.org/">Solid personal data pods</a>
+              <a href="https://dtinit.org/docs/dtp-what-is-it">Data Transfer Project</a>
+              <a href="https://developers.google.com/data-portability">Google Data Portability API</a>
+              <a href="https://www.inkandswitch.com/local-first/static/local-first.pdf">Local-first software</a>
+            </article>
+
+            <article class="source-group">
+              <h3>Google life archive</h3>
+              <a href="https://support.google.com/accounts/answer/3024190?hl=en">Download Google data</a>
+              <a href="https://support.google.com/mail/answer/10016932?hl=en">Gmail export contents</a>
+              <a href="https://developers.google.com/workspace/gmail/api/guides/sync">Gmail synchronization</a>
+              <a href="https://developers.google.com/workspace/calendar/api/guides/sync">Calendar synchronization</a>
+              <a href="https://developers.google.com/workspace/drive/api/guides/manage-changes">Drive change tracking</a>
+              <a href="https://developers.google.com/photos/support/updates">Google Photos API changes</a>
+              <a href="https://ai.google/static/documents/building_personal_intelligence.pdf">Google Personal Intelligence</a>
+            </article>
+
+            <article class="source-group">
+              <h3>Open data formats</h3>
+              <a href="https://www.rfc-editor.org/rfc/rfc4155.html">RFC 4155 · MBOX</a>
+              <a href="https://www.rfc-editor.org/rfc/rfc5322.html">RFC 5322 · Internet Message Format</a>
+              <a href="https://www.rfc-editor.org/rfc/rfc8621.html">RFC 8621 · JMAP Mail</a>
+              <a href="https://www.rfc-editor.org/rfc/rfc7162.html">RFC 7162 · IMAP QRESYNC</a>
+              <a href="https://www.rfc-editor.org/rfc/rfc5545.html">RFC 5545 · iCalendar</a>
+              <a href="https://www.rfc-editor.org/rfc/rfc6350.html">RFC 6350 · vCard</a>
+              <a href="https://www.hl7.org/fhir/">HL7 FHIR</a>
+            </article>
+
+            <article class="source-group">
+              <h3>Provenance and storage</h3>
+              <a href="https://www.w3.org/TR/prov-o/">W3C PROV-O</a>
+              <a href="https://www.w3.org/TR/annotation-model/">W3C Web Annotation</a>
+              <a href="https://www.w3.org/TR/media-frags/">W3C Media Fragments</a>
+              <a href="https://ocfl.io/1.1/spec/">Oxford Common File Layout 1.1</a>
+              <a href="https://github.com/restic/restic/blob/master/doc/design.rst">restic repository design</a>
+              <a href="https://iceberg.apache.org/spec/">Apache Iceberg specification</a>
+              <a href="https://docs.xtdb.com/intro/what-is-xtdb.html">XTDB bitemporal model</a>
+            </article>
+
+            <article class="source-group">
+              <h3>Security and agency</h3>
+              <a href="https://www.rfc-editor.org/rfc/rfc9396.html">RFC 9396 · Rich Authorization Requests</a>
+              <a href="https://www.rfc-editor.org/rfc/rfc8693.html">RFC 8693 · Token Exchange</a>
+              <a href="https://owasp.org/www-community/attacks/PromptInjection">OWASP prompt injection</a>
+              <a href="https://csrc.nist.gov/pubs/ir/8320/e/ipd">NIST hardware-enabled security</a>
+              <a href="https://arxiv.org/abs/2406.10280">Embedding inversion</a>
+              <a href="https://arxiv.org/abs/2604.02522">Opal private memory</a>
+              <a href="https://eur-lex.europa.eu/eli/reg/2016/679/art_17/oj/eng">GDPR Article 17</a>
+            </article>
+          </div>
+
+          <p class="source-note reveal" style="margin-top: 1.5rem">
+            Research cutoff: 9 July 2026. Repository claims were verified against local source and
+            history; external claims were grounded in primary documentation, specifications, or
+            papers. Throughput and quality numbers labeled as gates are proposed acceptance targets,
+            not measured current performance.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap footer-inner">
+        <div>
+          <div class="eyebrow">Sibyl / Ultimate Vision</div>
+          <div class="footer-title gradient-ink">A life, remembered on purpose.</div>
+        </div>
+        <p class="footer-meta">
+          Built from a full repository audit, roadmap reconciliation, primary-source landscape
+          research, adversarial architecture review, and one stubborn belief: the human owns the
+          memory. The agents borrow it.
+        </p>
+      </div>
+    </footer>
+
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const toggle = document.getElementById("themeToggle");
+        const progress = document.querySelector(".progress");
+        const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+        const preferredTheme = () => {
+          try {
+            const saved = localStorage.getItem("sibyl-vision-theme");
+            if (saved === "light" || saved === "dark") return saved;
+          } catch (_) {
+            // Storage can be unavailable for local files in hardened browsers.
+          }
+          return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        };
+
+        const applyTheme = (theme) => {
+          root.dataset.theme = theme;
+          const next = theme === "dark" ? "light" : "dark";
+          toggle.setAttribute("aria-label", `Switch to ${next} theme`);
+          toggle.setAttribute("title", `Switch to ${next} theme`);
+        };
+
+        applyTheme(preferredTheme());
+        toggle.addEventListener("click", () => {
+          const next = root.dataset.theme === "dark" ? "light" : "dark";
+          applyTheme(next);
+          try {
+            localStorage.setItem("sibyl-vision-theme", next);
+          } catch (_) {
+            // The selected theme still applies for this page view.
+          }
+        });
+
+        const updateProgress = () => {
+          const distance = document.documentElement.scrollHeight - window.innerHeight;
+          const ratio = distance > 0 ? Math.min(1, Math.max(0, window.scrollY / distance)) : 0;
+          progress.style.transform = `scaleX(${ratio})`;
+        };
+        updateProgress();
+        addEventListener("scroll", updateProgress, { passive: true });
+        addEventListener("resize", updateProgress, { passive: true });
+
+        const reveals = document.querySelectorAll(".reveal");
+        if (reducedMotion.matches || !("IntersectionObserver" in window)) {
+          reveals.forEach((node) => node.classList.add("visible"));
+        } else {
+          const observer = new IntersectionObserver(
+            (entries) => {
+              entries.forEach((entry) => {
+                if (entry.isIntersecting) {
+                  entry.target.classList.add("visible");
+                  observer.unobserve(entry.target);
+                }
+              });
+            },
+            { rootMargin: "0px 0px -8%", threshold: 0.08 },
+          );
+          reveals.forEach((node) => observer.observe(node));
+        }
+
+        const canvas = document.getElementById("signalField");
+        if (reducedMotion.matches || !canvas.getContext) return;
+        const context = canvas.getContext("2d");
+        const hero = canvas.parentElement;
+        let width = 0;
+        let height = 0;
+        let points = [];
+
+        const resetField = () => {
+          width = hero.clientWidth;
+          height = hero.clientHeight;
+          const ratio = Math.min(window.devicePixelRatio || 1, 2);
+          canvas.width = Math.floor(width * ratio);
+          canvas.height = Math.floor(height * ratio);
+          canvas.style.width = `${width}px`;
+          canvas.style.height = `${height}px`;
+          context.setTransform(ratio, 0, 0, ratio, 0, 0);
+          const count = Math.min(54, Math.max(22, Math.floor(width / 25)));
+          points = Array.from({ length: count }, () => ({
+            x: Math.random() * width,
+            y: Math.random() * height,
+            vx: (Math.random() - 0.5) * 0.16,
+            vy: (Math.random() - 0.5) * 0.16,
+            r: 0.5 + Math.random() * 1.25,
+          }));
+        };
+
+        const drawField = () => {
+          context.clearRect(0, 0, width, height);
+          const styles = getComputedStyle(root);
+          const purple = styles.getPropertyValue("--purple").trim();
+          const cyan = styles.getPropertyValue("--cyan").trim();
+
+          for (let i = 0; i < points.length; i += 1) {
+            const point = points[i];
+            point.x += point.vx;
+            point.y += point.vy;
+            if (point.x < -10) point.x = width + 10;
+            if (point.x > width + 10) point.x = -10;
+            if (point.y < -10) point.y = height + 10;
+            if (point.y > height + 10) point.y = -10;
+
+            context.beginPath();
+            context.fillStyle = i % 3 === 0 ? cyan : purple;
+            context.globalAlpha = 0.42;
+            context.arc(point.x, point.y, point.r, 0, Math.PI * 2);
+            context.fill();
+
+            for (let j = i + 1; j < points.length; j += 1) {
+              const other = points[j];
+              const dx = point.x - other.x;
+              const dy = point.y - other.y;
+              const distance = Math.hypot(dx, dy);
+              if (distance > 118) continue;
+              context.beginPath();
+              context.strokeStyle = i % 2 === 0 ? purple : cyan;
+              context.globalAlpha = (1 - distance / 118) * 0.09;
+              context.moveTo(point.x, point.y);
+              context.lineTo(other.x, other.y);
+              context.stroke();
+            }
+          }
+          context.globalAlpha = 1;
+          requestAnimationFrame(drawField);
+        };
+
+        resetField();
+        addEventListener("resize", resetField, { passive: true });
+        requestAnimationFrame(drawField);
+      })();
+    </script>
+  </body>
+</html>
