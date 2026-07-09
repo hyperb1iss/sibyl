@@ -672,7 +672,7 @@ def build_receipt_from_artifacts(
         domain=args.domain,
         tier=args.tier,
         plan=plan,
-        aggregated_metrics=aggregated_metrics,
+        aggregated_metrics=combined_metrics or aggregated_metrics,
     )
     artifacts = build_artifact_receipt(
         output_dir=output_dir,
@@ -1144,6 +1144,13 @@ def build_dataset_receipt(
         domain=domain,
         tier=tier,
     )
+    recorded_question_count = plan.get("question_count")
+    if recorded_question_count is None:
+        recorded_question_count = _number_from(
+            aggregated_metrics,
+            ("overall", "count_all_questions"),
+        )
+    recorded_required_trajectory_count = plan.get("required_trajectory_count")
     dataset_record = {
         "name": "longmemeval-v2",
         "data_root": str(data_root),
@@ -1151,9 +1158,10 @@ def build_dataset_receipt(
         "questions_sha256": sha256_file(questions_path),
         "trajectories_sha256": sha256_file(trajectories_path),
         "haystack_sha256": sha256_file(haystack),
-        "question_count": plan.get("question_count")
-        or _number_from(aggregated_metrics, ("overall", "count_all_questions")),
-        "required_trajectory_count": plan.get("required_trajectory_count"),
+        "question_count": _coerce_integral_number(recorded_question_count),
+        "required_trajectory_count": _coerce_integral_number(
+            recorded_required_trajectory_count
+        ),
     }
     if dataset_record["question_count"] is None:
         dataset_record["question_count"] = question_count
@@ -1371,6 +1379,13 @@ def _as_number(value: Any) -> float | None:
         number = float(value)
         return number if math.isfinite(number) else None
     return None
+
+
+def _coerce_integral_number(value: Any) -> Any:
+    number = _as_number(value)
+    if number is not None and number.is_integer():
+        return int(number)
+    return value
 
 
 def _is_finite_number(value: Any) -> bool:

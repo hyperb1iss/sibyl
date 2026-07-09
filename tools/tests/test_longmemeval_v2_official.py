@@ -26,6 +26,7 @@ EXPECTED_MEMORY_API_RETRY_CALLS = 2
 EXPECTED_READER_MAX_CONCURRENT_REQUESTS = 16
 EXPECTED_READER_RETRY_ATTEMPTS = 4
 EXPECTED_TRANSIENT_READER_ATTEMPTS = 2
+EXPECTED_COMBINED_QUESTION_COUNT = 4
 TEST_CONTENT_MAX_CHARS = 420
 
 
@@ -209,6 +210,8 @@ def test_official_runner_receipt_only_emits_citable_contract(tmp_path: Path) -> 
     assert receipt["domain"] == "combined"
     assert receipt["official_repo"]["commit"]
     assert receipt["dataset"]["questions_sha256"].startswith("sha256:")
+    assert receipt["dataset"]["question_count"] == EXPECTED_COMBINED_QUESTION_COUNT
+    assert isinstance(receipt["dataset"]["question_count"], int)
     assert receipt["source_runs"]["complete"] is True
     assert set(receipt["source_runs"]["domains"]) == {"web", "enterprise"}
     assert receipt["metrics"]["lafs_gain"] == EXPECTED_LAFS_GAIN
@@ -787,7 +790,7 @@ def _write_combined_outputs(
             {
                 "overall": {
                     "overall_full_set": 0.44,
-                    "count_all_questions": 4,
+                    "count_all_questions": 4.0,
                     "count_non_abstention": 4,
                     "count_abstention": 0,
                 },
