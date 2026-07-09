@@ -4,9 +4,10 @@ import importlib.util
 import json
 import shutil
 import subprocess
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import TypedDict
+from typing import Protocol, TypedDict, cast
 
 import httpx
 import pytest
@@ -33,6 +34,13 @@ class _RequestCall(TypedDict):
     path: str
     json: dict[str, object]
     params: dict[str, object]
+
+
+class _ReaderHarness(Protocol):
+    call_reader_model_async: Callable[
+        [object, object, list[dict[str, object]]],
+        Awaitable[tuple[str, dict[str, int]]],
+    ]
 
 
 def _load_module(path: Path, name: str) -> ModuleType:
@@ -282,7 +290,7 @@ def test_longmemeval_v2_receipt_redacts_sensitive_command_args() -> None:
 @pytest.mark.asyncio
 async def test_official_runner_retries_transient_reader_parse_failure(capsys) -> None:
     module = _load_runner_module()
-    harness = ModuleType("harness")
+    harness = cast(_ReaderHarness, ModuleType("harness"))
     attempts = 0
 
     async def flaky_reader(
@@ -320,7 +328,7 @@ async def test_official_runner_retries_transient_reader_parse_failure(capsys) ->
 @pytest.mark.asyncio
 async def test_official_runner_does_not_retry_non_transient_reader_failure() -> None:
     module = _load_runner_module()
-    harness = ModuleType("harness")
+    harness = cast(_ReaderHarness, ModuleType("harness"))
     attempts = 0
 
     async def broken_reader(
