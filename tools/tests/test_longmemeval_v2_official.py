@@ -8,6 +8,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import TypedDict
 
+import httpx
 import pytest
 from tools.bench import eval_gate
 
@@ -18,6 +19,9 @@ EXPECTED_EMBEDDING_JOB_WAIT_TIMEOUT_SECONDS = 1_800.0
 EXPECTED_BULK_MAX_ENTITIES = 16
 EXPECTED_BULK_MAX_CONTENT_CHARS = 200_000
 EXPECTED_EMBEDDING_BACKFILL_MAX_PENDING_JOBS = 8
+EXPECTED_MEMORY_API_TIMEOUT_SECONDS = 600.0
+EXPECTED_MEMORY_API_RETRY_ATTEMPTS = 3
+EXPECTED_MEMORY_API_RETRY_CALLS = 2
 EXPECTED_READER_MAX_CONCURRENT_REQUESTS = 16
 EXPECTED_READER_RETRY_ATTEMPTS = 4
 EXPECTED_TRANSIENT_READER_ATTEMPTS = 2
@@ -118,6 +122,12 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(tmp_path: Path)
     assert memory_config["memory_params"]["allow_localhost"] is True
     assert memory_config["memory_params"]["defer_embeddings"] is True
     assert (
+        memory_config["memory_params"]["api_timeout_seconds"] == EXPECTED_MEMORY_API_TIMEOUT_SECONDS
+    )
+    assert (
+        memory_config["memory_params"]["api_retry_attempts"] == EXPECTED_MEMORY_API_RETRY_ATTEMPTS
+    )
+    assert (
         memory_config["memory_params"]["embedding_job_wait_timeout_seconds"]
         == EXPECTED_EMBEDDING_JOB_WAIT_TIMEOUT_SECONDS
     )
@@ -131,6 +141,8 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(tmp_path: Path)
     )
     assert plan["reader_max_concurrent_requests"] == EXPECTED_READER_MAX_CONCURRENT_REQUESTS
     assert plan["reader_retry_attempts"] == EXPECTED_READER_RETRY_ATTEMPTS
+    assert plan["memory_api_timeout_seconds"] == EXPECTED_MEMORY_API_TIMEOUT_SECONDS
+    assert plan["memory_api_retry_attempts"] == EXPECTED_MEMORY_API_RETRY_ATTEMPTS
     assert plan["honesty_contract"]["answer_gold_visible_to_memory"] is False
     assert plan["required_trajectory_count"] == EXPECTED_REQUIRED_TRAJECTORIES
     assert plan["requirements"]["trajectories_jsonl_exists"] is True
@@ -335,6 +347,39 @@ async def test_official_runner_does_not_retry_non_transient_reader_failure() -> 
         await harness.call_reader_model_async(None, SimpleNamespace(), [])
 
     assert attempts == 1
+
+
+def test_sibyl_memory_request_retries_transient_timeout(capsys) -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    calls = 0
+
+    class FakeClient:
+        def request(
+            self,
+            method: str,
+            path: str,
+            *,
+            json: dict[str, object] | None = None,
+            params: dict[str, object] | None = None,
+        ) -> httpx.Response:
+            nonlocal calls
+            del method, path, json, params
+            calls += 1
+            if calls == 1:
+                raise httpx.ReadTimeout("timed out")
+            return httpx.Response(201, json={"created": 1})
+
+    memory.api_retry_attempts = EXPECTED_MEMORY_API_RETRY_CALLS
+    memory.api_retry_base_delay_seconds = 0.0
+    memory.api_retry_max_delay_seconds = 0.0
+    memory._client = FakeClient()
+    memory._refresh_token = ""
+
+    assert memory._request_json("POST", "/entities/bulk", json={}) == {"created": 1}
+    assert calls == EXPECTED_MEMORY_API_RETRY_CALLS
+    assert "retrying attempt 2/2" in capsys.readouterr().err
 
 
 def test_sibyl_memory_payloads_chunk_trajectory_by_state() -> None:

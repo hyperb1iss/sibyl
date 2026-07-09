@@ -58,12 +58,17 @@ DEFAULT_CONTENT_MAX_CHARS = 50_000
 DEFAULT_SEARCH_LIMIT = 12
 DEFAULT_CONTEXT_ITEMS = 8
 DEFAULT_CONTEXT_CHARS_PER_ITEM = 18_000
+DEFAULT_API_TIMEOUT_SECONDS = 600.0
+DEFAULT_API_RETRY_ATTEMPTS = 3
+DEFAULT_API_RETRY_BASE_DELAY_SECONDS = 2.0
+DEFAULT_API_RETRY_MAX_DELAY_SECONDS = 30.0
 DEFAULT_EMBEDDING_JOB_WAIT_TIMEOUT_SECONDS = 1_800.0
 DEFAULT_EMBEDDING_JOB_POLL_SECONDS = 0.5
 DEFAULT_BULK_MAX_ENTITIES = 16
 DEFAULT_BULK_MAX_CONTENT_CHARS = 200_000
 DEFAULT_EMBEDDING_BACKFILL_MAX_PENDING_JOBS = 8
 MAX_BULK_CREATE = 128
+RETRYABLE_HTTP_STATUS_CODES = frozenset({408, 409, 425, 429})
 
 _AUTH_CACHE: dict[tuple[str, str, str], dict[str, str]] = {}
 _AUTH_LOCK = threading.Lock()
@@ -172,6 +177,31 @@ class SibylLiveApiMemory(Memory):
             "include_screenshot_refs",
             False,
         )
+        self.api_timeout_seconds = _param_float(
+            memory_params,
+            "api_timeout_seconds",
+            DEFAULT_API_TIMEOUT_SECONDS,
+        )
+        self.api_retry_attempts = max(
+            1,
+            _param_int(memory_params, "api_retry_attempts", DEFAULT_API_RETRY_ATTEMPTS),
+        )
+        self.api_retry_base_delay_seconds = max(
+            0.0,
+            _param_float(
+                memory_params,
+                "api_retry_base_delay_seconds",
+                DEFAULT_API_RETRY_BASE_DELAY_SECONDS,
+            ),
+        )
+        self.api_retry_max_delay_seconds = max(
+            0.0,
+            _param_float(
+                memory_params,
+                "api_retry_max_delay_seconds",
+                DEFAULT_API_RETRY_MAX_DELAY_SECONDS,
+            ),
+        )
         self.defer_embeddings = _param_bool(memory_params, "defer_embeddings", True)
         self.embedding_job_wait_timeout_seconds = _param_float(
             memory_params,
@@ -210,7 +240,10 @@ class SibylLiveApiMemory(Memory):
         self.inserted_trajectories = 0
         self.created_entities = 0
         self._pending_embedding_job_ids: set[str] = set()
-        self._client = _new_http_client(self.api_url)
+        self._client = _new_http_client(
+            self.api_url,
+            timeout_seconds=self.api_timeout_seconds,
+        )
         self._closed = False
         self._refresh_token = ""
         self._cli_auth: dict[str, str] = {}
@@ -451,9 +484,33 @@ class SibylLiveApiMemory(Memory):
         json: dict[str, object] | None = None,
         params: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        response = self._client.request(method, path, json=json, params=params)
-        if response.status_code == 401 and self._refresh_token and self._refresh_access_token():
-            response = self._client.request(method, path, json=json, params=params)
+        response: httpx.Response | None = None
+        for attempt in range(1, self.api_retry_attempts + 1):
+            try:
+                response = self._client.request(method, path, json=json, params=params)
+                if (
+                    response.status_code == 401
+                    and self._refresh_token
+                    and self._refresh_access_token()
+                ):
+                    response = self._client.request(method, path, json=json, params=params)
+            except httpx.HTTPError as exc:
+                if attempt >= self.api_retry_attempts or not _is_retryable_http_error(exc):
+                    raise
+                self._sleep_before_retry(path, exc.__class__.__name__, attempt=attempt)
+                continue
+
+            if not _is_retryable_response(response) or attempt >= self.api_retry_attempts:
+                break
+            self._sleep_before_retry(
+                path,
+                f"HTTP {response.status_code}",
+                attempt=attempt,
+            )
+
+        if response is None:
+            msg = f"{path} request produced no response"
+            raise RuntimeError(msg)
         if response.status_code >= 400:
             msg = f"{path} failed with HTTP {response.status_code}: {response.text[:500]}"
             raise RuntimeError(msg)
@@ -462,6 +519,21 @@ class SibylLiveApiMemory(Memory):
             msg = f"{path} returned non-object JSON"
             raise RuntimeError(msg)
         return body
+
+    def _sleep_before_retry(self, path: str, reason: str, *, attempt: int) -> None:
+        delay = _retry_delay_seconds(
+            base_delay=self.api_retry_base_delay_seconds,
+            max_delay=self.api_retry_max_delay_seconds,
+            failed_attempt=attempt,
+        )
+        print(
+            f"Sibyl API request {path} failed with {reason}; "
+            f"retrying attempt {attempt + 1}/{self.api_retry_attempts} "
+            f"after {delay:.1f}s.",
+            file=sys.stderr,
+            flush=True,
+        )
+        time.sleep(delay)
 
     def _refresh_access_token(self) -> bool:
         response = self._client.post("/auth/refresh", json={"refresh_token": self._refresh_token})
@@ -602,8 +674,28 @@ def _created_count(response: dict[str, object]) -> int:
     return 0
 
 
-def _new_http_client(api_url: str) -> httpx.Client:
-    return httpx.Client(base_url=api_url, timeout=120.0, follow_redirects=True)
+def _is_retryable_response(response: httpx.Response) -> bool:
+    return response.status_code in RETRYABLE_HTTP_STATUS_CODES or response.status_code >= 500
+
+
+def _is_retryable_http_error(exc: httpx.HTTPError) -> bool:
+    return isinstance(
+        exc,
+        httpx.TimeoutException | httpx.NetworkError | httpx.RemoteProtocolError,
+    )
+
+
+def _retry_delay_seconds(
+    *,
+    base_delay: float,
+    max_delay: float,
+    failed_attempt: int,
+) -> float:
+    return min(max_delay, base_delay * (2 ** max(0, failed_attempt - 1)))
+
+
+def _new_http_client(api_url: str, *, timeout_seconds: float) -> httpx.Client:
+    return httpx.Client(base_url=api_url, timeout=timeout_seconds, follow_redirects=True)
 
 
 def _normalize_api_url(raw_url: str) -> str:

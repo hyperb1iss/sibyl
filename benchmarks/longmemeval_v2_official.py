@@ -250,6 +250,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--max-context-chars-per-item", type=int, default=18_000)
     parser.add_argument("--include-screenshot-refs", action="store_true")
     parser.add_argument("--inline-embeddings", action="store_true")
+    parser.add_argument("--api-timeout-seconds", type=float, default=600.0)
+    parser.add_argument("--api-retry-attempts", type=int, default=3)
+    parser.add_argument("--api-retry-base-delay-seconds", type=float, default=2.0)
+    parser.add_argument("--api-retry-max-delay-seconds", type=float, default=30.0)
     parser.add_argument("--embedding-job-wait-timeout-seconds", type=float, default=1_800.0)
     parser.add_argument("--bulk-max-entities", type=int, default=16)
     parser.add_argument("--bulk-max-content-chars", type=int, default=200_000)
@@ -293,6 +297,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--reader-retry-base-delay-seconds must be non-negative")
     if args.reader_retry_max_delay_seconds < 0:
         parser.error("--reader-retry-max-delay-seconds must be non-negative")
+    if args.api_timeout_seconds <= 0:
+        parser.error("--api-timeout-seconds must be positive")
+    if args.api_retry_attempts < 1:
+        parser.error("--api-retry-attempts must be positive")
+    if args.api_retry_base_delay_seconds < 0:
+        parser.error("--api-retry-base-delay-seconds must be non-negative")
+    if args.api_retry_max_delay_seconds < 0:
+        parser.error("--api-retry-max-delay-seconds must be non-negative")
     return args
 
 
@@ -392,6 +404,10 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "max_context_chars_per_item": args.max_context_chars_per_item,
         "include_screenshot_refs": args.include_screenshot_refs,
         "defer_embeddings": not args.inline_embeddings,
+        "api_timeout_seconds": args.api_timeout_seconds,
+        "api_retry_attempts": args.api_retry_attempts,
+        "api_retry_base_delay_seconds": args.api_retry_base_delay_seconds,
+        "api_retry_max_delay_seconds": args.api_retry_max_delay_seconds,
         "embedding_job_wait_timeout_seconds": args.embedding_job_wait_timeout_seconds,
         "bulk_max_entities": args.bulk_max_entities,
         "bulk_max_content_chars": args.bulk_max_content_chars,
@@ -452,6 +468,10 @@ def build_run_plan(
         "reader_retry_attempts": args.reader_retry_attempts,
         "reader_retry_base_delay_seconds": args.reader_retry_base_delay_seconds,
         "reader_retry_max_delay_seconds": args.reader_retry_max_delay_seconds,
+        "memory_api_timeout_seconds": args.api_timeout_seconds,
+        "memory_api_retry_attempts": args.api_retry_attempts,
+        "memory_api_retry_base_delay_seconds": args.api_retry_base_delay_seconds,
+        "memory_api_retry_max_delay_seconds": args.api_retry_max_delay_seconds,
         "evaluator_model": args.evaluator_model,
         "requirements": build_requirement_status(args=args, data_root=data_root),
         "summary": summarize_longmemeval_v2_inputs(
