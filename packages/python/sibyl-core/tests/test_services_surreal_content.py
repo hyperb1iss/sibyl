@@ -5,16 +5,20 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
 from surrealdb import AsyncSurreal
 
+from sibyl_core.backends.surreal.content_client import SurrealContentClient
 from sibyl_core.backends.surreal.content_schema import (
     CONTENT_ENTITY_ANCHOR_MIGRATION_DEFINITIONS,
     CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS,
+    bootstrap_content_schema,
 )
 from sibyl_core.embeddings.providers import EmbeddingMetadata
+from sibyl_core.errors import RevisionConflictError
 from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.services.surreal_content import (
     MemoryScope,
@@ -153,6 +157,53 @@ class EmbeddedContentClient:
 
 
 class TestSurrealContentHelpers:
+    @pytest.mark.asyncio
+    async def test_raw_memory_save_enforces_expected_revision(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        client = SurrealContentClient(url="memory://")
+        try:
+            await bootstrap_content_schema(client, reset=True)
+
+            @asynccontextmanager
+            async def fake_session():
+                yield client
+
+            from sibyl_core.services import surreal_content as content_service
+
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            created = await remember_raw_memory(
+                organization_id="org-revision",
+                principal_id="bliss",
+                source_id="cli:manual",
+                raw_content="Revision one",
+                embedding_provider=None,
+            )
+            assert created.revision == 1
+
+            updated = await save_raw_memory(
+                replace(created, raw_content="Revision two"),
+                expected_revision=1,
+                embedding_provider=None,
+            )
+            assert updated.revision == 2
+            assert updated.raw_content == "Revision two"
+
+            with pytest.raises(RevisionConflictError) as stale_update:
+                await save_raw_memory(
+                    replace(created, raw_content="Stale overwrite"),
+                    expected_revision=1,
+                    embedding_provider=None,
+                )
+            assert stale_update.value.details == {
+                "identifier": created.id,
+                "expected_revision": 1,
+                "actual_revision": 2,
+            }
+        finally:
+            await client.close()
+
     @pytest.mark.asyncio
     async def test_materialize_content_lineage_backfills_idempotent_edges(self) -> None:
         db = AsyncSurreal("memory://")

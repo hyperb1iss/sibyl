@@ -52,7 +52,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 20
+CONTENT_SCHEMA_CURRENT_VERSION = 21
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -500,6 +500,11 @@ UPDATE raw_captures SET
 WHERE type::is::number(metadata.confidence);
 """
 
+CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS = """
+DEFINE FIELD IF NOT EXISTS revision ON raw_captures TYPE int DEFAULT 1 ASSERT $value >= 1;
+UPDATE raw_captures SET revision = 1 WHERE revision = NONE OR revision < 1;
+"""
+
 
 def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
     compatible_schema = render_fulltext_compatible_sql(
@@ -628,6 +633,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
                     )
                 )
             ),
+        ),
+        SchemaMigration(
+            version=21,
+            name="content_raw_capture_revision",
+            statements=tuple(split_statements(CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS)),
         ),
     )
 
@@ -972,6 +982,7 @@ __all__ = [
     "CONTENT_MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS",
     "CONTENT_PERMISSION_MIGRATION_DEFINITIONS",
     "CONTENT_RAW_CAPTURE_LOOKUP_MIGRATION_DEFINITIONS",
+    "CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS",
     "CONTENT_RELATION_TABLES",
     "CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS",
     "CONTENT_SCHEMA_CURRENT_VERSION",

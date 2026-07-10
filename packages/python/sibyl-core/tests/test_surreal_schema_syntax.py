@@ -32,6 +32,7 @@ from sibyl_core.backends.surreal.content_schema import (
     CONTENT_RAW_CAPTURE_CHANGEFEED_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_LOOKUP_MIGRATION_DEFINITIONS,
+    CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS,
     CONTENT_RELATION_TABLES,
     CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS,
     CONTENT_SCHEMA_CURRENT_VERSION,
@@ -47,6 +48,7 @@ from sibyl_core.backends.surreal.schema import (
     DEAD_GRAPH_OBJECT_REMOVAL_DEFINITIONS,
     EDGE_DEFINITIONS,
     ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS,
+    ENTITY_REVISION_MIGRATION_DEFINITIONS,
     ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS,
     ENTITY_USAGE_SIGNAL_DEFINITIONS,
     GRAPH_ENUM_ASSERTION_DEFINITIONS,
@@ -522,7 +524,7 @@ def test_content_memory_quality_metadata_is_versioned() -> None:
     migration = next(item for item in migrations if item.name == "content_memory_quality_metadata")
     migration_sql = "\n".join(migration.statements)
 
-    assert CONTENT_SCHEMA_CURRENT_VERSION == 20
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 20
     assert "type::is::number(metadata.retention_importance)" in migration_sql
     assert "type::is::number(metadata.promotion_confidence)" in migration_sql
     assert "metadata.memory_importance = metadata.importance" in migration_sql
@@ -539,6 +541,19 @@ def test_content_memory_quality_metadata_renders_server_type_predicates() -> Non
 
     assert "type::is_number(metadata.retention_importance)" in migration_sql
     assert "type::is::number(metadata.retention_importance)" not in migration_sql
+
+
+def test_content_raw_capture_revision_is_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration = next(item for item in migrations if item.name == "content_raw_capture_revision")
+    migration_sql = "\n".join(migration.statements)
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION == 21
+    assert "DEFINE FIELD IF NOT EXISTS revision ON raw_captures" in migration_sql
+    assert "UPDATE raw_captures SET revision = 1" in migration_sql
+    assert CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS.strip().splitlines()[0] in (
+        migration_sql
+    )
 
 
 def test_raw_capture_changefeed_cursor_is_versioned() -> None:
@@ -1003,13 +1018,23 @@ def test_graph_memory_quality_metadata_is_versioned() -> None:
     )
     migration_sql = "\n".join(migration.statements)
 
-    assert GRAPH_SCHEMA_CURRENT_VERSION == 11
+    assert GRAPH_SCHEMA_CURRENT_VERSION >= 11
     assert "type::is::number(attributes.retention_importance)" in migration_sql
     assert "type::is::number(attributes.promotion_confidence)" in migration_sql
     assert "attributes.memory_importance = attributes.importance" in migration_sql
     assert "attributes.projection_confidence = attributes.confidence" in migration_sql
     assert "UPDATE relates_to SET" in migration_sql
     assert MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
+
+
+def test_graph_entity_revision_is_versioned() -> None:
+    migration = next(item for item in GRAPH_SCHEMA_MIGRATIONS if item.name == "entity_revision")
+    migration_sql = "\n".join(migration.statements)
+
+    assert GRAPH_SCHEMA_CURRENT_VERSION == 12
+    assert "DEFINE FIELD IF NOT EXISTS revision ON entity" in migration_sql
+    assert "UPDATE entity SET revision = 1" in migration_sql
+    assert ENTITY_REVISION_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
 
 
 def test_graph_relation_cleanup_covers_all_relation_tables() -> None:

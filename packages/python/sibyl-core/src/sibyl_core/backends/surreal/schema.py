@@ -87,6 +87,7 @@ DEFINE FIELD IF NOT EXISTS created_at ON entity TYPE datetime DEFAULT time::now(
 DEFINE FIELD IF NOT EXISTS updated_at ON entity TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS created_by ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS modified_by ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS revision ON entity TYPE int DEFAULT 1 ASSERT $value >= 1;
 DEFINE FIELD IF NOT EXISTS last_recalled_at ON entity TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS last_used_at ON entity TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS retrieval_count ON entity TYPE int DEFAULT 0;
@@ -465,6 +466,11 @@ UPDATE relates_to SET
 WHERE type::is::number(attributes.confidence);
 """
 
+ENTITY_REVISION_MIGRATION_DEFINITIONS = """
+DEFINE FIELD IF NOT EXISTS revision ON entity TYPE int DEFAULT 1 ASSERT $value >= 1;
+UPDATE entity SET revision = 1 WHERE revision = NONE OR revision < 1;
+"""
+
 
 CURRENT_SCHEMA_MAINTENANCE_DEFINITIONS = ENTITY_DENORMALIZATION_MAINTENANCE_DEFINITIONS
 
@@ -534,6 +540,11 @@ GRAPH_SCHEMA_MIGRATIONS = (
         version=11,
         name="memory_quality_metadata",
         statements=tuple(split_statements(MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS)),
+    ),
+    SchemaMigration(
+        version=12,
+        name="entity_revision",
+        statements=tuple(split_statements(ENTITY_REVISION_MIGRATION_DEFINITIONS)),
     ),
 )
 
@@ -919,6 +930,7 @@ __all__ = [
     "EMBEDDING_DIM",
     "EMBEDDING_VECTOR_FIELDS",
     "ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS",
+    "ENTITY_REVISION_MIGRATION_DEFINITIONS",
     "ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS",
     "ENTITY_USAGE_SIGNAL_DEFINITIONS",
     "GRAPH_EDGES",

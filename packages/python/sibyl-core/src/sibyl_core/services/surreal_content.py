@@ -25,6 +25,7 @@ from sibyl_core.embeddings.providers import (
     EmbeddingProviderName,
     create_embedding_provider,
 )
+from sibyl_core.errors import RevisionConflictError
 from sibyl_core.memory_pipeline.lifecycle import raw_memory_lifecycle_recallable
 from sibyl_core.memory_pipeline.quality import (
     expand_memory_quality_storage_metadata,
@@ -112,6 +113,7 @@ INSERT INTO raw_captures $rows ON DUPLICATE KEY UPDATE
     provenance = $input.provenance,
     capture_surface = $input.capture_surface,
     created_by_user_id = $input.created_by_user_id,
+    revision = (revision ?? 0) + 1,
     captured_at = $input.captured_at,
     deleted_at = $input.deleted_at,
     purge_after = $input.purge_after,
@@ -449,6 +451,7 @@ class RawMemory:
     provenance: dict[str, object] = field(default_factory=dict)
     capture_surface: str | None = None
     created_by_user_id: str | None = None
+    revision: int = 1
     captured_at: datetime | None = None
     deleted_at: datetime | None = None
     purge_after: datetime | None = None
@@ -1089,6 +1092,7 @@ def _raw_memory_from_record(record: Mapping[str, object]) -> RawMemory:
         provenance=_coerce_dict(record.get("provenance")),
         capture_surface=_coerce_optional_str(record.get("capture_surface")),
         created_by_user_id=_coerce_optional_str(record.get("created_by_user_id")),
+        revision=max(_coerce_int(record.get("revision")), 1),
         captured_at=_coerce_datetime(record.get("captured_at")),
         deleted_at=_coerce_datetime(record.get("deleted_at")),
         purge_after=_coerce_datetime(record.get("purge_after")),
@@ -1150,6 +1154,7 @@ def _raw_memory_record(memory: RawMemory) -> SurrealRecord:
         "provenance": dict(memory.provenance),
         "capture_surface": memory.capture_surface,
         "created_by_user_id": memory.created_by_user_id or memory.principal_id,
+        "revision": memory.revision,
         "captured_at": memory.captured_at,
         "deleted_at": memory.deleted_at,
         "purge_after": memory.purge_after,
@@ -2698,7 +2703,10 @@ async def save_raw_memory(
     memory: RawMemory,
     *,
     embedding_provider: EmbeddingProvider | None | object = _RAW_MEMORY_EMBEDDING_AUTO,
+    expected_revision: int | None = None,
 ) -> RawMemory:
+    if expected_revision is not None and expected_revision < 1:
+        raise ValueError("expected_revision must be at least 1")
     async with surreal_content_client() as client:
         existing_record = await _select_one(
             client,
@@ -2712,12 +2720,54 @@ async def save_raw_memory(
             existing=_raw_memory_from_record(existing_record) if existing_record else None,
             embedding_provider=embedding_provider,
         )
-        record = await _replace_record(
-            client,
-            "raw_captures",
-            uuid=memory.id,
-            record=_raw_memory_record(memory),
-        )
+        if existing_record is None:
+            if expected_revision is not None:
+                raise RevisionConflictError(memory.id, expected_revision, 0)
+            record = await _replace_record(
+                client,
+                "raw_captures",
+                uuid=memory.id,
+                record=_raw_memory_record(memory),
+            )
+        else:
+            update_record = _raw_memory_record(memory)
+            update_record.pop("revision", None)
+            rows = await _select_many_raw(
+                client,
+                """
+                    BEGIN TRANSACTION;
+                    LET $updated = (
+                        UPDATE raw_captures MERGE $record
+                        WHERE organization_id = $organization_id
+                            AND uuid = $uuid
+                            AND ($expected_revision = NONE OR revision = $expected_revision)
+                        RETURN AFTER
+                    );
+                    UPDATE $updated SET revision += 1 RETURN AFTER;
+                    COMMIT TRANSACTION;
+                """,
+                organization_id=memory.organization_id,
+                uuid=memory.id,
+                expected_revision=expected_revision,
+                record=update_record,
+            )
+            if not rows and expected_revision is not None:
+                current = await _select_one(
+                    client,
+                    "SELECT revision FROM raw_captures "
+                    "WHERE organization_id = $organization_id AND uuid = $uuid LIMIT 1;",
+                    organization_id=memory.organization_id,
+                    uuid=memory.id,
+                )
+                actual_revision = max(_coerce_int((current or {}).get("revision")), 0)
+                raise RevisionConflictError(
+                    memory.id,
+                    expected_revision,
+                    actual_revision,
+                )
+            if not rows:
+                raise RuntimeError(f"failed to persist raw_captures record {memory.id}")
+            record = rows[0]
     return _raw_memory_from_record(record)
 
 

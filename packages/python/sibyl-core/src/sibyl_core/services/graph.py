@@ -25,6 +25,7 @@ from sibyl_core.embeddings.providers import (
     entity_embedding_text,
     relationship_embedding_text,
 )
+from sibyl_core.errors import RevisionConflictError
 from sibyl_core.memory_pipeline.quality import (
     expand_memory_quality_storage_metadata,
     normalize_memory_quality_metadata,
@@ -101,6 +102,7 @@ _RELATED_ENTITY_PROJECTION_FIELDS = (
     ("group_id", "group_id"),
     ("created_at", "created_at"),
     ("updated_at", "updated_at"),
+    ("revision", "revision"),
     ("project_id", "project_id"),
     ("epic_id", "epic_id"),
     ("parent_task_id", "parent_task_id"),
@@ -148,6 +150,7 @@ INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     updated_at = $input.updated_at,
     created_by = created_by ?? $input.created_by,
     modified_by = $input.modified_by ?? modified_by,
+    revision = (revision ?? 0) + 1,
     last_recalled_at = $input.last_recalled_at ?? last_recalled_at,
     last_used_at = $input.last_used_at ?? last_used_at,
     retrieval_count = $input.retrieval_count ?? retrieval_count ?? 0,
@@ -335,36 +338,55 @@ class EntityManager:
         )
         return [_entity_from_row(row) for row in rows]
 
-    async def update(self, entity_id: str, updates: dict[str, Any]) -> Entity | None:
+    async def update(
+        self,
+        entity_id: str,
+        updates: dict[str, Any],
+        *,
+        expected_revision: int | None = None,
+    ) -> Entity | None:
         if not updates:
             return await self.get(entity_id)
+        if expected_revision is not None and expected_revision < 1:
+            raise ValueError("expected_revision must be at least 1")
 
         patch = _entity_update_patch(updates, updated_at=datetime.now(UTC))
         rows = await _execute_graph_transaction(
             self._client,
             """
-            BEGIN TRANSACTION;
-            UPDATE entity MERGE $patch
-            WHERE group_id = $group_id AND uuid = $uuid
-            RETURN NONE;
-            UPDATE entity SET
-                summary = IF description != NONE AND description != '' THEN
-                    string::slice(description, 0, 500)
-                ELSE
-                    name
-                END
-            WHERE group_id = $group_id AND uuid = $uuid
-            RETURN NONE;
-            SELECT *
-            FROM entity
-            WHERE group_id = $group_id AND uuid = $uuid
-            LIMIT 1;
-            COMMIT TRANSACTION;
+                BEGIN TRANSACTION;
+                LET $updated = (
+                    UPDATE entity MERGE $patch
+                    WHERE group_id = $group_id
+                        AND uuid = $uuid
+                        AND ($expected_revision = NONE OR revision = $expected_revision)
+                    RETURN AFTER
+                );
+                UPDATE $updated SET
+                    summary = IF description != NONE AND description != '' THEN
+                        string::slice(description, 0, 500)
+                    ELSE
+                        name
+                    END,
+                    revision += 1
+                RETURN AFTER;
+                COMMIT TRANSACTION;
             """,
             group_id=self._group_id,
             uuid=entity_id,
             patch=patch,
+            expected_revision=expected_revision,
         )
+        if not rows and expected_revision is not None:
+            try:
+                current = await self.get(entity_id)
+            except KeyError:
+                return None
+            raise RevisionConflictError(
+                entity_id,
+                expected_revision,
+                current.revision,
+            )
         if not rows:
             return None
         return _entity_from_row(rows[0])
@@ -1765,6 +1787,7 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
         or None,
         modified_by=_first_text(normalized_row.get("modified_by"), metadata.get("modified_by"))
         or None,
+        revision=max(_int_value(normalized_row.get("revision")), 1),
         metadata=metadata,
         created_at=_row_datetime(normalized_row.get("created_at") or metadata.get("created_at"))
         or datetime.now(UTC),
@@ -1900,6 +1923,7 @@ def _entity_to_task(entity: Entity) -> Task:
         organization_id=entity.organization_id,
         created_by=entity.created_by,
         modified_by=entity.modified_by,
+        revision=entity.revision,
         metadata=meta,
         created_at=entity.created_at,
         updated_at=entity.updated_at,
@@ -1956,6 +1980,7 @@ def _entity_to_procedure(entity: Entity) -> Procedure:
         organization_id=entity.organization_id,
         created_by=entity.created_by,
         modified_by=entity.modified_by,
+        revision=entity.revision,
         metadata=meta,
         created_at=entity.created_at,
         updated_at=entity.updated_at,
@@ -2580,6 +2605,7 @@ def _entity_record(
         "updated_at": updated_at,
         "created_by": entity.created_by,
         "modified_by": entity.modified_by,
+        "revision": entity.revision,
         "project_id": project_id,
         "epic_id": epic_id,
         "parent_task_id": parent_task_id,

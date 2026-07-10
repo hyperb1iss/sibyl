@@ -29,6 +29,7 @@ from sibyl_core.embeddings.providers import (
     DeterministicEmbeddingProvider,
     EmbeddingMetadata,
 )
+from sibyl_core.errors import RevisionConflictError
 from sibyl_core.models.entities import Entity, EntityType, Procedure, Relationship, RelationshipType
 from sibyl_core.models.tasks import EpicStatus, TaskPriority
 from sibyl_core.retrieval.dedup import EntityDeduplicator
@@ -711,8 +712,10 @@ async def test_native_entity_manager_update_uses_server_side_merge() -> None:
     query, params = client.calls[0]
     assert "BEGIN TRANSACTION" in query
     assert "UPDATE entity MERGE $patch" in query
-    assert "RETURN NONE" in query
+    assert "revision = $expected_revision" in query
+    assert "revision += 1" in query
     assert len(client.calls) == 1
+    assert params["expected_revision"] is None
     patch = cast("dict[str, object]", params["patch"])
     attributes = cast("dict[str, object]", patch["attributes"])
     assert patch["modified_by"] == "nova"
@@ -2810,24 +2813,42 @@ async def test_entity_update_recomputes_summary_after_server_side_merge() -> Non
                 organization_id=client.group_id,
             )
         )
+        created = await entity_manager.get("summary_native")
+        assert created.revision == 1
 
         renamed = await entity_manager.update(
             "summary_native",
             {"title": "Renamed Summary Name", "modified_by": "nova"},
+            expected_revision=1,
         )
 
         assert renamed is not None
+        assert renamed.revision == 2
         assert renamed.name == "Renamed Summary Name"
         assert renamed.description == "Renamed Summary Name"
         assert renamed.modified_by == "nova"
+
+        with pytest.raises(RevisionConflictError) as stale_update:
+            await entity_manager.update(
+                "summary_native",
+                {"description": "Stale overwrite"},
+                expected_revision=1,
+            )
+        assert stale_update.value.details == {
+            "identifier": "summary_native",
+            "expected_revision": 1,
+            "actual_revision": 2,
+        }
 
         long_description = "Detailed summary source " * 30
         described = await entity_manager.update(
             "summary_native",
             {"description": long_description},
+            expected_revision=2,
         )
 
         assert described is not None
+        assert described.revision == 3
         assert described.description == long_description.strip()
 
         rows = normalize_records(
@@ -2849,6 +2870,7 @@ async def test_entity_update_recomputes_summary_after_server_side_merge() -> Non
         )
 
         assert cleared is not None
+        assert cleared.revision == 4
         assert cleared.description == "Renamed Summary Name"
     finally:
         await client.close()

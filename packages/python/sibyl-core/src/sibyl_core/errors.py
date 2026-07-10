@@ -35,6 +35,21 @@ class EntityCreationError(SibylError):
         super().__init__(message, details={"entity_id": entity_id})
 
 
+class RevisionConflictError(SibylError):
+    """Raised when a mutation targets a stale entity revision."""
+
+    def __init__(self, identifier: str, expected_revision: int, actual_revision: int) -> None:
+        super().__init__(
+            f"Revision conflict for {identifier}: expected {expected_revision}, "
+            f"found {actual_revision}",
+            details={
+                "identifier": identifier,
+                "expected_revision": expected_revision,
+                "actual_revision": actual_revision,
+            },
+        )
+
+
 class ValidationError(SibylError):
     """Raised when input validation fails."""
 
