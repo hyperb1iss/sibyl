@@ -11,6 +11,11 @@ import pytest
 from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
 from sibyl_core.backends.surreal.content_schema import EMBEDDING_DIM
 from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient
+from sibyl_core.backends.surreal.schema import bootstrap_schema
+from sibyl_core.backends.surreal.schema_version import (
+    GRAPH_SCHEMA_NAME,
+    record_schema_version,
+)
 from sibyl_core.embeddings.providers import EmbeddingMetadata
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.services.graph import (
@@ -485,6 +490,86 @@ async def test_live_surreal_server_round_trips_native_entity() -> None:
     finally:
         with suppress(Exception):
             await manager.delete(entity_id)
+        await client.close()
+        if test_failed:
+            with suppress(Exception):
+                await _drop_surreal_namespace(client.namespace)
+        else:
+            await _drop_surreal_namespace(client.namespace)
+
+
+@pytest.mark.asyncio
+async def test_live_surreal_server_repairs_partial_graph_required_fields() -> None:
+    group_id = str(uuid4())
+    client = SurrealGraphClient(
+        group_id=group_id,
+        url=_live_surreal_url(),
+        username=_surreal_username(),
+        password=_surreal_password(),
+    )
+
+    test_failed = False
+    try:
+        await bootstrap_schema(client)
+        await client.execute_query(
+            """
+            CREATE entity:legacy_required_fields SET
+                uuid = 'legacy_required_fields',
+                name = 'Legacy Required Fields',
+                entity_type = 'pattern',
+                labels = [],
+                attributes = {
+                    retrieval_count: 7,
+                    citation_count: 5,
+                    misled_count: 3,
+                },
+                group_id = $group_id,
+                created_at = time::now();
+            DEFINE FIELD OVERWRITE revision ON entity TYPE option<int> DEFAULT 1;
+            DEFINE FIELD OVERWRITE retrieval_count ON entity TYPE option<int> DEFAULT 0;
+            DEFINE FIELD OVERWRITE citation_count ON entity TYPE option<int> DEFAULT 0;
+            DEFINE FIELD OVERWRITE misled_count ON entity TYPE option<int> DEFAULT 0;
+            UPDATE entity:legacy_required_fields SET
+                revision = NONE,
+                retrieval_count = NONE,
+                citation_count = NONE,
+                misled_count = NONE;
+            DEFINE FIELD OVERWRITE revision ON entity TYPE int DEFAULT 1 ASSERT $value >= 1;
+            DEFINE FIELD OVERWRITE retrieval_count ON entity TYPE int DEFAULT 0;
+            DEFINE FIELD OVERWRITE citation_count ON entity TYPE int DEFAULT 0;
+            DEFINE FIELD OVERWRITE misled_count ON entity TYPE int DEFAULT 0;
+            """,
+            group_id=client.group_id,
+        )
+        await record_schema_version(
+            client.execute_query,
+            version=9,
+            migrations=(),
+            name=GRAPH_SCHEMA_NAME,
+        )
+
+        await bootstrap_schema(client)
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT revision, retrieval_count, citation_count, misled_count
+                FROM entity:legacy_required_fields;
+                """
+            )
+        )
+        assert rows == [
+            {
+                "revision": 1,
+                "retrieval_count": 7,
+                "citation_count": 5,
+                "misled_count": 3,
+            }
+        ]
+    except Exception:
+        test_failed = True
+        raise
+    finally:
         await client.close()
         if test_failed:
             with suppress(Exception):

@@ -87,12 +87,12 @@ DEFINE FIELD IF NOT EXISTS created_at ON entity TYPE datetime DEFAULT time::now(
 DEFINE FIELD IF NOT EXISTS updated_at ON entity TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS created_by ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS modified_by ON entity TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS revision ON entity TYPE int DEFAULT 1 ASSERT $value >= 1;
+DEFINE FIELD IF NOT EXISTS revision ON entity TYPE option<int> DEFAULT 1;
 DEFINE FIELD IF NOT EXISTS last_recalled_at ON entity TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS last_used_at ON entity TYPE option<datetime>;
-DEFINE FIELD IF NOT EXISTS retrieval_count ON entity TYPE int DEFAULT 0;
-DEFINE FIELD IF NOT EXISTS citation_count ON entity TYPE int DEFAULT 0;
-DEFINE FIELD IF NOT EXISTS misled_count ON entity TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS retrieval_count ON entity TYPE option<int> DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS citation_count ON entity TYPE option<int> DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS misled_count ON entity TYPE option<int> DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS project_id ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS epic_id ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS parent_task_id ON entity TYPE option<string>;
@@ -393,11 +393,24 @@ WHERE modified_by = NONE
     AND attributes.modified_by != '';
 """
 
-ENTITY_USAGE_SIGNAL_DEFINITIONS = """
+# Pending migrations may leave these optional; the terminal repair restores strict ints.
+ENTITY_REQUIRED_FIELD_OPTIONAL_DEFINITIONS = """
+DEFINE FIELD OVERWRITE revision ON entity TYPE option<int> DEFAULT 1;
+DEFINE FIELD OVERWRITE retrieval_count ON entity TYPE option<int> DEFAULT 0;
+DEFINE FIELD OVERWRITE citation_count ON entity TYPE option<int> DEFAULT 0;
+DEFINE FIELD OVERWRITE misled_count ON entity TYPE option<int> DEFAULT 0;
+"""
+
+ENTITY_USAGE_SIGNAL_DEFINITIONS = f"""
+{ENTITY_REQUIRED_FIELD_OPTIONAL_DEFINITIONS}
 DEFINE FIELD IF NOT EXISTS last_recalled_at ON entity TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS last_used_at ON entity TYPE option<datetime>;
-DEFINE FIELD IF NOT EXISTS retrieval_count ON entity TYPE int DEFAULT 0;
-DEFINE FIELD IF NOT EXISTS citation_count ON entity TYPE int DEFAULT 0;
+UPDATE entity SET
+    retrieval_count = retrieval_count ?? attributes.retrieval_count ?? 0,
+    citation_count = citation_count ?? attributes.citation_count ?? 0
+WHERE retrieval_count = NONE OR citation_count = NONE;
+DEFINE FIELD OVERWRITE retrieval_count ON entity TYPE int DEFAULT 0;
+DEFINE FIELD OVERWRITE citation_count ON entity TYPE int DEFAULT 0;
 DEFINE INDEX IF NOT EXISTS idx_entity_last_recalled
     ON entity FIELDS last_recalled_at, created_at, uuid CONCURRENTLY;
 DEFINE INDEX IF NOT EXISTS idx_entity_last_used
@@ -468,15 +481,42 @@ WHERE type::is::number(attributes.confidence);
 """
 
 ENTITY_REVISION_MIGRATION_DEFINITIONS = """
-DEFINE FIELD IF NOT EXISTS revision ON entity TYPE int DEFAULT 1 ASSERT $value >= 1;
+DEFINE FIELD OVERWRITE revision ON entity TYPE option<int> DEFAULT 1;
 UPDATE entity SET revision = 1 WHERE revision = NONE OR revision < 1;
+DEFINE FIELD OVERWRITE revision ON entity TYPE int DEFAULT 1 ASSERT $value >= 1;
 """
 
 ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS = """
-DEFINE FIELD IF NOT EXISTS misled_count ON entity TYPE int DEFAULT 0;
+DEFINE FIELD OVERWRITE misled_count ON entity TYPE option<int> DEFAULT 0;
+UPDATE entity SET misled_count = misled_count ?? attributes.misled_count ?? 0
+WHERE misled_count = NONE;
+DEFINE FIELD OVERWRITE misled_count ON entity TYPE int DEFAULT 0;
 UPDATE entity SET misled_count = attributes.misled_count ?? 0
 WHERE misled_count = 0
     AND attributes.misled_count != NONE;
+"""
+
+ENTITY_REQUIRED_FIELD_REPAIR_DEFINITIONS = f"""
+{ENTITY_REQUIRED_FIELD_OPTIONAL_DEFINITIONS}
+UPDATE entity SET revision = 1 WHERE revision = NONE OR revision < 1;
+UPDATE entity SET
+    retrieval_count = retrieval_count ?? attributes.retrieval_count ?? 0,
+    citation_count = citation_count ?? attributes.citation_count ?? 0,
+    misled_count = misled_count ?? attributes.misled_count ?? 0
+WHERE retrieval_count = NONE OR citation_count = NONE OR misled_count = NONE;
+UPDATE entity SET retrieval_count = attributes.retrieval_count ?? 0
+WHERE retrieval_count = 0
+    AND attributes.retrieval_count != NONE;
+UPDATE entity SET citation_count = attributes.citation_count ?? 0
+WHERE citation_count = 0
+    AND attributes.citation_count != NONE;
+UPDATE entity SET misled_count = attributes.misled_count ?? 0
+WHERE misled_count = 0
+    AND attributes.misled_count != NONE;
+DEFINE FIELD OVERWRITE revision ON entity TYPE int DEFAULT 1 ASSERT $value >= 1;
+DEFINE FIELD OVERWRITE retrieval_count ON entity TYPE int DEFAULT 0;
+DEFINE FIELD OVERWRITE citation_count ON entity TYPE int DEFAULT 0;
+DEFINE FIELD OVERWRITE misled_count ON entity TYPE int DEFAULT 0;
 """
 
 
@@ -547,17 +587,40 @@ GRAPH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
         version=11,
         name="memory_quality_metadata",
-        statements=tuple(split_statements(MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS)),
+        statements=tuple(
+            split_statements(
+                ENTITY_REQUIRED_FIELD_OPTIONAL_DEFINITIONS
+                + "\n"
+                + MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS
+            )
+        ),
     ),
     SchemaMigration(
         version=12,
         name="entity_revision",
-        statements=tuple(split_statements(ENTITY_REVISION_MIGRATION_DEFINITIONS)),
+        statements=tuple(
+            split_statements(
+                ENTITY_REQUIRED_FIELD_OPTIONAL_DEFINITIONS
+                + "\n"
+                + ENTITY_REVISION_MIGRATION_DEFINITIONS
+            )
+        ),
     ),
     SchemaMigration(
         version=13,
         name="entity_misled_usage_signal",
-        statements=tuple(split_statements(ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS)),
+        statements=tuple(
+            split_statements(
+                ENTITY_REQUIRED_FIELD_OPTIONAL_DEFINITIONS
+                + "\n"
+                + ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS
+            )
+        ),
+    ),
+    SchemaMigration(
+        version=14,
+        name="entity_required_field_repair",
+        statements=tuple(split_statements(ENTITY_REQUIRED_FIELD_REPAIR_DEFINITIONS)),
     ),
 )
 
@@ -944,6 +1007,8 @@ __all__ = [
     "EMBEDDING_VECTOR_FIELDS",
     "ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS",
     "ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS",
+    "ENTITY_REQUIRED_FIELD_OPTIONAL_DEFINITIONS",
+    "ENTITY_REQUIRED_FIELD_REPAIR_DEFINITIONS",
     "ENTITY_REVISION_MIGRATION_DEFINITIONS",
     "ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS",
     "ENTITY_USAGE_SIGNAL_DEFINITIONS",

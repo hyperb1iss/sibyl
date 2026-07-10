@@ -50,6 +50,7 @@ from sibyl_core.backends.surreal.schema import (
     EDGE_DEFINITIONS,
     ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS,
     ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS,
+    ENTITY_REQUIRED_FIELD_REPAIR_DEFINITIONS,
     ENTITY_REVISION_MIGRATION_DEFINITIONS,
     ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS,
     ENTITY_USAGE_SIGNAL_DEFINITIONS,
@@ -1008,18 +1009,31 @@ def test_graph_entity_usage_signal_fields_are_versioned() -> None:
     for field in (
         "last_recalled_at",
         "last_used_at",
-        "retrieval_count",
-        "citation_count",
     ):
         assert f"DEFINE FIELD IF NOT EXISTS {field} ON entity" in NODE_DEFINITIONS
         assert f"DEFINE FIELD IF NOT EXISTS {field} ON entity" in (ENTITY_USAGE_SIGNAL_DEFINITIONS)
+    for field in ("retrieval_count", "citation_count"):
+        assert f"DEFINE FIELD IF NOT EXISTS {field} ON entity TYPE option<int>" in NODE_DEFINITIONS
+        assert f"DEFINE FIELD OVERWRITE {field} ON entity TYPE option<int>" in (
+            ENTITY_USAGE_SIGNAL_DEFINITIONS
+        )
+        assert f"DEFINE FIELD OVERWRITE {field} ON entity TYPE int" in (
+            ENTITY_USAGE_SIGNAL_DEFINITIONS
+        )
     assert "idx_entity_last_recalled" in NODE_DEFINITIONS
     assert "idx_entity_last_used" in NODE_DEFINITIONS
     assert "UPDATE entity SET" in ENTITY_USAGE_SIGNAL_DEFINITIONS
     assert ENTITY_USAGE_SIGNAL_DEFINITIONS.strip().splitlines()[0] in migration_sql
     assert "entity_misled_usage_signal" in [migration.name for migration in GRAPH_SCHEMA_MIGRATIONS]
-    assert "DEFINE FIELD IF NOT EXISTS misled_count ON entity" in NODE_DEFINITIONS
+    assert "DEFINE FIELD IF NOT EXISTS misled_count ON entity TYPE option<int>" in NODE_DEFINITIONS
+    assert "DEFINE FIELD OVERWRITE misled_count ON entity TYPE option<int>" in (
+        ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS
+    )
     assert ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS.strip().splitlines()[0] in migration_sql
+    assert "entity_required_field_repair" in [
+        migration.name for migration in GRAPH_SCHEMA_MIGRATIONS
+    ]
+    assert ENTITY_REQUIRED_FIELD_REPAIR_DEFINITIONS.strip().splitlines()[0] in migration_sql
 
 
 def test_graph_memory_quality_metadata_is_versioned() -> None:
@@ -1042,8 +1056,9 @@ def test_graph_entity_revision_is_versioned() -> None:
     migration_sql = "\n".join(migration.statements)
 
     assert GRAPH_SCHEMA_CURRENT_VERSION >= 12
-    assert "DEFINE FIELD IF NOT EXISTS revision ON entity" in migration_sql
+    assert "DEFINE FIELD OVERWRITE revision ON entity TYPE option<int>" in migration_sql
     assert "UPDATE entity SET revision = 1" in migration_sql
+    assert "DEFINE FIELD OVERWRITE revision ON entity TYPE int" in migration_sql
     assert ENTITY_REVISION_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
 
 

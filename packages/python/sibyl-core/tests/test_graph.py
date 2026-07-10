@@ -1550,6 +1550,121 @@ async def test_graph_migration_normalizes_legacy_updated_at_values() -> None:
         await client.close()
 
 
+@pytest.mark.parametrize("schema_version", [9, 13])
+@pytest.mark.asyncio
+async def test_graph_migration_repairs_partial_required_fields(schema_version: int) -> None:
+    client = SurrealGraphClient(
+        group_id=f"org-required-field-repair-{schema_version}",
+        url="memory://",
+    )
+    try:
+        await bootstrap_schema(client)
+        await client.execute_query(
+            """
+            CREATE entity:legacy_required_fields SET
+                uuid = 'legacy_required_fields',
+                name = 'Legacy Required Fields',
+                entity_type = 'pattern',
+                labels = [],
+                attributes = {
+                    retrieval_count: 7,
+                    citation_count: 5,
+                    misled_count: 3,
+                },
+                group_id = $group_id,
+                created_at = time::now();
+            DEFINE FIELD OVERWRITE revision ON entity TYPE option<int> DEFAULT 1;
+            DEFINE FIELD OVERWRITE retrieval_count ON entity TYPE option<int> DEFAULT 0;
+            DEFINE FIELD OVERWRITE citation_count ON entity TYPE option<int> DEFAULT 0;
+            DEFINE FIELD OVERWRITE misled_count ON entity TYPE option<int> DEFAULT 0;
+            UPDATE entity:legacy_required_fields SET
+                revision = NONE,
+                retrieval_count = NONE,
+                citation_count = NONE,
+                misled_count = NONE;
+            DEFINE FIELD OVERWRITE revision ON entity TYPE int DEFAULT 1 ASSERT $value >= 1;
+            DEFINE FIELD OVERWRITE retrieval_count ON entity TYPE int DEFAULT 0;
+            DEFINE FIELD OVERWRITE citation_count ON entity TYPE int DEFAULT 0;
+            DEFINE FIELD OVERWRITE misled_count ON entity TYPE int DEFAULT 0;
+            """,
+            group_id=client.group_id,
+        )
+        await record_schema_version(
+            client.execute_query,
+            version=schema_version,
+            migrations=(),
+            name=GRAPH_SCHEMA_NAME,
+        )
+
+        await bootstrap_schema(client)
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT revision, retrieval_count, citation_count, misled_count
+                FROM entity:legacy_required_fields;
+                """
+            )
+        )
+        assert rows == [
+            {
+                "revision": 1,
+                "retrieval_count": 7,
+                "citation_count": 5,
+                "misled_count": 3,
+            }
+        ]
+        assert await get_schema_version(client.execute_query) == GRAPH_SCHEMA_CURRENT_VERSION
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_graph_bootstrap_backfills_unversioned_legacy_required_fields() -> None:
+    client = SurrealGraphClient(group_id="org-unversioned-required-fields", url="memory://")
+    try:
+        await client.execute_query(
+            """
+            DEFINE TABLE entity SCHEMALESS;
+            CREATE entity:unversioned_required_fields SET
+                uuid = 'unversioned_required_fields',
+                name = 'Unversioned Required Fields',
+                entity_type = 'pattern',
+                labels = [],
+                attributes = {
+                    retrieval_count: 11,
+                    citation_count: 7,
+                    misled_count: 2,
+                },
+                group_id = $group_id,
+                created_at = time::now();
+            """,
+            group_id=client.group_id,
+        )
+
+        await bootstrap_schema(client)
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT revision, retrieval_count, citation_count, misled_count
+                FROM entity:unversioned_required_fields;
+                """
+            )
+        )
+        assert rows == [
+            {
+                "revision": 1,
+                "retrieval_count": 11,
+                "citation_count": 7,
+                "misled_count": 2,
+            }
+        ]
+        assert await get_schema_version(client.execute_query) == GRAPH_SCHEMA_CURRENT_VERSION
+    finally:
+        await client.close()
+
+
 @pytest.mark.asyncio
 async def test_graph_migration_rejects_invalid_entity_type_values() -> None:
     client = SurrealGraphClient(group_id="org-native-entity-type-migration", url="memory://")
