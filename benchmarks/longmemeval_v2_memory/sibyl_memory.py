@@ -54,7 +54,7 @@ except ModuleNotFoundError:
 
 
 DEFAULT_API_URL = "http://127.0.0.1:3334/api"
-DEFAULT_CONTENT_MAX_CHARS = 50_000
+DEFAULT_CONTENT_MAX_CHARS = 18_000
 DEFAULT_SEARCH_LIMIT = 12
 DEFAULT_CONTEXT_ITEMS = 8
 DEFAULT_CONTEXT_CHARS_PER_ITEM = 18_000
@@ -64,8 +64,8 @@ DEFAULT_API_RETRY_BASE_DELAY_SECONDS = 2.0
 DEFAULT_API_RETRY_MAX_DELAY_SECONDS = 30.0
 DEFAULT_EMBEDDING_JOB_WAIT_TIMEOUT_SECONDS = 1_800.0
 DEFAULT_EMBEDDING_JOB_POLL_SECONDS = 0.5
-DEFAULT_BULK_MAX_ENTITIES = 16
-DEFAULT_BULK_MAX_CONTENT_CHARS = 200_000
+DEFAULT_BULK_MAX_ENTITIES = 32
+DEFAULT_BULK_MAX_CONTENT_CHARS = 512_000
 DEFAULT_EMBEDDING_BACKFILL_MAX_PENDING_JOBS = 8
 MAX_BULK_CREATE = 128
 RETRYABLE_HTTP_STATUS_CODES = frozenset({408, 409, 425, 429})
@@ -295,6 +295,7 @@ class SibylLiveApiMemory(Memory):
             "include_documents": False,
             "include_graph": True,
             "include_content": True,
+            "content_max_chars": self.max_context_chars_per_item,
             "use_enhanced": True,
             "boost_recent": False,
             "limit": min(max(self.search_limit, self.max_context_items), 50),
@@ -325,6 +326,7 @@ class SibylLiveApiMemory(Memory):
             "defer_embeddings": self.defer_embeddings,
             "pending_embedding_backfill_jobs": len(self._pending_embedding_job_ids),
             "returned_context_items": len(memory_context),
+            "search_content_max_chars": self.max_context_chars_per_item,
         }
 
     def _remember_embedding_backfill_jobs(self, response: dict[str, object]) -> None:
@@ -604,7 +606,22 @@ def _state_text(state: LongMemEvalV2State, *, include_screenshot_refs: bool) -> 
 def _split_oversized_block(header: str, block: str, *, max_chars: int) -> list[str]:
     prefix = f"{header}\n\n"
     budget = max(1, max_chars - len(prefix))
-    return [prefix + block[index : index + budget] for index in range(0, len(block), budget)]
+    pieces: list[str] = []
+    current = ""
+    for line in block.splitlines(keepends=True):
+        if len(line) > budget:
+            if current:
+                pieces.append(current)
+                current = ""
+            pieces.extend(line[index : index + budget] for index in range(0, len(line), budget))
+            continue
+        if current and len(current) + len(line) > budget:
+            pieces.append(current)
+            current = ""
+        current += line
+    if current or not pieces:
+        pieces.append(current)
+    return [prefix + piece for piece in pieces]
 
 
 def _entity_name(trajectory_id: str, chunk_index: int, chunk_count: int) -> str:

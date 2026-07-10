@@ -17,8 +17,9 @@ EXPECTED_REQUIRED_TRAJECTORIES = 2
 EXPECTED_LAFS_GAIN = 0.125
 EXPECTED_MEMORY_QUERY_AVG_SECONDS = 2.5
 EXPECTED_EMBEDDING_JOB_WAIT_TIMEOUT_SECONDS = 1_800.0
-EXPECTED_BULK_MAX_ENTITIES = 16
-EXPECTED_BULK_MAX_CONTENT_CHARS = 200_000
+EXPECTED_CONTENT_MAX_CHARS = 18_000
+EXPECTED_BULK_MAX_ENTITIES = 32
+EXPECTED_BULK_MAX_CONTENT_CHARS = 512_000
 EXPECTED_EMBEDDING_BACKFILL_MAX_PENDING_JOBS = 8
 EXPECTED_MEMORY_API_TIMEOUT_SECONDS = 600.0
 EXPECTED_MEMORY_API_RETRY_ATTEMPTS = 3
@@ -28,6 +29,7 @@ EXPECTED_READER_RETRY_ATTEMPTS = 4
 EXPECTED_TRANSIENT_READER_ATTEMPTS = 2
 EXPECTED_COMBINED_QUESTION_COUNT = 4
 TEST_CONTENT_MAX_CHARS = 420
+TEST_CONTEXT_MAX_CHARS = 800
 
 
 class _RequestCall(TypedDict):
@@ -130,6 +132,7 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(tmp_path: Path)
     assert memory_config["memory_type"] == "sibyl_live_api"
     assert memory_config["memory_params"]["allow_localhost"] is True
     assert memory_config["memory_params"]["defer_embeddings"] is True
+    assert memory_config["memory_params"]["content_max_chars"] == EXPECTED_CONTENT_MAX_CHARS
     assert (
         memory_config["memory_params"]["api_timeout_seconds"] == EXPECTED_MEMORY_API_TIMEOUT_SECONDS
     )
@@ -413,6 +416,19 @@ def test_sibyl_memory_payloads_chunk_trajectory_by_state() -> None:
     assert any("Screenshot:" in str(payload["content"]) for payload in payloads)
 
 
+def test_sibyl_memory_oversized_blocks_split_on_line_boundaries() -> None:
+    module = _load_memory_module()
+    header = "Trajectory: t1"
+    block = "alpha\nbeta\ngamma\ndelta\n"
+
+    chunks = module._split_oversized_block(header, block, max_chars=len(header) + 14)
+    prefix = f"{header}\n\n"
+    bodies = [chunk.removeprefix(prefix) for chunk in chunks]
+
+    assert "".join(bodies) == block
+    assert all(body.endswith("\n") for body in bodies)
+
+
 def test_sibyl_memory_context_formats_retrieved_content() -> None:
     module = _load_memory_module()
 
@@ -609,6 +625,7 @@ def test_sibyl_memory_query_waits_for_embedding_backfill_before_search() -> None
         {"status": "complete", "error": None},
     ]
     calls: list[str] = []
+    search_payloads: list[dict[str, object]] = []
 
     def fake_request(
         method: str,
@@ -617,24 +634,41 @@ def test_sibyl_memory_query_waits_for_embedding_backfill_before_search() -> None
         json: dict[str, object] | None = None,
         params: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        del method, json, params
+        del method, params
         calls.append(path)
         if path == "/jobs/embed-lme-v2-1":
             return status_responses.pop(0)
         if path == "/search":
-            return {"results": []}
+            assert isinstance(json, dict)
+            search_payloads.append(json)
+            return {
+                "results": [
+                    {
+                        "content": "x" * 900,
+                        "score": 0.9,
+                        "metadata": {
+                            "longmemeval_v2_trajectory_id": "t1",
+                            "longmemeval_v2_chunk_index": 0,
+                        },
+                    }
+                ]
+            }
         raise AssertionError(f"unexpected path: {path}")
 
     memory.project_id = "project_lme"
     memory.search_limit = 12
     memory.max_context_items = 8
-    memory.max_context_chars_per_item = 18_000
+    memory.max_context_chars_per_item = TEST_CONTEXT_MAX_CHARS
     memory.embedding_job_wait_timeout_seconds = 5.0
     memory.embedding_job_poll_seconds = 0.0
     memory._pending_embedding_job_ids = {"embed-lme-v2-1"}
     memory._request_json = fake_request
 
-    assert memory.query("Which filter was selected?") == []
+    context = memory.query("Which filter was selected?")
+
+    assert len(context) == 1
+    assert context[0]["value"].endswith("x" * TEST_CONTEXT_MAX_CHARS)
+    assert search_payloads[0]["content_max_chars"] == TEST_CONTEXT_MAX_CHARS
     assert calls == ["/jobs/embed-lme-v2-1", "/jobs/embed-lme-v2-1", "/search"]
     assert memory._pending_embedding_job_ids == set()
 
