@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light" />
     <meta
       name="description"
-      content="A source-grounded 2026 vision for Sibyl as the sovereign context runtime for people and their agent fleets."
+      content="A source-grounded 2026 vision for Sibyl as the sovereign context runtime where humans own the evidence and governed agents help memory compound."
     />
     <title>Sibyl · The Sovereign Context Runtime</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -199,10 +199,12 @@
 
       .progress > span {
         display: block;
-        width: 0;
+        width: 100%;
         height: 100%;
         background: linear-gradient(90deg, var(--purple), var(--cyan), var(--coral));
         box-shadow: 0 0 12px color-mix(in srgb, var(--cyan) 60%, transparent);
+        transform: scaleX(0);
+        transform-origin: left;
       }
 
       .topbar {
@@ -442,7 +444,7 @@
 
       main section {
         position: relative;
-        padding-block: clamp(5rem, 10vw, 9rem);
+        padding-block: clamp(4.5rem, 8vw, 7rem);
       }
 
       .section-rule {
@@ -710,6 +712,10 @@
         text-underline-offset: 0.2em;
       }
 
+      .source-note .mono {
+        overflow-wrap: anywhere;
+      }
+
       .market-card {
         min-height: 19rem;
         display: flex;
@@ -856,6 +862,107 @@
         color: var(--subtle);
         font-size: 0.74rem;
         padding-block: 0.5rem;
+      }
+
+      .pen-map {
+        display: grid;
+        grid-template-columns: minmax(8rem, 0.55fr) repeat(2, minmax(0, 1fr));
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        background: var(--raised);
+      }
+
+      .pen-axis,
+      .pen-cell {
+        min-width: 0;
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        padding: 1.2rem;
+      }
+
+      .pen-map > :nth-child(3n) {
+        border-right: 0;
+      }
+
+      .pen-map > :nth-last-child(-n + 3) {
+        border-bottom: 0;
+      }
+
+      .pen-axis {
+        display: grid;
+        place-items: center start;
+        color: var(--subtle);
+        font-family: "Fira Code", monospace;
+        font-size: 0.64rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .pen-axis.column {
+        place-items: end start;
+        min-height: 5rem;
+        color: var(--cyan);
+      }
+
+      .pen-cell {
+        min-height: 10.5rem;
+        background: color-mix(in srgb, var(--card) 70%, transparent);
+      }
+
+      .pen-cell strong {
+        display: block;
+        margin-bottom: 0.55rem;
+        font-size: 1.1rem;
+      }
+
+      .pen-cell span {
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+
+      .pen-cell.target {
+        border-color: color-mix(in srgb, var(--purple) 52%, var(--line));
+        background:
+          radial-gradient(circle at 88% 12%, var(--purple-wash), transparent 42%),
+          color-mix(in srgb, var(--card) 88%, transparent);
+        box-shadow: inset 0 0 42px var(--purple-wash);
+      }
+
+      .pen-cell.target strong {
+        color: var(--purple);
+      }
+
+      .op-flow {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.8rem;
+      }
+
+      .op-node {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--raised);
+        padding: 1rem;
+      }
+
+      .op-node strong {
+        display: block;
+        margin-bottom: 0.55rem;
+        color: var(--cyan);
+        font-family: "Fira Code", monospace;
+        font-size: 0.72rem;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+
+      .op-node code {
+        display: block;
+        overflow-wrap: anywhere;
+        color: var(--muted);
+        font-size: 0.72rem;
+        line-height: 1.65;
       }
 
       .principle-list {
@@ -1492,7 +1599,7 @@
       }
 
       .reveal {
-        opacity: 0;
+        opacity: 1;
         transform: translateY(20px);
         transition:
           opacity 650ms ease,
@@ -1554,6 +1661,10 @@
       }
 
       @media (max-width: 720px) {
+        html {
+          scroll-padding-top: 7.5rem;
+        }
+
         body {
           font-size: 16px;
         }
@@ -1562,8 +1673,38 @@
           width: min(100% - 2rem, 1180px);
         }
 
+        .topbar-inner {
+          flex-wrap: wrap;
+          gap: 0.45rem 0.75rem;
+          padding-block: 0.55rem 0.35rem;
+        }
+
+        .brand {
+          font-size: 0.86rem;
+        }
+
         .nav-links {
+          display: flex;
+          order: 3;
+          width: 100%;
+          gap: 1rem;
+          overflow-x: auto;
+          padding-bottom: 0.35rem;
+          scrollbar-width: none;
+        }
+
+        .nav-links::-webkit-scrollbar {
           display: none;
+        }
+
+        .nav-links a,
+        .nav-links a:nth-child(n + 4) {
+          display: block;
+          flex: 0 0 auto;
+        }
+
+        .hero {
+          min-height: calc(100svh - 7.5rem);
         }
 
         .hero h1 {
@@ -1598,6 +1739,48 @@
         }
 
         .context-compiler {
+          grid-template-columns: 1fr;
+        }
+
+        .pen-map {
+          grid-template-columns: 1fr;
+        }
+
+        .pen-axis,
+        .pen-cell,
+        .pen-map > :nth-child(3n),
+        .pen-map > :nth-last-child(-n + 3) {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .pen-axis:first-child,
+        .pen-axis.column {
+          display: none;
+        }
+
+        .pen-axis:not(.column) {
+          min-height: auto;
+          padding-block: 0.7rem;
+          color: var(--coral);
+        }
+
+        .pen-cell::before {
+          display: block;
+          margin-bottom: 0.55rem;
+          color: var(--cyan);
+          content: attr(data-owner);
+          font-family: "Fira Code", monospace;
+          font-size: 0.6rem;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+        }
+
+        .pen-map > :last-child {
+          border-bottom: 0;
+        }
+
+        .op-flow {
           grid-template-columns: 1fr;
         }
 
@@ -1739,6 +1922,7 @@
           <a href="#reality">Reality</a>
           <a href="#landscape">Landscape</a>
           <a href="#architecture">Architecture</a>
+          <a href="#agent-pen">The pen</a>
           <a href="#gmail">Gmail</a>
           <a href="#roadmap">Roadmap</a>
           <a href="#sources">Sources</a>
@@ -1765,14 +1949,15 @@
         <p class="hero-thesis">
           A source-grounded product, architecture, and roadmap vision for turning Sibyl from the
           unusually integrated cross-agent memory system into the sovereign context runtime beneath
-          every agent,
-          project, relationship, archive, and chapter of a life.
+          every agent, project, relationship, archive, and chapter of a life. Humans own the
+          evidence. Governed agents help memory become more useful without becoming its sovereign.
         </p>
         <div class="hero-meta">
           <span class="pill">Audited at 8df846ea</span>
           <span class="pill">Primary-source research</span>
           <span class="pill">Practical before magical</span>
           <span class="pill">Self-hosted by default</span>
+          <span class="pill">Governed agent authorship</span>
         </div>
         <a class="scroll-cue" href="#verdict"><span></span> Enter the atlas</a>
       </div>
@@ -1817,9 +2002,10 @@
               <article class="card" data-accent="coral">
                 <div class="card-kicker">The roadmap correction</div>
                 <p>
-                  Most of “Prove It” exists in code. Finish its receipts, then put life-scale
-                  ingestion before team coalescence. One human across decades, identities, and
-                  sources is the right proving ground for many humans sharing memory.
+                  Run two destinations on one substrate. Governed authorship and team-scope trust
+                  start now; exact evidence and life-scale ingest advance beside them. Full
+                  multi-writer coalescence waits for correction lineage, but the personal archive
+                  never waits for coalescence.
                 </p>
               </article>
             </div>
@@ -1864,6 +2050,16 @@
                 outcome valuation remain proposed; live proof and write-path scaling are unfinished.
               </div>
               <span class="badge proving">proving</span>
+            </div>
+            <div class="status-row">
+              <div class="status-name">Agent authorship</div>
+              <div class="status-copy">
+                The internal ontology is rich, but the agent-facing pen is narrow. MCP remember
+                exposes 11 of 33 entity kinds; capture creates only generic, project, and task
+                relations; nine correction actions live behind admin REST; and basis, confidence,
+                retention, fidelity, and negative outcomes lack one governed mutation contract.
+              </div>
+              <span class="badge missing">critical gap</span>
             </div>
             <div class="status-row">
               <div class="status-name">Team control</div>
@@ -1928,6 +2124,19 @@
               </p>
             </article>
           </div>
+
+          <article class="card reveal" data-accent="yellow" style="margin-top: 1rem">
+            <div class="card-kicker">Subtract before expanding</div>
+            <h3>Make one obvious path through the power already here.</h3>
+            <p>
+              An internal audit of 1,732 local agent transcripts found ritual-heavy read verbs,
+              seven importance keys, four project-scope expressions, narrow use of a 33-kind
+              ontology, and correction machinery separated from ordinary capture. Unify the
+              authoring and recall surfaces, collapse duplicate fields and scope resolution, and
+              advertise a smaller coherent vocabulary without deleting the richer backend model.
+              Transcript counts are host-conditioned evidence, not a referendum on capability.
+            </p>
+          </article>
 
           <p class="source-note reveal" style="margin-top: 1.25rem">
             Audited against
@@ -2170,11 +2379,11 @@
             <article class="layer">
               <span class="layer-no">LAYER 06</span>
               <h3>Agent Fabric</h3>
-              <p>Stable identities, delegated capabilities, checkpoints, and action receipts.</p>
+              <p>Stable identities, governed memory authorship, checkpoints, and action receipts.</p>
               <ul>
                 <li>Purpose-bound grants</li>
+                <li>Typed memory operations</li>
                 <li>Fork, rewind, resume</li>
-                <li>Trajectory compilation</li>
                 <li>Untrusted-source taint</li>
               </ul>
             </article>
@@ -2254,6 +2463,21 @@
                   <td>Hash-addressed and cited; referenced personal payload remains revocable</td>
                 </tr>
                 <tr>
+                  <td>MemoryOp</td>
+                  <td>An idempotent, revision-aware request to assert, annotate, contest, supersede, report, nominate, or forget</td>
+                  <td>Every mutation carries actor, purpose, basis, evidence, policy, and expected revision</td>
+                </tr>
+                <tr>
+                  <td>MutationReceipt</td>
+                  <td>The applied revision, affected projections, policy decision, and compensation path</td>
+                  <td>No silent write; retry is safe; destructive and scope-crossing operations can be previewed</td>
+                </tr>
+                <tr>
+                  <td>SessionCheckpoint</td>
+                  <td>A branchable record of context, transcript span, tool receipts, commitments, and working state</td>
+                  <td>Forks preserve ancestry; merges never promote hypothetical state into observed truth</td>
+                </tr>
+                <tr>
                   <td>DeletionReceipt</td>
                   <td>A non-sensitive proof that lineage was purged or invalidated</td>
                   <td>Access revokes immediately; managed derivatives purge and backups expire by policy</td>
@@ -2274,11 +2498,226 @@
         </div>
       </section>
 
+      <section class="section-rule" id="agent-pen">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="section-no">05 / The governed pen</span>
+            <h2 class="section-title">The memory can express more than its authors can.</h2>
+            <p class="section-lede">
+              Sibyl already has a richer internal graph than agents can safely write. The next
+              practical leap is not eighteen new knobs or autonomous self-editing. It is one
+              coherent authorship contract: agents can contribute structured judgment, challenge
+              bad memory, and report what happened; policy and evidence decide what becomes durable.
+            </p>
+          </div>
+
+          <div class="thesis-banner reveal">
+            <p>The human owns the memory. The agent gets a pen, not the keys.</p>
+            <small>
+              Substrate without the pen is an archive. The pen without substrate is graffiti.
+              Sibyl wins by joining expressive agency to evidence, revision control, policy,
+              contextual feedback, and verifiable erasure.
+            </small>
+          </div>
+
+          <div class="pen-map reveal" style="margin-top: 1rem" aria-label="Memory architecture map">
+            <div class="pen-axis" aria-hidden="true">Representation ↓ / authorship →</div>
+            <div class="pen-axis column">Pipeline shapes memory</div>
+            <div class="pen-axis column">Agent can shape memory</div>
+            <div class="pen-axis">Flat state</div>
+            <div class="pen-cell" data-owner="Pipeline shapes memory">
+              <strong>Conventional RAG</strong>
+              <span>Chunks and summaries are generated around the agent. The model mostly reads.</span>
+            </div>
+            <div class="pen-cell" data-owner="Agent can shape memory">
+              <strong>Editable memory blocks</strong>
+              <span>The agent can update state, but truth, lineage, and correction semantics remain thin.</span>
+            </div>
+            <div class="pen-axis">Rich evidence graph</div>
+            <div class="pen-cell" data-owner="Pipeline shapes memory">
+              <strong>Sibyl today</strong>
+              <span>Strong provenance, ontology, retrieval, and policy; narrow agent-facing capture.</span>
+            </div>
+            <div class="pen-cell target" data-owner="Governed agent authorship">
+              <strong>Sibyl target</strong>
+              <span>Rich evidence plus revision-aware authorship, correction, outcomes, and receipts.</span>
+            </div>
+          </div>
+          <p class="source-note reveal" style="margin-top: 0.75rem">
+            Architecture map, not a benchmark. Products span cells and continue to evolve; the
+            important distinction is whether structured memory is only pipeline output or also a
+            governed medium an agent can deliberately improve.
+          </p>
+
+          <div class="grid grid-2 reveal" style="margin-top: 2.5rem">
+            <article class="card" data-accent="green">
+              <div class="card-kicker">Agents may</div>
+              <h3>Contribute judgment with receipts.</h3>
+              <p>
+                Assert, annotate, relate, contest, supersede derived claims, report outcomes,
+                propose retention or sharing, request forgetting, and checkpoint a branch. Each
+                act names its basis, evidence, purpose, actor, scope, and expected revision.
+              </p>
+            </article>
+            <article class="card" data-accent="coral">
+              <div class="card-kicker">Agents may not</div>
+              <h3>Manufacture authority.</h3>
+              <p>
+                Rewrite source evidence, mint verification, grant themselves access, erase another
+                person’s history, let a time-to-live delete evidence, or silently promote an
+                inference or hypothetical branch into observed truth.
+              </p>
+            </article>
+          </div>
+
+          <div class="grid grid-3 reveal" style="margin-top: 1rem">
+            <article class="card" data-accent="purple">
+              <div class="card-kicker">01 / Assert</div>
+              <h3>Say what kind of knowing this is.</h3>
+              <p>
+                Basis, confidence, evidence, valid interval, referents, fidelity, and scope travel
+                with the claim. Observed, reported, inferred, and hypothetical never collapse into
+                one generic “memory.”
+              </p>
+            </article>
+            <article class="card" data-accent="cyan">
+              <div class="card-kicker">02 / Relate</div>
+              <h3>Make epistemic structure writable.</h3>
+              <p>
+                Support, contradict, supersede, justify, bind, exemplify, and depend-on become typed
+                relations with actor, evidence, time, confidence, and policy, not unqualified edges.
+              </p>
+            </article>
+            <article class="card" data-accent="coral">
+              <div class="card-kicker">03 / Challenge</div>
+              <h3>Give wrong memory somewhere to go.</h3>
+              <p>
+                Mark stale, misleading, duplicate, unresolved, or contradicted state. Semantic
+                correction preserves revision history; sovereign deletion still removes managed
+                evidence and descendants.
+              </p>
+            </article>
+            <article class="card" data-accent="yellow">
+              <div class="card-kicker">04 / Nominate</div>
+              <h3>Propose what deserves attention.</h3>
+              <p>
+                Agents can nominate retention, broader scope, consolidation, verification, future
+                hooks, and tripwires. Policy and humans accept, narrow, defer, or reject the proposal.
+              </p>
+            </article>
+            <article class="card" data-accent="green">
+              <div class="card-kicker">05 / Evaluate</div>
+              <h3>Report consequence, not vibes.</h3>
+              <p>
+                Useful, cited, ignored, misleading, corrected, and outcome-bearing signals attach
+                to the exact assertion, ContextPack, task, purpose, agent, model, and reason. A bad
+                result in one context is not a global death sentence.
+              </p>
+            </article>
+            <article class="card" data-accent="purple">
+              <div class="card-kicker">06 / Checkpoint</div>
+              <h3>Branch work without branching reality.</h3>
+              <p>
+                Session checkpoints bind parentage, context hash, transcript span, tool receipts,
+                commitments, omissions, grants, and working state. Forks can merge learning without
+                flattening their histories.
+              </p>
+            </article>
+          </div>
+
+          <div class="mail-demo reveal" style="margin-top: 1rem" aria-label="Conceptual governed memory operation">
+            <div class="window-bar">
+              <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+              <div class="window-title">sibyl / governed memory operation</div>
+              <span class="badge research">target surface</span>
+            </div>
+            <div class="mail-main">
+              <div class="op-flow">
+                <div class="op-node">
+                  <strong>01 · Preview</strong>
+                  <code>action: contest<br />target: assertion:7f3<br />expected_revision: 12<br />basis: execution_outcome<br />context_pack: sha256:91c…</code>
+                </div>
+                <div class="op-node">
+                  <strong>02 · Decide</strong>
+                  <code>identity ✓<br />revision ✓<br />evidence ✓<br />scope: project only<br />policy: allow with lineage</code>
+                </div>
+                <div class="op-node">
+                  <strong>03 · Receipt</strong>
+                  <code>applied: true<br />revision: 13<br />projection_jobs: 4<br />reversible: true<br />compensation: op:8a1</code>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="signal-strip reveal" style="margin-top: 1rem">
+            <div><strong>01</strong><span>One living authoring surface, not overlapping ritual verbs</span></div>
+            <div><strong>02</strong><span>Infer safe defaults; make consequential overrides explicit</span></div>
+            <div><strong>03</strong><span>Idempotency and expected revision on every mutation</span></div>
+            <div><strong>04</strong><span>Preview scope-crossing and destructive operations</span></div>
+            <div><strong>05</strong><span>Imported content can be cited; it can never hold the pen</span></div>
+          </div>
+
+          <div class="section-head reveal" style="margin-top: 4.5rem">
+            <span class="section-no">Feedback physics</span>
+            <h3 class="section-title">Memory compounds only when consequences flow back.</h3>
+            <p class="section-lede">
+              Retrieval is not the end of the loop. Every use, correction, contradiction, result,
+              and deletion should refine what the next agent receives while preserving the evidence
+              needed to explain why.
+            </p>
+          </div>
+
+          <div class="grid grid-3 reveal">
+            <article class="card" data-accent="green">
+              <div class="card-kicker">Survival loop</div>
+              <h3>Useful memory earns retrieval strength.</h3>
+              <p>Exposure, citation, outcome, correction, and recurrence determine promotion, dormancy, review, or retirement without destroying evidence.</p>
+            </article>
+            <article class="card" data-accent="cyan">
+              <div class="card-kicker">Calibration loop</div>
+              <h3>Confidence learns from outcomes.</h3>
+              <p>Basis and confidence meet real results; calibration curves then influence trust-weighted retrieval for comparable future work.</p>
+            </article>
+            <article class="card" data-accent="coral">
+              <div class="card-kicker">Freshness loop</div>
+              <h3>Changing referents trigger repair.</h3>
+              <p>A code symbol, person, policy, or project changes; contradiction and validity checks supersede stale projections before context recompiles.</p>
+            </article>
+            <article class="card" data-accent="yellow">
+              <div class="card-kicker">Consolidation loop</div>
+              <h3>Patterns become reviewable competence.</h3>
+              <p>Repeated episodes propose procedures and principles. Evidence, failures, and human corrections stay attached to the distilled result.</p>
+            </article>
+            <article class="card" data-accent="purple">
+              <div class="card-kicker">Recompilation loop</div>
+              <h3>Corrections propagate through lineage.</h3>
+              <p>A source correction, policy change, model upgrade, or deletion invalidates descendants and rebuilds only the affected worldview.</p>
+            </article>
+            <article class="card" data-accent="green">
+              <div class="card-kicker">Continuity loop</div>
+              <h3>Good runs strengthen the next agent.</h3>
+              <p>Checkpoint, outcome, and correction produce reusable procedure, known failure modes, and a smaller, sharper next ContextPack.</p>
+            </article>
+          </div>
+
+          <p class="source-note reveal" style="margin-top: 1.25rem">
+            The target contract synthesizes current Sibyl code, the independently authored
+            “Hand the Agent the Pen” review,
+            <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool">Anthropic’s client-side memory tool</a>,
+            <a href="https://docs.letta.com/guides/agents/memory/">Letta memory blocks</a>,
+            <a href="https://arxiv.org/abs/2502.12110">A-MEM</a>,
+            <a href="https://arxiv.org/abs/2508.19828">Memory-R1</a>, and
+            <a href="https://arxiv.org/abs/2509.25911">Mem-alpha</a>. Names and envelopes shown
+            here are proposed architecture, not current CLI or MCP syntax.
+          </p>
+        </div>
+      </section>
+
       <section class="section-rule" id="principles">
         <div class="wrap narrow">
           <div class="section-head reveal">
-            <span class="section-no">05 / Constitution</span>
-            <h2 class="section-title">Eight laws for a system worthy of a life.</h2>
+            <span class="section-no">06 / Constitution</span>
+            <h2 class="section-title">Nine laws for a system worthy of a life.</h2>
             <p class="section-lede">
               These are product constraints, not branding. If a feature violates one, the feature
               is wrong or its trust boundary is dishonest.
@@ -2338,6 +2777,16 @@
             </article>
             <article class="principle">
               <div>
+                <h3>Agents get authorship, never sovereignty.</h3>
+                <p>
+                  Agents may contribute, challenge, supersede derived claims, report outcomes, and
+                  propose policy. They cannot rewrite evidence, mint verification, self-grant
+                  access, erase another person’s history, or silently convert hypothesis to truth.
+                </p>
+              </div>
+            </article>
+            <article class="principle">
+              <div>
                 <h3>Imported content is data, never instruction.</h3>
                 <p>
                   Email, webpages, documents, transcripts, and chat remain permanently typed as
@@ -2373,7 +2822,7 @@
       <section class="section-rule" id="gmail">
         <div class="wrap">
           <div class="section-head reveal">
-            <span class="section-no">06 / Flagship proof</span>
+            <span class="section-no">07 / Flagship proof</span>
             <h2 class="section-title">Import twenty years of email. Lose nothing.</h2>
             <p class="section-lede">
               Gmail Takeout should become Sibyl’s corpus-defining trial: millions of messy MIME
@@ -2524,7 +2973,7 @@
       <section class="section-rule" id="life-foundry">
         <div class="wrap">
           <div class="section-head reveal">
-            <span class="section-no">07 / Life-data foundry</span>
+            <span class="section-no">08 / Life-data foundry</span>
             <h2 class="section-title">One connector contract. Every chapter of a life.</h2>
             <p class="section-lede">
               The target connector contract requires every adapter to converge on the same durable
@@ -2620,7 +3069,7 @@
       <section class="section-rule" id="compiler">
         <div class="wrap">
           <div class="section-head reveal">
-            <span class="section-no">08 / The Lens</span>
+            <span class="section-no">09 / The Lens</span>
             <h2 class="section-title">Compile the smallest context that can tell the truth.</h2>
             <p class="section-lede">
               Retrieval returns candidates. A context compiler produces a governed artifact for a
@@ -2719,12 +3168,14 @@
       <section class="section-rule" id="life-browser">
         <div class="wrap">
           <div class="section-head reveal">
-            <span class="section-no">09 / The Life Browser</span>
+            <span class="section-no">10 / The Life Browser</span>
             <h2 class="section-title">Make a lifetime feel legible, not surveilled.</h2>
             <p class="section-lede">
-              The primary product is not a chat box. It is a humane observatory for time, people,
-              commitments, evidence, agents, sources, and change. Ask is one doorway into the
-              system; browse, correct, compare, and grant are equally important verbs.
+              At full power, Sibyl becomes a humane observatory for a life. The wedge is narrower
+              and already alive: agents that cheaply recall, author, challenge, correct, and cite
+              memory while work is happening. The Life Browser earns itself from those receipts,
+              beginning with the trust center, corrections, source fidelity, and time machine.
+              Ask is one doorway; browse, correct, compare, and grant are equally important verbs.
             </p>
           </div>
 
@@ -2800,7 +3251,7 @@
       <section class="section-rule" id="privacy">
         <div class="wrap">
           <div class="section-head reveal">
-            <span class="section-no">10 / Privacy kernel</span>
+            <span class="section-no">11 / Privacy kernel</span>
             <h2 class="section-title">No magical privacy claims. Honest lanes, hard boundaries.</h2>
             <p class="section-lede">
               A server cannot simultaneously know nothing, perform arbitrary semantic search, and
@@ -2811,14 +3262,14 @@
 
           <div class="grid grid-4 reveal">
             <article class="card" data-accent="green">
-              <div class="card-kicker">Recommended default</div>
-              <h3>Sovereign local</h3>
-              <p>Models and indexes run on trusted devices. Sync and backups carry ciphertext. External egress is opt-in per task.</p>
+              <div class="card-kicker">Practical default</div>
+              <h3>Trusted self-host</h3>
+              <p>The owner-controlled server decrypts and processes. Encryption protects rest and transit, not a compromised host. This is Sibyl’s credible near-term default.</p>
             </article>
             <article class="card" data-accent="cyan">
-              <div class="card-kicker">Practical self-host</div>
-              <h3>Trusted server</h3>
-              <p>The owner-controlled server decrypts and processes. Encryption protects rest and transit, not a compromised host.</p>
+              <div class="card-kicker">High-sensitivity destination</div>
+              <h3>Sovereign local</h3>
+              <p>Models and indexes run on trusted devices. Sync and backups carry ciphertext. External egress is opt-in per task, source, or space.</p>
             </article>
             <article class="card" data-accent="yellow">
               <div class="card-kicker">Advanced deployment</div>
@@ -2881,96 +3332,62 @@
       <section class="section-rule" id="horizon">
         <div class="wrap">
           <div class="section-head reveal">
-            <span class="section-no">11 / At full power</span>
+            <span class="section-no">12 / At full power</span>
             <h2 class="section-title">The magic is continuity with receipts.</h2>
             <p class="section-lede">
               The system becomes next-level when it stops behaving like a smarter search box and
               starts preserving the causal, relational, procedural, and moral texture of a life.
-              Every experience below is technically downstream of the architecture already defined.
+              The magic should first appear in an ordinary day, not a speculative demo.
             </p>
           </div>
 
-          <div class="grid grid-3 reveal">
+          <div class="mail-demo reveal" aria-label="A conceptual day with Sibyl">
+            <div class="window-bar">
+              <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+              <div class="window-title">sibyl / one ordinary day / evidence mode</div>
+              <span class="badge research">northstar flow</span>
+            </div>
+            <div class="mail-main">
+              <div class="timeline">
+                <div class="timeline-item">
+                  <div class="timeline-date">08:42</div>
+                  <div class="timeline-copy"><strong>Recall arrives already scoped.</strong><span>A coding agent receives the last checkpoint, two proven procedures, one unresolved promise, and a warning that a cited symbol changed yesterday.</span></div>
+                </div>
+                <div class="timeline-item">
+                  <div class="timeline-date">10:17</div>
+                  <div class="timeline-copy"><strong>A tripwire explains “why now.”</strong><span>A dependency release contradicts an assumption in the active plan. Sibyl cites the old premise, the new evidence, affected tasks, and the mute control.</span></div>
+                </div>
+                <div class="timeline-item">
+                  <div class="timeline-date">10:23</div>
+                  <div class="timeline-copy"><strong>Permission is narrower than memory.</strong><span>The agent previews a migration and asks for one repository write grant. It can inspect the project context but cannot read private mail or authorize deployment.</span></div>
+                </div>
+                <div class="timeline-item">
+                  <div class="timeline-date">14:05</div>
+                  <div class="timeline-copy"><strong>A human correction repairs the graph.</strong><span>“That meeting was exploratory, not a decision.” The assertion is contested, descendants are recompiled, and the original note remains visible as historical evidence.</span></div>
+                </div>
+                <div class="timeline-item">
+                  <div class="timeline-date">02:00</div>
+                  <div class="timeline-copy"><strong>The refinery makes tomorrow cheaper.</strong><span>Outcome receipts and corrections strengthen one procedure, retire a misleading shortcut, and produce a smaller next ContextPack with the complete derivation attached.</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-3 reveal" style="margin-top: 1rem">
             <article class="card" data-accent="coral">
               <div class="card-kicker">Reality debugger</div>
               <h3>“Why did I believe that?”</h3>
-              <p>
-                Reconstruct the evidence, people, messages, assumptions, and knowledge available at
-                a past moment. Compare them with what changed later, without rewriting the original
-                decision through hindsight.
-              </p>
-            </article>
-            <article class="card" data-accent="cyan">
-              <div class="card-kicker">Relationship continuity</div>
-              <h3>Remember people with care.</h3>
-              <p>
-                Before a reunion or meeting, surface shared history, open promises, preferences,
-                milestones, and sensitive boundaries. Cite everything; never turn a person into a
-                hidden score.
-              </p>
-            </article>
-            <article class="card" data-accent="green">
-              <div class="card-kicker">Agent apprenticeship</div>
-              <h3>Every good run teaches the next one.</h3>
-              <p>
-                Agents learn repeatable procedures from successful work, failure signatures from
-                broken runs, and judgment boundaries from corrections. Competence compounds across
-                models and tools.
-              </p>
-            </article>
-            <article class="card" data-accent="yellow">
-              <div class="card-kicker">Counterfactual workbench</div>
-              <h3>Fork context without forging truth.</h3>
-              <p>
-                Branch a signed snapshot into an explicitly hypothetical space: “What if we moved?”
-                or “What if this project shipped six months earlier?” Simulations never leak back as
-                observed facts.
-              </p>
+              <p>Reconstruct evidence, relationships, assumptions, and knowledge available at a past moment without contaminating it with hindsight.</p>
             </article>
             <article class="card" data-accent="purple">
-              <div class="card-kicker">Proof-carrying delegation</div>
-              <h3>Let agents act without surrendering everything.</h3>
-              <p>
-                Give an agent exactly the context and authority to renegotiate a subscription,
-                prepare a doctor packet, or schedule a trip. Inspect the evidence and capability
-                envelope before approval.
-              </p>
-            </article>
-            <article class="card" data-accent="coral">
               <div class="card-kicker">Continuity capsule</div>
               <h3>A life remains portable.</h3>
-              <p>
-                Export an encrypted, self-describing vault with recovery keys, provenance,
-                relationships, procedures, and chosen legacy instructions. Sibyl can disappear;
-                the human’s history cannot.
-              </p>
+              <p>Export an encrypted, self-describing vault with recovery keys, provenance, relationships, procedures, and chosen legacy instructions.</p>
             </article>
             <article class="card" data-accent="cyan">
               <div class="card-kicker">Collective memory treaty</div>
               <h3>Share conclusions without leaking lives.</h3>
-              <p>
-                Teams negotiate which assertions and procedures become common, while private
-                evidence stays private. Conflicts remain attributable; consensus is a versioned
-                projection, not forced truth.
-              </p>
-            </article>
-            <article class="card" data-accent="green">
-              <div class="card-kicker">Personal science</div>
-              <h3>Find patterns across years, responsibly.</h3>
-              <p>
-                Correlate sleep, work, symptoms, environment, mood, and routines with uncertainty,
-                confounders, and privacy boundaries visible. Generate hypotheses, never medical
-                certainty.
-              </p>
-            </article>
-            <article class="card" data-accent="yellow">
-              <div class="card-kicker">Memory contracts</div>
-              <h3>Decide what should survive.</h3>
-              <p>
-                Declare retention, locality, sharing, inheritance, sensitivity, dream eligibility,
-                and expiration by source or space. “Remember forever” becomes a conscious policy,
-                not an accidental default.
-              </p>
+              <p>Teams negotiate common assertions and procedures while private evidence stays private and disagreement remains attributable.</p>
             </article>
           </div>
         </div>
@@ -2979,13 +3396,14 @@
       <section class="section-rule" id="roadmap">
         <div class="wrap">
           <div class="section-head reveal">
-            <span class="section-no">12 / Release spine</span>
+            <span class="section-no">13 / Release spine</span>
             <h2 class="section-title">Sequence the proof. Protect the dream.</h2>
             <p class="section-lede">
-              This proposal replaces the sequence from v1.2 onward. Active v1.1 commitments remain
-              intact: pinned QA and V2 receipts; cost and latency evidence; live usage and forgetting
-              dogfood; team-scope trust; OKF changelog; and doc-claim gates. After that proof, move
-              acquisition ahead of coalescence. Every release has one story and one falsifiable gate.
+              Run two interlocking rails. Active v1.1 proof commitments stay intact while the
+              governed pen begins now and deepens every release. The Vault makes source truth exact;
+              Gmail proves fidelity and scale; the Life Browser grows from correction and trust
+              receipts. Team-scope trust continues throughout, while full cross-writer coalescence
+              waits for correction lineage and personal reconciliation to prove themselves.
             </p>
           </div>
 
@@ -3005,6 +3423,7 @@
                   <li>Live usage, citation, decay, and forgetting dogfood</li>
                   <li>Team-scope trust, OKF changelog, and doc-claim gates</li>
                   <li>Atomic writes, durable jobs, visible degraded retrieval</li>
+                  <li>Idempotent mutation receipts and contextual outcome-signal dogfood</li>
                   <li>Tenant-isolation gate; concurrent-load and adoption-scale gates move into Open the Vault’s exit criteria</li>
                   <li>Gate: reproducible release evidence packet</li>
                 </ul>
@@ -3025,6 +3444,7 @@
                   <li>Parent run + append-only chunk/record receipts</li>
                   <li>MBOX byte index and exact RFC evidence</li>
                   <li>Raw persistence before provider-dependent enrichment</li>
+                  <li>Stable assertion identity, revision journal, and correction propagation</li>
                   <li>Legacy-fidelity migration: mark parsed captures projection-only; re-import available archives; reconcile without relabeling parsed text as exact evidence</li>
                   <li>Versioned re-import and re-extraction with scored diffs, supersession lineage, and rollback</li>
                   <li>Append-only usage telemetry; asynchronously bulk-materialized stamps across documents and source artifacts</li>
@@ -3045,7 +3465,9 @@
                 </p>
                 <ul>
                   <li>Assertion, authority, conflict, and identity models</li>
+                  <li>Basis, confidence, premise links, referent validity, hooks, and tripwires</li>
                   <li>Tokenizer-aware, degradation-aware context compiler</li>
+                  <li>Branchable SessionCheckpoints with context and tool-receipt manifests</li>
                   <li>Transform lineage and reviewable dream inbox</li>
                   <li>Claim-level grounded synthesis and distilled project handbooks with evidence, conflict, and freshness verification</li>
                   <li>Read-only <span class="mono">.sibyl/memory/</span> projections for offline and zero-latency agent startup</li>
@@ -3070,6 +3492,7 @@
                   <li>Contribution boundaries and consensus projections</li>
                   <li>Private evidence behind shareable assertions</li>
                   <li>Team correction, disagreement, and provenance UX</li>
+                  <li>Governed scope proposals and cross-writer calibration</li>
                   <li>GroupMemBench and SocialMemBench-derived evaluation</li>
                   <li>Gate: no scope leaks, no irreversible false merges</li>
                 </ul>
@@ -3091,10 +3514,50 @@
                   <li>Purpose-bound agent delegation and action checkpoints</li>
                   <li>Portable context bundles and continuity capsules</li>
                   <li>Permissioned, explainable proactivity</li>
+                  <li>Learned routing and reranking trained on contextual outcomes</li>
                   <li>Gate: restore, offline convergence, and zero-egress drills</li>
                 </ul>
               </div>
             </article>
+          </div>
+
+          <div class="matrix-wrap reveal" style="margin-top: 2rem">
+            <table>
+              <thead>
+                <tr>
+                  <th>Release</th>
+                  <th>Governed authorship rail</th>
+                  <th>What becomes newly trustworthy</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>v1.1 · Receipt floor</td>
+                  <td>Idempotent MemoryOps, expected revisions, MutationReceipts, contextual outcomes, and one obvious capture path</td>
+                  <td>Agents can challenge and report without silent mutation or vocabulary explosion</td>
+                </tr>
+                <tr>
+                  <td>v1.2 · Safe substrate</td>
+                  <td>Stable identities, orthogonal lifecycle states, revision journal, exact evidence, and correction/deletion propagation</td>
+                  <td>A mutation can be retried, audited, compensated, recompiled, or erased correctly</td>
+                </tr>
+                <tr>
+                  <td>v1.3 · Expressive assertions</td>
+                  <td>Basis, confidence, premise links, known unknowns, referent validity, hooks, tripwires, blame, and SessionCheckpoints</td>
+                  <td>Agents express why memory should be believed, revisited, or distrusted</td>
+                </tr>
+                <tr>
+                  <td>v1.4 · Multiple writers</td>
+                  <td>Disputes, governed scope proposals, contribution boundaries, and cross-writer calibration</td>
+                  <td>People and agents coalesce memory without false consensus or private-evidence leakage</td>
+                </tr>
+                <tr>
+                  <td>v2.0 · Learned refinement</td>
+                  <td>Predictive routing, outcome-trained reranking, reconsolidation, and ontology analytics behind explicit gates</td>
+                  <td>The system gets better from experience without handing a model unilateral control</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </section>
@@ -3102,7 +3565,7 @@
       <section class="section-rule" id="gates">
         <div class="wrap">
           <div class="section-head reveal">
-            <span class="section-no">13 / Proof, not mythology</span>
+            <span class="section-no">14 / Proof, not mythology</span>
             <h2 class="section-title">If we cannot measure it, we do not claim it.</h2>
             <p class="section-lede">
               A life system needs product, retrieval, privacy, scale, and recovery gates in the
@@ -3168,8 +3631,8 @@
                 </tr>
                 <tr>
                   <td>Agent utility</td>
-                  <td>Outcome lift, citation use, abstention, and procedure reuse all measured</td>
-                  <td>More recalled tokens presented as proof of better decisions</td>
+                  <td>Outcome lift, citation, mislead, correction, abstention, and procedure reuse measured against exact ContextPacks</td>
+                  <td>More recalled tokens or global popularity presented as proof of better decisions</td>
                 </tr>
                 <tr>
                   <td>Human trust</td>
@@ -3192,7 +3655,7 @@
       <section class="section-rule" id="boundaries">
         <div class="wrap">
           <div class="section-head reveal">
-            <span class="section-no">14 / Product discipline</span>
+            <span class="section-no">15 / Product discipline</span>
             <h2 class="section-title">What Sibyl should refuse to become.</h2>
             <p class="section-lede">
               The ultimate system stays coherent by integrating excellent sensors and harnesses,
@@ -3240,7 +3703,7 @@
       <section class="section-rule" id="sources">
         <div class="wrap">
           <div class="section-head reveal">
-            <span class="section-no">15 / Research atlas</span>
+            <span class="section-no">16 / Research atlas</span>
             <h2 class="section-title">The receipts behind the future.</h2>
             <p class="section-lede">
               Primary documentation, standards, papers, and repository evidence reviewed for this
@@ -3269,6 +3732,16 @@
               <a href="https://docs.entire.io/security">Entire security and redaction</a>
               <a href="https://entire.io/blog/improving-agentic-search-in-coding-agents">Entire agentic search</a>
               <a href="https://github.com/entireio/cli">Entire CLI source</a>
+            </article>
+
+            <article class="source-group">
+              <h3>Agent authorship and learning</h3>
+              <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool">Anthropic memory tool</a>
+              <a href="https://docs.letta.com/guides/agents/memory/">Letta memory blocks</a>
+              <a href="https://arxiv.org/abs/2502.12110">A-MEM</a>
+              <a href="https://arxiv.org/abs/2508.19828">Memory-R1</a>
+              <a href="https://arxiv.org/abs/2509.25911">Mem-alpha</a>
+              <a href="https://arxiv.org/abs/2511.03506">HaluMem</a>
             </article>
 
             <article class="source-group">
@@ -3362,7 +3835,9 @@
             Research cutoff: 9 July 2026. Repository claims were verified against local source and
             history; external claims were grounded in primary documentation, specifications, or
             papers. Throughput and quality numbers labeled as gates are proposed acceptance targets,
-            not measured current performance.
+            not measured current performance. Cross-model synthesis froze “Hand the Agent the Pen”
+            at SHA-256 <span class="mono">06a5355406ffe49ffbe5401789d3ffaf4aa27bbf62a185e64fcca188cc319aec</span>;
+            its dual-track re-verdict is reflected in the release spine.
           </p>
         </div>
       </section>
@@ -3377,7 +3852,7 @@
         <p class="footer-meta">
           Built from a full repository audit, roadmap reconciliation, primary-source landscape
           research, adversarial architecture review, and one stubborn belief: the human owns the
-          memory. The agents borrow it.
+          memory. The agents earn a governed pen.
         </p>
       </div>
     </footer>
@@ -3386,7 +3861,7 @@
       (() => {
         const root = document.documentElement;
         const toggle = document.getElementById("themeToggle");
-        const progress = document.querySelector(".progress");
+        const progress = document.querySelector(".progress > span");
         const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
         const preferredTheme = () => {
