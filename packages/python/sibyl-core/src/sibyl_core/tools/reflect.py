@@ -57,6 +57,8 @@ async def reflect_memory(
     accessible_projects: set[str] | None = None,
     memory_scope: str | MemoryScope | None = None,
     scope_key: str | None = None,
+    suggested_memory_scope: str | MemoryScope | None = None,
+    suggested_scope_key: str | None = None,
     persist: bool = False,
     persist_source: bool = True,
     persist_review: bool = False,
@@ -81,6 +83,16 @@ async def reflect_memory(
     limit = max(1, min(limit, 25))
     resolved_scope = _resolve_reflection_scope(memory_scope, project)
     resolved_scope_key = _resolve_reflection_scope_key(resolved_scope, scope_key, project)
+    resolved_suggested_scope = (
+        _resolve_reflection_scope(suggested_memory_scope, None)
+        if suggested_memory_scope is not None
+        else resolved_scope
+    )
+    resolved_suggested_scope_key = _resolve_reflection_scope_key(
+        resolved_suggested_scope,
+        suggested_scope_key,
+        None,
+    )
     extraction_prompt_metadata = _extraction_prompt_metadata(
         intent=intent,
         domain=domain,
@@ -114,8 +126,8 @@ async def reflect_memory(
                 ground_reflection_candidate(
                     replace(candidate, metadata={**candidate.metadata, **persist_policy_metadata}),
                     raw_source_ids=[],
-                    suggested_memory_scope=resolved_scope.value,
-                    suggested_scope_key=resolved_scope_key,
+                    suggested_memory_scope=resolved_suggested_scope.value,
+                    suggested_scope_key=resolved_suggested_scope_key,
                     extraction_prompt_metadata=extraction_prompt_metadata,
                     source_id=None,
                 )
@@ -201,8 +213,8 @@ async def reflect_memory(
         ground_reflection_candidate(
             candidate,
             raw_source_ids=raw_source_ids,
-            suggested_memory_scope=resolved_scope.value,
-            suggested_scope_key=resolved_scope_key,
+            suggested_memory_scope=resolved_suggested_scope.value,
+            suggested_scope_key=resolved_suggested_scope_key,
             extraction_prompt_metadata=extraction_prompt_metadata,
             source_id=source_id,
         )
@@ -255,8 +267,8 @@ async def reflect_memory(
                 source_id=source_id,
                 memory_scope=resolved_scope,
                 scope_key=resolved_scope_key,
-                suggested_memory_scope=resolved_scope,
-                suggested_scope_key=resolved_scope_key,
+                suggested_memory_scope=resolved_suggested_scope,
+                suggested_scope_key=resolved_suggested_scope_key,
                 extraction_prompt_metadata=extraction_prompt_metadata,
             )
             persisted.append(

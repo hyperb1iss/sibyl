@@ -241,6 +241,8 @@ async def _reflect_dream_source(
         accessible_projects=accessible_projects,
         memory_scope=source.memory_scope,
         scope_key=source.scope_key,
+        suggested_memory_scope=_metadata_str(source.metadata, "suggested_memory_scope"),
+        suggested_scope_key=_metadata_str(source.metadata, "suggested_scope_key"),
         persist=not dry_run,
         persist_source=False,
         persist_review=not dry_run,

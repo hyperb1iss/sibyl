@@ -191,6 +191,7 @@ async def test_reflect_memory_can_persist_review_queue(
         accessible_projects={"project_123"},
         memory_scope="project",
         scope_key="project_123",
+        suggested_memory_scope="team",
         persist=True,
         persist_review=True,
         add_fn=add_fn,
@@ -201,8 +202,8 @@ async def test_reflect_memory_can_persist_review_queue(
     assert pack.persisted_count == 1
     assert pack.candidates[0].persisted_id == "raw-candidate-1"
     assert pack.candidates[0].raw_source_ids == ["raw-source-1"]
-    assert pack.candidates[0].suggested_memory_scope == "project"
-    assert pack.candidates[0].suggested_scope_key == "project_123"
+    assert pack.candidates[0].suggested_memory_scope == "team"
+    assert pack.candidates[0].suggested_scope_key is None
     assert pack.candidates[0].metadata["raw_source_ids"] == ["raw-source-1"]
     assert pack.candidates[0].metadata["review_state"] == "pending"
     assert pack.candidates[0].metadata["policy_allowed"] is True
@@ -215,6 +216,8 @@ async def test_reflect_memory_can_persist_review_queue(
         "same_scope_write_allowed",
     ]
     assert calls[1][1]["memory_scope"] is MemoryScope.PROJECT
+    assert calls[1][1]["suggested_memory_scope"] is MemoryScope.TEAM
+    assert calls[1][1]["suggested_scope_key"] is None
     assert calls[1][1]["extraction_prompt_metadata"]["extractor"] == ("sibyl_reflection_extractor")
     assert add_fn.await_count == 0
 

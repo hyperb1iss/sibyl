@@ -99,7 +99,10 @@ def test_team_scope_nomination_does_not_reuse_project_scope_key() -> None:
 
 @pytest.mark.asyncio
 async def test_reflection_dream_cycle_reflects_sources_and_promotes_candidates() -> None:
-    source = _raw_memory(id="source-1")
+    source = _raw_memory(
+        id="source-1",
+        metadata={"suggested_memory_scope": "team"},
+    )
     candidate = _raw_memory(
         id="candidate-1",
         capture_surface="reflection_candidate",
@@ -148,6 +151,8 @@ async def test_reflection_dream_cycle_reflects_sources_and_promotes_candidates()
     assert reflect_kwargs["persist"] is True
     assert reflect_kwargs["persist_source"] is False
     assert reflect_kwargs["persist_review"] is True
+    assert reflect_kwargs["suggested_memory_scope"] == "team"
+    assert reflect_kwargs["suggested_scope_key"] is None
     promote.assert_awaited_once()
     assert save.await_count == 1
     assert audit.await_count == 1
