@@ -200,12 +200,12 @@ This creates `guide` entities in your knowledge graph.
 For critical patterns, add them explicitly:
 
 ```bash
-sibyl add "Biome over ESLint" \
+sibyl remember "Biome over ESLint" \
   "Always use Biome for TypeScript/JavaScript linting.
    Reasons: faster, simpler config, better defaults.
    ESLint requires dozens of plugins for the same functionality." \
-  --type pattern \
-  --category tooling
+  --kind decision \
+  --domain tooling
 ```
 
 ### Method 3: Crawl on Change
@@ -240,10 +240,10 @@ When starting a new feature:
 
 ```bash
 # Find guidance about testing
-sibyl search "testing guide" --type guide
+sibyl context "review testing guidance" --intent review
 
 # Find patterns from wisdom docs
-sibyl search "architecture pattern" --type pattern
+sibyl context "review architecture patterns" --intent review
 ```
 
 ### Agent Usage
@@ -425,7 +425,7 @@ Update guidance when you learn something new:
 echo "## New Lesson\n\n$LESSON" >> docs/wisdom/debugging.md
 
 # Add to sibyl
-sibyl add "New debugging lesson" "$LESSON" --type guide
+sibyl remember "New debugging lesson" "$LESSON" --kind error_pattern
 
 # Commit
 git commit -am "Add debugging lesson about cache invalidation"

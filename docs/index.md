@@ -24,7 +24,7 @@ features:
   - icon: 🪄
     title: The Memory Loop
     details:
-      Recall context before you act, remember what you learn, and reflect raw notes into durable
+      Load context before you act, remember what you learn, and reflect raw notes into durable
       memory. Built into the CLI, MCP, and hooks.
   - icon: 🎯
     title: Project-Centric Tasks
@@ -62,7 +62,7 @@ workflow shared across every coding agent you use, self-hosted on your own hardw
 works for you and stays yours:
 
 - **Memory:** Store patterns, decisions, and solutions that persist across sessions
-- **The Memory Loop:** `recall → act → remember → reflect`, built into every surface
+- **The Memory Loop:** `context → act → remember → reflect`, built into every surface
 - **Task Tracking:** Manage work across sessions with full lifecycle support
 - **Semantic Search:** Find knowledge by meaning, not exact keywords
 - **Synthesis:** Generate verified documents grounded in your own memory
@@ -88,8 +88,8 @@ flowchart TD
 **Skills** teach your tools and teammates structured workflows:
 
 ```bash
-# Recall context before implementing
-sibyl recall "authentication work" --intent build
+# Load context before implementing
+sibyl context "authentication work" --intent build
 
 # Track work with full lifecycle
 sibyl task start task_xyz
@@ -126,10 +126,10 @@ sibyl init --local
 sibyl serve
 
 # Capture a learning
-sibyl remember "Redis insight" "Pool size must be >= concurrent requests" --kind pattern
+sibyl remember "Redis insight" "Pool size must be >= concurrent requests" --kind rule
 
-# Recall it as working context
-sibyl recall "redis connection pool"
+# Load it as working context
+sibyl context "redis connection pool"
 
 # Manage tasks
 sibyl task list --status doing
@@ -142,7 +142,7 @@ Sibyl is built around a durable cycle that both humans and agents follow:
 
 ```mermaid
 flowchart LR
-    R(["RECALL<br/>Pull working context before you act"])
+    R(["CONTEXT<br/>Pull working context before you act"])
     A(["ACT<br/>Do the work with context in hand"])
     M(["REMEMBER + REFLECT<br/>Capture learnings, distill session notes"])
     R --> A --> M

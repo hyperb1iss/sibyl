@@ -63,7 +63,7 @@ yours.**
 | Capability                       | What It Means                                                                                                           |
 | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | 🔮 **Compounding Context**       | Every session adds to the graph instead of starting over. The longer you use it, the sharper it gets                    |
-| 🪄 **The Memory Loop**           | `recall → act → remember → reflect` runs through the CLI, skills, MCP, and hooks. Agents wake with context and leave it behind  |
+| 🪄 **The Memory Loop**           | `context → act → remember → reflect` runs through the CLI, skills, MCP, and hooks. Agents wake with context and leave it behind |
 | 🎯 **Semantic Search**           | Find knowledge by meaning. "Authentication patterns" surfaces OAuth notes even when "OAuth" isn't in the text           |
 | 🦋 **Task Workflow**             | Plan with epics and tasks, then track execution across sessions and teammates in one place                              |
 | 🧪 **Source-Grounded Synthesis** | Draft verified documents from your own memory with citation, freshness, and gap checks                                  |
@@ -115,10 +115,10 @@ sibyl remember "Stale auth token bug" \
   "Redis TTL mismatch dropped the cached token early" --kind error_pattern
 
 # Pull it back as working context for your next session
-sibyl recall "auth token bug" --intent debug
+sibyl context "auth token bug" --intent debug
 
-# Search semantically across the whole graph
-sibyl search "stale auth token redis ttl"
+# Load a broader context across accessible projects
+sibyl context "review stale auth token and Redis TTL history" --intent review --all
 
 # Package wake-up context for the next coding session
 sibyl session bundle
@@ -129,12 +129,12 @@ sibyl session bundle
 Sibyl is built around a durable loop that both humans and agents follow:
 
 ```
-recall ──▶ act ──▶ remember ──▶ reflect
+context ──▶ act ──▶ remember ──▶ reflect
    ▲                                │
    └────────────────────────────────┘
 ```
 
-1. **Recall** working context before you start. `sibyl recall "<goal>"` returns a compact context
+1. **Context** before you start. `sibyl context "<goal>"` returns a compact context
    pack: active work, decisions, plans, constraints, and recent lessons, scoped to your project.
 2. **Act** with that context in hand.
 3. **Remember** durable knowledge as you learn it. `sibyl remember` stores decisions, plans, ideas,
@@ -143,7 +143,7 @@ recall ──▶ act ──▶ remember ──▶ reflect
    memory candidates and can persist them into the graph.
 
 ```bash
-sibyl recall "ship the context graph" --intent build
+sibyl context "ship the context graph" --intent build
 sibyl remember "Use context packs" "Group memory before dispatching agents" --kind decision
 sibyl reflect "We decided X. Next we build Y." --title "Planning checkpoint" --persist
 ```
@@ -159,14 +159,14 @@ workflows.
 
 ```bash
 # Memory loop
-sibyl recall "<goal>"                 # Compile working context
+sibyl context "<goal>"                 # Compile working context
 sibyl remember "Title" "Body"         # Store durable memory
 sibyl reflect "<notes>" --persist     # Distill notes into candidates
 sibyl capture "<quick note>"          # Fast verbatim capture
-sibyl search "authentication patterns"
+sibyl correct <raw_memory_id>          # Inspect or correct source memory
 
 # Knowledge & graph
-sibyl add "Redis pooling" "Pool size must be >= concurrent requests"
+sibyl remember "Redis pooling" "Pool size must be >= concurrent requests" --kind rule
 sibyl explore related ent_xyz         # Find connected entities
 sibyl show <id>                       # Full content by ID
 
@@ -228,7 +228,7 @@ subagent on any host gets the same source of truth from one command.
 
 Hooks are separate and, for now, specific to Claude Code: a single **SessionStart** hook prints a
 compact wake-up bundle with active tasks and relevant memory, then the agent owns invoking the
-`sibyl` skill and calling `sibyl recall` for working context. See [Skills & Hooks](docs/guide/skills.md).
+`sibyl` skill and calling `sibyl context` for working context. See [Skills & Hooks](docs/guide/skills.md).
 
 ## MCP Integration
 

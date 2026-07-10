@@ -177,6 +177,6 @@ sibyl synthesis remember "Auth hardening summary" \
 ## Related Commands
 
 - [`sibyl remember`](./remember.md) - Capture durable memory
-- [`sibyl recall`](./recall.md) - Recall memory into a context pack
+- [`sibyl context`](./context.md) - Recall memory into a context pack
 - [Memory governance](./memory.md) - Audit and inspect memory sources
-- [`sibyl search`](./search.md) - Semantic search across the graph
+- [`sibyl context`](./context.md) - Semantic search across the graph

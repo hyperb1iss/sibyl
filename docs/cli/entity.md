@@ -366,7 +366,7 @@ sibyl entity history ent_abc123 --include-expired
 
 ```bash
 # Search for existing patterns
-sibyl search "error handling" --type pattern
+sibyl context "review existing error-handling patterns" --intent review
 
 # If not found, create one
 sibyl entity create \
@@ -404,7 +404,7 @@ sibyl entity show ent_abc123
 
 ## Related Commands
 
-- [`sibyl add`](./add.md) - Quick knowledge capture (simpler interface)
+- [`sibyl remember`](./remember.md) - Quick knowledge capture (simpler interface)
 - [`sibyl remember`](./remember.md) - Typed memory-loop writes
-- [`sibyl search`](./search.md) - Semantic search
+- [`sibyl context`](./context.md) - Semantic search
 - [`sibyl explore related`](./explore.md) - Graph exploration

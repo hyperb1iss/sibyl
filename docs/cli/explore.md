@@ -291,4 +291,4 @@ sibyl explore path ent_a ent_b --depth 4
 
 - [`sibyl entity related`](./entity.md) - Entity-specific related lookup
 - [`sibyl task list`](./task-list.md) - Filter tasks
-- [`sibyl search`](./search.md) - Semantic search
+- [`sibyl context`](./context.md) - Semantic search

@@ -56,6 +56,6 @@ sibyl init --local --name dev --project sibyl
 ## Related Commands
 
 - [`sibyl doctor`](./doctor.md) - Verify config and daemon health after init
-- [`sibyl context`](./context.md) - List, switch, and edit contexts
+- [`sibyl config context`](./context.md) - List, switch, and edit contexts
 - [`sibyl auth`](./auth.md) - Log in to a remote context
 - [`sibyl local`](./local.md) - Run a Docker-based local instance instead

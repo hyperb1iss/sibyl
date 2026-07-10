@@ -23,7 +23,7 @@ Content is read from stdin when the positional argument is omitted.
 | Option           | Short | Default              | Description                                                                   |
 | ---------------- | ----- | -------------------- | ----------------------------------------------------------------------------- |
 | `--title`        | `-t`  | `Session reflection` | Source/session title                                                          |
-| `--intent`       | `-i`  | `general`            | Intent: build, plan, ideate, research, review, debug, decide, learn, general  |
+| `--intent`       | `-i`  | `general`            | Intent: build, plan, review, debug, general                                   |
 | `--domain`       | `-d`  | (none)               | Domain/category                                                               |
 | `--project`      | `-p`  | (auto)               | Project ID                                                                    |
 | `--all-projects` |       | false                | Do not auto-scope to the linked project                                       |
@@ -86,6 +86,6 @@ sibyl reflect "..." --json | jq '.candidates[] | {kind, title}'
 ## Related Commands
 
 - [`sibyl remember`](./remember.md) - Capture a single durable memory directly
-- [`sibyl recall`](./recall.md) - Recall memory into an agent context
+- [`sibyl context`](./context.md) - Recall memory into an agent context
 - [Memory governance](./memory.md) - Promote and audit reflection candidates
 - [`sibyl synthesis`](./synthesis.md) - Source-grounded synthesis from memory

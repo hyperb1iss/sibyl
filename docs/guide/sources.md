@@ -129,13 +129,13 @@ Documents are automatically included in search results:
 
 ```bash
 # Search across everything (graph memory + crawled docs)
-sibyl search "useState dependency array"
+sibyl context "useState dependency array"
 
 # Search only crawled docs, not graph memory
-sibyl search "useState" --docs-only
+sibyl context "review useState documentation" --intent review
 
 # Search only graph memory, skip crawled docs
-sibyl search "useState" --graph-only
+sibyl context "find prior project decisions about useState" --intent review
 ```
 
 To narrow a search to one crawled source by name, use the MCP `search` tool's `source_name` filter.

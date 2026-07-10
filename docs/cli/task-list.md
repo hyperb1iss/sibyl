@@ -319,4 +319,4 @@ Showing 1-50 of 127+ task(s) (--page 2 for more)
 - [`sibyl task show`](./task-lifecycle.md) - View task details
 - [`sibyl task create`](./task-create.md) - Create new task
 - [`sibyl task start`](./task-lifecycle.md) - Start working on task
-- [`sibyl search`](./search.md) - Broader semantic search
+- [`sibyl context`](./context.md) - Broader semantic search

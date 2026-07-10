@@ -37,7 +37,7 @@ active context, though, so if you previously pointed it at a remote server, swit
 context (it defaults to localhost, so no URL is needed):
 
 ```bash
-sibyl init --local        # or: sibyl context use local
+sibyl init --local        # or: sibyl config context use local
 sibyl doctor
 ```
 
@@ -86,7 +86,7 @@ The full key is shown once. Store it in your password manager or client secret s
 ## Daily Checks
 
 ```bash
-sibyl recall "current project context"
+sibyl context "current project context"
 sibyl remember "Deployment gotcha" "The restore drill needs the export PVC mounted"
 sibyl task list --status doing
 ```

@@ -63,7 +63,7 @@ respects it, so you see the memory you are authorized to see. Preview what an ag
 from a given set of spaces with:
 
 ```bash
-sibyl memory-space preview-agent
+sibyl admin memory space preview-agent
 ```
 
 This makes sharing boundaries explicit before you widen a scope.

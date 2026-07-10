@@ -56,6 +56,5 @@ sibyl session bundle --all
 
 ## Related Commands
 
-- [`sibyl recall`](./recall.md) - Recall a goal-scoped working context pack
-- [`sibyl context pack`](./context.md) - Lower-level context compilation
+- [`sibyl context`](./context.md) - Recall a goal-scoped working context pack
 - [`sibyl task list`](./task-list.md) - List active tasks directly

@@ -2,7 +2,7 @@
 
 Web crawling and documentation ingestion. `crawl` registers documentation sources, ingests them into
 the content store, and links the crawled chunks into the knowledge graph so they surface in
-[`sibyl search`](./search.md).
+[`sibyl context`](./context.md).
 
 ## Commands
 
@@ -249,12 +249,12 @@ sibyl crawl documents show <document_id> [options]
 ### Example
 
 ```bash
-sibyl search "proto config"
+sibyl graph-search "proto config" --docs-only
 # note the document_id in result metadata
 sibyl crawl documents show 22d4cf79-8561-4be0-8067-da8673e3439d
 ```
 
 ## Related Commands
 
-- [`sibyl search`](./search.md) - Search graph and crawled docs together
+- [`sibyl context`](./context.md) - Load graph and document context for an agent goal
 - [`sibyl explore`](./explore.md) - Traverse linked document entities

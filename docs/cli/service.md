@@ -92,8 +92,8 @@ The path is `~/Library/LaunchAgents/tech.hyperbliss.sibyl.plist` on macOS and
 
 ## Notes
 
-- `service install` requires an active local context; switch to one with `sibyl context use local`
-  or create one with [`sibyl init --local`](./init.md) first.
+- `service install` requires an active local context; switch to one with
+  `sibyl config context use local` or create one with [`sibyl init --local`](./init.md) first.
 - The service launches `sibyld serve --embedded` and logs to `~/.sibyl/run/sibyld.service.log`.
 - Native service files are only supported on macOS and Linux.
 

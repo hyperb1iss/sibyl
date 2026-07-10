@@ -11,13 +11,13 @@ capture, how to capture it, and patterns for high-quality knowledge entries. Cap
 
 ## The Philosophy
 
-### Recall Before Implementing
+### Context Before Implementing
 
 Before you write code, pull working context:
 
 ```bash
-sibyl recall "what you're building"
-sibyl search "error you hit" --type episode
+sibyl context "what you're building"
+sibyl context "debug the error you hit" --intent debug
 ```
 
 ### Capture What You Learn
@@ -32,7 +32,7 @@ sibyl capture "Surreal embedded mode is single-writer, fine for local dev"
 sibyl remember "Chose SurrealDB" "One engine replaces three backends" --kind decision
 
 # Full control over type and metadata
-sibyl add "Descriptive title" "What, why, how, caveats" --type pattern
+sibyl remember "Descriptive title" "What, why, how, caveats" --kind procedure
 ```
 
 `capture` and `remember` are the memory-loop verbs. `add` is the lower-level command with the widest
@@ -79,7 +79,7 @@ sibyl task complete task_xyz --learnings "Key insight: ..."
 ### Basic Usage
 
 ```bash
-sibyl add "Title" "Content"
+sibyl remember "Title" "Content"
 ```
 
 The default type is `episode` - a temporal learning.
@@ -88,19 +88,19 @@ The default type is `episode` - a temporal learning.
 
 ```bash
 # Create a pattern
-sibyl add "Error boundary pattern" "React error boundary for..." --type pattern
+sibyl remember "Error boundary procedure" "React error boundary for..." --kind procedure
 
 # Create a rule
-sibyl add "Never commit .env" "Environment files must be gitignored" --type rule
+sibyl remember "Never commit .env" "Environment files must be gitignored" --kind rule
 ```
 
 ### With Metadata
 
 ```bash
-sibyl add "Redis pooling insight" \
+sibyl remember "Redis pooling insight" \
   "Connection pool size must be >= concurrent requests" \
-  --category database \
-  --language python --language redis
+  --domain database \
+  --tags python,redis
 ```
 
 ## Quality Guidelines
@@ -120,13 +120,13 @@ A good entry answers:
 **Bad:**
 
 ```bash
-sibyl add "Fixed the bug" "It works now"
+sibyl remember "Fixed the bug" "It works now"
 ```
 
 **Good:**
 
 ```bash
-sibyl add "JWT refresh fails on Redis TTL expiry" \
+sibyl remember "JWT refresh fails on Redis TTL expiry" \
   "Root cause: Token service doesn't handle WRONGTYPE error when Redis key
 expires during refresh. The expired token returns a different data type.
 
@@ -233,18 +233,18 @@ Use consistent categories across your org:
 
 ```bash
 # Domain categories
---category authentication
---category database
---category api
---category frontend
---category devops
---category testing
+--domain authentication
+--domain database
+--domain api
+--domain frontend
+--domain devops
+--domain testing
 
 # Type categories
---category debugging
---category performance
---category security
---category integration
+--domain debugging
+--domain performance
+--domain security
+--domain integration
 ```
 
 ### Tag Patterns
@@ -264,7 +264,7 @@ Write content that will be found later:
 ### Include Synonyms
 
 ```bash
-sibyl add "Connection pool exhaustion" \
+sibyl remember "Connection pool exhaustion" \
   "Also known as: pool starvation, connection leak.
 Pool exhaustion occurs when all connections are in use..."
 ```
@@ -272,7 +272,7 @@ Pool exhaustion occurs when all connections are in use..."
 ### Include Error Messages
 
 ```bash
-sibyl add "Redis WRONGTYPE error on key reuse" \
+sibyl remember "Redis WRONGTYPE error on key reuse" \
   "Error: WRONGTYPE Operation against a key holding the wrong kind of value
 
 This occurs when a key is read as a type it was not written as..."
@@ -281,7 +281,7 @@ This occurs when a key is read as a type it was not written as..."
 ### Include Technology Names
 
 ```bash
-sibyl add "Async task cancellation" \
+sibyl remember "Async task cancellation" \
   "Python asyncio task cancellation pattern.
 
 When cancelling asyncio tasks, you must handle CancelledError..."
@@ -293,8 +293,8 @@ When cancelling asyncio tasks, you must handle CancelledError..."
 
 ```bash
 # Before implementing
-sibyl search "what you're building"
-sibyl search "common issues with X"
+sibyl context "what you're building"
+sibyl context "common issues with X"
 ```
 
 ### Implementation Phase
@@ -311,7 +311,7 @@ sibyl task note task_xyz "Found issue with OAuth scopes"
 sibyl task complete task_xyz --learnings "Detailed insight..."
 
 # If discovery was significant enough for standalone entry
-sibyl add "OAuth scope discovery" "Detailed content..."
+sibyl remember "OAuth scope discovery" "Detailed content..."
 ```
 
 ## MCP Knowledge Capture
@@ -372,7 +372,7 @@ manage(
 Create patterns that the whole team can use:
 
 ```bash
-sibyl add "Team API response format" \
+sibyl remember "Team API response format" \
   "All APIs must return: { data, error, meta }
 
 data: The response payload or null
@@ -387,8 +387,8 @@ Example:
   \"meta\": { \"version\": \"1.0\" }
 }
 \`\`\`" \
-  --type pattern \
-  --category api
+  --kind procedure \
+  --domain api
 ```
 
 ### Shared Rules
@@ -396,7 +396,7 @@ Example:
 Document team constraints:
 
 ```bash
-sibyl add "No direct database access from handlers" \
+sibyl remember "No direct database access from handlers" \
   "Route handlers must not directly query the database.
 Use service layer methods instead.
 
@@ -404,8 +404,8 @@ WRONG: await db.query('SELECT * FROM users')
 RIGHT: await user_service.get_users()
 
 Reason: Keeps business logic testable and reusable." \
-  --type rule \
-  --category architecture
+  --kind rule \
+  --domain architecture
 ```
 
 ## Measuring Knowledge Quality

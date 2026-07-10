@@ -73,7 +73,7 @@ restoreDrill:
   recallCheck:
     enabled: true
     command: |
-      results="$(sibyl search "restore drill fixture memory" --json)"
+      results="$(sibyl graph-search "restore drill fixture memory" --json)"
       count="$(printf '%s\n' "$results" | jq '.results | length')"
       printf '{"query":"restore drill fixture memory","result_count":%s}\n' "$count" \
         > "$SIBYL_RESTORE_RECALL_SAMPLE_PATH"

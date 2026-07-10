@@ -1,7 +1,7 @@
-# context
+# Context and Context Configuration
 
-Manage CLI contexts. Contexts bundle server URL, organization, and project settings for easy
-switching between environments (local, staging, production).
+`sibyl context` recalls agent-ready working memory for a goal. Named CLI contexts bundle server URL,
+organization, and project settings under `sibyl config context`.
 
 ## Overview
 
@@ -14,26 +14,26 @@ A context contains:
 
 ## Commands
 
-- `sibyl context` - Show current context
-- `sibyl context pack` - Compile a context pack for an agent
-- `sibyl context list` - List all contexts
-- `sibyl context show` - Show context details
-- `sibyl context create` - Create a context
-- `sibyl context use` - Set active context
-- `sibyl context update` - Update a context
-- `sibyl context delete` - Delete a context
-- `sibyl context clear` - Clear active context
+- `sibyl context <goal>` - Compile a context pack for an agent
+- `sibyl config context` - Show current CLI context
+- `sibyl config context list` - List all contexts
+- `sibyl config context show` - Show context details
+- `sibyl config context create` - Create a context
+- `sibyl config context use` - Set active context
+- `sibyl config context update` - Update a context
+- `sibyl config context delete` - Delete a context
+- `sibyl config context clear` - Clear active context
 
 ---
 
-## context (no subcommand)
+## config context (no subcommand)
 
 Show the current active context.
 
 ### Synopsis
 
 ```bash
-sibyl context [options]
+sibyl config context [options]
 ```
 
 ### Options
@@ -46,7 +46,7 @@ sibyl context [options]
 ### Example
 
 ```bash
-sibyl context
+sibyl config context
 ```
 
 Output:
@@ -65,17 +65,15 @@ status check that skips fetching full project detail.
 
 ---
 
-## context pack
+## context
 
-Compile a precise context pack for an agent. This is the lower-level command behind
-[`sibyl recall`](./recall.md): it builds a goal-scoped bundle of tasks, decisions, and graph
-neighbors. Use `recall` for everyday work and `context pack` when you need fine-grained control over
-the pack.
+Compile a precise context pack for an agent. The hidden `search` and `recall` compatibility aliases
+route here too; new instructions should use `context`.
 
 ### Synopsis
 
 ```bash
-sibyl context pack <goal> [options]
+sibyl context <goal> [options]
 ```
 
 ### Arguments
@@ -86,44 +84,44 @@ sibyl context pack <goal> [options]
 
 ### Options
 
-| Option            | Short | Default  | Description                                                                        |
-| ----------------- | ----- | -------- | ---------------------------------------------------------------------------------- |
-| `--intent`        | `-i`  | `build`  | Agent intent: build, plan, ideate, research, review, debug, decide, learn, general |
-| `--layer`         |       | `recall` | Context depth: `wake`, `recall`, `deep_search`                                     |
-| `--domain`        | `-d`  | (none)   | Domain/category to bias retrieval                                                  |
-| `--project`       | `-p`  | (auto)   | Project ID to scope context                                                        |
-| `--agent`         |       | (none)   | Agent diary identity to include                                                    |
-| `--all`           | `-a`  | false    | Use all accessible projects                                                        |
-| `--limit`         | `-l`  | 24       | Maximum total context items (1-50)                                                 |
-| `--related`       |       | on       | Include one-hop related graph context (`--no-related`)                             |
-| `--related-limit` |       | 3        | Related items per context item (0-5)                                               |
-| `--markdown`      | `-m`  | false    | Output compact Markdown for agent injection                                        |
-| `--json`          | `-j`  | false    | JSON output                                                                        |
+| Option      | Short | Default  | Description                                      |
+| ----------- | ----- | -------- | ------------------------------------------------ |
+| `--intent`  | `-i`  | `build`  | `build`, `plan`, `review`, `debug`, or `general` |
+| `--layer`   |       | `recall` | `wake`, `recall`, or `deep_search`               |
+| `--domain`  | `-d`  | (none)   | Domain/category to bias retrieval                |
+| `--project` | `-p`  | (auto)   | Project ID to scope context                      |
+| `--agent`   |       | (none)   | Agent diary identity to include                  |
+| `--all`     | `-a`  | false    | Use all accessible projects                      |
+| `--limit`   | `-l`  | 12       | Maximum context items (1-50)                     |
+| `--related` |       | on       | Include one-hop related graph context            |
+| `--audit`   |       | false    | Include full retrieval metadata                  |
+| `--budget`  |       | (none)   | Approximate Markdown token budget                |
+| `--json`    | `-j`  | false    | JSON output                                      |
 
 ### Examples
 
 ```bash
 # Compile a context pack for a goal
-sibyl context pack "implement the password reset endpoint"
+sibyl context "implement the password reset endpoint"
 
 # Markdown output for direct agent injection
-sibyl context pack "debug the auth refresh bug" --intent debug --markdown
+sibyl context "debug the auth refresh bug" --intent debug
 
 # Deep search with a wider item budget
-sibyl context pack "how synthesis verification works" \
+sibyl context "how synthesis verification works" \
   --layer deep_search --limit 40
 ```
 
 ---
 
-## context list
+## config context list
 
 List all configured contexts.
 
 ### Synopsis
 
 ```bash
-sibyl context list [options]
+sibyl config context list [options]
 ```
 
 ### Options
@@ -135,7 +133,7 @@ sibyl context list [options]
 ### Example
 
 ```bash
-sibyl context list
+sibyl config context list
 ```
 
 Output:
@@ -153,14 +151,14 @@ Contexts
 
 ---
 
-## context show
+## config context show
 
 Show details of a specific context.
 
 ### Synopsis
 
 ```bash
-sibyl context show [name] [options]
+sibyl config context show [name] [options]
 ```
 
 ### Arguments
@@ -178,7 +176,7 @@ sibyl context show [name] [options]
 ### Example
 
 ```bash
-sibyl context show prod
+sibyl config context show prod
 ```
 
 Output:
@@ -193,14 +191,14 @@ Output:
 
 ---
 
-## context create
+## config context create
 
 Create a new context.
 
 ### Synopsis
 
 ```bash
-sibyl context create <name> [options]
+sibyl config context create <name> [options]
 ```
 
 ### Arguments
@@ -224,17 +222,17 @@ sibyl context create <name> [options]
 
 ```bash
 # Create local development context
-sibyl context create local --server http://localhost:3334
+sibyl config context create local --server http://localhost:3334
 
 # Create production context and activate it
-sibyl context create prod \
+sibyl config context create prod \
   --server https://sibyl.example.com \
   --org myorg \
   --project proj_main \
   --use
 
 # Create staging with self-signed cert
-sibyl context create staging \
+sibyl config context create staging \
   --server https://staging.internal:3334 \
   --insecure
 ```
@@ -251,14 +249,14 @@ Set as active context
 
 ---
 
-## context use
+## config context use
 
 Set the active context. This affects all subsequent commands.
 
 ### Synopsis
 
 ```bash
-sibyl context use <name> [options]
+sibyl config context use <name> [options]
 ```
 
 ### Arguments
@@ -276,7 +274,7 @@ sibyl context use <name> [options]
 ### Example
 
 ```bash
-sibyl context use prod
+sibyl config context use prod
 ```
 
 Output:
@@ -288,14 +286,14 @@ Switched to context 'prod'
 
 ---
 
-## context update
+## config context update
 
 Update an existing context.
 
 ### Synopsis
 
 ```bash
-sibyl context update <name> [options]
+sibyl config context update <name> [options]
 ```
 
 ### Arguments
@@ -319,34 +317,34 @@ sibyl context update <name> [options]
 
 ```bash
 # Update server URL
-sibyl context update prod --server https://new-sibyl.example.com
+sibyl config context update prod --server https://new-sibyl.example.com
 
 # Change default project
-sibyl context update staging --project proj_new_staging
+sibyl config context update staging --project proj_new_staging
 
 # Clear organization (use auto-detect)
-sibyl context update local --org auto
+sibyl config context update local --org auto
 
 # Clear default project
-sibyl context update dev --project none
+sibyl config context update dev --project none
 
 # Enable insecure mode
-sibyl context update staging --insecure
+sibyl config context update staging --insecure
 
 # Disable insecure mode
-sibyl context update staging --secure
+sibyl config context update staging --secure
 ```
 
 ---
 
-## context delete
+## config context delete
 
 Delete a context.
 
 ### Synopsis
 
 ```bash
-sibyl context delete <name>
+sibyl config context delete <name>
 ```
 
 ### Arguments
@@ -358,7 +356,7 @@ sibyl context delete <name>
 ### Example
 
 ```bash
-sibyl context delete old-staging
+sibyl config context delete old-staging
 ```
 
 Output:
@@ -371,25 +369,25 @@ If you delete the active context:
 
 ```
 Deleted context 'local'
-No active context. Use 'sibyl context use <name>' to set one.
+No active context. Use 'sibyl config context use <name>' to set one.
 ```
 
 ---
 
-## context clear
+## config context clear
 
 Clear the active context. Falls back to legacy `server.url` from config.
 
 ### Synopsis
 
 ```bash
-sibyl context clear
+sibyl config context clear
 ```
 
 ### Example
 
 ```bash
-sibyl context clear
+sibyl config context clear
 ```
 
 Output:
@@ -436,7 +434,7 @@ Most personal installs never need more than one context. `sibyl up` sets up a lo
 automatically; to create it by hand, this is the whole setup:
 
 ```bash
-sibyl context create local --server http://localhost:3334 --use
+sibyl config context create local --server http://localhost:3334 --use
 sibyl health
 ```
 
@@ -446,21 +444,21 @@ Everything else on this page is for people juggling multiple servers or orgs.
 
 ```bash
 # Create contexts for different environments
-sibyl context create local --server http://localhost:3334 --use
-sibyl context create staging --server https://staging.sibyl.io --org myorg
-sibyl context create prod --server https://sibyl.example.com --org myorg
+sibyl config context create local --server http://localhost:3334 --use
+sibyl config context create staging --server https://staging.sibyl.io --org myorg
+sibyl config context create prod --server https://sibyl.example.com --org myorg
 
 # Switch between environments
-sibyl context use local
-sibyl context use staging
-sibyl context use prod
+sibyl config context use local
+sibyl config context use staging
+sibyl config context use prod
 ```
 
 ### CI/CD Integration
 
 ```bash
 # In CI pipeline
-sibyl context create ci \
+sibyl config context create ci \
   --server "$SIBYL_URL" \
   --org "$SIBYL_ORG" \
   --use
@@ -474,12 +472,12 @@ sibyl task list --status todo
 
 ```bash
 # Create context per org
-sibyl context create work --server https://sibyl.company.com --org company
-sibyl context create personal --server https://sibyl.io --org personal
+sibyl config context create work --server https://sibyl.company.com --org company
+sibyl config context create personal --server https://sibyl.io --org personal
 
 # Switch organizations
-sibyl context use work
-sibyl context use personal
+sibyl config context use work
+sibyl config context use personal
 ```
 
 ## Configuration File
@@ -511,7 +509,7 @@ insecure = true
 
 ## Related Commands
 
-- [`sibyl recall`](./recall.md) - Recall a working context pack (built on `context pack`)
+- `sibyl config context` - Manage named server, org, and project contexts
 - [`sibyl auth login`](./auth.md) - Log in and create a context in one step
 - [`sibyl project link`](./project.md) - Link directory to project
 - [`sibyl config`](./index.md) - Configuration management

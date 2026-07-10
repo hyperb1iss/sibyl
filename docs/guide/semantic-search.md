@@ -49,54 +49,49 @@ RRF_score = sum(1 / (k + rank)) for each ranking system
 
 This ensures you get results that are either semantically similar OR keyword matches.
 
-## Using Search
+## Using Context Retrieval
 
-### Basic Search
+### Basic Context
 
 ```bash
-# Search all entities
-sibyl search "authentication patterns"
+# Load relevant project memory
+sibyl context "implement authentication" --intent build
 
 # The search finds related concepts even with different words
-sibyl search "OAuth implementation"  # Finds "authentication patterns"
-sibyl search "login security"         # Also matches
+sibyl context "implement OAuth" --intent build
+sibyl context "review login security" --intent review
 ```
 
-### Filtering by Type
+### Biasing by Intent
 
 ```bash
-# Search only patterns
-sibyl search "error handling" --type pattern
-
-# Search tasks
-sibyl search "OAuth" --type task
-
-# Multiple types
-sibyl search "database" --type pattern,episode
+sibyl context "implement error handling" --intent build
+sibyl context "plan the OAuth work" --intent plan
+sibyl context "debug the database failure" --intent debug
 ```
 
 ### Scoping the Search Space
 
-The `search` command keeps a small, focused flag set:
+The `context` command keeps a small, goal-oriented flag set:
 
-| Flag           | Purpose                                             |
-| -------------- | --------------------------------------------------- |
-| `--type`       | Filter by entity type (comma-separated)             |
-| `--limit`      | Maximum results (default 10)                        |
-| `--all`        | Search across all projects, not just the linked one |
-| `--graph-only` | Search graph memory only                            |
-| `--docs-only`  | Search crawled docs only                            |
-| `--json`       | Structured output                                   |
+| Flag       | Purpose                                             |
+| ---------- | --------------------------------------------------- |
+| `--intent` | Bias retrieval for build, plan, review, or debug    |
+| `--limit`  | Maximum context items (default 12)                  |
+| `--all`    | Search across all projects, not just the linked one |
+| `--domain` | Bias retrieval toward a domain                      |
+| `--audit`  | Include full ranking and policy metadata            |
+| `--json`   | Structured output                                   |
 
 ```bash
 # Search every project, not just the linked one
-sibyl search "rate limiting" --all
+sibyl context "rate limiting" --all
 
-# Graph memory only, no crawled docs
-sibyl search "OAuth callback" --graph-only
+# Bias toward prior project decisions
+sibyl context "review prior OAuth callback decisions" --intent review
 ```
 
-`search` takes a required query. To list entities by structured filters such as status, project, or
+`context` takes a required goal. To list entities by structured filters such as status, project, or
 assignee, use `sibyl task list` or `sibyl entity list` instead.
 
 ```bash
@@ -120,13 +115,13 @@ Sibyl offers two ways to find entities:
 
 ```bash
 # Finding related knowledge
-sibyl search "how to handle rate limiting"
+sibyl context "how to handle rate limiting"
 
 # Discovering relevant patterns
-sibyl search "retry logic best practices"
+sibyl context "retry logic best practices"
 
 # Finding past solutions
-sibyl search "Redis connection timeout"
+sibyl context "Redis connection timeout"
 ```
 
 ### When to Use Entity List vs Explore
@@ -231,10 +226,10 @@ Search works best with natural language queries:
 
 ```bash
 # GOOD - natural question
-sibyl search "how to handle database connection timeouts"
+sibyl context "how to handle database connection timeouts"
 
 # LESS GOOD - keyword style
-sibyl search "database timeout handler"
+sibyl context "database timeout handler"
 ```
 
 ### 2. Be Specific
@@ -243,24 +238,24 @@ More context helps find better matches:
 
 ```bash
 # GOOD - specific context
-sibyl search "Python asyncio task cancellation handling"
+sibyl context "Python asyncio task cancellation handling"
 
 # LESS GOOD - too broad
-sibyl search "async tasks"
+sibyl context "async tasks"
 ```
 
-### 3. Narrow with Type
+### 3. Choose the Right Intent
 
-Use the type filter to focus a search:
+Use the intent to focus retrieval:
 
 ```bash
-# Find patterns about authentication
-sibyl search "authentication" --type pattern
+# Find implementation guidance about authentication
+sibyl context "implement authentication" --intent build
 ```
 
 ### 4. Use the Right Tool for Listing
 
-`search` always takes a query. To enumerate entities by structured filters, use `task list` or
+`context` always takes a goal. To enumerate entities by structured filters, use `task list` or
 `entity list`:
 
 ```bash
@@ -273,15 +268,15 @@ sibyl task list --status todo --project proj_abc
 
 ## Document Search
 
-Sibyl can also search crawled documentation. By default a search covers both graph memory and
-crawled docs; narrow it with `--docs-only` or `--graph-only`:
+Context retrieval blends graph memory and crawled documentation. Put the desired source shape in the
+goal:
 
 ```bash
-# Docs only
-sibyl search "Next.js middleware" --docs-only
+# Documentation-oriented review
+sibyl context "review Next.js middleware documentation" --intent review
 
-# Graph memory only
-sibyl search "OAuth callback" --graph-only
+# Project-memory review
+sibyl context "review prior OAuth callback decisions" --intent review
 ```
 
 Document search uses the same hybrid approach over Surreal-backed document chunks. The MCP `search`
@@ -311,15 +306,15 @@ Search results include:
 Always set reasonable limits:
 
 ```bash
-sibyl search "query" --limit 20
+sibyl context "query" --limit 20
 ```
 
 ### Index Efficiency
 
 Vector search is fast, but filtering is applied post-search. For large graphs:
 
-1. Use type filters to narrow the search space
-2. Use project filters for task searches
+1. Use a specific goal and intent to narrow the search space
+2. Use project filters for task lists
 3. Consider temporal filters for recent knowledge
 
 ### Caching

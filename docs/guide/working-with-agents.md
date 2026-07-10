@@ -93,7 +93,7 @@ Every effective session follows the same cycle: **recall, act, remember, reflect
 
 ```mermaid
 flowchart LR
-    R(["RECALL<br/>Pull working context before you act"])
+    R(["CONTEXT<br/>Pull working context before you act"])
     A(["ACT<br/>Do the work with context in hand"])
     M(["REMEMBER + REFLECT<br/>Capture learnings, distill session notes"])
     R --> A --> M
@@ -160,7 +160,7 @@ When you discover something non-obvious:
 
 | When You Want To...       | Say...                                      |
 | ------------------------- | ------------------------------------------- |
-| Recall working context    | "Recall context for X before we start"      |
+| Load working context      | "Load context for X before we start"        |
 | Search for patterns       | "Search sibyl for X"                        |
 | Check task status         | "What tasks are in progress?"               |
 | Start a task              | "Start the X task"                          |

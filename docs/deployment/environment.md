@@ -485,7 +485,7 @@ SIBYL_WEB_PORT=3347 SIBYL_BACKEND_URL=http://localhost:3344 pnpm -C apps/web dev
 
 - Use `docker compose --env-file /dev/null -p sibyl-test ps` to see test instance containers
 - Local Surreal data directories are namespaced by project when you override `SURREAL_DATA_DIR`
-- CLI contexts let you switch between instances: `sibyl context use test`
+- CLI contexts let you switch between instances: `sibyl config context use test`
 
 ## Computed Properties
 

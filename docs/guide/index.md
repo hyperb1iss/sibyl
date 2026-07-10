@@ -32,7 +32,7 @@ trapped in one tool instead of portable, structured, and searchable memory that 
 Sibyl fixes this by providing:
 
 - **Persistent Memory**: Knowledge stored in a SurrealDB-native graph survives forever
-- **The Memory Loop**: Recall context, act, remember what you learn, reflect on it
+- **The Memory Loop**: Load context, act, remember what you learn, reflect on it
 - **Semantic Search**: Find relevant patterns by meaning, not keywords
 - **Automatic Context**: Hooks inject knowledge without manual prompting
 - **Source-Grounded Synthesis**: Draft verified documents from your own memory
@@ -62,7 +62,7 @@ One hook fires automatically at session boundaries:
 
 Per-prompt context injection lived here for a while as `UserPromptSubmit`, but it substituted for
 skill invocation rather than nudging it, so we removed it. The agent is expected to call the `sibyl`
-skill and `sibyl recall` / `sibyl context pack` when it needs working memory.
+skill and `sibyl context` / `sibyl context` when it needs working memory.
 
 ### 3. Web UI
 
@@ -94,7 +94,7 @@ once and the rest of Sibyl falls into place.
 
 ```mermaid
 flowchart LR
-    R(["RECALL<br/>Pull working context before you act"])
+    R(["CONTEXT<br/>Pull working context before you act"])
     A(["ACT<br/>Do the work with context in hand"])
     M(["REMEMBER + REFLECT<br/>Capture learnings, distill session notes"])
     R --> A --> M

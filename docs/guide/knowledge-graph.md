@@ -54,8 +54,8 @@ verification.
 
 Temporal learnings, raw captures, and reflection output:
 
-```python
-sibyl add "Redis insight" "Connection pool must be >= concurrent requests"
+```bash
+sibyl remember "Redis insight" "Connection pool must be >= concurrent requests" --kind rule
 # Creates source-grounded memory records that native retrieval can render
 ```
 

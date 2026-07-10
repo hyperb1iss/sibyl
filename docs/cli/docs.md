@@ -2,7 +2,7 @@
 
 Import and list document collections. `docs` brings local files, directories, and URLs into Sibyl as
 documents, and pastes ad-hoc text straight into a collection. Imported documents are chunked,
-embedded, and surfaced through [`sibyl search`](./search.md).
+embedded, and surfaced through [`sibyl context`](./context.md).
 
 This is distinct from [`sibyl crawl documents`](./crawl.md#crawl-documents), which browses pages
 captured by the web crawler. Use `docs` to push content in; use `crawl` to pull a site down.
@@ -118,6 +118,6 @@ sibyl docs list [options]
 
 ## Related Commands
 
-- [`sibyl search`](./search.md) - Search documents alongside graph memory
+- [`sibyl context`](./context.md) - Search documents alongside graph memory
 - [`sibyl crawl`](./crawl.md) - Crawl websites into the content store
 - [`sibyl ingest`](./ingest.md) - Import agent transcript JSONL into raw memory

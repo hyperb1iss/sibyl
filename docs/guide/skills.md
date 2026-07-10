@@ -52,7 +52,7 @@ moments:
 │  • task_def456 [blocked] Add rate limiting (waiting on API)  │
 │                                                              │
 │  Project: Authentication System (proj_auth)                  │
-│  Remember: Use `sibyl add` to capture learnings!             │
+│  Remember: Use `sibyl remember` to capture learnings!        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -61,9 +61,8 @@ moments:
 An earlier `UserPromptSubmit` hook ran on every prompt, generated a semantic search query with
 Haiku, and injected a context pack inline. We removed it. The hook gave agents just-enough
 sibyl-shaped context to skip invoking the skill or reaching for the CLI on their own, which defeated
-the point of the skill. Agents now drive recall and capture explicitly via `sibyl recall`,
-`sibyl context pack`, `sibyl remember`, and `sibyl reflect`. The SessionStart bundle remains as a
-one-time wake-up nudge.
+the point of the skill. Agents now drive context and capture explicitly via `sibyl context`,
+`sibyl remember`, and `sibyl reflect`. The SessionStart bundle remains as a one-time wake-up nudge.
 
 ### Installing Hooks
 
@@ -167,17 +166,17 @@ non-directory targets.
 The loader is deliberately tiny. It points the agent back at the installed CLI, which serves the
 full, version-matched guidance as **skill packs built into the binary**:
 
-| Pack        | What it covers                                                       |
-| ----------- | -------------------------------------------------------------------- |
-| `core`      | The full recall → act → remember → reflect loop and command contract |
-| `quick`     | Minimal verb table for subagents (~500 tokens)                       |
-| `workflows` | Longer task, project, memory, and debugging workflows                |
-| `examples`  | Concrete CLI examples for search, tasks, memory, and projects        |
-| `migration` | Legacy Graphiti/FalkorDB migration guidance                          |
+| Pack        | What it covers                                                        |
+| ----------- | --------------------------------------------------------------------- |
+| `core`      | The full context → act → remember → reflect loop and command contract |
+| `quick`     | Minimal verb table for subagents (~500 tokens)                        |
+| `workflows` | Longer task, project, memory, and debugging workflows                 |
+| `examples`  | Concrete CLI examples for context, tasks, memory, and projects        |
+| `migration` | Legacy Graphiti/FalkorDB migration guidance                           |
 
 ```bash
 sibyl skill list           # List the packs this CLI version can serve
-sibyl skill get core       # Print the core pack (load this before knowledge work)
+sibyl skill get core       # Print the core pack before the first write intent
 sibyl skill get workflows  # Any other pack on demand
 ```
 
@@ -279,10 +278,10 @@ Provide clear command tables:
 ```markdown
 ## CLI Reference
 
-| Command                | Description     |
-| ---------------------- | --------------- |
-| `sibyl search "query"` | Semantic search |
-| `sibyl task list`      | List tasks      |
+| Command                 | Description     |
+| ----------------------- | --------------- |
+| `sibyl context "query"` | Semantic search |
+| `sibyl task list`       | List tasks      |
 ```
 
 ### Workflow Pattern
@@ -314,14 +313,14 @@ Help Claude avoid errors:
 
 ### Memory Loop Pattern
 
-Teach the recall, act, remember, reflect cycle:
+Teach the context, act, remember, reflect cycle:
 
 ```markdown
 ## The Memory Loop
 
 \`\`\`
 
-1. RECALL -> sibyl recall "topic"
+1. CONTEXT -> sibyl context "topic"
 2. ACT -> sibyl task start <id>
 3. REMEMBER -> sibyl remember "Title" "What, why, how"
 4. REFLECT -> sibyl reflect --persist --review \`\`\`
@@ -346,7 +345,7 @@ sibyl task list (various options available)
 ```markdown
 # Search for patterns
 
-sibyl search "authentication" --type pattern
+sibyl context "implement authentication using existing patterns" --intent build
 
 # Result:
 
@@ -447,7 +446,7 @@ Use Sibyl to:
 
 # 1. Search for relevant patterns
 
-sibyl search "code being reviewed" --type pattern
+sibyl context "review the code and relevant prior decisions" --intent review
 
 # 2. Check applicable rules
 
@@ -465,7 +464,7 @@ sibyl task start task_review_xyz \`\`\`
 
 # Find patterns for the domain
 
-sibyl search "domain of code" --type pattern
+sibyl context "review domain rules for this code" --intent review
 
 # Check rules
 
@@ -485,7 +484,7 @@ Check code against:
 
 # Capture new discoveries
 
-sibyl add "Review finding" "What was discovered..."
+sibyl remember "Review finding" "What was discovered..."
 
 # Complete review task
 

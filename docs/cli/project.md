@@ -278,7 +278,7 @@ Once linked:
 ```bash
 cd ~/dev/backend-api
 sibyl task list              # Only shows tasks for proj_abc123
-sibyl search "auth"          # Only searches proj_abc123
+sibyl context "work on auth"  # Only loads context from proj_abc123
 sibyl task create --title "Fix bug"  # Creates in proj_abc123
 ```
 
@@ -424,17 +424,17 @@ sibyl task start task_xyz
 
 ```bash
 # Search across all projects
-sibyl search "authentication" --all
+sibyl context "authentication" --all
 
 # List all tasks (all projects)
 sibyl task list --all
 
-# Override context for single command
-sibyl task list --context proj_other
+# Override the project for a single command
+sibyl task list --project proj_other
 ```
 
 ## Related Commands
 
 - [`sibyl task list`](./task-list.md) - List tasks (respects project context)
-- [`sibyl context`](./context.md) - Manage CLI contexts
+- `sibyl config context` - Manage named server, org, and project contexts
 - [`sibyl epic list`](./epic.md) - List epics in project

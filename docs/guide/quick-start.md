@@ -67,13 +67,13 @@ sibyl remember "Async gotcha" \
 Pull it back as working context:
 
 ```bash
-sibyl recall "async concurrency" --intent build
+sibyl context "async concurrency" --intent build
 ```
 
-Or search the whole graph by meaning:
+Or load context across every accessible project:
 
 ```bash
-sibyl search "running awaits at the same time"
+sibyl context "review prior async concurrency lessons" --intent review --all
 ```
 
 Semantic search finds that memory even though you searched with different words.
@@ -102,8 +102,8 @@ see [Agents & MCP](./claude-code.md).
 | Action           | Command                                      |
 | ---------------- | -------------------------------------------- |
 | Capture a memory | `sibyl remember "Title" "What matters"`      |
-| Recall context   | `sibyl recall "goal" --intent build`         |
-| Search the graph | `sibyl search "query"`                       |
+| Load context     | `sibyl context "goal" --intent build`        |
+| Search broadly   | `sibyl context "query" --all`                |
 | Show a record    | `sibyl show <id>`                            |
 | Create a task    | `sibyl task create --title "..."`            |
 | Complete a task  | `sibyl task complete <id> --learnings "..."` |

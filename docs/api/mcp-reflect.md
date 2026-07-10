@@ -44,7 +44,7 @@ interface ReflectInput {
 ### Intent Values
 
 ```
-build, plan, ideate, research, debug, decide, learn, general
+build, plan, review, debug, general
 ```
 
 Intent guides which kinds of candidates the extractor emphasizes.

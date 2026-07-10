@@ -34,10 +34,8 @@ sibyl project link <project_id>
 
 # Now commands auto-scope to that project
 sibyl task list --status todo
-sibyl search "authentication"
-
-# Recall a working context pack for a goal
-sibyl recall "wire up the password reset endpoint"
+# Load a working context pack for a goal
+sibyl context "wire up the password reset endpoint" --intent build
 ```
 
 ## Command Families
@@ -48,22 +46,21 @@ The CLI has roughly three dozen command groups. They fall into five families.
 
 Capture knowledge and recall it back into agent context.
 
-| Command                           | Description                                         |
-| --------------------------------- | --------------------------------------------------- |
-| [`sibyl recall`](./recall.md)     | Recall a compact working context pack for an agent  |
-| [`sibyl brief`](./brief.md)       | One-shot lean context brief for a subagent          |
-| [`sibyl remember`](./remember.md) | Remember a decision, plan, idea, claim, or learning |
-| [`sibyl reflect`](./reflect.md)   | Reflect raw notes into reviewable memory candidates |
-| [`sibyl capture`](./capture.md)   | Quick capture with an auto-derived title            |
-| [`sibyl note`](./remember.md)     | Add a task note or capture a free note memory       |
-| [`sibyl add`](./add.md)           | Add knowledge with explicit title and content       |
-| [`sibyl search`](./search.md)     | Semantic search across graph and crawled docs       |
-| [`sibyl show`](./show.md)         | Show a graph entity or raw memory by ID             |
-| [`sibyl entity`](./entity.md)     | Generic entity CRUD operations                      |
-| [`sibyl explore`](./explore.md)   | Graph traversal and exploration                     |
-| [`sibyl archive`](./archive.md)   | Browse raw quick captures                           |
-| [`sibyl session`](./session.md)   | Package a wake-up context bundle                    |
-| [`sibyl context`](./context.md)   | Compile context packs and manage CLI contexts       |
+| Command                                | Description                                         |
+| -------------------------------------- | --------------------------------------------------- |
+| [`sibyl context`](./context.md)        | Recall a compact working context pack for an agent  |
+| [`sibyl brief`](./brief.md)            | One-shot lean context brief for a subagent          |
+| [`sibyl remember`](./remember.md)      | Remember a decision, plan, idea, claim, or learning |
+| [`sibyl reflect`](./reflect.md)        | Reflect raw notes into reviewable memory candidates |
+| [`sibyl capture`](./capture.md)        | Quick capture with an auto-derived title            |
+| [`sibyl note`](./remember.md)          | Add a task note or capture a free note memory       |
+| [`sibyl correct`](./memory.md)         | Inspect or correct source memory                    |
+| [`sibyl show`](./show.md)              | Show a graph entity or raw memory by ID             |
+| [`sibyl entity`](./entity.md)          | Generic entity CRUD operations                      |
+| [`sibyl explore`](./explore.md)        | Graph traversal and exploration                     |
+| [`sibyl archive`](./archive.md)        | Browse raw quick captures                           |
+| [`sibyl session`](./session.md)        | Package a wake-up context bundle                    |
+| [`sibyl config context`](./context.md) | Manage named server, org, and project contexts      |
 
 ### Work tracking
 
@@ -90,15 +87,16 @@ Ingest external docs and produce source-grounded artifacts.
 
 Review, promote, share, and audit memory.
 
-| Command                                       | Description                                 |
-| --------------------------------------------- | ------------------------------------------- |
-| [`sibyl memory-audit`](./memory.md)           | Inspect memory audit receipts               |
-| [`sibyl memory-inspect`](./memory.md)         | Inspect a memory source and its audit trail |
-| [`sibyl memory-promote`](./memory.md)         | Preview or auto-review candidate promotion  |
-| [`sibyl memory-share`](./memory.md)           | Preview memory sharing across scopes        |
-| [`sibyl memory-space`](./memory.md)           | Memory-space inspection and preview         |
-| [`sibyl memory-review`](./memory.md)          | Reflection review queue and dream-cycle     |
-| [`sibyl pending-writes`](./pending-writes.md) | Inspect and replay locally buffered writes  |
+| Command                                           | Description                                 |
+| ------------------------------------------------- | ------------------------------------------- |
+| [`sibyl admin memory audit`](./memory.md)         | Inspect memory audit receipts               |
+| [`sibyl admin memory inspect`](./memory.md)       | Inspect a memory source and its audit trail |
+| [`sibyl admin memory import-status`](./memory.md) | Inspect a source import receipt             |
+| [`sibyl admin memory promote`](./memory.md)       | Preview or auto-review candidate promotion  |
+| [`sibyl admin memory share`](./memory.md)         | Preview memory sharing across scopes        |
+| [`sibyl admin memory space`](./memory.md)         | Memory-space inspection and preview         |
+| [`sibyl admin memory review`](./memory.md)        | Reflection review queue and dream-cycle     |
+| [`sibyl pending-writes`](./pending-writes.md)     | Inspect and replay locally buffered writes  |
 
 ### System
 
@@ -111,7 +109,7 @@ Auth, organizations, configuration, and operations.
 | `sibyl logout`                  | Clear stored auth credentials                        |
 | `sibyl whoami`                  | Check auth status for the active context             |
 | [`sibyl org`](./org.md)         | Organizations and member management                  |
-| `sibyl context`                 | Server/org/project context bundles (see above)       |
+| `sibyl config context`          | Server/org/project context bundles (see above)       |
 | [`sibyl init`](./init.md)       | Create a local or remote context for first-run setup |
 | `sibyl config`                  | Manage CLI configuration                             |
 | `sibyl health`                  | Check Sibyl server health                            |
@@ -216,8 +214,8 @@ When resolving project context, the CLI checks in this order:
 The CLI is built for AI agent consumption with JSON-first output:
 
 ```bash
-# Recall a context pack and pull titles
-sibyl recall "implement OAuth2" --json | jq '.items[].title'
+# Load a context pack and pull titles
+sibyl context "implement OAuth2" --json | jq '.items[].title'
 
 # Get task status
 sibyl task show <task_id> --json | jq '.metadata.status'
@@ -229,8 +227,8 @@ sibyl task list --status todo --json | jq '[.[] | {id, name, priority}]'
 ### The Memory Loop
 
 ```bash
-# Recall before starting work
-sibyl recall "fix the auth token refresh bug" --intent debug
+# Load context before starting work
+sibyl context "fix the auth token refresh bug" --intent debug
 
 # Capture findings as you go
 sibyl capture "Redis WRONGTYPE on refresh was the root cause"
@@ -248,7 +246,7 @@ sibyl project link proj_abc123
 
 # All future commands in this directory are scoped
 sibyl task list                      # Only proj_abc123 tasks
-sibyl search "auth"                  # Only searches proj_abc123
+sibyl context "work on auth"          # Only loads context from proj_abc123
 sibyl task create --title "Fix bug"  # Creates in proj_abc123
 ```
 
@@ -312,5 +310,5 @@ Either:
 
 - Link the directory: `sibyl project link <project_id>`
 - For task/epic commands: pass `--project <project_id>` or `-p`
-- For search and recall: pass `--all` or `-a`
+- For context retrieval: pass `--all` or `-a`
 - Use the global flag `--context` / `-C` to override

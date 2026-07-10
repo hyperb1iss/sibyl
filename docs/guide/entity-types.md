@@ -8,7 +8,8 @@ description: All entity types available in Sibyl
 Sibyl supports 33 entity types for different kinds of knowledge. Understanding when to use each type
 helps keep your knowledge graph organized and searchable.
 
-The full set, as accepted by `--type` on `sibyl add` and `--kind` on `sibyl remember`:
+The full compatibility set accepted by `sibyl entity --type` is larger than the compact set
+advertised by `sibyl remember --kind`.
 
 `pattern`, `rule`, `template`, `guide`, `tool`, `language`, `topic`, `episode`, `knowledge_source`,
 `config_file`, `slash_command`, `project`, `epic`, `task`, `team`, `error_pattern`, `milestone`,
@@ -25,7 +26,7 @@ crawler, analysis, and reflection paths create the rest.
 Temporal knowledge snapshots - insights, learnings, and discoveries.
 
 ```bash
-sibyl add "Redis timeout root cause" "Connection pool exhaustion happens when..."
+sibyl remember "Redis timeout root cause" "Connection pool exhaustion happens when..."
 ```
 
 **When to use:**
@@ -49,9 +50,9 @@ sibyl add "Redis timeout root cause" "Connection pool exhaustion happens when...
 Reusable coding patterns and best practices.
 
 ```bash
-sibyl add "Retry with exponential backoff" "Implementation pattern for resilient..." \
-  --type pattern \
-  --language python --language typescript
+sibyl remember "Retry with exponential backoff" "Implementation procedure for resilient..." \
+  --kind procedure \
+  --tags python,typescript
 ```
 
 **When to use:**
@@ -532,10 +533,10 @@ They accept the same `--type` flag if you ever need them, but most workflows nev
 
 ```bash
 # Episodes (default type)
-sibyl add "Title" "Content"
+sibyl remember "Title" "Content"
 
 # Specific types
-sibyl add "Title" "Content" --type pattern
+sibyl remember "Title" "Content" --kind procedure
 sibyl entity create --type rule --name "..." --content "..."
 ```
 

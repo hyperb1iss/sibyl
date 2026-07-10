@@ -18,7 +18,7 @@ This page is the end-to-end solo path. If you administer Sibyl for a team behind
 ## What You Get
 
 - A local SurrealDB knowledge graph, running on your box
-- The full memory loop (`recall → act → remember → reflect`) from any terminal
+- The full memory loop (`context → act → remember → reflect`) from any terminal
 - A web UI at `http://localhost:3337` for the graph explorer, tasks, and the memory workspace
 - The `sibyl` CLI as your agents' main interface — any tool that runs shell commands can use it —
   with an MCP endpoint at `http://localhost:3334/mcp` for MCP-native clients
@@ -74,7 +74,7 @@ pointed the CLI at a remote server, create or switch to the local context explic
 localhost, so no URL is needed):
 
 ```bash
-sibyl init --local        # or: sibyl context use local
+sibyl init --local        # or: sibyl config context use local
 sibyl doctor
 ```
 
@@ -83,10 +83,10 @@ Sibyl is now yours from any terminal.
 ## Step 4: Connect Your Agent
 
 The primary way an agent uses Sibyl is the `sibyl` CLI. If a tool can run a shell command, it can
-use Sibyl: the agent runs `sibyl recall`, `sibyl remember`, `sibyl search`, and the rest against the
-local server from Step 3. This is the recommended path — it is lighter-weight than MCP (less token
-overhead) and every Sibyl command is available. Sign in once with `sibyl auth login` if a write
-reports that authentication is required.
+use Sibyl: the agent runs `sibyl context`, `sibyl remember`, and the other task or correction verbs
+against the local server from Step 3. This is the recommended path — it is lighter-weight than MCP
+(less token overhead) and every Sibyl command is available. Sign in once with `sibyl auth login` if
+a write reports that authentication is required.
 
 Teach your agent the workflow by installing the Sibyl skill (and, for Claude Code, the session
 hooks):
@@ -137,13 +137,13 @@ The payoff. Capture something worth keeping, then pull it back:
 # Remember a hard-won gotcha
 sibyl remember "Async gotcha" \
   "Use asyncio.gather for concurrent awaits, not a sequential loop" \
-  --kind pattern
+  --kind error_pattern
 
-# Recall it as working context before you act
-sibyl recall "async concurrency" --intent build
+# Load it as working context before you act
+sibyl context "async concurrency" --intent build
 
-# Or search the whole graph by meaning
-sibyl search "running awaits at the same time"
+# Or load context across every accessible project
+sibyl context "review prior async concurrency lessons" --intent review --all
 ```
 
 Link a repo so commands auto-scope to it:
@@ -191,7 +191,7 @@ local-first auth. Point any CLI at it with `sibyl init --remote https://your-hos
 
 ## Where to Go Next
 
-- [The Memory Loop](./memory-loop.md) — recall, act, remember, reflect
+- [The Memory Loop](./memory-loop.md) — context, act, remember, reflect
 - [Capturing Knowledge](./capturing-knowledge.md) — what is worth saving
 - [Agents & MCP](./claude-code.md) — connect any AI agent
 - [Skills & Hooks](./skills.md) — automatic context injection

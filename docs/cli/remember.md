@@ -43,25 +43,32 @@ Content is read from stdin when the positional argument is omitted.
 | `--agent`           |       | (none)    | Agent identity for diary entries                         |
 | `--source-id`       |       | (none)    | Raw memory source ID                                     |
 | `--scope`           |       | `private` | Raw memory scope                                         |
-| `--scope-key`       |       | (none)    | Project/team/shared scope key                            |
+| `--scope-key`       |       | (none)    | Project/team/org scope key                               |
+| `--pin`             |       | false     | Exempt the memory from ordinary decay                    |
+| `--basis`           |       | (none)    | `observed`, `inferred`, `told`, or `assumed`             |
+| `--propose-scope`   |       | (none)    | Nominate the memory for audited team promotion           |
 
 ## Memory Kinds
 
 `remember` defaults to `episode`, but the memory loop adds first-class kinds for durable reasoning
 artifacts:
 
-| Kind       | Use Case                                    |
-| ---------- | ------------------------------------------- |
-| `decision` | A choice that was made, with rationale      |
-| `plan`     | An intended sequence of work                |
-| `idea`     | An exploration or proposal not yet acted on |
-| `claim`    | An assertion to be verified or cited later  |
-| `artifact` | A produced output (synthesis, doc, summary) |
-| `session`  | A session-level memory or summary           |
-| `episode`  | General learning or knowledge (default)     |
+| Kind            | Use Case                                    |
+| --------------- | ------------------------------------------- |
+| `episode`       | General learning or knowledge (default)     |
+| `decision`      | A choice that was made, with rationale      |
+| `procedure`     | A repeatable implementation or runbook      |
+| `error_pattern` | A recurring failure and its verified fix    |
+| `rule`          | A durable constraint or invariant           |
+| `plan`          | An intended sequence of work                |
+| `idea`          | An exploration or proposal not yet acted on |
+| `claim`         | An assertion to be verified or cited later  |
+| `artifact`      | A produced output (synthesis, doc, summary) |
+| `session`       | A session-level memory or summary           |
+| `note`          | A durable observation or breadcrumb         |
 
-`--kind` accepts the full set of 33 entity types, including `preference`, `person`, `place`, and
-`event`. See [`sibyl entity`](./entity.md) for the complete list.
+Compatibility kinds remain accepted for existing automation, but new agent instructions should use
+the compact set above.
 
 ## Examples
 
@@ -90,7 +97,7 @@ sibyl remember "Incident 2026-05 postmortem" --content-file ./postmortem.md --ki
 ### Store a Raw Memory
 
 `--raw` skips graph extraction and stores the payload verbatim in the raw memory store. Raw memories
-are read back with `recall --raw` and reviewed before promotion.
+are read back with `context --raw` and reviewed before promotion.
 
 ```bash
 sibyl remember "Deploy runbook" --raw --scope project --scope-key proj_abc123
@@ -112,8 +119,7 @@ git log -5 --oneline | sibyl remember "Recent auth commits" --kind episode
 
 ## Related Commands
 
-- [`sibyl recall`](./recall.md) - Recall memory back into an agent context
+- [`sibyl context`](./context.md) - Load memory back into an agent context
 - [`sibyl reflect`](./reflect.md) - Turn raw notes into reviewable candidates
 - [`sibyl capture`](./capture.md) - Quick capture without a separate title
-- [`sibyl add`](./add.md) - Add knowledge with explicit title and content
 - [Memory governance](./memory.md) - Inspect, audit, and promote raw memory

@@ -1,20 +1,68 @@
 # memory governance
 
 Sibyl's memory loop is governed. Raw memories and reflection candidates are not written straight
-into the shared graph; they move through review, promotion, and audit. This page covers the
-governance command family:
+into the shared graph; they move through review, promotion, and audit. Agents inspect and repair
+source truth with `correct`; operators use the `admin memory` command family:
 
-| Command                                               | Description                                                      |
-| ----------------------------------------------------- | ---------------------------------------------------------------- |
-| [`sibyl memory-audit`](#memory-audit)                 | Inspect memory audit receipts                                    |
-| [`sibyl memory-inspect`](#memory-inspect)             | Inspect a memory source and its audit trail                      |
-| [`sibyl memory-import-status`](#memory-import-status) | Inspect a source import receipt and its published raw memory IDs |
-| [`sibyl memory-promote`](#memory-promote)             | Preview or auto-review candidate promotion                       |
-| [`sibyl memory-share`](#memory-share)                 | Preview memory sharing across scopes                             |
-| [`sibyl memory-space`](#memory-space)                 | Memory-space inspection and preview                              |
-| [`sibyl memory-review`](#memory-review)               | Reflection review queue automation                               |
+| Command                         | Description                                  |
+| ------------------------------- | -------------------------------------------- |
+| [`sibyl correct`](#correct)     | Inspect or correct a raw memory source       |
+| [`sibyl cite`](#usage-feedback) | Record material citation or misleading usage |
+
+| Command                                                     | Description                                                      |
+| ----------------------------------------------------------- | ---------------------------------------------------------------- |
+| [`sibyl admin memory audit`](#memory-audit)                 | Inspect memory audit receipts                                    |
+| [`sibyl admin memory inspect`](#memory-inspect)             | Inspect a memory source and its audit trail                      |
+| [`sibyl admin memory import-status`](#memory-import-status) | Inspect a source import receipt and its published raw memory IDs |
+| [`sibyl admin memory promote`](#memory-promote)             | Preview or auto-review candidate promotion                       |
+| [`sibyl admin memory share`](#memory-share)                 | Preview memory sharing across scopes                             |
+| [`sibyl admin memory space`](#memory-space)                 | Memory-space inspection and preview                              |
+| [`sibyl admin memory review`](#memory-review)               | Reflection review queue automation                               |
 
 For the dream-cycle automation that drives much of this, see [`memory-review`](#memory-review).
+
+## correct
+
+Run `correct` without an action to inspect revisions, corrections, audits, derivations, and
+supersession lineage:
+
+```bash
+sibyl correct raw_memory:abc123
+```
+
+Apply the smallest correction matching what happened and provide a durable reason:
+
+```bash
+sibyl correct raw_memory:abc123 --action wrong \
+  --reason "Contradicted by the verified configuration"
+sibyl correct raw_memory:abc123 --action stale \
+  --reason "Valid only before the v2 migration"
+sibyl correct raw_memory:abc123 --action duplicate \
+  --duplicate-of raw_memory:def456 --reason "Same decision captured twice"
+sibyl correct raw_memory:abc123 --action superseded \
+  --replacement raw_memory:def456 --reason "The newer decision replaces this one"
+printf '%s' "Corrected canonical body" | sibyl correct raw_memory:abc123 \
+  --action revise --reason "The prior wording was misleading" --expected-revision 3
+```
+
+Every applied correction returns a mutation receipt with its operation ID, affected records, and
+revision. Use `--preview` to validate a mutation without applying it. The hidden `blame` alias
+remains available during migration, but new instructions should use `correct` for inspection.
+
+## Usage Feedback
+
+Record positive feedback only when memory materially shaped the result:
+
+```bash
+sibyl cite decision_abc raw_memory:def456
+```
+
+Use `--misled` only when the cited memory shaped the result incorrectly. Irrelevant or unused
+context is not misleading:
+
+```bash
+sibyl cite raw_memory:def456 --misled
+```
 
 ## Memory Scopes
 
@@ -25,9 +73,9 @@ Raw memories and artifacts carry a scope that controls who can recall them:
 | `private` | The capturing principal only (default) |
 | `project` | Members working in a project           |
 | `team`    | A named team                           |
-| `shared`  | Org-wide shared memory                 |
+| `org`     | Organization-wide memory               |
 
-`--scope-key` pins a scope to a specific project, team, or shared bucket.
+`--scope-key` pins a scope to a specific project, team, or organization bucket.
 
 ---
 
@@ -39,7 +87,7 @@ denial) writes an audit event. `memory-audit` reads that trail.
 ### Synopsis
 
 ```bash
-sibyl memory-audit [options]
+sibyl admin memory audit [options]
 ```
 
 ### Options
@@ -60,13 +108,13 @@ sibyl memory-audit [options]
 
 ```bash
 # Recent governed memory events
-sibyl memory-audit
+sibyl admin memory audit
 
 # Only denied actions
-sibyl memory-audit --policy denied
+sibyl admin memory audit --policy denied
 
 # Promotions by a specific actor
-sibyl memory-audit --action promote --actor user_abc123 --json
+sibyl admin memory audit --action promote --actor user_abc123 --json
 ```
 
 ---
@@ -79,7 +127,7 @@ record together with every audit event that touched it.
 ### Synopsis
 
 ```bash
-sibyl memory-inspect <source_id> [options]
+sibyl admin memory inspect <source_id> [options]
 ```
 
 ### Arguments
@@ -97,7 +145,7 @@ sibyl memory-inspect <source_id> [options]
 ### Example
 
 ```bash
-sibyl memory-inspect mem_abc123def456
+sibyl admin memory inspect mem_abc123def456
 ```
 
 ---
@@ -110,7 +158,7 @@ shows the import receipt together with the raw memory IDs the import published.
 ### Synopsis
 
 ```bash
-sibyl memory-import-status <import_id> [options]
+sibyl admin memory import-status <import_id> [options]
 ```
 
 ### Arguments
@@ -128,7 +176,7 @@ sibyl memory-import-status <import_id> [options]
 ### Example
 
 ```bash
-sibyl memory-import-status imp_abc123def456
+sibyl admin memory import-status imp_abc123def456
 ```
 
 ---
@@ -142,7 +190,7 @@ Promotion moves it into the shared graph.
 ### Synopsis
 
 ```bash
-sibyl memory-promote <candidate_id> [options]
+sibyl admin memory promote <candidate_id> [options]
 ```
 
 ### Arguments
@@ -183,13 +231,13 @@ Exactly one of `--preview`, `--apply`, or `--auto` is required.
 
 ```bash
 # Preview a candidate before promoting
-sibyl memory-promote cand_abc123 --preview
+sibyl admin memory promote cand_abc123 --preview
 
 # Dry-run the auto-review decision
-sibyl memory-promote cand_abc123 --dry-run
+sibyl admin memory promote cand_abc123 --dry-run
 
 # Auto-promote into a project scope when safe
-sibyl memory-promote cand_abc123 --auto \
+sibyl admin memory promote cand_abc123 --auto \
   --scope project --scope-key proj_abc123 \
   --confidence-threshold 0.8
 ```
@@ -204,7 +252,7 @@ more raw memories into another scope would entail. It is preview-only: it never 
 ### Synopsis
 
 ```bash
-sibyl memory-share <source_ids>... [options]
+sibyl admin memory share <source_ids>... [options]
 ```
 
 ### Arguments
@@ -228,7 +276,7 @@ sibyl memory-share <source_ids>... [options]
 ### Example
 
 ```bash
-sibyl memory-share mem_abc123 mem_def456 \
+sibyl admin memory share mem_abc123 mem_def456 \
   --target-scope shared --preview
 ```
 
@@ -247,7 +295,7 @@ before granting it.
 #### Synopsis
 
 ```bash
-sibyl memory-space preview-agent <agent_id> --space <space_id> [options]
+sibyl admin memory space preview-agent <agent_id> --space <space_id> [options]
 ```
 
 #### Arguments
@@ -268,7 +316,7 @@ sibyl memory-space preview-agent <agent_id> --space <space_id> [options]
 #### Example
 
 ```bash
-sibyl memory-space preview-agent agent_abc123 \
+sibyl admin memory space preview-agent agent_abc123 \
   --space space_main \
   --also-space space_shared,space_team \
   --limit 100
@@ -296,7 +344,7 @@ Drain pending reflection candidates through automatic review. By default this pr
 #### Synopsis
 
 ```bash
-sibyl memory-review drain [options]
+sibyl admin memory review drain [options]
 ```
 
 #### Options
@@ -321,10 +369,10 @@ sibyl memory-review drain [options]
 
 ```bash
 # Preview the drain
-sibyl memory-review drain
+sibyl admin memory review drain
 
 # Apply safe promotions and archive stale exceptions
-sibyl memory-review drain --apply --archive-exceptions
+sibyl admin memory review drain --apply --archive-exceptions
 ```
 
 ### memory-review dream
@@ -336,7 +384,7 @@ default it queues a dry run; `--apply` queues a run that commits safe promotions
 #### Synopsis
 
 ```bash
-sibyl memory-review dream [options]
+sibyl admin memory review dream [options]
 ```
 
 #### Options
@@ -353,10 +401,10 @@ sibyl memory-review dream [options]
 
 ```bash
 # Queue a dry-run dream cycle
-sibyl memory-review dream
+sibyl admin memory review dream
 
 # Queue an applying run with wider source coverage
-sibyl memory-review dream --apply --source-limit 50
+sibyl admin memory review dream --apply --source-limit 50
 ```
 
 ### memory-review status
@@ -366,7 +414,7 @@ Show reflection dream-cycle runs and automatic decision receipts.
 #### Synopsis
 
 ```bash
-sibyl memory-review status [options]
+sibyl admin memory review status [options]
 ```
 
 #### Options
@@ -379,12 +427,12 @@ sibyl memory-review status [options]
 #### Example
 
 ```bash
-sibyl memory-review status --limit 20
+sibyl admin memory review status --limit 20
 ```
 
 ## Related Commands
 
 - [`sibyl remember`](./remember.md) - Capture durable memory
 - [`sibyl reflect`](./reflect.md) - Produce reviewable reflection candidates
-- [`sibyl recall`](./recall.md) - Recall memory into a context pack
+- [`sibyl context`](./context.md) - Recall memory into a context pack
 - [`sibyl synthesis`](./synthesis.md) - Source-grounded synthesis from memory

@@ -81,5 +81,5 @@ sibyl capture "Unrelated idea for the docs site" --no-active-task
 
 - [`sibyl remember`](./remember.md) - Capture a titled, typed memory
 - [`sibyl note`](./remember.md) - Add a task note or free note memory
-- [`sibyl add`](./add.md) - Add knowledge with explicit title and content
+- [`sibyl remember`](./remember.md) - Add knowledge with explicit title and content
 - [`sibyl archive`](./archive.md) - Browse raw quick captures

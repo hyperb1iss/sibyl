@@ -100,6 +100,6 @@ sibyl ingest codex ~/.codex/sessions/ --drain --timeout 120
 ## Related Commands
 
 - [`sibyl reflect`](./reflect.md) - Promote raw memories into graph memory
-- [`sibyl recall`](./recall.md) - Recall raw memories with `--raw`
+- [`sibyl context`](./context.md) - Recall raw memories with `--raw`
 - [`sibyl docs`](./docs.md) - Import files, directories, or URLs as documents
 - [`sibyl crawl`](./crawl.md) - Crawl and ingest documentation sites

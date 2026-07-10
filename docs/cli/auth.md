@@ -234,5 +234,5 @@ sibyl auth api-key revoke <api_key_id>
 
 ## Related Commands
 
-- [`sibyl context`](./context.md) - Manage server/org/project contexts
+- [`sibyl config context`](./context.md) - Manage server/org/project contexts
 - [`sibyl org`](./org.md) - Organization and member management

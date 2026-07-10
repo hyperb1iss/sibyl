@@ -24,11 +24,11 @@ sibyl project link <project_id>
 ## The Memory Loop
 
 ```bash
-sibyl recall "goal"                          # Agent-ready context before work
+sibyl context "goal"                          # Agent-ready context before work
 sibyl remember "title" "content" --kind decision  # Capture durable memory
 sibyl reflect "raw notes" --persist          # Distill notes into candidates
 sibyl capture "content"                      # Fast verbatim capture
-sibyl search "query"                         # Semantic search
+sibyl correct <raw_memory_id>                 # Inspect or correct source memory
 sibyl session bundle                         # Wake up with active context
 ```
 
@@ -46,13 +46,10 @@ sibyl task complete <id> --learnings "..."   # Complete with learnings
 
 | Command    | Purpose                                                                |
 | ---------- | ---------------------------------------------------------------------- |
-| `recall`   | Compile an agent-ready Markdown or JSON context pack before work       |
-| `remember` | Capture decisions, plans, ideas, claims, artifacts, and session memory |
-| `correct`  | Mark memory wrong, stale, duplicate, superseded, or revise its body     |
-| `blame`    | Inspect revisions, corrections, audits, derivations, and supersessions  |
+| `context`  | Recall agent-ready working context                                     |
+| `remember` | Store raw-first durable knowledge                                      |
+| `correct`  | Inspect or correct source memory                                       |
 | `reflect`  | Distill raw notes into reviewable memory candidates                    |
-| `search`   | Semantic search across graph memory and crawled docs                   |
-| `add`      | Add structured knowledge                                               |
 | `capture`  | Fast verbatim capture from arguments or stdin                          |
 | `note`     | Add a task note or capture a free note memory                          |
 | `session`  | Package wake-up context for a session or agent                         |
@@ -80,14 +77,15 @@ sibyl task complete <id> --learnings "..."   # Complete with learnings
 
 ### Memory governance
 
-| Command          | Purpose                                                   |
-| ---------------- | --------------------------------------------------------- |
-| `memory-audit`   | Inspect memory audit receipts                             |
-| `memory-inspect` | Inspect a memory source and its audit trail               |
-| `memory-promote` | Preview or auto-review reflection candidate promotion     |
-| `memory-share`   | Preview memory sharing before enabling share writes       |
-| `memory-space`   | Memory-space inspection and agent-recall preview          |
-| `memory-review`  | Reflection review queue automation (drain, dream, status) |
+| Command                        | Purpose                                                   |
+| ------------------------------ | --------------------------------------------------------- |
+| `admin memory audit`           | Inspect memory audit receipts                             |
+| `admin memory inspect`         | Inspect a memory source and its audit trail               |
+| `admin memory import-status`   | Inspect source import receipts                            |
+| `admin memory promote`         | Preview or auto-review reflection candidate promotion     |
+| `admin memory share`           | Preview memory sharing before enabling share writes       |
+| `admin memory space`           | Memory-space inspection and agent-recall preview          |
+| `admin memory review`          | Reflection review queue automation (drain, dream, status) |
 
 ### System
 
@@ -97,7 +95,7 @@ sibyl task complete <id> --learnings "..."   # Complete with learnings
 | `health`         | Check API connectivity and health                 |
 | `auth`           | Login, logout, tokens, API keys                   |
 | `org`            | Organization switching and member management      |
-| `context`        | Multi-server context bundles                      |
+| `config context` | Multi-server context bundles                      |
 | `config`         | CLI configuration                                 |
 | `serve` / `stop` | Start or stop the local embedded daemon           |
 | `docker`         | Manage a self-hosted Docker deployment            |
@@ -133,7 +131,7 @@ compatibility.
 ## Capturing Memory
 
 ```bash
-sibyl recall "ship the SurrealDB-native memory path" --intent build
+sibyl context "ship the SurrealDB-native memory path" --intent build
 sibyl capture "Redis TTL mismatch caused the stale auth token bug"
 sibyl remember "Token TTL decision" \
   "Keep refresh token TTL longer than access token TTL." --kind decision --domain auth
@@ -168,7 +166,7 @@ sibyl auth login https://sibyl.hyperbliss.tech -c personal
 sibyl auth login http://localhost:3334 -c work
 
 # Switch the global default
-sibyl context use work
+sibyl config context use work
 
 # Override for a single command
 sibyl --context work task list
@@ -182,12 +180,12 @@ command run there routes to that context's server automatically:
 
 ```bash
 # Pin a whole tree to a context (new repos under it route correctly before linking)
-cd ~/work && sibyl context link work
+cd ~/work && sibyl config context link work
 
 # Linking a project pins the project AND the context it lives on, together
 cd ~/dev/sibyl && sibyl project link project_sibyl   # records the active context too
 
-sibyl context        # shows the effective context, marked "pinned by directory"
+sibyl config context --quick  # shows the effective context and directory pin
 sibyl project links   # lists every directory pin (project and/or context)
 ```
 

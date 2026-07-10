@@ -40,16 +40,13 @@ interface ContextInput {
 
 ### Intent Values
 
-| Intent     | Use For                              |
-| ---------- | ------------------------------------ |
-| `build`    | Implementation work (default)        |
-| `plan`     | Sequencing, milestones, roadmap work |
-| `ideate`   | Brainstorming and option generation  |
-| `research` | Investigation and landscape analysis |
-| `debug`    | Diagnosing failures                  |
-| `decide`   | Resolving a choice                   |
-| `learn`    | Building understanding of a topic    |
-| `general`  | Unscoped retrieval                   |
+| Intent    | Use For                              |
+| --------- | ------------------------------------ |
+| `build`   | Implementation work (default)        |
+| `plan`    | Sequencing, milestones, roadmap work |
+| `review`  | Verification and critique            |
+| `debug`   | Diagnosing failures                  |
+| `general` | Unscoped retrieval                   |
 
 Intent shapes which facets are emphasized in the resulting pack.
 

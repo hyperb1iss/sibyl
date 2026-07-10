@@ -165,4 +165,4 @@ sibyl org members remove acme-eng user_abc123 --force
 ## Related Commands
 
 - [`sibyl auth`](./auth.md) - Authentication and API keys
-- [`sibyl context`](./context.md) - Bundle server, org, and project settings
+- [`sibyl config context`](./context.md) - Bundle server, org, and project settings

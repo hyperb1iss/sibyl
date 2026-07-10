@@ -205,7 +205,7 @@ Compile a working context pack for a goal. This is the recall step of the memory
 ```python
 context(
     goal="implement OAuth refresh",
-    intent="build",       # build, plan, ideate, research, review, debug, decide, learn
+    intent="build",       # build, plan, review, debug, general
     layer="recall",       # wake (fast), recall (default), deep_search (wide)
     project="proj_abc"    # Scope recall to a project
 )

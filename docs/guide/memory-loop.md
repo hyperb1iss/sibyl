@@ -1,54 +1,54 @@
 ---
 title: The Memory Loop
-description: Recall, act, remember, reflect - the cycle Sibyl is built around
+description: Context, act, remember, reflect - the cycle Sibyl is built around
 ---
 
 # The Memory Loop 🔮
 
-Sibyl is built around a durable cycle that both humans and AI agents follow: **recall, act,
+Sibyl is built around a durable cycle that both humans and AI agents follow: **context, act,
 remember, reflect.** Every interface (CLI, MCP tools, hooks, and the web workspace) exists to
 support this loop. Learn it once and the rest of Sibyl falls into place.
 
 ```mermaid
 flowchart LR
-    R(["RECALL<br/>Pull working context"])
+    R(["CONTEXT<br/>Pull working context"])
     A(["ACT<br/>Do the work with context in hand"])
     M(["REMEMBER<br/>Capture decisions and durable knowledge"])
     RF(["REFLECT<br/>Distill raw notes into candidates"])
     R --> A --> M --> RF
-    RF -.->|the next recall is sharper| R
+    RF -.->|the next context is sharper| R
 ```
 
-Every completed loop makes the graph smarter. The next recall is sharper because the last remember
+Every completed loop makes the graph smarter. The next context is sharper because the last remember
 and reflect fed it.
 
-## Recall
+## Context
 
-`sibyl recall` compiles a compact working context pack for a goal. It fuses semantic search, raw
+`sibyl context` compiles a compact working context pack for a goal. It fuses semantic search, raw
 memory, and one-hop graph context into a result sized for an agent's prompt budget.
 
 ```bash
-# Recall context for a goal
-sibyl recall "implement OAuth refresh"
+# Load context for a goal
+sibyl context "implement OAuth refresh"
 
 # Tell Sibyl what kind of work this is
-sibyl recall "design the rate limiter" --intent plan
+sibyl context "design the rate limiter" --intent plan
 
 # Control how deep retrieval goes
-sibyl recall "why is login flaky" --intent debug --layer deep_search
+sibyl context "why is login flaky" --intent debug --layer deep_search
 ```
 
 Key flags:
 
-| Flag        | Purpose                                                                                |
-| ----------- | -------------------------------------------------------------------------------------- |
-| `--intent`  | `build`, `plan`, `ideate`, `research`, `review`, `debug`, `decide`, `learn`, `general` |
-| `--layer`   | Context depth: `wake`, `recall`, `deep_search`                                         |
-| `--project` | Scope recall to a project                                                              |
-| `--limit`   | Maximum context items (1-50, default 12)                                               |
-| `--raw`     | Recall verbatim raw memories instead of synthesized context                            |
-| `--diary`   | Recall a private agent diary                                                           |
-| `--json`    | Full structured output                                                                 |
+| Flag        | Purpose                                                     |
+| ----------- | ----------------------------------------------------------- |
+| `--intent`  | `build`, `plan`, `review`, `debug`, `general`               |
+| `--layer`   | Context depth: `wake`, `recall`, `deep_search`              |
+| `--project` | Scope recall to a project                                   |
+| `--limit`   | Maximum context items (1-50, default 12)                    |
+| `--raw`     | Recall verbatim raw memories instead of synthesized context |
+| `--diary`   | Recall a private agent diary                                |
+| `--json`    | Full structured output                                      |
 
 The `--layer` flag trades latency for depth. `wake` is a fast session-start pull, `recall` is the
 everyday default, and `deep_search` runs a wider, slower scan for hard questions.
@@ -120,13 +120,13 @@ inspectable run receipts.
 
 ```bash
 # Drain pending candidates through automatic review now
-sibyl memory-review drain
+sibyl admin memory review drain
 
 # Queue the nightly dream-cycle maintenance job
-sibyl memory-review dream
+sibyl admin memory review dream
 
 # Inspect dream-cycle runs and their decision receipts
-sibyl memory-review status
+sibyl admin memory review status
 ```
 
 The dream-cycle keeps the graph from accumulating unreviewed noise. Candidates that pass review
@@ -139,9 +139,9 @@ Memory is auditable end to end. These commands trace where a memory came from an
 reviewed:
 
 ```bash
-sibyl memory-audit              # Inspect memory audit receipts
-sibyl memory-inspect <source>   # Inspect a memory source and its audit trail
-sibyl memory-promote            # Preview or auto-review candidate promotion
+sibyl admin memory audit              # Inspect memory audit receipts
+sibyl admin memory inspect <source>   # Inspect a memory source and its audit trail
+sibyl admin memory promote <candidate> --preview  # Preview candidate promotion
 sibyl archive                   # Browse archived raw quick captures
 ```
 

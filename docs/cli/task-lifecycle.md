@@ -524,5 +524,5 @@ sibyl task complete task_abc123 \
 
 - [`sibyl task list`](./task-list.md) - List tasks
 - [`sibyl task create`](./task-create.md) - Create new task
-- [`sibyl recall`](./recall.md) - Recall a context pack before starting a task
-- [`sibyl search`](./search.md) - Find tasks semantically
+- [`sibyl context`](./context.md) - Recall a context pack before starting a task
+- [`sibyl context`](./context.md) - Find tasks semantically
