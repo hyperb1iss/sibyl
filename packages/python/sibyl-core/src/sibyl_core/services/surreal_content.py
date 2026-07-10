@@ -2858,8 +2858,8 @@ async def save_raw_memory(
                             };
                         };
                     };
-                    RETURN $saved;
                     COMMIT TRANSACTION;
+                    RETURN $saved;
                 """,
                 organization_id=memory.organization_id,
                 uuid=memory.id,

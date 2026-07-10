@@ -22,6 +22,7 @@ from sibyl_core.errors import RevisionConflictError
 from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.services.surreal_content import (
     MemoryScope,
+    RawMemory,
     RawMemoryWrite,
     _raw_memory_from_record,
     _replace_record,
@@ -245,6 +246,52 @@ class TestSurrealContentHelpers:
             }
         finally:
             await client.close()
+
+    @pytest.mark.asyncio
+    async def test_raw_memory_save_returns_saved_record_after_commit(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        existing = {
+            "uuid": "raw-1",
+            "organization_id": "org-1",
+            "source_id": "cli:manual",
+            "principal_id": "bliss",
+            "memory_scope": "private",
+            "raw_content": "Original",
+            "revision": 1,
+        }
+        saved_record = {**existing, "raw_content": "Updated", "revision": 2}
+        client = FakeClient(
+            [
+                _query_result([existing]),
+                _raw_query_result([saved_record]),
+            ]
+        )
+
+        @asynccontextmanager
+        async def fake_session():
+            yield client
+
+        from sibyl_core.services import surreal_content as content_service
+
+        monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+        saved = await save_raw_memory(
+            RawMemory(
+                id="raw-1",
+                organization_id="org-1",
+                source_id="cli:manual",
+                principal_id="bliss",
+                raw_content="Updated",
+            ),
+            expected_revision=1,
+            embedding_provider=None,
+        )
+
+        transaction = client.calls[1][0]
+        assert transaction.index("COMMIT TRANSACTION;") < transaction.index("RETURN $saved;")
+        assert saved.raw_content == "Updated"
+        assert saved.revision == 2
 
     @pytest.mark.asyncio
     async def test_raw_memory_save_atomically_records_supersession(
