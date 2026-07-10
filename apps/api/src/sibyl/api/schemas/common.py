@@ -25,6 +25,7 @@ MemoryCorrectionActionLiteral = Literal[
     "mark_stale",
     "mark_wrong",
     "redact",
+    "revise",
     "restore",
     "supersede",
 ]

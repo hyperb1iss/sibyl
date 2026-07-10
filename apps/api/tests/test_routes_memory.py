@@ -13,6 +13,7 @@ from sibyl.api.routes.memory import (
     add_memory_space_member_record,
     apply_memory_correction_route,
     auto_review_reflection_candidate,
+    blame_memory_source,
     cite_memory,
     create_memory_space_record,
     drain_reflection_review,
@@ -1647,6 +1648,118 @@ async def test_inspect_memory_source_returns_404_for_missing_source() -> None:
 
 
 @pytest.mark.asyncio
+async def test_blame_memory_source_returns_revisions_audits_and_lineage() -> None:
+    org = _org()
+    memory = _memory(
+        id="memory-1",
+        organization_id=str(org.id),
+        source_id="source-1",
+        revision=3,
+        metadata={
+            "content_revisions": [
+                {
+                    "revision": 2,
+                    "content": "Prior body",
+                    "reason": "Clarified",
+                }
+            ],
+            "correction_history": [{"action": "revise", "reason": "Clarified"}],
+        },
+    )
+    lineage = {
+        "derived_from": [
+            {
+                "uuid": "lineage-1",
+                "raw_memory_id": "memory-1",
+                "source_import_id": "import-1",
+            }
+        ],
+        "supersessions": [
+            {
+                "uuid": "supersedes-1",
+                "raw_memory_id": "memory-2",
+                "superseded_raw_memory_id": "memory-1",
+            }
+        ],
+    }
+
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl.api.routes.memory.list_memory_audit_events",
+            AsyncMock(return_value=[]),
+        ),
+        patch(
+            "sibyl.api.routes.memory.get_raw_memory_lineage",
+            AsyncMock(return_value=lineage),
+        ) as get_lineage,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        response = await blame_memory_source(
+            "memory-1",
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(),
+        )
+
+    assert response.source.id == "memory-1"
+    assert response.source.revision == 3
+    assert response.content_revisions[0]["content"] == "Prior body"
+    assert response.derived_from[0]["source_import_id"] == "import-1"
+    assert response.supersessions[0]["raw_memory_id"] == "memory-2"
+    get_lineage.assert_awaited_once_with(
+        organization_id=str(org.id),
+        memory_id="memory-1",
+    )
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["action"] == "memory.blame"
+
+
+@pytest.mark.asyncio
+async def test_blame_memory_source_hides_revision_bodies_after_redaction() -> None:
+    org = _org()
+    memory = _memory(
+        id="memory-1",
+        organization_id=str(org.id),
+        source_id="source-1",
+        metadata={
+            "memory_lifecycle": {
+                "state": "active",
+                "source_id": "memory-1",
+                "action": "redact",
+                "reason": "Sensitive",
+                "flags": ["redacted"],
+            },
+            "content_revisions": [{"revision": 1, "content": "Sensitive prior body"}],
+        },
+    )
+
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl.api.routes.memory.list_memory_audit_events",
+            AsyncMock(return_value=[]),
+        ),
+        patch(
+            "sibyl.api.routes.memory.get_raw_memory_lineage",
+            AsyncMock(return_value={"derived_from": [], "supersessions": []}),
+        ),
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+    ):
+        response = await blame_memory_source(
+            "memory-1",
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(),
+        )
+
+    assert response.source.content_redacted is True
+    assert response.source.raw_content is None
+    assert response.content_revisions == []
+    assert "content_revisions" not in response.source.metadata
+
+
+@pytest.mark.asyncio
 async def test_preview_memory_correction_audits_lifecycle_action() -> None:
     org = _org()
     memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
@@ -1693,8 +1806,10 @@ async def test_preview_memory_correction_audits_lifecycle_action() -> None:
         action="hide",
         reason="outdated",
         accessible_projects=None,
+        accessible_teams=None,
         replacement_source_id=None,
         duplicate_of_source_id=None,
+        revised_content=None,
     )
     audit.assert_awaited_once()
     assert audit.await_args.kwargs["action"] == "memory.correction.hide.preview"
@@ -1781,8 +1896,10 @@ async def test_apply_memory_correction_returns_updated_review_state() -> None:
         action="hide",
         reason="outdated",
         accessible_projects=None,
+        accessible_teams=None,
         replacement_source_id=None,
         duplicate_of_source_id=None,
+        revised_content=None,
         expected_revision=1,
     )
     audit.assert_awaited_once()

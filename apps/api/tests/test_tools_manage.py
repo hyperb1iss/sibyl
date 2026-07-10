@@ -102,7 +102,14 @@ class TestActionCategories:
 
     def test_source_actions_defined(self) -> None:
         """Verify all source actions are defined."""
-        expected = {"crawl", "sync", "refresh", "link_graph", "link_graph_status"}
+        expected = {
+            "correct_memory",
+            "crawl",
+            "sync",
+            "refresh",
+            "link_graph",
+            "link_graph_status",
+        }
         assert expected == SOURCE_ACTIONS
 
     def test_epic_actions_defined(self) -> None:

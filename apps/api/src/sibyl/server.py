@@ -31,6 +31,8 @@ from sibyl.persistence.auth_runtime import (
     authenticate_api_key,
     create_project_record,
     has_owner_membership,
+    list_accessible_team_scope_keys,
+    log_memory_audit_event,
     resolve_accessible_project_graph_ids,
     resolve_org_role,
 )
@@ -47,7 +49,11 @@ from sibyl_core.auth.memory_policy import (
     authorize_memory_write,
 )
 from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptureService
-from sibyl_core.services.surreal_content import MemoryScope
+from sibyl_core.services.surreal_content import (
+    MemoryScope,
+    get_raw_memory,
+    get_raw_memory_by_source_id,
+)
 
 log = structlog.get_logger()
 
@@ -117,6 +123,7 @@ class McpContext:
         scope_key: str | None = None,
         project_id: str | None = None,
         accessible_projects: Iterable[str] | None = None,
+        accessible_teams: Iterable[str] | None = None,
         accessible_delegations: Iterable[str] | None = None,
         source_surface: str = "mcp",
     ) -> MemoryPolicyContext:
@@ -126,6 +133,9 @@ class McpContext:
             organization_role=self.org_role,
             accessible_projects=frozenset(str(value) for value in accessible_projects)
             if accessible_projects is not None
+            else None,
+            accessible_teams=frozenset(str(value) for value in accessible_teams)
+            if accessible_teams is not None
             else None,
             accessible_delegations=frozenset(str(value) for value in accessible_delegations)
             if accessible_delegations is not None
@@ -472,12 +482,14 @@ def _authorize_mcp_memory_write(
     scope_key: str | None,
     accessible_projects: set[str] | None,
     surface: str,
+    accessible_teams: set[str] | None = None,
 ) -> MemoryPolicyDecision:
     policy_context = ctx.to_memory_policy_context(
         memory_space=memory_scope,
         scope_key=scope_key,
         project_id=scope_key,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         source_surface=surface,
     )
     decision = authorize_memory_write(
@@ -1094,6 +1106,38 @@ async def _authorize_mcp_manage_action(
     accessible_projects: set[str] | None,
 ) -> MemoryPolicyDecision | None:
     normalized_action = action.lower().strip()
+    if normalized_action == "correct_memory":
+        if not entity_id:
+            return None
+        memory = await get_raw_memory(
+            organization_id=ctx.org_id,
+            memory_id=entity_id,
+        )
+        if memory is None:
+            memory = await get_raw_memory_by_source_id(
+                organization_id=ctx.org_id,
+                source_id=entity_id,
+            )
+        if memory is None:
+            return None
+        if memory.memory_scope is MemoryScope.PRIVATE and memory.principal_id != ctx.user_id:
+            raise ValueError("principal_mismatch")
+        policy_projects = accessible_projects
+        if policy_projects is None and memory.scope_key:
+            policy_projects = {memory.scope_key}
+        accessible_teams = (
+            {str(team_id) for team_id in await list_accessible_team_scope_keys(ctx)}
+            if memory.memory_scope is MemoryScope.TEAM
+            else None
+        )
+        return _authorize_mcp_memory_write(
+            ctx=ctx,
+            memory_scope=memory.memory_scope.value,
+            scope_key=memory.scope_key,
+            accessible_projects=policy_projects,
+            surface="mcp_manage_correct_memory",
+            accessible_teams=accessible_teams,
+        )
     if normalized_action in MCP_PROJECT_ID_POLICY_ACTIONS:
         project_id = entity_id
     elif normalized_action in MCP_ENTITY_PROJECT_POLICY_ACTIONS:
@@ -1338,6 +1382,155 @@ async def _manage_workflow_transition(
     )
 
 
+async def _manage_memory_correction(
+    *,
+    ctx: McpContext,
+    entity_id: str | None,
+    data: dict[str, Any],
+    accessible_projects: set[str] | None,
+    policy_decision: MemoryPolicyDecision | None,
+) -> dict[str, Any]:
+    from sibyl_core.services.memory import apply_memory_correction
+
+    if not entity_id:
+        return {
+            "success": False,
+            "action": "correct_memory",
+            "entity_id": None,
+            "message": "entity_id (raw memory ID) required for correct_memory action",
+            "data": {},
+        }
+    correction_action = data.get("action")
+    if not isinstance(correction_action, str) or not correction_action.strip():
+        return {
+            "success": False,
+            "action": "correct_memory",
+            "entity_id": entity_id,
+            "message": "data.action required for correct_memory action",
+            "data": {},
+        }
+    reason = data.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        return {
+            "success": False,
+            "action": "correct_memory",
+            "entity_id": entity_id,
+            "message": "data.reason required for correct_memory action",
+            "data": {},
+        }
+    expected_revision = data.get("expected_revision")
+    if expected_revision is not None and (
+        isinstance(expected_revision, bool)
+        or not isinstance(expected_revision, int)
+        or expected_revision < 1
+    ):
+        return {
+            "success": False,
+            "action": "correct_memory",
+            "entity_id": entity_id,
+            "message": "expected_revision must be an integer greater than zero",
+            "data": {},
+        }
+    memory = await get_raw_memory(organization_id=ctx.org_id, memory_id=entity_id)
+    if memory is None:
+        memory = await get_raw_memory_by_source_id(
+            organization_id=ctx.org_id,
+            source_id=entity_id,
+        )
+    if memory is None:
+        return {
+            "success": False,
+            "action": "correct_memory",
+            "entity_id": entity_id,
+            "message": f"Memory source not found: {entity_id}",
+            "data": {},
+        }
+    result = await apply_memory_correction(
+        organization_id=ctx.org_id,
+        source_id=memory.id,
+        principal_id=ctx.user_id,
+        action=correction_action,
+        reason=reason.strip(),
+        accessible_projects=(
+            {memory.scope_key}
+            if accessible_projects is None
+            and memory.memory_scope is MemoryScope.PROJECT
+            and memory.scope_key
+            else accessible_projects
+        ),
+        accessible_teams=(
+            policy_decision.policy_context.accessible_teams
+            if policy_decision is not None and policy_decision.policy_context is not None
+            else None
+        ),
+        replacement_source_id=(
+            str(data["replacement_source_id"]) if data.get("replacement_source_id") else None
+        ),
+        duplicate_of_source_id=(
+            str(data["duplicate_of_source_id"]) if data.get("duplicate_of_source_id") else None
+        ),
+        revised_content=(
+            str(data["revised_content"]) if data.get("revised_content") is not None else None
+        ),
+        expected_revision=expected_revision,
+    )
+    revision = result.updated_memory.revision if result.updated_memory else None
+    affected_records = (
+        [f"raw_captures:{source_id}" for source_id in result.preview.affected_source_ids]
+        if result.applied
+        else []
+    )
+    response_data = {
+        "allowed": result.preview.allowed,
+        "applied": result.applied,
+        "correction_action": result.preview.action,
+        "reason": result.preview.reason,
+        "revision": revision,
+        "affected_source_ids": list(result.preview.affected_source_ids),
+        "affected_derived_ids": list(result.preview.affected_derived_ids),
+        "mutation_receipt": _mcp_mutation_receipt(
+            data,
+            applied=result.applied,
+            revision=revision,
+            affected_records=affected_records,
+        ),
+    }
+    await log_memory_audit_event(
+        action=result.preview.audit_action,
+        user_id=ctx.user_id,
+        organization_id=ctx.org_id,
+        request=None,
+        memory_scope=memory.memory_scope.value,
+        scope_key=memory.scope_key,
+        project_id=memory.project_id or memory.scope_key,
+        source_surface="mcp_manage_correct_memory",
+        source_ids=result.preview.affected_source_ids or [memory.id],
+        derived_ids=result.preview.affected_derived_ids,
+        policy_allowed=result.preview.allowed and result.applied,
+        policy_reason=result.preview.reason,
+        details={
+            "action": result.preview.action,
+            "applied": result.applied,
+            "target_lifecycle_state": result.preview.target_lifecycle_state,
+            "target_lifecycle_flags": result.preview.target_lifecycle_flags,
+        },
+    )
+    payload = {
+        "success": result.applied,
+        "action": "correct_memory",
+        "entity_id": entity_id,
+        "message": (
+            f"Memory correction applied: {result.preview.action}"
+            if result.applied
+            else f"Memory correction denied: {result.preview.reason}"
+        ),
+        "data": response_data,
+    }
+    if policy_decision is not None:
+        payload["policy_reason"] = policy_decision.reason
+    return payload
+
+
 @_serialize_mcp_idempotency("mcp/manage", action_scoped=True)
 async def _manage_mcp_action(
     *,
@@ -1435,6 +1628,14 @@ async def _manage_mcp_action(
             work_item_action=work_item_action,
             entity_id=entity_id,
             data=full_data,
+            policy_decision=policy_decision,
+        )
+    elif normalized_action == "correct_memory":
+        payload = await _manage_memory_correction(
+            ctx=ctx,
+            entity_id=entity_id,
+            data=full_data,
+            accessible_projects=accessible_projects,
             policy_decision=policy_decision,
         )
     else:
@@ -2186,6 +2387,8 @@ def _register_tools(mcp: FastMCP) -> None:
             - refresh: Sync all sources
             - link_graph: Link document chunks to knowledge graph (entity_id = source ID, optional)
             - link_graph_status: Get status of pending graph linking
+            - correct_memory: Correct a raw memory (entity_id = raw memory ID,
+              data.action = wrong, stale, duplicate, superseded, or revise)
 
         Analysis Actions:
             - estimate: Estimate task effort from similar completed tasks
@@ -2212,6 +2415,8 @@ def _register_tools(mcp: FastMCP) -> None:
             manage("link_graph")  # Link all pending chunks
             manage("link_graph", entity_id="source-123")  # Link specific source
             manage("link_graph_status")  # Check pending work
+            manage("correct_memory", entity_id="raw-123",
+                   data={"action": "wrong", "reason": "Contradicted by source"})
             manage("estimate", entity_id="task-456")
             manage("add_note", entity_id="task-123", data={"content": "Root cause found"})
         """

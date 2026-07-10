@@ -195,6 +195,13 @@ _CORRECTION_TARGET_FLAGS: dict[str, MemoryLifecycleFlag] = {
     "mark_sensitive": MemoryLifecycleFlag.SENSITIVE,
     "redact": MemoryLifecycleFlag.REDACTED,
 }
+_CORRECTION_ACTIONS = frozenset({*_CORRECTION_TARGET_STATES, *_CORRECTION_TARGET_FLAGS, "revise"})
+_CORRECTION_ACTION_ALIASES = {
+    "duplicate": "mark_duplicate",
+    "stale": "mark_stale",
+    "superseded": "supersede",
+    "wrong": "mark_wrong",
+}
 _CORRECTION_RECALL_EXCLUDED_STATES = frozenset(
     state.value
     for state in (
@@ -1274,11 +1281,18 @@ def _correction_requirement_reason(
     action: str,
     replacement_source_id: str | None,
     duplicate_of_source_id: str | None,
+    revised_content: str | None,
+    current_content: str,
 ) -> str | None:
     if action == "supersede" and not replacement_source_id:
         return "missing_replacement_source"
     if action == "mark_duplicate" and not duplicate_of_source_id:
         return "missing_duplicate_source"
+    if action == "revise":
+        if revised_content is None or not revised_content.strip():
+            return "missing_revised_content"
+        if revised_content == current_content:
+            return "unchanged_revised_content"
     return None
 
 
@@ -1331,12 +1345,15 @@ async def preview_memory_correction(
     action: str,
     reason: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     replacement_source_id: str | None = None,
     duplicate_of_source_id: str | None = None,
+    revised_content: str | None = None,
 ) -> MemoryCorrectionPreview:
-    normalized_action = action.strip().lower()
-    if normalized_action not in _CORRECTION_TARGET_STATES | _CORRECTION_TARGET_FLAGS:
+    requested_action = action.strip().lower()
+    normalized_action = _CORRECTION_ACTION_ALIASES.get(requested_action, requested_action)
+    if normalized_action not in _CORRECTION_ACTIONS:
         return _correction_preview_denied(
             source_id=source_id,
             action=normalized_action,
@@ -1366,23 +1383,24 @@ async def preview_memory_correction(
     if target_flag := _CORRECTION_TARGET_FLAGS.get(normalized_action):
         target_lifecycle_flags = list(dict.fromkeys([*target_lifecycle_flags, target_flag.value]))
 
-    read_decision = _authorize_share_source_read(
+    write_decision = _authorize_correction_source_write(
         memory=memory,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
-    if not read_decision.allowed:
+    if not write_decision.allowed:
         return _correction_preview_denied(
             source_id=memory.id,
             action=normalized_action,
-            reason=read_decision.reason,
+            reason=write_decision.reason,
             target_lifecycle_state=target_lifecycle_state,
             target_lifecycle_flags=target_lifecycle_flags,
-            policy_decisions=(read_decision,),
+            policy_decisions=(write_decision,),
             metadata={
                 "policy_allowed": False,
-                "policy_reasons": [read_decision.reason],
+                "policy_reasons": [write_decision.reason],
                 "requested_source_id": source_id,
             },
         )
@@ -1391,6 +1409,8 @@ async def preview_memory_correction(
         action=normalized_action,
         replacement_source_id=replacement_source_id,
         duplicate_of_source_id=duplicate_of_source_id,
+        revised_content=revised_content,
+        current_content=memory.raw_content,
     )
     if requirement_reason:
         return _correction_preview_denied(
@@ -1399,7 +1419,7 @@ async def preview_memory_correction(
             reason=requirement_reason,
             target_lifecycle_state=target_lifecycle_state,
             target_lifecycle_flags=target_lifecycle_flags,
-            policy_decisions=(read_decision,),
+            policy_decisions=(write_decision,),
             metadata={
                 "policy_allowed": False,
                 "policy_reasons": [requirement_reason],
@@ -1423,7 +1443,7 @@ async def preview_memory_correction(
                 reason=reference_reason,
                 target_lifecycle_state=target_lifecycle_state,
                 target_lifecycle_flags=target_lifecycle_flags,
-                policy_decisions=(read_decision,),
+                policy_decisions=(write_decision,),
                 metadata={
                     "policy_allowed": False,
                     "policy_reasons": [reference_reason],
@@ -1446,7 +1466,7 @@ async def preview_memory_correction(
                 reason=reference_reason,
                 target_lifecycle_state=target_lifecycle_state,
                 target_lifecycle_flags=target_lifecycle_flags,
-                policy_decisions=(read_decision,),
+                policy_decisions=(write_decision,),
                 metadata={
                     "duplicate_of_source_id": duplicate_of_source_id,
                     "policy_allowed": False,
@@ -1464,9 +1484,10 @@ async def preview_memory_correction(
     metadata = {
         "duplicate_of_source_id": canonical_duplicate_of_source_id,
         "policy_allowed": True,
-        "policy_reasons": [read_decision.reason],
+        "policy_reasons": [write_decision.reason],
         "replacement_source_id": canonical_replacement_source_id,
         "requested_source_id": source_id,
+        "revises_content": normalized_action == "revise",
     }
     return MemoryCorrectionPreview(
         allowed=True,
@@ -1481,7 +1502,7 @@ async def preview_memory_correction(
         recall_impact=recall_impact,
         synthesis_impact=synthesis_impact,
         audit_action=_correction_audit_action(normalized_action),
-        policy_decisions=(read_decision,),
+        policy_decisions=(write_decision,),
         metadata=metadata,
     )
 
@@ -1493,6 +1514,8 @@ def _correction_metadata(
     reason: str | None,
     replacement_source_id: str | None,
     duplicate_of_source_id: str | None,
+    revised_content: str | None,
+    principal_id: str | None,
 ) -> dict[str, object]:
     metadata = dict(memory.metadata)
     history = list(_metadata_dict_values(metadata, "correction_history"))
@@ -1503,6 +1526,18 @@ def _correction_metadata(
         review_state=memory.review_state,
     )
     prior_state = str(prior_lifecycle.state)
+    if preview.action == "revise" and revised_content is not None:
+        revisions = list(_metadata_dict_values(metadata, "content_revisions"))
+        revisions.append(
+            {
+                "revision": memory.revision,
+                "content": memory.raw_content,
+                "reason": reason or preview.reason,
+                "created_at": now,
+                "created_by_user_id": principal_id,
+            }
+        )
+        metadata["content_revisions"] = revisions
     if preview.action == "restore":
         for key in (
             "deleted_at",
@@ -1563,6 +1598,8 @@ def _correction_metadata(
             "created_at": now,
             "replacement_source_id": replacement_source_id,
             "duplicate_of_source_id": duplicate_of_source_id,
+            "prior_revision": memory.revision,
+            "created_by_user_id": principal_id,
         }
     )
     metadata["correction_history"] = history
@@ -1598,9 +1635,11 @@ async def apply_memory_correction(
     action: str,
     reason: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     replacement_source_id: str | None = None,
     duplicate_of_source_id: str | None = None,
+    revised_content: str | None = None,
     expected_revision: int | None = None,
 ) -> MemoryCorrectionResult:
     preview = await preview_memory_correction(
@@ -1610,9 +1649,11 @@ async def apply_memory_correction(
         action=action,
         reason=reason,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
         replacement_source_id=replacement_source_id,
         duplicate_of_source_id=duplicate_of_source_id,
+        revised_content=revised_content,
     )
     if not preview.allowed:
         return MemoryCorrectionResult(applied=False, preview=preview)
@@ -1648,6 +1689,7 @@ async def apply_memory_correction(
         review_state = _metadata_str(memory.metadata, "prior_review_state") or "pending"
     updated = replace(
         memory,
+        raw_content=revised_content if preview.action == "revise" else memory.raw_content,
         review_state=review_state,
         metadata=_correction_metadata(
             memory=memory,
@@ -1655,6 +1697,8 @@ async def apply_memory_correction(
             reason=reason,
             replacement_source_id=canonical_replacement_source_id,
             duplicate_of_source_id=canonical_duplicate_of_source_id,
+            revised_content=revised_content,
+            principal_id=principal_id,
         ),
     )
     if expected_revision is None:
@@ -2283,6 +2327,32 @@ def _authorize_share_source_read(
             scope_key=memory.scope_key,
         )
     return authorize_memory_read(
+        principal_id=principal_id,
+        memory_scope=memory.memory_scope,
+        scope_key=memory.scope_key,
+        accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+    )
+
+
+def _authorize_correction_source_write(
+    *,
+    memory: RawMemory,
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
+) -> MemoryPolicyDecision:
+    if memory.memory_scope is MemoryScope.PRIVATE and memory.principal_id != principal_id:
+        return MemoryPolicyDecision(
+            action=MemoryPolicyAction.WRITE,
+            allowed=False,
+            reason="principal_mismatch",
+            memory_scope=memory.memory_scope,
+            scope_key=memory.scope_key,
+        )
+    return authorize_memory_write(
         principal_id=principal_id,
         memory_scope=memory.memory_scope,
         scope_key=memory.scope_key,

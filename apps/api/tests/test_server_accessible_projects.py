@@ -15,6 +15,7 @@ from sibyl.server import (
     _get_accessible_projects,
     _get_mcp_context,
     _manage_mcp_action,
+    _manage_memory_correction,
     _manage_workflow_transition,
     _reflect_mcp_memory,
     _remember_mcp_memory,
@@ -35,6 +36,7 @@ from sibyl_core.models.context import (
     ContextSection,
 )
 from sibyl_core.models.reflection import ReflectionCandidate, ReflectionPack
+from sibyl_core.services.surreal_content import MemoryScope
 
 
 def _context_pack() -> ContextPack:
@@ -980,6 +982,79 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service() -> Non
     assert replayed["data"]["mutation_receipt"]["replayed"] is True
     episode_enqueue.assert_awaited_once()
     procedure_enqueue.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_manage_memory_correction_returns_audited_receipt() -> None:
+    ctx = McpContext(org_id="org-1", user_id="user-1", scopes=["mcp"])
+    memory = SimpleNamespace(
+        id="raw-1",
+        memory_scope=MemoryScope.PROJECT,
+        principal_id="user-1",
+        scope_key="project-a",
+        project_id="project-a",
+    )
+    preview = SimpleNamespace(
+        allowed=True,
+        action="mark_wrong",
+        reason="Incorrect",
+        audit_action="memory.correction.mark_wrong",
+        affected_source_ids=["raw-1"],
+        affected_derived_ids=["decision-1"],
+        target_lifecycle_state="contested",
+        target_lifecycle_flags=[],
+    )
+    result = SimpleNamespace(
+        applied=True,
+        preview=preview,
+        updated_memory=SimpleNamespace(revision=2),
+    )
+
+    with (
+        patch("sibyl.server.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl_core.services.memory.apply_memory_correction",
+            AsyncMock(return_value=result),
+        ) as apply_correction,
+        patch("sibyl.server.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        response = await _manage_memory_correction(
+            ctx=ctx,
+            entity_id="raw-1",
+            data={
+                "action": "mark_wrong",
+                "reason": "Incorrect",
+                "expected_revision": 1,
+                "idempotency_key": "correct-1",
+            },
+            accessible_projects=None,
+            policy_decision=None,
+        )
+
+    assert response["success"] is True
+    assert response["data"]["mutation_receipt"] == {
+        "operation_id": "correct-1",
+        "applied": True,
+        "revision": 2,
+        "affected_records": ["raw_captures:raw-1"],
+        "idempotency_key": "correct-1",
+        "replayed": False,
+    }
+    apply_correction.assert_awaited_once_with(
+        organization_id="org-1",
+        source_id="raw-1",
+        principal_id="user-1",
+        action="mark_wrong",
+        reason="Incorrect",
+        accessible_projects={"project-a"},
+        accessible_teams=None,
+        replacement_source_id=None,
+        duplicate_of_source_id=None,
+        revised_content=None,
+        expected_revision=1,
+    )
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["action"] == "memory.correction.mark_wrong"
 
 
 @pytest.mark.asyncio

@@ -33,6 +33,7 @@ from sibyl.api.schemas import (
     MemorySharePreviewResponse,
     MemoryShareRequest,
     MemoryShareResponse,
+    MemorySourceBlameResponse,
     MemorySourceInspectResponse,
     MemorySpaceAccessPreviewRequest,
     MemorySpaceAccessPreviewResponse,
@@ -123,6 +124,7 @@ from sibyl_core.services.surreal_content import (
     RawMemoryRecallResult,
     get_raw_memory,
     get_raw_memory_by_source_id,
+    get_raw_memory_lineage,
     list_reflection_candidate_reviews,
     recall_raw_memory_with_sources as recall_raw_memory,
     remember_raw_memory,
@@ -1059,6 +1061,48 @@ async def _inspect_content_policy(
     return decision
 
 
+async def _require_source_policy(
+    *,
+    ctx: AuthContext,
+    memory: RawMemory,
+    action: MemoryPolicyAction,
+    surface: str,
+    request: Request,
+) -> MemoryPolicyDecision:
+    if memory.memory_scope is MemoryScope.PRIVATE and memory.principal_id != ctx.user_id:
+        decision = MemoryPolicyDecision(
+            action=action,
+            allowed=False,
+            reason="principal_mismatch",
+            memory_scope=memory.memory_scope,
+            scope_key=memory.scope_key,
+        )
+        _log_policy_decision(ctx=ctx, decision=decision, surface=surface)
+        await _log_memory_audit(
+            action="memory.policy_deny",
+            ctx=ctx,
+            request=request,
+            memory_scope=memory.memory_scope.value,
+            scope_key=memory.scope_key,
+            project_id=_memory_project_id(memory),
+            source_surface=surface,
+            policy_allowed=False,
+            policy_reason=decision.reason,
+            details={"policy_action": action.value},
+        )
+        raise HTTPException(status_code=403, detail=decision.reason)
+    return await _authorize_memory_policy(
+        ctx=ctx,
+        action=action,
+        memory_scope=memory.memory_scope.value,
+        scope_key=memory.scope_key,
+        project_id=_memory_project_id(memory),
+        agent_id=memory.agent_id,
+        surface=surface,
+        request=request,
+    )
+
+
 def _dedupe_audit_rows(rows: list[dict[str, object]], *, limit: int) -> list[dict[str, object]]:
     seen: set[str] = set()
     deduped: list[dict[str, object]] = []
@@ -1267,6 +1311,7 @@ def _memory_source_inspect_response(
         metadata.pop("memory_lifecycle", None)
         metadata.pop("reflection_findings", None)
         metadata.pop("claim_records", None)
+        metadata.pop("content_revisions", None)
     visible_audit_events = _audit_events_for_visibility(
         audit_events,
         content_visible=policy_decision.allowed,
@@ -1298,6 +1343,7 @@ def _memory_source_inspect_response(
         id=memory.id,
         organization_id=memory.organization_id,
         source_id=memory.source_id,
+        revision=memory.revision,
         principal_id=memory.principal_id,
         agent_id=memory.agent_id,
         project_id=project_id,
@@ -2302,10 +2348,81 @@ async def inspect_memory_source(
     return response
 
 
+@router.get(
+    "/blame/{source_id:path}",
+    response_model=MemorySourceBlameResponse,
+    dependencies=[Depends(require_org_role(*_READ_ROLES))],
+)
+@handle_workflow_errors("blame_memory_source", id_param="source_id")
+async def blame_memory_source(
+    source_id: str,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+) -> MemorySourceBlameResponse:
+    """Inspect revision, correction, audit, and lineage history for a memory."""
+    if not ctx.user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    memory = await _load_memory_source_for_org(
+        organization_id=str(org.id),
+        source_id=source_id,
+    )
+    policy_decision = await _require_source_policy(
+        ctx=ctx,
+        memory=memory,
+        action=MemoryPolicyAction.READ,
+        surface="memory_blame",
+        request=http_request,
+    )
+    audit_events = await _source_audit_events(
+        organization_id=str(org.id),
+        source_id=source_id,
+        memory=memory,
+    )
+    source = _memory_source_inspect_response(
+        memory=memory,
+        policy_decision=policy_decision,
+        audit_events=audit_events,
+    )
+    lineage = await get_raw_memory_lineage(
+        organization_id=str(org.id),
+        memory_id=memory.id,
+    )
+    response = MemorySourceBlameResponse(
+        source=source,
+        content_revisions=(
+            []
+            if source.content_redacted
+            else _metadata_dicts(memory.metadata.get("content_revisions"))
+        ),
+        derived_from=lineage["derived_from"],
+        supersessions=lineage["supersessions"],
+    )
+    await _log_memory_audit(
+        action="memory.blame",
+        ctx=ctx,
+        request=http_request,
+        memory_scope=memory.memory_scope.value,
+        scope_key=memory.scope_key,
+        project_id=source.project_id,
+        source_surface="memory_blame",
+        source_ids=[memory.id, memory.source_id],
+        derived_ids=source.derived_ids,
+        policy_allowed=True,
+        policy_reason=policy_decision.reason,
+        details={
+            "content_revision_count": len(response.content_revisions),
+            "derived_from_count": len(response.derived_from),
+            "supersession_count": len(response.supersessions),
+        },
+    )
+    return response
+
+
 @router.post(
     "/inspect/{source_id:path}/corrections/preview",
     response_model=MemoryCorrectionResponse,
-    dependencies=[Depends(require_org_role(*_ADMIN_ROLES))],
+    dependencies=[Depends(require_org_role(*_WRITE_ROLES))],
 )
 async def preview_memory_correction_route(
     source_id: str,
@@ -2323,7 +2440,19 @@ async def preview_memory_correction_route(
         organization_id=str(org.id),
         source_id=source_id,
     )
+    await _require_source_policy(
+        ctx=ctx,
+        memory=memory,
+        action=MemoryPolicyAction.WRITE,
+        surface="memory_correction_preview",
+        request=http_request,
+    )
     accessible_projects = await _project_accessible_for_policy(
+        ctx=ctx,
+        memory_scope=memory.memory_scope.value,
+        scope_key=memory.scope_key,
+    )
+    accessible_teams = await _team_accessible_for_policy(
         ctx=ctx,
         memory_scope=memory.memory_scope.value,
         scope_key=memory.scope_key,
@@ -2335,8 +2464,10 @@ async def preview_memory_correction_route(
         action=request.action,
         reason=request.reason,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         replacement_source_id=request.replacement_source_id,
         duplicate_of_source_id=request.duplicate_of_source_id,
+        revised_content=request.revised_content,
     )
     response = _correction_response(preview)
     await _log_memory_audit(
@@ -2366,7 +2497,7 @@ async def preview_memory_correction_route(
 @router.post(
     "/inspect/{source_id:path}/corrections",
     response_model=MemoryCorrectionResponse,
-    dependencies=[Depends(require_org_role(*_ADMIN_ROLES))],
+    dependencies=[Depends(require_org_role(*_WRITE_ROLES))],
 )
 @handle_workflow_errors("apply_memory_correction", id_param="source_id")
 @serialize_idempotent_request
@@ -2386,7 +2517,19 @@ async def apply_memory_correction_route(
         organization_id=str(org.id),
         source_id=source_id,
     )
+    await _require_source_policy(
+        ctx=ctx,
+        memory=memory,
+        action=MemoryPolicyAction.WRITE,
+        surface="memory_correction",
+        request=http_request,
+    )
     accessible_projects = await _project_accessible_for_policy(
+        ctx=ctx,
+        memory_scope=memory.memory_scope.value,
+        scope_key=memory.scope_key,
+    )
+    accessible_teams = await _team_accessible_for_policy(
         ctx=ctx,
         memory_scope=memory.memory_scope.value,
         scope_key=memory.scope_key,
@@ -2412,8 +2555,10 @@ async def apply_memory_correction_route(
         "action": request.action,
         "reason": request.reason,
         "accessible_projects": accessible_projects,
+        "accessible_teams": accessible_teams,
         "replacement_source_id": request.replacement_source_id,
         "duplicate_of_source_id": request.duplicate_of_source_id,
+        "revised_content": request.revised_content,
     }
     if request.expected_revision is not None:
         correction_kwargs["expected_revision"] = request.expected_revision

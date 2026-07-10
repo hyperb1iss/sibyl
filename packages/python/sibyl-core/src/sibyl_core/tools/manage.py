@@ -379,13 +379,14 @@ type EpicAction = Literal[
     "update_epic",  # Update epic fields
 ]
 
-# Source operations (no REST equivalent)
+# Source operations
 type SourceAction = Literal[
     "crawl",  # Trigger crawl of URL
     "sync",  # Re-crawl existing source
     "refresh",  # Sync all sources
     "link_graph",  # Link documents to knowledge graph entities
     "link_graph_status",  # Get linking job status
+    "correct_memory",  # Correct or revise a raw memory source
 ]
 
 # Analysis (no REST equivalent)
@@ -1280,6 +1281,13 @@ async def _handle_source_action(
             message="entity_id (source ID) required for sync action",
         )
 
+    if action == "correct_memory" and not entity_id:
+        return ManageResponse(
+            success=False,
+            action=action,
+            message="entity_id (raw memory ID) required for correct_memory action",
+        )
+
     if not organization_id:
         return ManageResponse(
             success=False,
@@ -1305,6 +1313,90 @@ async def _handle_source_action(
 
     if action == "link_graph_status":
         return await _link_graph_status(organization_id)
+
+    if action == "correct_memory":
+        assert entity_id is not None
+        correction_action = data.get("action")
+        if not isinstance(correction_action, str) or not correction_action.strip():
+            return ManageResponse(
+                success=False,
+                action=action,
+                entity_id=entity_id,
+                message="data.action required for correct_memory action",
+            )
+        reason = data.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            return ManageResponse(
+                success=False,
+                action=action,
+                entity_id=entity_id,
+                message="data.reason required for correct_memory action",
+            )
+        expected_revision = data.get("expected_revision")
+        if expected_revision is not None and (
+            isinstance(expected_revision, bool)
+            or not isinstance(expected_revision, int)
+            or expected_revision < 1
+        ):
+            return ManageResponse(
+                success=False,
+                action=action,
+                entity_id=entity_id,
+                message="expected_revision must be an integer greater than zero",
+            )
+        from sibyl_core.services.memory import apply_memory_correction
+
+        result = await apply_memory_correction(
+            organization_id=organization_id,
+            source_id=entity_id,
+            principal_id=str(data["user_id"]) if data.get("user_id") else None,
+            action=correction_action,
+            reason=reason.strip(),
+            accessible_projects=data.get("accessible_projects"),
+            accessible_teams=data.get("accessible_teams"),
+            accessible_delegations=data.get("accessible_delegations"),
+            replacement_source_id=(
+                str(data["replacement_source_id"]) if data.get("replacement_source_id") else None
+            ),
+            duplicate_of_source_id=(
+                str(data["duplicate_of_source_id"]) if data.get("duplicate_of_source_id") else None
+            ),
+            revised_content=(
+                str(data["revised_content"]) if data.get("revised_content") is not None else None
+            ),
+            expected_revision=expected_revision,
+        )
+        revision = result.updated_memory.revision if result.updated_memory else None
+        affected_records = (
+            [f"raw_captures:{source_id}" for source_id in result.preview.affected_source_ids]
+            if result.applied
+            else []
+        )
+        return ManageResponse(
+            success=result.applied,
+            action=action,
+            entity_id=entity_id,
+            message=(
+                f"Memory correction applied: {result.preview.action}"
+                if result.applied
+                else f"Memory correction denied: {result.preview.reason}"
+            ),
+            data={
+                "allowed": result.preview.allowed,
+                "applied": result.applied,
+                "correction_action": result.preview.action,
+                "reason": result.preview.reason,
+                "revision": revision,
+                "affected_source_ids": list(result.preview.affected_source_ids),
+                "affected_derived_ids": list(result.preview.affected_derived_ids),
+                "mutation_receipt": _manage_mutation_receipt(
+                    data,
+                    applied=result.applied,
+                    revision=revision,
+                    affected_records=affected_records,
+                ),
+            },
+        )
 
     return ManageResponse(success=False, action=action, message="Unknown source action")
 

@@ -28,6 +28,7 @@ from sibyl_core.services.surreal_content import (
     get_or_create_source,
     get_raw_memory_by_dedupe_key,
     get_raw_memory_by_source_id,
+    get_raw_memory_lineage,
     list_raw_memories_for_promotion,
     list_raw_memories_for_scope,
     list_reflection_dream_source_memories,
@@ -157,6 +158,47 @@ class EmbeddedContentClient:
 
 
 class TestSurrealContentHelpers:
+    @pytest.mark.asyncio
+    async def test_raw_memory_lineage_reads_import_and_supersession_edges(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        derived = {
+            "uuid": "derived-1",
+            "raw_memory_id": "raw-1",
+            "source_import_id": "import-1",
+        }
+        supersession = {
+            "uuid": "supersedes-1",
+            "raw_memory_id": "raw-2",
+            "superseded_raw_memory_id": "raw-1",
+        }
+        client = FakeClient([_query_result([derived]), _query_result([supersession])])
+
+        @asynccontextmanager
+        async def fake_session():
+            yield client
+
+        from sibyl_core.services import surreal_content as content_service
+
+        monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+
+        result = await get_raw_memory_lineage(
+            organization_id="org-1",
+            memory_id="raw-1",
+        )
+
+        assert result == {
+            "derived_from": [derived],
+            "supersessions": [supersession],
+        }
+        assert len(client.calls) == 2
+        assert client.calls[0][1] == {
+            "organization_id": "org-1",
+            "memory_id": "raw-1",
+        }
+        assert client.calls[1][1] == client.calls[0][1]
+
     @pytest.mark.asyncio
     async def test_raw_memory_save_enforces_expected_revision(
         self,

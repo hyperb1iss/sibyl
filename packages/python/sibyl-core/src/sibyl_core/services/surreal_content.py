@@ -2554,6 +2554,45 @@ async def get_raw_memory_by_source_id(
     return _raw_memory_from_record(record) if record is not None else None
 
 
+async def get_raw_memory_lineage(
+    *,
+    organization_id: str,
+    memory_id: str,
+) -> dict[str, list[SurrealRecord]]:
+    async with surreal_content_client() as client:
+        derived_from = await _select_many(
+            client,
+            """
+            SELECT uuid, raw_memory_id, source_import_id, source_id, created_at
+            FROM derived_from
+            WHERE organization_id = $organization_id
+                AND raw_memory_id = $memory_id
+            ORDER BY created_at ASC, uuid ASC;
+            """,
+            organization_id=organization_id,
+            memory_id=memory_id,
+        )
+        supersessions = await _select_many(
+            client,
+            """
+            SELECT uuid, raw_memory_id, superseded_raw_memory_id, source_id, created_at
+            FROM supersedes
+            WHERE organization_id = $organization_id
+                AND (
+                    raw_memory_id = $memory_id
+                    OR superseded_raw_memory_id = $memory_id
+                )
+            ORDER BY created_at ASC, uuid ASC;
+            """,
+            organization_id=organization_id,
+            memory_id=memory_id,
+        )
+    return {
+        "derived_from": derived_from,
+        "supersessions": supersessions,
+    }
+
+
 async def list_raw_memories_by_source_id(
     *,
     organization_id: str,
@@ -3490,6 +3529,7 @@ __all__ = [
     "get_raw_memory",
     "get_raw_memory_by_dedupe_key",
     "get_raw_memory_by_source_id",
+    "get_raw_memory_lineage",
     "get_shared_surreal_content_client",
     "lexical_score",
     "lexical_score_from_tokens",

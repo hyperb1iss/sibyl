@@ -266,6 +266,7 @@ class MemorySourceInspectResponse(BaseModel):
     id: str = Field(..., description="Raw memory record ID")
     organization_id: str = Field(..., description="Organization ID")
     source_id: str = Field(..., description="Source/provenance ID")
+    revision: int = Field(..., ge=1, description="Current raw memory revision")
     principal_id: str = Field(..., description="Principal who captured or owns the memory")
     agent_id: str | None = Field(default=None, description="Agent identity for diary memory")
     project_id: str | None = Field(default=None, description="Associated project ID")
@@ -349,6 +350,7 @@ class MemoryCorrectionRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=2000)
     replacement_source_id: str | None = Field(default=None, max_length=500)
     duplicate_of_source_id: str | None = Field(default=None, max_length=500)
+    revised_content: str | None = Field(default=None, max_length=1_048_576)
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Audit-only metadata recorded with the correction receipt",
@@ -379,6 +381,15 @@ class MemoryCorrectionResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     revision: int | None = Field(default=None, ge=1)
     mutation_receipt: MutationReceipt | None = None
+
+
+class MemorySourceBlameResponse(BaseModel):
+    """Revision, correction, audit, and lineage history for one memory source."""
+
+    source: MemorySourceInspectResponse
+    content_revisions: list[dict[str, Any]] = Field(default_factory=list)
+    derived_from: list[dict[str, Any]] = Field(default_factory=list)
+    supersessions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ReflectionPromotionRequest(BaseModel):

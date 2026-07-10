@@ -94,6 +94,7 @@ class TestActionConstants:
     def test_source_actions_contains_expected(self) -> None:
         """SOURCE_ACTIONS contains all expected source operations."""
         expected = {
+            "correct_memory",
             "crawl",
             "sync",
             "refresh",
@@ -1324,6 +1325,63 @@ class TestSourceActions:
         )
         assert response.success is False
         assert "entity_id" in response.message or "source ID" in response.message
+
+    @pytest.mark.asyncio
+    async def test_correct_memory_returns_revision_aware_receipt(self) -> None:
+        preview = SimpleNamespace(
+            allowed=True,
+            action="mark_wrong",
+            reason="Incorrect",
+            affected_source_ids=["raw-1"],
+            affected_derived_ids=["decision-1"],
+        )
+        result = SimpleNamespace(
+            applied=True,
+            preview=preview,
+            updated_memory=SimpleNamespace(revision=3),
+        )
+
+        with patch(
+            "sibyl_core.services.memory.apply_memory_correction",
+            AsyncMock(return_value=result),
+        ) as apply_correction:
+            response = await manage(
+                action="correct_memory",
+                entity_id="raw-1",
+                data={
+                    "action": "mark_wrong",
+                    "reason": "Incorrect",
+                    "user_id": "user-1",
+                    "expected_revision": 2,
+                    "idempotency_key": "correct-1",
+                },
+                organization_id="org-1",
+            )
+
+        assert response.success is True
+        assert response.data["revision"] == 3
+        assert response.data["mutation_receipt"] == {
+            "operation_id": "correct-1",
+            "applied": True,
+            "revision": 3,
+            "affected_records": ["raw_captures:raw-1"],
+            "idempotency_key": "correct-1",
+            "replayed": False,
+        }
+        apply_correction.assert_awaited_once_with(
+            organization_id="org-1",
+            source_id="raw-1",
+            principal_id="user-1",
+            action="mark_wrong",
+            reason="Incorrect",
+            accessible_projects=None,
+            accessible_teams=None,
+            accessible_delegations=None,
+            replacement_source_id=None,
+            duplicate_of_source_id=None,
+            revised_content=None,
+            expected_revision=2,
+        )
 
     @pytest.mark.asyncio
     async def test_link_graph_scopes_chunks_by_org_and_forwards_create_new(

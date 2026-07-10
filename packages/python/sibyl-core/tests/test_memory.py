@@ -580,6 +580,96 @@ async def test_apply_memory_correction_marks_hidden_and_preserves_history(
 
 
 @pytest.mark.asyncio
+async def test_apply_memory_correction_revises_content_and_preserves_prior_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_review_candidate(
+        id="source-1",
+        principal_id="user-1",
+        raw_content="The original canonical body.",
+        revision=4,
+    )
+    saved_memory = _raw_review_candidate(
+        id="source-1",
+        principal_id="user-1",
+        raw_content="The corrected canonical body.",
+        revision=5,
+    )
+    save_raw_memory = AsyncMock(return_value=saved_memory)
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(memory_module, "save_raw_memory", save_raw_memory)
+
+    result = await apply_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="revise",
+        reason="The prior wording was misleading",
+        revised_content="The corrected canonical body.",
+        expected_revision=4,
+    )
+
+    assert result.applied
+    assert result.preview.target_lifecycle_state == "active"
+    assert result.preview.recall_impact["excluded_from_recall"] is False
+    updated = save_raw_memory.await_args.args[0]
+    assert updated.raw_content == "The corrected canonical body."
+    assert updated.metadata["content_revisions"] == [
+        {
+            "revision": 4,
+            "content": "The original canonical body.",
+            "reason": "The prior wording was misleading",
+            "created_at": updated.metadata["content_revisions"][0]["created_at"],
+            "created_by_user_id": "user-1",
+        }
+    ]
+    assert updated.metadata["correction_history"][-1]["action"] == "revise"
+    assert updated.metadata["correction_history"][-1]["prior_revision"] == 4
+    save_raw_memory.assert_awaited_once_with(updated, expected_revision=4)
+
+
+@pytest.mark.asyncio
+async def test_memory_correction_rejects_private_memory_owned_by_another_principal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_review_candidate(id="source-1", principal_id="other-user")
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+
+    result = await preview_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="mark_wrong",
+        reason="Incorrect",
+    )
+
+    assert not result.allowed
+    assert result.reason == "principal_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_memory_correction_accepts_agent_facing_action_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_review_candidate(id="source-1", principal_id="user-1")
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+
+    result = await preview_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="wrong",
+        reason="Incorrect",
+    )
+
+    assert result.allowed
+    assert result.action == "mark_wrong"
+
+
+@pytest.mark.asyncio
 async def test_memory_correction_preview_canonicalizes_supersede_reference(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
