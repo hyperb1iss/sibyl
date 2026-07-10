@@ -498,9 +498,27 @@ def test_add_command_waits_for_direct_readiness(
     assert payload["content"] == "Pattern body"
     assert payload["entity_type"] == "pattern"
     assert payload["sync"] is True
-    assert payload["metadata"]["capture_mode"] == "add"
+    assert payload["metadata"]["capture_mode"] == "remember"
     assert "Remembered pattern" in result.stdout
     mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+def test_add_alias_rejects_conflicting_kind_flags() -> None:
+    result = CliRunner().invoke(
+        app,
+        ["add", "Memory", "Body", "--kind", "decision", "--type", "claim"],
+    )
+
+    assert result.exit_code == 1
+    assert "--kind and the legacy --type alias must match" in result.stdout
+
+    explicit_default = CliRunner().invoke(
+        app,
+        ["add", "Memory", "Body", "--kind", "episode", "--type", "claim"],
+    )
+
+    assert explicit_default.exit_code == 1
+    assert "--kind and the legacy --type alias must match" in explicit_default.stdout
 
 
 @patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
@@ -515,7 +533,14 @@ def test_add_command_can_skip_conflict_detection(
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["add", "Fast Pattern", "Pattern body", "--type", "pattern", "--skip-conflicts"],
+        [
+            "graph-add",
+            "Fast Pattern",
+            "Pattern body",
+            "--type",
+            "pattern",
+            "--skip-conflicts",
+        ],
     )
 
     assert result.exit_code == 0
@@ -533,7 +558,10 @@ def test_add_command_accepts_title_and_content_options(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["add", "--title", "Option title", "--content", "Option body"])
+    result = runner.invoke(
+        app,
+        ["graph-add", "--title", "Option title", "--content", "Option body"],
+    )
 
     assert result.exit_code == 0
     payload = mock_client.create_entity.await_args.kwargs
@@ -555,7 +583,7 @@ def test_add_command_reads_content_from_stdin(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["add", "Stdin title", "-"], input="Stdin body\n")
+    result = runner.invoke(app, ["graph-add", "Stdin title", "-"], input="Stdin body\n")
 
     assert result.exit_code == 0
     mock_client.create_entity.assert_awaited_once()
@@ -1694,7 +1722,9 @@ def test_memory_audit_command_lists_events(mock_get_client: MagicMock) -> None:
     result = runner.invoke(
         app,
         [
-            "memory-audit",
+            "admin",
+            "memory",
+            "audit",
             "--action",
             "memory.remember",
             "--source-id",
@@ -1749,7 +1779,7 @@ def test_memory_inspect_command_renders_source_summary(mock_get_client: MagicMoc
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["memory-inspect", "memory-1"])
+    result = runner.invoke(app, ["admin", "memory", "inspect", "memory-1"])
 
     assert result.exit_code == 0
     assert "Memory source" in result.stdout
@@ -1810,7 +1840,9 @@ def test_correct_command_applies_user_facing_action_and_prints_receipt(
 
 
 @patch("sibyl_cli.main.get_client")
-def test_blame_command_renders_revision_and_lineage_history(mock_get_client: MagicMock) -> None:
+def test_correct_command_renders_revision_and_lineage_history(
+    mock_get_client: MagicMock,
+) -> None:
     mock_client = MagicMock()
     mock_client.resolve_id_prefix = AsyncMock(return_value={"matches": [{"id": "memory-1"}]})
     mock_client.memory_blame = AsyncMock(
@@ -1853,7 +1885,7 @@ def test_blame_command_renders_revision_and_lineage_history(mock_get_client: Mag
     )
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
-    result = CliRunner().invoke(app, ["blame", "raw_memory:memory-1"])
+    result = CliRunner().invoke(app, ["correct", "raw_memory:memory-1"])
 
     assert result.exit_code == 0
     assert "Content revisions" in result.stdout
@@ -1893,7 +1925,7 @@ def test_memory_import_status_command_renders_import_receipts(mock_get_client: M
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["memory-import-status", "import/run:1"])
+    result = runner.invoke(app, ["admin", "memory", "import-status", "import/run:1"])
 
     assert result.exit_code == 0
     assert "Source import receipt" in result.stdout
@@ -1921,7 +1953,7 @@ def test_memory_inspect_command_outputs_json(mock_get_client: MagicMock) -> None
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["memory-inspect", "memory-1", "--json"])
+    result = runner.invoke(app, ["admin", "memory", "inspect", "memory-1", "--json"])
 
     assert result.exit_code == 0
     assert '"id": "memory-1"' in result.stdout
@@ -2051,7 +2083,9 @@ def test_memory_promote_preview_command_renders_decision(
     result = runner.invoke(
         app,
         [
-            "memory-promote",
+            "admin",
+            "memory",
+            "promote",
             "candidate-1",
             "--preview",
             "--scope",
@@ -2112,7 +2146,9 @@ def test_memory_promote_apply_command_renders_result(
     result = runner.invoke(
         app,
         [
-            "memory-promote",
+            "admin",
+            "memory",
+            "promote",
             "raw-1",
             "--apply",
             "--scope",
@@ -2170,7 +2206,9 @@ def test_memory_promote_auto_command_renders_decision(
     result = runner.invoke(
         app,
         [
-            "memory-promote",
+            "admin",
+            "memory",
+            "promote",
             "candidate-1",
             "--auto",
             "--scope",
@@ -2208,7 +2246,7 @@ def test_memory_promote_auto_command_renders_decision(
 @patch("sibyl_cli.main.get_client")
 def test_memory_promote_without_preview_is_denied(mock_get_client: MagicMock) -> None:
     runner = CliRunner()
-    result = runner.invoke(app, ["memory-promote", "candidate-1"])
+    result = runner.invoke(app, ["admin", "memory", "promote", "candidate-1"])
 
     assert result.exit_code == 1
     assert "requires --preview, --apply, or --auto" in result.stdout
@@ -2265,7 +2303,9 @@ def test_memory_review_drain_command_renders_summary(
     result = runner.invoke(
         app,
         [
-            "memory-review",
+            "admin",
+            "memory",
+            "review",
             "drain",
             "--limit",
             "2",
@@ -2313,7 +2353,9 @@ def test_memory_review_dream_command_queues_dry_run(mock_get_client: MagicMock) 
     result = runner.invoke(
         app,
         [
-            "memory-review",
+            "admin",
+            "memory",
+            "review",
             "dream",
             "--source-limit",
             "3",
@@ -2351,7 +2393,7 @@ def test_memory_review_dream_command_apply_queues_mutating_run(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["memory-review", "dream", "--apply"])
+    result = runner.invoke(app, ["admin", "memory", "review", "dream", "--apply"])
 
     assert result.exit_code == 0
     assert "apply" in result.stdout
@@ -2421,7 +2463,10 @@ def test_memory_review_status_renders_runs_and_receipts(mock_get_client: MagicMo
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["memory-review", "status", "--limit", "2"])
+    result = runner.invoke(
+        app,
+        ["admin", "memory", "review", "status", "--limit", "2"],
+    )
 
     assert result.exit_code == 0
     assert "Reflection Dream Runs" in result.stdout
@@ -2469,7 +2514,9 @@ def test_memory_share_preview_command_renders_redactions(
     result = runner.invoke(
         app,
         [
-            "memory-share",
+            "admin",
+            "memory",
+            "share",
             "raw-1,raw-2",
             "--preview",
             "--target-scope",
@@ -2521,7 +2568,15 @@ def test_memory_share_applies_with_apply(
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["memory-share", "raw-1", "--target-scope", "project", "--apply"],
+        [
+            "admin",
+            "memory",
+            "share",
+            "raw-1",
+            "--target-scope",
+            "project",
+            "--apply",
+        ],
     )
 
     assert result.exit_code == 0
@@ -2568,7 +2623,7 @@ def test_memory_share_defaults_to_preview(
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["memory-share", "raw-1", "--target-scope", "project"],
+        ["admin", "memory", "share", "raw-1", "--target-scope", "project"],
     )
 
     assert result.exit_code == 0
@@ -2610,7 +2665,9 @@ def test_memory_space_preview_agent_command_renders_access(
     result = runner.invoke(
         app,
         [
-            "memory-space",
+            "admin",
+            "memory",
+            "space",
             "preview-agent",
             "agent:nova",
             "--space",

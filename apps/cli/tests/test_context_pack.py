@@ -93,7 +93,7 @@ def test_context_quick_json_returns_flat_local_status(
     }
 
     runner = CliRunner()
-    result = runner.invoke(app, ["context", "--quick", "--json"])
+    result = runner.invoke(app, ["contexts", "--quick", "--json"])
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
@@ -122,7 +122,7 @@ def test_context_quick_without_context_reports_missing_auth(
     mock_read_server_credentials: MagicMock,
 ) -> None:
     runner = CliRunner()
-    result = runner.invoke(app, ["context", "--quick"])
+    result = runner.invoke(app, ["contexts", "--quick"])
 
     assert result.exit_code == 0
     assert "Project:" in result.stdout
@@ -182,7 +182,7 @@ def test_context_uses_summary_only_project_fetch(
     mock_get_client.return_value = mock_client
 
     runner = CliRunner()
-    result = runner.invoke(app, ["context"])
+    result = runner.invoke(app, ["contexts"])
 
     assert result.exit_code == 0
     assert "Ship full-fidelity context" in result.stdout
@@ -215,7 +215,7 @@ def test_context_warns_when_linked_project_has_graph_entity_but_no_registry_reco
     mock_get_client.return_value = mock_client
 
     runner = CliRunner()
-    result = runner.invoke(app, ["context"])
+    result = runner.invoke(app, ["contexts"])
 
     assert result.exit_code == 0
     assert "Linked project project_missing is missing server-side" in result.stdout
@@ -248,7 +248,7 @@ def test_context_warns_when_linked_project_is_missing(
     mock_get_client.return_value = mock_client
 
     runner = CliRunner()
-    result = runner.invoke(app, ["context"])
+    result = runner.invoke(app, ["contexts"])
 
     assert result.exit_code == 0
     assert "Linked project project_missing is missing server-side" in result.stdout
@@ -270,7 +270,7 @@ def test_context_pack_json_uses_detected_project(
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["context", "pack", "ship faster", "--domain", "agent memory", "--json"],
+        ["contexts", "pack", "ship faster", "--domain", "agent memory", "--json"],
     )
 
     assert result.exit_code == 0
@@ -305,7 +305,7 @@ def test_context_pack_all_projects_omits_project_scope(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["context", "pack", "ship faster", "--all"])
+    result = runner.invoke(app, ["contexts", "pack", "ship faster", "--all"])
 
     assert result.exit_code == 0
     assert "Use context packs" in result.stdout
@@ -336,7 +336,7 @@ def test_context_pack_markdown_outputs_server_rendering(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["context", "pack", "ship faster", "--markdown"])
+    result = runner.invoke(app, ["contexts", "pack", "ship faster", "--markdown"])
 
     assert result.exit_code == 0
     assert "# Sibyl Context Pack: ship faster" in result.stdout
@@ -354,7 +354,7 @@ def test_context_pack_can_request_agent_diary(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["context", "pack", "ship faster", "--agent", "nova"])
+    result = runner.invoke(app, ["contexts", "pack", "ship faster", "--agent", "nova"])
 
     assert result.exit_code == 0
     mock_client.context_pack.assert_called_once_with(

@@ -110,6 +110,8 @@ app = typer.Typer(
 )
 memory_space_app = typer.Typer(help="Memory-space inspection and preview commands")
 memory_review_app = typer.Typer(help="Memory review queue automation commands")
+admin_app = typer.Typer(help="Administrative commands")
+admin_memory_app = typer.Typer(help="Memory administration commands")
 synthesis_app = typer.Typer(help="Source-grounded synthesis commands")
 team_app = typer.Typer(help="Team memory management commands")
 
@@ -128,8 +130,9 @@ app.add_typer(debug_app, name="debug")
 app.add_typer(dev_app, name="dev")
 app.add_typer(auth_app, name="auth")
 app.add_typer(org_app, name="org")
+config_app.add_typer(context_app, name="context")
 app.add_typer(config_app, name="config")
-app.add_typer(context_app, name="context")
+app.add_typer(context_app, name="contexts", hidden=True)
 app.add_typer(docker_app, name="docker")
 app.add_typer(service_app, name="service")
 app.add_typer(local_app, name="local")
@@ -138,8 +141,12 @@ app.add_typer(update_app, name="update")
 app.add_typer(skill_app, name="skill")
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(pending_writes_app, name="pending-writes")
-app.add_typer(memory_space_app, name="memory-space")
-app.add_typer(memory_review_app, name="memory-review")
+admin_memory_app.add_typer(memory_space_app, name="space")
+admin_memory_app.add_typer(memory_review_app, name="review")
+admin_app.add_typer(admin_memory_app, name="memory")
+app.add_typer(admin_app, name="admin")
+app.add_typer(memory_space_app, name="memory-space", hidden=True)
+app.add_typer(memory_review_app, name="memory-review", hidden=True)
 app.add_typer(synthesis_app, name="synthesis")
 app.add_typer(team_app, name="team")
 app.command("tasks", hidden=True)(list_tasks)
@@ -200,8 +207,16 @@ def _normalize_add_type(value: str) -> str:
     return _normalize_entity_type(value, option_name="--type")
 
 
-def _normalize_memory_kind(value: str) -> str:
+def _normalize_memory_kind(value: str | None) -> str | None:
+    if value is None:
+        return None
     return _normalize_entity_type(value, option_name="--kind")
+
+
+def _normalize_legacy_memory_kind(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return _normalize_entity_type(value, option_name="--type")
 
 
 def _normalize_memory_basis(value: str | None) -> str | None:
@@ -1486,7 +1501,7 @@ def init_cmd(
         info("Next: sibyl serve, then sibyl doctor")
 
 
-@app.command()
+@app.command("graph-search", hidden=True)
 def search(
     query: str = typer.Argument(..., help="Search query"),
     entity_type: str | None = typer.Option(None, "--type", "-t", help="Filter by entity type"),
@@ -1616,7 +1631,7 @@ def search(
     run_search()
 
 
-@app.command("add")
+@app.command("graph-add", hidden=True)
 def add_knowledge(
     title: str | None = typer.Argument(None, help="Title/name of the knowledge"),
     content: str | None = typer.Argument(None, help="Content/description"),
@@ -2349,7 +2364,7 @@ def brief_context(
     run_brief()
 
 
-@app.command("recall")
+@app.command("context")
 def recall_context(
     goal: str = typer.Argument(..., help="Agent goal or user task"),
     intent: str = typer.Option(
@@ -2486,7 +2501,12 @@ def recall_context(
     run_recall()
 
 
-@app.command("memory-audit")
+app.command("recall", hidden=True)(recall_context)
+app.command("search", hidden=True)(recall_context)
+
+
+@admin_memory_app.command("audit")
+@app.command("memory-audit", hidden=True)
 def memory_audit(
     action: str | None = typer.Option(None, "--action", "-a", help="Filter by audit action"),
     actor: str | None = typer.Option(None, "--actor", help="Filter by actor user ID"),
@@ -2583,7 +2603,8 @@ def cite_memories(
     run_cite_memories()
 
 
-@app.command("memory-inspect")
+@admin_memory_app.command("inspect")
+@app.command("memory-inspect", hidden=True)
 def memory_inspect(
     source_id: str = typer.Argument(..., help="Raw memory source ID"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
@@ -2605,7 +2626,7 @@ def memory_inspect(
     run_memory_inspect()
 
 
-@app.command("blame")
+@app.command("blame", hidden=True)
 def blame_memory(
     source_id: str = typer.Argument(..., help="Raw memory source ID"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
@@ -2616,11 +2637,7 @@ def blame_memory(
     async def run_blame_memory() -> None:
         try:
             async with get_client() as client:
-                resolved_source_id = await resolve_raw_memory_id_prefix(
-                    client,
-                    raw_memory_lookup_value(source_id),
-                )
-                data = await client.memory_blame(resolved_source_id)
+                data = await _load_memory_blame(client, source_id)
             if json_output:
                 print_json(data)
                 return
@@ -2631,15 +2648,23 @@ def blame_memory(
     run_blame_memory()
 
 
+async def _load_memory_blame(client: Any, source_id: str) -> dict[str, Any]:
+    resolved_source_id = await resolve_raw_memory_id_prefix(
+        client,
+        raw_memory_lookup_value(source_id),
+    )
+    return await client.memory_blame(resolved_source_id)
+
+
 @app.command("correct")
 def correct_memory(
     source_id: str = typer.Argument(..., help="Raw memory source ID"),
-    action: str = typer.Option(
-        ...,
+    action: str | None = typer.Option(
+        None,
         "--action",
         help="Correction: wrong, stale, duplicate, superseded, or revise",
     ),
-    reason: str = typer.Option(..., "--reason", help="Why this correction is needed"),
+    reason: str | None = typer.Option(None, "--reason", help="Why this correction is needed"),
     replacement: str | None = typer.Option(
         None,
         "--replacement",
@@ -2676,7 +2701,35 @@ def correct_memory(
     preview: bool = typer.Option(False, "--preview", help="Validate without writing"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ) -> None:
-    """Correct or revise a raw memory with a durable receipt."""
+    """Inspect, correct, or revise a raw memory with a durable receipt."""
+    if action is None:
+        mutation_inputs = (
+            reason,
+            replacement,
+            duplicate_of,
+            content,
+            content_file,
+            expected_revision,
+        )
+        if any(value is not None for value in mutation_inputs) or preview:
+            error("Correction options require --action")
+            raise typer.Exit(code=1)
+
+        @run_async
+        async def run_inspect_memory() -> None:
+            try:
+                async with get_client() as client:
+                    data = await _load_memory_blame(client, source_id)
+                if json_output:
+                    print_json(data)
+                    return
+                print_memory_source_blame(cast("dict[str, object]", data))
+            except SibylClientError as e:
+                _handle_client_error(e)
+
+        run_inspect_memory()
+        return
+
     action_map = {
         "wrong": "mark_wrong",
         "stale": "mark_stale",
@@ -2689,8 +2742,8 @@ def correct_memory(
     if api_action is None:
         error("--action must be wrong, stale, duplicate, superseded, or revise")
         raise typer.Exit(code=1)
-    reason = reason.strip()
-    if not reason:
+    reason_text = (reason or "").strip()
+    if not reason_text:
         error("--reason must not be empty")
         raise typer.Exit(code=1)
     if normalized_action == "duplicate" and not duplicate_of:
@@ -2745,7 +2798,7 @@ def correct_memory(
                 data = await client.correct_memory(
                     resolved_source_id,
                     action=api_action,
-                    reason=reason,
+                    reason=reason_text,
                     replacement_source_id=resolved_replacement,
                     duplicate_of_source_id=resolved_duplicate,
                     revised_content=revised_content,
@@ -2775,7 +2828,8 @@ def correct_memory(
     run_correct_memory()
 
 
-@app.command("memory-import-status")
+@admin_memory_app.command("import-status")
+@app.command("memory-import-status", hidden=True)
 def memory_import_status(
     import_id: str = typer.Argument(..., help="Source import ID"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
@@ -2797,7 +2851,8 @@ def memory_import_status(
     run_memory_import_status()
 
 
-@app.command("memory-promote")
+@admin_memory_app.command("promote")
+@app.command("memory-promote", hidden=True)
 def memory_promote(
     candidate_id: str = typer.Argument(..., help="Raw memory or reflection candidate ID"),
     preview: bool = typer.Option(False, "--preview", help="Preview without promoting"),
@@ -3076,7 +3131,8 @@ def memory_review_status(
     run_memory_review_status()
 
 
-@app.command("memory-share")
+@admin_memory_app.command("share")
+@app.command("memory-share", hidden=True)
 def memory_share(
     source_ids: Annotated[
         list[str],
@@ -3373,12 +3429,20 @@ def remember_memory(
         "--follow-symlinks",
         help="Allow --content-file to read through symlinks",
     ),
-    kind: str = typer.Option(
-        "episode",
+    kind: str | None = typer.Option(
+        None,
         "--kind",
         "-k",
         callback=_normalize_memory_kind,
         help=ENTITY_TYPE_HELP,
+        show_default="episode",
+    ),
+    legacy_kind: str | None = typer.Option(
+        None,
+        "--type",
+        "-t",
+        callback=_normalize_legacy_memory_kind,
+        hidden=True,
     ),
     domain: str | None = typer.Option(None, "--domain", "-d", help="Domain/category"),
     project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
@@ -3436,6 +3500,11 @@ def remember_memory(
     ),
 ) -> None:
     """Remember a decision, plan, idea, claim, artifact, session, or learning."""
+
+    if kind and legacy_kind and kind != legacy_kind:
+        error("--kind and the legacy --type alias must match")
+        raise typer.Exit(code=1)
+    kind = kind or legacy_kind or "episode"
 
     try:
         resolved_content = (
@@ -3555,6 +3624,9 @@ def remember_memory(
             raise typer.Exit(code=1) from e
 
     run_remember()
+
+
+app.command("add", hidden=True)(remember_memory)
 
 
 @app.command("reflect")

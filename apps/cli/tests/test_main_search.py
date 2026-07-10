@@ -72,7 +72,7 @@ def test_search_command_renders_longer_previews(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["search", "boop"])
+    result = runner.invoke(app, ["graph-search", "boop"])
 
     assert result.exit_code == 0
     assert "MAGICLATE" in result.stdout
@@ -98,7 +98,7 @@ def test_search_command_can_search_graph_only(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["search", "surreal graph", "--graph-only"])
+    result = runner.invoke(app, ["graph-search", "surreal graph", "--graph-only"])
 
     assert result.exit_code == 0
     mock_client.search.assert_called_once_with(
@@ -135,7 +135,7 @@ def test_search_command_labels_raw_memory_results(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["search", "alpha"])
+    result = runner.invoke(app, ["graph-search", "alpha"])
 
     assert result.exit_code == 0
     assert "memory Raw capture" in result.stdout
@@ -153,7 +153,7 @@ def test_search_command_can_search_docs_only(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["search", "nextjs", "--docs-only"])
+    result = runner.invoke(app, ["graph-search", "nextjs", "--docs-only"])
 
     assert result.exit_code == 0
     mock_client.search.assert_called_once_with(
@@ -177,7 +177,7 @@ def test_search_command_forwards_as_of(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["search", "temporal", "--as-of", "2025-03-15"])
+    result = runner.invoke(app, ["graph-search", "temporal", "--as-of", "2025-03-15"])
 
     assert result.exit_code == 0
     mock_client.search.assert_called_once_with(
@@ -194,7 +194,7 @@ def test_search_command_forwards_as_of(
 
 def test_search_command_rejects_conflicting_store_flags() -> None:
     runner = CliRunner()
-    result = runner.invoke(app, ["search", "surreal", "--graph-only", "--docs-only"])
+    result = runner.invoke(app, ["graph-search", "surreal", "--graph-only", "--docs-only"])
 
     assert result.exit_code == 1
     assert "--graph-only and --docs-only cannot be combined" in result.stdout
@@ -202,7 +202,7 @@ def test_search_command_rejects_conflicting_store_flags() -> None:
 
 def test_search_command_rejects_docs_only_graph_type() -> None:
     runner = CliRunner()
-    result = runner.invoke(app, ["search", "task", "--docs-only", "--type", "task"])
+    result = runner.invoke(app, ["graph-search", "task", "--docs-only", "--type", "task"])
 
     assert result.exit_code == 1
     assert "--docs-only can only be combined with --type document" in result.stdout
@@ -233,10 +233,41 @@ def test_search_command_soft_wraps_previews(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["search", "boop"])
+    result = runner.invoke(app, ["graph-search", "boop"])
 
     assert result.exit_code == 0
     assert any(call.kwargs.get("soft_wrap") is True for call in mock_console_print.call_args_list)
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_search_alias_returns_context_pack(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.context_pack = AsyncMock(return_value={"markdown": "# Agent context"})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    result = CliRunner().invoke(app, ["search", "ship context"])
+
+    assert result.exit_code == 0
+    assert "# Agent context" in result.stdout
+    mock_client.context_pack.assert_awaited_once_with(
+        goal="ship context",
+        intent="build",
+        layer="recall",
+        domain=None,
+        project="project_123",
+        agent_id=None,
+        limit=12,
+        include_related=True,
+        related_limit=3,
+        audit=False,
+        markdown_token_budget=None,
+    )
+    mock_client.search.assert_not_called()
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
