@@ -110,6 +110,7 @@ INSERT INTO raw_captures $rows ON DUPLICATE KEY UPDATE
     metadata.last_used_at = $input.last_used_at ?? last_used_at,
     metadata.retrieval_count = $input.retrieval_count ?? retrieval_count ?? 0,
     metadata.citation_count = $input.citation_count ?? citation_count ?? 0,
+    metadata.misled_count = $input.misled_count ?? misled_count ?? 0,
     provenance = $input.provenance,
     capture_surface = $input.capture_surface,
     created_by_user_id = $input.created_by_user_id,
@@ -121,6 +122,7 @@ INSERT INTO raw_captures $rows ON DUPLICATE KEY UPDATE
     last_used_at = $input.last_used_at ?? last_used_at,
     retrieval_count = $input.retrieval_count ?? retrieval_count ?? 0,
     citation_count = $input.citation_count ?? citation_count ?? 0,
+    misled_count = $input.misled_count ?? misled_count ?? 0,
     created_at = $input.created_at;
 """
 _RAW_MEMORY_RECALL_FIELDS = ", ".join(
@@ -151,6 +153,7 @@ _RAW_MEMORY_RECALL_FIELDS = ", ".join(
         "last_used_at",
         "retrieval_count",
         "citation_count",
+        "misled_count",
         "created_at",
     )
 )
@@ -463,6 +466,7 @@ class RawMemory:
     last_used_at: datetime | None = None
     retrieval_count: int | None = None
     citation_count: int | None = None
+    misled_count: int | None = None
     created_at: datetime | None = None
     score: float = 0.0
     snippet: str | None = None
@@ -1104,6 +1108,7 @@ def _raw_memory_from_record(record: Mapping[str, object]) -> RawMemory:
         last_used_at=_coerce_datetime(record.get("last_used_at")),
         retrieval_count=_coerce_int(record.get("retrieval_count")),
         citation_count=_coerce_int(record.get("citation_count")),
+        misled_count=_coerce_int(record.get("misled_count")),
         created_at=_coerce_datetime(record.get("created_at")),
         score=_coerce_float(record.get("score")),
         snippet=_search_snippet_from_values(
@@ -1176,6 +1181,9 @@ def _raw_memory_record(memory: RawMemory) -> SurrealRecord:
     if memory.citation_count is not None:
         record["citation_count"] = memory.citation_count
         metadata["citation_count"] = memory.citation_count
+    if memory.misled_count is not None:
+        record["misled_count"] = memory.misled_count
+        metadata["misled_count"] = memory.misled_count
     return record
 
 

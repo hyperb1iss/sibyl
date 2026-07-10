@@ -28,6 +28,7 @@ from sibyl_core.models.context import (
 from sibyl_core.models.entities import EntityType, RelationshipType
 from sibyl_core.services.usage import (
     MemoryUsageItemKind,
+    MemoryUsageSignal,
     MemoryUsageStamp,
     MemoryUsageWriteResult,
 )
@@ -1987,6 +1988,55 @@ class TestSearchTool:
         ]
         assert recorded_events[0].item_kind == MemoryUsageItemKind.RAW_CAPTURE
         assert recorded_events[0].item_id == "raw-1"
+
+    @pytest.mark.asyncio
+    async def test_usage_citation_records_misleading_signal(self) -> None:
+        from sibyl_core.tools.usage_citation import record_cited_item_usages
+
+        recorded_events: list[Any] = []
+
+        async def fake_record_memory_usage(
+            content_client: object,
+            events: list[Any],
+            *,
+            graph_client: object | None = None,
+        ) -> MemoryUsageWriteResult:
+            recorded_events.extend(events)
+            return MemoryUsageWriteResult(
+                events_processed=len(events),
+                stamps=tuple(
+                    MemoryUsageStamp(
+                        item_kind=MemoryUsageItemKind(str(event.item_kind)),
+                        item_id=event.item_id,
+                        retrieval_count=0,
+                        citation_count=0,
+                        last_recalled_at=None,
+                        last_used_at=None,
+                        misled_count=1,
+                    )
+                    for event in events
+                ),
+            )
+
+        with (
+            patch("sibyl_core.tools.usage_citation.get_shared_surreal_content_client", AsyncMock()),
+            patch(
+                "sibyl_core.tools.usage_citation.record_memory_usage",
+                AsyncMock(side_effect=fake_record_memory_usage),
+            ),
+        ):
+            summary = await record_cited_item_usages(
+                ["raw_memory:raw-1"],
+                organization_id="org-123",
+                principal_id="user-123",
+                project_id=None,
+                source_surface="test_misled",
+                misled=True,
+            )
+
+        assert summary["signal_type"] == MemoryUsageSignal.MISLED.value
+        assert summary["stamped_count"] == 1
+        assert recorded_events[0].signal_type == MemoryUsageSignal.MISLED
 
     @pytest.mark.asyncio
     async def test_search_document_timeout_returns_without_results(self) -> None:

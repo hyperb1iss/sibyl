@@ -121,6 +121,7 @@ _RELATED_ENTITY_PROJECTION_FIELDS = (
     ("invalid_at", "invalid_at"),
     ("created_by", "created_by"),
     ("modified_by", "modified_by"),
+    ("misled_count", "misled_count"),
     ("source_file", "source_file"),
 )
 _ENTITY_SEARCH_PROJECTION_FIELDS = (
@@ -145,6 +146,7 @@ INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     attributes.last_used_at = $input.last_used_at ?? last_used_at,
     attributes.retrieval_count = $input.retrieval_count ?? retrieval_count ?? 0,
     attributes.citation_count = $input.citation_count ?? citation_count ?? 0,
+    attributes.misled_count = $input.misled_count ?? misled_count ?? 0,
     group_id = $input.group_id,
     created_at = $input.created_at,
     updated_at = $input.updated_at,
@@ -155,6 +157,7 @@ INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     last_used_at = $input.last_used_at ?? last_used_at,
     retrieval_count = $input.retrieval_count ?? retrieval_count ?? 0,
     citation_count = $input.citation_count ?? citation_count ?? 0,
+    misled_count = $input.misled_count ?? misled_count ?? 0,
     project_id = $input.project_id,
     epic_id = $input.epic_id,
     parent_task_id = $input.parent_task_id,
@@ -1748,6 +1751,7 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
         "last_used_at",
         "retrieval_count",
         "citation_count",
+        "misled_count",
     ):
         value = normalized_row.get(key)
         if value is not None and metadata.get(key) is None:
@@ -2582,6 +2586,7 @@ def _entity_record(
     last_used_at = _metadata_datetime(metadata.get("last_used_at"))
     retrieval_count = _metadata_optional_int(metadata.get("retrieval_count"))
     citation_count = _metadata_optional_int(metadata.get("citation_count"))
+    misled_count = _metadata_optional_int(metadata.get("misled_count"))
     attributes: dict[str, object] = {
         **metadata,
         "description": entity.description or "",
@@ -2625,6 +2630,8 @@ def _entity_record(
         record["retrieval_count"] = retrieval_count
     if citation_count is not None:
         record["citation_count"] = citation_count
+    if misled_count is not None:
+        record["misled_count"] = misled_count
     return record
 
 
@@ -2675,12 +2682,17 @@ def _entity_update_patch(updates: Mapping[str, Any], *, updated_at: datetime) ->
         "last_used_at",
         "retrieval_count",
         "citation_count",
+        "misled_count",
     ):
         if key in metadata_patch and key in {"last_recalled_at", "last_used_at"}:
             value = _metadata_datetime(metadata_patch.get(key))
             patch[key] = value
             attributes_patch[key] = value
-        elif key in metadata_patch and key in {"retrieval_count", "citation_count"}:
+        elif key in metadata_patch and key in {
+            "retrieval_count",
+            "citation_count",
+            "misled_count",
+        }:
             value = _metadata_int(metadata_patch.get(key))
             patch[key] = value
             attributes_patch[key] = value

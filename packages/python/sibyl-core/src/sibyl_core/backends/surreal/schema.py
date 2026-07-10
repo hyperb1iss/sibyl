@@ -92,6 +92,7 @@ DEFINE FIELD IF NOT EXISTS last_recalled_at ON entity TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS last_used_at ON entity TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS retrieval_count ON entity TYPE int DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS citation_count ON entity TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS misled_count ON entity TYPE int DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS project_id ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS epic_id ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS parent_task_id ON entity TYPE option<string>;
@@ -471,6 +472,13 @@ DEFINE FIELD IF NOT EXISTS revision ON entity TYPE int DEFAULT 1 ASSERT $value >
 UPDATE entity SET revision = 1 WHERE revision = NONE OR revision < 1;
 """
 
+ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS = """
+DEFINE FIELD IF NOT EXISTS misled_count ON entity TYPE int DEFAULT 0;
+UPDATE entity SET misled_count = attributes.misled_count ?? 0
+WHERE misled_count = 0
+    AND attributes.misled_count != NONE;
+"""
+
 
 CURRENT_SCHEMA_MAINTENANCE_DEFINITIONS = ENTITY_DENORMALIZATION_MAINTENANCE_DEFINITIONS
 
@@ -545,6 +553,11 @@ GRAPH_SCHEMA_MIGRATIONS = (
         version=12,
         name="entity_revision",
         statements=tuple(split_statements(ENTITY_REVISION_MIGRATION_DEFINITIONS)),
+    ),
+    SchemaMigration(
+        version=13,
+        name="entity_misled_usage_signal",
+        statements=tuple(split_statements(ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS)),
     ),
 )
 
@@ -930,6 +943,7 @@ __all__ = [
     "EMBEDDING_DIM",
     "EMBEDDING_VECTOR_FIELDS",
     "ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS",
+    "ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS",
     "ENTITY_REVISION_MIGRATION_DEFINITIONS",
     "ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS",
     "ENTITY_USAGE_SIGNAL_DEFINITIONS",

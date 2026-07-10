@@ -15,6 +15,7 @@ from sibyl_core.backends.surreal.records import coerce_datetime, normalize_recor
 class MemoryUsageSignal(StrEnum):
     EXPOSURE = "exposure"
     CITATION = "citation"
+    MISLED = "misled"
 
 
 class MemoryUsageItemKind(StrEnum):
@@ -53,6 +54,7 @@ class MemoryUsageStamp:
     citation_count: int
     last_recalled_at: datetime | None
     last_used_at: datetime | None
+    misled_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +98,14 @@ LET $citation_events = (
         AND item_id = $item_id
         AND signal_type = "citation"
 );
+LET $misled_events = (
+    SELECT event_at
+    FROM memory_usage_events
+    WHERE organization_id = $organization_id
+        AND item_kind = "raw_capture"
+        AND item_id = $item_id
+        AND signal_type = "misled"
+);
 LET $last_recalled_at = (
     SELECT VALUE event_at
     FROM memory_usage_events
@@ -118,6 +128,7 @@ LET $last_used_at = (
 )[0];
 LET $retrieval_count = array::len($exposure_events);
 LET $citation_count = array::len($citation_events);
+LET $misled_count = array::len($misled_events);
 UPDATE raw_captures SET
     last_recalled_at = IF last_recalled_at != NONE
         AND ($last_recalled_at = NONE OR last_recalled_at > $last_recalled_at)
@@ -127,6 +138,7 @@ UPDATE raw_captures SET
         THEN last_used_at ELSE $last_used_at END,
     retrieval_count = math::max([retrieval_count ?? 0, $retrieval_count]),
     citation_count = math::max([citation_count ?? 0, $citation_count]),
+    misled_count = math::max([misled_count ?? 0, $misled_count]),
     metadata.last_recalled_at = IF last_recalled_at != NONE
         AND ($last_recalled_at = NONE OR last_recalled_at > $last_recalled_at)
         THEN last_recalled_at ELSE $last_recalled_at END,
@@ -134,7 +146,8 @@ UPDATE raw_captures SET
         AND ($last_used_at = NONE OR last_used_at > $last_used_at)
         THEN last_used_at ELSE $last_used_at END,
     metadata.retrieval_count = math::max([retrieval_count ?? 0, $retrieval_count]),
-    metadata.citation_count = math::max([citation_count ?? 0, $citation_count])
+    metadata.citation_count = math::max([citation_count ?? 0, $citation_count]),
+    metadata.misled_count = math::max([misled_count ?? 0, $misled_count])
 WHERE organization_id = $organization_id
     AND uuid = $item_id
 RETURN AFTER;
@@ -159,6 +172,7 @@ UPDATE entity SET
         THEN last_used_at ELSE $last_used_at END,
     retrieval_count = math::max([retrieval_count ?? 0, $retrieval_count]),
     citation_count = math::max([citation_count ?? 0, $citation_count]),
+    misled_count = math::max([misled_count ?? 0, $misled_count]),
     attributes.last_recalled_at = IF last_recalled_at != NONE
         AND ($last_recalled_at = NONE OR last_recalled_at > $last_recalled_at)
         THEN last_recalled_at ELSE $last_recalled_at END,
@@ -166,7 +180,8 @@ UPDATE entity SET
         AND ($last_used_at = NONE OR last_used_at > $last_used_at)
         THEN last_used_at ELSE $last_used_at END,
     attributes.retrieval_count = math::max([retrieval_count ?? 0, $retrieval_count]),
-    attributes.citation_count = math::max([citation_count ?? 0, $citation_count])
+    attributes.citation_count = math::max([citation_count ?? 0, $citation_count]),
+    attributes.misled_count = math::max([misled_count ?? 0, $misled_count])
 WHERE group_id = $organization_id
     AND uuid = $item_id
 RETURN AFTER;
@@ -271,6 +286,7 @@ async def _usage_stamp_for_item(
     )
     retrieval_count = 0
     citation_count = 0
+    misled_count = 0
     last_recalled_at: datetime | None = None
     last_used_at: datetime | None = None
     for row in rows:
@@ -282,6 +298,8 @@ async def _usage_stamp_for_item(
         elif signal == MemoryUsageSignal.CITATION.value:
             citation_count += 1
             last_used_at = _max_datetime(last_used_at, event_at)
+        elif signal == MemoryUsageSignal.MISLED.value:
+            misled_count += 1
     return MemoryUsageStamp(
         item_kind=item_kind,
         item_id=item_id,
@@ -289,6 +307,7 @@ async def _usage_stamp_for_item(
         citation_count=citation_count,
         last_recalled_at=last_recalled_at,
         last_used_at=last_used_at,
+        misled_count=misled_count,
     )
 
 
@@ -326,6 +345,7 @@ async def _stamp_graph_entity(
             last_used_at=stamp.last_used_at,
             retrieval_count=stamp.retrieval_count,
             citation_count=stamp.citation_count,
+            misled_count=stamp.misled_count,
         ),
     )
 
@@ -351,6 +371,7 @@ def _stamp_from_rows(
         citation_count=_int_count(row.get("citation_count")),
         last_recalled_at=coerce_datetime(row.get("last_recalled_at")),
         last_used_at=coerce_datetime(row.get("last_used_at")),
+        misled_count=_int_count(row.get("misled_count")),
     )
 
 

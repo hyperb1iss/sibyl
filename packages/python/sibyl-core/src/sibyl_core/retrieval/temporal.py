@@ -198,9 +198,11 @@ def usage_retention_multiplier(entity: Any) -> float:
     """Return a bounded half-life multiplier from W6 usage counters."""
     retrieval_count = _entity_int(entity, "retrieval_count")
     citation_count = _entity_int(entity, "citation_count")
+    misled_count = _entity_int(entity, "misled_count")
     retrieval_bonus = min(max(retrieval_count, 0), 50) * 0.02
     citation_bonus = min(max(citation_count, 0), 20) * 0.12
-    return min(4.0, 1.0 + retrieval_bonus + citation_bonus)
+    misled_penalty = min(max(misled_count, 0), 5) * 0.6
+    return max(0.1, min(4.0, 1.0 + retrieval_bonus + citation_bonus - misled_penalty))
 
 
 def temporal_decay_multiplier(

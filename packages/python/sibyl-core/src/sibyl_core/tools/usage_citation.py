@@ -49,10 +49,12 @@ async def record_cited_item_usages(
     project_id: str | None,
     source_surface: str,
     request_metadata: Mapping[str, object] | None = None,
+    misled: bool = False,
 ) -> dict[str, object]:
-    """Record citation usage for graph entities and raw captures."""
+    """Record positive citation or negative misleading usage feedback."""
 
     normalized_ids = normalize_cited_ids(cited_ids)
+    signal_type = MemoryUsageSignal.MISLED if misled else MemoryUsageSignal.CITATION
     session_key, message_key = _usage_keys(
         source_surface=source_surface,
         organization_id=organization_id,
@@ -113,6 +115,7 @@ async def record_cited_item_usages(
                             source_surface=source_surface,
                             session_key=session_key,
                             message_key=message_key,
+                            signal_type=signal_type,
                         )
                     )
                 except Exception as exc:
@@ -142,6 +145,7 @@ async def record_cited_item_usages(
                             source_surface=source_surface,
                             session_key=session_key,
                             message_key=message_key,
+                            signal_type=signal_type,
                             graph_client=graph_client,
                         )
                     )
@@ -184,7 +188,7 @@ async def record_cited_item_usages(
     cited_count = len(normalized_ids)
     return {
         "source_surface": source_surface,
-        "signal_type": MemoryUsageSignal.CITATION.value,
+        "signal_type": signal_type.value,
         "session_key": session_key,
         "message_key": message_key,
         "cited_count": cited_count,
@@ -206,6 +210,7 @@ async def _record_target_citations(
     source_surface: str,
     session_key: str,
     message_key: str,
+    signal_type: MemoryUsageSignal,
     graph_client: Any | None = None,
 ) -> set[tuple[MemoryUsageItemKind, str]]:
     result = await record_memory_usage(
@@ -218,11 +223,12 @@ async def _record_target_citations(
                 source_surface=source_surface,
                 item_kind=target.item_kind,
                 item_id=target.item_id,
-                signal_type=MemoryUsageSignal.CITATION,
+                signal_type=signal_type,
                 principal_id=principal_id,
                 project_id=project_id,
                 metadata={
                     "cited_id": target.cited_id,
+                    "signal_type": signal_type.value,
                     "source_surface": source_surface,
                 },
             )
@@ -233,7 +239,7 @@ async def _record_target_citations(
     return {
         (stamp.item_kind, stamp.item_id)
         for stamp in result.stamps
-        if _citation_stamp_applied(stamp)
+        if _usage_stamp_applied(stamp, signal_type)
     }
 
 
@@ -316,7 +322,9 @@ def _usage_keys(
     return (f"{source_surface}:{digest}", f"{source_surface}:citation:{digest}")
 
 
-def _citation_stamp_applied(stamp: MemoryUsageStamp) -> bool:
+def _usage_stamp_applied(stamp: MemoryUsageStamp, signal_type: MemoryUsageSignal) -> bool:
+    if signal_type is MemoryUsageSignal.MISLED:
+        return stamp.misled_count > 0
     return stamp.last_used_at is not None or stamp.citation_count > 0
 
 

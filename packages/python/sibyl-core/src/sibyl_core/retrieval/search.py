@@ -1914,6 +1914,7 @@ def _selected_record_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "last_used_at",
         "retrieval_count",
         "citation_count",
+        "misled_count",
         *_GRAPH_EXPANSION_METADATA_KEYS,
     ):
         value = row.get(key)

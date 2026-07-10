@@ -57,6 +57,7 @@ from sibyl_core.retrieval.temporal import (
     get_entity_decay_timestamp,
     temporal_boost,
     temporal_decay_multiplier,
+    usage_retention_multiplier,
 )
 from sibyl_core.services.graph import EntityManager, SurrealGraphClient, prepare_graph_schema
 
@@ -143,6 +144,18 @@ def test_temporal_decay_weights_exposure_below_citation() -> None:
     assert cited_multiplier > 0.9
     assert 0.1 < exposed_multiplier < cited_multiplier
     assert temporal_decay_multiplier(uncited, decay_days=30, reference_time=now) == 0.1
+
+
+def test_misled_feedback_damps_retention_below_no_feedback() -> None:
+    neutral = make_entity_for_test("neutral", metadata={})
+    misled = make_entity_for_test("misled", metadata={"misled_count": 1})
+    cited_then_misled = make_entity_for_test(
+        "cited-then-misled",
+        metadata={"citation_count": 1, "misled_count": 1},
+    )
+
+    assert usage_retention_multiplier(misled) < usage_retention_multiplier(neutral)
+    assert usage_retention_multiplier(cited_then_misled) < usage_retention_multiplier(neutral)
 
 
 def test_last_accessed_compatibility_does_not_outrank_citation() -> None:

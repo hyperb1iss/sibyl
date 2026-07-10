@@ -142,6 +142,7 @@ DEFINE FIELD IF NOT EXISTS last_recalled_at ON raw_captures TYPE option<datetime
 DEFINE FIELD IF NOT EXISTS last_used_at ON raw_captures TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS retrieval_count ON raw_captures TYPE int DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS citation_count ON raw_captures TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS misled_count ON raw_captures TYPE int DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS created_at ON raw_captures TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_uuid ON raw_captures FIELDS uuid UNIQUE;

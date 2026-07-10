@@ -28,6 +28,7 @@ from sibyl_core.backends.surreal.content_schema import (
     CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS,
     CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS,
     CONTENT_MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS,
+    CONTENT_MISLED_USAGE_SIGNAL_MIGRATION_DEFINITIONS,
     CONTENT_PERMISSION_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_CHANGEFEED_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS,
@@ -48,6 +49,7 @@ from sibyl_core.backends.surreal.schema import (
     DEAD_GRAPH_OBJECT_REMOVAL_DEFINITIONS,
     EDGE_DEFINITIONS,
     ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS,
+    ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS,
     ENTITY_REVISION_MIGRATION_DEFINITIONS,
     ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS,
     ENTITY_USAGE_SIGNAL_DEFINITIONS,
@@ -462,6 +464,11 @@ def test_content_usage_signals_are_versioned() -> None:
         CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS
     )
     assert CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
+    assert "content_misled_usage_signal" in [migration.name for migration in migrations]
+    assert "DEFINE FIELD IF NOT EXISTS misled_count ON raw_captures" in (CONTENT_SCHEMA_DEFINITIONS)
+    assert CONTENT_MISLED_USAGE_SIGNAL_MIGRATION_DEFINITIONS.strip().splitlines()[0] in (
+        migration_sql
+    )
 
 
 def test_content_source_import_receipt_arrays_are_versioned() -> None:
@@ -548,7 +555,7 @@ def test_content_raw_capture_revision_is_versioned() -> None:
     migration = next(item for item in migrations if item.name == "content_raw_capture_revision")
     migration_sql = "\n".join(migration.statements)
 
-    assert CONTENT_SCHEMA_CURRENT_VERSION == 21
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 21
     assert "DEFINE FIELD IF NOT EXISTS revision ON raw_captures" in migration_sql
     assert "UPDATE raw_captures SET revision = 1" in migration_sql
     assert CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS.strip().splitlines()[0] in (
@@ -1010,6 +1017,9 @@ def test_graph_entity_usage_signal_fields_are_versioned() -> None:
     assert "idx_entity_last_used" in NODE_DEFINITIONS
     assert "UPDATE entity SET" in ENTITY_USAGE_SIGNAL_DEFINITIONS
     assert ENTITY_USAGE_SIGNAL_DEFINITIONS.strip().splitlines()[0] in migration_sql
+    assert "entity_misled_usage_signal" in [migration.name for migration in GRAPH_SCHEMA_MIGRATIONS]
+    assert "DEFINE FIELD IF NOT EXISTS misled_count ON entity" in NODE_DEFINITIONS
+    assert ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS.strip().splitlines()[0] in migration_sql
 
 
 def test_graph_memory_quality_metadata_is_versioned() -> None:
@@ -1031,7 +1041,7 @@ def test_graph_entity_revision_is_versioned() -> None:
     migration = next(item for item in GRAPH_SCHEMA_MIGRATIONS if item.name == "entity_revision")
     migration_sql = "\n".join(migration.statements)
 
-    assert GRAPH_SCHEMA_CURRENT_VERSION == 12
+    assert GRAPH_SCHEMA_CURRENT_VERSION >= 12
     assert "DEFINE FIELD IF NOT EXISTS revision ON entity" in migration_sql
     assert "UPDATE entity SET revision = 1" in migration_sql
     assert ENTITY_REVISION_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql

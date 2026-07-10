@@ -52,7 +52,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 21
+CONTENT_SCHEMA_CURRENT_VERSION = 22
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -505,6 +505,13 @@ DEFINE FIELD IF NOT EXISTS revision ON raw_captures TYPE int DEFAULT 1 ASSERT $v
 UPDATE raw_captures SET revision = 1 WHERE revision = NONE OR revision < 1;
 """
 
+CONTENT_MISLED_USAGE_SIGNAL_MIGRATION_DEFINITIONS = """
+DEFINE FIELD IF NOT EXISTS misled_count ON raw_captures TYPE option<int> DEFAULT 0;
+UPDATE raw_captures SET misled_count = metadata.misled_count ?? 0
+WHERE misled_count = NONE;
+DEFINE FIELD OVERWRITE misled_count ON raw_captures TYPE int DEFAULT 0;
+"""
+
 
 def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
     compatible_schema = render_fulltext_compatible_sql(
@@ -638,6 +645,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=21,
             name="content_raw_capture_revision",
             statements=tuple(split_statements(CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=22,
+            name="content_misled_usage_signal",
+            statements=tuple(split_statements(CONTENT_MISLED_USAGE_SIGNAL_MIGRATION_DEFINITIONS)),
         ),
     )
 
@@ -980,6 +992,7 @@ __all__ = [
     "CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS",
     "CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS",
     "CONTENT_MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS",
+    "CONTENT_MISLED_USAGE_SIGNAL_MIGRATION_DEFINITIONS",
     "CONTENT_PERMISSION_MIGRATION_DEFINITIONS",
     "CONTENT_RAW_CAPTURE_LOOKUP_MIGRATION_DEFINITIONS",
     "CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS",

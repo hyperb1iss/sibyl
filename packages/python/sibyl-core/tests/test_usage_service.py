@@ -64,6 +64,7 @@ class _FakeContentClient:
     ) -> dict[str, object]:
         retrieval_count = 0
         citation_count = 0
+        misled_count = 0
         last_recalled_at: datetime | None = None
         last_used_at: datetime | None = None
         for row in self.events.values():
@@ -80,9 +81,12 @@ class _FakeContentClient:
             elif row["signal_type"] == MemoryUsageSignal.CITATION.value:
                 citation_count += 1
                 last_used_at = _max_datetime(last_used_at, event_at)
+            elif row["signal_type"] == MemoryUsageSignal.MISLED.value:
+                misled_count += 1
         return {
             "retrieval_count": retrieval_count,
             "citation_count": citation_count,
+            "misled_count": misled_count,
             "last_recalled_at": last_recalled_at,
             "last_used_at": last_used_at,
         }
@@ -105,6 +109,10 @@ class _FakeGraphClient:
             "citation_count": max(
                 int(previous.get("citation_count") or 0),
                 int(params["citation_count"] or 0),
+            ),
+            "misled_count": max(
+                int(previous.get("misled_count") or 0),
+                int(params["misled_count"] or 0),
             ),
             "last_recalled_at": _max_datetime(
                 coerce_datetime(previous.get("last_recalled_at")),
@@ -170,6 +178,16 @@ async def test_record_memory_usage_recomputes_stamps_from_unique_events() -> Non
                 organization_id="org-a",
                 session_key="session-a",
                 message_key="message-c",
+                source_surface="completion",
+                item_kind=MemoryUsageItemKind.RAW_CAPTURE,
+                item_id="raw-a",
+                signal_type=MemoryUsageSignal.MISLED,
+                event_at=base + timedelta(minutes=7),
+            ),
+            MemoryUsageEvent(
+                organization_id="org-a",
+                session_key="session-a",
+                message_key="message-d",
                 source_surface="context_pack",
                 item_kind=MemoryUsageItemKind.GRAPH_ENTITY,
                 item_id="entity-a",
@@ -180,16 +198,18 @@ async def test_record_memory_usage_recomputes_stamps_from_unique_events() -> Non
         graph_client=graph_client,
     )
 
-    assert result.events_processed == 3
-    assert len(content_client.events) == 3
+    assert result.events_processed == 4
+    assert len(content_client.events) == 4
     raw_stamp = content_client.raw_stamps["raw-a"]
     assert raw_stamp["retrieval_count"] == 1
     assert raw_stamp["citation_count"] == 1
+    assert raw_stamp["misled_count"] == 1
     assert raw_stamp["last_recalled_at"] == base.replace(tzinfo=None)
     assert raw_stamp["last_used_at"] == (base + timedelta(minutes=5)).replace(tzinfo=None)
     graph_stamp = graph_client.entity_stamps["entity-a"]
     assert graph_stamp["retrieval_count"] == 1
     assert graph_stamp["citation_count"] == 0
+    assert graph_stamp["misled_count"] == 0
     assert graph_stamp["last_recalled_at"] == (base + timedelta(minutes=1)).replace(tzinfo=None)
 
 
@@ -293,6 +313,16 @@ async def test_record_memory_usage_persists_events_and_stamps_surreal_records() 
                     organization_id=organization_id,
                     session_key="session-a",
                     message_key="message-c",
+                    source_surface="completion",
+                    item_kind=MemoryUsageItemKind.RAW_CAPTURE,
+                    item_id="raw-usage",
+                    signal_type=MemoryUsageSignal.MISLED,
+                    event_at=base + timedelta(minutes=7),
+                ),
+                MemoryUsageEvent(
+                    organization_id=organization_id,
+                    session_key="session-a",
+                    message_key="message-d",
                     source_surface="context_pack",
                     item_kind=MemoryUsageItemKind.GRAPH_ENTITY,
                     item_id="entity-usage",
@@ -302,12 +332,22 @@ async def test_record_memory_usage_persists_events_and_stamps_surreal_records() 
                 MemoryUsageEvent(
                     organization_id=organization_id,
                     session_key="session-a",
-                    message_key="message-d",
+                    message_key="message-e",
                     source_surface="completion",
                     item_kind=MemoryUsageItemKind.GRAPH_ENTITY,
                     item_id="entity-usage",
                     signal_type=MemoryUsageSignal.CITATION,
                     event_at=base + timedelta(minutes=6),
+                ),
+                MemoryUsageEvent(
+                    organization_id=organization_id,
+                    session_key="session-a",
+                    message_key="message-f",
+                    source_surface="completion",
+                    item_kind=MemoryUsageItemKind.GRAPH_ENTITY,
+                    item_id="entity-usage",
+                    signal_type=MemoryUsageSignal.MISLED,
+                    event_at=base + timedelta(minutes=8),
                 ),
             ],
             graph_client=graph_client,
@@ -370,7 +410,7 @@ async def test_record_memory_usage_persists_events_and_stamps_surreal_records() 
             await content_client.execute_query(
                 """
                 SELECT last_recalled_at, last_used_at, retrieval_count,
-                    citation_count, metadata
+                    citation_count, misled_count, metadata
                 FROM raw_captures
                 WHERE organization_id = $organization_id AND uuid = "raw-usage"
                 LIMIT 1;
@@ -382,7 +422,7 @@ async def test_record_memory_usage_persists_events_and_stamps_surreal_records() 
             await graph_client.execute_query(
                 """
                 SELECT last_recalled_at, last_used_at, retrieval_count,
-                    citation_count, attributes
+                    citation_count, misled_count, attributes
                 FROM entity
                 WHERE group_id = $organization_id AND uuid = "entity-usage"
                 LIMIT 1;
@@ -391,9 +431,10 @@ async def test_record_memory_usage_persists_events_and_stamps_surreal_records() 
             )
         )
 
-        assert len(events) == 4
+        assert len(events) == 6
         assert raw_rows[0]["retrieval_count"] == 1
         assert raw_rows[0]["citation_count"] == 1
+        assert raw_rows[0]["misled_count"] == 1
         assert coerce_datetime(raw_rows[0]["last_recalled_at"]) == base.replace(tzinfo=None)
         assert coerce_datetime(raw_rows[0]["last_used_at"]) == (
             base + timedelta(minutes=5)
@@ -402,6 +443,7 @@ async def test_record_memory_usage_persists_events_and_stamps_surreal_records() 
         assert raw_metadata["fresh"] is True
         assert raw_metadata["retrieval_count"] == 1
         assert raw_metadata["citation_count"] == 1
+        assert raw_metadata["misled_count"] == 1
         assert coerce_datetime(raw_metadata["last_recalled_at"]) == base.replace(tzinfo=None)
         assert coerce_datetime(raw_metadata["last_used_at"]) == (
             base + timedelta(minutes=5)
@@ -409,6 +451,7 @@ async def test_record_memory_usage_persists_events_and_stamps_surreal_records() 
 
         assert entity_rows[0]["retrieval_count"] == 1
         assert entity_rows[0]["citation_count"] == 1
+        assert entity_rows[0]["misled_count"] == 1
         assert coerce_datetime(entity_rows[0]["last_recalled_at"]) == (
             base + timedelta(minutes=1)
         ).replace(tzinfo=None)
@@ -419,6 +462,7 @@ async def test_record_memory_usage_persists_events_and_stamps_surreal_records() 
         assert attributes["status"] == "done"
         assert attributes["retrieval_count"] == 1
         assert attributes["citation_count"] == 1
+        assert attributes["misled_count"] == 1
         assert coerce_datetime(attributes["last_recalled_at"]) == (
             base + timedelta(minutes=1)
         ).replace(tzinfo=None)
