@@ -1,5 +1,6 @@
 """Tests that packaged CLI assets stay in sync with repo-local sources."""
 
+import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -56,3 +57,22 @@ def test_cli_bundle_contains_versioned_skill_packs() -> None:
     assert "Sibyl CLI Workflows" in (pack_dir / "workflows.md").read_text()
     assert "Sibyl CLI Examples" in (pack_dir / "examples.md").read_text()
     assert "migration" in (pack_dir / "migration.md").read_text().lower()
+
+
+def test_skill_packs_only_teach_converged_agent_commands() -> None:
+    pack_dir = REPO_ROOT / "apps" / "cli" / "src" / "sibyl_cli" / "data" / "skill-packs"
+    stale_command = re.compile(
+        r"(?m)^\s*sibyl (?:"
+        r"add|blame|recall|search|"
+        r"context (?:--quick|pack|list|show|create|use|update|delete|clear)|"
+        r"memory-(?:audit|inspect|import-status|promote|share|space|review)"
+        r")(?:\s|$)"
+    )
+
+    stale_examples = {
+        path.name: stale_command.findall(path.read_text())
+        for path in pack_dir.glob("*.md")
+        if stale_command.search(path.read_text())
+    }
+
+    assert stale_examples == {}

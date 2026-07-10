@@ -17,8 +17,8 @@ sibyl task list --status doing
 # 2. If nothing in progress, check todos
 sibyl task list --status todo
 
-# 3. Search for context on what you're working on
-sibyl search "topic from last session"
+# 3. Load context for what you're working on
+sibyl context "resume the topic from last session" --intent build
 
 # 4. Resume or start a task
 sibyl task start task_a1b2c3d4e5f6
@@ -37,7 +37,7 @@ sibyl task block task_a1b2c3d4e5f6 --reason "Need to investigate the timeout iss
 sibyl task review task_a1b2c3d4e5f6 --pr "github.com/org/repo/pull/42"
 
 # ALWAYS capture learnings before leaving
-sibyl add "Session insight: Topic" "What I discovered today..."
+sibyl remember "Session insight: Topic" "What I discovered today..." --kind session
 ```
 
 ### Resuming Blocked Work
@@ -61,16 +61,16 @@ sibyl task unblock task_a1b2c3d4e5f6
 
 ```bash
 # Find existing patterns
-sibyl search "feature area" --type pattern
+sibyl context "build the feature using existing patterns" --intent build
 
 # Find past implementations
-sibyl search "similar work" --type episode
+sibyl context "find similar prior work" --intent build
 
 # Look for gotchas
-sibyl search "problems with X" --type episode
+sibyl context "find known problems with X" --intent debug
 
 # Check for documented constraints
-sibyl search "requirements for X" --type pattern
+sibyl context "plan against requirements for X" --intent plan
 
 # Get full content for any result (use ID from search output)
 sibyl show "pattern:abc123-uuid-here"
@@ -133,13 +133,13 @@ sibyl task start next_task_id --assignee you
 
 ```bash
 # Search for similar errors
-sibyl search "error message or symptom" --type episode
+sibyl context "debug error message or symptom" --intent debug
 
 # Search for patterns in the problem area
-sibyl search "component name" --type pattern
+sibyl context "debug the component" --intent debug
 
 # Look for related gotchas
-sibyl search "common issues with X" --type episode
+sibyl context "find common issues with X" --intent debug
 
 # Read full details from any match (use ID from search output)
 sibyl show "episode:abc123-uuid-here"

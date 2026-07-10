@@ -10,7 +10,7 @@ when you own the session.
    `✗ <message>` and exit non-zero; suppressing them causes blind retries.
 2. Search previews truncate. Follow up with `sibyl show <id>` before acting on
    a result.
-3. Capture non-obvious learnings without asking permission: `sibyl add` or
+3. Capture non-obvious learnings without asking permission: `sibyl remember` or
    `--learnings` on task completion.
 4. On connection errors run `sibyl health` once. If the server is down, report
    it and move on — do not retry the same command.
@@ -20,16 +20,16 @@ when you own the session.
 
 | Intent | Command |
 | --- | --- |
-| Working context before acting | `sibyl recall "<goal>" --intent build` |
+| Working context before acting | `sibyl context "<goal>" --intent build` |
 | Lean brief for a subagent prompt | `sibyl brief "<goal>" --budget 1500` |
-| Find knowledge by meaning | `sibyl search "<topic>"` |
+| Find knowledge by meaning | `sibyl context "<topic>" --intent general` |
 | Full content by ID | `sibyl show <id>` |
 | Save a durable memory | `sibyl remember "Title" "Body" --kind decision` |
-| Quick learning capture | `sibyl add "Title" "What you learned"` |
+| Quick learning capture | `sibyl remember "Title" "What you learned" --kind note` |
 | Current work | `sibyl task list --status doing,blocked` |
 | Finish with learnings | `sibyl task complete <id> --learnings "..."` |
 
 ## Pattern
 
-recall → act → remember. Search shows IDs; `show` fetches full content;
+context → act → remember. Context shows IDs; `show` fetches full content;
 `remember` makes it durable for the next agent.

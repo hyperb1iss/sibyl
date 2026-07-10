@@ -92,7 +92,7 @@ def callback(
     if not active and not linked_project:
         error("No active context")
         info("Link this directory: sibyl project link")
-        info("Or create a context: sibyl context create local --use")
+        info("Or create a context: sibyl config context create local --use")
         raise typer.Exit(1)
 
     # If no named context but we have a path mapping, show that
@@ -571,7 +571,7 @@ def list_cmd(
         info("No contexts configured")
         console.print()
         console.print(f"  [{NEON_CYAN}]Create one:[/{NEON_CYAN}]")
-        console.print("    sibyl context create local --server http://localhost:3334")
+        console.print("    sibyl config context create local --server http://localhost:3334")
         return
 
     table = create_table("Contexts", "", "Name", "Server", "Org", "Project")
@@ -610,7 +610,7 @@ def show_cmd(
         ctx = get_active_context()
         if not ctx:
             error("No active context")
-            info("Set one with: sibyl context use <name>")
+            info("Set one with: sibyl config context use <name>")
             raise typer.Exit(1)
 
     active_name = get_active_context_name()
@@ -793,7 +793,7 @@ def delete_cmd(
     if deleted:
         success(f"Deleted context '{name}'")
         if is_active:
-            info("No active context. Use 'sibyl context use <name>' to set one.")
+            info("No active context. Use 'sibyl config context use <name>' to set one.")
     else:
         error(f"Failed to delete context '{name}'")
         raise typer.Exit(1)

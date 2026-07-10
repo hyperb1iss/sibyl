@@ -17,46 +17,46 @@ Concrete examples showing the CLI in action.
 ### Basic Search
 
 ```bash
-sibyl search "authentication patterns"
+sibyl context "implement authentication patterns" --intent build
 # Output shows: name, section path, preview, and entity ID
 ```
 
-### Get Full Content After Search
+### Get Full Content After Context
 
 ```bash
-# 1. Search finds relevant results with IDs
-sibyl search "redis connection"
+# 1. Context finds relevant results with IDs
+sibyl context "debug a Redis connection" --intent debug
 # Output includes ID like: episode:abc123-uuid-here
 
 # 2. Fetch full content by ID
 sibyl show "episode:abc123-uuid-here"
 ```
 
-### Search with Type Filter
+### Context with Intent
 
 ```bash
-sibyl search "error handling" --type pattern
-sibyl search "debugging tips" --type episode
-sibyl search "security notes" --type note
+sibyl context "build error handling" --intent build
+sibyl context "debug the current failure" --intent debug
+sibyl context "review security constraints" --intent review
 ```
 
-### Search with Limit
+### Context with Limit
 
 ```bash
-sibyl search "OAuth" --limit 5
+sibyl context "implement OAuth" --intent build --limit 5
 ```
 
-### Complex Search
+### Scoped Context
 
 ```bash
 # Find Python patterns about async
-sibyl search "async await patterns" --type pattern
+sibyl context "implement Python async patterns" --intent build
 
 # Find debugging episodes
-sibyl search "connection timeout" --type episode
+sibyl context "debug a connection timeout" --intent debug
 
 # Search across all projects
-sibyl search "python guidance" --all
+sibyl context "review Python guidance" --intent review --all
 ```
 
 ---
@@ -286,11 +286,11 @@ A full feature implementation from start to finish:
 
 ```bash
 # 1. Research phase
-sibyl search "user authentication" --type pattern
+sibyl context "implement user authentication" --intent build
 # Found pattern:abc123... - get full content
 sibyl show "pattern:abc123-uuid"
 
-sibyl search "OAuth implementation" --type episode
+sibyl context "find prior OAuth implementation lessons" --intent build
 
 # 2. Check existing projects
 sibyl project list
@@ -348,7 +348,7 @@ sibyl config show
 
 ```bash
 sibyl health
-sibyl context
+sibyl config context --quick
 ```
 
 ---
@@ -377,22 +377,22 @@ sibyl crawl documents show doc_a1b2c3d4e5f6 --raw    # Raw markdown
 
 ```bash
 # Check current context (always do this first!)
-sibyl context
+sibyl config context --quick
 
 # If Project: none, link it
 sibyl project list
 sibyl project link proj_a1b2c3d4e5f6
 
 # Verify
-sibyl context
+sibyl config context --quick
 ```
 
 ### Switch Between Contexts
 
 ```bash
-sibyl context list
-sibyl context use prod
-sibyl context create staging --server https://staging.example.com --use
+sibyl config context list
+sibyl config context use prod
+sibyl config context create staging --server https://staging.example.com --use
 ```
 
 ---
