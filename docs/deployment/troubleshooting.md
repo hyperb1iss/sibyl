@@ -111,7 +111,7 @@ default install, OIDC is off and local auth is expected.
 3. **Check the active CLI context and token owner:**
 
    ```bash
-   sibyl context
+   sibyl config context
    sibyl auth status
    sibyl whoami
    ```
