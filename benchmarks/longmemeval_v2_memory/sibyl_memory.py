@@ -8,6 +8,7 @@ import re
 import sys
 import threading
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -240,6 +241,7 @@ class SibylLiveApiMemory(Memory):
         self.inserted_trajectories = 0
         self.created_entities = 0
         self._pending_embedding_job_ids: set[str] = set()
+        self._pending_projection_job_ids: set[str] = set()
         self._client = _new_http_client(
             self.api_url,
             timeout_seconds=self.api_timeout_seconds,
@@ -282,12 +284,16 @@ class SibylLiveApiMemory(Memory):
             )
             self.created_entities += _created_count(created)
             self._remember_embedding_backfill_jobs(created)
+            self._remember_memory_projection_jobs(created)
             if len(self._pending_embedding_job_ids) >= self.embedding_backfill_max_pending_jobs:
                 self._drain_embedding_backfills()
+            if len(self._pending_projection_job_ids) >= self.embedding_backfill_max_pending_jobs:
+                self._drain_memory_projections()
         self.inserted_trajectories += 1
 
     def query(self, query: str, query_image: str | None = None) -> list[MemoryContextItem]:
         self._drain_embedding_backfills()
+        self._drain_memory_projections()
         payload = {
             "query": query,
             "types": ["session"],
@@ -325,6 +331,7 @@ class SibylLiveApiMemory(Memory):
             "created_entities": self.created_entities,
             "defer_embeddings": self.defer_embeddings,
             "pending_embedding_backfill_jobs": len(self._pending_embedding_job_ids),
+            "pending_memory_projection_jobs": len(self._pending_projection_job_ids),
             "returned_context_items": len(memory_context),
             "search_content_max_chars": self.max_context_chars_per_item,
         }
@@ -338,42 +345,80 @@ class SibylLiveApiMemory(Memory):
             raise RuntimeError(msg)
         self._pending_embedding_job_ids.update(job_ids)
 
+    def _remember_memory_projection_jobs(self, response: dict[str, object]) -> None:
+        self._pending_projection_job_ids.update(
+            _background_job_ids(response, "memory_projection")
+        )
+
     def _drain_embedding_backfills(self) -> None:
-        if not self._pending_embedding_job_ids:
+        self._drain_background_jobs(
+            self._pending_embedding_job_ids,
+            job_name="embedding backfill",
+            progress_label="Embedding backfills",
+        )
+
+    def _drain_memory_projections(self) -> None:
+        self._drain_background_jobs(
+            self._pending_projection_job_ids,
+            job_name="memory projection",
+            progress_label="Memory projections",
+        )
+
+    def _drain_background_jobs(
+        self,
+        job_ids: set[str],
+        *,
+        job_name: str,
+        progress_label: str,
+    ) -> None:
+        if not job_ids:
             return
 
-        pending = set(self._pending_embedding_job_ids)
-        deadline = time.monotonic() + self.embedding_job_wait_timeout_seconds
+        pending = set(job_ids)
+        total = len(pending)
+        stall_deadline = time.monotonic() + self.embedding_job_wait_timeout_seconds
         last_statuses: dict[str, str] = {}
         while pending:
+            made_progress = False
             for job_id in sorted(pending):
                 status = self._request_json("GET", f"/jobs/{job_id}")
                 status_value = _stripped_str(status.get("status")) or "unknown"
+                if last_statuses.get(job_id) != status_value:
+                    made_progress = True
                 last_statuses[job_id] = status_value
                 if status_value == "complete":
                     if status.get("error"):
-                        msg = (
-                            f"embedding backfill job {job_id} failed: "
-                            f"{status['error']}"
-                        )
+                        msg = f"{job_name} job {job_id} failed: {status['error']}"
                         raise RuntimeError(msg)
                     pending.remove(job_id)
+                    made_progress = True
                 elif status_value in {"cancelled", "not_found"}:
-                    msg = f"embedding backfill job {job_id} ended as {status_value}"
+                    msg = f"{job_name} job {job_id} ended as {status_value}"
                     raise RuntimeError(msg)
 
+            if made_progress:
+                stall_deadline = time.monotonic() + self.embedding_job_wait_timeout_seconds
+                _report_background_job_progress(
+                    progress_label,
+                    total,
+                    pending,
+                    last_statuses,
+                )
             if not pending:
                 break
-            if time.monotonic() >= deadline:
+            if time.monotonic() >= stall_deadline:
                 statuses = ", ".join(
                     f"{job_id}={last_statuses.get(job_id, 'unknown')}"
                     for job_id in sorted(pending)
                 )
-                msg = f"timed out waiting for embedding backfill jobs: {statuses}"
+                msg = (
+                    f"timed out after {self.embedding_job_wait_timeout_seconds:g}s "
+                    f"without {job_name} progress: {statuses}"
+                )
                 raise RuntimeError(msg)
             time.sleep(self.embedding_job_poll_seconds)
 
-        self._pending_embedding_job_ids.clear()
+        job_ids.clear()
 
     def _authenticate(self, memory_params: dict[str, object]) -> None:
         if _is_loopback_url(self.api_url) and not self.allow_localhost:
@@ -678,6 +723,24 @@ def _background_job_ids(response: dict[str, object], key: str) -> list[str]:
     if not isinstance(job_ids, list):
         return []
     return [_stripped_str(job_id) for job_id in job_ids if _stripped_str(job_id)]
+
+
+def _report_background_job_progress(
+    label: str,
+    total: int,
+    pending: set[str],
+    statuses: dict[str, str],
+) -> None:
+    pending_counts = Counter(statuses.get(job_id, "unknown") for job_id in pending)
+    pending_summary = ", ".join(
+        f"{status}={count}" for status, count in sorted(pending_counts.items())
+    )
+    print(
+        f"{label}: {total - len(pending)}/{total} complete; "
+        f"pending {pending_summary or 'none'}.",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def _created_count(response: dict[str, object]) -> int:

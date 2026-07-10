@@ -8,6 +8,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from itertools import count
 from typing import Any, NoReturn
 from uuid import UUID
 
@@ -32,7 +33,10 @@ from sibyl_core.observability import telemetry_registry
 log = structlog.get_logger()
 
 JobCallable = Callable[..., Awaitable[Any]]
+QueueEntry = tuple[int, int, str]
 LOCAL_BROKER_ERROR = "Local job broker is not running"
+_DEFAULT_QUEUE_PRIORITY = 0
+_DERIVED_QUEUE_PRIORITY = 1
 
 
 @dataclass
@@ -95,7 +99,8 @@ class LocalQueueBroker:
             if shutdown_grace_seconds is None
             else shutdown_grace_seconds
         )
-        self._queue: asyncio.Queue[str] | None = None
+        self._queue: asyncio.PriorityQueue[QueueEntry] | None = None
+        self._queue_sequence = count()
         self._workers: list[asyncio.Task[None]] = []
         self._jobs: dict[str, LocalJobRecord] = {}
         self._recent_job_ids: deque[str] = deque(maxlen=recent_job_limit)
@@ -108,7 +113,7 @@ class LocalQueueBroker:
             if self._queue is not None:
                 return
 
-            self._queue = asyncio.Queue()
+            self._queue = asyncio.PriorityQueue()
             self._ctx = {"start_time": datetime.now(UTC)}
             self._workers = [
                 asyncio.create_task(
@@ -314,6 +319,7 @@ class LocalQueueBroker:
             sources_data,
             group_id,
             job_id=job_id,
+            queue_priority=_DERIVED_QUEUE_PRIORITY,
             created_source_ids=created_source_ids,
         )
         return result.job_id
@@ -339,6 +345,7 @@ class LocalQueueBroker:
             sources_data,
             group_id,
             job_id=job_id,
+            queue_priority=_DERIVED_QUEUE_PRIORITY,
             created_source_ids=created_source_ids,
             max_entities_per_source=max_entities_per_source,
             max_source_chars=max_source_chars,
@@ -660,6 +667,7 @@ class LocalQueueBroker:
         *args: Any,
         job_id: str,
         clear_result: bool = False,
+        queue_priority: int = _DEFAULT_QUEUE_PRIORITY,
         **kwargs: Any,
     ) -> EnqueueResult:
         self._purge_expired_jobs()
@@ -688,7 +696,7 @@ class LocalQueueBroker:
             kwargs=kwargs,
         )
         self._record_recent_job(job_id)
-        await queue.put(job_id)
+        await queue.put((queue_priority, next(self._queue_sequence), job_id))
         telemetry_registry().record_job_enqueued(function=function, created=True)
         return EnqueueResult(job_id=job_id, created=True)
 
@@ -697,7 +705,7 @@ class LocalQueueBroker:
         worker_task = asyncio.current_task()
 
         while True:
-            job_id = await queue.get()
+            _, _, job_id = await queue.get()
             record = self._jobs.get(job_id)
             try:
                 if record is None or record.status != JobStatus.QUEUED:
@@ -805,7 +813,7 @@ class LocalQueueBroker:
             self._recent_job_ids.remove(job_id)
         self._recent_job_ids.appendleft(job_id)
 
-    def _require_queue(self) -> asyncio.Queue[str]:
+    def _require_queue(self) -> asyncio.PriorityQueue[QueueEntry]:
         if self._queue is None:
             self._raise_unsupported()
         return self._queue

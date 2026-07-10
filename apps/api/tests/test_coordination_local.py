@@ -353,6 +353,109 @@ async def test_local_queue_broker_executes_local_jobs_and_reports_health() -> No
 
 
 @pytest.mark.asyncio
+async def test_local_queue_broker_runs_required_work_before_derived_projection() -> None:
+    running_started = asyncio.Event()
+    release_running = asyncio.Event()
+    calls: list[str] = []
+
+    async def sync_source(
+        _ctx: dict[str, object],
+        source_id: str,
+    ) -> dict[str, object]:
+        running_started.set()
+        await release_running.wait()
+        calls.append(source_id)
+        return {"source_id": source_id}
+
+    async def project_memory_batch(
+        _ctx: dict[str, object],
+        sources_data: list[dict[str, object]],
+        group_id: str,
+        *,
+        created_source_ids: list[str] | None = None,
+    ) -> dict[str, object]:
+        del sources_data, group_id, created_source_ids
+        calls.append("projection")
+        return {"projected": True}
+
+    async def backfill_entity_embeddings(
+        _ctx: dict[str, object],
+        entities_data: list[dict[str, object]],
+        group_id: str,
+        *,
+        relationships: list[dict[str, object]] | None = None,
+    ) -> dict[str, object]:
+        del group_id, relationships
+        calls.append(str(entities_data[0]["id"]))
+        return {"embedded": True}
+
+    async def extract_memory_entities(
+        _ctx: dict[str, object],
+        sources_data: list[dict[str, object]],
+        group_id: str,
+        *,
+        created_source_ids: list[str] | None = None,
+        max_entities_per_source: int = 4,
+        max_source_chars: int = 12_000,
+        max_concurrent: int = 2,
+        max_tokens: int = 8192,
+    ) -> dict[str, object]:
+        del (
+            sources_data,
+            group_id,
+            created_source_ids,
+            max_entities_per_source,
+            max_source_chars,
+            max_concurrent,
+            max_tokens,
+        )
+        calls.append("extraction")
+        return {"extracted": True}
+
+    broker = LocalQueueBroker(
+        functions={
+            "sync_source": sync_source,
+            "project_memory_batch": project_memory_batch,
+            "backfill_entity_embeddings": backfill_entity_embeddings,
+            "extract_memory_entities": extract_memory_entities,
+        },
+        max_concurrency=1,
+        result_ttl_seconds=60,
+    )
+
+    await broker.startup()
+    running_job_id = await broker.enqueue_sync("running")
+    await running_started.wait()
+    projection_job_id = await broker.enqueue_memory_projection(
+        [{"id": "session_projection"}],
+        "org_123",
+    )
+    extraction_job_id = await broker.enqueue_memory_extraction(
+        [{"id": "session_extraction"}],
+        "org_123",
+    )
+    first_embedding_job_id = await broker.enqueue_entity_embedding_backfill(
+        [{"id": "embedding_1"}],
+        "org_123",
+    )
+    second_embedding_job_id = await broker.enqueue_entity_embedding_backfill(
+        [{"id": "embedding_2"}],
+        "org_123",
+    )
+
+    release_running.set()
+    await _wait_for_job_status(broker, running_job_id, JobStatus.COMPLETE)
+    await _wait_for_job_status(broker, first_embedding_job_id, JobStatus.COMPLETE)
+    await _wait_for_job_status(broker, second_embedding_job_id, JobStatus.COMPLETE)
+    await _wait_for_job_status(broker, projection_job_id, JobStatus.COMPLETE)
+    await _wait_for_job_status(broker, extraction_job_id, JobStatus.COMPLETE)
+
+    assert calls == ["running", "embedding_1", "embedding_2", "projection", "extraction"]
+
+    await broker.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_local_queue_broker_executes_source_import_drain() -> None:
     calls: list[tuple[str, dict[str, object]]] = []
 

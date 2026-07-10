@@ -582,7 +582,7 @@ def test_sibyl_memory_query_context_strips_gold_answer() -> None:
     }
 
 
-def test_sibyl_memory_insert_defers_embeddings_and_tracks_backfill_job() -> None:
+def test_sibyl_memory_insert_tracks_deferred_background_jobs() -> None:
     module = _load_memory_module()
     memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
     module.Memory.__init__(memory, {})
@@ -602,7 +602,11 @@ def test_sibyl_memory_insert_defers_embeddings_and_tracks_backfill_job() -> None
                 "embedding_backfill": {
                     "status": "queued",
                     "job_ids": ["embed-lme-v2-1"],
-                }
+                },
+                "memory_projection": {
+                    "status": "queued",
+                    "job_ids": ["project-lme-v2-1"],
+                },
             },
         }
 
@@ -617,6 +621,7 @@ def test_sibyl_memory_insert_defers_embeddings_and_tracks_backfill_job() -> None
     memory.created_entities = 0
     memory.inserted_trajectories = 0
     memory._pending_embedding_job_ids = set()
+    memory._pending_projection_job_ids = set()
     memory._request_json = fake_request
 
     memory.insert(_trajectory("t1"))
@@ -628,6 +633,7 @@ def test_sibyl_memory_insert_defers_embeddings_and_tracks_backfill_job() -> None
     assert memory.created_entities == 1
     assert memory.inserted_trajectories == 1
     assert memory._pending_embedding_job_ids == {"embed-lme-v2-1"}
+    assert memory._pending_projection_job_ids == {"project-lme-v2-1"}
 
 
 def test_sibyl_memory_batches_payloads_by_entity_count_and_content_size() -> None:
@@ -656,7 +662,8 @@ def test_sibyl_memory_drains_backfills_when_pending_threshold_is_reached() -> No
     memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
     module.Memory.__init__(memory, {})
     calls = 0
-    drain_calls = 0
+    embedding_drain_calls = 0
+    projection_drain_calls = 0
 
     def fake_request(
         method: str,
@@ -674,14 +681,23 @@ def test_sibyl_memory_drains_backfills_when_pending_threshold_is_reached() -> No
                 "embedding_backfill": {
                     "status": "queued",
                     "job_ids": [f"embed-lme-v2-{calls}"],
-                }
+                },
+                "memory_projection": {
+                    "status": "queued",
+                    "job_ids": [f"project-lme-v2-{calls}"],
+                },
             },
         }
 
-    def fake_drain() -> None:
-        nonlocal drain_calls
-        drain_calls += 1
+    def fake_embedding_drain() -> None:
+        nonlocal embedding_drain_calls
+        embedding_drain_calls += 1
         memory._pending_embedding_job_ids.clear()
+
+    def fake_projection_drain() -> None:
+        nonlocal projection_drain_calls
+        projection_drain_calls += 1
+        memory._pending_projection_job_ids.clear()
 
     memory.project_id = "project_lme"
     memory.run_id = "run_lme"
@@ -694,14 +710,18 @@ def test_sibyl_memory_drains_backfills_when_pending_threshold_is_reached() -> No
     memory.created_entities = 0
     memory.inserted_trajectories = 0
     memory._pending_embedding_job_ids = set()
+    memory._pending_projection_job_ids = set()
     memory._request_json = fake_request
-    memory._drain_embedding_backfills = fake_drain
+    memory._drain_embedding_backfills = fake_embedding_drain
+    memory._drain_memory_projections = fake_projection_drain
 
     memory.insert(_trajectory("t1", tree="button Priority " * 20))
 
     assert calls > 1
-    assert drain_calls == calls
+    assert embedding_drain_calls == calls
+    assert projection_drain_calls == calls
     assert memory._pending_embedding_job_ids == set()
+    assert memory._pending_projection_job_ids == set()
 
 
 def test_sibyl_memory_insert_rejects_missing_deferred_embedding_job() -> None:
@@ -716,14 +736,95 @@ def test_sibyl_memory_insert_rejects_missing_deferred_embedding_job() -> None:
         memory._remember_embedding_backfill_jobs({"created": 1, "background_jobs": {}})
 
 
-def test_sibyl_memory_query_waits_for_embedding_backfill_before_search() -> None:
+def test_sibyl_memory_embedding_wait_timeout_resets_on_progress(monkeypatch, capsys) -> None:
     module = _load_memory_module()
     memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
     module.Memory.__init__(memory, {})
+    clock = [0.0]
     status_responses: list[dict[str, object]] = [
         {"status": "queued"},
+        {"status": "in_progress"},
+        {"status": "in_progress"},
         {"status": "complete", "error": None},
     ]
+
+    def fake_request(
+        method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        del method, path, json, params
+        return status_responses.pop(0)
+
+    def fake_sleep(seconds: float) -> None:
+        clock[0] += seconds
+
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(module.time, "sleep", fake_sleep)
+    memory.embedding_job_wait_timeout_seconds = 1.0
+    memory.embedding_job_poll_seconds = 0.6
+    memory._pending_embedding_job_ids = {"embed-lme-v2-1"}
+    memory._request_json = fake_request
+
+    memory._drain_embedding_backfills()
+
+    assert clock[0] == pytest.approx(1.8)
+    assert memory._pending_embedding_job_ids == set()
+    progress = capsys.readouterr().err
+    assert "pending queued=1" in progress
+    assert "pending in_progress=1" in progress
+    assert "1/1 complete; pending none" in progress
+
+
+def test_sibyl_memory_embedding_wait_times_out_without_progress(monkeypatch) -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    clock = [0.0]
+
+    def fake_request(
+        method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        del method, path, json, params
+        return {"status": "queued"}
+
+    def fake_sleep(seconds: float) -> None:
+        clock[0] += seconds
+
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(module.time, "sleep", fake_sleep)
+    memory.embedding_job_wait_timeout_seconds = 1.0
+    memory.embedding_job_poll_seconds = 0.6
+    memory._pending_embedding_job_ids = {"embed-lme-v2-1"}
+    memory._request_json = fake_request
+
+    with pytest.raises(RuntimeError, match="without embedding backfill progress"):
+        memory._drain_embedding_backfills()
+
+    assert clock[0] == pytest.approx(1.2)
+    assert memory._pending_embedding_job_ids == {"embed-lme-v2-1"}
+
+
+def test_sibyl_memory_query_waits_for_background_jobs_before_search() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    status_responses: dict[str, list[dict[str, object]]] = {
+        "/jobs/embed-lme-v2-1": [
+            {"status": "queued"},
+            {"status": "complete", "error": None},
+        ],
+        "/jobs/project-lme-v2-1": [
+            {"status": "queued"},
+            {"status": "complete", "error": None},
+        ],
+    }
     calls: list[str] = []
     search_payloads: list[dict[str, object]] = []
 
@@ -736,8 +837,8 @@ def test_sibyl_memory_query_waits_for_embedding_backfill_before_search() -> None
     ) -> dict[str, object]:
         del method, params
         calls.append(path)
-        if path == "/jobs/embed-lme-v2-1":
-            return status_responses.pop(0)
+        if path in status_responses:
+            return status_responses[path].pop(0)
         if path == "/search":
             assert isinstance(json, dict)
             search_payloads.append(json)
@@ -762,6 +863,7 @@ def test_sibyl_memory_query_waits_for_embedding_backfill_before_search() -> None
     memory.embedding_job_wait_timeout_seconds = 5.0
     memory.embedding_job_poll_seconds = 0.0
     memory._pending_embedding_job_ids = {"embed-lme-v2-1"}
+    memory._pending_projection_job_ids = {"project-lme-v2-1"}
     memory._request_json = fake_request
 
     context = memory.query("Which filter was selected?")
@@ -769,8 +871,15 @@ def test_sibyl_memory_query_waits_for_embedding_backfill_before_search() -> None
     assert len(context) == 1
     assert context[0]["value"].endswith("x" * TEST_CONTEXT_MAX_CHARS)
     assert search_payloads[0]["content_max_chars"] == TEST_CONTEXT_MAX_CHARS
-    assert calls == ["/jobs/embed-lme-v2-1", "/jobs/embed-lme-v2-1", "/search"]
+    assert calls == [
+        "/jobs/embed-lme-v2-1",
+        "/jobs/embed-lme-v2-1",
+        "/jobs/project-lme-v2-1",
+        "/jobs/project-lme-v2-1",
+        "/search",
+    ]
     assert memory._pending_embedding_job_ids == set()
+    assert memory._pending_projection_job_ids == set()
 
 
 def _write_dataset(root: Path) -> None:
