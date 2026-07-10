@@ -225,68 +225,74 @@ class CLIRunner:
         timeout = WAIT_SEARCHABLE_COMMAND_TIMEOUT if wait_searchable else 30
         return self.run(*args, timeout=timeout)
 
-    def search(
+    def context(
         self,
-        query: str,
+        goal: str,
         limit: int = 5,
         all_projects: bool = True,
-        entity_type: str | None = None,
+        domain: str | None = None,
     ) -> CLIResult:
-        """Search the knowledge graph.
+        """Recall a context pack.
 
         Args:
-            all_projects: Search all projects (bypass auto-resolved project context).
+            all_projects: Recall across projects (bypass auto-resolved project context).
                           Defaults to True for E2E tests to avoid picking up host machine's project.
         """
-        args = ["search", query, "--limit", str(limit), "--json"]
-        if entity_type:
-            args.extend(["--type", entity_type])
+        args = ["context", goal, "--limit", str(limit), "--json"]
+        if domain:
+            args.extend(["--domain", domain])
         if all_projects:
             args.append("--all")
         return self.run(*args)
 
-    def wait_for_search_results(
+    def wait_for_context_items(
         self,
-        query: str,
+        goal: str,
         *,
         limit: int = 10,
         all_projects: bool = True,
-        entity_type: str | None = None,
+        domain: str | None = None,
         timeout: float = EVENTUAL_TIMEOUT,
         interval: float = 0.25,
         match: Callable[[dict], bool] | None = None,
     ) -> list[dict]:
-        """Poll search until matching results are available."""
+        """Poll context until matching items are available."""
 
-        def extract_results(payload: dict | list) -> list[dict]:
+        def extract_items(payload: dict | list) -> list[dict]:
             if isinstance(payload, list):
                 return payload
             if isinstance(payload, dict):
-                results = payload.get("results")
-                if isinstance(results, list):
-                    return results
+                sections = payload.get("sections")
+                if isinstance(sections, list):
+                    return [
+                        item
+                        for section in sections
+                        if isinstance(section, dict)
+                        for item in section.get("items", [])
+                        if isinstance(item, dict)
+                    ]
             return []
 
         matcher = match or (lambda _: True)
         deadline = time.monotonic() + timeout
-        last_stdout = ""
+        last_output = ""
 
         while time.monotonic() < deadline:
-            result = self.search(
-                query,
+            result = self.context(
+                goal,
                 limit=limit,
                 all_projects=all_projects,
-                entity_type=entity_type,
+                domain=domain,
             )
-            last_stdout = result.stdout
+            last_output = result.stdout or result.stderr
             if result.success and result.is_json:
-                matched = [item for item in extract_results(result.json()) if matcher(item)]
+                matched = [item for item in extract_items(result.json()) if matcher(item)]
                 if matched:
                     return matched
             time.sleep(interval)
 
         raise AssertionError(
-            f"Timed out waiting for search results for {query!r}. Last output: {last_stdout}"
+            f"Timed out waiting for context items for {goal!r}. Last output: {last_output}"
         )
 
     def entity_list(self, entity_type: str | None = None) -> CLIResult:

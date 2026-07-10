@@ -55,18 +55,17 @@ class TestEntityOperations:
         data = result.json()
         assert isinstance(data, list)
 
-    def test_search(self, cli, unique_id) -> None:
-        """Add content and search for it."""
+    def test_context_recall(self, cli, unique_id) -> None:
+        """Remember content and recall it in a context pack."""
         title = f"Searchable E2E {unique_id}"
         content = f"Unique searchable content {unique_id} for verification"
 
         remember_result = cli.remember(title, content, kind="pattern", wait_searchable=True)
         assert remember_result.success
 
-        results = cli.wait_for_search_results(
+        results = cli.wait_for_context_items(
             title,
             limit=10,
-            entity_type="pattern",
             match=lambda result: self._matches_unique_result(result, unique_id),
         )
 
