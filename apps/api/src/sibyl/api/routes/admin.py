@@ -5,7 +5,7 @@ import io
 import json
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import urlunparse
 from uuid import UUID, uuid4
 
@@ -14,6 +14,8 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
+from pydantic_core import to_jsonable_python
+from surrealdb.data.types.datetime import Datetime as SurrealDatetime
 
 from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.schemas import (
@@ -157,6 +159,19 @@ async def execute_debug_query(
     from sibyl.persistence.graph_runtime import execute_debug_query as service
 
     return await service(cypher, group_id=group_id, **params)
+
+
+def _debug_json_fallback(value: object) -> object:
+    if isinstance(value, SurrealDatetime):
+        return value.dt
+    return str(value)
+
+
+def _json_safe_debug_rows(rows: list[dict[str, object]]) -> list[dict[str, Any]]:
+    return cast(
+        "list[dict[str, Any]]",
+        to_jsonable_python(rows, fallback=_debug_json_fallback),
+    )
 
 
 def _surreal_http_base_url() -> str | None:
@@ -989,10 +1004,11 @@ async def debug_query(
             group_id=group_id,
             **params,
         )
+        safe_rows = _json_safe_debug_rows(rows)
 
         return DebugQueryResponse(
-            rows=rows,
-            row_count=len(rows),
+            rows=safe_rows,
+            row_count=len(safe_rows),
         )
 
     except Exception as e:

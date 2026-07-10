@@ -11,6 +11,8 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException
 from fastapi.routing import APIRoute
+from surrealdb import RecordID
+from surrealdb.data.types.datetime import Datetime as SurrealDatetime
 
 from sibyl.api.routes import admin as admin_routes
 from sibyl.api.routes.admin import (
@@ -228,6 +230,40 @@ async def test_debug_query_uses_debug_runner_for_surrealql() -> None:
         group_id=str(org.id),
         limit=1,
     )
+
+
+@pytest.mark.asyncio
+async def test_debug_query_serializes_surreal_native_values() -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    request = DebugQueryRequest(cypher="SELECT id, metadata FROM entity")
+    mock_execute = AsyncMock(
+        return_value=[
+            {
+                "id": RecordID("entity", "00f2y7aye1xkzr1zdusw"),
+                "metadata": {
+                    "source": RecordID("raw_captures", "capture_1"),
+                    "observed_at": SurrealDatetime("2026-07-10T16:48:19Z"),
+                },
+            }
+        ]
+    )
+
+    with patch("sibyl.api.routes.admin.execute_debug_query", mock_execute):
+        response = await debug_query(request=request, org=org)
+
+    assert json.loads(response.model_dump_json()) == {
+        "rows": [
+            {
+                "id": "entity:00f2y7aye1xkzr1zdusw",
+                "metadata": {
+                    "source": "raw_captures:capture_1",
+                    "observed_at": "2026-07-10T16:48:19Z",
+                },
+            }
+        ],
+        "row_count": 1,
+        "error": None,
+    }
 
 
 @pytest.mark.asyncio
