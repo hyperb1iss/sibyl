@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -11,11 +10,26 @@ def test_packaged_skill_and_hook_assets_match_repo_sources() -> None:
     file_pairs = [
         (
             REPO_ROOT / "skills" / "sibyl" / "SKILL.md",
-            REPO_ROOT / "apps" / "cli" / "src" / "sibyl_cli" / "data" / "skills" / "sibyl" / "SKILL.md",
+            REPO_ROOT
+            / "apps"
+            / "cli"
+            / "src"
+            / "sibyl_cli"
+            / "data"
+            / "skills"
+            / "sibyl"
+            / "SKILL.md",
         ),
         (
             REPO_ROOT / "hooks" / "session-start.py",
-            REPO_ROOT / "apps" / "cli" / "src" / "sibyl_cli" / "data" / "hooks" / "session-start.py",
+            REPO_ROOT
+            / "apps"
+            / "cli"
+            / "src"
+            / "sibyl_cli"
+            / "data"
+            / "hooks"
+            / "session-start.py",
         ),
     ]
 
@@ -33,6 +47,11 @@ def test_cli_bundle_contains_versioned_skill_packs() -> None:
     pack_dir = REPO_ROOT / "apps" / "cli" / "src" / "sibyl_cli" / "data" / "skill-packs"
 
     assert (pack_dir / "core.md").read_text().startswith("# Sibyl")
+    contract = (pack_dir / "contract.md").read_text()
+    assert contract.startswith("# Sibyl Agent Contract")
+    assert "## Five verbs" in contract
+    assert "## Five hard rules" in contract
+    assert len(contract.split()) < 1400
     assert "Agent Rules (READ FIRST)" in (pack_dir / "core.md").read_text()
     assert "Sibyl CLI Workflows" in (pack_dir / "workflows.md").read_text()
     assert "Sibyl CLI Examples" in (pack_dir / "examples.md").read_text()

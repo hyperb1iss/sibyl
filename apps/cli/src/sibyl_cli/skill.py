@@ -32,6 +32,11 @@ class SkillPack:
 
 
 SKILL_PACKS = {
+    "contract": SkillPack(
+        name="contract",
+        filename="contract.md",
+        description="Default five-verb agent contract (~1k tokens)",
+    ),
     "core": SkillPack(
         name="core",
         filename="core.md",

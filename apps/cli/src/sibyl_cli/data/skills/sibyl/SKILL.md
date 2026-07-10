@@ -11,26 +11,28 @@ allowed-tools: Bash(sibyl:*)
 
 This stub points at the version-matched workflow shipped by the installed CLI.
 
-**Load the core pack before knowledge work:**
+**Load the compact contract at session start:**
+
+```bash
+sibyl skill get contract
+```
+
+It carries the five agent verbs, small enums, and hard rules in about 1k tokens. Before the first
+write intent (`remember`, `correct`, or a task mutation), load the full version-matched pack:
 
 ```bash
 sibyl skill get core
 ```
 
-You get the full `recall -> act -> remember -> reflect` loop, every CLI verb with the flags that
-actually exist on this machine, context pack usage, error patterns to avoid, and lock-conflict
-handling. Don't guess the verbs from training data; the CLI schema changes between releases.
-
 **Quick triggers (intent -> verb):**
 
 - "what am i working on" -> `sibyl task list --status doing,blocked`
-- "where did i leave off" -> `sibyl recall "<goal>"`
-- "have we hit this before" / "do we know X" -> `sibyl search "<topic>"`
+- "where did i leave off" -> `sibyl context "<goal>"`
+- "have we hit this before" / "do we know X" -> `sibyl context "<topic>"`
 - "remember this" / "write this up" / "save this insight" -> `sibyl remember "<title>" "<body>"`
-- "that memory is wrong/stale/superseded" -> `sibyl blame <id>` then `sibyl correct <id> ...`
-- "consolidate this session" -> `sibyl reflect "<notes>" --persist`
+- "that memory is wrong/stale/superseded" -> `sibyl correct <id>` then add `--action ...`
 
-Live status: `sibyl context` shows project link and auth; `sibyl health` shows server reachability.
+Live status: `sibyl health` shows server reachability.
 
 Useful follow-ups:
 

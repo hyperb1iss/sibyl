@@ -6,7 +6,12 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from sibyl_cli.main import app as main_app
-from sibyl_cli.skill import app, canonical_skill_markdown, install_canonical_skill, skill_pack_markdown
+from sibyl_cli.skill import (
+    app,
+    canonical_skill_markdown,
+    install_canonical_skill,
+    skill_pack_markdown,
+)
 
 
 def test_skill_command_prints_canonical_markdown() -> None:
@@ -15,6 +20,7 @@ def test_skill_command_prints_canonical_markdown() -> None:
     assert result.exit_code == 0
     assert result.stdout == canonical_skill_markdown()
     assert "version-matched workflow" in result.stdout
+    assert "sibyl skill get contract" in result.stdout
     assert "sibyl skill get core" in result.stdout
     assert "intent -> verb" in result.stdout
 
@@ -27,11 +33,21 @@ def test_skill_get_prints_versioned_pack() -> None:
     assert "Agent Rules (READ FIRST)" in result.stdout
 
 
+def test_skill_get_prints_compact_contract() -> None:
+    result = CliRunner().invoke(main_app, ["skill", "get", "contract"])
+
+    assert result.exit_code == 0
+    assert result.stdout == skill_pack_markdown("contract")
+    assert "## Five verbs" in result.stdout
+    assert "## Five hard rules" in result.stdout
+
+
 def test_skill_list_shows_available_packs() -> None:
     result = CliRunner().invoke(main_app, ["skill", "list"])
 
     assert result.exit_code == 0
     assert "core" in result.stdout
+    assert "contract" in result.stdout
     assert "workflows" in result.stdout
     assert "examples" in result.stdout
 

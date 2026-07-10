@@ -83,6 +83,7 @@ from sibyl_cli.update import app as update_app
 from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptureService
 from sibyl_core.models.context import ContextIntent
 from sibyl_core.models.entities import EntityType
+from sibyl_core.models.memory_scope import MemoryScope
 
 
 def get_version() -> str:
@@ -161,11 +162,27 @@ ENTITY_TYPE_ALIASES = {
     "learning": EntityType.NOTE.value,
 }
 ENTITY_TYPE_VALUES = [entity_type.value for entity_type in EntityType]
+ADVERTISED_ENTITY_TYPE_VALUES = (
+    "episode",
+    "decision",
+    "procedure",
+    "error_pattern",
+    "rule",
+    "plan",
+    "idea",
+    "claim",
+    "artifact",
+    "session",
+    "note",
+)
 CONTEXT_INTENT_VALUES = [intent.value for intent in ContextIntent]
+ADVERTISED_CONTEXT_INTENT_VALUES = ("build", "plan", "review", "debug", "general")
+ADVERTISED_MEMORY_SCOPE_VALUES = ("private", "project", "team", "org")
 MEMORY_BASIS_VALUES = ("observed", "inferred", "told", "assumed")
 MEMORY_PROPOSAL_SCOPE_VALUES = ("team",)
-ENTITY_TYPE_HELP = f"Entity type: {', '.join(ENTITY_TYPE_VALUES)}"
-CONTEXT_INTENT_HELP = f"Agent intent: {', '.join(CONTEXT_INTENT_VALUES)}"
+ENTITY_TYPE_HELP = f"Memory kind: {', '.join(ADVERTISED_ENTITY_TYPE_VALUES)}"
+CONTEXT_INTENT_HELP = f"Agent intent: {', '.join(ADVERTISED_CONTEXT_INTENT_VALUES)}"
+MEMORY_SCOPE_HELP = f"Memory scope: {', '.join(ADVERTISED_MEMORY_SCOPE_VALUES)}"
 
 
 def _normalize_entity_type(value: str, *, option_name: str) -> str:
@@ -213,6 +230,17 @@ def _normalize_context_intent(value: str) -> str:
         return normalized
     choices = ", ".join(CONTEXT_INTENT_VALUES)
     raise typer.BadParameter(f"{value!r} is not one of: {choices}")
+
+
+def _normalize_memory_scope(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized == "org":
+        return "organization"
+    try:
+        return MemoryScope(normalized).value
+    except ValueError as exc:
+        choices = ", ".join(ADVERTISED_MEMORY_SCOPE_VALUES)
+        raise typer.BadParameter(f"{value!r} is not one of: {choices}") from exc
 
 
 def _looks_like_task_id(value: str) -> bool:
@@ -2361,7 +2389,12 @@ def recall_context(
     ),
     raw: bool = typer.Option(False, "--raw", help="Recall verbatim raw memories"),
     diary: bool = typer.Option(False, "--diary", help="Recall a private agent diary"),
-    memory_scope: str = typer.Option("private", "--scope", help="Raw memory scope"),
+    memory_scope: str = typer.Option(
+        "private",
+        "--scope",
+        callback=_normalize_memory_scope,
+        help=MEMORY_SCOPE_HELP,
+    ),
     scope_key: str | None = typer.Option(None, "--scope-key", help="Project/team/shared scope key"),
     participant: Annotated[
         list[str] | None,
@@ -3381,7 +3414,12 @@ def remember_memory(
     diary: bool = typer.Option(False, "--diary", help="Store a private agent diary entry"),
     agent: str | None = typer.Option(None, "--agent", help="Agent identity for diary entries"),
     source_id: str | None = typer.Option(None, "--source-id", help="Raw memory source ID"),
-    memory_scope: str = typer.Option("private", "--scope", help="Raw memory scope"),
+    memory_scope: str = typer.Option(
+        "private",
+        "--scope",
+        callback=_normalize_memory_scope,
+        help=MEMORY_SCOPE_HELP,
+    ),
     scope_key: str | None = typer.Option(None, "--scope-key", help="Project/team/shared scope key"),
     pin: bool = typer.Option(False, "--pin", help="Exempt this memory from ordinary decay"),
     basis: str | None = typer.Option(
