@@ -19,6 +19,7 @@ from sibyl_core.auth.memory_policy import (
     authorize_memory_share,
     authorize_memory_write,
 )
+from sibyl_core.memory_pipeline.quality import normalize_memory_quality_metadata
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.reflection import (
     MemoryLifecycle,
@@ -222,9 +223,9 @@ _TEMPORAL_INVALIDATION_REASONS = {
 _SHARE_SOURCE_METADATA_ALLOWLIST = frozenset(
     {
         "category",
+        "confidence",
         "domain",
         "remember_kind",
-        "share_confidence",
         "share_reason",
     }
 )
@@ -2889,7 +2890,7 @@ def _candidate_from_review_memory(
         title=memory.title,
         content=memory.raw_content,
         reason=_metadata_str(memory.metadata, "reflection_reason") or "accepted for promotion",
-        confidence=_metadata_float(memory.metadata, "reflection_confidence", 1.0),
+        confidence=_metadata_float(memory.metadata, "confidence", 1.0),
         tags=list(memory.tags),
         metadata=metadata,
         raw_source_ids=list(raw_source_ids),
@@ -2926,7 +2927,7 @@ def _candidate_from_raw_memory(
         content=memory.raw_content,
         reason=_metadata_str(memory.metadata, "promotion_reason")
         or "accepted raw memory for promotion",
-        confidence=_metadata_float(memory.metadata, "promotion_confidence", 1.0),
+        confidence=_metadata_float(memory.metadata, "confidence", 1.0),
         tags=list(memory.tags),
         metadata=metadata,
         raw_source_ids=[memory.id],
@@ -2979,7 +2980,7 @@ def _candidate_from_share_memory(
         title=memory.title,
         content=memory.raw_content,
         reason=_metadata_str(memory.metadata, "share_reason") or "shared memory promotion",
-        confidence=_metadata_float(memory.metadata, "share_confidence", 1.0),
+        confidence=_metadata_float(memory.metadata, "confidence", 1.0),
         tags=list(memory.tags),
         metadata=metadata,
         raw_source_ids=[memory.id],
@@ -3019,20 +3020,22 @@ def _entity_from_candidate(
     capture_surface = _metadata_str(candidate.metadata, "promoted_capture_surface")
     if not capture_surface:
         capture_surface = "reflection"
-    metadata = {
-        **candidate.metadata,
-        "tags": list(candidate.tags),
-        "organization_id": organization_id,
-        "capture_mode": capture_mode,
-        "capture_surface": capture_surface,
-        "remember_kind": candidate.kind,
-        "reflection_reason": candidate.reason,
-        "reflection_confidence": candidate.confidence,
-        "raw_source_ids": source_ids,
-        "source_ids": source_ids,
-        "native_write_path": native_write_path,
-        **dict(policy_metadata),
-    }
+    metadata = normalize_memory_quality_metadata(
+        {
+            **candidate.metadata,
+            "tags": list(candidate.tags),
+            "organization_id": organization_id,
+            "capture_mode": capture_mode,
+            "capture_surface": capture_surface,
+            "remember_kind": candidate.kind,
+            "reflection_reason": candidate.reason,
+            "confidence": candidate.confidence,
+            "raw_source_ids": source_ids,
+            "source_ids": source_ids,
+            "native_write_path": native_write_path,
+            **dict(policy_metadata),
+        }
+    )
     if domain:
         metadata["category"] = domain
     elif metadata.get("category") is None:

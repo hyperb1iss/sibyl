@@ -1316,6 +1316,10 @@ class TestSurrealContentHelpers:
                 raw_content="Surreal stores raw memory before extraction.",
                 provenance={"message_id": "msg-1"},
                 capture_surface="email",
+                metadata={
+                    "memory_importance": 0.8,
+                    "reflection_confidence": 0.9,
+                },
             )
 
         assert memory.source_id == "source-email-1"
@@ -1330,6 +1334,10 @@ class TestSurrealContentHelpers:
         assert saved_record["agent_id"] is None
         assert saved_record["project_id"] is None
         assert saved_record["review_state"] == "pending"
+        assert saved_record["metadata"]["importance"] == 0.8
+        assert saved_record["metadata"]["confidence"] == 0.9
+        assert saved_record["metadata"]["memory_importance"] == 0.8
+        assert saved_record["metadata"]["reflection_confidence"] == 0.9
 
     @pytest.mark.asyncio
     async def test_list_raw_memories_for_promotion_filters_and_maps_entity_id(self) -> None:

@@ -5,7 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from sibyl_core.backends.surreal.schema import render_fulltext_compatible_sql
+from sibyl_core.backends.surreal.schema import (
+    render_fulltext_compatible_sql,
+    render_surreal_compatible_sql,
+)
 from sibyl_core.backends.surreal.schema_helpers import is_missing_table_error, split_statements
 from sibyl_core.backends.surreal.schema_version import (
     SCHEMA_VERSION_TABLE,
@@ -49,7 +52,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 19
+CONTENT_SCHEMA_CURRENT_VERSION = 20
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -470,6 +473,33 @@ DEFINE FIELD OVERWRITE review_state ON raw_captures TYPE string DEFAULT 'pending
     ASSERT $value IN {_surql_string_array(_CONTENT_REVIEW_STATE_VALUES)};
 """
 
+CONTENT_MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS = """
+UPDATE raw_captures SET metadata.importance = metadata.memory_importance
+WHERE type::is::number(metadata.importance) = false
+    AND type::is::number(metadata.memory_importance);
+UPDATE raw_captures SET metadata.importance = metadata.retention_importance
+WHERE type::is::number(metadata.retention_importance);
+UPDATE raw_captures SET metadata.confidence = metadata.share_confidence
+WHERE type::is::number(metadata.confidence) = false
+    AND type::is::number(metadata.share_confidence);
+UPDATE raw_captures SET metadata.confidence = metadata.projection_confidence
+WHERE type::is::number(metadata.projection_confidence);
+UPDATE raw_captures SET metadata.confidence = metadata.reflection_confidence
+WHERE type::is::number(metadata.reflection_confidence);
+UPDATE raw_captures SET metadata.confidence = metadata.promotion_confidence
+WHERE type::is::number(metadata.promotion_confidence);
+UPDATE raw_captures SET
+    metadata.retention_importance = metadata.importance,
+    metadata.memory_importance = metadata.importance
+WHERE type::is::number(metadata.importance);
+UPDATE raw_captures SET
+    metadata.promotion_confidence = metadata.confidence,
+    metadata.reflection_confidence = metadata.confidence,
+    metadata.projection_confidence = metadata.confidence,
+    metadata.share_confidence = metadata.confidence
+WHERE type::is::number(metadata.confidence);
+"""
+
 
 def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
     compatible_schema = render_fulltext_compatible_sql(
@@ -585,6 +615,18 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             name="content_lifecycle_review_split",
             statements=tuple(
                 split_statements(CONTENT_LIFECYCLE_REVIEW_SPLIT_MIGRATION_DEFINITIONS)
+            ),
+        ),
+        SchemaMigration(
+            version=20,
+            name="content_memory_quality_metadata",
+            statements=tuple(
+                split_statements(
+                    render_surreal_compatible_sql(
+                        CONTENT_MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS,
+                        url=url,
+                    )
+                )
             ),
         ),
     )
@@ -927,6 +969,7 @@ __all__ = [
     "CONTENT_HIGHLIGHT_SNIPPET_MIGRATION_DEFINITIONS",
     "CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS",
     "CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS",
+    "CONTENT_MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS",
     "CONTENT_PERMISSION_MIGRATION_DEFINITIONS",
     "CONTENT_RAW_CAPTURE_LOOKUP_MIGRATION_DEFINITIONS",
     "CONTENT_RELATION_TABLES",

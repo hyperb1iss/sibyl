@@ -2492,7 +2492,7 @@ async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> Non
                 "same_scope_reflect_allowed",
                 "same_scope_write_allowed",
             ],
-            "reflection_confidence": 0.91,
+            "confidence": 0.91,
             "source_count": 1,
         },
     )
@@ -2615,7 +2615,7 @@ async def test_auto_review_reflection_candidate_dry_run_does_not_promote() -> No
                 "same_scope_reflect_allowed",
                 "same_scope_write_allowed",
             ],
-            "reflection_confidence": 0.9,
+            "confidence": 0.9,
         },
     )
     with (
@@ -2663,7 +2663,7 @@ async def test_auto_review_reflection_candidate_routes_exceptions() -> None:
         raw_source_ids=["source-1"],
         metadata={
             "policy_reasons": ["unverified_membership"],
-            "reflection_confidence": 0.9,
+            "confidence": 0.9,
         },
     )
     with (
@@ -2711,7 +2711,7 @@ async def test_drain_reflection_review_dry_run_summarizes_pending_candidates() -
         memory_scope=MemoryScope.PRIVATE,
         scope_key=None,
         raw_source_ids=["source-safe"],
-        metadata={"reflection_confidence": 0.92},
+        metadata={"confidence": 0.92},
     )
     exception_preview = ReflectionPromotionPreview(
         allowed=False,
@@ -2723,7 +2723,7 @@ async def test_drain_reflection_review_dry_run_summarizes_pending_candidates() -
         raw_source_ids=["source-exception"],
         metadata={
             "policy_reasons": ["unverified_membership"],
-            "reflection_confidence": 0.91,
+            "confidence": 0.91,
         },
     )
     candidates = [
@@ -2851,7 +2851,7 @@ async def test_drain_reflection_review_archives_terminal_exceptions() -> None:
         raw_source_ids=["source-1"],
         metadata={
             "candidate_duplicate_of_source_id": "source-0",
-            "reflection_confidence": 0.94,
+            "confidence": 0.94,
         },
     )
     candidate = RawMemory(

@@ -1585,6 +1585,155 @@ async def test_graph_migration_rejects_invalid_entity_type_values() -> None:
 
 
 @pytest.mark.asyncio
+async def test_graph_migration_normalizes_memory_quality_metadata() -> None:
+    client = SurrealGraphClient(group_id="org-quality-migration", url="memory://")
+    try:
+        await bootstrap_schema(client)
+        entity_manager = EntityManager(client, group_id=client.group_id)
+        relationship_manager = RelationshipManager(client, group_id=client.group_id)
+        await entity_manager.create_direct(
+            Entity(
+                id="quality_source",
+                entity_type=EntityType.EPISODE,
+                name="Quality source",
+                organization_id=client.group_id,
+            )
+        )
+        await entity_manager.create_direct(
+            Entity(
+                id="quality_target",
+                entity_type=EntityType.TOPIC,
+                name="Quality target",
+                organization_id=client.group_id,
+            )
+        )
+        await relationship_manager.create(
+            Relationship(
+                id="quality_relation",
+                source_id="quality_source",
+                target_id="quality_target",
+                relationship_type=RelationshipType.RELATED_TO,
+            )
+        )
+        await relationship_manager.create(
+            Relationship(
+                id="quality_string_relation",
+                source_id="quality_target",
+                target_id="quality_source",
+                relationship_type=RelationshipType.RELATED_TO,
+            )
+        )
+        await client.execute_query(
+            """
+            UPDATE entity SET
+                attributes.retention_importance = 'bogus',
+                attributes.importance = 0.2,
+                attributes.promotion_confidence = false,
+                attributes.reflection_confidence = 0.7,
+                attributes.confidence = 0.1
+            WHERE uuid = 'quality_source';
+            UPDATE relates_to SET
+                attributes.projection_confidence = 0.6,
+                attributes.confidence = 0.1
+            WHERE uuid = 'quality_relation';
+            UPDATE entity SET
+                attributes.importance = 'bogus',
+                attributes.memory_importance = '0.8',
+                attributes.confidence = 'bogus',
+                attributes.share_confidence = '0.45'
+            WHERE uuid = 'quality_target';
+            UPDATE relates_to SET
+                attributes.importance = 'bogus',
+                attributes.memory_importance = '0.65',
+                attributes.confidence = 'bogus',
+                attributes.share_confidence = '0.35'
+            WHERE uuid = 'quality_string_relation';
+            """
+        )
+        await record_schema_version(
+            client.execute_query,
+            version=10,
+            migrations=(),
+            name=GRAPH_SCHEMA_NAME,
+        )
+
+        await bootstrap_schema(client)
+
+        entity_rows = normalize_records(
+            await client.execute_query(
+                "SELECT attributes FROM entity WHERE uuid = 'quality_source' LIMIT 1;"
+            )
+        )
+        relation_rows = normalize_records(
+            await client.execute_query(
+                "SELECT attributes FROM relates_to WHERE uuid = 'quality_relation' LIMIT 1;"
+            )
+        )
+        string_entity_rows = normalize_records(
+            await client.execute_query(
+                "SELECT attributes FROM entity WHERE uuid = 'quality_target' LIMIT 1;"
+            )
+        )
+        string_relation_rows = normalize_records(
+            await client.execute_query(
+                "SELECT attributes FROM relates_to WHERE uuid = 'quality_string_relation' LIMIT 1;"
+            )
+        )
+        entity_metadata = entity_rows[0]["attributes"]
+        relation_metadata = relation_rows[0]["attributes"]
+        string_entity_metadata = string_entity_rows[0]["attributes"]
+        string_relation_metadata = string_relation_rows[0]["attributes"]
+        assert entity_metadata["importance"] == 0.2
+        assert entity_metadata["confidence"] == 0.7
+        assert relation_metadata["confidence"] == 0.6
+        assert entity_metadata["retention_importance"] == 0.2
+        assert entity_metadata["reflection_confidence"] == 0.7
+        assert relation_metadata["projection_confidence"] == 0.6
+        assert string_entity_metadata["importance"] == "bogus"
+        assert string_entity_metadata["memory_importance"] == "0.8"
+        assert string_entity_metadata["confidence"] == "bogus"
+        assert string_entity_metadata["share_confidence"] == "0.45"
+        assert string_relation_metadata["importance"] == "bogus"
+        assert string_relation_metadata["memory_importance"] == "0.65"
+        assert string_relation_metadata["confidence"] == "bogus"
+        assert string_relation_metadata["share_confidence"] == "0.35"
+
+        loaded_entity = await entity_manager.get("quality_source")
+        loaded_string_entity = await entity_manager.get("quality_target")
+        loaded_relationships = await relationship_manager.get_for_entity(
+            "quality_source",
+            direction="outgoing",
+        )
+        loaded_string_relationships = await relationship_manager.get_for_entity(
+            "quality_target",
+            direction="outgoing",
+        )
+        assert loaded_entity is not None
+        assert loaded_string_entity is not None
+        assert loaded_entity.metadata["importance"] == 0.2
+        assert loaded_entity.metadata["confidence"] == 0.7
+        assert loaded_relationships[0].metadata["confidence"] == 0.6
+        assert loaded_string_entity.metadata["importance"] == 0.8
+        assert loaded_string_entity.metadata["confidence"] == 0.45
+        assert loaded_string_relationships[0].metadata["importance"] == 0.65
+        assert loaded_string_relationships[0].metadata["confidence"] == 0.35
+        for legacy_key in (
+            "retention_importance",
+            "memory_importance",
+            "promotion_confidence",
+            "reflection_confidence",
+            "projection_confidence",
+            "share_confidence",
+        ):
+            assert legacy_key not in loaded_entity.metadata
+            assert legacy_key not in loaded_relationships[0].metadata
+            assert legacy_key not in loaded_string_entity.metadata
+            assert legacy_key not in loaded_string_relationships[0].metadata
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_native_entity_lists_can_omit_heavy_content_fields() -> None:
     client = SurrealGraphClient(group_id="org-native-light-list", url="memory://")
     try:
@@ -2256,6 +2405,10 @@ async def test_graph_writes_entities_and_relationships() -> None:
             "native_write_path": "test",
             "source_ids": ["raw_123"],
             "confidence": 0.82,
+            "promotion_confidence": 0.82,
+            "reflection_confidence": 0.82,
+            "projection_confidence": 0.82,
+            "share_confidence": 0.82,
             "valid_at": "2026-05-13T12:00:00+00:00",
             "invalid_at": "2026-05-14T12:00:00+00:00",
         }

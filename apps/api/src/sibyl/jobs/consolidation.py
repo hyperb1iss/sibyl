@@ -322,17 +322,8 @@ def _priority_decay_reason(entity: Any) -> str:
 
 def _entity_importance(entity: Any) -> float:
     metadata = entity.metadata or {}
-    for key in (
-        "retention_importance",
-        "importance",
-        "memory_importance",
-        "promotion_confidence",
-        "reflection_confidence",
-        "projection_confidence",
-        "confidence",
-    ):
-        if (value := _metadata_float(metadata, key)) is not None:
-            return max(0.0, min(value, 1.0))
+    if (value := _metadata_float(metadata, "importance")) is not None:
+        return max(0.0, min(value, 1.0))
     return 0.5
 
 

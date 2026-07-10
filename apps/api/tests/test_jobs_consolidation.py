@@ -632,6 +632,25 @@ def test_priority_decay_scores_citation_above_exposure_above_untouched() -> None
     assert exposed_score > legacy_capped_score > untouched_score
 
 
+def test_entity_importance_reads_only_canonical_quality_scores() -> None:
+    canonical = Entity(
+        id="canonical",
+        entity_type=EntityType.EPISODE,
+        name="canonical",
+        metadata={"importance": 0.8, "confidence": 0.4},
+    )
+    confidence_only = canonical.model_copy(
+        update={"id": "confidence-only", "metadata": {"confidence": 0.7}}
+    )
+    legacy_only = canonical.model_copy(
+        update={"id": "legacy-only", "metadata": {"reflection_confidence": 0.9}}
+    )
+
+    assert consolidation_module._entity_importance(canonical) == 0.8
+    assert consolidation_module._entity_importance(confidence_only) == 0.5
+    assert consolidation_module._entity_importance(legacy_only) == 0.5
+
+
 @pytest.mark.asyncio
 async def test_priority_decay_orders_candidates_by_usage_before_age_fallback(
     monkeypatch: pytest.MonkeyPatch,

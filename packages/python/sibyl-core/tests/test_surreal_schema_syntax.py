@@ -27,6 +27,7 @@ from sibyl_core.backends.surreal.content_schema import (
     CONTENT_LIFECYCLE_REVIEW_SPLIT_MIGRATION_DEFINITIONS,
     CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS,
     CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS,
+    CONTENT_MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS,
     CONTENT_PERMISSION_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_CHANGEFEED_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS,
@@ -51,6 +52,7 @@ from sibyl_core.backends.surreal.schema import (
     GRAPH_ENUM_ASSERTION_DEFINITIONS,
     GRAPH_INDEX_PRUNE_DEFINITIONS,
     GRAPH_SCHEMA_MIGRATIONS,
+    MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS,
     NODE_DEFINITIONS,
     PARENT_TASK_CANONICALIZATION_DEFINITIONS,
     RELATION_EDGE_CLEANUP_DEFINITIONS,
@@ -500,7 +502,7 @@ def test_content_lifecycle_review_split_is_versioned() -> None:
     migration = next(item for item in migrations if item.name == "content_lifecycle_review_split")
     migration_sql = "\n".join(migration.statements)
 
-    assert CONTENT_SCHEMA_CURRENT_VERSION == 19
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 19
     assert CONTENT_LIFECYCLE_REVIEW_SPLIT_MIGRATION_DEFINITIONS.strip().splitlines()[0] in (
         migration_sql
     )
@@ -513,6 +515,30 @@ def test_content_lifecycle_review_split_is_versioned() -> None:
     assert "metadata.prior_review_state" in migration_sql
     assert "metadata.review_state = review_state" in migration_sql
     assert "WHERE review_state NOT IN" in migration_sql
+
+
+def test_content_memory_quality_metadata_is_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration = next(item for item in migrations if item.name == "content_memory_quality_metadata")
+    migration_sql = "\n".join(migration.statements)
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION == 20
+    assert "type::is::number(metadata.retention_importance)" in migration_sql
+    assert "type::is::number(metadata.promotion_confidence)" in migration_sql
+    assert "metadata.memory_importance = metadata.importance" in migration_sql
+    assert "metadata.reflection_confidence = metadata.confidence" in migration_sql
+    assert CONTENT_MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS.strip().splitlines()[0] in (
+        migration_sql
+    )
+
+
+def test_content_memory_quality_metadata_renders_server_type_predicates() -> None:
+    migrations = _content_schema_migrations(url="ws://localhost:8000/rpc")
+    migration = next(item for item in migrations if item.name == "content_memory_quality_metadata")
+    migration_sql = "\n".join(migration.statements)
+
+    assert "type::is_number(metadata.retention_importance)" in migration_sql
+    assert "type::is::number(metadata.retention_importance)" not in migration_sql
 
 
 def test_raw_capture_changefeed_cursor_is_versioned() -> None:
@@ -850,6 +876,8 @@ def test_graph_schema_migrations_render_runtime_compatible_statements() -> None:
 
     assert "type::is_string(updated_at)" in migration_sql
     assert "type::is::string(updated_at)" not in migration_sql
+    assert "type::is_number(attributes.retention_importance)" in migration_sql
+    assert "type::is::number(attributes.retention_importance)" not in migration_sql
 
 
 def test_graph_index_prune_removes_constant_namespace_prefixes() -> None:
@@ -953,7 +981,7 @@ def test_graph_entity_usage_signal_fields_are_versioned() -> None:
         statement for migration in GRAPH_SCHEMA_MIGRATIONS for statement in migration.statements
     )
 
-    assert GRAPH_SCHEMA_CURRENT_VERSION == 10
+    assert GRAPH_SCHEMA_CURRENT_VERSION >= 10
     assert "entity_usage_signals" in [migration.name for migration in GRAPH_SCHEMA_MIGRATIONS]
     for field in (
         "last_recalled_at",
@@ -967,6 +995,21 @@ def test_graph_entity_usage_signal_fields_are_versioned() -> None:
     assert "idx_entity_last_used" in NODE_DEFINITIONS
     assert "UPDATE entity SET" in ENTITY_USAGE_SIGNAL_DEFINITIONS
     assert ENTITY_USAGE_SIGNAL_DEFINITIONS.strip().splitlines()[0] in migration_sql
+
+
+def test_graph_memory_quality_metadata_is_versioned() -> None:
+    migration = next(
+        item for item in GRAPH_SCHEMA_MIGRATIONS if item.name == "memory_quality_metadata"
+    )
+    migration_sql = "\n".join(migration.statements)
+
+    assert GRAPH_SCHEMA_CURRENT_VERSION == 11
+    assert "type::is::number(attributes.retention_importance)" in migration_sql
+    assert "type::is::number(attributes.promotion_confidence)" in migration_sql
+    assert "attributes.memory_importance = attributes.importance" in migration_sql
+    assert "attributes.projection_confidence = attributes.confidence" in migration_sql
+    assert "UPDATE relates_to SET" in migration_sql
+    assert MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS.strip().splitlines()[0] in migration_sql
 
 
 def test_graph_relation_cleanup_covers_all_relation_tables() -> None:
@@ -1043,7 +1086,7 @@ async def test_graph_bootstrap_applies_migrations_without_full_rebuild() -> None
     assert not any("DEFINE TABLE OVERWRITE relates_to" in statement for statement in client.calls)
     assert any("idx_relates_source_created" in statement for statement in client.calls)
     assert any("idx_mentions_source_created" in statement for statement in client.calls)
-    assert sum("UPDATE relates_to SET" in statement for statement in client.calls) == 2
+    assert sum("UPDATE relates_to SET" in statement for statement in client.calls) == 10
     assert sum("UPDATE mentions SET" in statement for statement in client.calls) == 2
     for table in (*REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES):
         assert any(f"REMOVE TABLE IF EXISTS {table}" in statement for statement in client.calls)
@@ -1062,7 +1105,7 @@ async def test_graph_bootstrap_applies_dead_graph_drop_without_full_rebuild() ->
 
     assert not any("DEFINE TABLE IF NOT EXISTS entity" in statement for statement in client.calls)
     assert not any("DEFINE TABLE OVERWRITE relates_to" in statement for statement in client.calls)
-    assert sum("UPDATE relates_to SET" in statement for statement in client.calls) == 1
+    assert sum("UPDATE relates_to SET" in statement for statement in client.calls) == 9
     assert sum("UPDATE mentions SET" in statement for statement in client.calls) == 1
     for table in (*REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES):
         assert any(f"REMOVE TABLE IF EXISTS {table}" in statement for statement in client.calls)

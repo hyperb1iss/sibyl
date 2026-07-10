@@ -35,7 +35,7 @@ class _Preview:
                         "same_scope_reflect_allowed",
                         "same_scope_write_allowed",
                     ],
-                    "reflection_confidence": 0.91,
+                    "confidence": 0.91,
                     "source_count": 1,
                 },
             )
@@ -72,7 +72,7 @@ def test_autonomy_decision_routes_policy_denials_to_review() -> None:
             reason="unverified_membership",
             metadata={
                 "policy_reasons": ["unverified_membership"],
-                "reflection_confidence": 0.92,
+                "confidence": 0.92,
             },
         )
     )
@@ -85,9 +85,7 @@ def test_autonomy_decision_routes_policy_denials_to_review() -> None:
 
 
 def test_autonomy_decision_routes_low_confidence_to_review() -> None:
-    decision = decide_reflection_candidate_autonomy(
-        _Preview(metadata={"reflection_confidence": 0.74})
-    )
+    decision = decide_reflection_candidate_autonomy(_Preview(metadata={"confidence": 0.74}))
 
     assert decision.outcome is ReflectionAutonomyOutcome.EXCEPTION
     assert decision.reason == "low_confidence"
@@ -98,7 +96,7 @@ def test_autonomy_decision_routes_sensitive_candidates_to_review() -> None:
     decision = decide_reflection_candidate_autonomy(
         _Preview(
             metadata={
-                "reflection_confidence": 0.95,
+                "confidence": 0.95,
                 "sensitivity_flags": ["tag:secret"],
             }
         )

@@ -49,7 +49,7 @@ def _raw_review_candidate(**overrides: object) -> RawMemory:
             "capture_surface": "reflection_candidate",
             "remember_kind": "decision",
             "reflection_reason": "captures a durable decision",
-            "reflection_confidence": 0.86,
+            "confidence": 0.86,
             "raw_source_ids": ["source-1"],
             "suggested_memory_scope": "private",
             "suggested_scope_key": None,

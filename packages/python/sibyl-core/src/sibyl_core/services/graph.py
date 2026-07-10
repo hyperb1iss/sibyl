@@ -25,6 +25,10 @@ from sibyl_core.embeddings.providers import (
     entity_embedding_text,
     relationship_embedding_text,
 )
+from sibyl_core.memory_pipeline.quality import (
+    expand_memory_quality_storage_metadata,
+    normalize_memory_quality_metadata,
+)
 from sibyl_core.models.entities import (
     Entity,
     EntityType,
@@ -1734,6 +1738,7 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
     record_id = _row_record_id(normalized_row)
     if record_id and record_id != entity_id and metadata.get("record_id") is None:
         metadata["record_id"] = record_id
+    metadata = normalize_memory_quality_metadata(metadata)
 
     entity = Entity(
         id=entity_id,
@@ -2084,6 +2089,7 @@ def relationship_from_surreal_row(row: Mapping[str, object]) -> Relationship:
     record_id = _row_record_id(normalized_row)
     if record_id and record_id != relationship_id and metadata.get("record_id") is None:
         metadata["record_id"] = record_id
+    metadata = normalize_memory_quality_metadata(metadata)
 
     return Relationship(
         id=relationship_id,
@@ -2823,7 +2829,7 @@ async def _replace_relationships_bulk(
 
 
 def _relationship_record(relationship: Relationship, *, group_id: str) -> SurrealRecord:
-    metadata = dict(relationship.metadata or {})
+    metadata = expand_memory_quality_storage_metadata(relationship.metadata or {})
     fact = _metadata_str(metadata, "fact") or _relationship_fact(relationship)
     fact_embedding = _metadata_float_list(
         metadata.get("fact_embedding") or metadata.get("embedding")
@@ -2918,7 +2924,8 @@ def _metadata_datetime(value: object) -> datetime | None:
 
 
 def _entity_metadata(entity: Entity) -> dict[str, object]:
-    metadata = {str(key): _jsonable(value) for key, value in dict(entity.metadata or {}).items()}
+    normalized_metadata = normalize_memory_quality_metadata(entity.metadata or {})
+    metadata = {str(key): _jsonable(value) for key, value in normalized_metadata.items()}
     model_dump = entity.model_dump(
         mode="json",
         exclude={
@@ -2940,7 +2947,7 @@ def _entity_metadata(entity: Entity) -> dict[str, object]:
     for key, value in model_dump.items():
         if value not in (None, "", [], {}):
             metadata[key] = _jsonable(value)
-    return metadata
+    return expand_memory_quality_storage_metadata(metadata)
 
 
 def _jsonable(value: object) -> object:

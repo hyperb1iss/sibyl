@@ -112,7 +112,7 @@ def reflection_autonomy_candidate_metadata(memory: RawMemory) -> dict[str, Any]:
         "autonomy_candidate_tags": tags,
         "autonomy_capture_surface": memory.capture_surface,
         "autonomy_remember_kind": _metadata_str(metadata, "remember_kind"),
-        "reflection_confidence": _metadata_float(metadata, "reflection_confidence"),
+        "confidence": _metadata_float(metadata, "confidence"),
         "sensitivity_flags": sensitivity_flags,
         "duplicate_of_source_id": _metadata_str(metadata, "duplicate_of_source_id"),
         "candidate_duplicate_of_source_id": _metadata_str(
@@ -140,7 +140,7 @@ def decide_reflection_candidate_autonomy(
         metadata=metadata,
         policy=active_policy,
     )
-    confidence = _metadata_float(metadata, "reflection_confidence")
+    confidence = _metadata_float(metadata, "confidence")
 
     if preview.reason in {"candidate_already_promoted", "candidate_archived"}:
         return _decision(
@@ -239,7 +239,7 @@ def _exception_reasons(
     if not preview.raw_source_ids:
         reasons.append("missing_source")
 
-    confidence = _metadata_float(metadata, "reflection_confidence")
+    confidence = _metadata_float(metadata, "confidence")
     if confidence is None:
         reasons.append("missing_confidence")
     elif confidence < policy.confidence_threshold:

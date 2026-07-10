@@ -482,7 +482,11 @@ def test_raw_capture_record_preserves_first_class_lifecycle_fields() -> None:
         entity_id="note_123",
         tags=["raw"],
         embedding=[0.1, 0.2, 0.3],
-        metadata={"source": "manual"},
+        metadata={
+            "source": "manual",
+            "memory_importance": 0.8,
+            "reflection_confidence": 0.9,
+        },
         provenance={"source_import_id": "import_123"},
         capture_surface="source_import",
         created_by_user_id=user_id,
@@ -506,8 +510,17 @@ def test_raw_capture_record_preserves_first_class_lifecycle_fields() -> None:
     assert record["captured_at"] == captured_at
     assert record["deleted_at"] == deleted_at
     assert record["purge_after"] == purge_after
+    assert record["metadata"]["importance"] == 0.8
+    assert record["metadata"]["confidence"] == 0.9
+    assert record["metadata"]["retention_importance"] == 0.8
+    assert record["metadata"]["reflection_confidence"] == 0.9
     assert round_tripped.source_id == "source:project:1"
     assert round_tripped.principal_id == str(user_id)
+    assert round_tripped.metadata == {
+        "source": "manual",
+        "importance": 0.8,
+        "confidence": 0.9,
+    }
     assert round_tripped.memory_scope == "project"
     assert round_tripped.scope_key == "project_123"
     assert round_tripped.review_state == "deferred"
@@ -1487,6 +1500,81 @@ async def test_content_schema_migration_backfills_legacy_raw_capture_defaults() 
         assert capture["memory_scope"] == "private"
         assert capture["review_state"] == "pending"
         assert version_rows[0]["version"] == CONTENT_SCHEMA_CURRENT_VERSION
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_content_schema_migration_normalizes_memory_quality_metadata() -> None:
+    client = SurrealContentClient(url="memory://")
+    capture_id = str(uuid4())
+    string_capture_id = str(uuid4())
+    try:
+        await bootstrap_content_schema(client, reset=True)
+        await client.execute_query(
+            "CREATE raw_captures CONTENT $record;",
+            record={
+                "uuid": capture_id,
+                "organization_id": str(uuid4()),
+                "title": "Legacy quality metadata",
+                "raw_content": "normalize quality aliases",
+                "entity_type": "episode",
+                "metadata": {
+                    "retention_importance": "bogus",
+                    "importance": 0.4,
+                    "memory_importance": 0.3,
+                    "promotion_confidence": False,
+                    "reflection_confidence": 0.75,
+                    "confidence": 0.2,
+                },
+            },
+        )
+        await client.execute_query(
+            "CREATE raw_captures CONTENT $record;",
+            record={
+                "uuid": string_capture_id,
+                "organization_id": str(uuid4()),
+                "title": "Legacy string quality metadata",
+                "raw_content": "preserve parseable legacy strings",
+                "entity_type": "episode",
+                "metadata": {
+                    "importance": "bogus",
+                    "memory_importance": "0.8",
+                    "confidence": "bogus",
+                    "share_confidence": "0.45",
+                },
+            },
+        )
+        await client.execute_query("UPDATE schema_version SET version = 19 WHERE name = 'content';")
+
+        await bootstrap_content_schema(client)
+
+        rows = _normalize_records(
+            await client.execute_query(
+                "SELECT metadata FROM raw_captures WHERE uuid = $uuid LIMIT 1;",
+                uuid=capture_id,
+            )
+        )
+        metadata = rows[0]["metadata"]
+        assert metadata["importance"] == 0.4
+        assert metadata["confidence"] == 0.75
+        assert metadata["retention_importance"] == 0.4
+        assert metadata["memory_importance"] == 0.4
+        assert metadata["promotion_confidence"] == 0.75
+        assert metadata["reflection_confidence"] == 0.75
+        assert metadata["projection_confidence"] == 0.75
+        assert metadata["share_confidence"] == 0.75
+        string_rows = _normalize_records(
+            await client.execute_query(
+                "SELECT metadata FROM raw_captures WHERE uuid = $uuid LIMIT 1;",
+                uuid=string_capture_id,
+            )
+        )
+        string_metadata = string_rows[0]["metadata"]
+        assert string_metadata["importance"] == "bogus"
+        assert string_metadata["memory_importance"] == "0.8"
+        assert string_metadata["confidence"] == "bogus"
+        assert string_metadata["share_confidence"] == "0.45"
     finally:
         await client.close()
 

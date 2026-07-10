@@ -32,6 +32,10 @@ from sibyl_core.backends.surreal.records import (
     raise_on_error as _raise_on_error,
     utcnow as _utcnow,
 )
+from sibyl_core.memory_pipeline.quality import (
+    expand_memory_quality_storage_metadata,
+    normalize_memory_quality_metadata,
+)
 from sibyl_core.models import ChunkType, CrawlStatus, SourceType
 from sibyl_core.models.reflection import (
     MemoryLifecycle,
@@ -529,7 +533,9 @@ def _chunk_record(chunk: DocumentChunk) -> SurrealRecord:
 
 def _raw_capture_from_record(record: Mapping[str, object]) -> RawCaptureRecord:
     now = datetime.now(UTC).replace(tzinfo=None)
-    metadata = _coerce_dict(record.get("metadata") or record.get("metadata_"))
+    metadata = normalize_memory_quality_metadata(
+        _coerce_dict(record.get("metadata") or record.get("metadata_"))
+    )
     created_by_user_id = _coerce_optional_uuid(record.get("created_by_user_id"))
     return RawCaptureRecord(
         id=_coerce_uuid(record.get("uuid"), field_name="raw_captures.uuid"),
@@ -577,7 +583,7 @@ def _raw_capture_from_record(record: Mapping[str, object]) -> RawCaptureRecord:
 
 
 def _raw_capture_record(capture: RawCaptureRecord) -> SurrealRecord:
-    metadata = dict(capture.metadata or {})
+    metadata = expand_memory_quality_storage_metadata(capture.metadata or {})
     created_by_user_id = str(capture.created_by_user_id) if capture.created_by_user_id else ""
     source_id = capture.source_id or str(
         metadata.get("raw_source_id") or metadata.get("source_id") or ""

@@ -6,6 +6,8 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from sibyl_core.memory_pipeline.quality import normalize_memory_quality_metadata
+
 
 @dataclass(frozen=True, slots=True)
 class MemoryCaptureRequest:
@@ -66,7 +68,7 @@ class MemoryCaptureService:
         raw_source_id = _optional_str(raw_memory.get("source_id"))
         raw_policy_reason = _optional_str(raw_memory.get("policy_reason"))
 
-        graph_metadata: dict[str, Any] = dict(request.metadata)
+        graph_metadata = normalize_memory_quality_metadata(request.metadata)
         if raw_memory_id:
             graph_metadata["raw_memory_id"] = raw_memory_id
         if raw_source_id:

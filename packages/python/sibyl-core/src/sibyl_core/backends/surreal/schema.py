@@ -414,6 +414,57 @@ WHERE citation_count = 0
     AND attributes.citation_count != NONE;
 """
 
+MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS = """
+UPDATE entity SET attributes.importance = attributes.memory_importance
+WHERE type::is::number(attributes.importance) = false
+    AND type::is::number(attributes.memory_importance);
+UPDATE entity SET attributes.importance = attributes.retention_importance
+WHERE type::is::number(attributes.retention_importance);
+UPDATE entity SET attributes.confidence = attributes.share_confidence
+WHERE type::is::number(attributes.confidence) = false
+    AND type::is::number(attributes.share_confidence);
+UPDATE entity SET attributes.confidence = attributes.projection_confidence
+WHERE type::is::number(attributes.projection_confidence);
+UPDATE entity SET attributes.confidence = attributes.reflection_confidence
+WHERE type::is::number(attributes.reflection_confidence);
+UPDATE entity SET attributes.confidence = attributes.promotion_confidence
+WHERE type::is::number(attributes.promotion_confidence);
+UPDATE entity SET
+    attributes.retention_importance = attributes.importance,
+    attributes.memory_importance = attributes.importance
+WHERE type::is::number(attributes.importance);
+UPDATE entity SET
+    attributes.promotion_confidence = attributes.confidence,
+    attributes.reflection_confidence = attributes.confidence,
+    attributes.projection_confidence = attributes.confidence,
+    attributes.share_confidence = attributes.confidence
+WHERE type::is::number(attributes.confidence);
+UPDATE relates_to SET attributes.importance = attributes.memory_importance
+WHERE type::is::number(attributes.importance) = false
+    AND type::is::number(attributes.memory_importance);
+UPDATE relates_to SET attributes.importance = attributes.retention_importance
+WHERE type::is::number(attributes.retention_importance);
+UPDATE relates_to SET attributes.confidence = attributes.share_confidence
+WHERE type::is::number(attributes.confidence) = false
+    AND type::is::number(attributes.share_confidence);
+UPDATE relates_to SET attributes.confidence = attributes.projection_confidence
+WHERE type::is::number(attributes.projection_confidence);
+UPDATE relates_to SET attributes.confidence = attributes.reflection_confidence
+WHERE type::is::number(attributes.reflection_confidence);
+UPDATE relates_to SET attributes.confidence = attributes.promotion_confidence
+WHERE type::is::number(attributes.promotion_confidence);
+UPDATE relates_to SET
+    attributes.retention_importance = attributes.importance,
+    attributes.memory_importance = attributes.importance
+WHERE type::is::number(attributes.importance);
+UPDATE relates_to SET
+    attributes.promotion_confidence = attributes.confidence,
+    attributes.reflection_confidence = attributes.confidence,
+    attributes.projection_confidence = attributes.confidence,
+    attributes.share_confidence = attributes.confidence
+WHERE type::is::number(attributes.confidence);
+"""
+
 
 CURRENT_SCHEMA_MAINTENANCE_DEFINITIONS = ENTITY_DENORMALIZATION_MAINTENANCE_DEFINITIONS
 
@@ -478,6 +529,11 @@ GRAPH_SCHEMA_MIGRATIONS = (
         version=10,
         name="entity_usage_signals",
         statements=tuple(split_statements(ENTITY_USAGE_SIGNAL_DEFINITIONS)),
+    ),
+    SchemaMigration(
+        version=11,
+        name="memory_quality_metadata",
+        statements=tuple(split_statements(MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS)),
     ),
 )
 
@@ -750,6 +806,7 @@ def render_surreal_compatible_sql(sql: str, *, url: str) -> str:
     if not url.startswith(_EMBEDDED_SURREAL_SCHEMES):
         rendered = (
             rendered.replace("type::is::string", "type::is_string")
+            .replace("type::is::number", "type::is_number")
             .replace("type::is::datetime", "type::is_datetime")
             .replace("string::is::datetime", "string::is_datetime")
         )
@@ -869,6 +926,7 @@ __all__ = [
     "GRAPH_INDEX_PRUNE_DEFINITIONS",
     "GRAPH_SCHEMA_MIGRATIONS",
     "GRAPH_TABLES",
+    "MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS",
     "NODE_DEFINITIONS",
     "PARENT_TASK_CANONICALIZATION_DEFINITIONS",
     "RELATION_EDGE_CLEANUP_DEFINITIONS",

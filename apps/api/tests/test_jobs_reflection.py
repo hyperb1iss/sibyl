@@ -69,7 +69,7 @@ def _preview(
         memory_scope=MemoryScope.PRIVATE,
         scope_key=None,
         raw_source_ids=["source-1"],
-        metadata={"reflection_confidence": 0.94, **(metadata or {})},
+        metadata={"confidence": 0.94, **(metadata or {})},
     )
 
 
@@ -93,7 +93,7 @@ async def test_reflection_dream_cycle_reflects_sources_and_promotes_candidates()
         id="candidate-1",
         capture_surface="reflection_candidate",
         raw_content="Reflection should run automatically.",
-        metadata={"suggested_memory_scope": "private", "reflection_confidence": 0.94},
+        metadata={"suggested_memory_scope": "private", "confidence": 0.94},
     )
 
     with (
@@ -151,7 +151,7 @@ async def test_reflection_dream_cycle_dry_run_writes_no_memory() -> None:
     candidate = _raw_memory(
         id="candidate-1",
         capture_surface="reflection_candidate",
-        metadata={"suggested_memory_scope": "private", "reflection_confidence": 0.94},
+        metadata={"suggested_memory_scope": "private", "confidence": 0.94},
     )
 
     with (
@@ -205,7 +205,7 @@ async def test_reflection_dream_cycle_archives_terminal_exception_candidates() -
         metadata={
             "candidate_duplicate_of_source_id": "source-0",
             "suggested_memory_scope": "private",
-            "reflection_confidence": 0.94,
+            "confidence": 0.94,
         },
     )
     archived = _raw_memory(

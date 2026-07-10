@@ -14,6 +14,11 @@ from sibyl_core.memory_pipeline.lifecycle import (
     memory_lifecycle_state,
     raw_memory_lifecycle_recallable,
 )
+from sibyl_core.memory_pipeline.quality import (
+    expand_memory_quality_storage_metadata,
+    memory_metadata_score,
+    normalize_memory_quality_metadata,
+)
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceFailure, CandidateSourceResult
 
 __all__ = [
@@ -27,6 +32,9 @@ __all__ = [
     "MemoryCaptureService",
     "MemoryLifecycleView",
     "RawMemoryCaptureWriter",
+    "expand_memory_quality_storage_metadata",
     "memory_lifecycle_state",
+    "memory_metadata_score",
+    "normalize_memory_quality_metadata",
     "raw_memory_lifecycle_recallable",
 ]

@@ -26,6 +26,10 @@ from sibyl_core.embeddings.providers import (
     create_embedding_provider,
 )
 from sibyl_core.memory_pipeline.lifecycle import raw_memory_lifecycle_recallable
+from sibyl_core.memory_pipeline.quality import (
+    expand_memory_quality_storage_metadata,
+    normalize_memory_quality_metadata,
+)
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceFailure, CandidateSourceResult
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.models.reflection import (
@@ -1060,7 +1064,7 @@ def _chunk_from_record(record: Mapping[str, object]) -> ContentChunk:
 
 
 def _raw_memory_from_record(record: Mapping[str, object]) -> RawMemory:
-    metadata = _coerce_dict(record.get("metadata"))
+    metadata = normalize_memory_quality_metadata(_coerce_dict(record.get("metadata")))
     return RawMemory(
         id=_coerce_str(record.get("uuid")),
         organization_id=_coerce_str(record.get("organization_id")),
@@ -1125,7 +1129,7 @@ def _source_record(source: ContentSource) -> SurrealRecord:
 
 
 def _raw_memory_record(memory: RawMemory) -> SurrealRecord:
-    metadata = dict(memory.metadata)
+    metadata = expand_memory_quality_storage_metadata(memory.metadata)
     record: SurrealRecord = {
         "uuid": memory.id,
         "organization_id": memory.organization_id,
@@ -1721,7 +1725,7 @@ def _order_raw_memory_records_by_input(
 def _raw_memory_from_write(write: RawMemoryWrite, *, captured_at: datetime) -> RawMemory:
     normalized_scope = _coerce_memory_scope(write.memory_scope)
     _validate_raw_memory_scope(normalized_scope, write.scope_key)
-    metadata = dict(write.metadata or {})
+    metadata = normalize_memory_quality_metadata(write.metadata or {})
     return RawMemory(
         id=str(uuid4()),
         organization_id=write.organization_id,
@@ -2457,7 +2461,7 @@ async def remember_reflection_candidate_review(
         "capture_surface": "reflection_candidate",
         "remember_kind": candidate.kind,
         "reflection_reason": candidate.reason,
-        "reflection_confidence": candidate.confidence,
+        "confidence": candidate.confidence,
         "raw_source_ids": source_ids,
         "source_ids": source_ids,
         "extraction_prompt_metadata": dict(extraction_prompt_metadata or {}),

@@ -238,7 +238,7 @@ async def reflect_memory(
             "capture_surface": "reflection",
             "remember_kind": candidate.kind,
             "reflection_reason": candidate.reason,
-            "reflection_confidence": candidate.confidence,
+            "confidence": candidate.confidence,
             **persist_policy_metadata,
         }
         if domain:

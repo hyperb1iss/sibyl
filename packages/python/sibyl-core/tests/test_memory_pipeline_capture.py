@@ -37,7 +37,11 @@ async def test_memory_capture_service_writes_raw_source_before_graph_entity() ->
             title="Use context packs",
             content="Agents should receive grouped memory before building.",
             entity_type="decision",
-            metadata={"capture_mode": "remember"},
+            metadata={
+                "capture_mode": "remember",
+                "memory_importance": 0.8,
+                "reflection_confidence": 0.9,
+            },
         )
     )
 
@@ -46,6 +50,8 @@ async def test_memory_capture_service_writes_raw_source_before_graph_entity() ->
         "id": "decision_123",
         "metadata": {
             "capture_mode": "remember",
+            "confidence": 0.9,
+            "importance": 0.8,
             "raw_memory_id": "raw_123",
             "raw_source_id": "cli:manual",
             "raw_policy_reason": "private_principal_bound",
