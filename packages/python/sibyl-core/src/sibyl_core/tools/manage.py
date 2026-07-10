@@ -22,10 +22,12 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal, cast, get_args
+from uuid import uuid4
 
 import structlog
 
 from sibyl_core.auth import MemoryPolicyContext, authorize_memory_write
+from sibyl_core.errors import RevisionConflictError
 from sibyl_core.models.entities import EntityType
 from sibyl_core.runtime_ports import (
     get_audit_port,
@@ -160,6 +162,25 @@ class ManageResponse:
     message: str = ""
     data: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+def _manage_mutation_receipt(
+    data: dict[str, Any],
+    *,
+    applied: bool,
+    revision: int | None,
+    affected_records: list[str],
+) -> dict[str, Any]:
+    key = data.get("idempotency_key")
+    idempotency_key = key.strip() if isinstance(key, str) and key.strip() else None
+    return {
+        "operation_id": idempotency_key or str(uuid4()),
+        "applied": applied,
+        "revision": revision,
+        "affected_records": affected_records,
+        "idempotency_key": idempotency_key,
+        "replayed": False,
+    }
 
 
 async def _log_task_learning_capture_denied(
@@ -599,55 +620,100 @@ async def _handle_task_action(
     from sibyl_core.tasks.workflow import TaskWorkflowEngine
 
     workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, organization_id)
+    expected_revision = data.get("expected_revision")
+    if expected_revision is not None and (
+        isinstance(expected_revision, bool)
+        or not isinstance(expected_revision, int)
+        or expected_revision < 1
+    ):
+        return ManageResponse(
+            success=False,
+            action=action,
+            entity_id=entity_id,
+            message="expected_revision must be an integer greater than zero",
+        )
+    revision_kwargs = (
+        {"expected_revision": expected_revision} if expected_revision is not None else {}
+    )
+
+    def _task_receipt(task: Any) -> dict[str, Any]:
+        revision = getattr(task, "revision", None)
+        revision = revision if isinstance(revision, int) else None
+        return _manage_mutation_receipt(
+            data,
+            applied=True,
+            revision=revision,
+            affected_records=[f"entity:{entity_id}"],
+        )
 
     # All actions below require entity_id (validated above except for update_task)
     try:
         if action == "start_task":
             assert entity_id is not None  # validated above
             assignee = data.get("assignee", "system")
-            task = await workflow.start_task(entity_id, assignee)
+            task = await workflow.start_task(entity_id, assignee, **revision_kwargs)
             return ManageResponse(
                 success=True,
                 action=action,
                 entity_id=entity_id,
                 message="Task started",
-                data={"status": task.status.value, "branch_name": task.branch_name},
+                data={
+                    "status": task.status.value,
+                    "branch_name": task.branch_name,
+                    "mutation_receipt": _task_receipt(task),
+                },
             )
 
         if action == "block_task":
             assert entity_id is not None  # validated above
             reason = data.get("reason", "No reason provided")
-            task = await workflow.block_task(entity_id, reason)
+            task = await workflow.block_task(entity_id, reason, **revision_kwargs)
             return ManageResponse(
                 success=True,
                 action=action,
                 entity_id=entity_id,
                 message=f"Task blocked: {reason}",
-                data={"status": task.status.value, "reason": reason},
+                data={
+                    "status": task.status.value,
+                    "reason": reason,
+                    "mutation_receipt": _task_receipt(task),
+                },
             )
 
         if action == "unblock_task":
             assert entity_id is not None  # validated above
-            task = await workflow.unblock_task(entity_id)
+            task = await workflow.unblock_task(entity_id, **revision_kwargs)
             return ManageResponse(
                 success=True,
                 action=action,
                 entity_id=entity_id,
                 message="Task unblocked, resuming work",
-                data={"status": task.status.value},
+                data={
+                    "status": task.status.value,
+                    "mutation_receipt": _task_receipt(task),
+                },
             )
 
         if action == "submit_review":
             assert entity_id is not None  # validated above
             commit_shas = data.get("commit_shas", [])
             pr_url = data.get("pr_url")
-            task = await workflow.submit_for_review(entity_id, commit_shas, pr_url)
+            task = await workflow.submit_for_review(
+                entity_id,
+                commit_shas,
+                pr_url,
+                **revision_kwargs,
+            )
             return ManageResponse(
                 success=True,
                 action=action,
                 entity_id=entity_id,
                 message="Task submitted for review",
-                data={"status": task.status.value, "pr_url": task.pr_url},
+                data={
+                    "status": task.status.value,
+                    "pr_url": task.pr_url,
+                    "mutation_receipt": _task_receipt(task),
+                },
             )
 
         if action == "complete_task":
@@ -669,8 +735,13 @@ async def _handle_task_action(
                 actual_hours,
                 learnings,
                 create_episode=False,
+                **revision_kwargs,
             )
-            response_data = {"status": task.status.value, "learnings": learnings}
+            response_data = {
+                "status": task.status.value,
+                "learnings": learnings,
+                "mutation_receipt": _task_receipt(task),
+            }
             try:
                 citation_usage = await _record_task_completion_citations(
                     cited_ids=data.get("cited_ids"),
@@ -711,13 +782,16 @@ async def _handle_task_action(
         if action == "archive_task":
             assert entity_id is not None  # validated above
             reason = data.get("reason", "")
-            task = await workflow.archive_task(entity_id, reason)
+            task = await workflow.archive_task(entity_id, reason, **revision_kwargs)
             return ManageResponse(
                 success=True,
                 action=action,
                 entity_id=entity_id,
                 message="Task archived",
-                data={"status": task.status.value},
+                data={
+                    "status": task.status.value,
+                    "mutation_receipt": _task_receipt(task),
+                },
             )
 
         if action == "update_task":
@@ -729,6 +803,14 @@ async def _handle_task_action(
             return await _add_note(entity_manager, relationship_manager, entity_id, data)
 
     except InvalidTransitionError as e:
+        return ManageResponse(
+            success=False,
+            action=action,
+            entity_id=entity_id,
+            message=str(e),
+            data=e.details,
+        )
+    except RevisionConflictError as e:
         return ManageResponse(
             success=False,
             action=action,
@@ -764,8 +846,19 @@ async def _update_task(
             message="entity_id required for update_task",
         )
 
-    # Extract control flag
-    sync = data.pop("sync", True)
+    sync = data.get("sync", True)
+    expected_revision = data.get("expected_revision")
+    if expected_revision is not None and (
+        isinstance(expected_revision, bool)
+        or not isinstance(expected_revision, int)
+        or expected_revision < 1
+    ):
+        return ManageResponse(
+            success=False,
+            action="update_task",
+            entity_id=entity_id,
+            message="expected_revision must be an integer greater than zero",
+        )
 
     # Filter allowed update fields
     # Note: status is included for historical/bulk updates that need to bypass workflow
@@ -808,24 +901,65 @@ async def _update_task(
                 message="organization_id required for async update",
             )
 
-        job_id = await get_queue_port().enqueue_update_task(entity_id, updates, organization_id)
+        job_id = await get_queue_port().enqueue_update_task(
+            entity_id,
+            updates,
+            organization_id,
+            expected_revision=expected_revision,
+        )
         return ManageResponse(
             success=True,
             action="update_task",
             entity_id=entity_id,
             message=f"Task update queued: {', '.join(updates.keys())}",
-            data={"job_id": job_id, "queued_fields": list(updates.keys())},
+            data={
+                "job_id": job_id,
+                "queued_fields": list(updates.keys()),
+                "mutation_receipt": _manage_mutation_receipt(
+                    data,
+                    applied=False,
+                    revision=None,
+                    affected_records=[f"entity:{entity_id}"],
+                ),
+            },
         )
 
     # Sync mode: update directly
-    result = await entity_manager.update(entity_id, updates)
+    try:
+        if expected_revision is None:
+            result = await entity_manager.update(entity_id, updates)
+        else:
+            result = await entity_manager.update(
+                entity_id,
+                updates,
+                expected_revision=expected_revision,
+            )
+    except RevisionConflictError as e:
+        return ManageResponse(
+            success=False,
+            action="update_task",
+            entity_id=entity_id,
+            message=str(e),
+            data=e.details,
+        )
     if result:
+        revision = getattr(result, "revision", None)
+        revision = revision if isinstance(revision, int) else None
         return ManageResponse(
             success=True,
             action="update_task",
             entity_id=entity_id,
             message=f"Task updated: {', '.join(updates.keys())}",
-            data={"updated_fields": list(updates.keys())},
+            data={
+                "updated_fields": list(updates.keys()),
+                "revision": revision,
+                "mutation_receipt": _manage_mutation_receipt(
+                    data,
+                    applied=True,
+                    revision=revision,
+                    affected_records=[f"entity:{entity_id}"],
+                ),
+            },
         )
 
     return ManageResponse(
@@ -853,8 +987,6 @@ async def _add_note(
             - author_type: "agent" (assistant-authored) or "user" (default: "user")
             - author_name: Author identifier (optional)
     """
-    import uuid
-
     from sibyl_core.models.entities import Relationship, RelationshipType
     from sibyl_core.models.tasks import AuthorType, Note
 
@@ -902,7 +1034,7 @@ async def _add_note(
     author_name = data.get("author_name", "")
 
     # Create note entity
-    note_id = f"note_{uuid.uuid4()}"
+    note_id = f"note_{uuid4()}"
     created_at = datetime.now(UTC)
 
     note = Note(
@@ -945,6 +1077,13 @@ async def _add_note(
             "author_type": author_type.value,
             "author_name": author_name,
             "created_at": created_at.isoformat(),
+            "revision": note.revision,
+            "mutation_receipt": _manage_mutation_receipt(
+                data,
+                applied=True,
+                revision=note.revision,
+                affected_records=[f"entity:{note_id}"],
+            ),
         },
     )
 

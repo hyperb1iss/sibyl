@@ -82,6 +82,7 @@ class WorkItemTransition:
     entity_type: EntityType
     status: str
     name: str
+    revision: int | None = None
     fields: dict[str, Any] = field(default_factory=dict)
     broadcast_data: dict[str, Any] = field(default_factory=dict)
     task_data: dict[str, Any] = field(default_factory=dict)
@@ -91,7 +92,8 @@ class WorkItemTransition:
     @property
     def response_data(self) -> dict[str, Any]:
         """Status plus transition fields, the shape route responses expose."""
-        return {"status": self.status, **self.fields}
+        revision = {"revision": self.revision} if self.revision is not None else {}
+        return {"status": self.status, **revision, **self.fields}
 
 
 def _broadcast_entity_type(entity_type: EntityType) -> str:
@@ -131,38 +133,60 @@ class _TransitionOutcome:
     broadcast_fields: dict[str, Any]
     task: Any | None = None
 
+    @property
+    def revision(self) -> int | None:
+        revision = getattr(self.task, "revision", None)
+        return revision if isinstance(revision, int) else None
+
 
 async def _run_task_transition(
     workflow: TaskWorkflowEngine,
     action: WorkItemAction,
     item_id: str,
     payload: dict[str, Any],
+    expected_revision: int | None,
 ) -> _TransitionOutcome:
     """Apply a task-style transition via the core engine.
 
     Project-activity is updated inside the engine for these transitions, so the
     wrapper does not touch it again.
     """
+    revision_kwargs = (
+        {"expected_revision": expected_revision} if expected_revision is not None else {}
+    )
     if action == WorkItemAction.START_TASK:
-        task = await workflow.start_task(item_id, payload.get("assignee") or "system")
+        task = await workflow.start_task(
+            item_id,
+            payload.get("assignee") or "system",
+            **revision_kwargs,
+        )
         fields = {"branch_name": task.branch_name}
         return _TransitionOutcome(task.status.value, task.name, fields, fields, task)
 
     if action == WorkItemAction.BLOCK_TASK:
         reason = payload.get("reason", "No reason provided")
-        task = await workflow.block_task(item_id, reason)
+        task = await workflow.block_task(
+            item_id,
+            reason,
+            **revision_kwargs,
+        )
         return _TransitionOutcome(
             task.status.value, task.name, {"reason": reason}, {"blocker": reason}, task
         )
 
     if action == WorkItemAction.UNBLOCK_TASK:
-        task = await workflow.unblock_task(item_id)
+        task = await workflow.unblock_task(item_id, **revision_kwargs)
         return _TransitionOutcome(task.status.value, task.name, {}, {}, task)
 
     if action == WorkItemAction.SUBMIT_REVIEW:
         commit_shas = payload.get("commit_shas") or []
         pr_url = payload.get("pr_url")
-        task = await workflow.submit_for_review(item_id, commit_shas, pr_url)
+        task = await workflow.submit_for_review(
+            item_id,
+            commit_shas,
+            pr_url,
+            **revision_kwargs,
+        )
         fields = {"pr_url": task.pr_url}
         return _TransitionOutcome(task.status.value, task.name, fields, fields, task)
 
@@ -174,12 +198,17 @@ async def _run_task_transition(
             payload.get("actual_hours"),
             payload.get("learnings") or "",
             create_episode=False,
+            **revision_kwargs,
         )
         fields = {"learnings": payload.get("learnings")}
         return _TransitionOutcome(task.status.value, task.name, fields, fields, task)
 
     # ARCHIVE_TASK
-    task = await workflow.archive_task(item_id, payload.get("reason") or "")
+    task = await workflow.archive_task(
+        item_id,
+        payload.get("reason") or "",
+        **revision_kwargs,
+    )
     return _TransitionOutcome(task.status.value, task.name, {}, {}, task)
 
 
@@ -252,6 +281,7 @@ async def transition_work_item(
     payload: dict[str, Any] | None = None,
     entity: Any | None = None,
     broadcast: bool = True,
+    expected_revision: int | None = None,
 ) -> WorkItemTransition:
     """Perform a locked, broadcasting work-item transition.
 
@@ -292,7 +322,13 @@ async def transition_work_item(
                 runtime.client,
                 group_id,
             )
-            outcome = await _run_task_transition(workflow, action, item_id, payload)
+            outcome = await _run_task_transition(
+                workflow,
+                action,
+                item_id,
+                payload,
+                expected_revision,
+            )
             entity_type = EntityType.TASK
         else:
             outcome = await _run_epic_transition(group_id, action, item_id, payload, entity)
@@ -321,6 +357,7 @@ async def transition_work_item(
         entity_type=entity_type,
         status=outcome.status,
         name=outcome.name,
+        revision=outcome.revision,
         fields=outcome.response_fields,
         broadcast_data=broadcast_data,
         task_data=task_data,

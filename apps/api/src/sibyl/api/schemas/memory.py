@@ -10,6 +10,7 @@ from .common import (
     MemoryCorrectionActionLiteral,
     MemoryScopeLiteral,
     MemorySpaceStateLiteral,
+    MutationReceipt,
 )
 
 
@@ -83,6 +84,8 @@ class RawMemoryResponse(BaseModel):
     score: float = Field(default=0.0, description="Recall score")
     snippet: str | None = Field(default=None, description="Highlighted recall snippet")
     policy_reason: str | None = Field(default=None, description="Memory policy decision reason")
+    revision: int = Field(default=1, ge=1, description="Monotonic storage revision")
+    mutation_receipt: MutationReceipt | None = None
 
 
 class RawMemoryRecallResponse(BaseModel):
@@ -350,6 +353,7 @@ class MemoryCorrectionRequest(BaseModel):
         default_factory=dict,
         description="Audit-only metadata recorded with the correction receipt",
     )
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class MemoryCorrectionResponse(BaseModel):
@@ -373,6 +377,8 @@ class MemoryCorrectionResponse(BaseModel):
     audit_action: str
     policy_reasons: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    revision: int | None = Field(default=None, ge=1)
+    mutation_receipt: MutationReceipt | None = None
 
 
 class ReflectionPromotionRequest(BaseModel):

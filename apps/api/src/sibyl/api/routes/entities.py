@@ -16,7 +16,11 @@ from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.dependencies import get_knowledge_read_service
 from sibyl.api.errors import constraint_violation, sanitize_error_text
 from sibyl.api.event_types import WSEvent
-from sibyl.api.idempotency import replay_idempotent_response, save_idempotent_response
+from sibyl.api.idempotency import (
+    replay_idempotent_response,
+    save_idempotent_response,
+    serialize_idempotent_request,
+)
 from sibyl.api.schemas import (
     EntityBulkCreateRequest,
     EntityBulkCreateResponse,
@@ -1564,6 +1568,7 @@ async def create_entities_bulk(
     dependencies=[Depends(require_org_role(*_WRITE_ROLES))],
 )
 @handle_workflow_errors("create_entity")
+@serialize_idempotent_request
 async def create_entity(
     request: Request,
     entity: EntityCreate,

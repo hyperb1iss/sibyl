@@ -12,6 +12,12 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from sibyl.api.decorators import handle_workflow_errors
+from sibyl.api.idempotency import (
+    mutation_receipt,
+    replay_idempotent_response,
+    save_idempotent_response,
+    serialize_idempotent_request,
+)
 from sibyl.api.raw_capture_events import publish_raw_capture_changed
 from sibyl.api.schemas import (
     MemoryAuditEventResponse,
@@ -37,6 +43,7 @@ from sibyl.api.schemas import (
     MemorySpaceResponse,
     MemorySpaceStateLiteral,
     MemorySpaceUpdateRequest,
+    MutationReceipt,
     RawMemoryRecallRequest,
     RawMemoryRecallResponse,
     RawMemoryRememberRequest,
@@ -476,6 +483,7 @@ def _raw_memory_response(
     memory: RawMemory,
     *,
     policy_reason: str | None = None,
+    receipt: MutationReceipt | None = None,
 ) -> RawMemoryResponse:
     return RawMemoryResponse(
         id=memory.id,
@@ -495,6 +503,8 @@ def _raw_memory_response(
         score=memory.score,
         snippet=memory.snippet,
         policy_reason=policy_reason,
+        revision=memory.revision,
+        mutation_receipt=receipt,
     )
 
 
@@ -849,6 +859,7 @@ def _correction_response(
     *,
     applied: bool = False,
     updated_memory: RawMemory | None = None,
+    receipt: MutationReceipt | None = None,
 ) -> MemoryCorrectionResponse:
     metadata = dict(preview.metadata or {})
     lifecycle: dict[str, Any] = {}
@@ -884,14 +895,21 @@ def _correction_response(
         policy_reasons=[decision.reason for decision in preview.policy_decisions]
         or _metadata_str_list(metadata.get("policy_reasons")),
         metadata=metadata,
+        revision=updated_memory.revision if updated_memory else None,
+        mutation_receipt=receipt,
     )
 
 
-def _correction_result_response(result: MemoryCorrectionResult) -> MemoryCorrectionResponse:
+def _correction_result_response(
+    result: MemoryCorrectionResult,
+    *,
+    receipt: MutationReceipt | None = None,
+) -> MemoryCorrectionResponse:
     return _correction_response(
         result.preview,
         applied=result.applied,
         updated_memory=result.updated_memory,
+        receipt=receipt,
     )
 
 
@@ -1813,6 +1831,7 @@ async def preview_memory_space_member_access(
     response_model=RawMemoryResponse,
     dependencies=[Depends(require_org_role(*_WRITE_ROLES))],
 )
+@serialize_idempotent_request
 async def remember_raw(
     request: RawMemoryRememberRequest,
     http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
@@ -1857,6 +1876,25 @@ async def remember_raw(
             request=http_request,
             project_id=request.project_id,
         )
+        idempotency_payload = {"body": request.model_dump(mode="json")}
+        replayed = await replay_idempotent_response(
+            http_request,
+            organization_id=org.id,
+            principal_id=principal_id,
+            method="POST",
+            path="/memory/raw",
+            payload=idempotency_payload,
+            response_model=RawMemoryResponse,
+            content_session=None,
+        )
+        if replayed is not None:
+            telemetry_registry().record_memory_operation(
+                operation="remember_raw",
+                status="ok",
+                duration_ms=elapsed_ms(started_at),
+                result_count=1,
+            )
+            return replayed
         metadata = _diary_metadata(
             metadata=request.metadata,
             diary=request.diary,
@@ -1898,7 +1936,27 @@ async def remember_raw(
             organization_id=memory.organization_id,
             raw_memory_ids=[memory.id],
         )
-        response = _raw_memory_response(memory, policy_reason=write_decision.reason)
+        response = _raw_memory_response(
+            memory,
+            policy_reason=write_decision.reason,
+            receipt=mutation_receipt(
+                http_request,
+                applied=True,
+                revision=memory.revision,
+                affected_records=[f"raw_captures:{memory.id}"],
+            ),
+        )
+        await save_idempotent_response(
+            http_request,
+            organization_id=org.id,
+            principal_id=principal_id,
+            method="POST",
+            path="/memory/raw",
+            payload=idempotency_payload,
+            response=response,
+            status_code=200,
+            content_session=None,
+        )
         telemetry_registry().record_memory_operation(
             operation="remember_raw",
             status="ok",
@@ -2310,6 +2368,8 @@ async def preview_memory_correction_route(
     response_model=MemoryCorrectionResponse,
     dependencies=[Depends(require_org_role(*_ADMIN_ROLES))],
 )
+@handle_workflow_errors("apply_memory_correction", id_param="source_id")
+@serialize_idempotent_request
 async def apply_memory_correction_route(
     source_id: str,
     request: MemoryCorrectionRequest,
@@ -2331,17 +2391,52 @@ async def apply_memory_correction_route(
         memory_scope=memory.memory_scope.value,
         scope_key=memory.scope_key,
     )
-    result = await apply_memory_correction(
-        organization_id=str(org.id),
-        source_id=memory.id,
+    idempotency_path = f"/memory/inspect/{source_id}/corrections"
+    idempotency_payload = {"body": request.model_dump(mode="json")}
+    replayed = await replay_idempotent_response(
+        http_request,
+        organization_id=org.id,
         principal_id=principal_id,
-        action=request.action,
-        reason=request.reason,
-        accessible_projects=accessible_projects,
-        replacement_source_id=request.replacement_source_id,
-        duplicate_of_source_id=request.duplicate_of_source_id,
+        method="POST",
+        path=idempotency_path,
+        payload=idempotency_payload,
+        response_model=MemoryCorrectionResponse,
+        content_session=None,
     )
-    response = _correction_result_response(result)
+    if replayed is not None:
+        return replayed
+    correction_kwargs: dict[str, Any] = {
+        "organization_id": str(org.id),
+        "source_id": memory.id,
+        "principal_id": principal_id,
+        "action": request.action,
+        "reason": request.reason,
+        "accessible_projects": accessible_projects,
+        "replacement_source_id": request.replacement_source_id,
+        "duplicate_of_source_id": request.duplicate_of_source_id,
+    }
+    if request.expected_revision is not None:
+        correction_kwargs["expected_revision"] = request.expected_revision
+    result = await apply_memory_correction(
+        **correction_kwargs,
+    )
+    updated_revision = result.updated_memory.revision if result.updated_memory else None
+    response = _correction_result_response(
+        result,
+        receipt=mutation_receipt(
+            http_request,
+            applied=result.applied,
+            revision=updated_revision,
+            affected_records=(
+                [
+                    f"raw_captures:{affected_id}"
+                    for affected_id in result.preview.affected_source_ids
+                ]
+                if result.applied
+                else []
+            ),
+        ),
+    )
     await _log_memory_audit(
         action=result.preview.audit_action,
         ctx=ctx,
@@ -2364,6 +2459,17 @@ async def apply_memory_correction_route(
             "target_lifecycle_flags": result.preview.target_lifecycle_flags,
             "updated_review_state": response.updated_review_state,
         },
+    )
+    await save_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=principal_id,
+        method="POST",
+        path=idempotency_path,
+        payload=idempotency_payload,
+        response=response,
+        status_code=200,
+        content_session=None,
     )
     return response
 

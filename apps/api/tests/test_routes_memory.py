@@ -253,6 +253,11 @@ async def test_remember_raw_uses_current_org_and_principal() -> None:
     assert response.id == "memory-1"
     assert response.source_id == "source-1"
     assert response.principal_id == "user-123"
+    assert response.revision == 1
+    assert response.mutation_receipt is not None
+    assert response.mutation_receipt.applied is True
+    assert response.mutation_receipt.revision == 1
+    assert response.mutation_receipt.affected_records == ["raw_captures:memory-1"]
     assert response.policy_reason == "same_scope_write_allowed"
     publish_changed.assert_awaited_once_with(
         organization_id=str(org.id),
@@ -1739,6 +1744,7 @@ async def test_apply_memory_correction_returns_updated_review_state() -> None:
         audit_action="memory.correction.hide",
         metadata={"policy_reasons": ["private_principal_bound"]},
     )
+    updated.revision = 2
     result = MemoryCorrectionResult(applied=True, preview=preview, updated_memory=updated)
 
     with (
@@ -1751,7 +1757,7 @@ async def test_apply_memory_correction_returns_updated_review_state() -> None:
     ):
         response = await apply_memory_correction_route(
             "memory-1",
-            MemoryCorrectionRequest(action="hide", reason="outdated"),
+            MemoryCorrectionRequest(action="hide", reason="outdated", expected_revision=1),
             http_request=_http_request(),
             org=org,
             ctx=_ctx(org_role=OrganizationRole.OWNER),
@@ -1764,6 +1770,10 @@ async def test_apply_memory_correction_returns_updated_review_state() -> None:
     assert response.lifecycle["action"] == "hide"
     assert response.reflection_finding is not None
     assert response.reflection_finding["kind"] == "correction"
+    assert response.revision == 2
+    assert response.mutation_receipt is not None
+    assert response.mutation_receipt.revision == 2
+    assert response.mutation_receipt.affected_records == ["raw_captures:memory-1"]
     apply_call.assert_awaited_once_with(
         organization_id=str(org.id),
         source_id="memory-1",
@@ -1773,10 +1783,55 @@ async def test_apply_memory_correction_returns_updated_review_state() -> None:
         accessible_projects=None,
         replacement_source_id=None,
         duplicate_of_source_id=None,
+        expected_revision=1,
     )
     audit.assert_awaited_once()
     assert audit.await_args.kwargs["action"] == "memory.correction.hide"
     assert audit.await_args.kwargs["policy_allowed"] is True
+
+
+@pytest.mark.asyncio
+async def test_denied_memory_correction_receipt_reports_no_write() -> None:
+    org = _org()
+    memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
+    preview = MemoryCorrectionPreview(
+        allowed=False,
+        source_id="memory-1",
+        action="hide",
+        reason="reference_scope_mismatch",
+        target_lifecycle_state="active",
+        target_lifecycle_flags=["hidden"],
+        affected_source_ids=[],
+        affected_derived_ids=[],
+        reversible=True,
+        recall_impact={},
+        synthesis_impact={},
+        audit_action="memory.correction.hide",
+    )
+    result = MemoryCorrectionResult(applied=False, preview=preview)
+
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl.api.routes.memory.apply_memory_correction",
+            AsyncMock(return_value=result),
+        ),
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+    ):
+        response = await apply_memory_correction_route(
+            "memory-1",
+            MemoryCorrectionRequest(action="hide", reason="outdated"),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(org_role=OrganizationRole.OWNER),
+        )
+
+    assert response.applied is False
+    assert response.revision is None
+    assert response.mutation_receipt is not None
+    assert response.mutation_receipt.applied is False
+    assert response.mutation_receipt.revision is None
+    assert response.mutation_receipt.affected_records == []
 
 
 @pytest.mark.asyncio

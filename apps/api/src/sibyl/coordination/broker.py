@@ -204,6 +204,7 @@ class QueueBroker(Protocol):
         new_status: str | None = None,
         add_depends_on: list[str] | None = None,
         remove_depends_on: list[str] | None = None,
+        expected_revision: int | None = None,
     ) -> str: ...
 
     async def enqueue_source_import_drain(

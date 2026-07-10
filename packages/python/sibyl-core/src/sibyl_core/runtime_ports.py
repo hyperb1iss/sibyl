@@ -37,6 +37,8 @@ class QueuePort(Protocol):
         entity_id: str,
         updates: Mapping[str, Any],
         organization_id: str,
+        *,
+        expected_revision: int | None = None,
     ) -> str: ...
 
     async def enqueue_create_learning_episode(

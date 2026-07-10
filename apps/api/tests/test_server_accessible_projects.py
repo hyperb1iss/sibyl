@@ -416,12 +416,22 @@ async def test_remember_mcp_memory_scopes_project_metadata() -> None:
             metadata={"source": "test"},
         )
 
+    receipt = result.pop("mutation_receipt")
     assert result == {
         "success": True,
         "id": "decision_123",
         "raw_memory_id": "raw_123",
         "raw_source_id": "mcp:remember:decision",
         "policy_reason": "same_scope_write_allowed",
+    }
+    operation_id = receipt.pop("operation_id")
+    UUID(operation_id)
+    assert receipt == {
+        "applied": True,
+        "revision": 1,
+        "affected_records": ["raw_captures:raw_123"],
+        "idempotency_key": None,
+        "replayed": False,
     }
     remember_raw.assert_awaited_once_with(
         organization_id=ctx.org_id,
@@ -462,6 +472,81 @@ async def test_remember_mcp_memory_scopes_project_metadata() -> None:
         },
         project="project-a",
     )
+
+
+@pytest.mark.asyncio
+async def test_remember_mcp_memory_replays_idempotent_receipt() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    add = AsyncMock(return_value={"success": True, "id": "decision_123"})
+    remember_raw = AsyncMock(
+        return_value=SimpleNamespace(
+            id="raw_123",
+            source_id="mcp:remember:decision",
+            revision=3,
+        )
+    )
+    get_idempotency = AsyncMock(return_value=None)
+    save_idempotency = AsyncMock(side_effect=lambda _session, *, record: record)
+    kwargs = {
+        "title": "Use receipts",
+        "content": "Agent writes need durable proof.",
+        "kind": "decision",
+        "domain": "sibyl",
+        "project": "project-a",
+        "tags": ["memory"],
+        "related_to": None,
+        "metadata": None,
+        "idempotency_key": "remember-1",
+    }
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl_core.tools.core.add", add),
+        patch("sibyl_core.services.surreal_content.remember_raw_memory", remember_raw),
+        patch(
+            "sibyl_core.tools.core.explore",
+            AsyncMock(return_value=SimpleNamespace(entities=[])),
+        ),
+        patch(
+            "sibyl.persistence.content_runtime.get_api_idempotency_record",
+            get_idempotency,
+        ),
+        patch(
+            "sibyl.persistence.content_runtime.save_api_idempotency_record",
+            save_idempotency,
+        ),
+    ):
+        result = await _remember_mcp_memory(**kwargs)
+
+    assert result["mutation_receipt"] == {
+        "operation_id": "remember-1",
+        "applied": True,
+        "revision": 3,
+        "affected_records": ["raw_captures:raw_123"],
+        "idempotency_key": "remember-1",
+        "replayed": False,
+    }
+    assert save_idempotency.await_count == 2
+    saved_record = save_idempotency.await_args.kwargs["record"]
+    add.reset_mock()
+    remember_raw.reset_mock()
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch(
+            "sibyl.persistence.content_runtime.get_api_idempotency_record",
+            AsyncMock(return_value=saved_record),
+        ),
+        patch("sibyl_core.tools.core.add", add),
+        patch("sibyl_core.services.surreal_content.remember_raw_memory", remember_raw),
+    ):
+        replayed = await _remember_mcp_memory(**kwargs)
+
+    assert replayed["mutation_receipt"]["replayed"] is True
+    add.assert_not_awaited()
+    remember_raw.assert_not_awaited()
 
 
 def test_authorize_mcp_memory_write_returns_policy_reason() -> None:
@@ -782,13 +867,20 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service() -> Non
         entity_type=EntityType.TASK,
         status="done",
         name="Ship it",
+        revision=2,
         fields={"learnings": "MCP task learning needs policy context."},
         task_data={"id": "task-1", "title": "Ship it"},
     )
     transition = AsyncMock(return_value=transition_result)
     episode_enqueue = AsyncMock(return_value="episode-job")
     procedure_enqueue = AsyncMock(return_value="procedure-job")
-    data = {"learnings": "MCP task learning needs policy context."}
+    data = {
+        "learnings": "MCP task learning needs policy context.",
+        "expected_revision": 1,
+        "idempotency_key": "mcp-complete-1",
+    }
+    get_idempotency = AsyncMock(return_value=None)
+    save_idempotency = AsyncMock(side_effect=lambda _session, *, record: record)
 
     with (
         patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
@@ -800,6 +892,14 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service() -> Non
         patch("sibyl.services.work_item_workflow.transition_work_item", transition),
         patch("sibyl.jobs.queue.enqueue_create_learning_episode", episode_enqueue),
         patch("sibyl.jobs.queue.enqueue_create_learning_procedure", procedure_enqueue),
+        patch(
+            "sibyl.persistence.content_runtime.get_api_idempotency_record",
+            get_idempotency,
+        ),
+        patch(
+            "sibyl.persistence.content_runtime.save_api_idempotency_record",
+            save_idempotency,
+        ),
         patch("sibyl_core.tools.manage.manage", manage),
     ):
         result = await _manage_mcp_action(
@@ -815,6 +915,7 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service() -> Non
     assert transition.await_args.args[0] == ctx.org_id
     assert transition.await_args.args[1] == "task-1"
     assert transition.await_args.args[2] == WorkItemAction.COMPLETE_TASK
+    assert transition.await_args.kwargs["expected_revision"] == 1
 
     # Learning jobs are enqueued with the policy context the authz step resolved.
     expected_policy = {
@@ -843,8 +944,42 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service() -> Non
     assert result["data"]["status"] == "done"
     assert result["data"]["learning_episode_job_id"] == "episode-job"
     assert result["data"]["learning_procedure_job_id"] == "procedure-job"
+    receipt = result["data"]["mutation_receipt"]
+    assert receipt == {
+        "operation_id": "mcp-complete-1",
+        "applied": True,
+        "revision": 2,
+        "affected_records": ["entity:task-1"],
+        "idempotency_key": "mcp-complete-1",
+        "replayed": False,
+    }
     # Deprecation pointer is preserved for MCP clients.
     assert result["data"]["deprecation"]["use_instead"] == "POST /tasks/{id}/complete"
+
+    assert save_idempotency.await_count == 2
+    saved_record = save_idempotency.await_args.kwargs["record"]
+    transition.reset_mock()
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.server._authorize_mcp_manage_action", AsyncMock(return_value=None)),
+        patch(
+            "sibyl.persistence.content_runtime.get_api_idempotency_record",
+            AsyncMock(return_value=saved_record),
+        ),
+        patch("sibyl.services.work_item_workflow.transition_work_item", transition),
+    ):
+        replayed = await _manage_mcp_action(
+            action="complete_task",
+            entity_id="task-1",
+            data=data,
+        )
+
+    transition.assert_not_awaited()
+    assert replayed["data"]["mutation_receipt"]["replayed"] is True
+    episode_enqueue.assert_awaited_once()
+    procedure_enqueue.assert_awaited_once()
 
 
 @pytest.mark.asyncio

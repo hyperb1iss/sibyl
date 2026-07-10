@@ -21,7 +21,7 @@ import structlog
 from fastapi import HTTPException
 
 from sibyl.coordination.locks import LockAcquisitionError
-from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError
+from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError, RevisionConflictError
 
 log = structlog.get_logger()
 
@@ -75,6 +75,9 @@ def handle_workflow_errors(
                     status_code=409,
                     detail="Work item is locked by another process. Please retry.",
                 ) from e
+
+            except RevisionConflictError as e:
+                raise HTTPException(status_code=409, detail=e.details) from e
 
             except HTTPException:
                 raise

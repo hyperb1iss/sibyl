@@ -34,6 +34,7 @@ from .common import (
     MemoryCorrectionActionLiteral,
     MemoryScopeLiteral,
     MemorySpaceStateLiteral,
+    MutationReceipt,
 )
 from .context import (
     ContextPackItem,
@@ -270,6 +271,7 @@ __all__ = [
     "MemorySpaceResponse",
     "MemorySpaceStateLiteral",
     "MemorySpaceUpdateRequest",
+    "MutationReceipt",
     "OrgMetricsResponse",
     "ProjectMetrics",
     "ProjectMetricsResponse",

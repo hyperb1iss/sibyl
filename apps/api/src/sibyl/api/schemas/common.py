@@ -6,6 +6,8 @@ than from each other, avoiding circular imports.
 
 from typing import Literal
 
+from pydantic import BaseModel, Field
+
 MemoryScopeLiteral = Literal[
     "private",
     "delegated",
@@ -28,3 +30,14 @@ MemoryCorrectionActionLiteral = Literal[
 ]
 
 MemorySpaceStateLiteral = Literal["active", "disabled"]
+
+
+class MutationReceipt(BaseModel):
+    """Machine-readable outcome of an agent-facing mutation."""
+
+    operation_id: str
+    applied: bool
+    revision: int | None = Field(default=None, ge=1)
+    affected_records: list[str] = Field(default_factory=list)
+    idempotency_key: str | None = None
+    replayed: bool = False

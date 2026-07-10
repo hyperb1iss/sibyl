@@ -99,6 +99,20 @@ class TaskWorkflowEngine:
         self._graph_client = graph_client
         self._organization_id = organization_id
 
+    async def _update_task_entity(
+        self,
+        task_id: str,
+        updates: dict[str, Any],
+        expected_revision: int | None,
+    ) -> Any:
+        if expected_revision is None:
+            return await self._entity_manager.update(task_id, updates)
+        return await self._entity_manager.update(
+            task_id,
+            updates,
+            expected_revision=expected_revision,
+        )
+
     async def _create_learning_artifact_link(
         self,
         *,
@@ -145,6 +159,8 @@ class TaskWorkflowEngine:
         task_id: str,
         target_status: TaskStatus,
         updates: dict | None = None,
+        *,
+        expected_revision: int | None = None,
     ) -> Task:
         """Transition a task to a new status with validation.
 
@@ -184,7 +200,11 @@ class TaskWorkflowEngine:
 
         # Apply updates
         if all_updates:
-            updated_entity = await self._entity_manager.update(task_id, all_updates)
+            updated_entity = await self._update_task_entity(
+                task_id,
+                all_updates,
+                expected_revision,
+            )
             task = self._entity_to_task(updated_entity)
 
         log.info(
@@ -195,7 +215,13 @@ class TaskWorkflowEngine:
         )
         return task
 
-    async def start_task(self, task_id: str, assignee: str) -> Task:
+    async def start_task(
+        self,
+        task_id: str,
+        assignee: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> Task:
         """Transition task to 'doing' status.
 
         Args:
@@ -234,7 +260,11 @@ class TaskWorkflowEngine:
             log.info("Generated branch name", task_id=task_id, branch=branch_name)
 
         # Update task
-        updated_entity = await self._entity_manager.update(task_id, updates)
+        updated_entity = await self._update_task_entity(
+            task_id,
+            updates,
+            expected_revision,
+        )
         updated_task = self._entity_to_task(updated_entity)
 
         # Update project activity timestamp
@@ -250,7 +280,12 @@ class TaskWorkflowEngine:
         return updated_task
 
     async def submit_for_review(
-        self, task_id: str, commit_shas: list[str], pr_url: str | None = None
+        self,
+        task_id: str,
+        commit_shas: list[str],
+        pr_url: str | None = None,
+        *,
+        expected_revision: int | None = None,
     ) -> Task:
         """Move task to review status.
 
@@ -281,7 +316,11 @@ class TaskWorkflowEngine:
         if pr_url:
             updates["pr_url"] = pr_url
 
-        updated_entity = await self._entity_manager.update(task_id, updates)
+        updated_entity = await self._update_task_entity(
+            task_id,
+            updates,
+            expected_revision,
+        )
         updated_task = self._entity_to_task(updated_entity)
 
         # Update project activity timestamp
@@ -303,6 +342,7 @@ class TaskWorkflowEngine:
         learnings: str = "",
         *,
         create_episode: bool = True,
+        expected_revision: int | None = None,
     ) -> Task:
         """Mark task as done and capture learnings.
 
@@ -339,7 +379,11 @@ class TaskWorkflowEngine:
             updates["learnings"] = learnings
 
         # Update task
-        updated_entity = await self._entity_manager.update(task_id, updates)
+        updated_entity = await self._update_task_entity(
+            task_id,
+            updates,
+            expected_revision,
+        )
         updated_task = self._entity_to_task(updated_entity)
 
         # Create learning artifacts from completed task if learnings provided.
@@ -360,7 +404,13 @@ class TaskWorkflowEngine:
         log.info("Task completed successfully", task_id=task_id)
         return updated_task
 
-    async def block_task(self, task_id: str, blocker_description: str) -> Task:
+    async def block_task(
+        self,
+        task_id: str,
+        blocker_description: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> Task:
         """Mark task as blocked.
 
         Args:
@@ -388,7 +438,11 @@ class TaskWorkflowEngine:
             "blockers_encountered": blockers,
         }
 
-        updated_entity = await self._entity_manager.update(task_id, updates)
+        updated_entity = await self._update_task_entity(
+            task_id,
+            updates,
+            expected_revision,
+        )
         updated_task = self._entity_to_task(updated_entity)
 
         # Update project activity timestamp
@@ -403,7 +457,12 @@ class TaskWorkflowEngine:
         log.info("Task blocked", task_id=task_id, blocker=blocker_description)
         return updated_task
 
-    async def unblock_task(self, task_id: str) -> Task:
+    async def unblock_task(
+        self,
+        task_id: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> Task:
         """Unblock a task and return to doing status.
 
         Args:
@@ -426,7 +485,11 @@ class TaskWorkflowEngine:
             "status": TaskStatus.DOING,
         }
 
-        updated_entity = await self._entity_manager.update(task_id, updates)
+        updated_entity = await self._update_task_entity(
+            task_id,
+            updates,
+            expected_revision,
+        )
         updated_task = self._entity_to_task(updated_entity)
 
         # Update project activity timestamp
@@ -436,7 +499,13 @@ class TaskWorkflowEngine:
         log.info("Task unblocked", task_id=task_id)
         return updated_task
 
-    async def archive_task(self, task_id: str, reason: str = "") -> Task:
+    async def archive_task(
+        self,
+        task_id: str,
+        reason: str = "",
+        *,
+        expected_revision: int | None = None,
+    ) -> Task:
         """Archive a task without completing it.
 
         Args:
@@ -462,7 +531,11 @@ class TaskWorkflowEngine:
         if reason:
             updates["metadata"] = {**(task.metadata or {}), "archive_reason": reason}
 
-        updated_entity = await self._entity_manager.update(task_id, updates)
+        updated_entity = await self._update_task_entity(
+            task_id,
+            updates,
+            expected_revision,
+        )
         updated_task = self._entity_to_task(updated_entity)
 
         # Update project progress

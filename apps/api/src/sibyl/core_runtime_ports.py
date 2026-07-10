@@ -70,10 +70,17 @@ class ApiQueuePort:
         entity_id: str,
         updates: Mapping[str, Any],
         organization_id: str,
+        *,
+        expected_revision: int | None = None,
     ) -> str:
         from sibyl.jobs.queue import enqueue_update_task
 
-        return await enqueue_update_task(entity_id, dict(updates), organization_id)
+        return await enqueue_update_task(
+            entity_id,
+            dict(updates),
+            organization_id,
+            expected_revision=expected_revision,
+        )
 
     async def enqueue_create_learning_episode(
         self,

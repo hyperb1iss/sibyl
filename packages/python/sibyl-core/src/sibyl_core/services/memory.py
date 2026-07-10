@@ -1601,6 +1601,7 @@ async def apply_memory_correction(
     accessible_delegations: Iterable[str] | None = None,
     replacement_source_id: str | None = None,
     duplicate_of_source_id: str | None = None,
+    expected_revision: int | None = None,
 ) -> MemoryCorrectionResult:
     preview = await preview_memory_correction(
         organization_id=organization_id,
@@ -1656,7 +1657,10 @@ async def apply_memory_correction(
             duplicate_of_source_id=canonical_duplicate_of_source_id,
         ),
     )
-    saved = await save_raw_memory(updated)
+    if expected_revision is None:
+        saved = await save_raw_memory(updated)
+    else:
+        saved = await save_raw_memory(updated, expected_revision=expected_revision)
     return MemoryCorrectionResult(applied=True, preview=preview, updated_memory=saved)
 
 

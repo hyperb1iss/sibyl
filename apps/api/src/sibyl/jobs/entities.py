@@ -1036,6 +1036,7 @@ async def update_task(
     new_status: str | None = None,
     add_depends_on: list[str] | None = None,
     remove_depends_on: list[str] | None = None,
+    expected_revision: int | None = None,
 ) -> dict[str, Any]:
     """Update a task asynchronously with epic relationship and auto-start logic.
 
@@ -1081,12 +1082,17 @@ async def update_task(
             entity_manager = runtime.entity_manager
 
             # Perform the entity field update (skip if only dep changes)
-            updated = None
-            if len(updates) > 1:  # more than just modified_by
+            if expected_revision is None:
                 updated = await entity_manager.update(task_id, updates)
-                if not updated:
-                    log.warning("update_task_no_changes", task_id=task_id)
-                    return {"task_id": task_id, "success": False, "message": "No changes made"}
+            else:
+                updated = await entity_manager.update(
+                    task_id,
+                    updates,
+                    expected_revision=expected_revision,
+                )
+            if not updated:
+                log.warning("update_task_no_changes", task_id=task_id)
+                return {"task_id": task_id, "success": False, "message": "No changes made"}
 
             # Create relationship manager if any relationship changes needed
             needs_rel_mgr = epic_id is not None or add_depends_on or remove_depends_on
@@ -1141,6 +1147,7 @@ async def update_task(
         return {
             "task_id": task_id,
             "updated_fields": list(updates.keys()),
+            "revision": updated.revision,
             "success": True,
         }
 

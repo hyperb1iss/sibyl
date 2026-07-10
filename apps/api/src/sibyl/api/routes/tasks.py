@@ -5,15 +5,21 @@ Dedicated endpoints for task lifecycle operations with proper event broadcasting
 
 import asyncio
 import uuid
-from typing import Any
+from typing import Any, cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.event_types import WSEvent
-from sibyl.api.idempotency import replay_idempotent_response, save_idempotent_response
+from sibyl.api.idempotency import (
+    mutation_receipt,
+    replay_idempotent_response,
+    save_idempotent_response,
+    serialize_idempotent_request,
+)
+from sibyl.api.schemas import MutationReceipt
 from sibyl.api.websocket import broadcast_event
 from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
@@ -28,10 +34,12 @@ from sibyl.locks import entity_lock
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl.services.work_item_workflow import WorkItemAction, transition_work_item
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole, ProjectRole
+from sibyl_core.errors import RevisionConflictError
 from sibyl_core.models.tasks import AuthorType, Note, TaskComplexity, TaskPriority, TaskStatus
 from sibyl_core.tools.helpers import _project_id_for_policy
 
 log = structlog.get_logger()
+_REQUEST_AUTO_INJECT_SENTINEL: Request = cast("Request", None)
 _WRITE_ROLES = (
     OrganizationRole.OWNER,
     OrganizationRole.ADMIN,
@@ -97,18 +105,21 @@ class TaskActionResponse(BaseModel):
     task_id: str
     message: str
     data: dict[str, Any] = {}
+    mutation_receipt: MutationReceipt | None = None
 
 
 class StartTaskRequest(BaseModel):
     """Request to start a task."""
 
     assignee: str | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class BlockTaskRequest(BaseModel):
     """Request to block a task."""
 
     reason: str
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class ReviewTaskRequest(BaseModel):
@@ -116,6 +127,7 @@ class ReviewTaskRequest(BaseModel):
 
     pr_url: str | None = None
     commit_shas: list[str] = []
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class CompleteTaskRequest(BaseModel):
@@ -124,12 +136,18 @@ class CompleteTaskRequest(BaseModel):
     actual_hours: float | None = None
     learnings: str | None = None
     cited_ids: list[str] = []
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class ArchiveTaskRequest(BaseModel):
     """Request to archive a task."""
 
     reason: str | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
+
+
+class UnblockTaskRequest(BaseModel):
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class UpdateTaskRequest(BaseModel):
@@ -148,6 +166,7 @@ class UpdateTaskRequest(BaseModel):
     technologies: list[str] | None = None
     add_depends_on: list[str] = []
     remove_depends_on: list[str] = []
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class CreateTaskRequest(BaseModel):
@@ -175,6 +194,7 @@ class CreateTaskRequest(BaseModel):
 
 @router.post("", response_model=TaskActionResponse)
 @handle_workflow_errors("create_task")
+@serialize_idempotent_request
 async def create_task(
     http_request: Request,
     request: CreateTaskRequest,
@@ -285,7 +305,13 @@ async def create_task(
         action="create",
         task_id=task_id,
         message="Task created successfully",
-        data={"project_id": request.project_id},
+        data={"project_id": request.project_id, "revision": task.revision},
+        mutation_receipt=mutation_receipt(
+            http_request,
+            applied=True,
+            revision=task.revision,
+            affected_records=[f"entity:{task_id}"],
+        ),
     )
     await save_idempotent_response(
         http_request,
@@ -344,6 +370,75 @@ async def _verify_epic_exists(entity_manager: Any, epic_id: str) -> None:
         )
 
 
+def _task_principal_id(auth: AuthContext) -> str:
+    return str(
+        getattr(auth, "user_id", None) or getattr(getattr(auth, "user", None), "id", "unknown")
+    )
+
+
+async def _task_transition_response(
+    *,
+    task_id: str,
+    http_request: Request,
+    org: AuthOrganization,
+    auth: AuthContext,
+    route_action: str,
+    workflow_action: WorkItemAction,
+    message: str,
+    request_body: object,
+    transition_payload: dict[str, Any] | None = None,
+    expected_revision: int | None = None,
+) -> TaskActionResponse:
+    path = f"/tasks/{task_id}/{route_action}"
+    idempotency_payload = {"body": request_body}
+    principal_id = _task_principal_id(auth)
+    replayed = await replay_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=principal_id,
+        method="POST",
+        path=path,
+        payload=idempotency_payload,
+        response_model=TaskActionResponse,
+        content_session=None,
+    )
+    if replayed is not None:
+        return replayed
+
+    result = await transition_work_item(
+        str(org.id),
+        task_id,
+        workflow_action,
+        payload=transition_payload,
+        expected_revision=expected_revision,
+    )
+    response = TaskActionResponse(
+        success=True,
+        action=workflow_action.value,
+        task_id=task_id,
+        message=message,
+        data=result.response_data,
+        mutation_receipt=mutation_receipt(
+            http_request,
+            applied=True,
+            revision=result.revision,
+            affected_records=[f"entity:{task_id}"],
+        ),
+    )
+    await save_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=principal_id,
+        method="POST",
+        path=path,
+        payload=idempotency_payload,
+        response=response,
+        status_code=200,
+        content_session=None,
+    )
+    return response
+
+
 async def _maybe_start_epic(
     entity_manager: Any,
     task_id: str,
@@ -392,8 +487,10 @@ async def _maybe_start_epic(
 
 @router.post("/{task_id}/start", response_model=TaskActionResponse)
 @handle_workflow_errors("start_task")
+@serialize_idempotent_request
 async def start_task(
     task_id: str,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
     org: AuthOrganization = Depends(get_current_organization),
     auth: AuthContext = Depends(get_auth_context),
     request: StartTaskRequest | None = None,
@@ -402,78 +499,79 @@ async def start_task(
     await _verify_task_access(task_id, org, auth)
 
     assignee = request.assignee if request else None
-    result = await transition_work_item(
-        str(org.id),
-        task_id,
-        WorkItemAction.START_TASK,
-        payload={"assignee": assignee or "system"},
-    )
-
-    return TaskActionResponse(
-        success=True,
-        action="start_task",
+    return await _task_transition_response(
         task_id=task_id,
+        http_request=http_request,
+        org=org,
+        auth=auth,
+        route_action="start",
+        workflow_action=WorkItemAction.START_TASK,
         message="Task started",
-        data=result.response_data,
+        request_body=request.model_dump(mode="json") if request else None,
+        transition_payload={"assignee": assignee or "system"},
+        expected_revision=request.expected_revision if request else None,
     )
 
 
 @router.post("/{task_id}/block", response_model=TaskActionResponse)
 @handle_workflow_errors("block_task")
+@serialize_idempotent_request
 async def block_task(
     task_id: str,
     request: BlockTaskRequest,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
     org: AuthOrganization = Depends(get_current_organization),
     auth: AuthContext = Depends(get_auth_context),
 ) -> TaskActionResponse:
     """Mark a task as blocked with a reason."""
     await _verify_task_access(task_id, org, auth)
 
-    result = await transition_work_item(
-        str(org.id),
-        task_id,
-        WorkItemAction.BLOCK_TASK,
-        payload={"reason": request.reason},
-    )
-
-    return TaskActionResponse(
-        success=True,
-        action="block_task",
+    return await _task_transition_response(
         task_id=task_id,
+        http_request=http_request,
+        org=org,
+        auth=auth,
+        route_action="block",
+        workflow_action=WorkItemAction.BLOCK_TASK,
         message=f"Task blocked: {request.reason}",
-        data=result.response_data,
+        request_body=request.model_dump(mode="json"),
+        transition_payload={"reason": request.reason},
+        expected_revision=request.expected_revision,
     )
 
 
 @router.post("/{task_id}/unblock", response_model=TaskActionResponse)
 @handle_workflow_errors("unblock_task")
+@serialize_idempotent_request
 async def unblock_task(
     task_id: str,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
     org: AuthOrganization = Depends(get_current_organization),
     auth: AuthContext = Depends(get_auth_context),
+    request: UnblockTaskRequest | None = None,
 ) -> TaskActionResponse:
     """Resume a blocked task (moves back to 'doing')."""
     await _verify_task_access(task_id, org, auth)
 
-    result = await transition_work_item(
-        str(org.id),
-        task_id,
-        WorkItemAction.UNBLOCK_TASK,
-    )
-
-    return TaskActionResponse(
-        success=True,
-        action="unblock_task",
+    return await _task_transition_response(
         task_id=task_id,
+        http_request=http_request,
+        org=org,
+        auth=auth,
+        route_action="unblock",
+        workflow_action=WorkItemAction.UNBLOCK_TASK,
         message="Task unblocked, resuming work",
-        data=result.response_data,
+        request_body=request.model_dump(mode="json") if request else None,
+        expected_revision=request.expected_revision if request else None,
     )
 
 
 @router.post("/{task_id}/review", response_model=TaskActionResponse)
 @handle_workflow_errors("submit_review")
+@serialize_idempotent_request
 async def submit_review(
     task_id: str,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
     org: AuthOrganization = Depends(get_current_organization),
     auth: AuthContext = Depends(get_auth_context),
     request: ReviewTaskRequest | None = None,
@@ -483,24 +581,23 @@ async def submit_review(
 
     pr_url = request.pr_url if request else None
     commit_shas = request.commit_shas if request else []
-    result = await transition_work_item(
-        str(org.id),
-        task_id,
-        WorkItemAction.SUBMIT_REVIEW,
-        payload={"pr_url": pr_url, "commit_shas": commit_shas},
-    )
-
-    return TaskActionResponse(
-        success=True,
-        action="submit_review",
+    return await _task_transition_response(
         task_id=task_id,
+        http_request=http_request,
+        org=org,
+        auth=auth,
+        route_action="review",
+        workflow_action=WorkItemAction.SUBMIT_REVIEW,
         message="Task submitted for review",
-        data=result.response_data,
+        request_body=request.model_dump(mode="json") if request else None,
+        transition_payload={"pr_url": pr_url, "commit_shas": commit_shas},
+        expected_revision=request.expected_revision if request else None,
     )
 
 
 @router.post("/{task_id}/complete", response_model=TaskActionResponse)
 @handle_workflow_errors("complete_task")
+@serialize_idempotent_request
 async def complete_task(
     task_id: str,
     http_request: Request,
@@ -517,9 +614,7 @@ async def complete_task(
     verified_task = await _verify_task_access(task_id, org, auth)
     idempotency_path = f"/tasks/{task_id}/complete"
     idempotency_payload = {"body": request.model_dump(mode="json") if request else None}
-    principal_id = str(
-        getattr(auth, "user_id", None) or getattr(getattr(auth, "user", None), "id", "unknown")
-    )
+    principal_id = _task_principal_id(auth)
     replayed = await replay_idempotent_response(
         http_request,
         organization_id=org.id,
@@ -554,11 +649,16 @@ async def complete_task(
     actual_hours = request.actual_hours if request else None
     learnings = request.learnings if request else None
 
+    transition_kwargs: dict[str, Any] = {
+        "payload": {"actual_hours": actual_hours, "learnings": learnings}
+    }
+    if request and request.expected_revision is not None:
+        transition_kwargs["expected_revision"] = request.expected_revision
     result = await transition_work_item(
         group_id,
         task_id,
         WorkItemAction.COMPLETE_TASK,
-        payload={"actual_hours": actual_hours, "learnings": learnings},
+        **transition_kwargs,
     )
     response_data = result.response_data
     if request and request.cited_ids:
@@ -600,6 +700,12 @@ async def complete_task(
         task_id=task_id,
         message="Task completed" + (" with learnings captured" if learnings else ""),
         data=response_data,
+        mutation_receipt=mutation_receipt(
+            http_request,
+            applied=True,
+            revision=result.revision,
+            affected_records=[f"entity:{task_id}"],
+        ),
     )
     await save_idempotent_response(
         http_request,
@@ -617,8 +723,10 @@ async def complete_task(
 
 @router.post("/{task_id}/archive", response_model=TaskActionResponse)
 @handle_workflow_errors("archive_task")
+@serialize_idempotent_request
 async def archive_task(
     task_id: str,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
     org: AuthOrganization = Depends(get_current_organization),
     auth: AuthContext = Depends(get_auth_context),
     request: ArchiveTaskRequest | None = None,
@@ -627,19 +735,17 @@ async def archive_task(
     await _verify_task_access(task_id, org, auth)
 
     reason = request.reason if request else ""
-    result = await transition_work_item(
-        str(org.id),
-        task_id,
-        WorkItemAction.ARCHIVE_TASK,
-        payload={"reason": reason},
-    )
-
-    return TaskActionResponse(
-        success=True,
-        action="archive_task",
+    return await _task_transition_response(
         task_id=task_id,
+        http_request=http_request,
+        org=org,
+        auth=auth,
+        route_action="archive",
+        workflow_action=WorkItemAction.ARCHIVE_TASK,
         message="Task archived",
-        data=result.response_data,
+        request_body=request.model_dump(mode="json") if request else None,
+        transition_payload={"reason": reason},
+        expected_revision=request.expected_revision if request else None,
     )
 
 
@@ -668,9 +774,11 @@ def _build_update_data(request: UpdateTaskRequest, user_id: str) -> dict[str, An
 
 
 @router.patch("/{task_id}", response_model=TaskActionResponse)
+@serialize_idempotent_request
 async def update_task(
     task_id: str,
     request: UpdateTaskRequest,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
     sync: bool = Query(False, description="Wait for update to complete synchronously"),
     org: AuthOrganization = Depends(get_current_organization),
     user: AuthUser = Depends(get_current_user),
@@ -688,6 +796,23 @@ async def update_task(
 
     group_id = str(org.id)
     update_data = _build_update_data(request, str(user.id))
+    idempotency_path = f"/tasks/{task_id}"
+    idempotency_payload = {
+        "body": request.model_dump(mode="json"),
+        "sync": sync,
+    }
+    replayed = await replay_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=str(user.id),
+        method="PATCH",
+        path=idempotency_path,
+        payload=idempotency_payload,
+        response_model=TaskActionResponse,
+        content_session=None,
+    )
+    if replayed is not None:
+        return replayed
 
     has_dep_changes = bool(request.add_depends_on or request.remove_depends_on)
     if len(update_data) <= 1 and not has_dep_changes:  # only modified_by
@@ -699,22 +824,45 @@ async def update_task(
 
     # --- Async fast path (default) ---
     if not sync:
+        enqueue_kwargs: dict[str, Any] = {
+            "epic_id": request.epic_id,
+            "new_status": request.status.value if request.status else None,
+            "add_depends_on": request.add_depends_on,
+            "remove_depends_on": request.remove_depends_on,
+        }
+        if request.expected_revision is not None:
+            enqueue_kwargs["expected_revision"] = request.expected_revision
         job_id = await enqueue_update_task_async(
             task_id,
             update_data,
             group_id,
-            epic_id=request.epic_id,
-            new_status=request.status.value if request.status else None,
-            add_depends_on=request.add_depends_on,
-            remove_depends_on=request.remove_depends_on,
+            **enqueue_kwargs,
         )
-        return TaskActionResponse(
+        response = TaskActionResponse(
             success=True,
             action="update_task",
             task_id=task_id,
             message="Update queued",
             data={"job_id": job_id, **update_data},
+            mutation_receipt=mutation_receipt(
+                http_request,
+                applied=False,
+                revision=None,
+                affected_records=[f"entity:{task_id}"],
+            ),
         )
+        await save_idempotent_response(
+            http_request,
+            organization_id=org.id,
+            principal_id=str(user.id),
+            method="PATCH",
+            path=idempotency_path,
+            payload=idempotency_payload,
+            response=response,
+            status_code=200,
+            content_session=None,
+        )
+        return response
 
     # --- Sync path (?sync=true) — existing inline behaviour ---
     from sibyl.locks import LockAcquisitionError
@@ -730,7 +878,14 @@ async def update_task(
 
             runtime = await get_task_graph_runtime(group_id)
 
-            updated = await runtime.entity_manager.update(task_id, update_data)
+            if request.expected_revision is None:
+                updated = await runtime.entity_manager.update(task_id, update_data)
+            else:
+                updated = await runtime.entity_manager.update(
+                    task_id,
+                    update_data,
+                    expected_revision=request.expected_revision,
+                )
             if not updated:
                 raise HTTPException(status_code=500, detail="Update failed")
 
@@ -774,13 +929,32 @@ async def update_task(
                 org_id=group_id,
             )
 
-            return TaskActionResponse(
+            updated_revision = getattr(updated, "revision", 1)
+            response = TaskActionResponse(
                 success=True,
                 action="update_task",
                 task_id=task_id,
                 message=f"Task updated: {', '.join(update_data.keys())}",
-                data=update_data,
+                data={**update_data, "revision": updated_revision},
+                mutation_receipt=mutation_receipt(
+                    http_request,
+                    applied=True,
+                    revision=updated_revision,
+                    affected_records=[f"entity:{task_id}"],
+                ),
             )
+            await save_idempotent_response(
+                http_request,
+                organization_id=org.id,
+                principal_id=str(user.id),
+                method="PATCH",
+                path=idempotency_path,
+                payload=idempotency_payload,
+                response=response,
+                status_code=200,
+                content_session=None,
+            )
+            return response
 
     except LockAcquisitionError as e:
         raise HTTPException(
@@ -789,6 +963,8 @@ async def update_task(
         ) from e
     except HTTPException:
         raise
+    except RevisionConflictError as e:
+        raise HTTPException(status_code=409, detail=e.details) from e
     except Exception as e:
         log.exception("update_task_failed", task_id=task_id, error=str(e))
         raise HTTPException(
@@ -819,6 +995,7 @@ class NoteResponse(BaseModel):
     author_name: str
     created_at: str
     status: str | None = None  # None = created, "pending" = queued for async creation
+    mutation_receipt: MutationReceipt | None = None
 
 
 class NotesListResponse(BaseModel):
@@ -830,6 +1007,7 @@ class NotesListResponse(BaseModel):
 
 @router.post("/{task_id}/notes", response_model=NoteResponse)
 @handle_workflow_errors("create_note")
+@serialize_idempotent_request
 async def create_note(
     task_id: str,
     http_request: Request,
@@ -908,6 +1086,12 @@ async def create_note(
             author_name=request.author_name,
             created_at=created_at.isoformat(),
             status="pending",
+            mutation_receipt=mutation_receipt(
+                http_request,
+                applied=False,
+                revision=None,
+                affected_records=[f"entity:{note_id}"],
+            ),
         )
         await save_idempotent_response(
             http_request,
@@ -973,6 +1157,12 @@ async def create_note(
         author_type=request.author_type.value,
         author_name=request.author_name,
         created_at=created_at.isoformat(),
+        mutation_receipt=mutation_receipt(
+            http_request,
+            applied=True,
+            revision=note.revision,
+            affected_records=[f"entity:{note_id}"],
+        ),
     )
     await save_idempotent_response(
         http_request,

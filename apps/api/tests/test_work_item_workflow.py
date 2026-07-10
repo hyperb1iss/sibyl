@@ -31,6 +31,7 @@ def _task(*, status: str = "doing", name: str = "Ship it", **fields: object) -> 
         name=name,
         branch_name=fields.get("branch_name"),
         pr_url=fields.get("pr_url"),
+        revision=fields.get("revision"),
         model_dump=MagicMock(return_value={"id": "task-1", "status": status}),
     )
 
@@ -43,7 +44,9 @@ async def _granting_lock(*_args, **_kwargs):
 class TestTaskTransition:
     @pytest.mark.asyncio
     async def test_start_task_locks_runs_engine_and_broadcasts(self) -> None:
-        engine = SimpleNamespace(start_task=AsyncMock(return_value=_task(branch_name="feature/x")))
+        engine = SimpleNamespace(
+            start_task=AsyncMock(return_value=_task(branch_name="feature/x", revision=2))
+        )
         runtime = SimpleNamespace(
             client=object(), entity_manager=MagicMock(), relationship_manager=MagicMock()
         )
@@ -57,7 +60,11 @@ class TestTaskTransition:
             patch.object(wiw, "broadcast_event", broadcast),
         ):
             result = await transition_work_item(
-                GROUP_ID, "task-1", WorkItemAction.START_TASK, payload={"assignee": "nova"}
+                GROUP_ID,
+                "task-1",
+                WorkItemAction.START_TASK,
+                payload={"assignee": "nova"},
+                expected_revision=1,
             )
 
         # Lock taken for this exact work item.
@@ -65,7 +72,7 @@ class TestTaskTransition:
         assert lock.call_args.args[0] == GROUP_ID
         assert lock.call_args.args[1] == "task-1"
         # Domain transition delegated to the core engine.
-        engine.start_task.assert_awaited_once_with("task-1", "nova")
+        engine.start_task.assert_awaited_once_with("task-1", "nova", expected_revision=1)
         # Broadcast fired with the canonical task payload.
         broadcast.assert_awaited_once()
         event_payload = broadcast.await_args.args[1]
@@ -76,7 +83,11 @@ class TestTaskTransition:
         assert event_payload["branch_name"] == "feature/x"
 
         assert result.entity_type == EntityType.TASK
-        assert result.response_data == {"status": "doing", "branch_name": "feature/x"}
+        assert result.response_data == {
+            "status": "doing",
+            "revision": 2,
+            "branch_name": "feature/x",
+        }
         assert result.task_data == {"id": "task-1", "status": "doing"}
 
     @pytest.mark.asyncio

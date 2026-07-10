@@ -213,6 +213,7 @@ async def enqueue_update_task(
     new_status: str | None = None,
     add_depends_on: list[str] | None = None,
     remove_depends_on: list[str] | None = None,
+    expected_revision: int | None = None,
 ) -> str:
     """Enqueue a task update job."""
     return await get_queue().enqueue_update_task(
@@ -223,6 +224,7 @@ async def enqueue_update_task(
         new_status=new_status,
         add_depends_on=add_depends_on,
         remove_depends_on=remove_depends_on,
+        expected_revision=expected_revision,
     )
 
 

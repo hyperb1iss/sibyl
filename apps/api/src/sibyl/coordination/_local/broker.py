@@ -427,20 +427,26 @@ class LocalQueueBroker:
         new_status: str | None = None,
         add_depends_on: list[str] | None = None,
         remove_depends_on: list[str] | None = None,
+        expected_revision: int | None = None,
     ) -> str:
         import time
 
         epoch_ms = int(time.time() * 1000)
+        update_kwargs: dict[str, Any] = {
+            "epic_id": epic_id,
+            "new_status": new_status,
+            "add_depends_on": add_depends_on or [],
+            "remove_depends_on": remove_depends_on or [],
+        }
+        if expected_revision is not None:
+            update_kwargs["expected_revision"] = expected_revision
         result = await self._enqueue_unique(
             "update_task",
             task_id,
             updates,
             group_id,
             job_id=f"update_task:{task_id}:{epoch_ms}",
-            epic_id=epic_id,
-            new_status=new_status,
-            add_depends_on=add_depends_on or [],
-            remove_depends_on=remove_depends_on or [],
+            **update_kwargs,
         )
         return result.job_id
 

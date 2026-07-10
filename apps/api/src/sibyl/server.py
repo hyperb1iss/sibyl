@@ -6,16 +6,25 @@ Exposes 11 tools and 2 resources:
 - Resources: sibyl://health, sibyl://stats
 """
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
+from copy import deepcopy
 from dataclasses import asdict, dataclass
-from typing import Any, Literal
-from uuid import UUID
+from functools import wraps
+from typing import Any, Literal, cast
+from uuid import UUID, uuid4
 
 import structlog
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.fastmcp import FastMCP
 
 from sibyl.api.context_audit import log_context_pack_audit, log_reflection_audit
+from sibyl.api.idempotency import (
+    complete_idempotency_record,
+    idempotency_lock,
+    idempotency_record_pending,
+    idempotency_request_hash,
+    reserve_idempotency_record,
+)
 from sibyl.auth.api_key_common import api_key_memory_scope_key
 from sibyl.config import settings
 from sibyl.persistence.auth_runtime import (
@@ -25,6 +34,7 @@ from sibyl.persistence.auth_runtime import (
     resolve_accessible_project_graph_ids,
     resolve_org_role,
 )
+from sibyl.persistence.content_common import ApiIdempotencyRecord
 from sibyl.services.recall_limits import (
     RecallConcurrencyLimitExceededError,
     recall_concurrency_slot,
@@ -220,6 +230,40 @@ async def _require_mcp_context() -> McpContext:
     if not ctx:
         raise ValueError("Organization context required. Authenticate with an org-scoped token.")
     return ctx
+
+
+def _serialize_mcp_idempotency[**P, R](
+    path: str,
+    *,
+    action_scoped: bool = False,
+) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
+    def decorator(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+        @wraps(func)
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+            raw_key: object = kwargs.get("idempotency_key")
+            data = kwargs.get("data")
+            if raw_key is None and isinstance(data, Mapping):
+                raw_key = data.get("idempotency_key")
+            if not isinstance(raw_key, str) or not raw_key.strip():
+                return await func(*args, **kwargs)
+
+            scoped_path = path
+            if action_scoped:
+                action = str(kwargs.get("action", "unknown")).lower().strip()
+                scoped_path = f"{path}/{action}"
+            ctx = await _require_mcp_context()
+            async with idempotency_lock(
+                organization_id=ctx.org_id,
+                principal_id=ctx.user_id or "unknown",
+                method="MCP",
+                path=scoped_path,
+                key=raw_key.strip(),
+            ):
+                return await func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 async def _get_accessible_projects(ctx: McpContext) -> set[str] | None:
@@ -501,6 +545,7 @@ async def _resolve_mcp_capture_links(
     return _append_unique_ids(links, [str(task_id)])
 
 
+@_serialize_mcp_idempotency("mcp/remember")
 async def _remember_mcp_memory(
     *,
     title: str,
@@ -513,6 +558,7 @@ async def _remember_mcp_memory(
     task_ids: list[str] | None = None,
     active_task: bool = True,
     metadata: dict[str, Any] | None = None,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     from sibyl_core.services.surreal_content import remember_raw_memory
     from sibyl_core.tools.core import add
@@ -525,6 +571,50 @@ async def _remember_mcp_memory(
     )
     if not ctx.user_id:
         raise ValueError("User context required to remember raw source material.")
+    if idempotency_key is not None:
+        idempotency_key = idempotency_key.strip()
+        if not idempotency_key or len(idempotency_key) > 255:
+            raise ValueError("idempotency_key must be a non-empty string up to 255 characters")
+
+    idempotency_payload = {
+        "title": title,
+        "content": content,
+        "kind": kind,
+        "domain": domain,
+        "project": project,
+        "tags": tags,
+        "related_to": related_to,
+        "task_ids": task_ids,
+        "active_task": active_task,
+        "metadata": metadata,
+    }
+    idempotency_path = "mcp/remember"
+    idempotency_claim: ApiIdempotencyRecord | None = None
+    if idempotency_key is not None:
+        record, claimed = await reserve_idempotency_record(
+            organization_id=UUID(ctx.org_id),
+            principal_id=ctx.user_id,
+            idempotency_key=idempotency_key,
+            method="MCP",
+            path=idempotency_path,
+            payload=idempotency_payload,
+            content_session=None,
+        )
+        if not claimed:
+            if record.request_hash != idempotency_request_hash(idempotency_payload):
+                raise ValueError("idempotency_key was already used for a different request")
+            if idempotency_record_pending(record):
+                raise ValueError(
+                    "idempotent operation is still in progress or was interrupted before "
+                    "its receipt completed"
+                )
+            replayed = cast("dict[str, Any]", deepcopy(record.response_body))
+            receipt = replayed.get("mutation_receipt")
+            if isinstance(receipt, dict):
+                replayed["mutation_receipt"] = {**receipt, "replayed": True}
+            return replayed
+        idempotency_claim = record
+
     memory_scope = "project" if project else "private"
     write_decision = _authorize_mcp_memory_write(
         ctx=ctx,
@@ -564,10 +654,12 @@ async def _remember_mcp_memory(
         scope_key=project,
         capture_surface="mcp",
     )
+    raw_revision = 1
 
     async def remember_raw(
         request: MemoryCaptureRequest,
     ) -> Mapping[str, Any]:
+        nonlocal raw_revision
         raw_memory = await remember_raw_memory(
             organization_id=ctx.org_id,
             principal_id=ctx.user_id,
@@ -581,6 +673,7 @@ async def _remember_mcp_memory(
             provenance=dict(request.provenance),
             capture_surface=request.capture_surface,
         )
+        raw_revision = getattr(raw_memory, "revision", 1)
         return {"id": raw_memory.id, "source_id": raw_memory.source_id}
 
     async def create_graph_entity(
@@ -607,6 +700,22 @@ async def _remember_mcp_memory(
     if capture_result.raw_policy_reason is None:
         payload.pop("raw_policy_reason", None)
     payload["policy_reason"] = write_decision.reason
+    affected_records = (
+        [f"raw_captures:{capture_result.raw_memory_id}"] if capture_result.raw_memory_id else []
+    )
+    payload["mutation_receipt"] = _mcp_mutation_receipt(
+        {"idempotency_key": idempotency_key},
+        applied=True,
+        revision=raw_revision,
+        affected_records=affected_records,
+    )
+    if idempotency_claim is not None:
+        await complete_idempotency_record(
+            idempotency_claim,
+            response_status_code=200,
+            response_body=payload,
+            content_session=None,
+        )
     return payload
 
 
@@ -1048,6 +1157,25 @@ def _mcp_transition_message(action: str, *, learnings: str | None, reason: str |
     return "Epic archived" + (f": {reason}" if reason else "")
 
 
+def _mcp_mutation_receipt(
+    data: Mapping[str, Any],
+    *,
+    applied: bool,
+    revision: int | None,
+    affected_records: list[str],
+) -> dict[str, Any]:
+    key = data.get("idempotency_key")
+    idempotency_key = key.strip() if isinstance(key, str) and key.strip() else None
+    return {
+        "operation_id": idempotency_key or str(uuid4()),
+        "applied": applied,
+        "revision": revision,
+        "affected_records": affected_records,
+        "idempotency_key": idempotency_key,
+        "replayed": False,
+    }
+
+
 async def _manage_workflow_transition(
     *,
     ctx: McpContext,
@@ -1065,7 +1193,7 @@ async def _manage_workflow_transition(
     """
     from sibyl.locks import LockAcquisitionError
     from sibyl.services.work_item_workflow import EPIC_TRANSITIONS, transition_work_item
-    from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError
+    from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError, RevisionConflictError
     from sibyl_core.tools.manage import _deprecation_notice
 
     def _response(
@@ -1109,14 +1237,26 @@ async def _manage_workflow_transition(
 
     learnings = data.get("learnings") if action in {"complete_task", "complete_epic"} else None
     reason = data.get("reason") if action in {"block_task", "archive_epic"} else None
+    expected_revision = data.get("expected_revision")
+    if expected_revision is not None and (
+        isinstance(expected_revision, bool)
+        or not isinstance(expected_revision, int)
+        or expected_revision < 1
+    ):
+        return _response(
+            success=False,
+            message="expected_revision must be an integer greater than zero",
+        )
 
     try:
+        transition_kwargs: dict[str, Any] = {"payload": data, "entity": entity}
+        if expected_revision is not None:
+            transition_kwargs["expected_revision"] = expected_revision
         result = await transition_work_item(
             ctx.org_id,
             entity_id,
             work_item_action,
-            payload=data,
-            entity=entity,
+            **transition_kwargs,
         )
     except InvalidTransitionError as exc:
         return _response(success=False, message=str(exc), action_data=exc.details)
@@ -1127,10 +1267,18 @@ async def _manage_workflow_transition(
         )
     except (EntityNotFoundError, KeyError):
         return _response(success=False, message=f"Work item not found: {entity_id}")
+    except RevisionConflictError as exc:
+        return _response(success=False, message=str(exc), action_data=exc.details)
 
     # complete_task with learnings enqueues the same background learning jobs the
     # REST surface does, using the policy context the authz step resolved.
     response_data = dict(result.response_data)
+    response_data["mutation_receipt"] = _mcp_mutation_receipt(
+        data,
+        applied=True,
+        revision=result.revision,
+        affected_records=[f"entity:{entity_id}"],
+    )
     cited_ids = data.get("cited_ids") if action == "complete_task" else None
     if cited_ids:
         from sibyl_core.tools.usage_citation import record_cited_item_usages
@@ -1190,6 +1338,7 @@ async def _manage_workflow_transition(
     )
 
 
+@_serialize_mcp_idempotency("mcp/manage", action_scoped=True)
 async def _manage_mcp_action(
     *,
     action: str,
@@ -1207,7 +1356,69 @@ async def _manage_mcp_action(
         accessible_projects=accessible_projects,
     )
 
-    full_data = dict(data or {})
+    normalized_action = action.lower().strip()
+    request_data = dict(data or {})
+    idempotency_key = request_data.get("idempotency_key")
+    if idempotency_key is not None and (
+        not isinstance(idempotency_key, str)
+        or not idempotency_key.strip()
+        or len(idempotency_key.strip()) > 255
+    ):
+        return {
+            "success": False,
+            "action": normalized_action,
+            "entity_id": entity_id,
+            "message": "idempotency_key must be a non-empty string up to 255 characters",
+            "data": {},
+        }
+    idempotency_key = idempotency_key.strip() if isinstance(idempotency_key, str) else None
+    if idempotency_key is not None:
+        request_data["idempotency_key"] = idempotency_key
+    idempotency_path = f"mcp/manage/{normalized_action}"
+    idempotency_payload = {"entity_id": entity_id, "data": dict(request_data)}
+    principal_id = ctx.user_id or "unknown"
+    idempotency_claim: ApiIdempotencyRecord | None = None
+    if idempotency_key is not None:
+        record, claimed = await reserve_idempotency_record(
+            organization_id=UUID(ctx.org_id),
+            principal_id=principal_id,
+            idempotency_key=idempotency_key,
+            method="MCP",
+            path=idempotency_path,
+            payload=idempotency_payload,
+            content_session=None,
+        )
+        if not claimed:
+            if record.request_hash != idempotency_request_hash(idempotency_payload):
+                return {
+                    "success": False,
+                    "action": normalized_action,
+                    "entity_id": entity_id,
+                    "message": "idempotency_key was already used for a different request",
+                    "data": {},
+                }
+            if idempotency_record_pending(record):
+                return {
+                    "success": False,
+                    "action": normalized_action,
+                    "entity_id": entity_id,
+                    "message": (
+                        "idempotent operation is still in progress or was interrupted before "
+                        "its receipt completed"
+                    ),
+                    "data": {},
+                }
+            replayed = cast("dict[str, Any]", deepcopy(record.response_body))
+            raw_response_data = replayed.get("data")
+            if isinstance(raw_response_data, dict):
+                response_data = cast("dict[str, Any]", raw_response_data)
+                receipt = response_data.get("mutation_receipt")
+                if isinstance(receipt, dict):
+                    response_data["mutation_receipt"] = {**receipt, "replayed": True}
+            return replayed
+        idempotency_claim = record
+
+    full_data = request_data
     full_data["organization_id"] = ctx.org_id
     if ctx.user_id:
         full_data["user_id"] = ctx.user_id
@@ -1216,10 +1427,9 @@ async def _manage_mcp_action(
     # path gains locking, broadcasting, and project-activity by construction.
     # Everything else (update_task, add_note, crawl, analysis, ...) stays on the
     # core manage() dispatcher unchanged.
-    normalized_action = action.lower().strip()
     work_item_action = _MCP_WORKFLOW_TRANSITIONS.get(normalized_action)
     if work_item_action is not None:
-        return await _manage_workflow_transition(
+        payload = await _manage_workflow_transition(
             ctx=ctx,
             action=normalized_action,
             work_item_action=work_item_action,
@@ -1227,16 +1437,24 @@ async def _manage_mcp_action(
             data=full_data,
             policy_decision=policy_decision,
         )
+    else:
+        result = await manage(
+            action=action,
+            entity_id=entity_id,
+            data=full_data,
+            organization_id=ctx.org_id,
+        )
+        payload = _to_dict(result)
+        if policy_decision is not None:
+            payload["policy_reason"] = policy_decision.reason
 
-    result = await manage(
-        action=action,
-        entity_id=entity_id,
-        data=full_data,
-        organization_id=ctx.org_id,
-    )
-    payload = _to_dict(result)
-    if policy_decision is not None:
-        payload["policy_reason"] = policy_decision.reason
+    if idempotency_claim is not None:
+        await complete_idempotency_record(
+            idempotency_claim,
+            response_status_code=200,
+            response_body=payload,
+            content_session=None,
+        )
     return payload
 
 
@@ -1855,6 +2073,7 @@ def _register_tools(mcp: FastMCP) -> None:
         task_ids: list[str] | None = None,
         active_task: bool = True,
         metadata: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Remember durable context from planning, ideation, building, or any domain.
 
@@ -1877,6 +2096,7 @@ def _register_tools(mcp: FastMCP) -> None:
             task_ids=task_ids,
             active_task=active_task,
             metadata=metadata,
+            idempotency_key=idempotency_key,
         )
 
     # =========================================================================

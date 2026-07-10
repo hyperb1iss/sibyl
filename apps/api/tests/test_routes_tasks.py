@@ -10,11 +10,12 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException
 
-from sibyl.api.idempotency import idempotency_request_hash
+from sibyl.api.idempotency import idempotency_request_hash, replay_idempotent_response
 from sibyl.api.routes.tasks import (
     CompleteTaskRequest,
     CreateNoteRequest,
     CreateTaskRequest,
+    TaskActionResponse,
     UpdateTaskRequest,
     complete_task,
     create_note,
@@ -234,6 +235,55 @@ async def test_create_task_rejects_idempotency_key_payload_mismatch() -> None:
 
 
 @pytest.mark.asyncio
+async def test_idempotency_replay_marks_mutation_receipt() -> None:
+    org_id = UUID("00000000-0000-0000-0000-000000000111")
+    payload = {"body": {"expected_revision": 1}}
+    record = ApiIdempotencyRecord(
+        organization_id=org_id,
+        principal_id="user-1",
+        idempotency_key="idem-replay",
+        method="POST",
+        path="/tasks/task-1/start",
+        request_hash=idempotency_request_hash(payload),
+        response_status_code=200,
+        response_body={
+            "success": True,
+            "action": "start_task",
+            "task_id": "task-1",
+            "message": "Task started",
+            "data": {"status": "doing", "revision": 2},
+            "mutation_receipt": {
+                "operation_id": "idem-replay",
+                "applied": True,
+                "revision": 2,
+                "affected_records": ["entity:task-1"],
+                "idempotency_key": "idem-replay",
+                "replayed": False,
+            },
+        },
+    )
+
+    with patch(
+        "sibyl.api.idempotency.content_runtime.get_api_idempotency_record",
+        AsyncMock(return_value=record),
+    ):
+        response = await replay_idempotent_response(
+            _request(idempotency_key="idem-replay"),
+            organization_id=org_id,
+            principal_id="user-1",
+            method="POST",
+            path="/tasks/task-1/start",
+            payload=payload,
+            response_model=TaskActionResponse,
+            content_session=None,
+        )
+
+    assert response is not None
+    assert response.mutation_receipt is not None
+    assert response.mutation_receipt.replayed is True
+
+
+@pytest.mark.asyncio
 async def test_update_task_sync_allows_title_description_with_actor_attribution() -> None:
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
@@ -332,7 +382,7 @@ async def test_create_task_saves_idempotent_response_after_success() -> None:
         )
 
     assert response.task_id == "task-123"
-    save_record.assert_awaited_once()
+    assert save_record.await_count == 2
     saved = save_record.await_args.kwargs["record"]
     assert saved.organization_id == org.id
     assert saved.principal_id == str(user.id)
@@ -357,13 +407,18 @@ class TestCompleteTaskRoute:
                 )
             ),
         )
-        request = CompleteTaskRequest(actual_hours=2.5, learnings="Capture the pattern")
+        request = CompleteTaskRequest(
+            actual_hours=2.5,
+            learnings="Capture the pattern",
+            expected_revision=1,
+        )
         transition_result = WorkItemTransition(
             action=WorkItemAction.COMPLETE_TASK,
             item_id="task-123",
             entity_type=EntityType.TASK,
             status="done",
             name="Ship the thing",
+            revision=2,
             fields={"learnings": "Capture the pattern"},
             task_data={"id": "task-123", "title": "Ship the thing"},
         )
@@ -406,6 +461,7 @@ class TestCompleteTaskRoute:
             "task-123",
             WorkItemAction.COMPLETE_TASK,
             payload={"actual_hours": 2.5, "learnings": "Capture the pattern"},
+            expected_revision=1,
         )
         auth.to_memory_policy_context.assert_called_once_with(
             memory_space="project",
@@ -450,9 +506,15 @@ class TestCompleteTaskRoute:
         )
         assert response.action == "complete_task"
         assert response.data["status"] == "done"
-        save_record.assert_awaited_once()
+        assert response.mutation_receipt is not None
+        assert response.mutation_receipt.applied is True
+        assert response.mutation_receipt.revision == 2
+        assert response.mutation_receipt.idempotency_key == "idem-complete"
+        assert response.mutation_receipt.affected_records == ["entity:task-123"]
+        assert save_record.await_count == 2
         saved = save_record.await_args.kwargs["record"]
         assert saved.path == "/tasks/task-123/complete"
+        assert saved.response_body["mutation_receipt"]["revision"] == 2
         assert saved.response_body["action"] == "complete_task"
 
     @pytest.mark.asyncio
@@ -676,7 +738,7 @@ class TestNotesRoute:
         assert response.content == "Save me"
         manager.create_direct.assert_awaited_once()
         runtime.relationship_manager.create.assert_awaited_once()
-        save_record.assert_awaited_once()
+        assert save_record.await_count == 2
         saved = save_record.await_args.kwargs["record"]
         assert saved.organization_id == org.id
         assert saved.principal_id == str(user.id)
