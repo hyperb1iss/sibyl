@@ -348,6 +348,7 @@ jobs:
             "${args[@]}"
 
       - name: Upload official domain artifact
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name:

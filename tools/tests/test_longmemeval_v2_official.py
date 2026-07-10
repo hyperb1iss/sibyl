@@ -27,6 +27,8 @@ EXPECTED_MEMORY_API_RETRY_CALLS = 2
 EXPECTED_READER_MAX_CONCURRENT_REQUESTS = 16
 EXPECTED_READER_RETRY_ATTEMPTS = 4
 EXPECTED_TRANSIENT_READER_ATTEMPTS = 2
+EXPECTED_EVALUATOR_RETRY_ATTEMPTS = 3
+EXPECTED_TRANSIENT_EVALUATOR_ATTEMPTS = 2
 EXPECTED_COMBINED_QUESTION_COUNT = 4
 TEST_CONTENT_MAX_CHARS = 420
 TEST_CONTEXT_MAX_CHARS = 800
@@ -44,6 +46,11 @@ class _ReaderHarness(Protocol):
         [object, object, list[dict[str, object]]],
         Awaitable[tuple[str, dict[str, int]]],
     ]
+
+
+class _EvaluatorMetrics(Protocol):
+    llm_abstention_checker: Callable[..., bool]
+    llm_gotchas_checker: Callable[..., bool]
 
 
 def _load_module(path: Path, name: str) -> ModuleType:
@@ -153,6 +160,7 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(tmp_path: Path)
     )
     assert plan["reader_max_concurrent_requests"] == EXPECTED_READER_MAX_CONCURRENT_REQUESTS
     assert plan["reader_retry_attempts"] == EXPECTED_READER_RETRY_ATTEMPTS
+    assert plan["evaluator_retry_attempts"] == EXPECTED_EVALUATOR_RETRY_ATTEMPTS
     assert plan["memory_api_timeout_seconds"] == EXPECTED_MEMORY_API_TIMEOUT_SECONDS
     assert plan["memory_api_retry_attempts"] == EXPECTED_MEMORY_API_RETRY_ATTEMPTS
     assert plan["honesty_contract"]["answer_gold_visible_to_memory"] is False
@@ -359,6 +367,98 @@ async def test_official_runner_does_not_retry_non_transient_reader_failure() -> 
 
     with pytest.raises(ValueError, match="bad request shape"):
         await harness.call_reader_model_async(None, SimpleNamespace(), [])
+
+    assert attempts == 1
+
+
+@pytest.mark.parametrize(
+    "error_message",
+    [
+        "Could not parse evaluator binary judgement: '\\boxed{0}'",
+        "Empty judgement response from evaluator model.",
+        "Evaluator model returned empty response content.",
+    ],
+)
+def test_official_runner_retries_malformed_evaluator_judgement(
+    capsys,
+    error_message: str,
+) -> None:
+    module = _load_runner_module()
+    metrics = cast(_EvaluatorMetrics, ModuleType("qa_eval_metrics"))
+    attempts = 0
+
+    def flaky_evaluator(*args: object, **kwargs: object) -> bool:
+        nonlocal attempts
+        del args, kwargs
+        attempts += 1
+        if attempts == 1:
+            raise ValueError(error_message)
+        return True
+
+    def stable_evaluator(*args: object, **kwargs: object) -> bool:
+        del args, kwargs
+        return True
+
+    metrics.llm_abstention_checker = flaky_evaluator
+    metrics.llm_gotchas_checker = stable_evaluator
+    module.install_evaluator_retry(
+        metrics,
+        args=SimpleNamespace(evaluator_retry_attempts=EXPECTED_EVALUATOR_RETRY_ATTEMPTS),
+    )
+
+    assert metrics.llm_abstention_checker("prediction", "answer") is True
+    assert attempts == EXPECTED_TRANSIENT_EVALUATOR_ATTEMPTS
+    assert "retrying evaluator attempt 2/3" in capsys.readouterr().err
+
+
+def test_official_runner_raises_after_malformed_evaluator_retries_exhausted() -> None:
+    module = _load_runner_module()
+    metrics = cast(_EvaluatorMetrics, ModuleType("qa_eval_metrics"))
+    attempts = 0
+
+    def broken_evaluator(*args: object, **kwargs: object) -> bool:
+        nonlocal attempts
+        del args, kwargs
+        attempts += 1
+        raise ValueError("Could not parse evaluator binary judgement: '\\boxed{0}'")
+
+    metrics.llm_abstention_checker = broken_evaluator
+    metrics.llm_gotchas_checker = broken_evaluator
+    module.install_evaluator_retry(
+        metrics,
+        args=SimpleNamespace(evaluator_retry_attempts=EXPECTED_EVALUATOR_RETRY_ATTEMPTS),
+    )
+
+    with pytest.raises(ValueError, match="Could not parse evaluator binary judgement"):
+        metrics.llm_abstention_checker("prediction", "answer")
+
+    assert attempts == EXPECTED_EVALUATOR_RETRY_ATTEMPTS
+
+
+def test_official_runner_does_not_retry_other_evaluator_value_error() -> None:
+    module = _load_runner_module()
+    metrics = cast(_EvaluatorMetrics, ModuleType("qa_eval_metrics"))
+    attempts = 0
+
+    def stable_evaluator(*args: object, **kwargs: object) -> bool:
+        del args, kwargs
+        return True
+
+    def broken_evaluator(*args: object, **kwargs: object) -> bool:
+        nonlocal attempts
+        del args, kwargs
+        attempts += 1
+        raise ValueError("bad evaluator configuration")
+
+    metrics.llm_abstention_checker = stable_evaluator
+    metrics.llm_gotchas_checker = broken_evaluator
+    module.install_evaluator_retry(
+        metrics,
+        args=SimpleNamespace(evaluator_retry_attempts=EXPECTED_EVALUATOR_RETRY_ATTEMPTS),
+    )
+
+    with pytest.raises(ValueError, match="bad evaluator configuration"):
+        metrics.llm_gotchas_checker("prediction", "answer")
 
     assert attempts == 1
 

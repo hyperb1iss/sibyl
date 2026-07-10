@@ -117,8 +117,10 @@ def main(argv: list[str] | None = None) -> int:
     sys.path.insert(0, str(official_repo))
     import benchmarks.longmemeval_v2_memory.sibyl_memory  # noqa: F401, PLC0415
     import evaluation.harness as official_harness  # noqa: PLC0415
+    import evaluation.qa_eval_metrics as official_metrics  # noqa: PLC0415
 
     install_reader_retry(official_harness, args=args)
+    install_evaluator_retry(official_metrics, args=args)
 
     old_argv = sys.argv
     try:
@@ -210,6 +212,50 @@ def reader_retry_delay_seconds(args: argparse.Namespace, *, failed_attempt: int)
     return min(max_delay, base * (2 ** max(0, failed_attempt - 1)))
 
 
+def install_evaluator_retry(official_metrics: Any, *, args: argparse.Namespace) -> None:
+    attempts = int(args.evaluator_retry_attempts)
+    if attempts <= 1:
+        return
+    for function_name in ("llm_abstention_checker", "llm_gotchas_checker"):
+        original = getattr(official_metrics, function_name)
+        setattr(
+            official_metrics,
+            function_name,
+            _evaluator_retry_wrapper(original, function_name=function_name, attempts=attempts),
+        )
+
+
+def _evaluator_retry_wrapper(original: Any, *, function_name: str, attempts: int) -> Any:
+    def evaluator_with_retry(*call_args: Any, **call_kwargs: Any) -> Any:
+        for attempt in range(1, attempts + 1):
+            try:
+                return original(*call_args, **call_kwargs)
+            except ValueError as exc:
+                if attempt >= attempts or not is_malformed_evaluator_judgement(exc):
+                    raise
+                print(
+                    f"Official {function_name} returned a malformed judgement; "
+                    f"retrying evaluator attempt {attempt + 1}/{attempts}.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        msg = "Evaluator retry loop exhausted unexpectedly"
+        raise RuntimeError(msg)
+
+    return evaluator_with_retry
+
+
+def is_malformed_evaluator_judgement(exc: ValueError) -> bool:
+    message = str(exc)
+    return message.startswith(
+        (
+            "Could not parse evaluator binary judgement:",
+            "Empty judgement response from evaluator model.",
+            "Evaluator model returned empty response content.",
+        )
+    )
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PLR0915
     parser = argparse.ArgumentParser(description="Run LongMemEval-V2 with Sibyl memory.")
     parser.add_argument("--official-repo", default=os.getenv("LME_V2_OFFICIAL_REPO"))
@@ -286,6 +332,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     )
     parser.add_argument("--evaluator-max-completion-tokens", type=int, default=4096)
     parser.add_argument("--evaluator-timeout-seconds", type=float, default=43_200.0)
+    parser.add_argument("--evaluator-retry-attempts", type=int, default=3)
     parser.add_argument("--prompt-build-max-workers", type=int, default=1)
     parser.add_argument("--shuffle-questions-seed", type=int, default=None)
     args = parser.parse_args(argv)
@@ -297,6 +344,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--reader-retry-base-delay-seconds must be non-negative")
     if args.reader_retry_max_delay_seconds < 0:
         parser.error("--reader-retry-max-delay-seconds must be non-negative")
+    if args.evaluator_retry_attempts < 1:
+        parser.error("--evaluator-retry-attempts must be positive")
     if args.api_timeout_seconds <= 0:
         parser.error("--api-timeout-seconds must be positive")
     if args.api_retry_attempts < 1:
@@ -473,6 +522,7 @@ def build_run_plan(
         "memory_api_retry_base_delay_seconds": args.api_retry_base_delay_seconds,
         "memory_api_retry_max_delay_seconds": args.api_retry_max_delay_seconds,
         "evaluator_model": args.evaluator_model,
+        "evaluator_retry_attempts": args.evaluator_retry_attempts,
         "requirements": build_requirement_status(args=args, data_root=data_root),
         "summary": summarize_longmemeval_v2_inputs(
             selected_question_models,
