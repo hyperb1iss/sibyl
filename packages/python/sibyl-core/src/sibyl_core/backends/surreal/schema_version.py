@@ -11,7 +11,7 @@ from typing import Protocol, cast
 
 from sibyl_core.backends.surreal.schema_helpers import execute_schema_statement, split_statements
 
-GRAPH_SCHEMA_CURRENT_VERSION = 14
+GRAPH_SCHEMA_CURRENT_VERSION = 15
 GRAPH_SCHEMA_NAME = "graph"
 SCHEMA_VERSION_TABLE = "schema_version"
 

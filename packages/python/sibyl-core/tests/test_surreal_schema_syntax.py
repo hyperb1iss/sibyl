@@ -53,6 +53,7 @@ from sibyl_core.backends.surreal.schema import (
     ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS,
     ENTITY_REQUIRED_FIELD_REPAIR_DEFINITIONS,
     ENTITY_REVISION_MIGRATION_DEFINITIONS,
+    ENTITY_SCHEMA_DRIFT_REPAIR_DEFINITIONS,
     ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS,
     ENTITY_USAGE_SIGNAL_DEFINITIONS,
     GRAPH_ENUM_ASSERTION_DEFINITIONS,
@@ -891,6 +892,23 @@ def test_entity_updated_at_datetime_migration_is_versioned() -> None:
     )
     assert "CONCURRENTLY" in ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS
     assert "DEFINE FIELD OVERWRITE updated_at ON entity TYPE option<datetime>" in migration_sql
+
+
+def test_graph_terminal_schema_repair_reconciles_updated_at_and_required_fields() -> None:
+    migration = next(
+        item for item in GRAPH_SCHEMA_MIGRATIONS if item.name == "entity_schema_drift_repair"
+    )
+    migration_sql = "\n".join(migration.statements)
+
+    assert GRAPH_SCHEMA_CURRENT_VERSION >= 15
+    assert "DEFINE FIELD OVERWRITE updated_at ON entity TYPE option<datetime>" in migration_sql
+    assert "SELECT VALUE id" in migration_sql
+    assert "SET updated_at = type::datetime(updated_at)" in migration_sql
+    assert "DEFINE INDEX" not in migration_sql
+    for field in ("revision", "retrieval_count", "citation_count", "misled_count"):
+        assert f"DEFINE FIELD OVERWRITE {field} ON entity TYPE option<int>" in migration_sql
+        assert f"DEFINE FIELD OVERWRITE {field} ON entity TYPE int" in migration_sql
+    assert ENTITY_SCHEMA_DRIFT_REPAIR_DEFINITIONS.strip().splitlines()[0] in migration_sql
 
 
 def test_graph_schema_renders_flat_type_predicates_for_server_runtime() -> None:

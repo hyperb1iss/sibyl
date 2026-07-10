@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -539,6 +540,9 @@ async def test_live_surreal_server_repairs_partial_graph_required_fields() -> No
                 retrieval_count = NONE,
                 citation_count = NONE,
                 misled_count = NONE;
+            DEFINE FIELD OVERWRITE updated_at ON entity TYPE option<string>;
+            UPDATE entity:legacy_required_fields SET
+                updated_at = '2026-07-10T17:37:01Z';
             DEFINE FIELD OVERWRITE revision ON entity TYPE int DEFAULT 1 ASSERT $value >= 1;
             DEFINE FIELD OVERWRITE retrieval_count ON entity TYPE int DEFAULT 0;
             DEFINE FIELD OVERWRITE citation_count ON entity TYPE int DEFAULT 0;
@@ -548,17 +552,32 @@ async def test_live_surreal_server_repairs_partial_graph_required_fields() -> No
         )
         await record_schema_version(
             client.execute_query,
-            version=9,
+            version=14,
             migrations=(),
             name=GRAPH_SCHEMA_NAME,
         )
+        staged_rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT updated_at,
+                    type::is_string(updated_at) AS updated_at_is_string
+                FROM entity:legacy_required_fields;
+                """
+            )
+        )
+        assert staged_rows == [
+            {
+                "updated_at": "2026-07-10T17:37:01Z",
+                "updated_at_is_string": True,
+            }
+        ]
 
         await bootstrap_schema(client)
 
         rows = normalize_records(
             await client.execute_query(
                 """
-                SELECT revision, retrieval_count, citation_count, misled_count
+                SELECT revision, retrieval_count, citation_count, misled_count, updated_at
                 FROM entity:legacy_required_fields;
                 """
             )
@@ -569,6 +588,7 @@ async def test_live_surreal_server_repairs_partial_graph_required_fields() -> No
                 "retrieval_count": 7,
                 "citation_count": 5,
                 "misled_count": 3,
+                "updated_at": datetime(2026, 7, 10, 17, 37, 1, tzinfo=UTC),
             }
         ]
     except Exception:
