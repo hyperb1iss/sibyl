@@ -1974,6 +1974,11 @@ async def remember_raw(
             policy_reason=write_decision.reason,
             details={
                 "agent_id": request.agent_id,
+                "capture_flags": {
+                    "basis": metadata.get("basis"),
+                    "pinned": metadata.get("pinned"),
+                    "proposed_scope": metadata.get("suggested_memory_scope"),
+                },
                 "diary": request.diary,
                 "tag_count": len(request.tags),
             },

@@ -249,7 +249,16 @@ async def test_remember_raw_uses_current_org_and_principal() -> None:
         derived_ids=["memory-1"],
         policy_allowed=True,
         policy_reason="same_scope_write_allowed",
-        details={"agent_id": None, "diary": False, "tag_count": 1},
+        details={
+            "agent_id": None,
+            "capture_flags": {
+                "basis": None,
+                "pinned": None,
+                "proposed_scope": None,
+            },
+            "diary": False,
+            "tag_count": 1,
+        },
     )
     assert response.id == "memory-1"
     assert response.source_id == "source-1"

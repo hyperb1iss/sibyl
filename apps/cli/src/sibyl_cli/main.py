@@ -162,6 +162,8 @@ ENTITY_TYPE_ALIASES = {
 }
 ENTITY_TYPE_VALUES = [entity_type.value for entity_type in EntityType]
 CONTEXT_INTENT_VALUES = [intent.value for intent in ContextIntent]
+MEMORY_BASIS_VALUES = ("observed", "inferred", "told", "assumed")
+MEMORY_PROPOSAL_SCOPE_VALUES = ("team",)
 ENTITY_TYPE_HELP = f"Entity type: {', '.join(ENTITY_TYPE_VALUES)}"
 CONTEXT_INTENT_HELP = f"Agent intent: {', '.join(CONTEXT_INTENT_VALUES)}"
 
@@ -183,6 +185,26 @@ def _normalize_add_type(value: str) -> str:
 
 def _normalize_memory_kind(value: str) -> str:
     return _normalize_entity_type(value, option_name="--kind")
+
+
+def _normalize_memory_basis(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in MEMORY_BASIS_VALUES:
+        return normalized
+    choices = ", ".join(MEMORY_BASIS_VALUES)
+    raise typer.BadParameter(f"{value!r} is not one of: {choices}")
+
+
+def _normalize_memory_proposal_scope(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in MEMORY_PROPOSAL_SCOPE_VALUES:
+        return normalized
+    choices = ", ".join(MEMORY_PROPOSAL_SCOPE_VALUES)
+    raise typer.BadParameter(f"{value!r} is not one of: {choices}")
 
 
 def _normalize_context_intent(value: str) -> str:
@@ -404,6 +426,7 @@ async def _write_memory_capture(
     source_id: str | None = None,
     skip_conflicts: bool = False,
     languages: list[str] | None = None,
+    capture_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     metadata: dict[str, Any] = {
         "capture_mode": capture_mode,
@@ -414,6 +437,7 @@ async def _write_memory_capture(
         metadata["domain"] = domain
     if languages:
         metadata["languages"] = languages
+    metadata.update(capture_metadata or {})
 
     resolved_project = (
         await resolve_project_reference(client, effective_project) if effective_project else None
@@ -3352,6 +3376,19 @@ def remember_memory(
     source_id: str | None = typer.Option(None, "--source-id", help="Raw memory source ID"),
     memory_scope: str = typer.Option("private", "--scope", help="Raw memory scope"),
     scope_key: str | None = typer.Option(None, "--scope-key", help="Project/team/shared scope key"),
+    pin: bool = typer.Option(False, "--pin", help="Exempt this memory from ordinary decay"),
+    basis: str | None = typer.Option(
+        None,
+        "--basis",
+        callback=_normalize_memory_basis,
+        help="Epistemic basis: observed, inferred, told, or assumed",
+    ),
+    propose_scope: str | None = typer.Option(
+        None,
+        "--propose-scope",
+        callback=_normalize_memory_proposal_scope,
+        help="Nominate this memory for audited promotion to team scope",
+    ),
 ) -> None:
     """Remember a decision, plan, idea, claim, artifact, session, or learning."""
 
@@ -3380,6 +3417,14 @@ def remember_memory(
         "capture_surface": surface,
         "remember_kind": kind,
     }
+    capture_metadata: dict[str, Any] = {}
+    if pin:
+        capture_metadata["pinned"] = True
+    if basis:
+        capture_metadata["basis"] = basis
+    if propose_scope:
+        capture_metadata["suggested_memory_scope"] = propose_scope
+    metadata.update(capture_metadata)
     if domain:
         metadata["domain"] = domain
 
@@ -3445,6 +3490,7 @@ def remember_memory(
                     memory_scope=memory_scope,
                     scope_key=scope_key,
                     source_id=source_id,
+                    capture_metadata=capture_metadata,
                 )
 
                 if json_output:

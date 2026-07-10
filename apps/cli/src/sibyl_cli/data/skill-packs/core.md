@@ -337,13 +337,24 @@ echo "Exact session notes..." | sibyl remember "Planning session" --kind session
 # Read the body from a guarded file
 sibyl remember "Planning session" --content-file ./notes.md --kind session
 sibyl add "CSS diagnostic" --content-file ./snippet.css
+
+# Preserve a durable rule and state how it was learned
+sibyl remember "Moon gates" "Use moon for monorepo checks." --kind rule --pin --basis observed
+
+# Nominate a private memory for audited team promotion; this does not share it immediately
+sibyl remember "Review ritual" "Verifier passes are mandatory." --kind rule --propose-scope team
 ```
 
 `remember` has **no** `--title`, `--type`, or `--summary` flags — title and body are positional
 (`sibyl remember "TITLE" "BODY" --kind <kind>`), with stdin, `--content`, or `--content-file` as
 body alternatives. If a flag is rejected (exit 2), switch to the positional form — do not retry
 flag variants. `--kind` values are snake_case; `gotcha` and `learning` are deprecated aliases that
-remap to `error_pattern` and `note` with a warning (full 33-kind list: `sibyl remember --help`). whenever future agents should not have to rediscover a detail. Project
+remap to `error_pattern` and `note` with a warning (full 33-kind list: `sibyl remember --help`).
+Use `--pin` only when ordinary decay would be harmful. `--basis` records whether the memory was
+observed, inferred, told, or assumed. `--propose-scope team` nominates the capture for the audited
+promotion pipeline; it never bypasses scope policy. These optional fields are usage-gated: if any
+remains null on more than 95 percent of writes after one release, rework or demote that surface.
+Remember whenever future agents should not have to rediscover a detail. Project
 scoping stores both `metadata.project_id` and a project edge, and `remember` links to the single
 active `doing` task when exactly one exists. Future recall can find the memory from structured
 search, graph traversal, or task context. Use `--no-active-task` when the memory belongs to the

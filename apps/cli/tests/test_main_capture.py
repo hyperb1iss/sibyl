@@ -1038,6 +1038,83 @@ def test_remember_command_can_store_raw_memory(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.main.get_client")
+def test_remember_command_records_capture_flags_for_raw_and_graph(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.remember_raw_memory = AsyncMock(
+        return_value={"id": "raw_123", "source_id": "cli:manual"}
+    )
+    mock_client.create_entity = AsyncMock(return_value={"id": "decision_123"})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "remember",
+            "Observed team convention",
+            "The repository uses moon for every quality gate.",
+            "--kind",
+            "decision",
+            "--pin",
+            "--basis",
+            "observed",
+            "--propose-scope",
+            "team",
+        ],
+    )
+
+    assert result.exit_code == 0
+    raw_metadata = mock_client.remember_raw_memory.await_args.kwargs["metadata"]
+    graph_metadata = mock_client.create_entity.await_args.kwargs["metadata"]
+    expected_flags = {
+        "basis": "observed",
+        "pinned": True,
+        "suggested_memory_scope": "team",
+    }
+    assert expected_flags.items() <= raw_metadata.items()
+    assert expected_flags.items() <= graph_metadata.items()
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    ("option", "value", "choices"),
+    [
+        ("--basis", "guessed", ("observed", "inferred", "told", "assumed")),
+        ("--propose-scope", "public", ("team",)),
+    ],
+)
+@patch("sibyl_cli.main.resolve_project_from_cwd")
+@patch("sibyl_cli.main.get_client")
+def test_remember_command_rejects_invalid_capture_flags_before_api(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+    option: str,
+    value: str,
+    choices: tuple[str, ...],
+) -> None:
+    mock_client = MagicMock()
+    mock_client.remember_raw_memory = AsyncMock()
+    mock_client.create_entity = AsyncMock()
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    result = CliRunner().invoke(
+        app,
+        ["remember", "Bad flag", "Nope.", option, value],
+    )
+
+    assert result.exit_code == 2
+    stderr = _strip_ansi(result.stderr)
+    assert "is not one of" in stderr
+    assert all(choice in stderr for choice in choices)
+    mock_client.remember_raw_memory.assert_not_awaited()
+    mock_client.create_entity.assert_not_awaited()
+    mock_resolve_project_from_cwd.assert_not_called()
+
+
 @patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
 @patch("sibyl_cli.main.get_client")
 def test_remember_command_can_store_agent_diary(
