@@ -37,9 +37,13 @@ class MemoryCaptureResult:
     raw_memory_id: str | None
     raw_source_id: str | None
     raw_policy_reason: str | None
+    mutation_receipt: dict[str, Any] | None = None
 
     def to_payload(self) -> dict[str, Any]:
-        return dict(self.payload)
+        payload = dict(self.payload)
+        if self.mutation_receipt is not None:
+            payload["mutation_receipt"] = dict(self.mutation_receipt)
+        return payload
 
 
 type RawMemoryCaptureWriter = Callable[
@@ -67,6 +71,8 @@ class MemoryCaptureService:
         raw_memory_id = _optional_str(raw_memory.get("id"))
         raw_source_id = _optional_str(raw_memory.get("source_id"))
         raw_policy_reason = _optional_str(raw_memory.get("policy_reason"))
+        raw_receipt = raw_memory.get("mutation_receipt")
+        mutation_receipt = dict(raw_receipt) if isinstance(raw_receipt, Mapping) else None
 
         graph_metadata = normalize_memory_quality_metadata(request.metadata)
         if raw_memory_id:
@@ -85,6 +91,7 @@ class MemoryCaptureService:
             raw_memory_id=raw_memory_id,
             raw_source_id=raw_source_id,
             raw_policy_reason=raw_policy_reason,
+            mutation_receipt=mutation_receipt,
         )
 
 

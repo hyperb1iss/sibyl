@@ -29,6 +29,7 @@ from sibyl_cli.common import (
     info,
     pagination_hint,
     print_json,
+    print_mutation_receipt,
     resolve_content_input,
     run_async,
     success,
@@ -548,6 +549,10 @@ def show_task(
 def start_task(
     task_id: Annotated[str, typer.Argument(help="Task ID or unambiguous prefix to start")],
     assignee: Annotated[str | None, typer.Option("--assignee", "-a", help="Assignee name")] = None,
+    expected_revision: Annotated[
+        int | None,
+        typer.Option("--expected-revision", min=1, help="Reject a stale task revision"),
+    ] = None,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
@@ -561,7 +566,10 @@ def start_task(
         try:
             resolved_id = await _resolve_task_id(client, task_id)
 
-            response = await client.start_task(resolved_id, assignee)
+            revision_kwargs = (
+                {"expected_revision": expected_revision} if expected_revision is not None else {}
+            )
+            response = await client.start_task(resolved_id, assignee, **revision_kwargs)
 
             if json_out:
                 print_json(response)
@@ -569,6 +577,7 @@ def start_task(
 
             if response.get("success"):
                 success(f"Task started: {task_id}")
+                print_mutation_receipt(response)
                 branch = response.get("data", {}).get("branch_name")
                 if branch:
                     info(f"Branch: {branch}")
@@ -589,6 +598,10 @@ def start_task(
 def block_task(
     task_id: Annotated[str, typer.Argument(help="Task ID or unambiguous prefix to block")],
     reason: Annotated[str, typer.Option("--reason", "-r", help="Blocker reason (required)")],
+    expected_revision: Annotated[
+        int | None,
+        typer.Option("--expected-revision", min=1, help="Reject a stale task revision"),
+    ] = None,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
@@ -602,7 +615,10 @@ def block_task(
         try:
             resolved_id = await _resolve_task_id(client, task_id)
 
-            response = await client.block_task(resolved_id, reason)
+            revision_kwargs = (
+                {"expected_revision": expected_revision} if expected_revision is not None else {}
+            )
+            response = await client.block_task(resolved_id, reason, **revision_kwargs)
 
             if json_out:
                 print_json(response)
@@ -610,6 +626,7 @@ def block_task(
 
             if response.get("success"):
                 success(f"Task blocked: {task_id}")
+                print_mutation_receipt(response)
             else:
                 error(f"Failed to block task: {response.get('message', 'Unknown error')}")
 
@@ -622,6 +639,10 @@ def block_task(
 @app.command("unblock")
 def unblock_task(
     task_id: Annotated[str, typer.Argument(help="Task ID or unambiguous prefix to unblock")],
+    expected_revision: Annotated[
+        int | None,
+        typer.Option("--expected-revision", min=1, help="Reject a stale task revision"),
+    ] = None,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
@@ -635,7 +656,10 @@ def unblock_task(
         try:
             resolved_id = await _resolve_task_id(client, task_id)
 
-            response = await client.unblock_task(resolved_id)
+            revision_kwargs = (
+                {"expected_revision": expected_revision} if expected_revision is not None else {}
+            )
+            response = await client.unblock_task(resolved_id, **revision_kwargs)
 
             if json_out:
                 print_json(response)
@@ -643,6 +667,7 @@ def unblock_task(
 
             if response.get("success"):
                 success(f"Task unblocked: {task_id}")
+                print_mutation_receipt(response)
             else:
                 error(f"Failed to unblock task: {response.get('message', 'Unknown error')}")
 
@@ -662,6 +687,10 @@ def submit_review(
     commits: Annotated[
         str | None, typer.Option("--commits", "-c", help="Comma-separated commit SHAs")
     ] = None,
+    expected_revision: Annotated[
+        int | None,
+        typer.Option("--expected-revision", min=1, help="Reject a stale task revision"),
+    ] = None,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
@@ -676,7 +705,15 @@ def submit_review(
             resolved_id = await _resolve_task_id(client, task_id)
             commit_list = [c.strip() for c in commits.split(",")] if commits else None
 
-            response = await client.submit_review(resolved_id, pr_url, commit_list)
+            revision_kwargs = (
+                {"expected_revision": expected_revision} if expected_revision is not None else {}
+            )
+            response = await client.submit_review(
+                resolved_id,
+                pr_url,
+                commit_list,
+                **revision_kwargs,
+            )
 
             if json_out:
                 print_json(response)
@@ -684,6 +721,7 @@ def submit_review(
 
             if response.get("success"):
                 success(f"Task submitted for review: {task_id}")
+                print_mutation_receipt(response)
             else:
                 error(f"Failed to submit for review: {response.get('message', 'Unknown error')}")
 
@@ -720,6 +758,10 @@ def complete_task(
         str | None,
         typer.Option("--cited", help="Comma-separated context/search IDs that informed completion"),
     ] = None,
+    expected_revision: Annotated[
+        int | None,
+        typer.Option("--expected-revision", min=1, help="Reject a stale task revision"),
+    ] = None,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
@@ -740,16 +782,18 @@ def complete_task(
             resolved_learnings = (resolved_learnings or "").strip() or None
             resolved_id = await _resolve_task_id(client, task_id)
             cited_ids = _parse_csv_ids(cited)
-
+            completion_kwargs: dict[str, Any] = {}
             if cited_ids:
-                response = await client.complete_task(
-                    resolved_id,
-                    hours,
-                    resolved_learnings,
-                    cited_ids=cited_ids,
-                )
-            else:
-                response = await client.complete_task(resolved_id, hours, resolved_learnings)
+                completion_kwargs["cited_ids"] = cited_ids
+            if expected_revision is not None:
+                completion_kwargs["expected_revision"] = expected_revision
+
+            response = await client.complete_task(
+                resolved_id,
+                hours,
+                resolved_learnings,
+                **completion_kwargs,
+            )
 
             if json_out:
                 print_json(response)
@@ -757,6 +801,7 @@ def complete_task(
 
             if response.get("success"):
                 success(f"Task completed: {task_id}")
+                print_mutation_receipt(response)
                 if resolved_learnings:
                     info("Task learning capture queued")
                 citation_usage = response.get("data", {}).get("citation_usage", {})
@@ -782,6 +827,10 @@ def complete_task(
 def archive_task(
     task_id: Annotated[str | None, typer.Argument(help="Task ID to archive")] = None,
     reason: Annotated[str | None, typer.Option("--reason", "-r", help="Archive reason")] = None,
+    expected_revision: Annotated[
+        int | None,
+        typer.Option("--expected-revision", min=1, help="Reject a stale task revision"),
+    ] = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
     stdin: Annotated[
         bool, typer.Option("--stdin", help="Read task IDs from stdin (one per line)")
@@ -820,6 +869,9 @@ def archive_task(
     if len(task_ids) > 1 and not yes:
         error(f"Bulk archive requires --yes flag (found {len(task_ids)} tasks)")
         raise typer.Exit(1)
+    if len(task_ids) > 1 and expected_revision is not None:
+        error("--expected-revision requires a single task")
+        raise typer.Exit(1)
 
     @run_async
     async def _archive() -> None:
@@ -831,7 +883,12 @@ def archive_task(
         for tid in task_ids:
             try:
                 resolved_id = await _resolve_task_id(client, tid)
-                response = await client.archive_task(resolved_id, reason)
+                revision_kwargs = (
+                    {"expected_revision": expected_revision}
+                    if expected_revision is not None
+                    else {}
+                )
+                response = await client.archive_task(resolved_id, reason, **revision_kwargs)
                 results.append({"id": resolved_id, **response})
                 if response.get("success"):
                     archived += 1
@@ -851,6 +908,7 @@ def archive_task(
         if len(task_ids) == 1:
             if results[0].get("success"):
                 success(f"Task archived: {results[0]['id']}")
+                print_mutation_receipt(results[0])
             else:
                 error(f"Failed: {_archive_error_detail(results[0])}")
         else:
@@ -972,6 +1030,7 @@ def create_task(
             task_id = normalized_response.get("id")
             if response.get("success") or task_id:
                 success(f"Task created: {task_id}")
+                print_mutation_receipt(response)
                 if assignee:
                     info(f"Assigned to: {assignee}")
                 if dep_list:
@@ -1020,6 +1079,10 @@ def update_task(
         str | None,
         typer.Option("--remove-dep", help="Comma-separated task IDs to remove as dependencies"),
     ] = None,
+    expected_revision: Annotated[
+        int | None,
+        typer.Option("--expected-revision", min=1, help="Reject a stale task revision"),
+    ] = None,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
@@ -1062,6 +1125,9 @@ def update_task(
             add_dep_list = [d.strip() for d in add_dep.split(",")] if add_dep else None
             remove_dep_list = [d.strip() for d in remove_dep.split(",")] if remove_dep else None
 
+            revision_kwargs = (
+                {"expected_revision": expected_revision} if expected_revision is not None else {}
+            )
             response = await client.update_task(
                 task_id=resolved_id,
                 status=status,
@@ -1076,6 +1142,7 @@ def update_task(
                 technologies=tech_list,
                 add_depends_on=add_dep_list,
                 remove_depends_on=remove_dep_list,
+                **revision_kwargs,
             )
 
             if json_out:
@@ -1084,6 +1151,7 @@ def update_task(
 
             if response.get("success"):
                 success(f"Task updated: {resolved_id}")
+                print_mutation_receipt(response)
                 info(f"Fields: {', '.join(response.get('data', {}).keys())}")
             else:
                 error(f"Failed to update task: {response.get('message', 'Unknown error')}")
@@ -1168,6 +1236,7 @@ def add_note(
 
             if response.get("id"):
                 success(f"Note added: {response['id']}")
+                print_mutation_receipt(response)
             else:
                 error("Failed to add note")
 

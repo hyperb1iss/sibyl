@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -63,6 +63,18 @@ def print_json(data: object) -> None:
 
     clean_data = _strip_embeddings(data)
     print(json.dumps(clean_data, indent=2, default=str, ensure_ascii=False))
+
+
+def print_mutation_receipt(response: Mapping[str, object]) -> None:
+    receipt = response.get("mutation_receipt")
+    if not isinstance(receipt, Mapping):
+        return
+    revision = receipt.get("revision") or "pending"
+    operation_id = receipt.get("operation_id", "unknown")
+    state = "replayed" if receipt.get("replayed") else "applied"
+    if not receipt.get("applied"):
+        state = "queued"
+    console.print(f"  [dim]Revision: {revision} · Operation: {operation_id} ({state})[/dim]")
 
 
 def read_content_file(

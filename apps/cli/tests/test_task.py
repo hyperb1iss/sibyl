@@ -272,7 +272,17 @@ def test_task_note_reads_content_file(
     content_file = tmp_path / "diag.md"
     content_file.write_text("Root cause breadcrumb\n", encoding="utf-8")
     mock_client = MagicMock()
-    mock_client.create_note = AsyncMock(return_value={"success": True})
+    mock_client.create_note = AsyncMock(
+        return_value={
+            "success": True,
+            "id": "note-1",
+            "mutation_receipt": {
+                "operation_id": "note-op-1",
+                "applied": True,
+                "revision": 1,
+            },
+        }
+    )
     mock_get_client.return_value = mock_client
 
     runner = CliRunner()
@@ -296,6 +306,8 @@ def test_task_note_reads_content_file(
         "agent",
         "Nova",
     )
+    assert "Revision: 1" in result.stdout
+    assert "Operation: note-op-1 (applied)" in result.stdout
 
 
 @patch("sibyl_cli.task.get_client")
@@ -337,6 +349,49 @@ def test_task_start_accepts_short_prefix(mock_get_client: MagicMock) -> None:
     assert result.exit_code == 0
     mock_client.resolve_id_prefix.assert_awaited_once_with("123456", entity_type="task")
     mock_client.start_task.assert_awaited_once_with("task_123456789abc", None)
+
+
+@patch("sibyl_cli.task.get_client")
+def test_task_start_forwards_expected_revision_and_prints_receipt(
+    mock_get_client: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.start_task = AsyncMock(
+        return_value={
+            "success": True,
+            "mutation_receipt": {
+                "operation_id": "start-1",
+                "applied": True,
+                "revision": 8,
+            },
+        }
+    )
+    mock_get_client.return_value = mock_client
+    mock_client.resolve_id_prefix = AsyncMock(
+        return_value={"matches": [{"id": "task_123456789abc"}]}
+    )
+    mock_client.get_entity = AsyncMock(
+        return_value={
+            "id": "task_123456789abc",
+            "name": "Revision-aware task",
+            "entity_type": "task",
+            "metadata": {"status": "doing"},
+        }
+    )
+
+    result = CliRunner().invoke(
+        task.app,
+        ["start", "123456", "--expected-revision", "7"],
+    )
+
+    assert result.exit_code == 0
+    mock_client.start_task.assert_awaited_once_with(
+        "task_123456789abc",
+        None,
+        expected_revision=7,
+    )
+    assert "Revision: 8" in result.stdout
+    assert "Operation: start-1 (applied)" in result.stdout
 
 
 @patch("sibyl_cli.task.get_client")

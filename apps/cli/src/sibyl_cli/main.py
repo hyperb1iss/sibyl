@@ -34,6 +34,7 @@ from sibyl_cli.common import (
     handle_client_error,
     info,
     print_json,
+    print_mutation_receipt,
     resolve_content_input,
     run_async,
     success,
@@ -503,6 +504,7 @@ def _print_memory_capture_result(
         success(f"Remembered {kind}: {title}")
     else:
         info(f"Queued {kind}: {title}")
+    print_mutation_receipt(data)
     console.print(f"  [dim]ID: {entity_id}[/dim]")
     if raw_memory_id := data.get("raw_memory_id"):
         console.print(f"  [dim]Raw: {raw_memory_id}[/dim]")
@@ -3248,6 +3250,7 @@ def remember_memory(
 
                     label = f"diary entry for {agent}" if diary else "raw memory"
                     success(f"Remembered {label}: {title}")
+                    print_mutation_receipt(data)
                     console.print(f"  [dim]ID: {memory_id}[/dim]")
                     if policy_reason := data.get("policy_reason"):
                         console.print(f"  [dim]Policy: {policy_reason}[/dim]")

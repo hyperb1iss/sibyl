@@ -18,6 +18,11 @@ async def test_memory_capture_service_writes_raw_source_before_graph_entity() ->
             "id": "raw_123",
             "source_id": "cli:manual",
             "policy_reason": "private_principal_bound",
+            "mutation_receipt": {
+                "operation_id": "remember-1",
+                "applied": True,
+                "revision": 1,
+            },
         }
 
     async def create_graph_entity(
@@ -59,7 +64,13 @@ async def test_memory_capture_service_writes_raw_source_before_graph_entity() ->
         "raw_memory_id": "raw_123",
         "raw_source_id": "cli:manual",
         "raw_policy_reason": "private_principal_bound",
+        "mutation_receipt": {
+            "operation_id": "remember-1",
+            "applied": True,
+            "revision": 1,
+        },
     }
+    assert "mutation_receipt" not in result.to_payload()["metadata"]
 
 
 @pytest.mark.asyncio

@@ -663,6 +663,11 @@ def test_remember_command_records_domain_memory_with_links(
             "id": "raw_123",
             "source_id": "cli:manual",
             "policy_reason": "private_principal_bound",
+            "mutation_receipt": {
+                "operation_id": "remember-1",
+                "applied": True,
+                "revision": 1,
+            },
         }
     )
     mock_client.create_entity = AsyncMock(return_value={"id": "decision_123"})
@@ -740,6 +745,8 @@ def test_remember_command_records_domain_memory_with_links(
         limit=2,
     )
     assert "Queued decision" in result.stdout
+    assert "Revision: 1" in result.stdout
+    assert "Operation: remember-1 (applied)" in result.stdout
     assert "Policy: private_principal_bound" in result.stdout
     mock_resolve_project_from_cwd.assert_called_once_with()
 

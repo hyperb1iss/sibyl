@@ -985,24 +985,51 @@ class SibylClient:
     # Task Workflow Operations
     # =========================================================================
 
-    async def start_task(self, task_id: str, assignee: str | None = None) -> dict[str, Any]:
+    async def start_task(
+        self,
+        task_id: str,
+        assignee: str | None = None,
+        *,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
         """Start working on a task."""
-        data = {"assignee": assignee} if assignee else None
-        return await self._request("POST", f"/tasks/{task_id}/start", json=data)
+        data: dict[str, Any] = {}
+        if assignee:
+            data["assignee"] = assignee
+        if expected_revision is not None:
+            data["expected_revision"] = expected_revision
+        return await self._request("POST", f"/tasks/{task_id}/start", json=data or None)
 
-    async def block_task(self, task_id: str, reason: str) -> dict[str, Any]:
+    async def block_task(
+        self,
+        task_id: str,
+        reason: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
         """Block a task with a reason."""
-        return await self._request("POST", f"/tasks/{task_id}/block", json={"reason": reason})
+        data: dict[str, Any] = {"reason": reason}
+        if expected_revision is not None:
+            data["expected_revision"] = expected_revision
+        return await self._request("POST", f"/tasks/{task_id}/block", json=data)
 
-    async def unblock_task(self, task_id: str) -> dict[str, Any]:
+    async def unblock_task(
+        self,
+        task_id: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
         """Unblock a task."""
-        return await self._request("POST", f"/tasks/{task_id}/unblock")
+        data = {"expected_revision": expected_revision} if expected_revision is not None else None
+        return await self._request("POST", f"/tasks/{task_id}/unblock", json=data)
 
     async def submit_review(
         self,
         task_id: str,
         pr_url: str | None = None,
         commit_shas: list[str] | None = None,
+        *,
+        expected_revision: int | None = None,
     ) -> dict[str, Any]:
         """Submit a task for review."""
         data: dict[str, Any] = {}
@@ -1010,6 +1037,8 @@ class SibylClient:
             data["pr_url"] = pr_url
         if commit_shas:
             data["commit_shas"] = commit_shas
+        if expected_revision is not None:
+            data["expected_revision"] = expected_revision
         return await self._request("POST", f"/tasks/{task_id}/review", json=data or None)
 
     async def complete_task(
@@ -1019,6 +1048,7 @@ class SibylClient:
         learnings: str | None = None,
         *,
         cited_ids: list[str] | None = None,
+        expected_revision: int | None = None,
     ) -> dict[str, Any]:
         """Complete a task."""
         data: dict[str, Any] = {}
@@ -1028,12 +1058,24 @@ class SibylClient:
             data["learnings"] = learnings
         if cited_ids:
             data["cited_ids"] = cited_ids
+        if expected_revision is not None:
+            data["expected_revision"] = expected_revision
         return await self._request("POST", f"/tasks/{task_id}/complete", json=data or None)
 
-    async def archive_task(self, task_id: str, reason: str | None = None) -> dict[str, Any]:
+    async def archive_task(
+        self,
+        task_id: str,
+        reason: str | None = None,
+        *,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
         """Archive a task."""
-        data = {"reason": reason} if reason else None
-        return await self._request("POST", f"/tasks/{task_id}/archive", json=data)
+        data: dict[str, Any] = {}
+        if reason:
+            data["reason"] = reason
+        if expected_revision is not None:
+            data["expected_revision"] = expected_revision
+        return await self._request("POST", f"/tasks/{task_id}/archive", json=data or None)
 
     async def create_task(
         self,
@@ -1094,6 +1136,7 @@ class SibylClient:
         technologies: list[str] | None = None,
         add_depends_on: list[str] | None = None,
         remove_depends_on: list[str] | None = None,
+        expected_revision: int | None = None,
     ) -> dict[str, Any]:
         """Update task fields."""
         data: dict[str, Any] = {}
@@ -1121,6 +1164,8 @@ class SibylClient:
             data["add_depends_on"] = add_depends_on
         if remove_depends_on:
             data["remove_depends_on"] = remove_depends_on
+        if expected_revision is not None:
+            data["expected_revision"] = expected_revision
 
         return await self._request("PATCH", f"/tasks/{task_id}", json=data)
 
