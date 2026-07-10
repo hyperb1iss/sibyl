@@ -253,8 +253,12 @@ _SUPERSEDES_LINEAGE_CANDIDATE_QUERY = """
     SELECT id, uuid, organization_id, source_id, metadata, created_at
     FROM raw_captures
     WHERE organization_id = $organization_id
-        AND metadata.supersedes_raw_memory_id != NONE
-        AND metadata.supersedes_raw_memory_id != ''
+        AND (
+            (metadata.supersedes_raw_memory_id != NONE
+                AND metadata.supersedes_raw_memory_id != '')
+            OR (metadata.superseded_by_source_id != NONE
+                AND metadata.superseded_by_source_id != '')
+        )
     ORDER BY created_at ASC, uuid ASC
     LIMIT $page_size START $offset;
 """
@@ -1488,9 +1492,14 @@ async def _materialize_supersedes_lineage(
         for row in rows:
             metadata = _coerce_dict(row.get("metadata"))
             superseded_id = _coerce_optional_str(metadata.get("supersedes_raw_memory_id"))
+            raw_memory_id = _coerce_str(row.get("uuid"))
+            if not superseded_id:
+                replacement_id = _coerce_optional_str(metadata.get("superseded_by_source_id"))
+                if replacement_id:
+                    superseded_id = raw_memory_id
+                    raw_memory_id = replacement_id
             if not superseded_id:
                 continue
-            raw_memory_id = _coerce_str(row.get("uuid"))
             edge_uuid = _lineage_edge_id(
                 "supersedes",
                 organization_id,
@@ -1514,10 +1523,17 @@ async def _materialize_supersedes_lineage(
             organization_id=organization_id,
             values=[_coerce_str(edge.get("superseded_raw_memory_id")) for edge in edges],
         )
+        existing_raw_ids = await _existing_content_uuids(
+            client,
+            "raw_captures",
+            organization_id=organization_id,
+            values=[_coerce_str(edge.get("raw_memory_id")) for edge in edges],
+        )
         edges = [
             edge
             for edge in edges
             if _coerce_str(edge.get("superseded_raw_memory_id")) in existing_superseded_ids
+            and _coerce_str(edge.get("raw_memory_id")) in existing_raw_ids
         ]
         pending = await _pending_lineage_edges(client, "supersedes", edges)
         batch = pending[:remaining]
@@ -2743,6 +2759,7 @@ async def save_raw_memory(
     *,
     embedding_provider: EmbeddingProvider | None | object = _RAW_MEMORY_EMBEDDING_AUTO,
     expected_revision: int | None = None,
+    superseded_by_memory_id: str | None = None,
 ) -> RawMemory:
     if expected_revision is not None and expected_revision < 1:
         raise ValueError("expected_revision must be at least 1")
@@ -2762,6 +2779,8 @@ async def save_raw_memory(
         if existing_record is None:
             if expected_revision is not None:
                 raise RevisionConflictError(memory.id, expected_revision, 0)
+            if superseded_by_memory_id is not None:
+                raise ValueError("supersession requires an existing raw memory")
             record = await _replace_record(
                 client,
                 "raw_captures",
@@ -2771,6 +2790,22 @@ async def save_raw_memory(
         else:
             update_record = _raw_memory_record(memory)
             update_record.pop("revision", None)
+            supersession = None
+            if superseded_by_memory_id is not None:
+                edge_uuid = _lineage_edge_id(
+                    "supersedes",
+                    memory.organization_id,
+                    superseded_by_memory_id,
+                    memory.id,
+                )
+                supersession = {
+                    "uuid": edge_uuid,
+                    "edge_ref": _lineage_record_ref("supersedes", edge_uuid),
+                    "raw_memory_id": superseded_by_memory_id,
+                    "superseded_raw_memory_id": memory.id,
+                    "organization_id": memory.organization_id,
+                    "created_at": _utcnow(),
+                }
             rows = await _select_many_raw(
                 client,
                 """
@@ -2782,13 +2817,47 @@ async def save_raw_memory(
                             AND ($expected_revision = NONE OR revision = $expected_revision)
                         RETURN AFTER
                     );
-                    UPDATE $updated SET revision += 1 RETURN AFTER;
+                    LET $saved = (UPDATE $updated SET revision += 1 RETURN AFTER);
+                    IF $supersession != NONE AND array::len($saved) > 0 {
+                        LET $replacement = (
+                            SELECT id, source_id FROM raw_captures
+                            WHERE organization_id = $organization_id
+                                AND uuid = $supersession.raw_memory_id
+                            LIMIT 1
+                        )[0];
+                        LET $superseded = (
+                            SELECT VALUE id FROM raw_captures
+                            WHERE organization_id = $organization_id
+                                AND uuid = $supersession.superseded_raw_memory_id
+                            LIMIT 1
+                        )[0];
+                        IF $replacement = NONE OR $superseded = NONE {
+                            THROW "supersession_reference_missing";
+                        };
+                        LET $replacement_id = $replacement.id;
+                        LET $edge = type::record($supersession.edge_ref);
+                        LET $existing_edge = (
+                            SELECT VALUE id FROM supersedes WHERE id = $edge LIMIT 1
+                        )[0];
+                        IF $existing_edge = NONE {
+                            RELATE $replacement_id->$edge->$superseded CONTENT {
+                                uuid: $supersession.uuid,
+                                organization_id: $organization_id,
+                                raw_memory_id: $supersession.raw_memory_id,
+                                superseded_raw_memory_id: $supersession.superseded_raw_memory_id,
+                                source_id: $replacement.source_id,
+                                created_at: $supersession.created_at
+                            };
+                        };
+                    };
+                    RETURN $saved;
                     COMMIT TRANSACTION;
                 """,
                 organization_id=memory.organization_id,
                 uuid=memory.id,
                 expected_revision=expected_revision,
                 record=update_record,
+                supersession=supersession,
             )
             if not rows and expected_revision is not None:
                 current = await _select_one(

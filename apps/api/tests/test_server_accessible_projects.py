@@ -10,6 +10,7 @@ from sibyl.auth.api_key_common import api_key_memory_scope_key
 from sibyl.server import (
     McpContext,
     _add_mcp_entity,
+    _authorize_mcp_manage_action,
     _authorize_mcp_memory_write,
     _compile_mcp_context_pack,
     _get_accessible_projects,
@@ -622,6 +623,43 @@ def test_authorize_mcp_memory_write_denies_api_key_memory_space_mismatch() -> No
             accessible_projects={"project-b"},
             surface="mcp_remember",
         )
+
+
+@pytest.mark.asyncio
+async def test_authorize_mcp_team_correction_resolves_team_scope_from_ids() -> None:
+    ctx = McpContext(
+        org_id=str(uuid4()),
+        user_id=str(uuid4()),
+        scopes=["mcp"],
+        org_role="member",
+    )
+    memory = SimpleNamespace(
+        id="raw-1",
+        memory_scope=MemoryScope.TEAM,
+        principal_id=ctx.user_id,
+        scope_key="team-a",
+    )
+    resolve_teams = AsyncMock(return_value={"team-a"})
+
+    with (
+        patch("sibyl.server.get_raw_memory", AsyncMock(return_value=memory)),
+        patch("sibyl.server.resolve_accessible_team_scope_keys", resolve_teams),
+    ):
+        decision = await _authorize_mcp_manage_action(
+            ctx=ctx,
+            action="correct_memory",
+            entity_id="raw-1",
+            accessible_projects=None,
+        )
+
+    assert decision is not None
+    assert decision.allowed
+    assert decision.reason == "same_scope_write_allowed"
+    resolve_teams.assert_awaited_once_with(
+        user_id=ctx.user_id,
+        org_id=ctx.org_id,
+        scopes=ctx.scopes,
+    )
 
 
 def test_mcp_policy_context_preserves_delegated_identity() -> None:

@@ -247,6 +247,64 @@ class TestSurrealContentHelpers:
             await client.close()
 
     @pytest.mark.asyncio
+    async def test_raw_memory_save_atomically_records_supersession(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        client = SurrealContentClient(url="memory://")
+        try:
+            await bootstrap_content_schema(client, reset=True)
+
+            @asynccontextmanager
+            async def fake_session():
+                yield client
+
+            from sibyl_core.services import surreal_content as content_service
+
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            superseded = await remember_raw_memory(
+                organization_id="org-supersession",
+                principal_id="bliss",
+                source_id="cli:old",
+                raw_content="Old decision",
+                embedding_provider=None,
+            )
+            replacement = await remember_raw_memory(
+                organization_id="org-supersession",
+                principal_id="bliss",
+                source_id="cli:new",
+                raw_content="New decision",
+                embedding_provider=None,
+            )
+
+            saved = await save_raw_memory(
+                replace(
+                    superseded,
+                    metadata={"superseded_by_source_id": replacement.id},
+                ),
+                expected_revision=1,
+                superseded_by_memory_id=replacement.id,
+                embedding_provider=None,
+            )
+            lineage = await get_raw_memory_lineage(
+                organization_id="org-supersession",
+                memory_id=superseded.id,
+            )
+
+            assert saved.revision == 2
+            assert lineage["supersessions"] == [
+                {
+                    "uuid": lineage["supersessions"][0]["uuid"],
+                    "raw_memory_id": replacement.id,
+                    "superseded_raw_memory_id": superseded.id,
+                    "source_id": replacement.source_id,
+                    "created_at": lineage["supersessions"][0]["created_at"],
+                }
+            ]
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
     async def test_materialize_content_lineage_backfills_idempotent_edges(self) -> None:
         db = AsyncSurreal("memory://")
         try:

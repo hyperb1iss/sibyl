@@ -31,9 +31,9 @@ from sibyl.persistence.auth_runtime import (
     authenticate_api_key,
     create_project_record,
     has_owner_membership,
-    list_accessible_team_scope_keys,
     log_memory_audit_event,
     resolve_accessible_project_graph_ids,
+    resolve_accessible_team_scope_keys,
     resolve_org_role,
 )
 from sibyl.persistence.content_common import ApiIdempotencyRecord
@@ -1126,8 +1126,12 @@ async def _authorize_mcp_manage_action(
         if policy_projects is None and memory.scope_key:
             policy_projects = {memory.scope_key}
         accessible_teams = (
-            {str(team_id) for team_id in await list_accessible_team_scope_keys(ctx)}
-            if memory.memory_scope is MemoryScope.TEAM
+            await resolve_accessible_team_scope_keys(
+                user_id=ctx.user_id,
+                org_id=ctx.org_id,
+                scopes=ctx.scopes,
+            )
+            if memory.memory_scope is MemoryScope.TEAM and ctx.user_id
             else None
         )
         return _authorize_mcp_memory_write(

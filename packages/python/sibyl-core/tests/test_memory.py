@@ -700,6 +700,65 @@ async def test_memory_correction_preview_canonicalizes_supersede_reference(
 
 
 @pytest.mark.asyncio
+async def test_memory_correction_hides_inaccessible_reference_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_review_candidate(id="source-1", principal_id="user-1")
+    replacement = _raw_review_candidate(id="replacement-1", principal_id="other-user")
+    monkeypatch.setattr(
+        memory_module,
+        "get_raw_memory",
+        AsyncMock(side_effect=[memory, replacement]),
+    )
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+
+    result = await preview_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="superseded",
+        replacement_source_id="replacement-1",
+    )
+
+    assert not result.allowed
+    assert result.reason == "replacement_source_not_found"
+
+
+@pytest.mark.asyncio
+async def test_apply_supersede_persists_lineage_with_correction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_review_candidate(id="source-1", principal_id="user-1")
+    replacement = _raw_review_candidate(id="replacement-1", principal_id="user-1")
+    save_raw_memory = AsyncMock(side_effect=lambda updated, **_: updated)
+    monkeypatch.setattr(
+        memory_module,
+        "get_raw_memory",
+        AsyncMock(side_effect=[memory, replacement, memory]),
+    )
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(memory_module, "save_raw_memory", save_raw_memory)
+
+    result = await apply_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="superseded",
+        reason="Replaced",
+        replacement_source_id="replacement-1",
+        expected_revision=1,
+    )
+
+    assert result.applied
+    updated = save_raw_memory.await_args.args[0]
+    save_raw_memory.assert_awaited_once_with(
+        updated,
+        expected_revision=1,
+        superseded_by_memory_id="replacement-1",
+    )
+
+
+@pytest.mark.asyncio
 async def test_memory_correction_preview_rejects_self_reference(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

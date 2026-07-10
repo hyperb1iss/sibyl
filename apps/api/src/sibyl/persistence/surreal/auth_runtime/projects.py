@@ -1365,6 +1365,23 @@ async def list_accessible_team_scope_keys(ctx) -> set[str]:
         return keys
 
 
+async def resolve_accessible_team_scope_keys(
+    *,
+    user_id: str,
+    org_id: str,
+    scopes=None,
+) -> set[str]:
+    try:
+        auth_ctx = await _resolve_auth_context_from_claims(
+            {"sub": user_id, "org": org_id, "scopes": list(scopes or [])}
+        )
+    except Exception:
+        return set()
+    if auth_ctx.organization is None:
+        return set()
+    return await list_accessible_team_scope_keys(auth_ctx)
+
+
 async def resolve_accessible_project_graph_ids(
     *,
     user_id: str,

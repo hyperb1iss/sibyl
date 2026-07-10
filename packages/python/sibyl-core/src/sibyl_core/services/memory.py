@@ -1302,6 +1302,10 @@ async def _validate_correction_reference(
     memory: RawMemory,
     reference_source_id: str,
     reference_kind: str,
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None,
+    accessible_delegations: Iterable[str] | None,
 ) -> tuple[RawMemory | None, str | None]:
     reference = await _load_correction_memory(
         organization_id=organization_id,
@@ -1311,6 +1315,15 @@ async def _validate_correction_reference(
         return None, f"{reference_kind}_source_not_found"
     if reference.id == memory.id:
         return None, f"{reference_kind}_source_self_reference"
+    read_decision = _authorize_share_source_read(
+        memory=reference,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+    )
+    if not read_decision.allowed:
+        return None, f"{reference_kind}_source_not_found"
     if not raw_memory_recallable(reference):
         return None, f"{reference_kind}_source_not_recallable"
     return reference, None
@@ -1435,6 +1448,10 @@ async def preview_memory_correction(
             memory=memory,
             reference_source_id=replacement_source_id,
             reference_kind="replacement",
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         )
         if reference_reason:
             return _correction_preview_denied(
@@ -1458,6 +1475,10 @@ async def preview_memory_correction(
             memory=memory,
             reference_source_id=duplicate_of_source_id,
             reference_kind="duplicate",
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         )
         if reference_reason:
             return _correction_preview_denied(
@@ -1701,10 +1722,12 @@ async def apply_memory_correction(
             principal_id=principal_id,
         ),
     )
-    if expected_revision is None:
-        saved = await save_raw_memory(updated)
-    else:
-        saved = await save_raw_memory(updated, expected_revision=expected_revision)
+    save_kwargs: dict[str, Any] = {}
+    if expected_revision is not None:
+        save_kwargs["expected_revision"] = expected_revision
+    if preview.action == "supersede" and canonical_replacement_source_id is not None:
+        save_kwargs["superseded_by_memory_id"] = canonical_replacement_source_id
+    saved = await save_raw_memory(updated, **save_kwargs)
     return MemoryCorrectionResult(applied=True, preview=preview, updated_memory=saved)
 
 
