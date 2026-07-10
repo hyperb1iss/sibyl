@@ -127,6 +127,54 @@ class TestDocumentSearch:
         scope_loader.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_search_documents_honors_content_budget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(document_search_service.settings, "store", "surreal")
+
+        source = ContentSource(
+            id="src-1",
+            organization_id="org-1",
+            name="Docs",
+            url="https://docs.example.com",
+        )
+        document = ContentDocument(
+            id="doc-1",
+            source_id="src-1",
+            url="https://docs.example.com/guide",
+            title="Guide",
+            content="x" * 900,
+            has_code=False,
+        )
+        chunk = ContentChunk(
+            id="chunk-1",
+            document_id="doc-1",
+            content="x" * 900,
+            context="details",
+            heading_path=["Guide"],
+            embedding=[1.0, 0.0],
+        )
+
+        with (
+            patch(
+                "sibyl_core.services.document_search.search_document_chunks",
+                AsyncMock(return_value=([(chunk, document, source.name, source.id, 0.91)], [])),
+            ),
+            patch(
+                "sibyl_core.services.document_search._embed_text",
+                AsyncMock(return_value=[1.0, 0.0]),
+            ),
+        ):
+            results = await search_documents(
+                "guide",
+                organization_id="org-1",
+                content_max_chars=700,
+            )
+
+        assert len(results[0].content) == 700
+        assert results[0].content.startswith("[Guide] ")
+
+    @pytest.mark.asyncio
     async def test_search_documents_propagates_vector_search_failures(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

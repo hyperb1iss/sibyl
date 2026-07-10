@@ -845,6 +845,64 @@ class TestSearchTool:
         assert response.offset == 0
 
     @pytest.mark.asyncio
+    async def test_search_honors_explicit_graph_content_budget(self) -> None:
+        from sibyl_core.retrieval.hybrid import HybridResult
+        from sibyl_core.tools.search import search
+
+        entity = MockEntity(
+            id="session_evidence",
+            entity_type=EntityType.SESSION,
+            name="evidence",
+            content="x" * 900,
+        )
+        entity_manager = AsyncMock()
+        hybrid_search = AsyncMock(
+            return_value=HybridResult(
+                results=[(entity, 0.95)],
+                metadata={"entity_manager_search_completed": True},
+            )
+        )
+
+        with (
+            patch(
+                "sibyl_core.tools.search.get_graph_runtime",
+                AsyncMock(return_value=make_graph_runtime(entity_manager=entity_manager)),
+            ),
+            patch("sibyl_core.tools.search.hybrid_search", hybrid_search),
+        ):
+            default_response = await search(
+                query="evidence",
+                organization_id="org_123",
+                include_documents=False,
+                record_exposure=False,
+            )
+            expanded_response = await search(
+                query="evidence",
+                organization_id="org_123",
+                include_documents=False,
+                content_max_chars=700,
+                record_exposure=False,
+            )
+
+        assert len(default_response.results[0].content) == 500
+        assert len(expanded_response.results[0].content) == 700
+        assert expanded_response.filters["content_max_chars"] == 700
+
+    @pytest.mark.asyncio
+    async def test_search_clamps_content_budget(self) -> None:
+        from sibyl_core.tools.search import MAX_SEARCH_CONTENT_MAX_CHARS, search
+
+        response = await search(
+            query="test",
+            organization_id="org_123",
+            include_documents=False,
+            include_graph=False,
+            content_max_chars=MAX_SEARCH_CONTENT_MAX_CHARS + 1,
+        )
+
+        assert response.filters["content_max_chars"] == MAX_SEARCH_CONTENT_MAX_CHARS
+
+    @pytest.mark.asyncio
     async def test_search_graph_runtime_skips_schema_preparation(
         self,
         monkeypatch: pytest.MonkeyPatch,

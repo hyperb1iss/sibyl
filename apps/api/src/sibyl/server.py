@@ -1367,6 +1367,7 @@ def _register_tools(mcp: FastMCP) -> None:
         since: str | None = None,
         limit: int = 10,
         include_content: bool = True,
+        content_max_chars: int = 500,
         include_documents: bool = True,
         include_graph: bool = True,
         use_enhanced: bool = True,
@@ -1400,7 +1401,8 @@ def _register_tools(mcp: FastMCP) -> None:
             assignee: Filter tasks by assignee name
             since: Filter by creation date (ISO format: 2024-03-15 or relative: 7d, 2w)
             limit: Maximum results to return (1-50, default: 10)
-            include_content: Include full content in results (default: True)
+            include_content: Include content in results (default: True)
+            content_max_chars: Maximum content characters per result (default: 500)
             include_documents: Search crawled documentation (default: True)
             include_graph: Search knowledge graph entities (default: True)
             use_enhanced: Use enhanced hybrid retrieval, vector + graph fusion (default: True)
@@ -1450,6 +1452,7 @@ def _register_tools(mcp: FastMCP) -> None:
             since=since,
             limit=limit,
             include_content=include_content,
+            content_max_chars=content_max_chars,
             include_documents=include_documents,
             include_graph=include_graph,
             use_enhanced=use_enhanced,

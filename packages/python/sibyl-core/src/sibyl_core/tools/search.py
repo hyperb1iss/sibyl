@@ -49,6 +49,9 @@ log = structlog.get_logger()
 
 DOCUMENT_SEARCH_TIMEOUT_SECONDS = min(10.0, TIMEOUTS["search"])
 DOCUMENT_SEARCH_GRAPH_JOIN_TIMEOUT_SECONDS = min(2.0, DOCUMENT_SEARCH_TIMEOUT_SECONDS)
+DEFAULT_SEARCH_CONTENT_MAX_CHARS = 500
+MAX_SEARCH_CONTENT_MAX_CHARS = 50_000
+SEARCH_PREVIEW_MAX_CHARS = 200
 
 
 @dataclass(frozen=True, slots=True)
@@ -500,6 +503,7 @@ async def _search_documents(
     language: str | None = None,
     limit: int = 10,
     include_content: bool = True,
+    content_max_chars: int = DEFAULT_SEARCH_CONTENT_MAX_CHARS,
 ) -> list[SearchResult]:
     return await document_search_service.search_documents(
         query=query,
@@ -509,6 +513,7 @@ async def _search_documents(
         language=language,
         limit=limit,
         include_content=include_content,
+        content_max_chars=content_max_chars,
     )
 
 
@@ -516,6 +521,8 @@ def _raw_memory_search_result(
     memory: RawMemory,
     *,
     organization_id: str,
+    include_content: bool,
+    content_max_chars: int,
 ) -> SearchResult:
     source = memory.source_id or memory.capture_surface
     project_id = (
@@ -545,11 +552,16 @@ def _raw_memory_search_result(
             **memory.metadata,
         },
     )
+    if include_content:
+        content = (memory.snippet or memory.raw_content)[:content_max_chars]
+    else:
+        content = (memory.snippet or memory.raw_content)[:SEARCH_PREVIEW_MAX_CHARS]
+
     return SearchResult(
         id=f"raw_memory:{memory.id}",
         type="raw_memory",
         name=memory.title or "Untitled raw memory",
-        content=memory.snippet or memory.raw_content[:500],
+        content=content,
         score=memory.score,
         source=source,
         result_origin="raw_memory",
@@ -573,6 +585,8 @@ async def _search_raw_memories(
     occurred_before: datetime | str | None,
     as_of: datetime | str | None,
     limit: int,
+    include_content: bool,
+    content_max_chars: int,
 ) -> RawMemorySearchFetch:
     recall_result = await recall_raw_memory(
         organization_id=organization_id,
@@ -602,7 +616,13 @@ async def _search_raw_memories(
             "raw_recall_failure_count": 0,
         }
     results = [
-        _raw_memory_search_result(memory, organization_id=organization_id) for memory in memories
+        _raw_memory_search_result(
+            memory,
+            organization_id=organization_id,
+            include_content=include_content,
+            content_max_chars=content_max_chars,
+        )
+        for memory in memories
     ]
     return RawMemorySearchFetch(
         results=results,
@@ -627,6 +647,7 @@ async def search(
     limit: int = 10,
     offset: int = 0,
     include_content: bool = True,
+    content_max_chars: int = DEFAULT_SEARCH_CONTENT_MAX_CHARS,
     include_documents: bool = True,
     include_graph: bool = True,
     include_raw_memory: bool = True,
@@ -681,7 +702,8 @@ async def search(
         since: Temporal filter - only return entities created after this ISO date.
         limit: Maximum results to return (1-50, default 10).
         offset: Offset for pagination (default 0).
-        include_content: Include full content in results (default True).
+        include_content: Include content in results (default True).
+        content_max_chars: Maximum content characters per result (default 500).
         include_documents: Include crawled documentation in search (default True).
         include_graph: Include knowledge graph entities in search (default True).
         include_raw_memory: Include raw memory captures in search (default True).
@@ -702,6 +724,7 @@ async def search(
     # Clamp limit and offset
     limit = max(1, min(limit, 50))
     offset = max(0, offset)
+    content_max_chars = max(0, min(content_max_chars, MAX_SEARCH_CONTENT_MAX_CHARS))
 
     log.info(
         "unified_search",
@@ -716,10 +739,13 @@ async def search(
         include_documents=include_documents,
         include_graph=include_graph,
         include_raw_memory=include_raw_memory,
+        content_max_chars=content_max_chars,
         limit=limit,
     )
 
     filters = {}
+    if include_content:
+        filters["content_max_chars"] = content_max_chars
     source_failures: list[CandidateSourceFailure] = []
     if types:
         filters["types"] = types
@@ -848,6 +874,7 @@ async def search(
                     language=language,
                     limit=limit,
                     include_content=include_content,
+                    content_max_chars=content_max_chars,
                 ),
                 timeout_seconds=document_timeout_seconds,
                 operation_name="document_search",
@@ -872,6 +899,8 @@ async def search(
                     occurred_before=occurred_before,
                     as_of=resolved_as_of,
                     limit=limit,
+                    include_content=include_content,
+                    content_max_chars=content_max_chars,
                 ),
                 timeout_seconds=TIMEOUTS["search"],
                 operation_name="raw_memory_search",
@@ -1108,9 +1137,11 @@ async def search(
 
                 content = ""
                 if include_content:
-                    content = entity.content[:500] if entity.content else entity.description
+                    content = (entity.content or entity.description or "")[:content_max_chars]
                 else:
-                    content = entity.description[:200] if entity.description else ""
+                    content = (
+                        entity.description[:SEARCH_PREVIEW_MAX_CHARS] if entity.description else ""
+                    )
 
                 graph_results.append(
                     SearchResult(

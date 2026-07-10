@@ -76,7 +76,7 @@ class TestSearchRoute:
             patch("sibyl_core.tools.core.search", AsyncMock(return_value=result)) as core_search,
         ):
             response = await search(
-                request=SearchRequest(query="seam"),
+                request=SearchRequest(query="seam", content_max_chars=18_000),
                 org=org,
                 ctx=ctx,
             )
@@ -87,6 +87,7 @@ class TestSearchRoute:
         assert core_search.await_args.kwargs["project"] is None
         assert core_search.await_args.kwargs["accessible_projects"] == {"proj_1"}
         assert core_search.await_args.kwargs["include_raw_memory"] is False
+        assert core_search.await_args.kwargs["content_max_chars"] == 18_000
 
     @pytest.mark.asyncio
     async def test_search_verifies_project_filter_directly(self) -> None:

@@ -42,7 +42,13 @@ class SearchRequest(BaseModel):
     )
     limit: int = Field(default=10, ge=1, le=50, description="Maximum results")
     offset: int = Field(default=0, ge=0, description="Offset for pagination")
-    include_content: bool = Field(default=True, description="Include full content in results")
+    include_content: bool = Field(default=True, description="Include content in results")
+    content_max_chars: int = Field(
+        default=500,
+        ge=0,
+        le=50_000,
+        description="Maximum content characters returned per result",
+    )
     include_documents: bool = Field(
         default=True, description="Include crawled documentation in search"
     )

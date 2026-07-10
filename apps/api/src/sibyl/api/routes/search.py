@@ -176,6 +176,7 @@ async def search(
             limit=request.limit,
             offset=request.offset,
             include_content=request.include_content,
+            content_max_chars=request.content_max_chars,
             include_documents=request.include_documents,
             include_graph=request.include_graph,
             include_raw_memory=include_raw_memory,

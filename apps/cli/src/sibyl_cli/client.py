@@ -1166,6 +1166,7 @@ class SibylClient:
         limit: int = 10,
         offset: int = 0,
         include_content: bool = True,
+        content_max_chars: int = 500,
         include_documents: bool = True,
         include_graph: bool = True,
         as_of: str | None = None,
@@ -1176,6 +1177,7 @@ class SibylClient:
             "limit": limit,
             "offset": offset,
             "include_content": include_content,
+            "content_max_chars": content_max_chars,
             "include_documents": include_documents,
             "include_graph": include_graph,
         }

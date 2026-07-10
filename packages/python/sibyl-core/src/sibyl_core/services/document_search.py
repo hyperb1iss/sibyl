@@ -215,17 +215,20 @@ def _build_document_result(
     source_id: UUID | str,
     score: float,
     include_content: bool,
+    content_max_chars: int,
     signal: CandidateSignal,
 ) -> SearchResult:
     snippet = getattr(chunk, "snippet", None)
     if include_content:
-        content = snippet or (chunk.content[:500] if chunk.content else "")
+        content = snippet or (chunk.content if chunk.content else "")
     else:
         content = snippet or (chunk.content[:200] if chunk.content else "")
 
     heading_context = " > ".join(chunk.heading_path) if chunk.heading_path else ""
     if heading_context:
         content = f"[{heading_context}] {content}"
+    if include_content:
+        content = content[: max(0, content_max_chars)]
 
     display_url = None
     if doc.url and not doc.url.startswith("file://"):
@@ -317,6 +320,7 @@ def _build_document_results_from_rows(
     *,
     limit: int,
     include_content: bool,
+    content_max_chars: int,
     signal: CandidateSignal,
 ) -> list[SearchResult]:
     return [
@@ -327,6 +331,7 @@ def _build_document_results_from_rows(
             source_id=src_id,
             score=float(score),
             include_content=include_content,
+            content_max_chars=content_max_chars,
             signal=signal,
         )
         for chunk, doc, src_name, src_id, score in _dedupe_document_rows(rows)[:limit]
@@ -346,6 +351,7 @@ def _search_documents_from_scope(
     language: str | None,
     limit: int,
     include_content: bool,
+    content_max_chars: int,
     query_embedding: list[float] | None,
     sources_by_id: Mapping[str, DocumentSearchSource],
     documents_by_id: Mapping[str, DocumentSearchDocument],
@@ -387,6 +393,7 @@ def _search_documents_from_scope(
         vector_rows_raw,
         limit=limit,
         include_content=include_content,
+        content_max_chars=content_max_chars,
         signal=CandidateSignal.DOCUMENT_VECTOR,
     )
 
@@ -413,6 +420,7 @@ def _search_documents_from_scope(
         lexical_rows_raw,
         limit=limit,
         include_content=include_content,
+        content_max_chars=content_max_chars,
         signal=CandidateSignal.DOCUMENT_FULLTEXT,
     )
 
@@ -428,6 +436,7 @@ async def _search_documents_surreal_scan(
     language: str | None,
     limit: int,
     include_content: bool,
+    content_max_chars: int,
     query_embedding: list[float] | None,
 ) -> list[SearchResult]:
     _, sources_by_id, documents_by_id, chunks = await load_search_scope(
@@ -440,6 +449,7 @@ async def _search_documents_surreal_scan(
         language=language,
         limit=limit,
         include_content=include_content,
+        content_max_chars=content_max_chars,
         query_embedding=query_embedding,
         sources_by_id=sources_by_id,
         documents_by_id=documents_by_id,
@@ -455,6 +465,7 @@ async def search_documents(
     language: str | None = None,
     limit: int = 10,
     include_content: bool = True,
+    content_max_chars: int = 500,
 ) -> list[SearchResult]:
     """Search crawled documentation using vector and lexical matching."""
 
@@ -493,6 +504,7 @@ async def search_documents(
             language=language,
             limit=limit,
             include_content=include_content,
+            content_max_chars=content_max_chars,
             query_embedding=query_embedding,
         )
 
@@ -500,12 +512,14 @@ async def search_documents(
         vector_rows_raw,
         limit=limit,
         include_content=include_content,
+        content_max_chars=content_max_chars,
         signal=CandidateSignal.DOCUMENT_VECTOR,
     )
     lexical_results = _build_document_results_from_rows(
         lexical_rows_raw,
         limit=limit,
         include_content=include_content,
+        content_max_chars=content_max_chars,
         signal=CandidateSignal.DOCUMENT_FULLTEXT,
     )
 
