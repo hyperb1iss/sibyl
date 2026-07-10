@@ -606,7 +606,7 @@ def _apply_reflection_lifecycle_decisions(
         metadata = with_memory_lifecycle_metadata(
             metadata,
             MemoryLifecycle(
-                state=MemoryLifecycleState.DUPLICATE,
+                state=MemoryLifecycleState.CONTESTED,
                 source_id=source_ids[0] if source_ids else "",
                 action="mark_duplicate",
                 reason=reason,
@@ -621,7 +621,7 @@ def _apply_reflection_lifecycle_decisions(
             related_source_ids=[duplicate_id],
             reason=reason,
             action="mark_duplicate",
-            lifecycle_state=MemoryLifecycleState.DUPLICATE,
+            lifecycle_state=MemoryLifecycleState.CONTESTED,
             confidence=cast("float", duplicate["score"]),
         )
         findings.append(finding)

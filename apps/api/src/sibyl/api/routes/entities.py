@@ -179,7 +179,7 @@ async def _archive_raw_capture(
             scope_key=str(metadata["scope_key"]) if metadata.get("scope_key") else None,
             agent_id=str(metadata["agent_id"]) if metadata.get("agent_id") else None,
             project_id=str(metadata["project_id"]) if metadata.get("project_id") else None,
-            review_state=str(metadata.get("review_state") or "pending"),
+            review_state=_normalized_raw_capture_review_state(metadata.get("review_state")),
             entity_id=entity_id,
             title=entity_name,
             raw_content=entity_content,
@@ -192,11 +192,16 @@ async def _archive_raw_capture(
     )
 
 
+_RAW_CAPTURE_REVIEW_STATES = frozenset({"pending", "deferred", "promoted", "archived"})
+
+
+def _normalized_raw_capture_review_state(value: object) -> str:
+    state = str(value or "pending").strip().lower()
+    return state if state in _RAW_CAPTURE_REVIEW_STATES else "pending"
+
+
 def _raw_capture_review_state(capture: RawCaptureRecord) -> str:
-    metadata_state = str((capture.metadata or {}).get("review_state") or "").strip()
-    if metadata_state and (not capture.review_state or capture.review_state == "pending"):
-        return metadata_state
-    return capture.review_state or "pending"
+    return _normalized_raw_capture_review_state(capture.review_state)
 
 
 def _serialize_raw_capture_summary(capture: RawCaptureRecord) -> RawCaptureSummary:

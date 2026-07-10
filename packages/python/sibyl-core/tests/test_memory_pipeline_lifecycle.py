@@ -11,6 +11,7 @@ from sibyl_core.memory_pipeline.lifecycle import (
 )
 from sibyl_core.models.reflection import (
     MemoryLifecycle,
+    MemoryLifecycleFlag,
     MemoryLifecycleState,
     with_memory_lifecycle_metadata,
 )
@@ -64,7 +65,7 @@ def test_raw_memory_lifecycle_recallable_uses_structured_lifecycle_snapshot() ->
     metadata = with_memory_lifecycle_metadata(
         {},
         MemoryLifecycle(
-            state=MemoryLifecycleState.STALE,
+            state=MemoryLifecycleState.SUPERSEDED,
             source_id="source-1",
             action="supersede",
             reason="newer source won",
@@ -84,5 +85,20 @@ def test_memory_lifecycle_state_normalizes_legacy_metadata() -> None:
             source_id="source-1",
             review_state="pending",
         )
-        == "stale"
+        == "contested"
     )
+
+
+def test_raw_memory_lifecycle_recallable_rejects_structured_flags() -> None:
+    metadata = with_memory_lifecycle_metadata(
+        {},
+        MemoryLifecycle(
+            state=MemoryLifecycleState.ACTIVE,
+            source_id="source-1",
+            action="redact",
+            reason="private source",
+            flags=[MemoryLifecycleFlag.REDACTED],
+        ),
+    )
+
+    assert raw_memory_lifecycle_recallable(RawMemoryView(metadata=metadata)) is False

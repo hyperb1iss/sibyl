@@ -19,16 +19,12 @@ RECALL_EXCLUDED_REVIEW_STATES = frozenset(
 RECALL_EXCLUDED_LIFECYCLE_STATES = frozenset(
     {
         MemoryLifecycleState.ARCHIVED.value,
+        MemoryLifecycleState.CONTESTED.value,
         MemoryLifecycleState.DELETED.value,
-        MemoryLifecycleState.DUPLICATE.value,
-        MemoryLifecycleState.HIDDEN.value,
-        MemoryLifecycleState.REDACTED.value,
-        MemoryLifecycleState.SENSITIVE.value,
-        MemoryLifecycleState.STALE.value,
         MemoryLifecycleState.SUPERSEDED.value,
-        MemoryLifecycleState.WRONG.value,
     }
 )
+RECALL_EXCLUDED_LIFECYCLE_FLAGS = frozenset({"hidden", "redacted", "sensitive"})
 
 
 class MemoryLifecycleView(Protocol):
@@ -75,6 +71,8 @@ def raw_memory_lifecycle_recallable(memory: MemoryLifecycleView) -> bool:
     if review_state in RECALL_EXCLUDED_REVIEW_STATES:
         return False
     if lifecycle_state in RECALL_EXCLUDED_LIFECYCLE_STATES:
+        return False
+    if RECALL_EXCLUDED_LIFECYCLE_FLAGS.intersection(lifecycle.flags):
         return False
     if lifecycle.replacement_source_id:
         return False

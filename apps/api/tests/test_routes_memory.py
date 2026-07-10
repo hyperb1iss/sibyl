@@ -1445,7 +1445,7 @@ async def test_inspect_memory_source_returns_metadata_and_visible_content() -> N
     assert response.policy_reason == "private_principal_bound"
     assert response.visibility["content_visible"] is True
     assert response.visibility["project_id"] == "project_123"
-    assert response.lifecycle["state"] == "promoted"
+    assert response.lifecycle["state"] == "active"
     assert response.lifecycle["derived_ids"] == ["entity-1"]
     assert response.reflection_findings[0]["kind"] == "promotion"
     assert response.reflection_findings[0]["related_source_ids"] == ["entity-1"]
@@ -1650,7 +1650,8 @@ async def test_preview_memory_correction_audits_lifecycle_action() -> None:
         source_id="memory-1",
         action="hide",
         reason="hide_preview_allowed",
-        target_review_state="hidden",
+        target_lifecycle_state="active",
+        target_lifecycle_flags=["hidden"],
         affected_source_ids=["memory-1"],
         affected_derived_ids=["entity-1"],
         reversible=True,
@@ -1703,13 +1704,14 @@ async def test_apply_memory_correction_returns_updated_review_state() -> None:
         id="memory-1",
         organization_id=str(org.id),
         source_id="source-1",
-        review_state="hidden",
+        review_state="pending",
         metadata={
             "memory_lifecycle": {
-                "state": "hidden",
+                "state": "active",
                 "source_id": "memory-1",
                 "action": "hide",
                 "reason": "outdated",
+                "flags": ["hidden"],
             },
             "reflection_findings": [
                 {
@@ -1717,7 +1719,7 @@ async def test_apply_memory_correction_returns_updated_review_state() -> None:
                     "target_source_id": "memory-1",
                     "reason": "outdated",
                     "action": "hide",
-                    "lifecycle_state": "hidden",
+                    "lifecycle_state": "active",
                 }
             ],
         },
@@ -1727,7 +1729,8 @@ async def test_apply_memory_correction_returns_updated_review_state() -> None:
         source_id="memory-1",
         action="hide",
         reason="hidden",
-        target_review_state="hidden",
+        target_lifecycle_state="active",
+        target_lifecycle_flags=["hidden"],
         affected_source_ids=["memory-1"],
         affected_derived_ids=[],
         reversible=True,
@@ -1755,8 +1758,9 @@ async def test_apply_memory_correction_returns_updated_review_state() -> None:
         )
 
     assert response.applied is True
-    assert response.updated_review_state == "hidden"
-    assert response.lifecycle["state"] == "hidden"
+    assert response.updated_review_state == "pending"
+    assert response.lifecycle["state"] == "active"
+    assert response.lifecycle["flags"] == ["hidden"]
     assert response.lifecycle["action"] == "hide"
     assert response.reflection_finding is not None
     assert response.reflection_finding["kind"] == "correction"

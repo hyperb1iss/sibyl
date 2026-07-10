@@ -453,7 +453,9 @@ async def test_supersession_handler_links_new_and_old_raw_memories() -> None:
         )
 
     assert [memory.id for memory in saved] == ["raw-old", "raw-new"]
-    assert old.review_state == "superseded"
+    assert old.review_state == "pending"
+    assert old.metadata["lifecycle_state"] == "superseded"
+    assert old.metadata["memory_lifecycle"]["replacement_source_id"] == "raw-new"
     assert old.metadata["superseded_by_raw_memory_id"] == "raw-new"
     assert new.metadata["supersedes_raw_memory_id"] == "raw-old"
 

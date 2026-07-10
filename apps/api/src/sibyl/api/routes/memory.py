@@ -870,7 +870,8 @@ def _correction_response(
         source_id=preview.source_id,
         action=preview.action,
         reason=preview.reason,
-        target_review_state=preview.target_review_state,
+        target_lifecycle_state=preview.target_lifecycle_state,
+        target_lifecycle_flags=preview.target_lifecycle_flags,
         updated_review_state=updated_memory.review_state if updated_memory else None,
         lifecycle=lifecycle,
         reflection_finding=reflection_finding,
@@ -964,11 +965,22 @@ def _memory_project_id(memory: RawMemory) -> str | None:
 
 
 def _memory_lifecycle_state(memory: RawMemory) -> str:
-    return str(memory.metadata.get("lifecycle_state") or memory.review_state or "pending")
+    return str(
+        memory_lifecycle_from_metadata(
+            memory.metadata,
+            source_id=memory.id,
+            review_state=memory.review_state,
+        ).state
+    )
 
 
 def _memory_lifecycle_redacts_content(memory: RawMemory) -> bool:
-    return _memory_lifecycle_state(memory).lower() in {"deleted", "redacted"}
+    lifecycle = memory_lifecycle_from_metadata(
+        memory.metadata,
+        source_id=memory.id,
+        review_state=memory.review_state,
+    )
+    return str(lifecycle.state).lower() == "deleted" or "redacted" in lifecycle.flags
 
 
 async def _load_memory_source_for_org(
@@ -2286,7 +2298,8 @@ async def preview_memory_correction_route(
             "metadata": dict(request.metadata),
             "recall_impact": dict(preview.recall_impact),
             "synthesis_impact": dict(preview.synthesis_impact),
-            "target_review_state": preview.target_review_state,
+            "target_lifecycle_state": preview.target_lifecycle_state,
+            "target_lifecycle_flags": preview.target_lifecycle_flags,
         },
     )
     return response
@@ -2347,7 +2360,8 @@ async def apply_memory_correction_route(
             "metadata": dict(request.metadata),
             "recall_impact": dict(result.preview.recall_impact),
             "synthesis_impact": dict(result.preview.synthesis_impact),
-            "target_review_state": result.preview.target_review_state,
+            "target_lifecycle_state": result.preview.target_lifecycle_state,
+            "target_lifecycle_flags": result.preview.target_lifecycle_flags,
             "updated_review_state": response.updated_review_state,
         },
     )

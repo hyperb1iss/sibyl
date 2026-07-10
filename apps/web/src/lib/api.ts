@@ -390,7 +390,8 @@ export interface MemoryCorrectionResponse {
   source_id: string;
   action: string;
   reason: string;
-  target_review_state: string;
+  target_lifecycle_state: string;
+  target_lifecycle_flags: string[];
   updated_review_state: string | null;
   affected_source_ids: string[];
   affected_derived_ids: string[];

@@ -33,6 +33,12 @@ from sibyl_core.backends.surreal.records import (
     utcnow as _utcnow,
 )
 from sibyl_core.models import ChunkType, CrawlStatus, SourceType
+from sibyl_core.models.reflection import (
+    MemoryLifecycle,
+    MemoryLifecycleState,
+    memory_lifecycle_from_metadata,
+    with_memory_lifecycle_metadata,
+)
 from sibyl_core.services.link_graph_status import LinkGraphSourceStatusData, LinkGraphStatusData
 from sibyl_core.utils.query import query_tokens
 
@@ -1807,21 +1813,35 @@ async def soft_delete_private_raw_captures_for_user(
         for row in rows:
             capture_id = _coerce_uuid(row.get("uuid"), field_name="raw_captures.uuid")
             metadata = _coerce_dict(row.get("metadata") or row.get("metadata_"))
+            lifecycle = memory_lifecycle_from_metadata(
+                metadata,
+                source_id=str(capture_id),
+                review_state=str(row.get("review_state") or "pending"),
+            )
             metadata.update(
                 {
-                    "review_state": "deleted",
-                    "lifecycle_state": "deleted",
                     "deletion_requested_at": deleted_at.isoformat(),
                     "purge_after": purge_after.isoformat(),
                     "deleted_by_user_id": user_id_str,
                 }
+            )
+            metadata = with_memory_lifecycle_metadata(
+                metadata,
+                MemoryLifecycle(
+                    state=MemoryLifecycleState.DELETED,
+                    source_id=str(capture_id),
+                    action="delete",
+                    reason="user_deletion_requested",
+                    prior_state=str(lifecycle.state),
+                    flags=list(lifecycle.flags),
+                    reversible=False,
+                ),
             )
             updated = await _select_many(
                 client,
                 """
                     UPDATE raw_captures
                     SET metadata = $metadata,
-                        review_state = 'deleted',
                         deleted_at = $deleted_at,
                         purge_after = $purge_after
                     WHERE uuid = $capture_id;
@@ -1842,7 +1862,7 @@ async def purge_due_deleted_raw_captures(*, now: datetime | None = None) -> list
             client,
             """
                 DELETE FROM raw_captures
-                WHERE review_state = 'deleted'
+                WHERE deleted_at != NONE
                     AND purge_after != NONE
                     AND purge_after <= $now;
             """,

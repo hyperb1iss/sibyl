@@ -10,18 +10,34 @@ from uuid import uuid4
 
 
 class MemoryLifecycleState(StrEnum):
-    PENDING = "pending"
-    PROMOTED = "promoted"
-    DUPLICATE = "duplicate"
-    STALE = "stale"
-    WRONG = "wrong"
-    SENSITIVE = "sensitive"
+    ACTIVE = "active"
+    CONTESTED = "contested"
     SUPERSEDED = "superseded"
+    ARCHIVED = "archived"
+    DELETED = "deleted"
+
+
+class MemoryLifecycleFlag(StrEnum):
     HIDDEN = "hidden"
     REDACTED = "redacted"
-    DELETED = "deleted"
-    RESTORED = "restored"
-    ARCHIVED = "archived"
+    SENSITIVE = "sensitive"
+
+
+_LEGACY_LIFECYCLE_STATES: dict[str, MemoryLifecycleState] = {
+    "pending": MemoryLifecycleState.ACTIVE,
+    "deferred": MemoryLifecycleState.ACTIVE,
+    "promoted": MemoryLifecycleState.ACTIVE,
+    "restored": MemoryLifecycleState.ACTIVE,
+    "duplicate": MemoryLifecycleState.CONTESTED,
+    "stale": MemoryLifecycleState.CONTESTED,
+    "wrong": MemoryLifecycleState.CONTESTED,
+    "hidden": MemoryLifecycleState.ACTIVE,
+    "redacted": MemoryLifecycleState.ACTIVE,
+    "sensitive": MemoryLifecycleState.ACTIVE,
+}
+_LEGACY_LIFECYCLE_FLAGS: dict[str, MemoryLifecycleFlag] = {
+    flag.value: flag for flag in MemoryLifecycleFlag
+}
 
 
 class ReflectionFindingKind(StrEnum):
@@ -49,11 +65,21 @@ def _now_iso() -> str:
 def _state_value(value: MemoryLifecycleState | str | None) -> str:
     if isinstance(value, MemoryLifecycleState):
         return value.value
-    text = str(value or MemoryLifecycleState.PENDING.value).strip().lower()
+    text = str(value or MemoryLifecycleState.ACTIVE.value).strip().lower()
+    if legacy_state := _LEGACY_LIFECYCLE_STATES.get(text):
+        return legacy_state.value
     try:
         return MemoryLifecycleState(text).value
     except ValueError:
-        return text or MemoryLifecycleState.PENDING.value
+        return MemoryLifecycleState.CONTESTED.value
+
+
+def _flag_values(value: object, *, legacy_state: object = None) -> list[str]:
+    flags = _str_list(value)
+    legacy_flag = _LEGACY_LIFECYCLE_FLAGS.get(str(legacy_state or "").strip().lower())
+    if legacy_flag is not None:
+        flags.append(legacy_flag.value)
+    return list(dict.fromkeys(flag.strip().lower() for flag in flags if flag.strip()))
 
 
 def _finding_kind_value(value: ReflectionFindingKind | str | None) -> str:
@@ -254,6 +280,7 @@ class MemoryLifecycle:
     replacement_source_id: str | None = None
     duplicate_of_source_id: str | None = None
     derived_ids: list[str] = field(default_factory=list)
+    flags: list[MemoryLifecycleFlag | str] = field(default_factory=list)
     reversible: bool = True
     created_at: str = field(default_factory=_now_iso)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -268,6 +295,7 @@ class MemoryLifecycle:
             "replacement_source_id": self.replacement_source_id,
             "duplicate_of_source_id": self.duplicate_of_source_id,
             "derived_ids": list(self.derived_ids),
+            "flags": _flag_values(self.flags),
             "reversible": self.reversible,
             "created_at": self.created_at,
             "metadata": dict(self.metadata),
@@ -275,8 +303,9 @@ class MemoryLifecycle:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> MemoryLifecycle:
+        raw_state = value.get("state")
         return cls(
-            state=_state_value(value.get("state")),
+            state=_state_value(raw_state),
             source_id=str(value.get("source_id") or ""),
             action=str(value.get("action") or ""),
             reason=str(value.get("reason") or ""),
@@ -288,6 +317,7 @@ class MemoryLifecycle:
             if value.get("duplicate_of_source_id")
             else None,
             derived_ids=_str_list(value.get("derived_ids")),
+            flags=_flag_values(value.get("flags"), legacy_state=raw_state),
             reversible=bool(value.get("reversible", True)),
             created_at=str(value.get("created_at") or _now_iso()),
             metadata=_dict_value(value.get("metadata")),
@@ -382,6 +412,10 @@ def memory_lifecycle_from_metadata(
         return MemoryLifecycle.from_dict(lifecycle)
     raw_state = metadata.get("lifecycle_state") or metadata.get("review_state") or review_state
     state = _state_value(str(raw_state) if raw_state else review_state)
+    flags = _flag_values(metadata.get("lifecycle_flags"), legacy_state=raw_state)
+    for flag in MemoryLifecycleFlag:
+        if metadata.get(flag.value) or metadata.get(f"{flag.value}_at"):
+            flags = list(dict.fromkeys([*flags, flag.value]))
     return MemoryLifecycle(
         state=state,
         source_id=source_id,
@@ -396,6 +430,7 @@ def memory_lifecycle_from_metadata(
         duplicate_of_source_id=str(metadata["duplicate_of_source_id"])
         if metadata.get("duplicate_of_source_id")
         else None,
+        flags=flags,
     )
 
 
@@ -407,6 +442,7 @@ def with_memory_lifecycle_metadata(
     snapshot = lifecycle.to_dict()
     next_metadata["memory_lifecycle"] = snapshot
     next_metadata["lifecycle_state"] = snapshot["state"]
+    next_metadata["lifecycle_flags"] = snapshot["flags"]
     next_metadata["lifecycle_action"] = snapshot["action"]
     next_metadata["lifecycle_reason"] = snapshot["reason"]
     if snapshot.get("replacement_source_id"):

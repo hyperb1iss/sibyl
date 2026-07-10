@@ -2468,7 +2468,7 @@ async def remember_reflection_candidate_review(
     metadata = with_memory_lifecycle_metadata(
         metadata,
         MemoryLifecycle(
-            state=MemoryLifecycleState.PENDING,
+            state=MemoryLifecycleState.ACTIVE,
             source_id=resolved_source_id,
             action="capture",
             reason="reflection_candidate_pending",

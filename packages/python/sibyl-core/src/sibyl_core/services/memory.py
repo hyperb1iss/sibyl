@@ -22,12 +22,14 @@ from sibyl_core.auth.memory_policy import (
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.reflection import (
     MemoryLifecycle,
+    MemoryLifecycleFlag,
     MemoryLifecycleState,
     ReflectionCandidate,
     ReflectionFinding,
     ReflectionFindingKind,
     claim_records_from_metadata,
     correction_finding_kind,
+    memory_lifecycle_from_metadata,
     reflection_findings_from_metadata,
     with_memory_lifecycle_metadata,
     with_reflection_finding_metadata,
@@ -147,7 +149,8 @@ class MemoryCorrectionPreview:
     source_id: str
     action: str
     reason: str
-    target_review_state: str
+    target_lifecycle_state: str
+    target_lifecycle_flags: list[str]
     affected_source_ids: list[str]
     affected_derived_ids: list[str]
     reversible: bool
@@ -178,29 +181,29 @@ class _ReflectionPromotionPlan:
 
 _PROMOTED_REVIEW_STATE = "promoted"
 _ACCESS_PREVIEW_OVERFETCH_FACTOR = 4
-_CORRECTION_TARGET_STATES: dict[str, str] = {
-    "delete": "deleted",
-    "hide": "hidden",
-    "mark_duplicate": "duplicate",
-    "mark_sensitive": "sensitive",
-    "mark_stale": "stale",
-    "mark_wrong": "wrong",
-    "redact": "redacted",
-    "restore": "pending",
-    "supersede": "superseded",
+_CORRECTION_TARGET_STATES: dict[str, MemoryLifecycleState] = {
+    "delete": MemoryLifecycleState.DELETED,
+    "mark_duplicate": MemoryLifecycleState.CONTESTED,
+    "mark_stale": MemoryLifecycleState.CONTESTED,
+    "mark_wrong": MemoryLifecycleState.CONTESTED,
+    "restore": MemoryLifecycleState.ACTIVE,
+    "supersede": MemoryLifecycleState.SUPERSEDED,
+}
+_CORRECTION_TARGET_FLAGS: dict[str, MemoryLifecycleFlag] = {
+    "hide": MemoryLifecycleFlag.HIDDEN,
+    "mark_sensitive": MemoryLifecycleFlag.SENSITIVE,
+    "redact": MemoryLifecycleFlag.REDACTED,
 }
 _CORRECTION_RECALL_EXCLUDED_STATES = frozenset(
-    {
-        "deleted",
-        "duplicate",
-        "hidden",
-        "redacted",
-        "sensitive",
-        "stale",
-        "superseded",
-        "wrong",
-    }
+    state.value
+    for state in (
+        MemoryLifecycleState.ARCHIVED,
+        MemoryLifecycleState.CONTESTED,
+        MemoryLifecycleState.DELETED,
+        MemoryLifecycleState.SUPERSEDED,
+    )
 )
+_CORRECTION_RECALL_EXCLUDED_FLAGS = frozenset(flag.value for flag in MemoryLifecycleFlag)
 _CORRECTION_IRREVERSIBLE_ACTIONS = frozenset({"delete", "redact"})
 _TEMPORAL_INVALIDATION_SOURCE_KEYS = (
     "contradiction_source_ids",
@@ -1242,7 +1245,8 @@ def _correction_preview_denied(
     source_id: str,
     action: str,
     reason: str,
-    target_review_state: str = "",
+    target_lifecycle_state: str = "",
+    target_lifecycle_flags: Sequence[str] = (),
     policy_decisions: Sequence[MemoryPolicyDecision] = (),
     metadata: dict[str, Any] | None = None,
 ) -> MemoryCorrectionPreview:
@@ -1251,7 +1255,8 @@ def _correction_preview_denied(
         source_id=source_id,
         action=action,
         reason=reason,
-        target_review_state=target_review_state,
+        target_lifecycle_state=target_lifecycle_state,
+        target_lifecycle_flags=list(target_lifecycle_flags),
         affected_source_ids=[],
         affected_derived_ids=[],
         reversible=False,
@@ -1296,16 +1301,23 @@ async def _validate_correction_reference(
     return reference, None
 
 
-def _correction_impact(target_review_state: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    excluded = target_review_state in _CORRECTION_RECALL_EXCLUDED_STATES
+def _correction_impact(
+    target_lifecycle_state: str,
+    target_lifecycle_flags: Sequence[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    excluded = target_lifecycle_state in _CORRECTION_RECALL_EXCLUDED_STATES or bool(
+        _CORRECTION_RECALL_EXCLUDED_FLAGS.intersection(target_lifecycle_flags)
+    )
     recall = {
         "excluded_from_recall": excluded,
-        "target_review_state": target_review_state,
+        "target_lifecycle_state": target_lifecycle_state,
+        "target_lifecycle_flags": list(target_lifecycle_flags),
     }
     synthesis = {
         "excluded_from_synthesis": excluded,
         "preserve_source_truth": True,
-        "target_review_state": target_review_state,
+        "target_lifecycle_state": target_lifecycle_state,
+        "target_lifecycle_flags": list(target_lifecycle_flags),
     }
     return recall, synthesis
 
@@ -1323,8 +1335,7 @@ async def preview_memory_correction(
     duplicate_of_source_id: str | None = None,
 ) -> MemoryCorrectionPreview:
     normalized_action = action.strip().lower()
-    target_review_state = _CORRECTION_TARGET_STATES.get(normalized_action)
-    if target_review_state is None:
+    if normalized_action not in _CORRECTION_TARGET_STATES | _CORRECTION_TARGET_FLAGS:
         return _correction_preview_denied(
             source_id=source_id,
             action=normalized_action,
@@ -1340,10 +1351,19 @@ async def preview_memory_correction(
             source_id=source_id,
             action=normalized_action,
             reason="memory_source_not_found",
-            target_review_state=target_review_state,
         )
-    if normalized_action == "restore":
-        target_review_state = _metadata_str(memory.metadata, "prior_review_state") or "pending"
+    lifecycle = memory_lifecycle_from_metadata(
+        memory.metadata,
+        source_id=memory.id,
+        review_state=memory.review_state,
+    )
+    target_state = _CORRECTION_TARGET_STATES.get(normalized_action)
+    if target_state is None:
+        target_state = MemoryLifecycleState(str(lifecycle.state))
+    target_lifecycle_state = target_state.value
+    target_lifecycle_flags = [] if normalized_action == "restore" else list(lifecycle.flags)
+    if target_flag := _CORRECTION_TARGET_FLAGS.get(normalized_action):
+        target_lifecycle_flags = list(dict.fromkeys([*target_lifecycle_flags, target_flag.value]))
 
     read_decision = _authorize_share_source_read(
         memory=memory,
@@ -1356,7 +1376,8 @@ async def preview_memory_correction(
             source_id=memory.id,
             action=normalized_action,
             reason=read_decision.reason,
-            target_review_state=target_review_state,
+            target_lifecycle_state=target_lifecycle_state,
+            target_lifecycle_flags=target_lifecycle_flags,
             policy_decisions=(read_decision,),
             metadata={
                 "policy_allowed": False,
@@ -1375,7 +1396,8 @@ async def preview_memory_correction(
             source_id=memory.id,
             action=normalized_action,
             reason=requirement_reason,
-            target_review_state=target_review_state,
+            target_lifecycle_state=target_lifecycle_state,
+            target_lifecycle_flags=target_lifecycle_flags,
             policy_decisions=(read_decision,),
             metadata={
                 "policy_allowed": False,
@@ -1398,7 +1420,8 @@ async def preview_memory_correction(
                 source_id=memory.id,
                 action=normalized_action,
                 reason=reference_reason,
-                target_review_state=target_review_state,
+                target_lifecycle_state=target_lifecycle_state,
+                target_lifecycle_flags=target_lifecycle_flags,
                 policy_decisions=(read_decision,),
                 metadata={
                     "policy_allowed": False,
@@ -1420,7 +1443,8 @@ async def preview_memory_correction(
                 source_id=memory.id,
                 action=normalized_action,
                 reason=reference_reason,
-                target_review_state=target_review_state,
+                target_lifecycle_state=target_lifecycle_state,
+                target_lifecycle_flags=target_lifecycle_flags,
                 policy_decisions=(read_decision,),
                 metadata={
                     "duplicate_of_source_id": duplicate_of_source_id,
@@ -1431,7 +1455,10 @@ async def preview_memory_correction(
             )
         canonical_duplicate_of_source_id = reference.id if reference else duplicate_of_source_id
 
-    recall_impact, synthesis_impact = _correction_impact(target_review_state)
+    recall_impact, synthesis_impact = _correction_impact(
+        target_lifecycle_state,
+        target_lifecycle_flags,
+    )
     affected_derived_ids = _correction_derived_ids(memory)
     metadata = {
         "duplicate_of_source_id": canonical_duplicate_of_source_id,
@@ -1445,7 +1472,8 @@ async def preview_memory_correction(
         source_id=memory.id,
         action=normalized_action,
         reason=reason or f"{normalized_action}_preview_allowed",
-        target_review_state=target_review_state,
+        target_lifecycle_state=target_lifecycle_state,
+        target_lifecycle_flags=target_lifecycle_flags,
         affected_source_ids=[memory.id],
         affected_derived_ids=affected_derived_ids,
         reversible=normalized_action not in _CORRECTION_IRREVERSIBLE_ACTIONS,
@@ -1468,7 +1496,12 @@ def _correction_metadata(
     metadata = dict(memory.metadata)
     history = list(_metadata_dict_values(metadata, "correction_history"))
     now = datetime.now(UTC).isoformat()
-    prior_state = str(memory.review_state or "pending")
+    prior_lifecycle = memory_lifecycle_from_metadata(
+        metadata,
+        source_id=memory.id,
+        review_state=memory.review_state,
+    )
+    prior_state = str(prior_lifecycle.state)
     if preview.action == "restore":
         for key in (
             "deleted_at",
@@ -1478,6 +1511,7 @@ def _correction_metadata(
             "lifecycle_action",
             "lifecycle_reason",
             "lifecycle_state",
+            "lifecycle_flags",
             "prior_review_state",
             "redacted_at",
             "sensitive_at",
@@ -1489,7 +1523,7 @@ def _correction_metadata(
             metadata.pop(key, None)
         metadata["restored_at"] = now
         lifecycle = MemoryLifecycle(
-            state=preview.target_review_state,
+            state=preview.target_lifecycle_state,
             source_id=memory.id,
             action=preview.action,
             reason=reason or preview.reason,
@@ -1497,18 +1531,17 @@ def _correction_metadata(
             reversible=True,
         )
     else:
-        if not _metadata_str(metadata, "prior_review_state"):
-            metadata["prior_review_state"] = prior_state
         metadata["lifecycle_action"] = preview.action
-        metadata["lifecycle_state"] = preview.target_review_state
+        metadata["lifecycle_state"] = preview.target_lifecycle_state
+        metadata["lifecycle_flags"] = preview.target_lifecycle_flags
         metadata["lifecycle_reason"] = reason or preview.reason
-        metadata[f"{preview.target_review_state}_at"] = now
+        metadata[f"{preview.action.removeprefix('mark_')}_at"] = now
         if replacement_source_id:
             metadata["superseded_by_source_id"] = replacement_source_id
         if duplicate_of_source_id:
             metadata["duplicate_of_source_id"] = duplicate_of_source_id
         lifecycle = MemoryLifecycle(
-            state=preview.target_review_state,
+            state=preview.target_lifecycle_state,
             source_id=memory.id,
             action=preview.action,
             reason=reason or preview.reason,
@@ -1516,6 +1549,7 @@ def _correction_metadata(
             replacement_source_id=replacement_source_id,
             duplicate_of_source_id=duplicate_of_source_id,
             derived_ids=preview.affected_derived_ids,
+            flags=preview.target_lifecycle_flags,
             reversible=preview.reversible,
         )
     history.append(
@@ -1523,14 +1557,14 @@ def _correction_metadata(
             "action": preview.action,
             "audit_action": preview.audit_action,
             "reason": reason or preview.reason,
-            "target_review_state": preview.target_review_state,
+            "target_lifecycle_state": preview.target_lifecycle_state,
+            "target_lifecycle_flags": preview.target_lifecycle_flags,
             "created_at": now,
             "replacement_source_id": replacement_source_id,
             "duplicate_of_source_id": duplicate_of_source_id,
         }
     )
     metadata["correction_history"] = history
-    metadata["review_state"] = preview.target_review_state
     metadata = with_memory_lifecycle_metadata(metadata, lifecycle)
     return with_reflection_finding_metadata(
         metadata,
@@ -1548,7 +1582,8 @@ def _correction_metadata(
             reversible=preview.reversible,
             metadata={
                 "audit_action": preview.audit_action,
-                "target_review_state": preview.target_review_state,
+                "target_lifecycle_state": preview.target_lifecycle_state,
+                "target_lifecycle_flags": preview.target_lifecycle_flags,
             },
         ),
     )
@@ -1586,7 +1621,8 @@ async def apply_memory_correction(
             source_id=source_id,
             action=preview.action,
             reason="memory_source_not_found",
-            target_review_state=preview.target_review_state,
+            target_lifecycle_state=preview.target_lifecycle_state,
+            target_lifecycle_flags=preview.target_lifecycle_flags,
         )
         return MemoryCorrectionResult(applied=False, preview=denied)
     preview_metadata = preview.metadata or {}
@@ -1596,9 +1632,21 @@ async def apply_memory_correction(
     canonical_duplicate_of_source_id = (
         _metadata_str(preview_metadata, "duplicate_of_source_id") or duplicate_of_source_id
     )
+    review_state = memory.review_state
+    if preview.action == "restore" and review_state in {
+        "deleted",
+        "duplicate",
+        "hidden",
+        "redacted",
+        "sensitive",
+        "stale",
+        "superseded",
+        "wrong",
+    }:
+        review_state = _metadata_str(memory.metadata, "prior_review_state") or "pending"
     updated = replace(
         memory,
-        review_state=preview.target_review_state,
+        review_state=review_state,
         metadata=_correction_metadata(
             memory=memory,
             preview=preview,
@@ -2100,7 +2148,7 @@ def _promotion_lifecycle_metadata(
     next_metadata = with_memory_lifecycle_metadata(
         next_metadata,
         MemoryLifecycle(
-            state=MemoryLifecycleState.PROMOTED,
+            state=MemoryLifecycleState.ACTIVE,
             source_id=target_source_id,
             action="promote",
             reason=reason or "reflection_promotion",
@@ -2117,7 +2165,7 @@ def _promotion_lifecycle_metadata(
             target_source_id=target_source_id,
             reason=reason or "reflection_promotion",
             action="promote",
-            lifecycle_state=MemoryLifecycleState.PROMOTED,
+            lifecycle_state=MemoryLifecycleState.ACTIVE,
             source_ids=list(source_ids),
             related_source_ids=[promoted_entity_id],
             policy_reasons=_metadata_str_values(policy_metadata or {}, "policy_reasons"),

@@ -24,6 +24,7 @@ from sibyl_core.backends.surreal.content_schema import (
     CONTENT_ENTITY_ANCHOR_MIGRATION_DEFINITIONS,
     CONTENT_EXTRACTED_INTO_RELATION_MIGRATION_DEFINITIONS,
     CONTENT_HIGHLIGHT_SNIPPET_MIGRATION_DEFINITIONS,
+    CONTENT_LIFECYCLE_REVIEW_SPLIT_MIGRATION_DEFINITIONS,
     CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS,
     CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS,
     CONTENT_PERMISSION_MIGRATION_DEFINITIONS,
@@ -483,7 +484,7 @@ def test_content_raw_capture_lookup_indexes_are_versioned() -> None:
         statement for migration in migrations for statement in migration.statements
     )
 
-    assert CONTENT_SCHEMA_CURRENT_VERSION == 18
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 18
     assert "content_raw_capture_lookup_indexes" in [migration.name for migration in migrations]
     for index_name in (
         "idx_raw_captures_dedupe_lookup",
@@ -492,6 +493,26 @@ def test_content_raw_capture_lookup_indexes_are_versioned() -> None:
         assert index_name in CONTENT_SCHEMA_DEFINITIONS
         assert index_name in CONTENT_RAW_CAPTURE_LOOKUP_MIGRATION_DEFINITIONS
         assert index_name in migration_sql
+
+
+def test_content_lifecycle_review_split_is_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration = next(item for item in migrations if item.name == "content_lifecycle_review_split")
+    migration_sql = "\n".join(migration.statements)
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION == 19
+    assert CONTENT_LIFECYCLE_REVIEW_SPLIT_MIGRATION_DEFINITIONS.strip().splitlines()[0] in (
+        migration_sql
+    )
+    assert "metadata.lifecycle_state = 'active'" in migration_sql
+    assert "metadata.lifecycle_state = 'contested'" in migration_sql
+    assert "metadata.lifecycle_flags = ['hidden']" in migration_sql
+    assert "metadata.lifecycle_flags = ['redacted']" in migration_sql
+    assert "metadata.lifecycle_flags = ['sensitive']" in migration_sql
+    assert "metadata.memory_lifecycle = NONE" in migration_sql
+    assert "metadata.prior_review_state" in migration_sql
+    assert "metadata.review_state = review_state" in migration_sql
+    assert "WHERE review_state NOT IN" in migration_sql
 
 
 def test_raw_capture_changefeed_cursor_is_versioned() -> None:

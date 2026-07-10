@@ -375,7 +375,7 @@ def _is_superseded_or_stale(entity: Any) -> bool:
         str(metadata.get("review_state") or "").lower(),
         str(metadata.get("status") or "").lower(),
     }
-    if lifecycle_values & {"superseded", "stale"}:
+    if lifecycle_values & {"contested", "superseded", "stale"}:
         return True
     return bool(
         metadata.get("superseded_by_raw_memory_id")

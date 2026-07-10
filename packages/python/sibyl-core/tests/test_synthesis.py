@@ -661,7 +661,7 @@ async def test_materialize_synthesis_section_packs_omits_corrected_sources() -> 
     assert pack.correction_count == 3
     assert pack.correction_reasons == {
         "duplicate_of_source_id": 1,
-        "lifecycle_stale": 1,
+        "lifecycle_contested": 1,
         "superseded_by_source_id": 1,
     }
     assert artifact.verification.status is SynthesisVerificationStatus.PASS

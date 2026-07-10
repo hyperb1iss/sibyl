@@ -486,7 +486,51 @@ async def test_memory_correction_preview_requires_supersede_target(
 
     assert not result.allowed
     assert result.reason == "missing_replacement_source"
-    assert result.target_review_state == "superseded"
+    assert result.target_lifecycle_state == "superseded"
+    assert result.target_lifecycle_flags == []
+
+
+@pytest.mark.asyncio
+async def test_memory_correction_preview_treats_deferred_review_as_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_review_candidate(id="source-1", review_state="deferred")
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+
+    result = await preview_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="hide",
+    )
+
+    assert result.allowed
+    assert result.target_lifecycle_state == "active"
+    assert result.target_lifecycle_flags == ["hidden"]
+
+
+@pytest.mark.asyncio
+async def test_memory_correction_preview_fails_closed_for_unknown_lifecycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_review_candidate(
+        id="source-1",
+        metadata={"lifecycle_state": "bogus"},
+    )
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+
+    result = await preview_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="redact",
+    )
+
+    assert result.allowed
+    assert result.target_lifecycle_state == "contested"
+    assert result.target_lifecycle_flags == ["redacted"]
 
 
 @pytest.mark.asyncio
@@ -515,8 +559,9 @@ async def test_apply_memory_correction_marks_hidden_and_preserves_history(
     assert result.preview.allowed
     assert result.preview.audit_action == "memory.correction.hide"
     assert result.updated_memory is not None
-    assert result.updated_memory.review_state == "hidden"
-    assert result.updated_memory.metadata["lifecycle_state"] == "hidden"
+    assert result.updated_memory.review_state == "pending"
+    assert result.updated_memory.metadata["lifecycle_state"] == "active"
+    assert result.updated_memory.metadata["lifecycle_flags"] == ["hidden"]
     assert result.updated_memory.metadata["lifecycle_reason"] == "No longer useful"
     lifecycle = memory_lifecycle_from_metadata(
         result.updated_memory.metadata,
@@ -524,7 +569,8 @@ async def test_apply_memory_correction_marks_hidden_and_preserves_history(
         review_state=result.updated_memory.review_state,
     )
     findings = reflection_findings_from_metadata(result.updated_memory.metadata)
-    assert lifecycle.state == "hidden"
+    assert lifecycle.state == "active"
+    assert lifecycle.flags == ["hidden"]
     assert lifecycle.action == "hide"
     assert findings[-1].kind == "correction"
     assert findings[-1].target_source_id == "source-1"
@@ -626,7 +672,8 @@ async def test_apply_memory_correction_restore_preserves_prior_review_state(
         review_state=result.updated_memory.review_state,
     )
     findings = reflection_findings_from_metadata(result.updated_memory.metadata)
-    assert lifecycle.state == "promoted"
+    assert lifecycle.state == "active"
+    assert lifecycle.flags == []
     assert lifecycle.action == "restore"
     assert findings[-1].action == "restore"
 
@@ -1168,7 +1215,7 @@ async def test_promote_review_candidate_persists_native_record_and_marks_promote
         review_state=saved[0].review_state,
     )
     findings = reflection_findings_from_metadata(saved[0].metadata)
-    assert lifecycle.state == "promoted"
+    assert lifecycle.state == "active"
     assert lifecycle.source_id == "candidate-1"
     assert lifecycle.derived_ids == ["decision_123"]
     assert findings[-1].kind == "promotion"
@@ -1523,7 +1570,7 @@ async def test_promote_raw_memory_persists_native_record_and_marks_promoted(
         review_state=saved[0].review_state,
     )
     findings = reflection_findings_from_metadata(saved[0].metadata)
-    assert lifecycle.state == "promoted"
+    assert lifecycle.state == "active"
     assert lifecycle.source_id == "raw-1"
     assert lifecycle.derived_ids == ["episode_123"]
     assert findings[-1].target_source_id == "raw-1"

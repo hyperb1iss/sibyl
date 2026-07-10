@@ -210,7 +210,7 @@ async def test_reflect_memory_marks_duplicate_candidates_before_review_persisten
     finding = metadata["reflection_findings"][-1]
 
     assert metadata["candidate_duplicate_of_source_id"] == "older-source-1"
-    assert metadata["lifecycle_state"] == "duplicate"
+    assert metadata["lifecycle_state"] == "contested"
     assert finding["kind"] == "duplicate"
     assert finding["related_source_ids"] == ["older-source-1"]
 
@@ -278,7 +278,7 @@ def test_reflection_lifecycle_decisions_mark_duplicate_candidates() -> None:
     )
 
     assert result.metadata["candidate_duplicate_of_source_id"] == "memory-1"
-    assert result.metadata["lifecycle_state"] == "duplicate"
+    assert result.metadata["lifecycle_state"] == "contested"
     assert result.reflection_findings[-1].kind == "duplicate"
 
 

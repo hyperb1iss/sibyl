@@ -360,7 +360,8 @@ class MemoryCorrectionResponse(BaseModel):
     source_id: str
     action: str
     reason: str
-    target_review_state: str
+    target_lifecycle_state: str
+    target_lifecycle_flags: list[str] = Field(default_factory=list)
     updated_review_state: str | None = None
     lifecycle: dict[str, Any] = Field(default_factory=dict)
     reflection_finding: dict[str, Any] | None = None

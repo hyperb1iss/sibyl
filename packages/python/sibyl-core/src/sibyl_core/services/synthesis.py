@@ -104,10 +104,8 @@ SOURCE_ABSENCE_GAP_REASONS = {
     "no_citable_sources",
 }
 CORRECTED_LIFECYCLE_STATES = {
-    "duplicate",
-    "stale",
+    "contested",
     "superseded",
-    "wrong",
 }
 MAX_EXPLICIT_NEIGHBORHOOD_IDS = 100
 
@@ -416,12 +414,22 @@ def _metadata_unresolved_claims(metadata: dict[str, Any]) -> list[str]:
     return []
 
 
-def _context_item_is_redacted(metadata: dict[str, Any], lifecycle_state: str | None) -> bool:
-    return bool(metadata.get("redacted")) or lifecycle_state == "redacted"
+def _context_item_is_redacted(
+    metadata: dict[str, Any],
+    lifecycle_state: str | None,
+    lifecycle_flags: list[str],
+) -> bool:
+    return (
+        bool(metadata.get("redacted"))
+        or lifecycle_state == "redacted"
+        or "redacted" in lifecycle_flags
+    )
 
 
-def _context_item_is_hidden(lifecycle_state: str | None) -> bool:
-    return lifecycle_state in {"deleted", "hidden"}
+def _context_item_is_hidden(lifecycle_state: str | None, lifecycle_flags: list[str]) -> bool:
+    return lifecycle_state in {"archived", "deleted", "hidden"} or bool(
+        {"hidden", "sensitive"}.intersection(lifecycle_flags)
+    )
 
 
 def _context_item_correction_reason(
@@ -480,6 +488,7 @@ async def materialize_synthesis_section_packs(
 
     from sibyl_core.tools.context import (
         context_item_freshness,
+        context_item_lifecycle_flags,
         context_item_lifecycle_state,
         context_item_project_id,
         context_item_source_id,
@@ -513,9 +522,13 @@ async def materialize_synthesis_section_packs(
         for item in pack.items:
             source_id = context_item_source_id(item)
             lifecycle_state = context_item_lifecycle_state(item)
+            lifecycle_flags = context_item_lifecycle_flags(item)
             metadata = dict(item.metadata)
             project_id = context_item_project_id(item)
-            if _context_item_is_hidden(lifecycle_state) or not _context_item_allowed_for_render(
+            if _context_item_is_hidden(
+                lifecycle_state,
+                lifecycle_flags,
+            ) or not _context_item_allowed_for_render(
                 metadata=metadata,
                 project_id=project_id,
                 principal_id=principal_id,
@@ -529,7 +542,11 @@ async def materialize_synthesis_section_packs(
                     correction_reasons.get(correction_reason, 0) + 1
                 )
                 continue
-            redacted = _context_item_is_redacted(metadata, lifecycle_state)
+            redacted = _context_item_is_redacted(
+                metadata,
+                lifecycle_state,
+                lifecycle_flags,
+            )
             if redacted:
                 redaction_count += 1
             if source_id in seen_source_ids:

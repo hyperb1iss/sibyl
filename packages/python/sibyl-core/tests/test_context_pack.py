@@ -25,6 +25,7 @@ from sibyl_core.tools.context import (
     FACET_TYPES,
     compile_context,
     context_item_freshness,
+    context_item_lifecycle_flags,
     context_item_lifecycle_state,
     context_item_project_id,
     context_item_source_id,
@@ -967,7 +968,8 @@ def test_context_item_metadata_helpers_normalize_source_policy_fields() -> None:
     assert context_item_source_id(item) == "source:fallback"
     assert context_item_project_id(item) == "project-quality"
     assert context_item_freshness(item) == "2026-05-14T10:00:00Z"
-    assert context_item_lifecycle_state(item) == "redacted"
+    assert context_item_lifecycle_state(item) == "active"
+    assert context_item_lifecycle_flags(item) == ["redacted"]
 
 
 def test_context_item_metadata_helpers_fall_back_to_metadata() -> None:
@@ -989,7 +991,8 @@ def test_context_item_metadata_helpers_fall_back_to_metadata() -> None:
     assert context_item_source_id(item) == "artifact:id"
     assert context_item_project_id(item) == "project-metadata"
     assert context_item_freshness(item) == "snapshot:2026-05-14"
-    assert context_item_lifecycle_state(item) == "hidden"
+    assert context_item_lifecycle_state(item) == "active"
+    assert context_item_lifecycle_flags(item) == ["hidden"]
 
 
 @pytest.mark.asyncio

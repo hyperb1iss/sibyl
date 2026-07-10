@@ -49,7 +49,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 18
+CONTENT_SCHEMA_CURRENT_VERSION = 19
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -58,14 +58,6 @@ _CONTENT_REVIEW_STATE_VALUES = (
     "deferred",
     "promoted",
     "archived",
-    "deleted",
-    "duplicate",
-    "hidden",
-    "redacted",
-    "sensitive",
-    "stale",
-    "superseded",
-    "wrong",
 )
 _CONTENT_SOURCE_IMPORT_STATUS_VALUES = (
     "pending",
@@ -435,6 +427,49 @@ DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_lookup
     ON raw_captures FIELDS source_id, organization_id, memory_scope, scope_key;
 """
 
+CONTENT_LIFECYCLE_REVIEW_SPLIT_MIGRATION_DEFINITIONS = f"""
+UPDATE raw_captures SET
+    metadata.lifecycle_state = 'active',
+    metadata.lifecycle_flags = ['hidden'],
+    metadata.memory_lifecycle = NONE
+WHERE review_state = 'hidden';
+UPDATE raw_captures SET
+    metadata.lifecycle_state = 'active',
+    metadata.lifecycle_flags = ['redacted'],
+    metadata.memory_lifecycle = NONE
+WHERE review_state = 'redacted';
+UPDATE raw_captures SET
+    metadata.lifecycle_state = 'active',
+    metadata.lifecycle_flags = ['sensitive'],
+    metadata.memory_lifecycle = NONE
+WHERE review_state = 'sensitive';
+UPDATE raw_captures SET
+    metadata.lifecycle_state = 'contested',
+    metadata.lifecycle_flags = [],
+    metadata.memory_lifecycle = NONE
+WHERE review_state IN ['duplicate', 'stale', 'wrong'];
+UPDATE raw_captures SET
+    metadata.lifecycle_state = review_state,
+    metadata.lifecycle_flags = [],
+    metadata.memory_lifecycle = NONE
+WHERE review_state IN ['deleted', 'superseded'];
+UPDATE raw_captures SET
+    metadata.lifecycle_state = 'contested',
+    metadata.lifecycle_flags = [],
+    metadata.memory_lifecycle = NONE
+WHERE review_state NOT IN {_surql_string_array((*_CONTENT_REVIEW_STATE_VALUES, "hidden", "redacted", "sensitive", "duplicate", "stale", "wrong", "deleted", "superseded"))};
+UPDATE raw_captures SET review_state =
+    IF metadata.prior_review_state IN {_surql_string_array(_CONTENT_REVIEW_STATE_VALUES)}
+    THEN metadata.prior_review_state
+    ELSE 'pending'
+    END
+WHERE review_state NOT IN {_surql_string_array(_CONTENT_REVIEW_STATE_VALUES)};
+UPDATE raw_captures SET metadata.review_state = review_state
+WHERE metadata.review_state != NONE;
+DEFINE FIELD OVERWRITE review_state ON raw_captures TYPE string DEFAULT 'pending'
+    ASSERT $value IN {_surql_string_array(_CONTENT_REVIEW_STATE_VALUES)};
+"""
+
 
 def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
     compatible_schema = render_fulltext_compatible_sql(
@@ -544,6 +579,13 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=18,
             name="content_raw_capture_lookup_indexes",
             statements=tuple(split_statements(CONTENT_RAW_CAPTURE_LOOKUP_MIGRATION_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=19,
+            name="content_lifecycle_review_split",
+            statements=tuple(
+                split_statements(CONTENT_LIFECYCLE_REVIEW_SPLIT_MIGRATION_DEFINITIONS)
+            ),
         ),
     )
 

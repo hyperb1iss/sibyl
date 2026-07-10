@@ -21,6 +21,12 @@ from sibyl.services.document_adapters import (
     ensure_document_adapters_registered,
 )
 from sibyl_core.auth import MemoryPolicyContext, authorize_memory_write
+from sibyl_core.models.reflection import (
+    MemoryLifecycle,
+    MemoryLifecycleState,
+    memory_lifecycle_from_metadata,
+    with_memory_lifecycle_metadata,
+)
 from sibyl_core.models.sources import SourceImportCheckpoint, SourceRecord
 from sibyl_core.services.mailbox_adapter import IMAP_ADAPTER_NAME, ensure_mailbox_adapter_registered
 from sibyl_core.services.source_adapters import (
@@ -514,8 +520,23 @@ def _default_supersession_handler(*, organization_id: str) -> SourceRecordSupers
         superseded_metadata = dict(superseded.metadata)
         superseded_metadata["superseded_by_raw_memory_id"] = memory.id
         superseded_metadata["superseded_by_source_id"] = payload.source_id
-        superseded.review_state = "superseded"
-        superseded.metadata = superseded_metadata
+        prior_lifecycle = memory_lifecycle_from_metadata(
+            superseded_metadata,
+            source_id=superseded.id,
+            review_state=superseded.review_state,
+        )
+        superseded.metadata = with_memory_lifecycle_metadata(
+            superseded_metadata,
+            MemoryLifecycle(
+                state=MemoryLifecycleState.SUPERSEDED,
+                source_id=superseded.id,
+                action="supersede",
+                reason="source_record_superseded",
+                prior_state=str(prior_lifecycle.state),
+                replacement_source_id=memory.id,
+                flags=list(prior_lifecycle.flags),
+            ),
+        )
 
         memory_metadata = dict(memory.metadata)
         memory_metadata["supersedes_raw_memory_id"] = superseded.id

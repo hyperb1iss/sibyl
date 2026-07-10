@@ -61,6 +61,7 @@ def _capture(
         tags=["alpha"],
         metadata=metadata,
         capture_surface=surface,
+        review_state=review_state or "pending",
         created_by_user_id=owner_id,
         created_at=datetime(2026, 4, 14, 16, 0, tzinfo=UTC),
     )
@@ -233,6 +234,7 @@ async def test_update_raw_capture_review_state_updates_metadata() -> None:
             AsyncMock(
                 side_effect=lambda _session, **_kwargs: replace(
                     capture,
+                    review_state="deferred",
                     metadata={
                         **capture.metadata,
                         "review_state": "deferred",

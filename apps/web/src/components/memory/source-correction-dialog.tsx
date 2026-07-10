@@ -88,7 +88,11 @@ function PreviewSummary({ preview }: { preview: MemoryCorrectionResponse }) {
           )}
           {preview.reason}
         </span>
-        <span className="text-xs text-sc-fg-subtle">{preview.target_review_state}</span>
+        <span className="text-xs text-sc-fg-subtle">
+          {preview.target_lifecycle_state}
+          {preview.target_lifecycle_flags.length > 0 &&
+            ` · ${preview.target_lifecycle_flags.join(', ')}`}
+        </span>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <ImpactList title="Recall" value={preview.recall_impact} />

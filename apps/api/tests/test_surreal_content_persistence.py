@@ -621,9 +621,10 @@ async def test_soft_delete_private_raw_captures_marks_purge_window(
     assert "principal_id = $user_id" in select_query
     assert "memory_scope = 'private'" in select_query
     assert select_params["user_id"] == str(user_id)
-    assert "review_state = 'deleted'" in update_query
+    assert "review_state = 'deleted'" not in update_query
     assert update_params["metadata"]["existing"] == "yes"
-    assert update_params["metadata"]["review_state"] == "deleted"
+    assert update_params["metadata"]["lifecycle_state"] == "deleted"
+    assert update_params["metadata"]["memory_lifecycle"]["state"] == "deleted"
     assert update_params["metadata"]["deleted_by_user_id"] == str(user_id)
     assert update_params["purge_after"] == purge_after
 
@@ -647,6 +648,7 @@ async def test_purge_due_deleted_raw_captures_deletes_due_rows(
     assert purged[0]["uuid"]
     query, params = client.calls[0]
     assert "DELETE FROM raw_captures" in query
+    assert "deleted_at != NONE" in query
     assert "purge_after <= $now" in query
     assert params["now"] == now
 

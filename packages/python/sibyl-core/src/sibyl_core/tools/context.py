@@ -20,6 +20,7 @@ from sibyl_core.models.context import (
     ContextRelatedItem,
     ContextSection,
 )
+from sibyl_core.models.reflection import memory_lifecycle_from_metadata
 from sibyl_core.retrieval.search import (
     build_context_retrieval_plan,
     context_search,
@@ -444,6 +445,8 @@ _ITEM_METADATA_KEYS = (
     "priority",
     "complexity",
     "lifecycle_state",
+    "lifecycle_flags",
+    "lifecycle_action",
     "review_state",
     "tags",
     "category",
@@ -677,9 +680,21 @@ def context_item_freshness(item: ContextItem) -> str | None:
 
 
 def context_item_lifecycle_state(item: ContextItem) -> str | None:
-    return _compact_metadata_value(
-        item.metadata.get("lifecycle_state") or item.metadata.get("review_state")
+    lifecycle = memory_lifecycle_from_metadata(
+        item.metadata,
+        source_id=context_item_source_id(item),
+        review_state=str(item.metadata.get("review_state") or "pending"),
     )
+    return _compact_metadata_value(lifecycle.state)
+
+
+def context_item_lifecycle_flags(item: ContextItem) -> list[str]:
+    lifecycle = memory_lifecycle_from_metadata(
+        item.metadata,
+        source_id=context_item_source_id(item),
+        review_state=str(item.metadata.get("review_state") or "pending"),
+    )
+    return [str(flag) for flag in lifecycle.flags]
 
 
 def _date_only(value: str | None) -> str | None:
@@ -1313,6 +1328,7 @@ __all__ = [
     "INTENT_FACETS",
     "compile_context",
     "context_item_freshness",
+    "context_item_lifecycle_flags",
     "context_item_lifecycle_state",
     "context_item_project_id",
     "context_item_source_id",
