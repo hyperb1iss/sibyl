@@ -319,10 +319,60 @@ async def test_cite_memory_records_usage_and_audit() -> None:
             "metadata": {"command": "sibyl cite"},
             "route": "memory_cite",
         },
+        misled=False,
     )
     audit.assert_awaited_once()
     assert response.usage["stamped_count"] == 2
     assert response.cited_ids == ["decision-1", "raw_memory:raw-1"]
+
+
+@pytest.mark.asyncio
+async def test_cite_memory_records_misleading_feedback_and_audit() -> None:
+    org = _org()
+    ctx = _ctx()
+    http_request = _http_request()
+    usage = {"signal_type": "misled", "stamped_count": 1}
+    record_citations = AsyncMock(return_value=usage)
+
+    with (
+        patch(
+            "sibyl_core.tools.usage_citation.record_cited_item_usages",
+            record_citations,
+        ),
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        response = await cite_memory(
+            MemoryCitationRequest(cited_ids=["decision-1"], misled=True),
+            http_request=http_request,
+            org=org,
+            ctx=ctx,
+        )
+
+    record_citations.assert_awaited_once_with(
+        ["decision-1"],
+        organization_id=str(org.id),
+        principal_id="user-123",
+        project_id=None,
+        source_surface="cli_cite",
+        request_metadata={"metadata": {}, "route": "memory_cite"},
+        misled=True,
+    )
+    audit.assert_awaited_once_with(
+        action="memory.misled",
+        user_id="user-123",
+        organization_id="org-1",
+        request=http_request,
+        memory_scope=None,
+        scope_key=None,
+        project_id=None,
+        source_surface="cli_cite",
+        source_ids=["decision-1"],
+        derived_ids=None,
+        policy_allowed=True,
+        policy_reason="misled_recorded",
+        details={"usage": usage, "metadata": {}, "misled": True},
+    )
+    assert response.usage["signal_type"] == "misled"
 
 
 @pytest.mark.asyncio

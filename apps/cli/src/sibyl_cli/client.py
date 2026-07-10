@@ -1357,12 +1357,14 @@ class SibylClient:
         project_id: str | None = None,
         source_surface: str = "cli_cite",
         metadata: dict[str, Any] | None = None,
+        misled: bool = False,
     ) -> dict[str, Any]:
-        """Record cited memories as strong usage feedback."""
+        """Record cited memories as positive or misleading usage feedback."""
         data: dict[str, Any] = {
             "cited_ids": cited_ids,
             "source_surface": source_surface,
             "metadata": metadata or {},
+            "misled": misled,
         }
         if project_id:
             data["project_id"] = project_id

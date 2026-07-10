@@ -592,11 +592,13 @@ def _candidate_target_scope(candidate: RawMemory) -> str:
 
 
 def _candidate_target_scope_key(candidate: RawMemory, target_scope: str) -> str | None:
-    return (
-        _metadata_str(candidate.metadata, "suggested_scope_key")
-        or candidate.scope_key
-        or (candidate.project_id if target_scope == MemoryScope.PROJECT.value else None)
-    )
+    if suggested_scope_key := _metadata_str(candidate.metadata, "suggested_scope_key"):
+        return suggested_scope_key
+    if candidate.memory_scope.value == target_scope:
+        return candidate.scope_key
+    if target_scope == MemoryScope.PROJECT.value:
+        return candidate.project_id
+    return None
 
 
 def _candidate_project(

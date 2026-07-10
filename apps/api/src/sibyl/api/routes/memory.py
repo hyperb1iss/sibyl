@@ -2233,7 +2233,7 @@ async def cite_memory(
     org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
 ) -> MemoryCitationResponse:
-    """Record memories that materially informed an answer or action."""
+    """Record memories that materially informed or misled an answer or action."""
     from sibyl_core.tools.usage_citation import record_cited_item_usages
 
     principal_id = ctx.user_id
@@ -2257,19 +2257,22 @@ async def cite_memory(
             "route": "memory_cite",
             "metadata": request.metadata,
         },
+        misled=request.misled,
     )
+    audit_action = "memory.misled" if request.misled else "memory.cite"
+    policy_reason = "misled_recorded" if request.misled else "citation_recorded"
     await _log_memory_audit(
-        action="memory.cite",
+        action=audit_action,
         ctx=ctx,
         request=http_request,
         memory_scope="project" if request.project_id else None,
         scope_key=request.project_id,
         source_surface=request.source_surface,
         policy_allowed=True,
-        policy_reason="citation_recorded",
+        policy_reason=policy_reason,
         project_id=request.project_id,
         source_ids=request.cited_ids,
-        details={"usage": usage, "metadata": request.metadata},
+        details={"usage": usage, "metadata": request.metadata, "misled": request.misled},
     )
     return MemoryCitationResponse(cited_ids=request.cited_ids, usage=usage)
 

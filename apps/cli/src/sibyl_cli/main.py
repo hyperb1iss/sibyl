@@ -2509,8 +2509,13 @@ def cite_memories(
         help="Do not attach the current directory project",
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    misled: bool = typer.Option(
+        False,
+        "--misled",
+        help="Mark these memories as having materially led the answer astray",
+    ),
 ) -> None:
-    """Record cited memories as strong usage feedback."""
+    """Record positive citation or negative misleading usage feedback."""
     parsed_ids = _parse_id_args(cited_ids)
     if not parsed_ids:
         error("Provide at least one cited memory ID")
@@ -2524,8 +2529,9 @@ def cite_memories(
                 data = await client.cite_memory(
                     parsed_ids,
                     project_id=effective_project,
-                    source_surface="cli_cite",
-                    metadata={"command": "sibyl cite"},
+                    source_surface="cli_cite_misled" if misled else "cli_cite",
+                    metadata={"command": "sibyl cite", "misled": misled},
+                    misled=misled,
                 )
             if json_output:
                 print_json(data)
@@ -2534,7 +2540,8 @@ def cite_memories(
             cited_count = usage.get("cited_count", len(parsed_ids))
             stamped_count = usage.get("stamped_count", 0)
             excluded_count = usage.get("excluded_count", 0)
-            success(f"Recorded {stamped_count}/{cited_count} cited memories")
+            label = "misleading" if misled else "cited"
+            success(f"Recorded {stamped_count}/{cited_count} {label} memories")
             if excluded_count:
                 info(f"{excluded_count} citation(s) were accounted as exclusions")
         except SibylClientError as e:

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from sibyl.jobs.reflection import run_reflection_dream_cycle
+from sibyl.jobs.reflection import _candidate_target_scope_key, run_reflection_dream_cycle
 from sibyl_core.models.reflection import ReflectionPack
 from sibyl_core.services.memory import (
     ReflectionPromotionPreview,
@@ -84,6 +84,17 @@ def _promotion(candidate_id: str = "candidate-1") -> ReflectionPromotionResult:
         scope_key=None,
         raw_source_ids=["source-1"],
     )
+
+
+def test_team_scope_nomination_does_not_reuse_project_scope_key() -> None:
+    candidate = _raw_memory(
+        memory_scope=MemoryScope.PROJECT,
+        scope_key="project-123",
+        project_id="project-123",
+        metadata={"suggested_memory_scope": "team"},
+    )
+
+    assert _candidate_target_scope_key(candidate, MemoryScope.TEAM.value) is None
 
 
 @pytest.mark.asyncio

@@ -120,6 +120,10 @@ class MemoryCitationRequest(BaseModel):
         description="Caller surface recording the citation",
     )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Auxiliary metadata")
+    misled: bool = Field(
+        default=False,
+        description="Record negative feedback because these memories led the caller astray",
+    )
 
 
 class MemoryCitationResponse(BaseModel):

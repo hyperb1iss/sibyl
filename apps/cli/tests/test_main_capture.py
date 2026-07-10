@@ -81,7 +81,40 @@ def test_cite_command_records_cited_memories(
         ["decision-1", "raw_memory:raw-1"],
         project_id="project_123",
         source_surface="cli_cite",
-        metadata={"command": "sibyl cite"},
+        metadata={"command": "sibyl cite", "misled": False},
+        misled=False,
+    )
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.main.get_client")
+def test_cite_command_records_misleading_feedback(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.cite_memory = AsyncMock(
+        return_value={
+            "usage": {
+                "cited_count": 1,
+                "excluded_count": 0,
+                "stamped_count": 1,
+            }
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    result = CliRunner().invoke(app, ["cite", "decision-1", "--misled"])
+
+    assert result.exit_code == 0
+    assert "Recorded 1/1 misleading memories" in result.stdout
+    mock_client.cite_memory.assert_awaited_once_with(
+        ["decision-1"],
+        project_id=None,
+        source_surface="cli_cite_misled",
+        metadata={"command": "sibyl cite", "misled": True},
+        misled=True,
     )
     mock_resolve_project_from_cwd.assert_called_once_with()
 

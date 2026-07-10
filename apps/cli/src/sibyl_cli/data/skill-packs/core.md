@@ -85,6 +85,8 @@ Sibyl is the agent's durable brain. Use it as a loop, not a lookup box:
 2. **Act with context in hand.** Use recalled IDs for follow-up retrieval with `sibyl show <id>`
    when a preview is not enough. If a recalled/search item materially informs your answer or
    action, record that with `sibyl cite <id...>` or a `--cited` flag on the write you are making.
+   If it materially leads the answer astray, use `sibyl cite <id...> --misled` instead. Do not mark
+   merely irrelevant or unused context as misleading.
 3. **Remember while learning.** Run `sibyl remember "Title" "What matters" --kind <type>` whenever
    future agents should not rediscover a decision, plan, idea, claim, artifact, session, procedure,
    or error pattern. In a linked repo, `remember` automatically scopes the memory to that project.
@@ -181,7 +183,7 @@ sibyl task complete task_a1b2c3d4e5f6 --learnings "OAuth tokens expire..."
 2. RECALL           -> sibyl recall "goal" --intent build
 3. RETRIEVE         -> sibyl show <id>  (get full content by ID from search)
 4. CHECK TASKS      -> sibyl task list --status doing
-5. CITE USED MEMORY -> sibyl cite "decision_abc raw_memory:source_123"
+5. CITE OR FLAG     -> sibyl cite "decision_abc raw_memory:source_123" [--misled]
 6. WORK & REMEMBER  -> sibyl remember "Title" "Decision, plan, idea, or learning..."
 7. REFLECT          -> sibyl reflect "Raw session notes..." --title "Session" --persist
 8. COMPLETE         -> sibyl task complete --learnings "..."
