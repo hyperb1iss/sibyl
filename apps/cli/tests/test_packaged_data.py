@@ -86,11 +86,16 @@ def test_current_docs_only_teach_converged_cli_commands() -> None:
         Path("docs/cli/recall.md"),
         Path("docs/cli/search.md"),
     }
+    tracked_research_docs = {Path("docs/research/rust-port/INVENTORY.md")}
     doc_paths = [REPO_ROOT / "README.md", REPO_ROOT / "apps" / "cli" / "README.md"]
     doc_paths.extend(
         path
         for path in (REPO_ROOT / "docs").rglob("*.md")
         if "_archive" not in path.parts
+        and (
+            "research" not in path.parts
+            or path.relative_to(REPO_ROOT) in tracked_research_docs
+        )
         and ".vitepress" not in path.parts
         and path.relative_to(REPO_ROOT) not in excluded
     )

@@ -185,21 +185,21 @@ class CLIRunner:
             args.extend(["--learnings", learnings])
         return self.run(*args)
 
-    def add(
+    def remember(
         self,
         title: str,
         content: str,
-        entity_type: str = "pattern",
-        category: str | None = None,
-        language: str | None = None,
+        kind: str = "pattern",
+        domain: str | None = None,
+        tags: str | None = None,
         wait_searchable: bool = False,
     ) -> CLIResult:
-        """Add knowledge to the graph."""
-        args = ["add", title, content, "--type", entity_type, "--json"]
-        if category:
-            args.extend(["-c", category])
-        if language:
-            args.extend(["-l", language])
+        """Remember knowledge in the graph."""
+        args = ["remember", title, content, "--kind", kind, "--json"]
+        if domain:
+            args.extend(["--domain", domain])
+        if tags:
+            args.extend(["--tags", tags])
         if wait_searchable:
             args.append("--wait-searchable")
         timeout = WAIT_SEARCHABLE_COMMAND_TIMEOUT if wait_searchable else 30

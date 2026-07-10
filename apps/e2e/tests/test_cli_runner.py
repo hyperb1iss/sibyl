@@ -9,14 +9,34 @@ from tests.conftest import API_BASE_URL, WAIT_SEARCHABLE_COMMAND_TIMEOUT, CLIRun
 class TestCLIRunnerTimeouts:
     """Ensure explicit searchability waits have enough subprocess headroom."""
 
-    def test_add_wait_searchable_uses_extended_timeout(self) -> None:
-        """Wait-searchable adds should outlive the CLI's internal wait budget."""
+    def test_remember_wait_searchable_uses_extended_timeout(self) -> None:
+        """Wait-searchable remembers should outlive the CLI's internal wait budget."""
         runner = CLIRunner()
 
         with patch.object(runner, "run") as mock_run:
-            runner.add("Title", "Content", wait_searchable=True)
+            runner.remember(
+                "Title",
+                "Content",
+                kind="pattern",
+                domain="testing",
+                tags="python,e2e",
+                wait_searchable=True,
+            )
 
-        assert mock_run.call_args.kwargs["timeout"] == WAIT_SEARCHABLE_COMMAND_TIMEOUT
+        mock_run.assert_called_once_with(
+            "remember",
+            "Title",
+            "Content",
+            "--kind",
+            "pattern",
+            "--json",
+            "--domain",
+            "testing",
+            "--tags",
+            "python,e2e",
+            "--wait-searchable",
+            timeout=WAIT_SEARCHABLE_COMMAND_TIMEOUT,
+        )
 
     def test_capture_wait_searchable_uses_extended_timeout(self) -> None:
         """Wait-searchable captures should use the same extended timeout budget."""
