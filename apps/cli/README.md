@@ -48,6 +48,8 @@ sibyl task complete <id> --learnings "..."   # Complete with learnings
 | ---------- | ---------------------------------------------------------------------- |
 | `recall`   | Compile an agent-ready Markdown or JSON context pack before work       |
 | `remember` | Capture decisions, plans, ideas, claims, artifacts, and session memory |
+| `correct`  | Mark memory wrong, stale, duplicate, superseded, or revise its body     |
+| `blame`    | Inspect revisions, corrections, audits, derivations, and supersessions  |
 | `reflect`  | Distill raw notes into reviewable memory candidates                    |
 | `search`   | Semantic search across graph memory and crawled docs                   |
 | `add`      | Add structured knowledge                                               |

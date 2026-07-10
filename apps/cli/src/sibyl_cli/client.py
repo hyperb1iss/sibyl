@@ -1373,6 +1373,41 @@ class SibylClient:
         encoded_source_id = quote(source_id, safe="")
         return await self._request("GET", f"/memory/inspect/{encoded_source_id}")
 
+    async def memory_blame(self, source_id: str) -> dict[str, Any]:
+        """Inspect revisions, corrections, audits, and lineage for a raw memory."""
+        encoded_source_id = quote(source_id, safe="")
+        return await self._request("GET", f"/memory/blame/{encoded_source_id}")
+
+    async def correct_memory(
+        self,
+        source_id: str,
+        *,
+        action: str,
+        reason: str,
+        replacement_source_id: str | None = None,
+        duplicate_of_source_id: str | None = None,
+        revised_content: str | None = None,
+        expected_revision: int | None = None,
+        preview: bool = False,
+    ) -> dict[str, Any]:
+        """Preview or apply a correction to a raw memory source."""
+        encoded_source_id = quote(source_id, safe="")
+        suffix = "/preview" if preview else ""
+        data: dict[str, Any] = {
+            "action": action,
+            "reason": reason,
+            "replacement_source_id": replacement_source_id,
+            "duplicate_of_source_id": duplicate_of_source_id,
+            "revised_content": revised_content,
+            "expected_revision": expected_revision,
+            "metadata": {"command": "sibyl correct"},
+        }
+        return await self._request(
+            "POST",
+            f"/memory/inspect/{encoded_source_id}/corrections{suffix}",
+            json=data,
+        )
+
     async def source_import_status(self, import_id: str) -> dict[str, Any]:
         """Inspect a source import receipt from the memory surface."""
         encoded_import_id = quote(import_id, safe="")

@@ -103,6 +103,34 @@ Prefer these verbs:
 - `search`: discover candidates when you do not yet know the goal shape.
 - `show`: retrieve full source memory from a graph entity or raw memory ID.
 - `cite`: mark only the memory that materially informed an answer, task completion, or reflection.
+- `correct`: mark raw memory wrong, stale, duplicate, or superseded, or revise its canonical body.
+- `blame`: inspect a raw memory's revisions, corrections, audits, derivations, and supersessions.
+
+### Correction loop
+
+Inspect the belief history before changing source truth, then make the smallest correction that
+matches what happened:
+
+```bash
+sibyl blame raw_memory:abc123
+sibyl correct raw_memory:abc123 --action wrong --reason "Contradicted by the verified config"
+sibyl correct raw_memory:abc123 --action stale --reason "Valid before the v2 migration"
+sibyl correct raw_memory:abc123 --action duplicate --duplicate-of raw_memory:def456 \
+  --reason "Same decision captured twice"
+sibyl correct raw_memory:abc123 --action superseded --replacement raw_memory:def456 \
+  --reason "The newer decision replaces this one"
+printf '%s' "Corrected canonical body" | sibyl correct raw_memory:abc123 --action revise \
+  --reason "The prior wording was misleading" --expected-revision 3
+```
+
+Negative examples:
+
+- Do not append a contradictory `remember` entry to work around a bad memory. Mark it wrong,
+  stale, superseded, or revise it so retrieval stops treating both claims as current.
+- Do not use `duplicate` without `--duplicate-of` or `superseded` without `--replacement`; the
+  lineage target is part of the correction receipt.
+- Do not revise a body fetched earlier without `--expected-revision`; the compare-and-set guard
+  prevents overwriting a correction another writer landed first.
 
 ---
 

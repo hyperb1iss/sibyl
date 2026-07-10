@@ -101,6 +101,49 @@ async def test_memory_inspect_client_url_encodes_source_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_memory_blame_client_url_encodes_source_id() -> None:
+    client = SibylClient(base_url="http://example.test/api", auth_token="token")
+    client._request = AsyncMock(return_value={"source": {"id": "memory-1"}})  # type: ignore[method-assign]
+
+    data = await client.memory_blame("source/provenance:1")
+
+    assert data == {"source": {"id": "memory-1"}}
+    client._request.assert_awaited_once_with(  # type: ignore[attr-defined]
+        "GET",
+        "/memory/blame/source%2Fprovenance%3A1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_correct_memory_client_encodes_id_and_sends_revision_contract() -> None:
+    client = SibylClient(base_url="http://example.test/api", auth_token="token")
+    client._request = AsyncMock(return_value={"applied": True})  # type: ignore[method-assign]
+
+    data = await client.correct_memory(
+        "source/provenance:1",
+        action="revise",
+        reason="Clarify the canonical body",
+        revised_content="Corrected body",
+        expected_revision=2,
+    )
+
+    assert data == {"applied": True}
+    client._request.assert_awaited_once_with(  # type: ignore[attr-defined]
+        "POST",
+        "/memory/inspect/source%2Fprovenance%3A1/corrections",
+        json={
+            "action": "revise",
+            "reason": "Clarify the canonical body",
+            "replacement_source_id": None,
+            "duplicate_of_source_id": None,
+            "revised_content": "Corrected body",
+            "expected_revision": 2,
+            "metadata": {"command": "sibyl correct"},
+        },
+    )
+
+
+@pytest.mark.asyncio
 async def test_source_import_status_client_url_encodes_import_id() -> None:
     client = SibylClient(base_url="http://example.test/api", auth_token="token")
     client._request = AsyncMock(return_value={"import_id": "import-1"})  # type: ignore[method-assign]
@@ -1611,6 +1654,105 @@ def test_memory_inspect_command_renders_source_summary(mock_get_client: MagicMoc
         entity_type="raw_memory",
     )
     mock_client.memory_inspect.assert_awaited_once_with("memory-1")
+
+
+@patch("sibyl_cli.main.get_client")
+def test_correct_command_applies_user_facing_action_and_prints_receipt(
+    mock_get_client: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.resolve_id_prefix = AsyncMock(return_value={"matches": [{"id": "memory-1"}]})
+    mock_client.correct_memory = AsyncMock(
+        return_value={
+            "allowed": True,
+            "applied": True,
+            "reason": "Incorrect",
+            "mutation_receipt": {
+                "operation_id": "correct-1",
+                "applied": True,
+                "revision": 2,
+                "affected_records": ["raw_captures:memory-1"],
+                "replayed": False,
+            },
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    result = CliRunner().invoke(
+        app,
+        ["correct", "raw_memory:memory-1", "--action", "wrong", "--reason", "Incorrect"],
+    )
+
+    assert result.exit_code == 0
+    assert "Memory corrected: wrong" in result.stdout
+    assert "Revision: 2" in result.stdout
+    assert "correct-1" in result.stdout
+    mock_client.correct_memory.assert_awaited_once_with(
+        "memory-1",
+        action="mark_wrong",
+        reason="Incorrect",
+        replacement_source_id=None,
+        duplicate_of_source_id=None,
+        revised_content=None,
+        expected_revision=None,
+        preview=False,
+    )
+
+
+@patch("sibyl_cli.main.get_client")
+def test_blame_command_renders_revision_and_lineage_history(mock_get_client: MagicMock) -> None:
+    mock_client = MagicMock()
+    mock_client.resolve_id_prefix = AsyncMock(return_value={"matches": [{"id": "memory-1"}]})
+    mock_client.memory_blame = AsyncMock(
+        return_value={
+            "source": {
+                "id": "memory-1",
+                "source_id": "source-1",
+                "revision": 2,
+                "title": "Canonical memory",
+                "memory_scope": "private",
+                "review_state": "pending",
+                "entity_type": "decision",
+                "policy_allowed": True,
+                "policy_reason": "same_scope_read_allowed",
+                "content_redacted": False,
+                "raw_content": "Current body",
+                "correction_history": [
+                    {"action": "revise", "prior_revision": 1, "reason": "Clarify"}
+                ],
+                "derived_records": [
+                    {"id": "decision-1", "record_type": "graph_entity", "source_action": "promote"}
+                ],
+                "recent_audit_events": [
+                    {
+                        "created_at": "2026-07-09T12:00:00Z",
+                        "action": "memory.correction.revise",
+                        "policy_reason": "same_scope_write_allowed",
+                    }
+                ],
+                "derived_ids": ["decision-1"],
+                "audit_event_count": 1,
+                "available_actions": [],
+            },
+            "content_revisions": [{"revision": 1, "content": "Prior body", "reason": "Clarify"}],
+            "derived_from": [{"source_import_id": "import-1", "raw_memory_id": "memory-1"}],
+            "supersessions": [
+                {"raw_memory_id": "memory-2", "superseded_raw_memory_id": "memory-1"}
+            ],
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    result = CliRunner().invoke(app, ["blame", "raw_memory:memory-1"])
+
+    assert result.exit_code == 0
+    assert "Content revisions" in result.stdout
+    assert "revision 1 → 2" in result.stdout
+    assert "Corrections" in result.stdout
+    assert "Import lineage" in result.stdout
+    assert "Supersessions" in result.stdout
+    assert "Audit trail" in result.stdout
+    mock_client.memory_blame.assert_awaited_once_with("memory-1")
 
 
 @patch("sibyl_cli.main.get_client")

@@ -66,7 +66,9 @@ from sibyl_cli.logs import app as logs_app
 from sibyl_cli.memory_display import (
     inspect_raw_memory_source,
     is_raw_memory_reference,
+    print_memory_source_blame,
     print_memory_source_inspect,
+    raw_memory_lookup_value,
 )
 from sibyl_cli.org import app as org_app
 from sibyl_cli.pending import app as pending_writes_app
@@ -2537,6 +2539,176 @@ def memory_inspect(
             _handle_client_error(e)
 
     run_memory_inspect()
+
+
+@app.command("blame")
+def blame_memory(
+    source_id: str = typer.Argument(..., help="Raw memory source ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Show a memory's revisions, corrections, audits, and lineage."""
+
+    @run_async
+    async def run_blame_memory() -> None:
+        try:
+            async with get_client() as client:
+                resolved_source_id = await resolve_raw_memory_id_prefix(
+                    client,
+                    raw_memory_lookup_value(source_id),
+                )
+                data = await client.memory_blame(resolved_source_id)
+            if json_output:
+                print_json(data)
+                return
+            print_memory_source_blame(cast("dict[str, object]", data))
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_blame_memory()
+
+
+@app.command("correct")
+def correct_memory(
+    source_id: str = typer.Argument(..., help="Raw memory source ID"),
+    action: str = typer.Option(
+        ...,
+        "--action",
+        help="Correction: wrong, stale, duplicate, superseded, or revise",
+    ),
+    reason: str = typer.Option(..., "--reason", help="Why this correction is needed"),
+    replacement: str | None = typer.Option(
+        None,
+        "--replacement",
+        help="Replacement raw memory ID for --action superseded",
+    ),
+    duplicate_of: str | None = typer.Option(
+        None,
+        "--duplicate-of",
+        help="Canonical raw memory ID for --action duplicate",
+    ),
+    content: str | None = typer.Option(None, "--content", help="Canonical body for revise"),
+    content_file: str | None = typer.Option(
+        None,
+        "--content-file",
+        help="Read revised canonical body from file",
+    ),
+    max_size: int = typer.Option(
+        1_048_576,
+        "--max-size",
+        min=1,
+        help="Maximum revised content size in bytes",
+    ),
+    follow_symlinks: bool = typer.Option(
+        False,
+        "--follow-symlinks",
+        help="Allow --content-file to read through symlinks",
+    ),
+    expected_revision: int | None = typer.Option(
+        None,
+        "--expected-revision",
+        min=1,
+        help="Apply only if the memory still has this revision",
+    ),
+    preview: bool = typer.Option(False, "--preview", help="Validate without writing"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Correct or revise a raw memory with a durable receipt."""
+    action_map = {
+        "wrong": "mark_wrong",
+        "stale": "mark_stale",
+        "duplicate": "mark_duplicate",
+        "superseded": "supersede",
+        "revise": "revise",
+    }
+    normalized_action = action.strip().lower()
+    api_action = action_map.get(normalized_action)
+    if api_action is None:
+        error("--action must be wrong, stale, duplicate, superseded, or revise")
+        raise typer.Exit(code=1)
+    reason = reason.strip()
+    if not reason:
+        error("--reason must not be empty")
+        raise typer.Exit(code=1)
+    if normalized_action == "duplicate" and not duplicate_of:
+        error("--action duplicate requires --duplicate-of")
+        raise typer.Exit(code=1)
+    if normalized_action == "superseded" and not replacement:
+        error("--action superseded requires --replacement")
+        raise typer.Exit(code=1)
+    if normalized_action != "revise" and (content is not None or content_file is not None):
+        error("--content and --content-file are only valid with --action revise")
+        raise typer.Exit(code=1)
+    revised_content: str | None = None
+    if normalized_action == "revise":
+        try:
+            revised_content = resolve_content_input(
+                content,
+                content_file=content_file,
+                max_size=max_size,
+                follow_symlinks=follow_symlinks,
+            )
+        except ValueError as e:
+            error(str(e))
+            raise typer.Exit(code=1) from e
+        if revised_content is None or not revised_content.strip():
+            error("--action revise requires --content, --content-file, or stdin")
+            raise typer.Exit(code=1)
+
+    @run_async
+    async def run_correct_memory() -> None:
+        try:
+            async with get_client() as client:
+                resolved_source_id = await resolve_raw_memory_id_prefix(
+                    client,
+                    raw_memory_lookup_value(source_id),
+                )
+                resolved_replacement = (
+                    await resolve_raw_memory_id_prefix(
+                        client,
+                        raw_memory_lookup_value(replacement),
+                    )
+                    if replacement
+                    else None
+                )
+                resolved_duplicate = (
+                    await resolve_raw_memory_id_prefix(
+                        client,
+                        raw_memory_lookup_value(duplicate_of),
+                    )
+                    if duplicate_of
+                    else None
+                )
+                data = await client.correct_memory(
+                    resolved_source_id,
+                    action=api_action,
+                    reason=reason,
+                    replacement_source_id=resolved_replacement,
+                    duplicate_of_source_id=resolved_duplicate,
+                    revised_content=revised_content,
+                    expected_revision=expected_revision,
+                    preview=preview,
+                )
+            applied = data.get("applied") is True
+            allowed = data.get("allowed") is True
+            if json_output:
+                print_json(data)
+                if applied or (preview and allowed):
+                    return
+                raise typer.Exit(code=1)
+            if preview and allowed:
+                success(f"Correction preview allowed: {normalized_action}")
+                return
+            if applied:
+                success(f"Memory corrected: {normalized_action}")
+                print_mutation_receipt(data)
+                return
+            error(f"Correction denied: {data.get('reason') or 'unknown reason'}")
+            print_mutation_receipt(data)
+            raise typer.Exit(code=1)
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_correct_memory()
 
 
 @app.command("memory-import-status")

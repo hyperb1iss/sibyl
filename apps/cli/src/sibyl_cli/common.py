@@ -73,7 +73,10 @@ def print_mutation_receipt(response: Mapping[str, object]) -> None:
     operation_id = receipt.get("operation_id", "unknown")
     state = "replayed" if receipt.get("replayed") else "applied"
     if not receipt.get("applied"):
-        state = "queued"
+        affected_records = receipt.get("affected_records")
+        state = (
+            "queued" if isinstance(affected_records, list) and affected_records else "not applied"
+        )
     console.print(f"  [dim]Revision: {revision} · Operation: {operation_id} ({state})[/dim]")
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from difflib import unified_diff
+from itertools import pairwise
 from typing import Any, cast
 
 from sibyl_cli.common import console, create_table
@@ -93,6 +95,7 @@ def print_memory_source_inspect(data: dict[str, object], *, full_content: bool =
     table = create_table(None, "Field", "Value", expand=False)
     table.add_row("ID", str(data.get("id") or ""))
     table.add_row("Source", str(data.get("source_id") or ""))
+    table.add_row("Revision", str(data.get("revision") or ""))
     table.add_row("Title", str(data.get("title") or ""))
     table.add_row("Scope", scope)
     table.add_row("Project", str(data.get("project_id") or ""))
@@ -115,3 +118,115 @@ def print_memory_source_inspect(data: dict[str, object], *, full_content: bool =
         console.print()
         content = raw_content if full_content else _format_memory_preview(raw_content)
         console.print(content, soft_wrap=True)
+
+
+def _dict_items(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [cast("dict[str, object]", item) for item in value if isinstance(item, dict)]
+
+
+def _revision_number(value: object) -> int:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return 0
+
+
+def _print_blame_revisions(
+    revisions: list[dict[str, object]],
+    source: dict[str, object],
+) -> None:
+    current_content = source.get("raw_content")
+    if not revisions and not isinstance(current_content, str):
+        return
+    console.print("\n[bold]Content revisions[/bold]\n")
+    table = create_table(None, "Revision", "Changed", "Reason", expand=False)
+    ordered = sorted(
+        revisions,
+        key=lambda item: _revision_number(item.get("revision")),
+    )
+    for item in ordered:
+        table.add_row(
+            str(item.get("revision") or ""),
+            str(item.get("created_at") or ""),
+            str(item.get("reason") or ""),
+        )
+    table.add_row(str(source.get("revision") or "current"), "current", "canonical body")
+    console.print(table)
+
+    versions = [
+        (_revision_number(item.get("revision")), str(item.get("content") or "")) for item in ordered
+    ]
+    if isinstance(current_content, str):
+        versions.append((_revision_number(source.get("revision")), current_content))
+    for (prior_revision, prior), (next_revision, current) in pairwise(versions):
+        lines = list(
+            unified_diff(
+                prior.splitlines(),
+                current.splitlines(),
+                fromfile=f"revision {prior_revision}",
+                tofile=f"revision {next_revision}",
+                lineterm="",
+            )
+        )
+        if not lines:
+            continue
+        console.print(f"\n[dim]revision {prior_revision} → {next_revision}[/dim]")
+        for line in lines[:200]:
+            console.print(line, markup=False, soft_wrap=True)
+        if len(lines) > 200:
+            console.print(f"[dim]… {len(lines) - 200} diff lines omitted[/dim]")
+
+
+def _print_blame_table(
+    title: str,
+    rows: list[dict[str, object]],
+    columns: tuple[tuple[str, str], ...],
+) -> None:
+    if not rows:
+        return
+    console.print(f"\n[bold]{title}[/bold]\n")
+    table = create_table(None, *(label for label, _ in columns), expand=False)
+    for row in rows:
+        table.add_row(*(str(row.get(key) or "") for _, key in columns))
+    console.print(table)
+
+
+def print_memory_source_blame(data: dict[str, object]) -> None:
+    source_value = data.get("source")
+    if not isinstance(source_value, dict):
+        return
+    source = cast("dict[str, object]", source_value)
+    print_memory_source_inspect(source)
+    _print_blame_revisions(_dict_items(data.get("content_revisions")), source)
+    _print_blame_table(
+        "Corrections",
+        _dict_items(source.get("correction_history")),
+        (("Action", "action"), ("Revision", "prior_revision"), ("Reason", "reason")),
+    )
+    _print_blame_table(
+        "Import lineage",
+        _dict_items(data.get("derived_from")),
+        (("Import", "source_import_id"), ("Memory", "raw_memory_id"), ("Created", "created_at")),
+    )
+    _print_blame_table(
+        "Supersessions",
+        _dict_items(data.get("supersessions")),
+        (
+            ("Replacement", "raw_memory_id"),
+            ("Superseded", "superseded_raw_memory_id"),
+            ("Created", "created_at"),
+        ),
+    )
+    _print_blame_table(
+        "Derived records",
+        _dict_items(source.get("derived_records")),
+        (("ID", "id"), ("Type", "record_type"), ("Action", "source_action")),
+    )
+    _print_blame_table(
+        "Audit trail",
+        _dict_items(source.get("recent_audit_events")),
+        (("Created", "created_at"), ("Action", "action"), ("Policy", "policy_reason")),
+    )

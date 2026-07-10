@@ -27,6 +27,7 @@ handling. Don't guess the verbs from training data; the CLI schema changes betwe
 - "where did i leave off" -> `sibyl recall "<goal>"`
 - "have we hit this before" / "do we know X" -> `sibyl search "<topic>"`
 - "remember this" / "write this up" / "save this insight" -> `sibyl remember "<title>" "<body>"`
+- "that memory is wrong/stale/superseded" -> `sibyl blame <id>` then `sibyl correct <id> ...`
 - "consolidate this session" -> `sibyl reflect "<notes>" --persist`
 
 Live status: `sibyl context` shows project link and auth; `sibyl health` shows server reachability.
