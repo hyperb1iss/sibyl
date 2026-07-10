@@ -33,6 +33,7 @@ from sibyl_core.backends.surreal.content_schema import (
     CONTENT_RAW_CAPTURE_CHANGEFEED_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_INGESTION_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_LOOKUP_MIGRATION_DEFINITIONS,
+    CONTENT_RAW_CAPTURE_REQUIRED_FIELD_REPAIR_DEFINITIONS,
     CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS,
     CONTENT_RELATION_TABLES,
     CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS,
@@ -411,6 +412,12 @@ def test_content_backup_legacy_include_cleanup_is_versioned() -> None:
 
     assert CONTENT_SCHEMA_CURRENT_VERSION >= 14
     assert "content_backup_full_org_archives" in [migration.name for migration in migrations]
+    assert migration_sql.index("UPDATE backup_settings SET include_postgres = NONE") < (
+        migration_sql.index("REMOVE FIELD IF EXISTS include_postgres ON TABLE backup_settings")
+    )
+    assert migration_sql.index("UPDATE backups SET include_postgres = NONE") < (
+        migration_sql.index("REMOVE FIELD IF EXISTS include_postgres ON TABLE backups")
+    )
     assert "REMOVE FIELD IF EXISTS include_postgres ON TABLE backup_settings" in migration_sql
     assert "REMOVE FIELD IF EXISTS include_postgres ON TABLE backups" in migration_sql
     assert "DEFINE FIELD OVERWRITE include_database_dump ON backup_settings" in migration_sql
@@ -447,14 +454,17 @@ def test_content_usage_signals_are_versioned() -> None:
     assert CONTENT_SCHEMA_CURRENT_VERSION >= 16
     assert "memory_usage_events" in CONTENT_TABLES
     assert "content_usage_signals" in [migration.name for migration in migrations]
-    for field in (
-        "last_recalled_at",
-        "last_used_at",
-        "retrieval_count",
-        "citation_count",
-    ):
+    for field in ("last_recalled_at", "last_used_at"):
         assert f"DEFINE FIELD IF NOT EXISTS {field} ON raw_captures" in (CONTENT_SCHEMA_DEFINITIONS)
         assert f"DEFINE FIELD IF NOT EXISTS {field} ON raw_captures" in (
+            CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS
+        )
+    for field in ("retrieval_count", "citation_count"):
+        assert f"DEFINE FIELD IF NOT EXISTS {field} ON raw_captures" in (CONTENT_SCHEMA_DEFINITIONS)
+        assert f"DEFINE FIELD OVERWRITE {field} ON raw_captures TYPE option<int>" in (
+            CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS
+        )
+        assert f"DEFINE FIELD OVERWRITE {field} ON raw_captures TYPE int" in (
             CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS
         )
     assert "DEFINE TABLE IF NOT EXISTS memory_usage_events SCHEMAFULL" in (
@@ -557,9 +567,28 @@ def test_content_raw_capture_revision_is_versioned() -> None:
     migration_sql = "\n".join(migration.statements)
 
     assert CONTENT_SCHEMA_CURRENT_VERSION >= 21
-    assert "DEFINE FIELD IF NOT EXISTS revision ON raw_captures" in migration_sql
+    assert "DEFINE FIELD OVERWRITE revision ON raw_captures TYPE option<int>" in migration_sql
     assert "UPDATE raw_captures SET revision = 1" in migration_sql
     assert CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS.strip().splitlines()[0] in (
+        migration_sql
+    )
+
+
+def test_content_raw_capture_required_fields_have_terminal_repair() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration = next(
+        item for item in migrations if item.name == "content_raw_capture_required_field_repair"
+    )
+    migration_sql = "\n".join(migration.statements)
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 23
+    for field in ("revision", "retrieval_count", "citation_count", "misled_count"):
+        assert f"DEFINE FIELD OVERWRITE {field} ON raw_captures TYPE option<int>" in migration_sql
+        assert f"DEFINE FIELD OVERWRITE {field} ON raw_captures TYPE int" in migration_sql
+    assert "metadata.retrieval_count" in migration_sql
+    assert "metadata.citation_count" in migration_sql
+    assert "metadata.misled_count" in migration_sql
+    assert CONTENT_RAW_CAPTURE_REQUIRED_FIELD_REPAIR_DEFINITIONS.strip().splitlines()[0] in (
         migration_sql
     )
 

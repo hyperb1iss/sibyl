@@ -134,15 +134,15 @@ DEFINE FIELD IF NOT EXISTS metadata ON raw_captures TYPE object FLEXIBLE DEFAULT
 DEFINE FIELD IF NOT EXISTS provenance ON raw_captures TYPE object FLEXIBLE DEFAULT {{}};
 DEFINE FIELD IF NOT EXISTS capture_surface ON raw_captures TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS created_by_user_id ON raw_captures TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS revision ON raw_captures TYPE int DEFAULT 1 ASSERT $value >= 1;
+DEFINE FIELD IF NOT EXISTS revision ON raw_captures TYPE option<int> DEFAULT 1;
 DEFINE FIELD IF NOT EXISTS captured_at ON raw_captures TYPE datetime DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS deleted_at ON raw_captures TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS purge_after ON raw_captures TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS last_recalled_at ON raw_captures TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS last_used_at ON raw_captures TYPE option<datetime>;
-DEFINE FIELD IF NOT EXISTS retrieval_count ON raw_captures TYPE int DEFAULT 0;
-DEFINE FIELD IF NOT EXISTS citation_count ON raw_captures TYPE int DEFAULT 0;
-DEFINE FIELD IF NOT EXISTS misled_count ON raw_captures TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS retrieval_count ON raw_captures TYPE option<int> DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS citation_count ON raw_captures TYPE option<int> DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS misled_count ON raw_captures TYPE option<int> DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS created_at ON raw_captures TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_uuid ON raw_captures FIELDS uuid UNIQUE;

@@ -9,11 +9,16 @@ from uuid import uuid4
 import pytest
 
 from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
-from sibyl_core.backends.surreal.content_schema import EMBEDDING_DIM
+from sibyl_core.backends.surreal.content_schema import (
+    CONTENT_SCHEMA_CURRENT_VERSION,
+    CONTENT_SCHEMA_NAME,
+    EMBEDDING_DIM,
+)
 from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient
 from sibyl_core.backends.surreal.schema import bootstrap_schema
 from sibyl_core.backends.surreal.schema_version import (
     GRAPH_SCHEMA_NAME,
+    get_schema_version,
     record_schema_version,
 )
 from sibyl_core.embeddings.providers import EmbeddingMetadata
@@ -576,6 +581,96 @@ async def test_live_surreal_server_repairs_partial_graph_required_fields() -> No
                 await _drop_surreal_namespace(client.namespace)
         else:
             await _drop_surreal_namespace(client.namespace)
+
+
+@pytest.mark.asyncio
+async def test_live_surreal_server_resumes_partial_content_migration() -> None:
+    namespace = f"content_migration_live_{uuid4().hex}"
+    client = SurrealContentClient(
+        url=_live_surreal_url(),
+        username=_surreal_username(),
+        password=_surreal_password(),
+        namespace=namespace,
+        database="content",
+    )
+
+    test_failed = False
+    try:
+        await bootstrap_content_schema(client, reset=True)
+        await client.execute_query(
+            """
+            DEFINE FIELD include_postgres ON backup_settings TYPE option<bool>;
+            DEFINE FIELD include_postgres ON backups TYPE option<bool>;
+            CREATE backup_settings:legacy SET
+                uuid = 'legacy',
+                organization_id = 'legacy-org',
+                include_postgres = true;
+            CREATE backups:legacy SET
+                uuid = 'legacy',
+                organization_id = 'legacy-org',
+                backup_id = 'legacy',
+                include_postgres = true;
+            REMOVE FIELD include_postgres ON backup_settings;
+            REMOVE FIELD include_postgres ON backups;
+            REMOVE FIELD revision ON raw_captures;
+            REMOVE FIELD retrieval_count ON raw_captures;
+            REMOVE FIELD citation_count ON raw_captures;
+            REMOVE FIELD misled_count ON raw_captures;
+            CREATE raw_captures:legacy SET
+                uuid = 'legacy',
+                organization_id = 'legacy-org',
+                metadata = {
+                    retrieval_count: 7,
+                    citation_count: 5,
+                    misled_count: 3
+                };
+            """
+        )
+        await record_schema_version(
+            client.execute_query,
+            version=13,
+            migrations=(),
+            name=CONTENT_SCHEMA_NAME,
+        )
+
+        await bootstrap_content_schema(client)
+
+        assert (
+            await get_schema_version(client.execute_query, name=CONTENT_SCHEMA_NAME)
+            == CONTENT_SCHEMA_CURRENT_VERSION
+        )
+        raw_rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT revision, retrieval_count, citation_count, misled_count
+                FROM raw_captures:legacy;
+                """
+            )
+        )
+        assert raw_rows == [
+            {
+                "revision": 1,
+                "retrieval_count": 7,
+                "citation_count": 5,
+                "misled_count": 3,
+            }
+        ]
+        backup_rows = normalize_records(await client.execute_query("SELECT * FROM backups:legacy;"))
+        backup_setting_rows = normalize_records(
+            await client.execute_query("SELECT * FROM backup_settings:legacy;")
+        )
+        assert "include_postgres" not in backup_rows[0]
+        assert "include_postgres" not in backup_setting_rows[0]
+    except Exception:
+        test_failed = True
+        raise
+    finally:
+        await client.close()
+        if test_failed:
+            with suppress(Exception):
+                await _drop_surreal_namespace(namespace)
+        else:
+            await _drop_surreal_namespace(namespace)
 
 
 @pytest.mark.asyncio

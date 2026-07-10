@@ -52,7 +52,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 22
+CONTENT_SCHEMA_CURRENT_VERSION = 23
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -336,6 +336,8 @@ ALTER TABLE IF EXISTS entity PERMISSIONS
 """
 
 CONTENT_BACKUP_LEGACY_INCLUDE_CLEANUP_DEFINITIONS = """
+UPDATE backup_settings SET include_postgres = NONE;
+UPDATE backups SET include_postgres = NONE;
 REMOVE FIELD IF EXISTS include_postgres ON TABLE backup_settings;
 REMOVE FIELD IF EXISTS include_postgres ON TABLE backups;
 DEFINE FIELD OVERWRITE include_database_dump ON backup_settings TYPE option<bool>;
@@ -357,11 +359,18 @@ DEFINE INDEX IF NOT EXISTS idx_document_chunks_org_uuid
     ON document_chunks FIELDS organization_id, uuid UNIQUE;
 """
 
-CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS = """
+CONTENT_RAW_CAPTURE_REQUIRED_FIELD_OPTIONAL_DEFINITIONS = """
+DEFINE FIELD OVERWRITE revision ON raw_captures TYPE option<int> DEFAULT 1;
+DEFINE FIELD OVERWRITE retrieval_count ON raw_captures TYPE option<int> DEFAULT 0;
+DEFINE FIELD OVERWRITE citation_count ON raw_captures TYPE option<int> DEFAULT 0;
+DEFINE FIELD OVERWRITE misled_count ON raw_captures TYPE option<int> DEFAULT 0;
+"""
+
+CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS = (
+    CONTENT_RAW_CAPTURE_REQUIRED_FIELD_OPTIONAL_DEFINITIONS
+    + """
 DEFINE FIELD IF NOT EXISTS last_recalled_at ON raw_captures TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS last_used_at ON raw_captures TYPE option<datetime>;
-DEFINE FIELD IF NOT EXISTS retrieval_count ON raw_captures TYPE option<int> DEFAULT 0;
-DEFINE FIELD IF NOT EXISTS citation_count ON raw_captures TYPE option<int> DEFAULT 0;
 UPDATE raw_captures SET
     retrieval_count = retrieval_count ?? metadata.retrieval_count ?? 0,
     citation_count = citation_count ?? metadata.citation_count ?? 0
@@ -415,6 +424,7 @@ WHERE last_recalled_at = NONE
         OR metadata.citation_count != NONE
     );
 """
+)
 
 CONTENT_SOURCE_IMPORT_RECEIPT_MIGRATION_DEFINITIONS = """
 DEFINE FIELD IF NOT EXISTS skipped_records.* ON source_imports TYPE object FLEXIBLE;
@@ -500,17 +510,38 @@ UPDATE raw_captures SET
 WHERE type::is::number(metadata.confidence);
 """
 
-CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS = """
-DEFINE FIELD IF NOT EXISTS revision ON raw_captures TYPE int DEFAULT 1 ASSERT $value >= 1;
+CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS = (
+    CONTENT_RAW_CAPTURE_REQUIRED_FIELD_OPTIONAL_DEFINITIONS
+    + """
 UPDATE raw_captures SET revision = 1 WHERE revision = NONE OR revision < 1;
+DEFINE FIELD OVERWRITE revision ON raw_captures TYPE int DEFAULT 1 ASSERT $value >= 1;
 """
+)
 
-CONTENT_MISLED_USAGE_SIGNAL_MIGRATION_DEFINITIONS = """
-DEFINE FIELD IF NOT EXISTS misled_count ON raw_captures TYPE option<int> DEFAULT 0;
+CONTENT_MISLED_USAGE_SIGNAL_MIGRATION_DEFINITIONS = (
+    CONTENT_RAW_CAPTURE_REQUIRED_FIELD_OPTIONAL_DEFINITIONS
+    + """
 UPDATE raw_captures SET misled_count = metadata.misled_count ?? 0
 WHERE misled_count = NONE;
 DEFINE FIELD OVERWRITE misled_count ON raw_captures TYPE int DEFAULT 0;
 """
+)
+
+CONTENT_RAW_CAPTURE_REQUIRED_FIELD_REPAIR_DEFINITIONS = (
+    CONTENT_RAW_CAPTURE_REQUIRED_FIELD_OPTIONAL_DEFINITIONS
+    + """
+UPDATE raw_captures SET revision = 1 WHERE revision = NONE OR revision < 1;
+UPDATE raw_captures SET
+    retrieval_count = retrieval_count ?? metadata.retrieval_count ?? 0,
+    citation_count = citation_count ?? metadata.citation_count ?? 0,
+    misled_count = misled_count ?? metadata.misled_count ?? 0
+WHERE retrieval_count = NONE OR citation_count = NONE OR misled_count = NONE;
+DEFINE FIELD OVERWRITE revision ON raw_captures TYPE int DEFAULT 1 ASSERT $value >= 1;
+DEFINE FIELD OVERWRITE retrieval_count ON raw_captures TYPE int DEFAULT 0;
+DEFINE FIELD OVERWRITE citation_count ON raw_captures TYPE int DEFAULT 0;
+DEFINE FIELD OVERWRITE misled_count ON raw_captures TYPE int DEFAULT 0;
+"""
+)
 
 
 def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
@@ -650,6 +681,13 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=22,
             name="content_misled_usage_signal",
             statements=tuple(split_statements(CONTENT_MISLED_USAGE_SIGNAL_MIGRATION_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=23,
+            name="content_raw_capture_required_field_repair",
+            statements=tuple(
+                split_statements(CONTENT_RAW_CAPTURE_REQUIRED_FIELD_REPAIR_DEFINITIONS)
+            ),
         ),
     )
 
@@ -995,6 +1033,8 @@ __all__ = [
     "CONTENT_MISLED_USAGE_SIGNAL_MIGRATION_DEFINITIONS",
     "CONTENT_PERMISSION_MIGRATION_DEFINITIONS",
     "CONTENT_RAW_CAPTURE_LOOKUP_MIGRATION_DEFINITIONS",
+    "CONTENT_RAW_CAPTURE_REQUIRED_FIELD_OPTIONAL_DEFINITIONS",
+    "CONTENT_RAW_CAPTURE_REQUIRED_FIELD_REPAIR_DEFINITIONS",
     "CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS",
     "CONTENT_RELATION_TABLES",
     "CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS",
