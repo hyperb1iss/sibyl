@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import random
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -24,6 +25,9 @@ from sibyl_core.backends.surreal.protocols import QueryParams, SurrealClient
 
 logger = logging.getLogger(__name__)
 _MAX_CLOSED_CONNECTION_RETRIES = 2
+_MAX_TRANSACTION_CONFLICT_RETRIES = 8
+_TRANSACTION_CONFLICT_RETRY_BASE_SECONDS = 0.05
+_TRANSACTION_CONFLICT_RETRY_MAX_SECONDS = 1.0
 _DEFAULT_POOL_SIZE = 4
 
 
@@ -34,6 +38,19 @@ def _is_embedded_url(url: str) -> bool:
     # Embedded stores are single-writer and `memory://` hands out a fresh empty
     # database per connection, so a pool there would fragment state.
     return url.startswith(_EMBEDDED_URL_SCHEMES)
+
+
+def _is_retryable_transaction_conflict(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return "transaction conflict" in message and "can be retried" in message
+
+
+def _transaction_conflict_retry_delay(retry_count: int) -> float:
+    ceiling = min(
+        _TRANSACTION_CONFLICT_RETRY_MAX_SECONDS,
+        _TRANSACTION_CONFLICT_RETRY_BASE_SECONDS * (2 ** (retry_count - 1)),
+    )
+    return random.uniform(0.0, ceiling)
 
 
 class _PooledConnection:
@@ -259,7 +276,8 @@ class DedicatedSurrealClient:
         query_origin: str | None,
     ) -> object:
         started_at = query_start()
-        retry_count = 0
+        connection_retry_count = 0
+        transaction_retry_count = 0
         result: object = None
         can_retry = _can_retry_raw_query(query) if raw else _can_retry_query(query)
         connection = await self._available.get()
@@ -281,29 +299,43 @@ class DedicatedSurrealClient:
                                 if not _is_transient_connection_error(exc):
                                     raise
                                 await connection.drop()
-                                if retry_count >= _MAX_CLOSED_CONNECTION_RETRIES:
+                                if connection_retry_count >= _MAX_CLOSED_CONNECTION_RETRIES:
                                     raise
-                                retry_count += 1
+                                connection_retry_count += 1
                                 logger.warning(
                                     "SurrealDB dedicated client connection failed during "
                                     "write preflight; retrying attempt=%s error=%s",
-                                    retry_count,
+                                    connection_retry_count,
                                     exc,
                                 )
                     client = await connection.connect()
                     result = await self._send_query(client, query, params=params, raw=raw)
                     break
                 except Exception as exc:
+                    if _is_retryable_transaction_conflict(exc):
+                        if transaction_retry_count >= _MAX_TRANSACTION_CONFLICT_RETRIES:
+                            raise
+                        transaction_retry_count += 1
+                        delay = _transaction_conflict_retry_delay(transaction_retry_count)
+                        logger.warning(
+                            "SurrealDB transaction conflict; retrying attempt=%s delay=%.3fs "
+                            "error=%s",
+                            transaction_retry_count,
+                            delay,
+                            exc,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
                     if not _is_transient_connection_error(exc):
                         raise
                     await connection.drop()
-                    if not can_retry or retry_count >= _MAX_CLOSED_CONNECTION_RETRIES:
+                    if not can_retry or connection_retry_count >= _MAX_CLOSED_CONNECTION_RETRIES:
                         raise
-                    retry_count += 1
+                    connection_retry_count += 1
                     logger.warning(
                         "SurrealDB dedicated client connection failed during read; retrying "
                         "attempt=%s error=%s",
-                        retry_count,
+                        connection_retry_count,
                         exc,
                     )
         except Exception as exc:
@@ -317,7 +349,7 @@ class DedicatedSurrealClient:
                 param_keys=sorted(params),
                 query_label=query_label,
                 query_origin=query_origin,
-                retry_count=retry_count,
+                retry_count=connection_retry_count + transaction_retry_count,
                 error=exc,
             )
             raise
@@ -333,7 +365,7 @@ class DedicatedSurrealClient:
             param_keys=sorted(params),
             query_label=query_label,
             query_origin=query_origin,
-            retry_count=retry_count,
+            retry_count=connection_retry_count + transaction_retry_count,
         )
         return result
 

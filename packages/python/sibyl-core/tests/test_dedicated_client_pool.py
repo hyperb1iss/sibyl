@@ -347,3 +347,94 @@ async def test_ping_drops_transient_failed_connection(monkeypatch) -> None:
     pooled = await client._available.get()
     assert pooled._client is None
     client._available.put_nowait(pooled)
+
+
+@pytest.mark.asyncio
+async def test_execute_query_retries_server_declared_transaction_conflicts(monkeypatch) -> None:
+    calls = 0
+    sleeps: list[float] = []
+
+    class FakeAsyncSurreal:
+        def __init__(self, _url: str) -> None:
+            pass
+
+        async def signin(self, _credentials: dict[str, str]) -> None:
+            return None
+
+        async def use(self, _namespace: str, _database: str) -> None:
+            return None
+
+        async def query(self, query: str, _params: object | None = None) -> object:
+            nonlocal calls
+            if query == "RETURN true;":
+                return True
+            calls += 1
+            if calls == 1:
+                raise RuntimeError(
+                    "Transaction conflict: Resource busy. This transaction can be retried"
+                )
+            return [{"ok": True}]
+
+        async def close(self) -> None:
+            return None
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr(dedicated_client_module.random, "uniform", lambda _low, high: high)
+    monkeypatch.setattr(dedicated_client_module.asyncio, "sleep", fake_sleep)
+    client = DedicatedSurrealClient(
+        url="ws://localhost:8000/rpc",
+        username="root",
+        password="root",
+        namespace="org_conflict",
+        database="graph",
+        pool_size=1,
+    )
+
+    result = await client.execute_query("UPDATE entity SET updated_at = time::now();")
+
+    assert result == [{"ok": True}]
+    assert calls == 2
+    assert sleeps == [dedicated_client_module._TRANSACTION_CONFLICT_RETRY_BASE_SECONDS]
+
+
+@pytest.mark.asyncio
+async def test_execute_query_does_not_retry_unmarked_transaction_conflicts(monkeypatch) -> None:
+    calls = 0
+
+    class FakeAsyncSurreal:
+        def __init__(self, _url: str) -> None:
+            pass
+
+        async def signin(self, _credentials: dict[str, str]) -> None:
+            return None
+
+        async def use(self, _namespace: str, _database: str) -> None:
+            return None
+
+        async def query(self, query: str, _params: object | None = None) -> object:
+            nonlocal calls
+            if query == "RETURN true;":
+                return True
+            calls += 1
+            raise RuntimeError("Transaction conflict: retry safety is unknown")
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    client = DedicatedSurrealClient(
+        url="ws://localhost:8000/rpc",
+        username="root",
+        password="root",
+        namespace="org_conflict",
+        database="graph",
+        pool_size=1,
+    )
+
+    with pytest.raises(RuntimeError, match="retry safety is unknown"):
+        await client.execute_query("UPDATE entity SET updated_at = time::now();")
+
+    assert calls == 1
