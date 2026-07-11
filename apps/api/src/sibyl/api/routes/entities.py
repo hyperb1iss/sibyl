@@ -1368,6 +1368,7 @@ async def create_entities_bulk(
 ) -> EntityBulkCreateResponse:
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
+    verified_project_ids: set[str] = set()
 
     for entity in batch.entities:
         if entity.entity_type in BULK_UNSUPPORTED_TYPES:
@@ -1381,14 +1382,16 @@ async def create_entities_bulk(
                 detail="bulk create requires skip_conflicts=true; use POST /entities for conflict detection",
             )
         project = entity.metadata.get("project_id") if entity.metadata else None
-        if project:
+        project_id = str(project) if project else None
+        if project_id and project_id not in verified_project_ids:
             await verify_entity_project_access(
                 content_session,
                 ctx,
-                str(project),
+                project_id,
                 required_role=ProjectRole.CONTRIBUTOR,
                 require_existing_project=True,
             )
+            verified_project_ids.add(project_id)
         await _validate_related_to_targets_for_write(
             ctx=ctx,
             entity_manager=runtime.entity_manager,

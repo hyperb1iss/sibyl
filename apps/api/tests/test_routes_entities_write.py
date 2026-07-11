@@ -203,6 +203,55 @@ async def test_create_entities_bulk_uses_runtime_bulk_create() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_entities_bulk_verifies_each_project_once() -> None:
+    org = _org()
+    ctx = _ctx()
+    batch = EntityBulkCreateRequest(
+        entities=[
+            EntityCreate(
+                name=f"Session {index}",
+                content="project-scoped memory",
+                entity_type=EntityType.SESSION,
+                skip_conflicts=True,
+                metadata={"project_id": "project_shared"},
+            )
+            for index in range(2)
+        ]
+    )
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            create_direct_bulk=AsyncMock(return_value=["session_one", "session_two"])
+        ),
+        relationship_manager=SimpleNamespace(create_bulk=AsyncMock(return_value=(0, 0))),
+    )
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "sibyl.api.routes.entities.verify_entity_project_access",
+            AsyncMock(),
+        ) as verify_access,
+    ):
+        await create_entities_bulk(
+            batch=batch,
+            org=org,
+            ctx=ctx,
+            content_session="session",
+        )
+
+    verify_access.assert_awaited_once_with(
+        "session",
+        ctx,
+        "project_shared",
+        required_role=ProjectRole.CONTRIBUTOR,
+        require_existing_project=True,
+    )
+
+
+@pytest.mark.asyncio
 async def test_create_entities_bulk_can_defer_embeddings_to_backfill_job() -> None:
     org = _org()
     ctx = _ctx()
