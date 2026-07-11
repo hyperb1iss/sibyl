@@ -390,6 +390,16 @@ class SibylLiveApiMemory(Memory):
                     if status.get("error"):
                         msg = f"{job_name} job {job_id} failed: {status['error']}"
                         raise RuntimeError(msg)
+                    result = status.get("result")
+                    if isinstance(result, dict):
+                        result_errors = result.get("errors")
+                        projection_state = _stripped_str(result.get("projection_state"))
+                        if result_errors or projection_state == "partial":
+                            msg = (
+                                f"{job_name} job {job_id} completed partially: "
+                                f"{result_errors or projection_state}"
+                            )
+                            raise RuntimeError(msg)
                     pending.remove(job_id)
                     made_progress = True
                 elif status_value in {"cancelled", "not_found"}:

@@ -811,6 +811,28 @@ def test_sibyl_memory_embedding_wait_times_out_without_progress(monkeypatch) -> 
     assert memory._pending_embedding_job_ids == {"embed-lme-v2-1"}
 
 
+def test_sibyl_memory_projection_rejects_partial_job_result() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    memory.embedding_job_wait_timeout_seconds = 1.0
+    memory.embedding_job_poll_seconds = 0.1
+    memory._pending_projection_job_ids = {"project-lme-v2-1"}
+    memory._request_json = lambda *_args, **_kwargs: {
+        "status": "complete",
+        "error": None,
+        "result": {
+            "projection_state": "partial",
+            "errors": ["Transaction conflict: Resource busy"],
+        },
+    }
+
+    with pytest.raises(RuntimeError, match="completed partially.*Resource busy"):
+        memory._drain_memory_projections()
+
+    assert memory._pending_projection_job_ids == {"project-lme-v2-1"}
+
+
 def test_sibyl_memory_query_waits_for_background_jobs_before_search() -> None:
     module = _load_memory_module()
     memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
