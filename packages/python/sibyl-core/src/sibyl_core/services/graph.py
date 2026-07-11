@@ -170,44 +170,24 @@ INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     name_embedding = $input.name_embedding;
 """
 _RELATIONSHIP_BULK_UPSERT_QUERY = """
-FOR $row IN $rows {
-    LET $src = $row.src;
-    LET $tgt = $row.tgt;
-    DELETE FROM relates_to WHERE uuid = $row.uuid AND (in != $src OR out != $tgt);
-    LET $updated = (UPDATE relates_to SET
-        in = $src,
-        out = $tgt,
-        uuid = $row.uuid,
-        name = $row.name,
-        fact = $row.fact,
-        fact_embedding = $row.fact_embedding,
-        group_id = $row.group_id,
-        source_id = $row.source_id,
-        target_id = $row.target_id,
-        episodes = $row.episodes ?? [],
-        attributes = $row.attributes ?? {},
-        created_at = $row.created_at,
-        expired_at = $row.expired_at,
-        valid_at = $row.valid_at,
-        invalid_at = $row.invalid_at
-    WHERE uuid = $row.uuid RETURN id);
-    IF array::len($updated) = 0 THEN
-        RELATE $src->relates_to->$tgt SET
-            uuid = $row.uuid,
-            name = $row.name,
-            fact = $row.fact,
-            fact_embedding = $row.fact_embedding,
-            group_id = $row.group_id,
-            source_id = $row.source_id,
-            target_id = $row.target_id,
-            episodes = $row.episodes ?? [],
-            attributes = $row.attributes ?? {},
-            created_at = $row.created_at,
-            expired_at = $row.expired_at,
-            valid_at = $row.valid_at,
-            invalid_at = $row.invalid_at
-    END;
-};
+BEGIN TRANSACTION;
+DELETE FROM relates_to
+WHERE uuid IN $uuids
+  AND (in != $sources[uuid] OR out != $targets[uuid]);
+INSERT RELATION INTO relates_to $rows ON DUPLICATE KEY UPDATE
+    name = $input.name,
+    fact = $input.fact,
+    fact_embedding = $input.fact_embedding,
+    group_id = $input.group_id,
+    source_id = $input.source_id,
+    target_id = $input.target_id,
+    episodes = $input.episodes ?? [],
+    attributes = $input.attributes ?? {},
+    created_at = $input.created_at,
+    expired_at = $input.expired_at,
+    valid_at = $input.valid_at,
+    invalid_at = $input.invalid_at;
+COMMIT TRANSACTION;
 """
 log = structlog.get_logger()
 
@@ -2847,22 +2827,37 @@ async def _replace_relationships_bulk(
         if src is None or tgt is None:
             continue
         payload = _relationship_record(relationship, group_id=group_id)
-        payload["src"] = src
-        payload["tgt"] = tgt
+        payload["in"] = src
+        payload["out"] = tgt
         rows.append(payload)
         written_ids.append(relationship.id)
 
     if not rows:
         return []
 
+    uuids = [str(row["uuid"]) for row in rows]
+    sources = {str(row["uuid"]): row["in"] for row in rows}
+    targets = {str(row["uuid"]): row["out"] for row in rows}
     try:
-        await client.execute_query(_RELATIONSHIP_BULK_UPSERT_QUERY, rows=rows)
+        await client.execute_query(
+            _RELATIONSHIP_BULK_UPSERT_QUERY,
+            rows=rows,
+            uuids=uuids,
+            sources=sources,
+            targets=targets,
+        )
     except Exception as exc:
         if not _is_transient_connection_error(exc):
             raise
         mark_graph_schema_dirty(client.group_id)
         await prepare_graph_schema(client)
-        await client.execute_query(_RELATIONSHIP_BULK_UPSERT_QUERY, rows=rows)
+        await client.execute_query(
+            _RELATIONSHIP_BULK_UPSERT_QUERY,
+            rows=rows,
+            uuids=uuids,
+            sources=sources,
+            targets=targets,
+        )
     return written_ids
 
 

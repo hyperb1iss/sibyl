@@ -2174,7 +2174,9 @@ async def test_native_relationship_bulk_writes_in_one_surreal_query() -> None:
 
     assert created_ids == [relationship.id for relationship in relationships]
 
-    write_calls = [call for call in client.calls if "FOR $row IN $rows" in call[0]]
+    write_calls = [
+        call for call in client.calls if "INSERT RELATION INTO relates_to $rows" in call[0]
+    ]
     endpoint_lookups = [
         call for call in client.calls if "AS record_id" in call[0] and "FROM entity" in call[0]
     ]
@@ -2184,7 +2186,11 @@ async def test_native_relationship_bulk_writes_in_one_surreal_query() -> None:
     _, write_params = write_calls[0]
     rows = cast("list[dict[str, object]]", write_params["rows"])
     assert len(rows) == len(relationships)
+    assert write_params["uuids"] == [relationship.id for relationship in relationships]
+    assert set(cast("dict[str, object]", write_params["sources"])) == set(write_params["uuids"])
+    assert set(cast("dict[str, object]", write_params["targets"])) == set(write_params["uuids"])
     assert all(row["group_id"] == client.group_id for row in rows)
+    assert all("in" in row and "out" in row for row in rows)
     assert {str(row["uuid"]) for row in rows} == {relationship.id for relationship in relationships}
     for row in rows:
         assert len(cast("list[float]", row["fact_embedding"])) == 4
@@ -2254,6 +2260,69 @@ async def test_native_relationship_bulk_skips_edges_with_missing_endpoints() -> 
     assert {row["target_id"] for row in rows} == {"beta", "gamma"}
     assert all(row["in_uuid"] == "alpha" for row in rows)
     assert {row["out_uuid"] for row in rows} == {"beta", "gamma"}
+
+
+@pytest.mark.asyncio
+async def test_native_relationship_bulk_replaces_changed_endpoints() -> None:
+    client = SurrealGraphClient(group_id="org-native-bulk-rel-rewire", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        entity_manager = EntityManager(client, group_id=client.group_id)
+        relationship_manager = RelationshipManager(client, group_id=client.group_id)
+
+        for entity_id in ("alpha", "beta", "gamma"):
+            await entity_manager.create_direct(
+                Entity(
+                    id=entity_id,
+                    entity_type=EntityType.TOPIC,
+                    name=entity_id.title(),
+                    organization_id=client.group_id,
+                )
+            )
+
+        await relationship_manager.create_direct_bulk(
+            [
+                Relationship(
+                    id="rel_rewired",
+                    source_id="alpha",
+                    target_id="beta",
+                    relationship_type=RelationshipType.RELATED_TO,
+                )
+            ]
+        )
+        await relationship_manager.create_direct_bulk(
+            [
+                Relationship(
+                    id="rel_rewired",
+                    source_id="gamma",
+                    target_id="beta",
+                    relationship_type=RelationshipType.BLOCKS,
+                )
+            ]
+        )
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT uuid, name, source_id, target_id, in.uuid AS in_uuid, out.uuid AS out_uuid
+                FROM relates_to
+                WHERE uuid = 'rel_rewired';
+                """
+            )
+        )
+    finally:
+        await client.close()
+
+    assert rows == [
+        {
+            "uuid": "rel_rewired",
+            "name": "BLOCKS",
+            "source_id": "gamma",
+            "target_id": "beta",
+            "in_uuid": "gamma",
+            "out_uuid": "beta",
+        }
+    ]
 
 
 @pytest.mark.asyncio
