@@ -1,10 +1,16 @@
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from sibyl.coordination._redis.broker import RedisQueueBroker
+from sibyl.coordination._redis import broker as redis_broker_module
+from sibyl.coordination._redis.broker import (
+    JOB_METADATA_KEY_PREFIX,
+    JOB_METADATA_TTL_SECONDS,
+    RedisQueueBroker,
+)
 from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_KEY,
     RECENT_JOB_INDEX_LIMIT,
@@ -48,6 +54,7 @@ class RecordingEnqueuePool:
         self.calls: list[tuple[str, str | None, dict[str, object]]] = []
         self.extra_args: list[tuple[object, ...]] = []
         self.delete = AsyncMock()
+        self.set = AsyncMock()
         self.zadd = AsyncMock()
         self.zremrangebyrank = AsyncMock()
 
@@ -61,6 +68,18 @@ class RecordingEnqueuePool:
         self.calls.append((function, first_arg, kwargs))
         self.extra_args.append(args)
         return SimpleNamespace(job_id=kwargs["_job_id"])
+
+
+class DuplicateEnqueuePool(RecordingEnqueuePool):
+    async def enqueue_job(
+        self,
+        function: str,
+        first_arg: object | None = None,
+        *args: object,
+        **kwargs: object,
+    ):
+        self.calls.append((function, first_arg, kwargs))
+        self.extra_args.append(args)
 
 
 def make_broker(pool: object) -> RedisQueueBroker:
@@ -459,6 +478,93 @@ async def test_enqueue_memory_extraction_uses_source_scoped_job_id() -> None:
     assert pool.calls[0][2]["max_tokens"] == 512
     assert pool.extra_args[0] == ("org-123",)
     assert_recent_job_indexed(pool, job_id)
+    metadata_key, metadata_json = pool.set.await_args.args
+    assert metadata_key == f"{JOB_METADATA_KEY_PREFIX}{job_id}"
+    assert pool.set.await_args.kwargs == {"ex": JOB_METADATA_TTL_SECONDS}
+    assert json.loads(metadata_json)["organization_id"] == "org-123"
+
+
+@pytest.mark.asyncio
+async def test_get_job_status_uses_small_metadata_without_loading_job_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class MetadataPool:
+        async def get(self, key: str) -> bytes:
+            assert key == f"{JOB_METADATA_KEY_PREFIX}project-memory-1"
+            return json.dumps(
+                {
+                    "function": "project_memory_batch",
+                    "organization_id": "org-123",
+                    "enqueue_time": "2026-07-11T12:00:00+00:00",
+                }
+            ).encode()
+
+    class FakeJob:
+        def __init__(self, job_id: str, _pool: object) -> None:
+            assert job_id == "project-memory-1"
+
+        async def status(self):
+            return redis_broker_module.ArqJobStatus.in_progress
+
+        async def info(self):
+            raise AssertionError("job arguments must not be deserialized")
+
+    pool = MetadataPool()
+    broker = make_broker(pool)
+    monkeypatch.setattr(redis_broker_module, "Job", FakeJob)
+
+    info = await broker.get_job_status("project-memory-1")
+
+    assert info.function == "project_memory_batch"
+    assert info.organization_id == "org-123"
+    assert info.status == JobStatus.IN_PROGRESS
+    assert info.enqueue_time == datetime(2026, 7, 11, 12, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_get_job_status_falls_back_when_metadata_is_incomplete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    enqueue_time = datetime(2026, 7, 11, 12, tzinfo=UTC)
+
+    class MetadataPool:
+        async def get(self, _key: str) -> bytes:
+            return b'{"organization_id":"org-123"}'
+
+    class FakeJob:
+        def __init__(self, _job_id: str, _pool: object) -> None:
+            pass
+
+        async def status(self):
+            return redis_broker_module.ArqJobStatus.queued
+
+        async def info(self):
+            return SimpleNamespace(
+                function="project_memory_batch",
+                enqueue_time=enqueue_time,
+                args=([{"id": "session-1"}], "org-123"),
+                kwargs={},
+            )
+
+    broker = make_broker(MetadataPool())
+    monkeypatch.setattr(redis_broker_module, "Job", FakeJob)
+
+    info = await broker.get_job_status("project-memory-legacy")
+
+    assert info.function == "project_memory_batch"
+    assert info.args == ([{"id": "session-1"}], "org-123")
+    assert info.enqueue_time == enqueue_time
+
+
+@pytest.mark.asyncio
+async def test_deduplicated_enqueue_does_not_replace_original_metadata() -> None:
+    pool = DuplicateEnqueuePool()
+    broker = make_broker(pool)
+
+    job_id = await broker.enqueue_consolidation("org-123")
+
+    assert job_id == "consolidate:org-123"
+    pool.set.assert_not_awaited()
 
 
 @pytest.mark.asyncio

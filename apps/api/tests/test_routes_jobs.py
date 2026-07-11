@@ -22,6 +22,21 @@ from sibyl.api.routes.jobs import (
 
 class TestJobVisibility:
     @pytest.mark.asyncio
+    async def test_job_metadata_checks_org_without_deserializing_arguments(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        visible = SimpleNamespace(
+            organization_id=str(org.id),
+            function="project_memory_batch",
+        )
+        hidden = SimpleNamespace(
+            organization_id="00000000-0000-0000-0000-000000000999",
+            function="project_memory_batch",
+        )
+
+        assert await _job_visible_to_org(visible, org=org) is True
+        assert await _job_visible_to_org(hidden, org=org) is False
+
+    @pytest.mark.asyncio
     async def test_source_jobs_use_embedded_org_metadata_without_db_lookup(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         session = AsyncMock()

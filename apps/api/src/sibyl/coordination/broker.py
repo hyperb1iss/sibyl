@@ -17,6 +17,31 @@ RECENT_JOB_INDEX_KEY = "sibyl:jobs:recent"
 RECENT_JOB_INDEX_LIMIT = 1000
 QueueBackend = Literal["local", "redis"]
 
+_JOB_ORG_ARGUMENT_INDEX = {
+    "create_entity": 2,
+    "update_entity": 3,
+    "backfill_entity_embeddings": 1,
+    "project_memory_batch": 1,
+    "extract_memory_entities": 1,
+    "consolidate_org": 0,
+    "priority_decay": 0,
+    "run_reflection_dream_cycle": 0,
+}
+
+
+def job_organization_id(
+    function: str,
+    args: tuple[Any, ...] | list[Any],
+    kwargs: dict[str, Any],
+) -> str | None:
+    if function in {"crawl_source", "sync_source"}:
+        organization_id = kwargs.get("organization_id")
+        return str(organization_id) if organization_id is not None else None
+    index = _JOB_ORG_ARGUMENT_INDEX.get(function)
+    if index is None or index >= len(args):
+        return None
+    return str(args[index])
+
 
 class JobStatus(StrEnum):
     """Job status enum matching arq statuses."""
@@ -41,6 +66,7 @@ class JobInfo:
     finish_time: datetime | None = None
     result: Any = None
     error: str | None = None
+    organization_id: str | None = None
     args: tuple[Any, ...] | None = None
     kwargs: dict[str, Any] | None = None
 

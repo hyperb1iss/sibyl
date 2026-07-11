@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -22,6 +23,7 @@ from sibyl.coordination.broker import (
     JobInfo,
     JobStatus,
     entity_embedding_job_id,
+    job_organization_id,
     memory_extraction_job_id,
     memory_projection_job_id,
     raw_capture_changefeed_job_id,
@@ -37,12 +39,18 @@ log = structlog.get_logger()
 # stays capped so a request cannot fan out across the whole recent
 # index. Never larger than the index itself.
 LIST_JOBS_FILTER_SCAN_CAP = min(200, RECENT_JOB_INDEX_LIMIT)
+JOB_METADATA_KEY_PREFIX = "sibyl:jobs:metadata:"
+JOB_METADATA_TTL_SECONDS = 90_000
 
 
 @dataclass
 class EnqueueResult:
     job_id: str
     created: bool
+
+
+def _job_metadata_key(job_id: str) -> str:
+    return f"{JOB_METADATA_KEY_PREFIX}{job_id}"
 
 
 class RedisQueueBroker:
@@ -568,7 +576,19 @@ class RedisQueueBroker:
         job = Job(job_id, pool)
 
         status = await job.status()
-        info = await job.info()
+        metadata = await self._load_job_metadata(pool, job_id)
+        function = str(metadata.get("function") or "unknown") if metadata else "unknown"
+        organization_id = (
+            str(metadata["organization_id"])
+            if metadata and metadata.get("organization_id") is not None
+            else None
+        )
+        needs_info = (
+            metadata is None
+            or function == "unknown"
+            or (function in {"crawl_source", "sync_source"} and organization_id is None)
+        )
+        info = await job.info() if needs_info else None
 
         status_map = {
             ArqJobStatus.queued: JobStatus.QUEUED,
@@ -580,10 +600,16 @@ class RedisQueueBroker:
 
         job_info = JobInfo(
             job_id=job_id,
-            function=info.function if info else "unknown",
+            function=info.function if info else function,
             status=status_map.get(status, JobStatus.NOT_FOUND),
+            organization_id=organization_id,
         )
 
+        if metadata:
+            enqueue_time = metadata.get("enqueue_time")
+            if isinstance(enqueue_time, str):
+                with contextlib.suppress(ValueError):
+                    job_info.enqueue_time = datetime.fromisoformat(enqueue_time)
         if info:
             job_info.enqueue_time = getattr(info, "enqueue_time", None)
             job_info.args = getattr(info, "args", None)
@@ -601,6 +627,23 @@ class RedisQueueBroker:
                         job_info.result = None
 
         return job_info
+
+    async def _load_job_metadata(
+        self,
+        pool: ArqRedis,
+        job_id: str,
+    ) -> dict[str, Any] | None:
+        try:
+            raw = await pool.get(_job_metadata_key(job_id))
+            if raw is None:
+                return None
+            if isinstance(raw, bytes):
+                raw = raw.decode()
+            metadata = json.loads(raw)
+            return metadata if isinstance(metadata, dict) else None
+        except Exception as exc:
+            log.warning("Failed to load job metadata", job_id=job_id, error=str(exc))
+            return None
 
     async def list_jobs(
         self,
@@ -839,9 +882,41 @@ class RedisQueueBroker:
             telemetry_registry().record_job_enqueued(function=function, created=False)
             return EnqueueResult(job_id=job_id, created=False)
 
+        await self._store_job_metadata(
+            pool,
+            job.job_id,
+            function=function,
+            args=args,
+            kwargs=kwargs,
+        )
         await self._record_recent_job(pool, job.job_id)
         telemetry_registry().record_job_enqueued(function=function, created=True)
         return EnqueueResult(job_id=job.job_id, created=True)
+
+    async def _store_job_metadata(
+        self,
+        pool: ArqRedis,
+        job_id: str,
+        *,
+        function: str,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> None:
+        metadata = json.dumps(
+            {
+                "function": function,
+                "organization_id": job_organization_id(function, args, kwargs),
+                "enqueue_time": datetime.now(UTC).isoformat(),
+            }
+        )
+        try:
+            await pool.set(
+                _job_metadata_key(job_id),
+                metadata,
+                ex=JOB_METADATA_TTL_SECONDS,
+            )
+        except Exception as exc:
+            log.warning("Failed to store job metadata", job_id=job_id, error=str(exc))
 
     async def _record_recent_job(self, pool: ArqRedis, job_id: str) -> None:
         score = datetime.now(UTC).timestamp()

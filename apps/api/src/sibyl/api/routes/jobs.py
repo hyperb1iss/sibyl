@@ -13,6 +13,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from sibyl.auth.dependencies import get_current_organization, require_org_admin
+from sibyl.coordination.broker import job_organization_id
 from sibyl.persistence.content_runtime import (
     get_content_read_session,
     get_crawl_source_by_id,
@@ -39,27 +40,18 @@ async def _job_visible_to_org(
     session: Any | None = None,
     visible_source_ids: set[UUID] | None = None,
 ) -> bool:
+    organization_id = getattr(job, "organization_id", None)
+    if organization_id is not None:
+        return str(organization_id) == str(org.id)
+
     fn = getattr(job, "function", "") or ""
     args: list[Any] = list(getattr(job, "args", None) or ())
     kwargs = dict(getattr(job, "kwargs", None) or {})
-
-    if fn == "create_entity" and len(args) >= 3:
-        return str(args[2]) == str(org.id)
-    if fn == "update_entity" and len(args) >= 4:
-        return str(args[3]) == str(org.id)
-    if (
-        fn in {"backfill_entity_embeddings", "project_memory_batch", "extract_memory_entities"}
-        and len(args) >= 2
-    ):
-        return str(args[1]) == str(org.id)
-    if fn in {"consolidate_org", "priority_decay", "run_reflection_dream_cycle"} and args:
-        return str(args[0]) == str(org.id)
+    embedded_organization_id = job_organization_id(fn, args, kwargs)
+    if embedded_organization_id is not None:
+        return embedded_organization_id == str(org.id)
 
     if fn in {"crawl_source", "sync_source"} and args:
-        metadata_org_id = kwargs.get("organization_id")
-        if metadata_org_id is not None:
-            return str(metadata_org_id) == str(org.id)
-
         try:
             source_uuid = UUID(str(args[0]))
         except (TypeError, ValueError):
