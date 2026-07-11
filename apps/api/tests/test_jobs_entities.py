@@ -197,7 +197,21 @@ class TestBackfillEntityEmbeddingsJob:
         )
 
     @pytest.mark.asyncio
-    async def test_retries_surreal_write_conflicts(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize(
+        "conflict_message",
+        [
+            (
+                "Transaction conflict: Write conflict, retry the transaction. "
+                "This transaction can be retried"
+            ),
+            "Transaction conflict: Resource busy. This transaction can be retried",
+        ],
+    )
+    async def test_retries_surreal_write_conflicts(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        conflict_message: str,
+    ) -> None:
         entity = Entity(
             id="session-123",
             entity_type="session",
@@ -207,10 +221,7 @@ class TestBackfillEntityEmbeddingsJob:
         entity_manager = MagicMock()
         entity_manager.create_direct_bulk = AsyncMock(
             side_effect=[
-                RuntimeError(
-                    "Transaction conflict: Write conflict, retry the transaction. "
-                    "This transaction can be retried"
-                ),
+                RuntimeError(conflict_message),
                 ["session-123"],
             ]
         )

@@ -83,11 +83,7 @@ def _policy_context_project_id(policy_context: MemoryPolicyContext) -> str | Non
 
 def _is_retryable_surreal_write_conflict(exc: BaseException) -> bool:
     message = str(exc).lower()
-    return (
-        "transaction conflict" in message
-        and "write conflict" in message
-        and "can be retried" in message
-    )
+    return "transaction conflict" in message and "can be retried" in message
 
 
 async def _retry_surreal_write_conflict[T](
