@@ -2472,6 +2472,37 @@ async def test_native_relationship_batch_uses_native_traversal_projection() -> N
 
 
 @pytest.mark.asyncio
+async def test_native_relationship_batch_reads_directions_concurrently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _RelatedBatchClient()
+    relationship_manager = RelationshipManager(
+        cast("SurrealGraphClient", client),
+        group_id=client.group_id,
+    )
+    started: set[str] = set()
+    both_started = asyncio.Event()
+
+    async def coordinated_direction_rows(*_: object, **kwargs: object) -> list[dict[str, object]]:
+        started.add(cast("str", kwargs["endpoint_field"]))
+        if len(started) == 2:
+            both_started.set()
+        await asyncio.wait_for(both_started.wait(), timeout=0.5)
+        return []
+
+    monkeypatch.setattr(
+        relationship_manager,
+        "_get_native_related_entity_direction_rows",
+        coordinated_direction_rows,
+    )
+
+    related = await relationship_manager.get_related_entities_batch(["seed-a"])
+
+    assert started == {"source_id", "target_id"}
+    assert related == {"seed-a": []}
+
+
+@pytest.mark.asyncio
 async def test_native_relationship_batch_tops_up_underfilled_seeds_when_capped() -> None:
     client = _CappedRelatedBatchClient()
     relationship_manager = RelationshipManager(

@@ -1378,25 +1378,27 @@ class RelationshipManager:
         type_values: Sequence[str],
         limit: int,
     ) -> list[SurrealRecord]:
-        outgoing_rows = await self._get_native_related_entity_direction_rows(
-            seed_ids,
-            endpoint_field="source_id",
-            endpoint_alias="source_uuid",
-            related_side="out",
-            direction="outgoing",
-            type_clause=type_clause,
-            type_values=type_values,
-            limit=limit,
-        )
-        incoming_rows = await self._get_native_related_entity_direction_rows(
-            seed_ids,
-            endpoint_field="target_id",
-            endpoint_alias="target_uuid",
-            related_side="in",
-            direction="incoming",
-            type_clause=type_clause,
-            type_values=type_values,
-            limit=limit,
+        outgoing_rows, incoming_rows = await asyncio.gather(
+            self._get_native_related_entity_direction_rows(
+                seed_ids,
+                endpoint_field="source_id",
+                endpoint_alias="source_uuid",
+                related_side="out",
+                direction="outgoing",
+                type_clause=type_clause,
+                type_values=type_values,
+                limit=limit,
+            ),
+            self._get_native_related_entity_direction_rows(
+                seed_ids,
+                endpoint_field="target_id",
+                endpoint_alias="target_uuid",
+                related_side="in",
+                direction="incoming",
+                type_clause=type_clause,
+                type_values=type_values,
+                limit=limit,
+            ),
         )
 
         rows: list[SurrealRecord] = []
