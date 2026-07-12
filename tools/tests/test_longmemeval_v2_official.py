@@ -40,6 +40,8 @@ EXPECTED_MAX_CHUNKS_PER_TRAJECTORY = 2
 EXPECTED_NEIGHBOR_STITCH_ITEMS = 2
 EXPECTED_NEIGHBOR_STITCH_SPAN = 1
 EXPECTED_SEARCH_LIMIT_OVERRIDE = 24
+EXPECTED_SAVED_USAGE_REQUESTS = 2
+EXPECTED_SAVED_USAGE_COST_USD = 0.25
 TEST_CONTENT_MAX_CHARS = 420
 TEST_CONTEXT_MAX_CHARS = 800
 TEST_CREDENTIAL = "fresh-credential"
@@ -200,6 +202,7 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(tmp_path: Path)
         "reader": str(output_dir / "provider_usage" / "reader.jsonl"),
         "judge": str(output_dir / "provider_usage" / "judge.jsonl"),
     }
+    assert plan["checkpoint_dir"] is None
     assert "reader_endpoint_reachable" in plan["requirements"]
     assert "torch_available" in plan["requirements"]
 
@@ -894,6 +897,20 @@ def test_sibyl_memory_chunk_catalog_round_trips(tmp_path: Path) -> None:
     memory._pending_projection_job_ids = set()
     memory._finalize_lock = threading.Lock()
     memory._ingest_finalized = True
+    memory.api_url = "http://127.0.0.1:3434/api"
+    memory.project_id = "project_saved"
+    memory.run_id = "run-saved"
+    memory.chunking_mode = "state"
+    memory.content_max_chars = EXPECTED_CONTENT_MAX_CHARS
+    memory.ingest_api_runtime = {"version": "test"}
+    memory.ingest_embedding_usage = {
+        "requests": EXPECTED_SAVED_USAGE_REQUESTS,
+        "provider_reported_cost_usd": EXPECTED_SAVED_USAGE_COST_USD,
+    }
+    (tmp_path / "memory_config.json").write_text(
+        json.dumps(memory.memory_config),
+        encoding="utf-8",
+    )
 
     memory._save_backend(tmp_path)
 
@@ -905,10 +922,16 @@ def test_sibyl_memory_chunk_catalog_round_trips(tmp_path: Path) -> None:
     restored._load_backend(tmp_path)
 
     assert (tmp_path / module.CHUNK_CATALOG_FILENAME).is_file()
+    assert (tmp_path / module.MEMORY_MANIFEST_FILENAME).is_file()
     assert restored._chunk_catalog == catalog
     assert restored.created_entities == len(catalog["t1"])
     assert restored.inserted_trajectories == len(catalog)
     assert restored._ingest_finalized is True
+    assert restored.ingest_api_runtime == {"version": "test"}
+    assert restored.ingest_embedding_usage == {
+        "requests": EXPECTED_SAVED_USAGE_REQUESTS,
+        "provider_reported_cost_usd": EXPECTED_SAVED_USAGE_COST_USD,
+    }
 
 
 def test_sibyl_memory_saved_config_strips_credentials() -> None:
@@ -935,6 +958,55 @@ def test_sibyl_memory_saved_config_strips_credentials() -> None:
     assert "api_token" not in params
     assert "email" not in params
     assert "password" not in params
+
+
+def test_sibyl_memory_ingest_checkpoint_resumes_completed_trajectory(tmp_path: Path) -> None:
+    module = _load_memory_module()
+    checkpoint_dir = tmp_path / "checkpoint"
+    payloads = module.build_entity_payloads_for_trajectory(
+        _trajectory("t1"),
+        project_id="project_saved",
+        run_id="run-saved",
+    )
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    memory.api_url = "http://127.0.0.1:3434/api"
+    memory.project_id = "project_saved"
+    memory.run_id = "run-saved"
+    memory.chunking_mode = "state"
+    memory.content_max_chars = EXPECTED_CONTENT_MAX_CHARS
+    memory.checkpoint_dir = checkpoint_dir
+    memory._chunk_catalog = module._catalog_results(payloads)
+    memory._completed_trajectory_ids = {"t1"}
+    memory._pending_embedding_job_ids = {"embed-1"}
+    memory._pending_projection_job_ids = {"project-1"}
+    memory.ingest_embedding_usage = {"requests": EXPECTED_SAVED_USAGE_REQUESTS}
+    memory.ingest_api_runtime = {"version": "test"}
+
+    memory._append_checkpoint(payloads)
+    catalog_path = checkpoint_dir / module.CHECKPOINT_CATALOG_FILENAME
+    with catalog_path.open("ab") as handle:
+        handle.write(b"interrupted trailing bytes")
+
+    restored = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(restored, {})
+    restored.api_url = memory.api_url
+    restored.project_id = memory.project_id
+    restored.run_id = memory.run_id
+    restored.chunking_mode = memory.chunking_mode
+    restored.content_max_chars = memory.content_max_chars
+    restored._load_checkpoint(checkpoint_dir)
+
+    assert restored._completed_trajectory_ids == {"t1"}
+    assert restored._pending_embedding_job_ids == {"embed-1"}
+    assert restored._pending_projection_job_ids == {"project-1"}
+    assert restored._chunk_catalog == memory._chunk_catalog
+    assert restored.ingest_embedding_usage == {"requests": EXPECTED_SAVED_USAGE_REQUESTS}
+
+    restored._request_json = lambda *args, **kwargs: pytest.fail(
+        f"completed trajectory was reinserted: {args}, {kwargs}"
+    )
+    restored.insert(_trajectory("t1"))
 
 
 def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
@@ -1014,6 +1086,50 @@ def test_official_runner_load_config_preserves_saved_ingest_identity(tmp_path: P
     assert params["content_max_chars"] == EXPECTED_CONTENT_MAX_CHARS
     assert params["api_token"] == TEST_CREDENTIAL
     assert params["search_limit"] == EXPECTED_SEARCH_LIMIT_OVERRIDE
+
+
+def test_official_runner_checkpoint_restart_reuses_saved_project(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    data_root = tmp_path / "data"
+    checkpoint_dir = tmp_path / "checkpoint"
+    checkpoint_dir.mkdir()
+    _write_dataset(data_root)
+    (checkpoint_dir / "memory_config.json").write_text(
+        json.dumps(
+            {
+                "memory_type": "sibyl_live_api",
+                "memory_params": {
+                    "api_url": "http://127.0.0.1:3434/api",
+                    "project_id": "project_checkpoint",
+                    "run_id": "run-checkpoint",
+                    "content_max_chars": EXPECTED_CONTENT_MAX_CHARS,
+                    "chunking_mode": "state",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(data_root),
+            "--domain",
+            "enterprise",
+            "--output-dir",
+            str(tmp_path / "output"),
+            "--checkpoint-dir",
+            str(checkpoint_dir),
+            "--plan-only",
+        ]
+    )
+
+    config = module.build_memory_config(args)
+    params = config["memory_params"]
+
+    assert params["api_url"] == "http://127.0.0.1:3434/api"
+    assert params["project_id"] == "project_checkpoint"
+    assert params["run_id"] == "run-checkpoint"
+    assert params["checkpoint_dir"] == str(checkpoint_dir)
 
 
 def test_sibyl_memory_query_context_exposes_only_question_and_image() -> None:

@@ -66,6 +66,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "max_chunks_per_trajectory",
         "neighbor_stitch_items",
         "neighbor_stitch_span",
+        "checkpoint_dir",
     }
 )
 QWEN_READER_MODEL_FRAGMENT = "qwen3.5-9b"
@@ -374,6 +375,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--save-memory", action="store_true")
     parser.add_argument("--skip-evaluation", action="store_true")
     parser.add_argument("--load-memory-dir", default=None)
+    parser.add_argument("--checkpoint-dir", default=None)
 
     parser.add_argument(
         "--api-url", default=os.getenv("SIBYL_API_URL", "http://127.0.0.1:3334/api")
@@ -439,6 +441,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     args = parser.parse_args(argv)
     if not args.receipt_only and args.domain == "combined":
         parser.error("--domain combined is only valid with --receipt-only")
+    if args.load_memory_dir and args.checkpoint_dir:
+        parser.error("--load-memory-dir cannot be combined with --checkpoint-dir")
     if args.reader_retry_attempts < 1:
         parser.error("--reader-retry-attempts must be positive")
     if args.reader_retry_base_delay_seconds < 0:
@@ -556,6 +560,7 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "allow_signup": not args.no_signup,
         "content_max_chars": args.content_max_chars,
         "chunking_mode": args.chunking_mode,
+        "checkpoint_dir": args.checkpoint_dir,
         "search_limit": args.search_limit,
         "max_context_items": args.max_context_items,
         "max_context_chars_per_item": args.max_context_chars_per_item,
@@ -575,12 +580,19 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "runner_provenance": git_provenance(ROOT),
     }
     config = {"memory_type": "sibyl_live_api", "memory_params": params}
-    if not args.load_memory_dir:
-        return config
-    return build_loaded_memory_config(
-        Path(args.load_memory_dir).expanduser().resolve(),
-        requested_config=config,
-    )
+    if args.load_memory_dir:
+        return build_loaded_memory_config(
+            Path(args.load_memory_dir).expanduser().resolve(),
+            requested_config=config,
+        )
+    if args.checkpoint_dir:
+        checkpoint_dir = Path(args.checkpoint_dir).expanduser().resolve()
+        if (checkpoint_dir / "memory_config.json").is_file():
+            return build_loaded_memory_config(
+                checkpoint_dir,
+                requested_config=config,
+            )
+    return config
 
 
 def build_loaded_memory_config(
@@ -652,6 +664,7 @@ def build_run_plan(
         "save_memory": args.save_memory,
         "skip_evaluation": args.skip_evaluation,
         "load_memory_dir": args.load_memory_dir,
+        "checkpoint_dir": args.checkpoint_dir,
         "trajectory_path": str(data_root / "trajectories.jsonl"),
         "trajectory_path_exists": (data_root / "trajectories.jsonl").exists(),
         "question_count": len(selected_questions),

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
+import io
 import itertools
 import json as json_module
 import os
@@ -78,6 +80,11 @@ CHUNKING_MODES = frozenset({"trajectory", "state"})
 JOB_STATUS_BATCH_SIZE = 64
 MAX_BULK_CREATE = 128
 CHUNK_CATALOG_FILENAME = "chunk_catalog.jsonl.gz"
+MEMORY_MANIFEST_FILENAME = "memory_manifest.json"
+MEMORY_MANIFEST_SCHEMA_VERSION = "sibyl-longmemeval-v2-memory-state-v1"
+CHECKPOINT_CATALOG_FILENAME = "checkpoint_catalog.jsonl"
+CHECKPOINT_MANIFEST_FILENAME = "checkpoint_manifest.json"
+CHECKPOINT_SCHEMA_VERSION = "sibyl-longmemeval-v2-ingest-checkpoint-v1"
 RETRYABLE_HTTP_STATUS_CODES = frozenset({408, 409, 425, 429})
 SAVED_MEMORY_SECRET_KEYS = frozenset({"api_token", "email", "password"})
 LOADED_MEMORY_RUNTIME_KEYS = frozenset(
@@ -95,6 +102,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "max_chunks_per_trajectory",
         "neighbor_stitch_items",
         "neighbor_stitch_span",
+        "checkpoint_dir",
     }
 )
 SAVED_MEMORY_IDENTITY_KEYS = frozenset(
@@ -463,7 +471,7 @@ class SibylLiveApiMemory(Memory):
         memory_params = {
             key: value
             for key, value in self.memory_params.items()
-            if key not in SAVED_MEMORY_SECRET_KEYS
+            if key not in SAVED_MEMORY_SECRET_KEYS | {"checkpoint_dir"}
         }
         memory_params.update(
             {
@@ -518,6 +526,8 @@ class SibylLiveApiMemory(Memory):
             "content_max_chars",
             DEFAULT_CONTENT_MAX_CHARS,
         )
+        checkpoint_dir = _param_str(memory_params, "checkpoint_dir", "")
+        self.checkpoint_dir = Path(checkpoint_dir).expanduser().resolve() if checkpoint_dir else None
         self.chunking_mode = _param_str(
             memory_params,
             "chunking_mode",
@@ -638,6 +648,7 @@ class SibylLiveApiMemory(Memory):
         self._ingest_finalized = False
         self._query_local = threading.local()
         self._chunk_catalog: dict[str, dict[int, dict[str, object]]] = {}
+        self._completed_trajectory_ids: set[str] = set()
         self._client = _new_http_client(
             self.api_url,
             timeout_seconds=self.api_timeout_seconds,
@@ -647,9 +658,14 @@ class SibylLiveApiMemory(Memory):
         self._cli_auth: dict[str, str] = {}
         self._authenticate(memory_params)
         self.api_runtime = self._request_json("GET", "/health")
+        self.ingest_api_runtime = dict(self.api_runtime)
         if not self.project_id:
             self.project_id = self._create_project()
         self.memory_params["project_id"] = self.project_id
+        if self.checkpoint_dir is not None and (
+            self.checkpoint_dir / CHECKPOINT_MANIFEST_FILENAME
+        ).is_file():
+            self._load_checkpoint(self.checkpoint_dir)
 
     def set_query_context(self, **kwargs: object) -> None:
         question_item = kwargs.get("question_item")
@@ -660,6 +676,13 @@ class SibylLiveApiMemory(Memory):
         super().set_query_context(**safe_context)
 
     def insert(self, trajectory: dict[str, object]) -> None:
+        trajectory_id = _stripped_str(trajectory.get("id"))
+        completed_trajectory_ids = getattr(self, "_completed_trajectory_ids", None)
+        if completed_trajectory_ids is None:
+            completed_trajectory_ids = set()
+            self._completed_trajectory_ids = completed_trajectory_ids
+        if trajectory_id and trajectory_id in completed_trajectory_ids:
+            return
         self._ingest_finalized = False
         payloads = build_entity_payloads_for_trajectory(
             trajectory,
@@ -691,7 +714,11 @@ class SibylLiveApiMemory(Memory):
                 self._drain_embedding_backfills()
             if len(self._pending_projection_job_ids) >= self.embedding_backfill_max_pending_jobs:
                 self._drain_memory_projections()
-        self.inserted_trajectories += 1
+        if trajectory_id:
+            completed_trajectory_ids.add(trajectory_id)
+        self.inserted_trajectories = len(completed_trajectory_ids)
+        if getattr(self, "checkpoint_dir", None) is not None:
+            self._append_checkpoint(payloads)
 
     def finalize_ingest(self) -> None:
         with self._finalize_lock:
@@ -700,6 +727,8 @@ class SibylLiveApiMemory(Memory):
             self._drain_embedding_backfills()
             self._drain_memory_projections()
             self._ingest_finalized = True
+            if getattr(self, "checkpoint_dir", None) is not None:
+                self._write_checkpoint_manifest(finalized=True)
 
     def query(self, query: str, query_image: str | None = None) -> list[MemoryContextItem]:
         pending_jobs = len(self._pending_embedding_job_ids) + len(
@@ -762,19 +791,70 @@ class SibylLiveApiMemory(Memory):
     def _save_backend(self, output_dir: Path) -> None:
         self.finalize_ingest()
         catalog_path = output_dir / CHUNK_CATALOG_FILENAME
-        with gzip.open(catalog_path, "wt", encoding="utf-8") as handle:
-            for trajectory_id in sorted(self._chunk_catalog):
-                for chunk_index in sorted(self._chunk_catalog[trajectory_id]):
-                    handle.write(
-                        json_module.dumps(self._chunk_catalog[trajectory_id][chunk_index])
-                        + "\n"
-                    )
+        with catalog_path.open("wb") as raw_handle:
+            with gzip.GzipFile(fileobj=raw_handle, mode="wb", mtime=0) as gzip_handle:
+                with io.TextIOWrapper(gzip_handle, encoding="utf-8") as handle:
+                    for trajectory_id in sorted(self._chunk_catalog):
+                        for chunk_index in sorted(self._chunk_catalog[trajectory_id]):
+                            handle.write(
+                                json_module.dumps(
+                                    self._chunk_catalog[trajectory_id][chunk_index],
+                                    sort_keys=True,
+                                )
+                                + "\n"
+                            )
+        memory_config_path = output_dir / "memory_config.json"
+        manifest = {
+            "schema_version": MEMORY_MANIFEST_SCHEMA_VERSION,
+            "api_url": getattr(self, "api_url", None),
+            "project_id": getattr(self, "project_id", None),
+            "run_id": getattr(self, "run_id", None),
+            "chunking_mode": getattr(self, "chunking_mode", DEFAULT_CHUNKING_MODE),
+            "content_max_chars": getattr(self, "content_max_chars", DEFAULT_CONTENT_MAX_CHARS),
+            "inserted_trajectories": getattr(
+                self,
+                "inserted_trajectories",
+                len(self._chunk_catalog),
+            ),
+            "created_entities": getattr(
+                self,
+                "created_entities",
+                sum(len(chunks) for chunks in self._chunk_catalog.values()),
+            ),
+            "ingest_api_runtime": dict(getattr(self, "ingest_api_runtime", {})),
+            "ingest_embedding_usage": dict(getattr(self, "ingest_embedding_usage", {})),
+            "completed_trajectory_ids": sorted(
+                getattr(self, "_completed_trajectory_ids", self._chunk_catalog)
+            ),
+            "pending_embedding_job_ids": sorted(self._pending_embedding_job_ids),
+            "pending_projection_job_ids": sorted(self._pending_projection_job_ids),
+            "ingest_finalized": True,
+            "memory_config_sha256": _sha256_file(memory_config_path),
+            "chunk_catalog_sha256": _sha256_file(catalog_path),
+        }
+        (output_dir / MEMORY_MANIFEST_FILENAME).write_text(
+            json_module.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
 
     def _load_backend(self, input_dir: Path) -> None:
         catalog_path = input_dir / CHUNK_CATALOG_FILENAME
         if not catalog_path.is_file():
             msg = f"Missing saved chunk catalog: {catalog_path}"
             raise RuntimeError(msg)
+        manifest_path = input_dir / MEMORY_MANIFEST_FILENAME
+        if not manifest_path.is_file():
+            msg = f"Missing saved memory manifest: {manifest_path}"
+            raise RuntimeError(msg)
+        manifest = json_module.loads(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict) or manifest.get("schema_version") != MEMORY_MANIFEST_SCHEMA_VERSION:
+            raise RuntimeError(f"Invalid saved memory manifest: {manifest_path}")
+        expected_catalog_hash = manifest.get("chunk_catalog_sha256")
+        if expected_catalog_hash != _sha256_file(catalog_path):
+            raise RuntimeError(f"Saved chunk catalog hash mismatch: {catalog_path}")
+        memory_config_path = input_dir / "memory_config.json"
+        if manifest.get("memory_config_sha256") != _sha256_file(memory_config_path):
+            raise RuntimeError(f"Saved memory config hash mismatch: {memory_config_path}")
         catalog: dict[str, dict[int, dict[str, object]]] = {}
         with gzip.open(catalog_path, "rt", encoding="utf-8") as handle:
             for line in handle:
@@ -797,9 +877,140 @@ class SibylLiveApiMemory(Memory):
         self._chunk_catalog = catalog
         self.created_entities = sum(len(chunks) for chunks in catalog.values())
         self.inserted_trajectories = len(catalog)
+        self._completed_trajectory_ids = set(catalog)
+        self.ingest_api_runtime = (
+            dict(manifest["ingest_api_runtime"])
+            if isinstance(manifest.get("ingest_api_runtime"), dict)
+            else {}
+        )
+        self.ingest_embedding_usage = (
+            dict(manifest["ingest_embedding_usage"])
+            if isinstance(manifest.get("ingest_embedding_usage"), dict)
+            else {}
+        )
         self._pending_embedding_job_ids.clear()
         self._pending_projection_job_ids.clear()
         self._ingest_finalized = True
+
+    def _append_checkpoint(self, payloads: list[dict[str, object]]) -> None:
+        if self.checkpoint_dir is None:
+            return
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        config_path = self.checkpoint_dir / "memory_config.json"
+        if not config_path.exists():
+            _write_json_atomic(config_path, self.memory_config)
+        catalog_path = self.checkpoint_dir / CHECKPOINT_CATALOG_FILENAME
+        checkpoint_results = _catalog_results(payloads)
+        with catalog_path.open("a", encoding="utf-8") as handle:
+            for trajectory_id in sorted(checkpoint_results):
+                for chunk_index in sorted(checkpoint_results[trajectory_id]):
+                    handle.write(
+                        json_module.dumps(
+                            checkpoint_results[trajectory_id][chunk_index],
+                            sort_keys=True,
+                        )
+                        + "\n"
+                    )
+            handle.flush()
+            os.fsync(handle.fileno())
+        self._write_checkpoint_manifest(finalized=False)
+
+    def _write_checkpoint_manifest(self, *, finalized: bool) -> None:
+        if self.checkpoint_dir is None:
+            return
+        config_path = self.checkpoint_dir / "memory_config.json"
+        catalog_path = self.checkpoint_dir / CHECKPOINT_CATALOG_FILENAME
+        if not config_path.exists():
+            _write_json_atomic(config_path, self.memory_config)
+        if not catalog_path.exists():
+            catalog_path.touch()
+        manifest = {
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "api_url": self.api_url,
+            "project_id": self.project_id,
+            "run_id": self.run_id,
+            "chunking_mode": self.chunking_mode,
+            "content_max_chars": self.content_max_chars,
+            "completed_trajectory_ids": sorted(self._completed_trajectory_ids),
+            "pending_embedding_job_ids": sorted(self._pending_embedding_job_ids),
+            "pending_projection_job_ids": sorted(self._pending_projection_job_ids),
+            "ingest_embedding_usage": dict(self.ingest_embedding_usage),
+            "ingest_api_runtime": dict(self.ingest_api_runtime),
+            "ingest_finalized": finalized,
+            "catalog_size": catalog_path.stat().st_size,
+            "memory_config_sha256": _sha256_file(config_path),
+        }
+        _write_json_atomic(
+            self.checkpoint_dir / CHECKPOINT_MANIFEST_FILENAME,
+            manifest,
+        )
+
+    def _load_checkpoint(self, checkpoint_dir: Path) -> None:
+        manifest_path = checkpoint_dir / CHECKPOINT_MANIFEST_FILENAME
+        manifest = json_module.loads(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict) or manifest.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
+            raise RuntimeError(f"Invalid ingest checkpoint manifest: {manifest_path}")
+        config_path = checkpoint_dir / "memory_config.json"
+        if manifest.get("memory_config_sha256") != _sha256_file(config_path):
+            raise RuntimeError(f"Ingest checkpoint config hash mismatch: {config_path}")
+        for key, current in {
+            "api_url": self.api_url,
+            "project_id": self.project_id,
+            "run_id": self.run_id,
+            "chunking_mode": self.chunking_mode,
+            "content_max_chars": self.content_max_chars,
+        }.items():
+            if manifest.get(key) != current:
+                msg = (
+                    f"Ingest checkpoint identity mismatch for {key!r}: "
+                    f"checkpoint={manifest.get(key)!r}, current={current!r}"
+                )
+                raise RuntimeError(msg)
+        catalog_path = checkpoint_dir / CHECKPOINT_CATALOG_FILENAME
+        catalog_size = manifest.get("catalog_size")
+        if isinstance(catalog_size, bool) or not isinstance(catalog_size, int):
+            raise RuntimeError(f"Invalid ingest checkpoint catalog size: {manifest_path}")
+        catalog_bytes = catalog_path.read_bytes()[:catalog_size]
+        completed = {
+            str(value)
+            for value in manifest.get("completed_trajectory_ids", [])
+            if isinstance(value, str) and value
+        }
+        catalog: dict[str, dict[int, dict[str, object]]] = {}
+        for line in catalog_bytes.splitlines():
+            loaded = json_module.loads(line)
+            if not isinstance(loaded, dict):
+                continue
+            metadata = loaded.get("metadata") if isinstance(loaded.get("metadata"), dict) else {}
+            trajectory_id = _stripped_str(metadata.get("longmemeval_v2_trajectory_id"))
+            chunk_index = metadata.get("longmemeval_v2_chunk_index")
+            if trajectory_id in completed and isinstance(chunk_index, int):
+                catalog.setdefault(trajectory_id, {})[chunk_index] = loaded
+        self._chunk_catalog = catalog
+        self._completed_trajectory_ids = completed
+        self.inserted_trajectories = len(completed)
+        self.created_entities = sum(len(chunks) for chunks in catalog.values())
+        self._pending_embedding_job_ids = {
+            str(value)
+            for value in manifest.get("pending_embedding_job_ids", [])
+            if isinstance(value, str) and value
+        }
+        self._pending_projection_job_ids = {
+            str(value)
+            for value in manifest.get("pending_projection_job_ids", [])
+            if isinstance(value, str) and value
+        }
+        self.ingest_embedding_usage = (
+            dict(manifest["ingest_embedding_usage"])
+            if isinstance(manifest.get("ingest_embedding_usage"), dict)
+            else {}
+        )
+        self.ingest_api_runtime = (
+            dict(manifest["ingest_api_runtime"])
+            if isinstance(manifest.get("ingest_api_runtime"), dict)
+            else {}
+        )
+        self._ingest_finalized = bool(manifest.get("ingest_finalized"))
 
     def post_query_hook(
         self,
@@ -812,6 +1023,7 @@ class SibylLiveApiMemory(Memory):
             "memory_type": self.memory_type,
             "api_url": self.api_url,
             "api_runtime": dict(getattr(self, "api_runtime", {})),
+            "ingest_api_runtime": dict(getattr(self, "ingest_api_runtime", {})),
             "project_id": self.project_id,
             "run_id": self.run_id,
             "inserted_trajectories": self.inserted_trajectories,
@@ -1346,6 +1558,24 @@ def _split_text_lines(value: str, *, max_chars: int) -> list[str]:
     if current or not pieces:
         pieces.append(current)
     return pieces
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _write_json_atomic(path: Path, value: dict[str, object]) -> None:
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    temporary.parent.mkdir(parents=True, exist_ok=True)
+    with temporary.open("w", encoding="utf-8") as handle:
+        handle.write(json_module.dumps(value, indent=2, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    temporary.replace(path)
 
 
 def _entity_name(trajectory_id: str, chunk_index: int, chunk_count: int) -> str:
