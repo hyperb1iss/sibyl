@@ -161,6 +161,7 @@ class MemoryCorrectionPreview:
     audit_action: str
     policy_decisions: tuple[MemoryPolicyDecision, ...] = ()
     metadata: dict[str, Any] | None = None
+    current_revision: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1526,6 +1527,7 @@ async def preview_memory_correction(
         audit_action=_correction_audit_action(normalized_action),
         policy_decisions=(write_decision,),
         metadata=metadata,
+        current_revision=memory.revision,
     )
 
 

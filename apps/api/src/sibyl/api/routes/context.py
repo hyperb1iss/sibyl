@@ -3,6 +3,7 @@
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
+from hashlib import sha256
 from typing import Any, cast
 
 import structlog
@@ -35,6 +36,7 @@ from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl_core.ai.operational_distillation import OPERATIONAL_NOTE_CATEGORY
 from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
+from sibyl_core.auth.memory_policy import memory_scope_policy_key
 from sibyl_core.embeddings.providers import capture_embedding_usage, configured_embedding_provider
 from sibyl_core.models.context import ContextPack
 from sibyl_core.observability import elapsed_ms, telemetry_registry
@@ -777,6 +779,20 @@ async def _compile_context_with_evidence(
     return pack, evidence_response
 
 
+def _require_reflection_memory_space_access(
+    *,
+    ctx: AuthContext,
+    project: str | None,
+) -> None:
+    allowed_scope_keys = ctx.api_key_memory_scope_keys
+    if allowed_scope_keys is None:
+        return
+    memory_scope = "project" if project else "private"
+    scope_key = project or ctx.user_id
+    if memory_scope_policy_key(memory_scope, scope_key) not in allowed_scope_keys:
+        raise HTTPException(status_code=403, detail="api_key_memory_space_denied")
+
+
 @router.post("/pack", response_model=ContextPackResponse)
 async def context_pack(
     request: ContextPackRequest,
@@ -900,7 +916,13 @@ async def context_pack(
             status="error",
             duration_ms=elapsed_ms(started_at),
         )
-        log.exception("context_pack_failed", goal=request.goal, error=str(e))
+        goal_hash = sha256(request.goal.encode("utf-8")).hexdigest()[:16]
+        log.exception(
+            "context_pack_failed",
+            goal_hash=goal_hash,
+            goal_length=len(request.goal),
+            error_type=type(e).__name__,
+        )
         raise HTTPException(
             status_code=500,
             detail="Context pack compilation failed. Please try again.",
@@ -931,6 +953,7 @@ async def reflect_context(
                 ProjectRole.CONTRIBUTOR if request.persist else ProjectRole.VIEWER
             ),
         )
+        _require_reflection_memory_space_access(ctx=ctx, project=request.project)
         related_to = await _resolve_reflection_links(
             org_id=str(org.id),
             project=request.project,

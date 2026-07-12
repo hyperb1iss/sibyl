@@ -1346,6 +1346,35 @@ class TestContextPackRoute:
         assert compile_context.await_args.kwargs["record_exposure"] is False
 
     @pytest.mark.asyncio
+    async def test_context_pack_failure_log_does_not_include_raw_goal(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        canary = "HOUSEHOLD-SECRET-CANARY"
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch(
+                "sibyl_core.tools.context.compile_context",
+                AsyncMock(side_effect=RuntimeError("backend unavailable")),
+            ),
+            patch("sibyl.api.routes.context.log.exception") as failure_log,
+            pytest.raises(HTTPException) as exc,
+        ):
+            await context_pack(
+                request=ContextPackRequest(goal=canary),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        assert exc.value.status_code == 500
+        failure_log.assert_called_once()
+        assert canary not in repr(failure_log.call_args)
+        assert failure_log.call_args.kwargs["goal_length"] == len(canary)
+        assert len(failure_log.call_args.kwargs["goal_hash"]) == 16
+
+    @pytest.mark.asyncio
     async def test_context_pack_forwards_api_key_memory_scope_keys(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         ctx = SimpleNamespace(
@@ -1758,6 +1787,34 @@ def _reflection_pack(
 
 
 class TestReflectRoute:
+    @pytest.mark.asyncio
+    async def test_reflect_rejects_disallowed_api_key_memory_space(self) -> None:
+        from sibyl.api.routes.context import reflect_context
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        ctx = SimpleNamespace(
+            user_id="user-123",
+            api_key_memory_scope_keys=frozenset({"project\x1fproj_allowed"}),
+        )
+
+        with (
+            patch(
+                "sibyl.api.routes.context.verify_entity_project_access",
+                AsyncMock(),
+            ),
+            patch("sibyl_core.tools.core.reflect_memory", AsyncMock()) as reflect_memory,
+            pytest.raises(HTTPException) as exc,
+        ):
+            await reflect_context(
+                request=ReflectionRequest(content="notes", project="proj_denied"),
+                org=org,
+                ctx=ctx,
+            )
+
+        assert exc.value.status_code == 403
+        assert exc.value.detail == "api_key_memory_space_denied"
+        reflect_memory.assert_not_awaited()
+
     @pytest.mark.asyncio
     async def test_reflect_scopes_to_accessible_project(self) -> None:
         from sibyl.api.routes.context import reflect_context

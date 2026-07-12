@@ -17,6 +17,7 @@ from sibyl.api.routes.memory import (
     cite_memory,
     create_memory_space_record,
     drain_reflection_review,
+    expose_memory_context,
     get_memory_source_import_status,
     get_memory_space_record,
     inspect_memory_source,
@@ -35,6 +36,7 @@ from sibyl.api.routes.memory import (
     update_memory_space_record,
 )
 from sibyl.api.schemas import (
+    ContextExposureRequest,
     MemoryCitationRequest,
     MemoryCorrectionRequest,
     MemorySharePreviewRequest,
@@ -54,6 +56,7 @@ from sibyl.jobs import source_imports
 from sibyl.services.recall_limits import RecallConcurrencyLimitExceededError
 from sibyl_core.auth import OrganizationRole, ProjectRole
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceResult
+from sibyl_core.models.context import ContextFacet, ContextItem
 from sibyl_core.services.memory import (
     MemoryAccessPreview,
     MemoryCorrectionPreview,
@@ -92,6 +95,16 @@ def _http_request() -> SimpleNamespace:
     return SimpleNamespace(
         client=SimpleNamespace(host="10.0.0.5"),
         headers={"user-agent": "SibylTest/1.0"},
+    )
+
+
+def _idempotent_http_request() -> SimpleNamespace:
+    return SimpleNamespace(
+        client=SimpleNamespace(host="10.0.0.5"),
+        headers={
+            "Idempotency-Key": "hermes-context-operation-1",
+            "user-agent": "SibylTest/1.0",
+        },
     )
 
 
@@ -277,6 +290,104 @@ async def test_remember_raw_uses_current_org_and_principal() -> None:
         organization_id=str(org.id),
         raw_memory_ids=["memory-1"],
     )
+
+
+def test_context_exposure_request_rejects_duplicate_or_malformed_ids() -> None:
+    with pytest.raises(ValueError, match="unique syntactically valid"):
+        ContextExposureRequest(
+            exposed_ids=["decision_1", "decision_1"],
+            project_id="project_1",
+        )
+
+    with pytest.raises(ValueError, match="unique syntactically valid"):
+        ContextExposureRequest(
+            exposed_ids=["not a sibyl id"],
+            project_id="project_1",
+        )
+
+
+@pytest.mark.asyncio
+async def test_expose_memory_context_records_only_authorized_delivered_ids() -> None:
+    org = _org()
+    ctx = _ctx()
+    http_request = _idempotent_http_request()
+    delivered = ContextItem(
+        id="decision_1",
+        type="decision",
+        name="Use delivered acknowledgments",
+        content="",
+        score=0.0,
+        facet=ContextFacet.DECISIONS,
+        reason="delivered context acknowledgment",
+        metadata={"candidate_kind": "node", "project_id": "project_1"},
+    )
+
+    async def record_exposure(items: list[ContextItem], **_: object) -> dict[str, object]:
+        for item in items:
+            item.metadata["usage_exposure"] = {"status": "stamped"}
+        return {"stamped_count": len(items)}
+
+    with (
+        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()) as verify,
+        patch(
+            "sibyl.api.routes.memory._authorized_exposure_item",
+            AsyncMock(side_effect=[delivered, None]),
+        ),
+        patch(
+            "sibyl.api.routes.memory.get_surreal_graph_runtime",
+            AsyncMock(return_value=MagicMock()),
+        ) as graph_runtime,
+        patch(
+            "sibyl.api.routes.memory.annotate_context_item_exposures",
+            record_exposure,
+        ) as annotate,
+        patch(
+            "sibyl.api.routes.memory.replay_idempotent_response",
+            AsyncMock(return_value=None),
+        ),
+        patch(
+            "sibyl.api.routes.memory.save_idempotent_response",
+            AsyncMock(),
+        ) as save,
+    ):
+        response = await expose_memory_context.__wrapped__(
+            ContextExposureRequest(
+                exposed_ids=["decision_1", "raw_memory:missing"],
+                project_id="project_1",
+                metadata={
+                    "session_id_hash": "session-hash",
+                    "query_hash": "query-hash",
+                    "automatic": True,
+                },
+            ),
+            http_request=http_request,
+            org=org,
+            ctx=ctx,
+        )
+
+    verify.assert_awaited_once()
+    graph_runtime.assert_awaited_once_with(str(org.id))
+    assert annotate is not None
+    assert response.recorded_ids == ["decision_1"]
+    assert response.excluded_ids == []
+    assert response.denied_ids == ["raw_memory:missing"]
+    assert response.mutation_receipt.idempotency_key == "hermes-context-operation-1"
+    assert response.mutation_receipt.applied is True
+    save.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_expose_memory_context_requires_idempotency_key() -> None:
+    with pytest.raises(HTTPException) as exc:
+        await expose_memory_context.__wrapped__(
+            ContextExposureRequest(exposed_ids=["decision_1"], project_id="project_1"),
+            http_request=_http_request(),
+            org=_org(),
+            ctx=_ctx(),
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Idempotency-Key is required"
 
 
 @pytest.mark.asyncio
@@ -1840,6 +1951,7 @@ async def test_preview_memory_correction_audits_lifecycle_action() -> None:
         synthesis_impact={"excluded_from_synthesis": True},
         audit_action="memory.correction.hide",
         metadata={"policy_reasons": ["private_principal_bound"]},
+        current_revision=memory.revision,
     )
 
     with (
@@ -1862,6 +1974,7 @@ async def test_preview_memory_correction_audits_lifecycle_action() -> None:
     assert response.applied is False
     assert response.audit_action == "memory.correction.hide"
     assert response.affected_derived_ids == ["entity-1"]
+    assert response.current_revision == memory.revision
     preview_call.assert_awaited_once_with(
         organization_id=str(org.id),
         source_id="memory-1",

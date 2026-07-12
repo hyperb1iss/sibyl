@@ -106,6 +106,9 @@ from .ingestion import (
     SourceImportStatusResponse,
 )
 from .memory import (
+    ContextExposureMetadata,
+    ContextExposureRequest,
+    ContextExposureResponse,
     MemoryAuditEventResponse,
     MemoryAuditListResponse,
     MemoryCitationRequest,
@@ -218,6 +221,9 @@ __all__ = [
     "ContextPackRequest",
     "ContextPackResponse",
     "ContextPackSection",
+    "ContextExposureMetadata",
+    "ContextExposureRequest",
+    "ContextExposureResponse",
     "CrawlDocumentListResponse",
     "CrawlDocumentResponse",
     "CrawlHealthResponse",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -13,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.idempotency import (
+    idempotency_key,
     mutation_receipt,
     replay_idempotent_response,
     save_idempotent_response,
@@ -20,6 +22,8 @@ from sibyl.api.idempotency import (
 )
 from sibyl.api.raw_capture_events import publish_raw_capture_changed
 from sibyl.api.schemas import (
+    ContextExposureRequest,
+    ContextExposureResponse,
     MemoryAuditEventResponse,
     MemoryAuditListResponse,
     MemoryCitationRequest,
@@ -87,12 +91,18 @@ from sibyl_core.auth.memory_policy import (
     authorize_memory_read,
     authorize_memory_write,
 )
+from sibyl_core.models.context import (
+    ContextFacet,
+    ContextItem,
+    ContextItemQualityMetadata,
+)
 from sibyl_core.models.reflection import (
     claim_records_from_metadata,
     memory_lifecycle_from_metadata,
     reflection_findings_from_metadata,
 )
 from sibyl_core.observability import elapsed_ms, telemetry_registry
+from sibyl_core.services.graph import GraphRuntime, get_surreal_graph_runtime
 from sibyl_core.services.memory import (
     MemoryAccessPreview,
     MemoryCorrectionPreview,
@@ -130,6 +140,7 @@ from sibyl_core.services.surreal_content import (
     remember_raw_memory,
     save_raw_memory,
 )
+from sibyl_core.tools.usage_exposure import annotate_context_item_exposures
 
 log = structlog.get_logger()
 
@@ -162,6 +173,97 @@ def _policy_http_status(reason: str) -> int:
     if reason == "principal_mismatch":
         return 401
     return 403
+
+
+def _graph_entity_project_id(entity: Any) -> str | None:
+    entity_type = getattr(entity, "entity_type", None)
+    if getattr(entity_type, "value", entity_type) == "project":
+        return str(entity.id)
+    project_id = getattr(entity, "project_id", None) or entity.metadata.get("project_id")
+    return str(project_id) if project_id else None
+
+
+async def _authorized_exposure_item(
+    *,
+    exposed_id: str,
+    project_id: str,
+    organization_id: str,
+    graph_runtime: GraphRuntime | None,
+    ctx: AuthContext,
+    request: Request,
+) -> ContextItem | None:
+    if exposed_id.startswith("raw_memory:"):
+        memory_id = exposed_id.removeprefix("raw_memory:")
+        try:
+            memory = await _load_memory_source_for_org(
+                organization_id=organization_id,
+                source_id=memory_id,
+            )
+            await _require_source_policy(
+                ctx=ctx,
+                memory=memory,
+                action=MemoryPolicyAction.READ,
+                surface="memory_exposure",
+                request=request,
+            )
+        except HTTPException:
+            return None
+        if _memory_project_id(memory) != project_id:
+            return None
+        return ContextItem(
+            id=exposed_id,
+            type="raw_memory",
+            name=memory.title or exposed_id,
+            content="",
+            score=0.0,
+            facet=ContextFacet.RECENT_MEMORY,
+            reason="delivered context acknowledgment",
+            metadata={
+                "candidate_kind": "raw_memory",
+                "project_id": project_id,
+            },
+            quality=ContextItemQualityMetadata(
+                origin="raw_memory",
+                project_id=project_id,
+            ),
+        )
+
+    if graph_runtime is None:
+        return None
+    try:
+        entity = await graph_runtime.entity_manager.get(exposed_id)
+    except KeyError:
+        return None
+    entity_project_id = _graph_entity_project_id(entity)
+    if entity_project_id != project_id:
+        return None
+    try:
+        await verify_entity_project_access(
+            None,
+            ctx,
+            project_id,
+            required_role=ProjectRole.VIEWER,
+            require_existing_project=True,
+        )
+    except HTTPException:
+        return None
+    return ContextItem(
+        id=exposed_id,
+        type=str(getattr(entity.entity_type, "value", entity.entity_type)),
+        name=entity.name,
+        content="",
+        score=0.0,
+        facet=ContextFacet.DOMAIN,
+        reason="delivered context acknowledgment",
+        metadata={
+            "candidate_kind": "node",
+            "project_id": project_id,
+        },
+        quality=ContextItemQualityMetadata(
+            origin="graph",
+            project_id=project_id,
+        ),
+    )
 
 
 def _log_policy_decision(
@@ -897,6 +999,7 @@ def _correction_response(
         policy_reasons=[decision.reason for decision in preview.policy_decisions]
         or _metadata_str_list(metadata.get("policy_reasons")),
         metadata=metadata,
+        current_revision=preview.current_revision,
         revision=updated_memory.revision if updated_memory else None,
         mutation_receipt=receipt,
     )
@@ -1686,6 +1789,117 @@ async def _accessible_teams_for_share(
 ) -> set[str] | None:
     accessible_teams = await list_accessible_team_scope_keys(ctx)
     return {str(team_id) for team_id in accessible_teams or set()}
+
+
+@router.post(
+    "/expose",
+    response_model=ContextExposureResponse,
+    dependencies=[Depends(require_org_role(*_READ_ROLES))],
+)
+@serialize_idempotent_request
+async def expose_memory_context(
+    request: ContextExposureRequest,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+) -> ContextExposureResponse:
+    """Record the exact context items delivered to an agent prompt."""
+    principal_id = ctx.user_id
+    if not principal_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    operation_id = idempotency_key(http_request)
+    if not operation_id:
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+
+    await verify_entity_project_access(
+        None,
+        ctx,
+        request.project_id,
+        required_role=ProjectRole.VIEWER,
+        require_existing_project=True,
+    )
+    idempotency_path = "/memory/expose"
+    idempotency_payload = {"body": request.model_dump(mode="json")}
+    replayed = await replay_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=principal_id,
+        method="POST",
+        path=idempotency_path,
+        payload=idempotency_payload,
+        response_model=ContextExposureResponse,
+        content_session=None,
+    )
+    if replayed is not None:
+        return replayed
+
+    graph_runtime = (
+        await get_surreal_graph_runtime(str(org.id))
+        if any(not exposed_id.startswith("raw_memory:") for exposed_id in request.exposed_ids)
+        else None
+    )
+    candidates = await asyncio.gather(
+        *(
+            _authorized_exposure_item(
+                exposed_id=exposed_id,
+                project_id=request.project_id,
+                organization_id=str(org.id),
+                graph_runtime=graph_runtime,
+                ctx=ctx,
+                request=http_request,
+            )
+            for exposed_id in request.exposed_ids
+        )
+    )
+    authorized_items = [item for item in candidates if item is not None]
+    denied_ids = [
+        exposed_id
+        for exposed_id, item in zip(request.exposed_ids, candidates, strict=True)
+        if item is None
+    ]
+    if authorized_items:
+        await annotate_context_item_exposures(
+            authorized_items,
+            organization_id=str(org.id),
+            principal_id=principal_id,
+            project_id=request.project_id,
+            source_surface=request.source_surface,
+            request_metadata={
+                **request.metadata.model_dump(mode="json", exclude_none=True),
+                "provider_operation_id": operation_id,
+                "item_ids": list(request.exposed_ids),
+            },
+        )
+
+    recorded_ids = [
+        item.id
+        for item in authorized_items
+        if item.metadata.get("usage_exposure", {}).get("status") == "stamped"
+    ]
+    excluded_ids = [item.id for item in authorized_items if item.id not in set(recorded_ids)]
+    response = ContextExposureResponse(
+        recorded_ids=recorded_ids,
+        excluded_ids=excluded_ids,
+        denied_ids=denied_ids,
+        mutation_receipt=mutation_receipt(
+            http_request,
+            applied=bool(recorded_ids),
+            revision=1 if recorded_ids else None,
+            affected_records=recorded_ids,
+        ),
+    )
+    await save_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=principal_id,
+        method="POST",
+        path=idempotency_path,
+        payload=idempotency_payload,
+        response=response,
+        status_code=200,
+        content_session=None,
+    )
+    return response
 
 
 @router.get(

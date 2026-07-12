@@ -1,10 +1,12 @@
 """Memory: raw memory, audit events, memory spaces, source inspection,
 corrections, reflection promotion/autonomy, and sharing models."""
 
+import json
+import re
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .common import (
     MemoryCorrectionActionLiteral,
@@ -12,6 +14,58 @@ from .common import (
     MemorySpaceStateLiteral,
     MutationReceipt,
 )
+
+_SIBYL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,499}$")
+_EXPOSURE_METADATA_MAX_BYTES = 16 * 1024
+
+
+class ContextExposureMetadata(BaseModel):
+    """Bounded provider metadata attached to delivered-context usage events."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id_hash: str | None = Field(default=None, max_length=256)
+    query_hash: str | None = Field(default=None, max_length=256)
+    automatic: bool = True
+
+
+class ContextExposureRequest(BaseModel):
+    """Acknowledge context items that reached an agent prompt."""
+
+    exposed_ids: list[str] = Field(..., min_length=1, max_length=100)
+    project_id: str = Field(..., min_length=1, max_length=500)
+    source_surface: Literal["hermes_memory_provider"] = "hermes_memory_provider"
+    metadata: ContextExposureMetadata = Field(default_factory=ContextExposureMetadata)
+
+    @field_validator("exposed_ids")
+    @classmethod
+    def validate_exposed_ids(cls, value: list[str]) -> list[str]:
+        normalized = list(dict.fromkeys(item.strip() for item in value))
+        if len(normalized) != len(value) or any(
+            not _SIBYL_ID_PATTERN.fullmatch(item) for item in normalized
+        ):
+            raise ValueError("exposed_ids must contain unique syntactically valid Sibyl IDs")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_metadata_size(self) -> "ContextExposureRequest":
+        encoded = json.dumps(
+            self.metadata.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if len(encoded) > _EXPOSURE_METADATA_MAX_BYTES:
+            raise ValueError("metadata exceeds the 16 KiB encoded limit")
+        return self
+
+
+class ContextExposureResponse(BaseModel):
+    """Result of a delivered-context acknowledgment."""
+
+    recorded_ids: list[str] = Field(default_factory=list)
+    excluded_ids: list[str] = Field(default_factory=list)
+    denied_ids: list[str] = Field(default_factory=list)
+    mutation_receipt: MutationReceipt
 
 
 class RawMemoryRememberRequest(BaseModel):
@@ -383,6 +437,7 @@ class MemoryCorrectionResponse(BaseModel):
     audit_action: str
     policy_reasons: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    current_revision: int | None = Field(default=None, ge=1)
     revision: int | None = Field(default=None, ge=1)
     mutation_receipt: MutationReceipt | None = None
 

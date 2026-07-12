@@ -506,6 +506,7 @@ async def test_memory_correction_preview_treats_deferred_review_as_active(
     )
 
     assert result.allowed
+    assert result.current_revision == memory.revision
     assert result.target_lifecycle_state == "active"
     assert result.target_lifecycle_flags == ["hidden"]
 
