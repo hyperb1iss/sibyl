@@ -1670,6 +1670,6 @@ The project is complete when:
 8. Stored prompt injection remains fenced evidence.
 9. Corrections affect future recall with revision-aware receipts.
 10. Branch, resume, reset, compression, and rewind semantics pass their fixtures.
-11. The four release gates pass against an ephemeral real stack.
+11. The five release gates pass against an ephemeral real stack.
 12. Solo and household shadow dogfood produce no unresolved critical finding.
 13. A clean public Git install succeeds without local source-tree assumptions.
