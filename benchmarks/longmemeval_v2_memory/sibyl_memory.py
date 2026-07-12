@@ -77,6 +77,34 @@ JOB_STATUS_BATCH_SIZE = 64
 MAX_BULK_CREATE = 128
 CHUNK_CATALOG_FILENAME = "chunk_catalog.jsonl.gz"
 RETRYABLE_HTTP_STATUS_CODES = frozenset({408, 409, 425, 429})
+SAVED_MEMORY_SECRET_KEYS = frozenset({"api_token", "email", "password"})
+LOADED_MEMORY_RUNTIME_KEYS = frozenset(
+    {
+        *SAVED_MEMORY_SECRET_KEYS,
+        "allow_localhost",
+        "allow_signup",
+        "api_timeout_seconds",
+        "api_retry_attempts",
+        "api_retry_base_delay_seconds",
+        "api_retry_max_delay_seconds",
+        "search_limit",
+        "max_context_items",
+        "max_context_chars_per_item",
+        "max_chunks_per_trajectory",
+        "neighbor_stitch_items",
+        "neighbor_stitch_span",
+    }
+)
+SAVED_MEMORY_IDENTITY_KEYS = frozenset(
+    {
+        "api_url",
+        "project_id",
+        "run_id",
+        "content_max_chars",
+        "include_screenshot_refs",
+        "defer_embeddings",
+    }
+)
 
 _AUTH_CACHE: dict[tuple[str, str, str], dict[str, str]] = {}
 _AUTH_LOCK = threading.Lock()
@@ -391,9 +419,73 @@ def _catalog_results(
     return catalog
 
 
+def _memory_config_params(
+    config: dict[str, object],
+    *,
+    expected_type: str,
+) -> dict[str, object]:
+    if config.get("memory_type") != expected_type:
+        msg = f"Expected memory_type {expected_type!r}, got {config.get('memory_type')!r}"
+        raise RuntimeError(msg)
+    memory_params = config.get("memory_params")
+    if not isinstance(memory_params, dict):
+        raise RuntimeError("Memory config missing object memory_params")
+    return dict(memory_params)
+
+
 @register_memory
 class SibylLiveApiMemory(Memory):
     memory_type = "sibyl_live_api"
+
+    @property
+    def memory_config(self) -> dict[str, object]:
+        memory_params = {
+            key: value
+            for key, value in self.memory_params.items()
+            if key not in SAVED_MEMORY_SECRET_KEYS
+        }
+        memory_params.update(
+            {
+                "api_url": self.api_url,
+                "project_id": self.project_id,
+                "run_id": self.run_id,
+            }
+        )
+        return {"memory_type": self.memory_type, "memory_params": memory_params}
+
+    @classmethod
+    def reconcile_loaded_memory_config(
+        cls,
+        saved_config: dict[str, object],
+        requested_config: dict[str, object] | None,
+    ) -> dict[str, object]:
+        saved_params = _memory_config_params(saved_config, expected_type=cls.memory_type)
+        if requested_config is None:
+            return {
+                "memory_type": cls.memory_type,
+                "memory_params": dict(saved_params),
+            }
+        requested_params = _memory_config_params(
+            requested_config,
+            expected_type=cls.memory_type,
+        )
+        for key in SAVED_MEMORY_IDENTITY_KEYS:
+            if key not in requested_params or requested_params[key] == saved_params.get(key):
+                continue
+            msg = (
+                f"Loaded Sibyl memory cannot change ingest identity parameter {key!r}: "
+                f"saved={saved_params.get(key)!r}, requested={requested_params[key]!r}"
+            )
+            raise RuntimeError(msg)
+        effective_params = dict(saved_params)
+        effective_params.update(
+            {
+                key: requested_params[key]
+                for key in LOADED_MEMORY_RUNTIME_KEYS
+                if key in requested_params
+            }
+        )
+        return {"memory_type": cls.memory_type, "memory_params": effective_params}
 
     def __init__(self, memory_params: dict[str, object]) -> None:
         super().__init__(memory_params)

@@ -39,8 +39,10 @@ EXPECTED_JUDGE_REQUESTS = 2
 EXPECTED_MAX_CHUNKS_PER_TRAJECTORY = 2
 EXPECTED_NEIGHBOR_STITCH_ITEMS = 2
 EXPECTED_NEIGHBOR_STITCH_SPAN = 1
+EXPECTED_SEARCH_LIMIT_OVERRIDE = 24
 TEST_CONTENT_MAX_CHARS = 420
 TEST_CONTEXT_MAX_CHARS = 800
+TEST_CREDENTIAL = "fresh-credential"
 
 
 class _RequestCall(TypedDict):
@@ -886,6 +888,111 @@ def test_sibyl_memory_chunk_catalog_round_trips(tmp_path: Path) -> None:
     assert restored.created_entities == len(catalog["t1"])
     assert restored.inserted_trajectories == len(catalog)
     assert restored._ingest_finalized is True
+
+
+def test_sibyl_memory_saved_config_strips_credentials() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(
+        memory,
+        {
+            "api_url": "http://127.0.0.1:3434/api",
+            "api_token": "token-secret",
+            "email": "bench@example.invalid",
+            "password": "password-secret",
+            "run_id": "run-saved",
+        },
+    )
+    memory.api_url = "http://127.0.0.1:3434/api"
+    memory.project_id = "project_saved"
+    memory.run_id = "run-saved"
+
+    params = memory.memory_config["memory_params"]
+
+    assert params["project_id"] == "project_saved"
+    assert params["run_id"] == "run-saved"
+    assert "api_token" not in params
+    assert "email" not in params
+    assert "password" not in params
+
+
+def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
+    module = _load_memory_module()
+    saved = {
+        "memory_type": "sibyl_live_api",
+        "memory_params": {
+            "api_url": "http://127.0.0.1:3434/api",
+            "project_id": "project_saved",
+            "run_id": "run-saved",
+            "content_max_chars": EXPECTED_CONTENT_MAX_CHARS,
+            "search_limit": 12,
+            "neighbor_stitch_items": 0,
+        },
+    }
+    requested = {
+        "memory_type": "sibyl_live_api",
+        "memory_params": {
+            **saved["memory_params"],
+            "api_token": TEST_CREDENTIAL,
+            "search_limit": EXPECTED_SEARCH_LIMIT_OVERRIDE,
+            "neighbor_stitch_items": 2,
+        },
+    }
+
+    effective = module.SibylLiveApiMemory.reconcile_loaded_memory_config(saved, requested)
+    params = effective["memory_params"]
+
+    assert params["project_id"] == "project_saved"
+    assert params["run_id"] == "run-saved"
+    assert params["api_token"] == TEST_CREDENTIAL
+    assert params["search_limit"] == EXPECTED_SEARCH_LIMIT_OVERRIDE
+    assert params["neighbor_stitch_items"] == EXPECTED_NEIGHBOR_STITCH_ITEMS
+
+    requested["memory_params"]["content_max_chars"] = 8_000
+    with pytest.raises(RuntimeError, match="content_max_chars"):
+        module.SibylLiveApiMemory.reconcile_loaded_memory_config(saved, requested)
+
+
+def test_official_runner_load_config_preserves_saved_ingest_identity(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    (memory_dir / "memory_config.json").write_text(
+        json.dumps(
+            {
+                "memory_type": "sibyl_live_api",
+                "memory_params": {
+                    "api_url": "http://127.0.0.1:3434/api",
+                    "project_id": "project_saved",
+                    "run_id": "run-saved",
+                    "content_max_chars": EXPECTED_CONTENT_MAX_CHARS,
+                    "search_limit": 12,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    requested = {
+        "memory_type": "sibyl_live_api",
+        "memory_params": {
+            "api_url": "http://127.0.0.1:3334/api",
+            "project_id": "",
+            "run_id": "run-new",
+            "content_max_chars": 8_000,
+            "api_token": TEST_CREDENTIAL,
+            "search_limit": EXPECTED_SEARCH_LIMIT_OVERRIDE,
+        },
+    }
+
+    effective = module.build_loaded_memory_config(memory_dir, requested_config=requested)
+    params = effective["memory_params"]
+
+    assert params["api_url"] == "http://127.0.0.1:3434/api"
+    assert params["project_id"] == "project_saved"
+    assert params["run_id"] == "run-saved"
+    assert params["content_max_chars"] == EXPECTED_CONTENT_MAX_CHARS
+    assert params["api_token"] == TEST_CREDENTIAL
+    assert params["search_limit"] == EXPECTED_SEARCH_LIMIT_OVERRIDE
 
 
 def test_sibyl_memory_query_context_exposes_only_question_and_image() -> None:

@@ -49,6 +49,25 @@ RECEIPT_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-receipt-v1"
 ACCOUNTING_SCHEMA_VERSION = "sibyl-eval-accounting-v1"
 OFFICIAL_REPO_URL = "https://github.com/xiaowu0162/LongMemEval-V2"
 OFFICIAL_HARNESS_PATH = "evaluation/harness.py"
+LOADED_MEMORY_RUNTIME_KEYS = frozenset(
+    {
+        "api_token",
+        "email",
+        "password",
+        "allow_localhost",
+        "allow_signup",
+        "api_timeout_seconds",
+        "api_retry_attempts",
+        "api_retry_base_delay_seconds",
+        "api_retry_max_delay_seconds",
+        "search_limit",
+        "max_context_items",
+        "max_context_chars_per_item",
+        "max_chunks_per_trajectory",
+        "neighbor_stitch_items",
+        "neighbor_stitch_span",
+    }
+)
 QWEN_READER_MODEL_FRAGMENT = "qwen3.5-9b"
 GPT_EVALUATOR_MODEL_FRAGMENT = "gpt-5.2"
 DEFAULT_METHOD = "sibyl_live_api"
@@ -553,7 +572,39 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "embedding_backfill_max_pending_jobs": args.embedding_backfill_max_pending_jobs,
         "runner_provenance": git_provenance(ROOT),
     }
-    return {"memory_type": "sibyl_live_api", "memory_params": params}
+    config = {"memory_type": "sibyl_live_api", "memory_params": params}
+    if not args.load_memory_dir:
+        return config
+    return build_loaded_memory_config(
+        Path(args.load_memory_dir).expanduser().resolve(),
+        requested_config=config,
+    )
+
+
+def build_loaded_memory_config(
+    memory_dir: Path,
+    *,
+    requested_config: dict[str, object],
+) -> dict[str, object]:
+    saved_path = memory_dir / "memory_config.json"
+    saved_config = _load_json_if_exists(saved_path)
+    if saved_config.get("memory_type") != "sibyl_live_api":
+        msg = f"Saved memory config is not sibyl_live_api: {saved_path}"
+        raise RuntimeError(msg)
+    saved_params = saved_config.get("memory_params")
+    requested_params = requested_config.get("memory_params")
+    if not isinstance(saved_params, dict) or not isinstance(requested_params, dict):
+        msg = f"Saved or requested memory config is missing memory_params: {saved_path}"
+        raise RuntimeError(msg)
+    effective_params = dict(saved_params)
+    effective_params.update(
+        {
+            key: requested_params[key]
+            for key in LOADED_MEMORY_RUNTIME_KEYS
+            if key in requested_params
+        }
+    )
+    return {"memory_type": "sibyl_live_api", "memory_params": effective_params}
 
 
 def haystack_path(data_root: Path, tier: str) -> Path:
