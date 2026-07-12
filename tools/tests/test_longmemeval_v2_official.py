@@ -660,6 +660,45 @@ def test_sibyl_memory_insert_tracks_deferred_background_jobs() -> None:
     assert memory._pending_projection_job_ids == {"project-lme-v2-1"}
 
 
+def test_sibyl_memory_project_creation_defers_and_tracks_embeddings() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    requests: list[dict[str, object]] = []
+
+    def fake_request(
+        method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        del params
+        assert method == "POST"
+        assert path == "/entities"
+        assert isinstance(json, dict)
+        requests.append(json)
+        return {
+            "id": "project_lme",
+            "background_jobs": {
+                "embedding_backfill": {
+                    "status": "queued",
+                    "job_ids": ["embed-project-1"],
+                }
+            },
+        }
+
+    memory.run_id = "run_lme"
+    memory.defer_embeddings = True
+    memory._pending_embedding_job_ids = set()
+    memory._pending_projection_job_ids = set()
+    memory._request_json = fake_request
+
+    assert memory._create_project() == "project_lme"
+    assert requests[0]["defer_embeddings"] is True
+    assert memory._pending_embedding_job_ids == {"embed-project-1"}
+
+
 def test_sibyl_memory_batches_payloads_by_entity_count_and_content_size() -> None:
     module = _load_memory_module()
 
@@ -919,11 +958,26 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
             job_ids = json["job_ids"]
             assert isinstance(job_ids, list)
             assert len(job_ids) == 1
+            result = None
+            if str(job_ids[0]).startswith("embed-"):
+                result = {
+                    "embedding_usage": {
+                        "provider": "openai",
+                        "model": "text-embedding-3-small",
+                        "requests": 1,
+                        "inputs": 4,
+                        "prompt_tokens": 100,
+                        "total_tokens": 100,
+                        "cost_reported_requests": 0,
+                        "cost_usd": 0.0,
+                    }
+                }
             return {
                 "jobs": {
                     str(job_ids[0]): {
                         "status": "complete",
                         "error": None,
+                        "result": result,
                     }
                 }
             }
@@ -951,6 +1005,7 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
     memory.inserted_trajectories = 2
     memory.created_entities = 4
     memory.defer_embeddings = True
+    memory.ingest_embedding_usage = {}
     memory.embedding_job_wait_timeout_seconds = 5.0
     memory.embedding_job_poll_seconds = 0.0
     memory._pending_embedding_job_ids = {"embed-lme-v2-1"}
@@ -978,6 +1033,16 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
     assert metadata["api_runtime"]["runtime"] == {
         "commit": "abc123",
         "git_dirty": False,
+    }
+    assert metadata["ingest_embedding_usage"] == {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "requests": 1,
+        "inputs": 4,
+        "prompt_tokens": 100,
+        "total_tokens": 100,
+        "cost_reported_requests": 0,
+        "cost_usd": 0.0,
     }
 
 

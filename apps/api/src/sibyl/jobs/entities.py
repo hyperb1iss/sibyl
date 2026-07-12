@@ -14,7 +14,10 @@ from sibyl.api.event_types import WSEvent
 from sibyl.persistence.auth_runtime import log_memory_audit_event
 from sibyl_core.auth import MemoryPolicyContext, OrganizationRole, authorize_memory_write
 from sibyl_core.auth.memory_policy import MemoryPolicyAction, MemoryPolicyDecision
-from sibyl_core.embeddings.providers import configured_embedding_provider
+from sibyl_core.embeddings.providers import (
+    capture_embedding_usage,
+    configured_embedding_provider,
+)
 from sibyl_core.projection import project_memory_entities, project_memory_entity
 from sibyl_core.services.graph import get_surreal_graph_runtime
 from sibyl_core.services.surreal_content import MemoryScope
@@ -706,19 +709,21 @@ async def project_memory_batch(
     """Project prose-bearing source entities into native graph handles."""
     from sibyl_core.models.entities import Entity
 
-    sources = [Entity.model_validate(source_data) for source_data in sources_data]
-    runtime = await get_surreal_graph_runtime(
-        group_id,
-        embedding_provider=configured_embedding_provider(),
-    )
-    projection = await project_memory_entities(
-        entity_manager=runtime.entity_manager,
-        relationship_manager=runtime.relationship_manager,
-        sources=sources,
-        group_id=group_id,
-        created_source_ids=created_source_ids,
-        generate_embeddings=True,
-    )
+    embedding_provider = configured_embedding_provider()
+    with capture_embedding_usage(embedding_provider) as embedding_usage:
+        sources = [Entity.model_validate(source_data) for source_data in sources_data]
+        runtime = await get_surreal_graph_runtime(
+            group_id,
+            embedding_provider=embedding_provider,
+        )
+        projection = await project_memory_entities(
+            entity_manager=runtime.entity_manager,
+            relationship_manager=runtime.relationship_manager,
+            sources=sources,
+            group_id=group_id,
+            created_source_ids=created_source_ids,
+            generate_embeddings=True,
+        )
 
     result = {
         "sources": projection.sources,
@@ -728,6 +733,7 @@ async def project_memory_batch(
         "projection_state": projection.projection_state,
         "skipped": projection.skipped,
         "errors": list(projection.errors),
+        "embedding_usage": embedding_usage,
     }
     if projection.errors:
         log.warning("memory_projection_batch_failed", **result)
@@ -746,46 +752,50 @@ async def backfill_entity_embeddings(
     """Generate native graph embeddings after a lexical-first write."""
     from sibyl_core.models.entities import Entity, Relationship
 
-    runtime = await get_surreal_graph_runtime(
-        group_id,
-        embedding_provider=configured_embedding_provider(),
-    )
-    entities = [Entity.model_validate(entity_data) for entity_data in entities_data]
-    created_ids = await _retry_surreal_write_conflict(
-        "entity_embedding_backfill_entities",
-        lambda: runtime.entity_manager.create_direct_bulk(
-            entities,
-            generate_embeddings=True,
-        ),
-    )
+    embedding_provider = configured_embedding_provider()
+    with capture_embedding_usage(embedding_provider) as embedding_usage:
+        runtime = await get_surreal_graph_runtime(
+            group_id,
+            embedding_provider=embedding_provider,
+        )
+        entities = [Entity.model_validate(entity_data) for entity_data in entities_data]
+        created_ids = await _retry_surreal_write_conflict(
+            "entity_embedding_backfill_entities",
+            lambda: runtime.entity_manager.create_direct_bulk(
+                entities,
+                generate_embeddings=True,
+            ),
+        )
 
-    relationship_ids: list[str] = []
-    if relationships:
-        relationship_models = [
-            Relationship.model_validate(relationship_data) for relationship_data in relationships
-        ]
-        create_direct_bulk = getattr(runtime.relationship_manager, "create_direct_bulk", None)
-        if callable(create_direct_bulk):
-            relationship_ids = list(
-                await _retry_surreal_write_conflict(
-                    "entity_embedding_backfill_relationships",
-                    lambda: create_direct_bulk(
-                        relationship_models,
-                        generate_embeddings=True,
-                    ),
-                )
-            )
-        else:
-            relationship_ids = [
-                await runtime.relationship_manager.create(relationship)
-                for relationship in relationship_models
+        relationship_ids: list[str] = []
+        if relationships:
+            relationship_models = [
+                Relationship.model_validate(relationship_data)
+                for relationship_data in relationships
             ]
+            create_direct_bulk = getattr(runtime.relationship_manager, "create_direct_bulk", None)
+            if callable(create_direct_bulk):
+                relationship_ids = list(
+                    await _retry_surreal_write_conflict(
+                        "entity_embedding_backfill_relationships",
+                        lambda: create_direct_bulk(
+                            relationship_models,
+                            generate_embeddings=True,
+                        ),
+                    )
+                )
+            else:
+                relationship_ids = [
+                    await runtime.relationship_manager.create(relationship)
+                    for relationship in relationship_models
+                ]
 
     result = {
         "entities": len(created_ids),
         "relationships": len(relationship_ids),
         "entity_ids": list(created_ids),
         "relationship_ids": relationship_ids,
+        "embedding_usage": embedding_usage,
     }
     log.info("entity_embedding_backfill_complete", **result)
     return result

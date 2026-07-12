@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,10 +13,15 @@ import sibyl_core.retrieval.query_ranking as query_ranking_module
 import sibyl_core.retrieval.search as search_module
 from sibyl_core.auth.memory_policy import memory_scope_policy_key
 from sibyl_core.embeddings.providers import (
+    CachedEmbeddingProvider,
     DeterministicEmbeddingProvider,
     EmbeddingMetadata,
+    OpenAIEmbeddingProvider,
+    capture_embedding_usage,
     configured_embedding_provider,
     create_embedding_provider,
+    embedding_usage_delta,
+    embedding_usage_snapshot,
 )
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceResult
 from sibyl_core.models.context import ContextFacet
@@ -46,6 +52,48 @@ class _FakeSentenceTransformer:
         return [
             [float(index + 1), 0.0, 0.0][: self.dimensions] for index, _text in enumerate(texts)
         ]
+
+
+@pytest.mark.asyncio
+async def test_openai_embedding_provider_records_response_usage() -> None:
+    class Embeddings:
+        async def create(self, **kwargs: object) -> SimpleNamespace:
+            inputs = kwargs["input"]
+            assert isinstance(inputs, list)
+            return SimpleNamespace(
+                data=[SimpleNamespace(embedding=[0.1, 0.2]) for _ in inputs],
+                usage=SimpleNamespace(prompt_tokens=7, total_tokens=7, cost=0.0001),
+            )
+
+    metadata = EmbeddingMetadata(
+        provider="openai",
+        model="text-embedding-test",
+        dimensions=2,
+        cache_namespace="usage-test",
+        tokenizer_estimate_method="test",
+    )
+    provider = CachedEmbeddingProvider(
+        OpenAIEmbeddingProvider(
+            metadata=metadata,
+            client=SimpleNamespace(embeddings=Embeddings()),
+        )
+    )
+    before = embedding_usage_snapshot(provider)
+    with capture_embedding_usage(provider) as captured:
+        assert await provider.embed_texts(["alpha", "beta"]) == [[0.1, 0.2], [0.1, 0.2]]
+
+    expected_usage = {
+        "provider": "openai",
+        "model": "text-embedding-test",
+        "requests": 1,
+        "inputs": 2,
+        "prompt_tokens": 7,
+        "total_tokens": 7,
+        "cost_reported_requests": 1,
+        "cost_usd": 0.0001,
+    }
+    assert captured == expected_usage
+    assert embedding_usage_delta(before, embedding_usage_snapshot(provider)) == expected_usage
 
 
 @pytest.mark.asyncio

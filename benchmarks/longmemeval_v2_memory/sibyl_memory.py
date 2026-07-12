@@ -243,6 +243,7 @@ class SibylLiveApiMemory(Memory):
         self.created_entities = 0
         self._pending_embedding_job_ids: set[str] = set()
         self._pending_projection_job_ids: set[str] = set()
+        self.ingest_embedding_usage: dict[str, object] = {}
         self._finalize_lock = threading.Lock()
         self._ingest_finalized = False
         self._query_local = threading.local()
@@ -356,6 +357,7 @@ class SibylLiveApiMemory(Memory):
             "defer_embeddings": self.defer_embeddings,
             "pending_embedding_backfill_jobs": len(self._pending_embedding_job_ids),
             "pending_memory_projection_jobs": len(self._pending_projection_job_ids),
+            "ingest_embedding_usage": dict(self.ingest_embedding_usage),
             "returned_context_items": len(memory_context),
             "search_content_max_chars": self.max_context_chars_per_item,
             "search_metadata": dict(
@@ -444,6 +446,10 @@ class SibylLiveApiMemory(Memory):
                                 f"{result_errors or projection_state}"
                             )
                             raise RuntimeError(msg)
+                        _merge_usage_totals(
+                            self.ingest_embedding_usage,
+                            result.get("embedding_usage"),
+                        )
                     pending.remove(job_id)
                     made_progress = True
                 elif status_value in {"cancelled", "not_found"}:
@@ -565,6 +571,7 @@ class SibylLiveApiMemory(Memory):
                 "content": "LongMemEval-V2 isolated memory workspace.",
                 "entity_type": "project",
                 "skip_conflicts": True,
+                "defer_embeddings": self.defer_embeddings,
                 "metadata": {
                     "longmemeval_v2_run_id": self.run_id,
                     "capture_surface": "longmemeval-v2-official",
@@ -575,6 +582,8 @@ class SibylLiveApiMemory(Memory):
         if not project_id:
             msg = "Sibyl project creation did not return an id"
             raise RuntimeError(msg)
+        self._remember_embedding_backfill_jobs(response)
+        self._remember_memory_projection_jobs(response)
         return project_id
 
     def _request_json(
@@ -826,6 +835,29 @@ def _retry_delay_seconds(
     failed_attempt: int,
 ) -> float:
     return min(max_delay, base_delay * (2 ** max(0, failed_attempt - 1)))
+
+
+def _merge_usage_totals(total: dict[str, object], usage: object) -> None:
+    if not isinstance(usage, dict):
+        return
+    for field_name in ("provider", "model"):
+        value = _stripped_str(usage.get(field_name))
+        if value:
+            total[field_name] = value
+    for field_name in (
+        "requests",
+        "inputs",
+        "prompt_tokens",
+        "total_tokens",
+        "cost_reported_requests",
+        "cost_usd",
+    ):
+        value = usage.get(field_name)
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            continue
+        current = total.get(field_name, 0)
+        current_number = current if isinstance(current, int | float) else 0
+        total[field_name] = current_number + value
 
 
 def _new_http_client(api_url: str, *, timeout_seconds: float) -> httpx.Client:

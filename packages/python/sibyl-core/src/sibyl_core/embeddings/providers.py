@@ -10,8 +10,9 @@ import os
 import threading
 import weakref
 from collections import OrderedDict
-from collections.abc import Sequence
-from contextlib import suppress
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, replace
 from functools import lru_cache
 from typing import Any, Literal, Protocol, cast
@@ -54,6 +55,18 @@ _configured_provider_cache: weakref.WeakKeyDictionary[
     dict[_ConfiguredProviderCacheKey, EmbeddingProvider],
 ] = weakref.WeakKeyDictionary()
 _configured_provider_lock = threading.Lock()
+_embedding_usage_collector: ContextVar[dict[str, str | int | float] | None] = ContextVar(
+    "embedding_usage_collector",
+    default=None,
+)
+_EMBEDDING_USAGE_COUNTERS = (
+    "requests",
+    "inputs",
+    "prompt_tokens",
+    "total_tokens",
+    "cost_reported_requests",
+    "cost_usd",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +138,15 @@ class OpenAIEmbeddingProvider:
 
             client = AsyncOpenAI(api_key=api_key or None)
         self._client = client
+        self._usage_lock = threading.Lock()
+        self._usage: dict[str, int | float] = {
+            "requests": 0,
+            "inputs": 0,
+            "prompt_tokens": 0,
+            "total_tokens": 0,
+            "cost_reported_requests": 0,
+            "cost_usd": 0.0,
+        }
 
     @property
     def metadata(self) -> EmbeddingMetadata:
@@ -152,8 +174,41 @@ class OpenAIEmbeddingProvider:
                 input=input_batch,
                 dimensions=self.metadata.dimensions,
             )
+            self._record_usage(result, input_count=len(input_batch))
             embeddings.extend([list(item.embedding) for item in result.data])
         return embeddings
+
+    def usage_snapshot(self) -> dict[str, str | int | float]:
+        with self._usage_lock:
+            usage = dict(self._usage)
+        return {
+            "provider": self.metadata.provider,
+            "model": self.metadata.model,
+            **usage,
+        }
+
+    def _record_usage(self, response: Any, *, input_count: int) -> None:
+        usage = getattr(response, "usage", None)
+        prompt_tokens = _usage_number(usage, "prompt_tokens") or 0.0
+        total_tokens = _usage_number(usage, "total_tokens") or prompt_tokens
+        cost = _usage_number(usage, "cost")
+        with self._usage_lock:
+            self._usage["requests"] += 1
+            self._usage["inputs"] += input_count
+            self._usage["prompt_tokens"] += int(prompt_tokens)
+            self._usage["total_tokens"] += int(total_tokens)
+            if cost is not None:
+                self._usage["cost_reported_requests"] += 1
+                self._usage["cost_usd"] += cost
+        collector = _embedding_usage_collector.get()
+        if collector is not None:
+            _record_usage_totals(
+                collector,
+                input_count=input_count,
+                prompt_tokens=int(prompt_tokens),
+                total_tokens=int(total_tokens),
+                cost=cost,
+            )
 
 
 class GeminiEmbeddingProvider:
@@ -400,6 +455,104 @@ class CachedEmbeddingProvider:
 
     def clear_cache(self) -> None:
         self._cache.clear()
+
+    def usage_snapshot(self) -> dict[str, str | int | float]:
+        snapshot = getattr(self._provider, "usage_snapshot", None)
+        if callable(snapshot):
+            return dict(snapshot())
+        return _empty_embedding_usage(self.metadata)
+
+
+def embedding_usage_snapshot(
+    provider: EmbeddingProvider | None,
+) -> dict[str, str | int | float]:
+    if provider is None:
+        return {}
+    snapshot = getattr(provider, "usage_snapshot", None)
+    if callable(snapshot):
+        return dict(snapshot())
+    return _empty_embedding_usage(provider.metadata)
+
+
+@contextmanager
+def capture_embedding_usage(
+    provider: EmbeddingProvider | None,
+) -> Iterator[dict[str, str | int | float]]:
+    usage = {} if provider is None else _empty_embedding_usage(provider.metadata)
+    token = _embedding_usage_collector.set(usage)
+    try:
+        yield usage
+    finally:
+        _embedding_usage_collector.reset(token)
+
+
+def embedding_usage_delta(
+    before: dict[str, str | int | float],
+    after: dict[str, str | int | float],
+) -> dict[str, str | int | float]:
+    if not after:
+        return {}
+    delta: dict[str, str | int | float] = {
+        "provider": str(after.get("provider") or before.get("provider") or "unknown"),
+        "model": str(after.get("model") or before.get("model") or "unknown"),
+    }
+    for field_name in _EMBEDDING_USAGE_COUNTERS:
+        current = _numeric_usage_value(after.get(field_name))
+        previous = _numeric_usage_value(before.get(field_name))
+        value = max(current - previous, 0.0)
+        delta[field_name] = value if field_name == "cost_usd" else int(value)
+    return delta
+
+
+def _empty_embedding_usage(metadata: EmbeddingMetadata) -> dict[str, str | int | float]:
+    return {
+        "provider": metadata.provider,
+        "model": metadata.model,
+        "requests": 0,
+        "inputs": 0,
+        "prompt_tokens": 0,
+        "total_tokens": 0,
+        "cost_reported_requests": 0,
+        "cost_usd": 0.0,
+    }
+
+
+def _usage_number(usage: Any, field_name: str) -> float | None:
+    if usage is None:
+        return None
+    value = usage.get(field_name) if isinstance(usage, dict) else getattr(usage, field_name, None)
+    if value is None:
+        model_extra = getattr(usage, "model_extra", None)
+        if isinstance(model_extra, dict):
+            value = model_extra.get(field_name)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def _numeric_usage_value(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return 0.0
+    number = float(value)
+    return number if math.isfinite(number) else 0.0
+
+
+def _record_usage_totals(
+    usage: dict[str, str | int | float],
+    *,
+    input_count: int,
+    prompt_tokens: int,
+    total_tokens: int,
+    cost: float | None,
+) -> None:
+    usage["requests"] = int(usage.get("requests", 0)) + 1
+    usage["inputs"] = int(usage.get("inputs", 0)) + input_count
+    usage["prompt_tokens"] = int(usage.get("prompt_tokens", 0)) + prompt_tokens
+    usage["total_tokens"] = int(usage.get("total_tokens", 0)) + total_tokens
+    if cost is not None:
+        usage["cost_reported_requests"] = int(usage.get("cost_reported_requests", 0)) + 1
+        usage["cost_usd"] = float(usage.get("cost_usd", 0.0)) + cost
 
 
 def create_embedding_provider(
@@ -820,9 +973,12 @@ __all__ = [
     "GeminiEmbeddingProvider",
     "LocalSentenceTransformerEmbeddingProvider",
     "OpenAIEmbeddingProvider",
+    "capture_embedding_usage",
     "configured_embedding_provider",
     "create_embedding_provider",
     "embedding_cache_key",
+    "embedding_usage_delta",
+    "embedding_usage_snapshot",
     "entity_embedding_text",
     "local_embedding_dimensions",
     "relationship_embedding_text",

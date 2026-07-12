@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -74,6 +75,14 @@ class TestSearchRoute:
                 AsyncMock(return_value={"proj_1"}),
             ) as list_projects,
             patch("sibyl_core.tools.core.search", AsyncMock(return_value=result)) as core_search,
+            patch(
+                "sibyl.api.routes.search.configured_embedding_provider",
+                return_value=object(),
+            ),
+            patch(
+                "sibyl.api.routes.search.capture_embedding_usage",
+                return_value=nullcontext({"requests": 1, "prompt_tokens": 4}),
+            ),
         ):
             response = await search(
                 request=SearchRequest(query="seam", content_max_chars=18_000),
@@ -88,6 +97,10 @@ class TestSearchRoute:
         assert core_search.await_args.kwargs["accessible_projects"] == {"proj_1"}
         assert core_search.await_args.kwargs["include_raw_memory"] is False
         assert core_search.await_args.kwargs["content_max_chars"] == 18_000
+        assert response.filters["embedding_usage"] == {
+            "requests": 1,
+            "prompt_tokens": 4,
+        }
 
     @pytest.mark.asyncio
     async def test_search_verifies_project_filter_directly(self) -> None:
