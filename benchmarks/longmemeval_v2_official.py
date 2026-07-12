@@ -31,6 +31,12 @@ if str(ROOT) not in sys.path:
 if str(CORE_SRC) not in sys.path:
     sys.path.insert(0, str(CORE_SRC))
 
+from benchmarks.provider_usage import (  # noqa: E402
+    AsyncUsageTrackingClient,
+    ProviderUsageRecorder,
+    SyncUsageTrackingClient,
+    usage_from_response,
+)
 from sibyl_core.evals.longmemeval_v2 import (  # noqa: E402
     load_longmemeval_v2_haystack,
     load_longmemeval_v2_questions,
@@ -119,6 +125,12 @@ def main(argv: list[str] | None = None) -> int:
     import evaluation.harness as official_harness  # noqa: PLC0415
     import evaluation.qa_eval_metrics as official_metrics  # noqa: PLC0415
 
+    install_provider_usage_tracking(
+        official_harness,
+        official_metrics,
+        args=args,
+        output_dir=output_dir,
+    )
     install_reader_retry(official_harness, args=args)
     install_memory_finalize(official_harness)
     install_evaluator_retry(official_metrics, args=args)
@@ -196,6 +208,53 @@ def install_reader_retry(official_harness: Any, *, args: argparse.Namespace) -> 
         raise RuntimeError(msg)
 
     official_harness.call_reader_model_async = call_reader_model_async_with_retry
+
+
+def install_provider_usage_tracking(
+    official_harness: Any,
+    official_metrics: Any,
+    *,
+    args: argparse.Namespace,
+    output_dir: Path,
+) -> None:
+    usage_dir = output_dir / "provider_usage"
+    reader_recorder = ProviderUsageRecorder(
+        usage_dir / "reader.jsonl",
+        run_id=args.run_id,
+        role="reader",
+    )
+    judge_recorder = ProviderUsageRecorder(
+        usage_dir / "judge.jsonl",
+        run_id=args.run_id,
+        role="judge",
+    )
+
+    original_create_async_client = official_harness.create_async_client
+
+    def create_tracked_async_client(*call_args: Any, **call_kwargs: Any) -> Any:
+        client = original_create_async_client(*call_args, **call_kwargs)
+        return AsyncUsageTrackingClient(client, reader_recorder)
+
+    original_extract_usage = official_harness.extract_usage_dict
+
+    def extract_tracked_usage(response: Any) -> dict[str, Any]:
+        usage = dict(original_extract_usage(response))
+        usage.update(usage_from_response(response))
+        if isinstance(model := getattr(response, "model", None), str):
+            usage["provider_model"] = model
+        if isinstance(response_id := getattr(response, "id", None), str):
+            usage["response_id"] = response_id
+        return usage
+
+    original_create_evaluator_client = official_metrics._create_openai_client
+
+    def create_tracked_evaluator_client(*call_args: Any, **call_kwargs: Any) -> Any:
+        client = original_create_evaluator_client(*call_args, **call_kwargs)
+        return SyncUsageTrackingClient(client, judge_recorder)
+
+    official_harness.create_async_client = create_tracked_async_client
+    official_harness.extract_usage_dict = extract_tracked_usage
+    official_metrics._create_openai_client = create_tracked_evaluator_client
 
 
 def install_memory_finalize(official_harness: Any) -> None:
@@ -539,6 +598,10 @@ def build_run_plan(
         "memory_api_retry_max_delay_seconds": args.api_retry_max_delay_seconds,
         "evaluator_model": args.evaluator_model,
         "evaluator_retry_attempts": args.evaluator_retry_attempts,
+        "provider_usage": {
+            "reader": str(output_dir / "provider_usage" / "reader.jsonl"),
+            "judge": str(output_dir / "provider_usage" / "judge.jsonl"),
+        },
         "requirements": build_requirement_status(args=args, data_root=data_root),
         "summary": summarize_longmemeval_v2_inputs(
             selected_question_models,

@@ -446,9 +446,12 @@ tasks:
       - "**/pyproject.toml"
 
   inventory-lint:
-    script: uv run ruff check tools && uv run ruff format --check tools
+    script:
+      uv run ruff check tools benchmarks/provider_usage.py && uv run ruff format --check tools
+      benchmarks/provider_usage.py
     inputs:
       - tools/**/*.py
+      - benchmarks/provider_usage.py
       - pyproject.toml
 
   inventory-typecheck:
@@ -684,6 +687,7 @@ tasks:
       - benchmarks/longmemeval_replay.py
       - benchmarks/longmemeval_v2_probe.py
       - benchmarks/longmemeval_v2_official.py
+      - benchmarks/provider_usage.py
       - benchmarks/longmemeval_v2_memory/**/*.py
       - benchmarks/results/ai-memory/**/*.json
       - moon.yml

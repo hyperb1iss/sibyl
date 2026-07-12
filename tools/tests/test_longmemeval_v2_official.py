@@ -70,6 +70,13 @@ def _load_runner_module() -> ModuleType:
     )
 
 
+def _load_provider_usage_module() -> ModuleType:
+    return _load_module(
+        Path(__file__).parents[2] / "benchmarks" / "provider_usage.py",
+        "provider_usage",
+    )
+
+
 def _load_memory_module() -> ModuleType:
     return _load_module(
         Path(__file__).parents[2] / "benchmarks" / "longmemeval_v2_memory" / "sibyl_memory.py",
@@ -168,6 +175,10 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(tmp_path: Path)
     assert plan["required_trajectory_count"] == EXPECTED_REQUIRED_TRAJECTORIES
     assert plan["requirements"]["trajectories_jsonl_exists"] is True
     assert plan["requirements"]["official_repo_configured"] is False
+    assert plan["provider_usage"] == {
+        "reader": str(output_dir / "provider_usage" / "reader.jsonl"),
+        "judge": str(output_dir / "provider_usage" / "judge.jsonl"),
+    }
     assert "reader_endpoint_reachable" in plan["requirements"]
     assert "torch_available" in plan["requirements"]
 
@@ -300,6 +311,62 @@ def test_longmemeval_v2_receipt_redacts_sensitive_command_args() -> None:
         "--domain",
         "web",
     ]
+
+
+@pytest.mark.asyncio
+async def test_provider_usage_proxies_persist_successful_responses(tmp_path: Path) -> None:
+    module = _load_provider_usage_module()
+    response = SimpleNamespace(
+        id="response-1",
+        model="provider/model-v1",
+        usage=SimpleNamespace(
+            prompt_tokens=11,
+            completion_tokens=7,
+            total_tokens=18,
+            cost=0.0042,
+            completion_tokens_details={"reasoning_tokens": 3},
+        ),
+    )
+
+    class AsyncCompletions:
+        async def create(self, **kwargs: object) -> object:
+            assert kwargs["model"] == "requested/model"
+            return response
+
+    class SyncCompletions:
+        def create(self, **kwargs: object) -> object:
+            assert kwargs["model"] == "judge/model"
+            return response
+
+    async_path = tmp_path / "reader.jsonl"
+    sync_path = tmp_path / "judge.jsonl"
+    async_recorder = module.ProviderUsageRecorder(async_path, run_id="run-1", role="reader")
+    sync_recorder = module.ProviderUsageRecorder(sync_path, run_id="run-1", role="judge")
+    async_client = module.AsyncUsageTrackingClient(
+        SimpleNamespace(chat=SimpleNamespace(completions=AsyncCompletions())),
+        async_recorder,
+    )
+    sync_client = module.SyncUsageTrackingClient(
+        SimpleNamespace(chat=SimpleNamespace(completions=SyncCompletions())),
+        sync_recorder,
+    )
+
+    assert await async_client.chat.completions.create(model="requested/model") is response
+    assert sync_client.chat.completions.create(model="judge/model") is response
+
+    reader_event = json.loads(async_path.read_text(encoding="utf-8"))
+    judge_event = json.loads(sync_path.read_text(encoding="utf-8"))
+    assert reader_event["requested_model"] == "requested/model"
+    assert reader_event["provider_model"] == "provider/model-v1"
+    assert reader_event["usage"] == {
+        "completion_tokens": 7,
+        "completion_tokens_details": {"reasoning_tokens": 3},
+        "cost": 0.0042,
+        "cost_usd": 0.0042,
+        "prompt_tokens": 11,
+        "total_tokens": 18,
+    }
+    assert judge_event["role"] == "judge"
 
 
 @pytest.mark.asyncio
