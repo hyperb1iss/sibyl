@@ -47,6 +47,7 @@ from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,
     RawMemoryRecallResult,
+    raw_memory_public_metadata,
     raw_memory_recallable,
     recall_raw_memory_with_sources,
 )
@@ -1996,7 +1997,7 @@ def _candidate_from_raw_memory(
         "scope_key": memory.scope_key,
         "capture_surface": memory.capture_surface,
         "tags": list(memory.tags),
-        **memory.metadata,
+        **raw_memory_public_metadata(memory.metadata),
     }
     return RetrievalCandidate(
         id=f"raw_memory:{memory.id}",

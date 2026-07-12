@@ -178,6 +178,7 @@ async def log_memory_audit_event(
     policy_allowed: bool | None = None,
     policy_reason: str | None = None,
     details: Mapping[str, object] | None = None,
+    event_id: str | None = None,
 ) -> str | None:
     """Record metadata-only memory audit receipts exposed through inspect APIs."""
     bounded_source_ids, source_ids_truncated = _bounded_audit_id_list(source_ids)
@@ -207,6 +208,7 @@ async def log_memory_audit_event(
             organization_id=_coerce_optional_uuid(organization_id),
             request=request,
             details=payload,
+            event_id=event_id,
         )
 
 

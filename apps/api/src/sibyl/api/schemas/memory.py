@@ -438,6 +438,7 @@ class MemoryCorrectionResponse(BaseModel):
     policy_reasons: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     current_revision: int | None = Field(default=None, ge=1)
+    intended_outcome_satisfied: bool = False
     revision: int | None = Field(default=None, ge=1)
     mutation_receipt: MutationReceipt | None = None
 

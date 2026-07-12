@@ -6,12 +6,12 @@ import asyncio
 import hashlib
 import os
 import re
-from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Protocol, cast
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import structlog
 
@@ -474,6 +474,7 @@ class RawMemory:
     created_at: datetime | None = None
     score: float = 0.0
     snippet: str | None = None
+    write_applied: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -502,6 +503,10 @@ class RawMemoryRecallResult:
         if failures:
             metadata["raw_recall_failures"] = failures
         return metadata
+
+
+class RawMemoryIdentityConflictError(RuntimeError):
+    """Raised when a stable source identity already belongs to another write."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1755,12 +1760,17 @@ def _order_raw_memory_records_by_input(
     return ordered_records
 
 
-def _raw_memory_from_write(write: RawMemoryWrite, *, captured_at: datetime) -> RawMemory:
+def _raw_memory_from_write(
+    write: RawMemoryWrite,
+    *,
+    captured_at: datetime,
+    memory_id: str | None = None,
+) -> RawMemory:
     normalized_scope = _coerce_memory_scope(write.memory_scope)
     _validate_raw_memory_scope(normalized_scope, write.scope_key)
     metadata = normalize_memory_quality_metadata(write.metadata or {})
     return RawMemory(
-        id=str(uuid4()),
+        id=memory_id or str(uuid4()),
         organization_id=write.organization_id,
         source_id=write.source_id,
         principal_id=write.principal_id,
@@ -1779,6 +1789,21 @@ def _raw_memory_from_write(write: RawMemoryWrite, *, captured_at: datetime) -> R
         captured_at=captured_at,
         created_at=captured_at,
     )
+
+
+def raw_memory_public_metadata(metadata: Mapping[str, object]) -> dict[str, object]:
+    def sanitized(value: object) -> object:
+        if isinstance(value, Mapping):
+            return {
+                str(key): sanitized(item)
+                for key, item in value.items()
+                if key != "_provider_recovery"
+            }
+        if isinstance(value, list):
+            return [sanitized(item) for item in value]
+        return value
+
+    return cast("dict[str, object]", sanitized(metadata))
 
 
 async def _raw_memory_with_embedding(
@@ -2415,7 +2440,14 @@ async def remember_raw_memory(
     capture_surface: str | None = None,
     entity_type: str = "raw_memory",
     embedding_provider: EmbeddingProvider | None | object = _RAW_MEMORY_EMBEDDING_AUTO,
+    stable_source_identity: bool = False,
+    before_write: Callable[[], Awaitable[None]] | None = None,
 ) -> RawMemory:
+    memory_id = (
+        str(uuid5(NAMESPACE_URL, f"sibyl.raw_source:{organization_id}:{source_id}"))
+        if stable_source_identity
+        else None
+    )
     memory = _raw_memory_from_write(
         RawMemoryWrite(
             organization_id=organization_id,
@@ -2432,6 +2464,7 @@ async def remember_raw_memory(
             entity_type=entity_type,
         ),
         captured_at=_utcnow(),
+        memory_id=memory_id,
     )
     provider = (
         _configured_raw_memory_embedding_provider()
@@ -2439,13 +2472,49 @@ async def remember_raw_memory(
         else cast("EmbeddingProvider | None", embedding_provider)
     )
     memory = await _raw_memory_with_embedding(memory, provider)
+    if before_write is not None:
+        await before_write()
     async with surreal_content_client() as client:
-        record = await _replace_record(
-            client,
-            "raw_captures",
-            uuid=memory.id,
-            record=_raw_memory_record(memory),
-        )
+        if not stable_source_identity:
+            record = await _replace_record(
+                client,
+                "raw_captures",
+                uuid=memory.id,
+                record=_raw_memory_record(memory),
+            )
+        else:
+            try:
+                record = await _select_one(
+                    client,
+                    "CREATE raw_captures CONTENT $record RETURN AFTER;",
+                    record=_raw_memory_record(memory),
+                )
+            except Exception as exc:
+                record = await _select_one(
+                    client,
+                    "SELECT * FROM raw_captures "
+                    "WHERE organization_id = $organization_id AND uuid = $uuid LIMIT 1;",
+                    organization_id=organization_id,
+                    uuid=memory.id,
+                )
+                if record is None:
+                    raise
+                existing = _raw_memory_from_record(record)
+                if (
+                    existing.source_id != source_id
+                    or existing.principal_id != principal_id
+                    or existing.memory_scope is not memory.memory_scope
+                    or existing.scope_key != memory.scope_key
+                    or existing.metadata.get("provider_operation_id")
+                    != memory.metadata.get("provider_operation_id")
+                    or existing.metadata.get("provider_request_hash")
+                    != memory.metadata.get("provider_request_hash")
+                ):
+                    raise RawMemoryIdentityConflictError(source_id) from exc
+                existing.write_applied = False
+                return existing
+            if record is None:
+                raise RuntimeError(f"failed to persist stable raw source {source_id}")
     return _raw_memory_from_record(record)
 
 
@@ -3607,6 +3676,7 @@ __all__ = [
     "ContentSource",
     "MemoryScope",
     "RawMemory",
+    "RawMemoryIdentityConflictError",
     "RawMemoryRecallResult",
     "RawMemoryWrite",
     "backfill_content_lineage",
@@ -3631,6 +3701,7 @@ __all__ = [
     "materialize_content_lineage",
     "raw_memory_currently_recallable",
     "raw_memory_embedding_text",
+    "raw_memory_public_metadata",
     "raw_memory_recallable",
     "recall_raw_memory",
     "recall_raw_memory_with_sources",

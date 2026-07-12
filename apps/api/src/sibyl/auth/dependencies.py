@@ -132,8 +132,10 @@ async def _enforce_memory_provider_profile(request: Request, auth: ApiKeyAuth) -
     else:
         raise _capability_profile_forbidden(method=method, path=path)
 
+
+async def _enforce_agent_identity(request: Request, auth: ApiKeyAuth) -> None:
     agent_id = getattr(auth, "agent_id", None)
-    if agent_id is None or method != "POST":
+    if agent_id is None or request.method.upper() != "POST":
         return
     body = await _request_body_mapping(request)
     request_agent_id = body.get("agent_id") if body is not None else None
@@ -213,6 +215,7 @@ async def resolve_claims(
                     scopes=scopes, method=request.method
                 ):
                     raise _insufficient_api_scope(scopes=scopes, method=request.method)
+                await _enforce_agent_identity(request, auth)
                 await _enforce_memory_provider_profile(request, auth)
                 api_key_claims = _api_key_claims(auth, scopes=scopes)
                 setattr(request.state, _VALIDATED_AUTH_CLAIMS_ATTR, api_key_claims)

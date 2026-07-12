@@ -12,6 +12,7 @@ import sibyl_core.embeddings.providers as embedding_providers
 import sibyl_core.retrieval.hybrid as hybrid_module
 import sibyl_core.retrieval.query_ranking as query_ranking_module
 import sibyl_core.retrieval.search as search_module
+import sibyl_core.tools.search as tools_search_module
 from sibyl_core.auth.memory_policy import memory_scope_policy_key
 from sibyl_core.embeddings.providers import (
     CachedEmbeddingProvider,
@@ -564,6 +565,42 @@ def test_candidate_from_raw_memory_uses_top_level_project_id_when_metadata_missi
     )
 
     assert candidate.project_id == "project_999"
+
+
+def test_raw_memory_search_and_context_strip_provider_recovery_metadata() -> None:
+    memory = RawMemory(
+        id="raw-1",
+        organization_id="org-123",
+        source_id="hermes:turn:nova:session:1",
+        principal_id="user-123",
+        raw_content="Remember this",
+        metadata={
+            "correction_history": [
+                {
+                    "action": "hide",
+                    "_provider_recovery": {"operation_id": "secret-internal-proof"},
+                }
+            ]
+        },
+    )
+    scope = search_module.ScopeSpec(
+        memory_scope=MemoryScope.PRIVATE,
+        principal_id="user-123",
+        scope_key=None,
+        policy_reason="private_principal_bound",
+    )
+
+    candidate = search_module._candidate_from_raw_memory(memory, scope)
+    result = tools_search_module._raw_memory_search_result(
+        memory,
+        organization_id="org-123",
+        include_content=True,
+        content_max_chars=500,
+    )
+
+    assert "_provider_recovery" not in str(candidate.metadata)
+    assert "_provider_recovery" not in str(result.metadata)
+    assert candidate.metadata["correction_history"] == [{"action": "hide"}]
 
 
 def test_candidate_allowed_denies_private_candidate_without_private_grant() -> None:

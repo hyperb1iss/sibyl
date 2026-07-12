@@ -799,6 +799,34 @@ async def test_log_memory_audit_event_records_bounded_receipt(
 
 
 @pytest.mark.asyncio
+async def test_memory_audit_event_id_uses_idempotent_upsert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _RecordingAuthClient([])
+    event_id = str(uuid4())
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(client),
+    )
+
+    await surreal_auth_runtime.log_memory_audit_event(
+        action="memory.expose",
+        user_id=uuid4(),
+        organization_id=uuid4(),
+        request=None,
+        source_surface="hermes_memory_provider",
+        event_id=event_id,
+    )
+
+    assert len(client.calls) == 1
+    query, params = client.calls[0]
+    assert "UPSERT audit_logs CONTENT $record WHERE uuid = $uuid" in query
+    assert params["uuid"] == event_id
+    assert params["record"]["uuid"] == event_id
+
+
+@pytest.mark.asyncio
 async def test_request_user_deletion_schedules_private_memory_purge(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

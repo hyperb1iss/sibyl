@@ -10,6 +10,7 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 
+from sibyl.api.idempotency import complete_idempotency_record, reserve_idempotency_record
 from sibyl.crawler.service import SourceAlreadyExistsError
 from sibyl.persistence import content_archive
 from sibyl.persistence.backups_common import BackupRecord, BackupSettingsRecord
@@ -60,6 +61,7 @@ from sibyl.persistence.surreal.system_settings import (
 from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
 from sibyl_core.backends.surreal.content_schema import CONTENT_SCHEMA_CURRENT_VERSION, EMBEDDING_DIM
 from sibyl_core.models import ChunkType, CrawlStatus, SourceType
+from sibyl_core.services.surreal_content import get_raw_memory, remember_raw_memory
 
 pytest.importorskip("surrealdb")
 
@@ -507,6 +509,86 @@ async def test_api_idempotency_claim_compare_and_set_is_fenced(
     assert "updated_at <= $stale_before" in query
     assert params["expected_claim_token"] == "claim-1"
     assert params["expected_claim_revision"] == 2
+
+
+@pytest.mark.asyncio
+async def test_provider_write_orders_real_reservation_effect_and_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+    surreal_content_client: SurrealContentClient,
+) -> None:
+    from sibyl_core.services import surreal_content as core_content
+
+    @asynccontextmanager
+    async def client_scope():
+        yield surreal_content_client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", client_scope)
+    monkeypatch.setattr(core_content, "surreal_content_client", client_scope)
+    organization_id = uuid4()
+    claim, claimed = await reserve_idempotency_record(
+        organization_id=organization_id,
+        principal_id="user-123",
+        idempotency_key="hermes-turn-operation-1",
+        method="POST",
+        path="/memory/raw",
+        payload={"body": {"source_id": "hermes:turn:nova:session:1"}},
+        content_session=None,
+    )
+
+    assert claimed is True
+
+    async def assert_reservation_precedes_write() -> None:
+        pending = await surreal_content.get_api_idempotency_record(
+            None,
+            organization_id=organization_id,
+            principal_id="user-123",
+            idempotency_key="hermes-turn-operation-1",
+            method="POST",
+            path="/memory/raw",
+        )
+        assert pending is not None
+        assert pending.response_status_code == 102
+
+    memory = await remember_raw_memory(
+        organization_id=str(organization_id),
+        principal_id="user-123",
+        source_id="hermes:turn:nova:session:1",
+        raw_content="[User]\nRemember this\n\n[Assistant]\nRemembered",
+        metadata={
+            "provider_operation_id": "operation-1",
+            "provider_request_hash": "request-hash-1",
+        },
+        capture_surface="hermes_memory_provider",
+        embedding_provider=None,
+        stable_source_identity=True,
+        before_write=assert_reservation_precedes_write,
+    )
+    still_pending = await surreal_content.get_api_idempotency_record(
+        None,
+        organization_id=organization_id,
+        principal_id="user-123",
+        idempotency_key="hermes-turn-operation-1",
+        method="POST",
+        path="/memory/raw",
+    )
+    persisted = await get_raw_memory(
+        organization_id=str(organization_id),
+        memory_id=memory.id,
+    )
+
+    assert persisted is not None
+    assert still_pending is not None
+    assert still_pending.response_status_code == 102
+
+    completed = await complete_idempotency_record(
+        claim,
+        response_status_code=200,
+        response_body={"id": memory.id},
+        content_session=None,
+    )
+
+    assert completed.response_status_code == 200
+    assert completed.response_body == {"id": memory.id}
 
 
 def test_raw_capture_record_preserves_first_class_lifecycle_fields() -> None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -45,6 +45,7 @@ from sibyl_core.services.surreal_content import (
     get_raw_memory_by_source_id,
     list_raw_memories_by_source_id,
     list_raw_memories_for_scope,
+    raw_memory_public_metadata,
     raw_memory_recallable,
     save_raw_memory,
 )
@@ -162,6 +163,7 @@ class MemoryCorrectionPreview:
     policy_decisions: tuple[MemoryPolicyDecision, ...] = ()
     metadata: dict[str, Any] | None = None
     current_revision: int | None = None
+    intended_outcome_satisfied: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -1259,6 +1261,7 @@ def _correction_preview_denied(
     target_lifecycle_flags: Sequence[str] = (),
     policy_decisions: Sequence[MemoryPolicyDecision] = (),
     metadata: dict[str, Any] | None = None,
+    intended_outcome_satisfied: bool = False,
 ) -> MemoryCorrectionPreview:
     return MemoryCorrectionPreview(
         allowed=False,
@@ -1275,6 +1278,7 @@ def _correction_preview_denied(
         audit_action=_correction_audit_action(action or "unknown"),
         policy_decisions=tuple(policy_decisions),
         metadata=metadata or {"policy_allowed": False, "policy_reasons": [reason]},
+        intended_outcome_satisfied=intended_outcome_satisfied,
     )
 
 
@@ -1327,7 +1331,7 @@ async def _validate_correction_reference(
     if not read_decision.allowed:
         return None, f"{reference_kind}_source_not_found"
     if not raw_memory_recallable(reference):
-        return None, f"{reference_kind}_source_not_recallable"
+        return reference, f"{reference_kind}_source_not_recallable"
     return reference, None
 
 
@@ -1350,6 +1354,55 @@ def _correction_impact(
         "target_lifecycle_flags": list(target_lifecycle_flags),
     }
     return recall, synthesis
+
+
+def _correction_outcome_satisfied(
+    *,
+    memory: RawMemory,
+    action: str,
+    replacement_source_id: str | None,
+    duplicate_of_source_id: str | None,
+    revised_content: str | None,
+) -> bool:
+    lifecycle = memory_lifecycle_from_metadata(
+        memory.metadata,
+        source_id=memory.id,
+        review_state=memory.review_state,
+    )
+    state = str(lifecycle.state)
+    flags = {str(flag) for flag in lifecycle.flags}
+    if action == "mark_wrong":
+        return state == "contested" and bool(memory.metadata.get("wrong_at"))
+    if action == "mark_stale":
+        return state == "contested" and bool(memory.metadata.get("stale_at"))
+    if action == "mark_duplicate":
+        return (
+            duplicate_of_source_id is not None
+            and state == "contested"
+            and lifecycle.duplicate_of_source_id == duplicate_of_source_id
+        )
+    if action == "mark_sensitive":
+        return "sensitive" in flags
+    if action == "hide":
+        return "hidden" in flags
+    if action == "redact":
+        return "redacted" in flags
+    if action == "supersede":
+        return (
+            replacement_source_id is not None
+            and state == "superseded"
+            and lifecycle.replacement_source_id == replacement_source_id
+        )
+    if action == "revise":
+        return memory.raw_content == revised_content
+    if action == "restore":
+        return (
+            state == "active"
+            and not flags
+            and lifecycle.replacement_source_id is None
+            and lifecycle.duplicate_of_source_id is None
+        )
+    return action == "delete" and state == "deleted"
 
 
 async def preview_memory_correction(
@@ -1428,6 +1481,13 @@ async def preview_memory_correction(
         current_content=memory.raw_content,
     )
     if requirement_reason:
+        intended_outcome_satisfied = _correction_outcome_satisfied(
+            memory=memory,
+            action=normalized_action,
+            replacement_source_id=replacement_source_id,
+            duplicate_of_source_id=duplicate_of_source_id,
+            revised_content=revised_content,
+        )
         return _correction_preview_denied(
             source_id=memory.id,
             action=normalized_action,
@@ -1440,6 +1500,7 @@ async def preview_memory_correction(
                 "policy_reasons": [requirement_reason],
                 "requested_source_id": source_id,
             },
+            intended_outcome_satisfied=intended_outcome_satisfied,
         )
 
     canonical_replacement_source_id = replacement_source_id
@@ -1455,7 +1516,15 @@ async def preview_memory_correction(
             accessible_teams=accessible_teams,
             accessible_delegations=accessible_delegations,
         )
+        canonical_replacement_source_id = reference.id if reference else replacement_source_id
         if reference_reason:
+            intended_outcome_satisfied = _correction_outcome_satisfied(
+                memory=memory,
+                action=normalized_action,
+                replacement_source_id=canonical_replacement_source_id,
+                duplicate_of_source_id=canonical_duplicate_of_source_id,
+                revised_content=revised_content,
+            )
             return _correction_preview_denied(
                 source_id=memory.id,
                 action=normalized_action,
@@ -1469,8 +1538,8 @@ async def preview_memory_correction(
                     "requested_source_id": source_id,
                     "replacement_source_id": replacement_source_id,
                 },
+                intended_outcome_satisfied=intended_outcome_satisfied,
             )
-        canonical_replacement_source_id = reference.id if reference else replacement_source_id
     if duplicate_of_source_id:
         reference, reference_reason = await _validate_correction_reference(
             organization_id=organization_id,
@@ -1482,7 +1551,15 @@ async def preview_memory_correction(
             accessible_teams=accessible_teams,
             accessible_delegations=accessible_delegations,
         )
+        canonical_duplicate_of_source_id = reference.id if reference else duplicate_of_source_id
         if reference_reason:
+            intended_outcome_satisfied = _correction_outcome_satisfied(
+                memory=memory,
+                action=normalized_action,
+                replacement_source_id=canonical_replacement_source_id,
+                duplicate_of_source_id=canonical_duplicate_of_source_id,
+                revised_content=revised_content,
+            )
             return _correction_preview_denied(
                 source_id=memory.id,
                 action=normalized_action,
@@ -1496,8 +1573,8 @@ async def preview_memory_correction(
                     "policy_reasons": [reference_reason],
                     "requested_source_id": source_id,
                 },
+                intended_outcome_satisfied=intended_outcome_satisfied,
             )
-        canonical_duplicate_of_source_id = reference.id if reference else duplicate_of_source_id
 
     recall_impact, synthesis_impact = _correction_impact(
         target_lifecycle_state,
@@ -1512,6 +1589,13 @@ async def preview_memory_correction(
         "requested_source_id": source_id,
         "revises_content": normalized_action == "revise",
     }
+    intended_outcome_satisfied = _correction_outcome_satisfied(
+        memory=memory,
+        action=normalized_action,
+        replacement_source_id=canonical_replacement_source_id,
+        duplicate_of_source_id=canonical_duplicate_of_source_id,
+        revised_content=revised_content,
+    )
     return MemoryCorrectionPreview(
         allowed=True,
         source_id=memory.id,
@@ -1528,6 +1612,7 @@ async def preview_memory_correction(
         policy_decisions=(write_decision,),
         metadata=metadata,
         current_revision=memory.revision,
+        intended_outcome_satisfied=intended_outcome_satisfied,
     )
 
 
@@ -1541,6 +1626,7 @@ def _correction_metadata(
     revised_content: str | None,
     principal_id: str | None,
     provider_operation_id: str | None,
+    updated_review_state: str,
 ) -> dict[str, object]:
     metadata = dict(memory.metadata)
     history = list(_metadata_dict_values(metadata, "correction_history"))
@@ -1635,11 +1721,12 @@ def _correction_metadata(
             "synthesis_impact": dict(preview.synthesis_impact),
             "policy_reasons": _metadata_str_values(preview.metadata or {}, "policy_reasons"),
             "current_revision": preview.current_revision,
+            "intended_outcome_satisfied": preview.intended_outcome_satisfied,
         }
     history.append(history_entry)
     metadata["correction_history"] = history
     metadata = with_memory_lifecycle_metadata(metadata, lifecycle)
-    return with_reflection_finding_metadata(
+    metadata = with_reflection_finding_metadata(
         metadata,
         ReflectionFinding(
             kind=correction_finding_kind(preview.action),
@@ -1660,6 +1747,22 @@ def _correction_metadata(
             },
         ),
     )
+    if provider_operation_id:
+        recovery = history_entry.get("_provider_recovery")
+        if isinstance(recovery, dict):
+            recovery_record = cast("dict[str, object]", recovery)
+            findings = reflection_findings_from_metadata(metadata)
+            recovery_record["result"] = {
+                "revision": memory.revision + 1,
+                "updated_review_state": updated_review_state,
+                "lifecycle": memory_lifecycle_from_metadata(
+                    metadata,
+                    source_id=memory.id,
+                    review_state=updated_review_state,
+                ).to_dict(),
+                "reflection_finding": findings[-1].to_dict() if findings else None,
+            }
+    return metadata
 
 
 async def apply_memory_correction(
@@ -1677,6 +1780,7 @@ async def apply_memory_correction(
     revised_content: str | None = None,
     expected_revision: int | None = None,
     provider_operation_id: str | None = None,
+    before_write: Callable[[], Awaitable[None]] | None = None,
 ) -> MemoryCorrectionResult:
     preview = await preview_memory_correction(
         organization_id=organization_id,
@@ -1736,6 +1840,7 @@ async def apply_memory_correction(
             revised_content=revised_content,
             principal_id=principal_id,
             provider_operation_id=provider_operation_id,
+            updated_review_state=review_state,
         ),
     )
     save_kwargs: dict[str, Any] = {}
@@ -1743,6 +1848,8 @@ async def apply_memory_correction(
         save_kwargs["expected_revision"] = expected_revision
     if preview.action == "supersede" and canonical_replacement_source_id is not None:
         save_kwargs["superseded_by_memory_id"] = canonical_replacement_source_id
+    if before_write is not None:
+        await before_write()
     saved = await save_raw_memory(updated, **save_kwargs)
     return MemoryCorrectionResult(applied=True, preview=preview, updated_memory=saved)
 
@@ -2987,7 +3094,7 @@ def _candidate_from_review_memory(
     domain: str | None,
 ) -> ReflectionCandidate:
     metadata = {
-        **memory.metadata,
+        **raw_memory_public_metadata(memory.metadata),
         "raw_source_ids": raw_source_ids,
         "source_ids": raw_source_ids,
         "review_capture_id": memory.id,
@@ -3021,7 +3128,7 @@ def _candidate_from_raw_memory(
     domain: str | None,
 ) -> ReflectionCandidate:
     metadata = {
-        **memory.metadata,
+        **raw_memory_public_metadata(memory.metadata),
         "capture_mode": "promote",
         "imported_capture_id": memory.id,
         "native_write_path": "raw_memory_promotion",
@@ -3139,7 +3246,7 @@ def _entity_from_candidate(
         # this promotion was authorized against rather than trusted.
         stamp_memory_scope_metadata(
             {
-                **candidate.metadata,
+                **raw_memory_public_metadata(candidate.metadata),
                 "tags": list(candidate.tags),
                 "organization_id": organization_id,
                 "capture_mode": capture_mode,

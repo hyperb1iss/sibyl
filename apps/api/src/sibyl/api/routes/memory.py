@@ -7,7 +7,7 @@ import time
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, cast
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -16,6 +16,7 @@ from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.idempotency import (
     PROVIDER_REQUEST_HASH_METADATA_KEY,
     IdempotencyConflictCode,
+    idempotency_claim_lease,
     idempotency_conflict,
     idempotency_key,
     mutation_receipt,
@@ -136,12 +137,14 @@ from sibyl_core.services.surreal_content import (
     AGENT_DIARY_CAPTURE_SURFACE,
     MemoryScope,
     RawMemory,
+    RawMemoryIdentityConflictError,
     RawMemoryRecallResult,
     get_raw_memory,
     get_raw_memory_by_source_id,
     get_raw_memory_lineage,
     get_shared_surreal_content_client,
     list_reflection_candidate_reviews,
+    raw_memory_public_metadata,
     recall_raw_memory_with_sources as recall_raw_memory,
     remember_raw_memory,
     save_raw_memory,
@@ -338,26 +341,64 @@ async def _log_memory_audit(
     source_ids: list[str] | None = None,
     derived_ids: list[str] | None = None,
     details: dict[str, object] | None = None,
+    event_id: str | None = None,
 ) -> str | None:
+    authenticated_details = dict(details or {})
+    if source_surface in {
+        "memory_correction",
+        "memory_correction_preview",
+        "memory_exposure",
+        "raw_remember",
+    }:
+        authenticated_details["agent_id"] = _auth_context_text(ctx, "agent_id")
+        authenticated_details["delegated_authority"] = _auth_context_text(
+            ctx,
+            "delegated_authority",
+        )
     try:
+        audit_kwargs = {
+            "action": action,
+            "user_id": ctx.user_id,
+            "organization_id": ctx.organization_id,
+            "request": request,
+            "memory_scope": memory_scope,
+            "scope_key": scope_key,
+            "project_id": project_id,
+            "source_surface": source_surface,
+            "source_ids": source_ids,
+            "derived_ids": derived_ids,
+            "policy_allowed": policy_allowed,
+            "policy_reason": policy_reason,
+            "details": authenticated_details or None,
+        }
+        if event_id is not None:
+            audit_kwargs["event_id"] = event_id
         return await log_memory_audit_event(
-            action=action,
-            user_id=ctx.user_id,
-            organization_id=ctx.organization_id,
-            request=request,
-            memory_scope=memory_scope,
-            scope_key=scope_key,
-            project_id=project_id,
-            source_surface=source_surface,
-            source_ids=source_ids,
-            derived_ids=derived_ids,
-            policy_allowed=policy_allowed,
-            policy_reason=policy_reason,
-            details=details,
+            **audit_kwargs,
         )
     except Exception as exc:
         log.warning("memory_audit_event_failed", action=action, error=str(exc), exc_info=True)
         return None
+
+
+def _auth_context_text(ctx: AuthContext, field: str) -> str | None:
+    value = getattr(ctx, field, None)
+    return value if isinstance(value, str) and value else None
+
+
+def _provider_audit_event_id(
+    *,
+    organization_id: str,
+    principal_id: str,
+    operation_id: str,
+    action: str,
+) -> str:
+    return str(
+        uuid5(
+            NAMESPACE_URL,
+            f"sibyl.provider.audit:{organization_id}:{principal_id}:{operation_id}:{action}",
+        )
+    )
 
 
 async def _project_accessible_for_policy(
@@ -599,10 +640,11 @@ def _validate_diary_request(*, diary: bool, agent_id: str | None, memory_scope: 
 def _raw_recall_audit_details(
     request: RawMemoryRecallRequest,
     *,
+    agent_id: str | None,
     result_count: int,
 ) -> dict[str, object]:
     details: dict[str, object] = {
-        "agent_id": request.agent_id,
+        "agent_id": agent_id,
         "diary": request.diary,
         "limit": request.limit,
         "result_count": result_count,
@@ -1039,6 +1081,7 @@ def _correction_response(
         or _metadata_str_list(metadata.get("policy_reasons")),
         metadata=metadata,
         current_revision=preview.current_revision,
+        intended_outcome_satisfied=preview.intended_outcome_satisfied,
         revision=updated_memory.revision if updated_memory else None,
         mutation_receipt=receipt,
     )
@@ -1055,6 +1098,14 @@ def _correction_result_response(
         updated_memory=result.updated_memory,
         receipt=receipt,
     )
+
+
+def _correction_denial_is_not_found(preview: MemoryCorrectionPreview) -> bool:
+    if preview.allowed:
+        return False
+    if preview.reason == "memory_source_not_found" or preview.reason.endswith("_source_not_found"):
+        return True
+    return any(not decision.allowed for decision in preview.policy_decisions)
 
 
 def _metadata_str_list(value: object) -> list[str]:
@@ -1245,6 +1296,27 @@ async def _require_source_policy(
     )
 
 
+async def _require_correction_source_policy(
+    *,
+    ctx: AuthContext,
+    memory: RawMemory,
+    surface: str,
+    request: Request,
+) -> MemoryPolicyDecision:
+    try:
+        return await _require_source_policy(
+            ctx=ctx,
+            memory=memory,
+            action=MemoryPolicyAction.WRITE,
+            surface=surface,
+            request=request,
+        )
+    except HTTPException as exc:
+        if exc.status_code in {401, 403, 404}:
+            raise HTTPException(status_code=404, detail="memory_source_not_found") from None
+        raise
+
+
 def _dedupe_audit_rows(rows: list[dict[str, object]], *, limit: int) -> list[dict[str, object]]:
     seen: set[str] = set()
     deduped: list[dict[str, object]] = []
@@ -1354,10 +1426,7 @@ def _public_correction_history(value: object) -> list[dict[str, Any]]:
 
 
 def _public_memory_metadata(memory: RawMemory) -> dict[str, object]:
-    metadata = dict(memory.metadata)
-    if "correction_history" in metadata:
-        metadata["correction_history"] = _public_correction_history(metadata["correction_history"])
-    return metadata
+    return raw_memory_public_metadata(memory.metadata)
 
 
 def _correction_history(
@@ -1396,7 +1465,7 @@ def _provider_correction_preview(
     operation_id: str,
     principal_id: str,
     request: MemoryCorrectionRequest,
-) -> MemoryCorrectionPreview | None:
+) -> tuple[MemoryCorrectionPreview, dict[str, object]] | None:
     for entry in reversed(_metadata_dicts(memory.metadata.get("correction_history"))):
         recovery = entry.get("_provider_recovery")
         if not isinstance(recovery, dict) or recovery.get("operation_id") != operation_id:
@@ -1409,7 +1478,12 @@ def _provider_correction_preview(
             raise _provider_recovery_conflict(
                 "Correction recovery found a mismatched actor, action, or prior revision"
             )
-        return MemoryCorrectionPreview(
+        result = recovery.get("result")
+        if not isinstance(result, dict) or not isinstance(result.get("revision"), int):
+            raise _provider_recovery_conflict(
+                "Correction recovery is missing its immutable result proof"
+            )
+        preview = MemoryCorrectionPreview(
             allowed=True,
             source_id=memory.id,
             action=str(entry["action"]),
@@ -1436,7 +1510,9 @@ def _provider_correction_preview(
                 if isinstance(recovery.get("current_revision"), int)
                 else request.expected_revision
             ),
+            intended_outcome_satisfied=bool(recovery.get("intended_outcome_satisfied")),
         )
+        return preview, {str(key): value for key, value in result.items()}
     return None
 
 
@@ -1948,6 +2024,34 @@ async def expose_memory_context(
         if item is None
     ]
     usage_metadata = _exposure_usage_metadata(request, operation_id=operation_id)
+    exposure_audit_id = _provider_audit_event_id(
+        organization_id=str(org.id),
+        principal_id=principal_id,
+        operation_id=operation_id,
+        action="memory.expose",
+    )
+
+    async def audit_exposure(response: ContextExposureResponse) -> None:
+        await _log_memory_audit(
+            action="memory.expose",
+            ctx=ctx,
+            request=http_request,
+            memory_scope="project",
+            scope_key=request.project_id,
+            project_id=request.project_id,
+            source_surface=request.source_surface,
+            source_ids=list(response.recorded_ids),
+            policy_allowed=True,
+            policy_reason="delivered_context_recorded",
+            details={
+                "agent_id": _auth_context_text(ctx, "agent_id"),
+                "delegated_authority": _auth_context_text(ctx, "delegated_authority"),
+                "denied_count": len(response.denied_ids),
+                "excluded_count": len(response.excluded_ids),
+                "recorded_count": len(response.recorded_ids),
+            },
+            event_id=exposure_audit_id,
+        )
 
     async def recover_pending_exposure(_: object) -> ContextExposureResponse | None:
         session_key, message_key = usage_exposure_keys(
@@ -1973,12 +2077,40 @@ async def expose_memory_context(
             proof.principal_id == principal_id and proof.project_id == request.project_id
             for proof in proofs
         )
-        if actual != expected or not scope_matches:
+        if not actual.issubset(expected) or not scope_matches:
             raise _provider_recovery_conflict(
                 "Exposure recovery found usage events with a mismatched delivered set or scope"
             )
+        if actual != expected:
+            missing_items = [
+                item for item in authorized_items if _exposure_proof_target(item) not in actual
+            ]
+            await annotate_context_item_exposures(
+                missing_items,
+                organization_id=str(org.id),
+                principal_id=principal_id,
+                project_id=request.project_id,
+                source_surface=request.source_surface,
+                request_metadata=usage_metadata,
+            )
+            proofs = await list_memory_usage_exposure_proofs(
+                content_client,
+                organization_id=str(org.id),
+                session_key=session_key,
+                message_key=message_key,
+                source_surface=request.source_surface,
+            )
+            actual = {(proof.response_id, proof.item_kind, proof.item_id) for proof in proofs}
+            scope_matches = all(
+                proof.principal_id == principal_id and proof.project_id == request.project_id
+                for proof in proofs
+            )
+            if actual != expected or not scope_matches:
+                raise _provider_recovery_conflict(
+                    "Exposure recovery could not converge the delivered set"
+                )
         recorded_ids = [item.id for item in authorized_items]
-        return ContextExposureResponse(
+        response = ContextExposureResponse(
             recorded_ids=recorded_ids,
             excluded_ids=[],
             denied_ids=denied_ids,
@@ -1989,6 +2121,8 @@ async def expose_memory_context(
                 affected_records=recorded_ids,
             ),
         )
+        await audit_exposure(response)
+        return response
 
     replayed = await replay_idempotent_response(
         http_request,
@@ -2005,14 +2139,19 @@ async def expose_memory_context(
         return replayed
 
     if authorized_items:
-        await annotate_context_item_exposures(
-            authorized_items,
-            organization_id=str(org.id),
-            principal_id=principal_id,
-            project_id=request.project_id,
-            source_surface=request.source_surface,
-            request_metadata=usage_metadata,
-        )
+        async with idempotency_claim_lease(
+            http_request,
+            content_session=None,
+        ) as execution:
+            await execution.assert_active()
+            await annotate_context_item_exposures(
+                authorized_items,
+                organization_id=str(org.id),
+                principal_id=principal_id,
+                project_id=request.project_id,
+                source_surface=request.source_surface,
+                request_metadata=usage_metadata,
+            )
 
     recorded_ids = [
         item.id
@@ -2031,6 +2170,7 @@ async def expose_memory_context(
             affected_records=recorded_ids,
         ),
     )
+    await audit_exposure(response)
     await save_idempotent_response(
         http_request,
         organization_id=org.id,
@@ -2229,6 +2369,73 @@ async def preview_memory_space_member_access(
     return _access_preview_response(result)
 
 
+async def _persist_raw_memory(
+    *,
+    request: RawMemoryRememberRequest,
+    http_request: Request,
+    organization_id: str,
+    principal_id: str,
+    source_id: str,
+    capture_surface: str,
+    metadata: dict[str, object],
+    provider_operation_id: object | None,
+) -> RawMemory:
+    remember_kwargs: dict[str, Any] = {
+        "organization_id": organization_id,
+        "principal_id": principal_id,
+        "source_id": source_id,
+        "raw_content": request.raw_content,
+        "title": request.title,
+        "memory_scope": request.memory_scope,
+        "scope_key": request.scope_key,
+        "tags": request.tags,
+        "metadata": metadata,
+        "provenance": request.provenance,
+        "capture_surface": capture_surface,
+    }
+    if provider_operation_id is None:
+        return await remember_raw_memory(**remember_kwargs)
+    async with idempotency_claim_lease(
+        http_request,
+        content_session=None,
+    ) as execution:
+        remember_kwargs["stable_source_identity"] = True
+        remember_kwargs["before_write"] = execution.assert_active
+        return await remember_raw_memory(**remember_kwargs)
+
+
+async def _prepare_raw_capture_metadata(
+    *,
+    request: RawMemoryRememberRequest,
+    http_request: Request,
+    agent_id: str | None,
+) -> tuple[dict[str, object], object | None, dict[str, object]]:
+    idempotency_body = request.model_dump(mode="json")
+    idempotency_body["agent_id"] = agent_id
+    provider_body = await provider_request_body(http_request, request)
+    canonical_provider_hash = provider_request_hash(provider_body)
+    provider_operation_id = request.metadata.get("provider_operation_id")
+    supplied_provider_hash = request.metadata.get(PROVIDER_REQUEST_HASH_METADATA_KEY)
+    if provider_operation_id is not None and not str(provider_operation_id).strip():
+        raise _provider_recovery_conflict("provider_operation_id cannot be empty")
+    if supplied_provider_hash is not None and supplied_provider_hash != canonical_provider_hash:
+        raise _provider_recovery_conflict(
+            "provider_request_hash does not match the canonical raw request body"
+        )
+    metadata = _diary_metadata(
+        metadata=request.metadata,
+        diary=request.diary,
+        agent_id=agent_id,
+        project_id=request.project_id,
+    )
+    if agent_id:
+        metadata["agent_id"] = agent_id
+    if provider_operation_id is not None:
+        metadata["provider_operation_id"] = str(provider_operation_id)
+        metadata[PROVIDER_REQUEST_HASH_METADATA_KEY] = canonical_provider_hash
+    return metadata, provider_operation_id, idempotency_body
+
+
 @router.post(
     "/raw",
     response_model=RawMemoryResponse,
@@ -2280,35 +2487,51 @@ async def remember_raw(
             request=http_request,
             project_id=request.project_id,
         )
-        idempotency_body = request.model_dump(mode="json")
-        idempotency_body["agent_id"] = agent_id
-        provider_body = await provider_request_body(
-            http_request,
-            request,
-        )
-        canonical_provider_hash = provider_request_hash(provider_body)
-        provider_operation_id = request.metadata.get("provider_operation_id")
-        supplied_provider_hash = request.metadata.get(PROVIDER_REQUEST_HASH_METADATA_KEY)
-        if provider_operation_id is not None and not str(provider_operation_id).strip():
-            raise _provider_recovery_conflict("provider_operation_id cannot be empty")
-        if supplied_provider_hash is not None and supplied_provider_hash != canonical_provider_hash:
-            raise _provider_recovery_conflict(
-                "provider_request_hash does not match the canonical raw request body"
-            )
-
-        metadata = _diary_metadata(
-            metadata=request.metadata,
-            diary=request.diary,
+        metadata, provider_operation_id, idempotency_body = await _prepare_raw_capture_metadata(
+            request=request,
+            http_request=http_request,
             agent_id=agent_id,
-            project_id=request.project_id,
         )
-        if agent_id:
-            metadata["agent_id"] = agent_id
-        if provider_operation_id is not None:
-            metadata["provider_operation_id"] = str(provider_operation_id)
-            metadata[PROVIDER_REQUEST_HASH_METADATA_KEY] = canonical_provider_hash
+        canonical_provider_hash = metadata.get(PROVIDER_REQUEST_HASH_METADATA_KEY)
 
         idempotency_payload = {"body": idempotency_body}
+        raw_audit_id = (
+            _provider_audit_event_id(
+                organization_id=str(org.id),
+                principal_id=principal_id,
+                operation_id=str(provider_operation_id),
+                action="memory.remember",
+            )
+            if provider_operation_id is not None
+            else None
+        )
+
+        async def audit_raw_memory(memory: RawMemory) -> None:
+            await _log_memory_audit(
+                action="memory.remember",
+                ctx=ctx,
+                request=http_request,
+                memory_scope=memory.memory_scope.value,
+                scope_key=memory.scope_key,
+                project_id=request.project_id,
+                source_surface=capture_surface,
+                source_ids=[memory.source_id],
+                derived_ids=[memory.id],
+                policy_allowed=write_decision.allowed,
+                policy_reason=write_decision.reason,
+                details={
+                    "agent_id": agent_id,
+                    "delegated_authority": _auth_context_text(ctx, "delegated_authority"),
+                    "capture_flags": {
+                        "basis": metadata.get("basis"),
+                        "pinned": metadata.get("pinned"),
+                        "proposed_scope": metadata.get("suggested_memory_scope"),
+                    },
+                    "diary": request.diary,
+                    "tag_count": len(request.tags),
+                },
+                event_id=raw_audit_id,
+            )
 
         async def recover_pending_raw(_: object) -> RawMemoryResponse | None:
             existing = await get_raw_memory_by_source_id(
@@ -2331,7 +2554,7 @@ async def remember_raw(
                     "Raw recovery found a source with mismatched operation, request, principal, "
                     "or scope"
                 )
-            return _raw_memory_response(
+            response = _raw_memory_response(
                 existing,
                 policy_reason=write_decision.reason,
                 receipt=mutation_receipt(
@@ -2341,6 +2564,8 @@ async def remember_raw(
                     affected_records=[f"raw_captures:{existing.id}"],
                 ),
             )
+            await audit_raw_memory(existing)
+            return response
 
         replayed = await replay_idempotent_response(
             http_request,
@@ -2361,46 +2586,22 @@ async def remember_raw(
                 result_count=1,
             )
             return replayed
-        memory = await remember_raw_memory(
+        memory = await _persist_raw_memory(
+            request=request,
+            http_request=http_request,
             organization_id=str(org.id),
             principal_id=principal_id,
             source_id=source_id,
-            raw_content=request.raw_content,
-            title=request.title,
-            memory_scope=request.memory_scope,
-            scope_key=request.scope_key,
-            tags=request.tags,
-            metadata=metadata,
-            provenance=request.provenance,
             capture_surface=capture_surface,
+            metadata=metadata,
+            provider_operation_id=provider_operation_id,
         )
-        await _log_memory_audit(
-            action="memory.remember",
-            ctx=ctx,
-            request=http_request,
-            memory_scope=memory.memory_scope.value,
-            scope_key=memory.scope_key,
-            project_id=request.project_id,
-            source_surface=capture_surface,
-            source_ids=[memory.source_id],
-            derived_ids=[memory.id],
-            policy_allowed=write_decision.allowed,
-            policy_reason=write_decision.reason,
-            details={
-                "agent_id": agent_id,
-                "capture_flags": {
-                    "basis": metadata.get("basis"),
-                    "pinned": metadata.get("pinned"),
-                    "proposed_scope": metadata.get("suggested_memory_scope"),
-                },
-                "diary": request.diary,
-                "tag_count": len(request.tags),
-            },
-        )
-        await publish_raw_capture_changed(
-            organization_id=memory.organization_id,
-            raw_memory_ids=[memory.id],
-        )
+        await audit_raw_memory(memory)
+        if memory.write_applied:
+            await publish_raw_capture_changed(
+                organization_id=memory.organization_id,
+                raw_memory_ids=[memory.id],
+            )
         response = _raw_memory_response(
             memory,
             policy_reason=write_decision.reason,
@@ -2436,6 +2637,15 @@ async def remember_raw(
             duration_ms=elapsed_ms(started_at),
         )
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except RawMemoryIdentityConflictError as e:
+        telemetry_registry().record_memory_operation(
+            operation="remember_raw",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
+        raise _provider_recovery_conflict(
+            "Raw source identity already belongs to another provider operation"
+        ) from e
     except HTTPException:
         telemetry_registry().record_memory_operation(
             operation="remember_raw",
@@ -2471,9 +2681,10 @@ async def recall_raw(
 
     started_at = time.perf_counter()
     try:
+        agent_id = _auth_context_text(ctx, "agent_id") or request.agent_id
         _validate_diary_request(
             diary=request.diary,
-            agent_id=request.agent_id,
+            agent_id=agent_id,
             memory_scope=request.memory_scope,
         )
         read_decision = await _authorize_memory_policy(
@@ -2483,7 +2694,7 @@ async def recall_raw(
             scope_key=request.scope_key,
             surface="raw_recall",
             request=http_request,
-            agent_id=request.agent_id,
+            agent_id=agent_id,
             project_id=request.project_id,
         )
         await _authorize_project_filter(
@@ -2520,7 +2731,7 @@ async def recall_raw(
                 query=request.query,
                 memory_scope=request.memory_scope,
                 scope_key=request.scope_key,
-                agent_id=request.agent_id,
+                agent_id=agent_id,
                 project_id=request.project_id,
                 limit=request.limit,
                 **recall_kwargs,
@@ -2543,7 +2754,11 @@ async def recall_raw(
             derived_ids=[memory.id for memory in memories],
             policy_allowed=read_decision.allowed,
             policy_reason=read_decision.reason,
-            details=_raw_recall_audit_details(request, result_count=len(memories)),
+            details=_raw_recall_audit_details(
+                request,
+                agent_id=agent_id,
+                result_count=len(memories),
+            ),
         )
         response = RawMemoryRecallResponse(
             query=request.query,
@@ -2862,10 +3077,9 @@ async def preview_memory_correction_route(
         organization_id=str(org.id),
         source_id=source_id,
     )
-    await _require_source_policy(
+    await _require_correction_source_policy(
         ctx=ctx,
         memory=memory,
-        action=MemoryPolicyAction.WRITE,
         surface="memory_correction_preview",
         request=http_request,
     )
@@ -2906,13 +3120,15 @@ async def preview_memory_correction_route(
         policy_reason=preview.reason,
         details={
             "action": preview.action,
-            "metadata": dict(request.metadata),
+            "metadata": raw_memory_public_metadata(request.metadata),
             "recall_impact": dict(preview.recall_impact),
             "synthesis_impact": dict(preview.synthesis_impact),
             "target_lifecycle_state": preview.target_lifecycle_state,
             "target_lifecycle_flags": preview.target_lifecycle_flags,
         },
     )
+    if _correction_denial_is_not_found(preview):
+        raise HTTPException(status_code=404, detail="memory_source_not_found")
     return response
 
 
@@ -2939,10 +3155,9 @@ async def apply_memory_correction_route(
         organization_id=str(org.id),
         source_id=source_id,
     )
-    await _require_source_policy(
+    await _require_correction_source_policy(
         ctx=ctx,
         memory=memory,
-        action=MemoryPolicyAction.WRITE,
         surface="memory_correction",
         request=http_request,
     )
@@ -2965,31 +3180,78 @@ async def apply_memory_correction_route(
         raise _provider_recovery_conflict(
             "Provider corrections require a non-empty operation ID and expected revision"
         )
+    correction_audit_id = (
+        _provider_audit_event_id(
+            organization_id=str(org.id),
+            principal_id=principal_id,
+            operation_id=str(provider_operation_id),
+            action=f"memory.correction.{request.action}",
+        )
+        if provider_operation_id is not None
+        else None
+    )
+
+    async def audit_correction(response: MemoryCorrectionResponse) -> None:
+        await _log_memory_audit(
+            action=response.audit_action,
+            ctx=ctx,
+            request=http_request,
+            memory_scope=memory.memory_scope.value,
+            scope_key=memory.scope_key,
+            project_id=_memory_project_id(memory),
+            source_surface="memory_correction",
+            source_ids=response.affected_source_ids or [memory.id],
+            derived_ids=response.affected_derived_ids,
+            policy_allowed=response.allowed and response.applied,
+            policy_reason=response.reason,
+            details={
+                "action": response.action,
+                "agent_id": _auth_context_text(ctx, "agent_id"),
+                "delegated_authority": _auth_context_text(ctx, "delegated_authority"),
+                "applied": response.applied,
+                "metadata": raw_memory_public_metadata(request.metadata),
+                "recall_impact": dict(response.recall_impact),
+                "synthesis_impact": dict(response.synthesis_impact),
+                "target_lifecycle_state": response.target_lifecycle_state,
+                "target_lifecycle_flags": response.target_lifecycle_flags,
+                "updated_review_state": response.updated_review_state,
+            },
+            event_id=correction_audit_id,
+        )
 
     async def recover_pending_correction(_: object) -> MemoryCorrectionResponse | None:
-        preview = _provider_correction_preview(
+        recovery = _provider_correction_preview(
             memory=memory,
             operation_id=str(provider_operation_id),
             principal_id=principal_id,
             request=request,
         )
-        if preview is None:
+        if recovery is None:
             return None
-        return _correction_result_response(
-            MemoryCorrectionResult(
-                applied=True,
-                preview=preview,
-                updated_memory=memory,
-            ),
+        preview, result_proof = recovery
+        revision = cast("int", result_proof["revision"])
+        response = _correction_response(
+            preview,
+            applied=True,
             receipt=mutation_receipt(
                 http_request,
                 applied=True,
-                revision=memory.revision,
+                revision=revision,
                 affected_records=[
                     f"raw_captures:{affected_id}" for affected_id in preview.affected_source_ids
                 ],
             ),
         )
+        response = response.model_copy(
+            update={
+                "updated_review_state": result_proof.get("updated_review_state"),
+                "lifecycle": dict(cast("dict[str, object]", result_proof.get("lifecycle") or {})),
+                "reflection_finding": result_proof.get("reflection_finding"),
+                "revision": revision,
+            }
+        )
+        await audit_correction(response)
+        return response
 
     replayed = await replay_idempotent_response(
         http_request,
@@ -3020,9 +3282,14 @@ async def apply_memory_correction_route(
         correction_kwargs["expected_revision"] = request.expected_revision
     if provider_operation_id is not None:
         correction_kwargs["provider_operation_id"] = str(provider_operation_id)
-    result = await apply_memory_correction(
-        **correction_kwargs,
-    )
+        async with idempotency_claim_lease(
+            http_request,
+            content_session=None,
+        ) as execution:
+            correction_kwargs["before_write"] = execution.assert_active
+            result = await apply_memory_correction(**correction_kwargs)
+    else:
+        result = await apply_memory_correction(**correction_kwargs)
     updated_revision = result.updated_memory.revision if result.updated_memory else None
     response = _correction_result_response(
         result,
@@ -3040,29 +3307,9 @@ async def apply_memory_correction_route(
             ),
         ),
     )
-    await _log_memory_audit(
-        action=result.preview.audit_action,
-        ctx=ctx,
-        request=http_request,
-        memory_scope=memory.memory_scope.value,
-        scope_key=memory.scope_key,
-        project_id=_memory_project_id(memory),
-        source_surface="memory_correction",
-        source_ids=result.preview.affected_source_ids or [memory.id],
-        derived_ids=result.preview.affected_derived_ids,
-        policy_allowed=result.preview.allowed and result.applied,
-        policy_reason=result.preview.reason,
-        details={
-            "action": result.preview.action,
-            "applied": result.applied,
-            "metadata": dict(request.metadata),
-            "recall_impact": dict(result.preview.recall_impact),
-            "synthesis_impact": dict(result.preview.synthesis_impact),
-            "target_lifecycle_state": result.preview.target_lifecycle_state,
-            "target_lifecycle_flags": result.preview.target_lifecycle_flags,
-            "updated_review_state": response.updated_review_state,
-        },
-    )
+    await audit_correction(response)
+    if _correction_denial_is_not_found(result.preview):
+        raise HTTPException(status_code=404, detail="memory_source_not_found")
     await save_idempotent_response(
         http_request,
         organization_id=org.id,

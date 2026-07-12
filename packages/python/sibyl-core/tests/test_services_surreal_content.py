@@ -248,6 +248,53 @@ class TestSurrealContentHelpers:
             await client.close()
 
     @pytest.mark.asyncio
+    async def test_stable_raw_source_concurrent_writes_persist_one_effect(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        client = SurrealContentClient(url="memory://")
+        try:
+            await bootstrap_content_schema(client, reset=True)
+
+            @asynccontextmanager
+            async def fake_session():
+                yield client
+
+            from sibyl_core.services import surreal_content as content_service
+
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            write = {
+                "organization_id": "org-provider",
+                "principal_id": "bliss",
+                "source_id": "hermes:turn:nova:session:1",
+                "raw_content": "[User]\nRemember this\n\n[Assistant]\nRemembered",
+                "metadata": {
+                    "provider_operation_id": "turn-operation-1",
+                    "provider_request_hash": "request-hash-1",
+                },
+                "capture_surface": "hermes_memory_provider",
+                "embedding_provider": None,
+                "stable_source_identity": True,
+            }
+
+            first, second = await asyncio.gather(
+                remember_raw_memory(**write),
+                remember_raw_memory(**write),
+            )
+            rows = await client.execute_query(
+                "SELECT uuid FROM raw_captures WHERE organization_id = $organization_id "
+                "AND source_id = $source_id;",
+                organization_id="org-provider",
+                source_id="hermes:turn:nova:session:1",
+            )
+
+            assert first.id == second.id
+            assert sorted([first.write_applied, second.write_applied]) == [False, True]
+            assert len(rows) == 1
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
     async def test_raw_memory_save_returns_saved_record_after_commit(
         self,
         monkeypatch: pytest.MonkeyPatch,

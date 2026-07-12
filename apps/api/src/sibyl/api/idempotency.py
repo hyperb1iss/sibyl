@@ -284,6 +284,85 @@ def _request_claim(request: object) -> ApiIdempotencyRecord | None:
     return claim if isinstance(claim, ApiIdempotencyRecord) else None
 
 
+class IdempotencyClaimLease:
+    """Keep a durable mutation claim fresh and fence its irreversible write."""
+
+    def __init__(self, request: object, *, content_session: object) -> None:
+        self._request = request
+        self._content_session = content_session
+        self._lock = asyncio.Lock()
+        self._lost = False
+
+    async def assert_active(self) -> None:
+        """Refresh the durable claim immediately before an irreversible write."""
+        async with self._lock:
+            if self._lost:
+                self._raise_lost()
+            claim = _request_claim(self._request)
+            if claim is None:
+                return
+            refreshed = replace(
+                claim,
+                claim_revision=claim.claim_revision + 1,
+                updated_at=datetime.now(UTC).replace(tzinfo=None),
+            )
+            try:
+                saved = await content_runtime.compare_and_set_api_idempotency_record(
+                    self._content_session,
+                    record=refreshed,
+                    expected_claim_token=claim.claim_token,
+                    expected_claim_revision=claim.claim_revision,
+                    pending_status_code=_PENDING_RESPONSE_STATUS,
+                )
+            except Exception:
+                self._lost = True
+                raise
+            if saved is None:
+                self._lost = True
+                self._raise_lost()
+            assert saved is not None
+            _store_request_claim(self._request, saved)
+
+    def _raise_lost(self) -> None:
+        raise idempotency_conflict(
+            IdempotencyConflictCode.RECOVERY_CONFLICT,
+            "The durable idempotency claim changed before the mutation could be applied",
+        )
+
+
+@contextlib.asynccontextmanager
+async def idempotency_claim_lease(
+    request: object,
+    *,
+    content_session: object,
+    heartbeat_seconds: float = LOCK_TTL_SECONDS / 3,
+) -> AsyncGenerator[IdempotencyClaimLease]:
+    """Heartbeat a claimed operation until its mutation reaches durable storage."""
+    lease = IdempotencyClaimLease(request, content_session=content_session)
+    if _request_claim(request) is None:
+        yield lease
+        return
+
+    await lease.assert_active()
+
+    async def heartbeat() -> None:
+        while True:
+            await asyncio.sleep(heartbeat_seconds)
+            try:
+                await lease.assert_active()
+            except Exception:
+                log.exception("api_idempotency_claim_heartbeat_failed")
+                return
+
+    heartbeat_task = asyncio.create_task(heartbeat())
+    try:
+        yield lease
+    finally:
+        heartbeat_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await heartbeat_task
+
+
 def _idempotency_lock_id(
     *,
     principal_id: str,

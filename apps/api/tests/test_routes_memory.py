@@ -84,6 +84,7 @@ def _ctx(
     org_role: OrganizationRole = OrganizationRole.MEMBER,
     api_key_memory_scope_keys: set[str] | None = None,
     agent_id: str | None = None,
+    delegated_authority: str | None = None,
 ) -> MagicMock:
     ctx = MagicMock()
     ctx.user_id = user_id
@@ -94,6 +95,7 @@ def _ctx(
     ctx.api_key_memory_scope_keys = api_key_memory_scope_keys
     # Same hazard: a truthy MagicMock here would outrank request.agent_id.
     ctx.agent_id = agent_id
+    ctx.delegated_authority = delegated_authority
     return ctx
 
 
@@ -274,6 +276,7 @@ async def test_remember_raw_uses_current_org_and_principal() -> None:
         policy_reason="same_scope_write_allowed",
         details={
             "agent_id": None,
+            "delegated_authority": None,
             "capture_flags": {
                 "basis": None,
                 "pinned": None,
@@ -332,17 +335,25 @@ async def test_remember_raw_recovers_matching_source_before_receipt() -> None:
             AsyncMock(return_value=existing),
         ),
         patch("sibyl.api.routes.memory.remember_raw_memory", AsyncMock()) as remember,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await remember_raw.__wrapped__(
             request,
             http_request=http_request,
             org=org,
-            ctx=_ctx(),
+            ctx=_ctx(
+                agent_id="hermes:home:nova",
+                delegated_authority="household-agent",
+            ),
         )
 
     assert response.id == existing.id
     assert response.mutation_receipt is not None
     assert response.mutation_receipt.affected_records == ["raw_captures:memory-1"]
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["details"]["agent_id"] == "hermes:home:nova"
+    assert audit.await_args.kwargs["details"]["delegated_authority"] == "household-agent"
+    assert audit.await_args.kwargs["event_id"]
     remember.assert_not_awaited()
 
 
@@ -403,6 +414,7 @@ async def test_expose_memory_context_records_only_authorized_delivered_ids() -> 
             "sibyl.api.routes.memory.save_idempotent_response",
             AsyncMock(),
         ) as save,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await expose_memory_context.__wrapped__(
             ContextExposureRequest(
@@ -427,6 +439,7 @@ async def test_expose_memory_context_records_only_authorized_delivered_ids() -> 
     assert response.denied_ids == ["raw_memory:missing"]
     assert response.mutation_receipt.idempotency_key == "hermes-context-operation-1"
     assert response.mutation_receipt.applied is True
+    audit.assert_awaited_once()
     save.assert_awaited_once()
 
 
@@ -494,17 +507,109 @@ async def test_expose_memory_context_recovers_write_before_receipt() -> None:
             ),
         ),
         patch("sibyl.api.routes.memory.annotate_context_item_exposures", AsyncMock()) as annotate,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await expose_memory_context.__wrapped__(
             ContextExposureRequest(exposed_ids=["decision_1"], project_id="project_1"),
             http_request=http_request,
             org=org,
-            ctx=_ctx(),
+            ctx=_ctx(
+                agent_id="hermes:home:nova",
+                delegated_authority="household-agent",
+            ),
         )
 
     assert response.recorded_ids == ["decision_1"]
     assert response.mutation_receipt.affected_records == ["decision_1"]
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["details"]["agent_id"] == "hermes:home:nova"
+    assert audit.await_args.kwargs["details"]["delegated_authority"] == "household-agent"
+    assert audit.await_args.kwargs["event_id"]
     annotate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_expose_memory_context_recovery_converges_partial_mixed_write() -> None:
+    org = _org()
+    http_request = _idempotent_http_request()
+    graph_item = ContextItem(
+        id="decision_1",
+        type="decision",
+        name="Recovered decision",
+        content="",
+        score=0.0,
+        facet=ContextFacet.DECISIONS,
+        reason="delivered context acknowledgment",
+        metadata={"candidate_kind": "node", "project_id": "project_1"},
+    )
+    raw_item = ContextItem(
+        id="raw_memory:raw-1",
+        type="raw_memory",
+        name="Recovered raw memory",
+        content="",
+        score=0.0,
+        facet=ContextFacet.RECENT_MEMORY,
+        reason="delivered context acknowledgment",
+        metadata={"candidate_kind": "raw_memory", "project_id": "project_1"},
+    )
+    graph_proof = SimpleNamespace(
+        response_id="decision_1",
+        item_kind=MemoryUsageItemKind.GRAPH_ENTITY,
+        item_id="decision_1",
+        principal_id="user-123",
+        project_id="project_1",
+    )
+    raw_proof = SimpleNamespace(
+        response_id="raw_memory:raw-1",
+        item_kind=MemoryUsageItemKind.RAW_CAPTURE,
+        item_id="raw-1",
+        principal_id="user-123",
+        project_id="project_1",
+    )
+
+    async def recover(*_: object, **kwargs: object) -> object:
+        callback = kwargs["recover_pending"]
+        assert callable(callback)
+        return await callback(object())
+
+    with (
+        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
+        patch(
+            "sibyl.api.routes.memory._authorized_exposure_item",
+            AsyncMock(side_effect=[graph_item, raw_item]),
+        ),
+        patch(
+            "sibyl.api.routes.memory.get_surreal_graph_runtime",
+            AsyncMock(return_value=MagicMock()),
+        ),
+        patch("sibyl.api.routes.memory.replay_idempotent_response", side_effect=recover),
+        patch(
+            "sibyl.api.routes.memory.get_shared_surreal_content_client",
+            AsyncMock(return_value=MagicMock()),
+        ),
+        patch(
+            "sibyl.api.routes.memory.list_memory_usage_exposure_proofs",
+            AsyncMock(side_effect=[(graph_proof,), (graph_proof, raw_proof)]),
+        ),
+        patch(
+            "sibyl.api.routes.memory.annotate_context_item_exposures",
+            AsyncMock(),
+        ) as annotate,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+    ):
+        response = await expose_memory_context.__wrapped__(
+            ContextExposureRequest(
+                exposed_ids=["decision_1", "raw_memory:raw-1"],
+                project_id="project_1",
+            ),
+            http_request=http_request,
+            org=org,
+            ctx=_ctx(),
+        )
+
+    assert response.recorded_ids == ["decision_1", "raw_memory:raw-1"]
+    annotate.assert_awaited_once()
+    assert annotate.await_args.args[0] == [raw_item]
 
 
 @pytest.mark.asyncio
@@ -658,6 +763,8 @@ async def test_remember_raw_audits_project_filter_denial() -> None:
         details={
             "policy_action": "write",
             "required_project_role": "project_contributor",
+            "agent_id": None,
+            "delegated_authority": None,
         },
     )
     remember.assert_not_awaited()
@@ -947,7 +1054,11 @@ async def test_remember_raw_denies_project_scope_without_policy_membership() -> 
         derived_ids=None,
         policy_allowed=False,
         policy_reason="unverified_membership",
-        details={"policy_action": "write"},
+        details={
+            "policy_action": "write",
+            "agent_id": None,
+            "delegated_authority": None,
+        },
     )
     route_log.info.assert_any_call(
         "memory_policy_decision",
@@ -1194,6 +1305,26 @@ async def test_recall_raw_diary_filters_agent_and_project() -> None:
         limit=10,
     )
     assert response.policy_reason == "agent_diary_private_read_allowed"
+
+
+@pytest.mark.asyncio
+async def test_recall_raw_diary_uses_authenticated_agent_id() -> None:
+    org = _org()
+    with (
+        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock(return_value=[])) as recall,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        await recall_raw(
+            RawMemoryRecallRequest(query="implementation state", diary=True),
+            org=org,
+            ctx=_ctx(
+                agent_id="hermes:home:nova",
+                delegated_authority="household-agent",
+            ),
+        )
+
+    assert recall.await_args.kwargs["agent_id"] == "hermes:home:nova"
+    assert audit.await_args.kwargs["details"]["agent_id"] == "hermes:home:nova"
 
 
 @pytest.mark.asyncio
@@ -2096,6 +2227,120 @@ async def test_blame_memory_source_hides_revision_bodies_after_redaction() -> No
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("apply", [False, True])
+async def test_memory_correction_hides_authorization_denials_after_audit(apply: bool) -> None:
+    org = _org()
+    memory = _memory(
+        id="memory-1",
+        organization_id=str(org.id),
+        principal_id="owner-123",
+    )
+    ctx = _ctx(
+        user_id="intruder-123",
+        agent_id="hermes:home:nova",
+        delegated_authority="household-agent",
+    )
+    request = MemoryCorrectionRequest(action="hide", reason="outdated")
+    http_request = _idempotent_http_request() if apply else _http_request()
+
+    async def invoke() -> None:
+        if apply:
+            await apply_memory_correction_route.__wrapped__.__wrapped__(
+                "memory-1",
+                request,
+                http_request=http_request,
+                org=org,
+                ctx=ctx,
+            )
+        else:
+            await preview_memory_correction_route(
+                "memory-1",
+                request,
+                http_request=http_request,
+                org=org,
+                ctx=ctx,
+            )
+
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        pytest.raises(HTTPException) as exc,
+    ):
+        await invoke()
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "memory_source_not_found"
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["action"] == "memory.policy_deny"
+    assert audit.await_args.kwargs["policy_reason"] == "principal_mismatch"
+    assert audit.await_args.kwargs["details"]["agent_id"] == "hermes:home:nova"
+    assert audit.await_args.kwargs["details"]["delegated_authority"] == "household-agent"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("apply", [False, True])
+async def test_memory_correction_hides_inaccessible_reference_denials(apply: bool) -> None:
+    org = _org()
+    memory = _memory(id="memory-1", organization_id=str(org.id))
+    denied = MemoryCorrectionPreview(
+        allowed=False,
+        source_id="memory-1",
+        action="supersede",
+        reason="replacement_source_not_found",
+        target_lifecycle_state="superseded",
+        target_lifecycle_flags=[],
+        affected_source_ids=[],
+        affected_derived_ids=[],
+        reversible=False,
+        recall_impact={"excluded_from_recall": False},
+        synthesis_impact={"excluded_from_synthesis": False},
+        audit_action="memory.correction.supersede",
+    )
+    request = MemoryCorrectionRequest(
+        action="supersede",
+        replacement_source_id="foreign-memory",
+    )
+
+    async def invoke() -> None:
+        if apply:
+            await apply_memory_correction_route.__wrapped__.__wrapped__(
+                "memory-1",
+                request,
+                http_request=_http_request(),
+                org=org,
+                ctx=_ctx(),
+            )
+        else:
+            await preview_memory_correction_route(
+                "memory-1",
+                request,
+                http_request=_http_request(),
+                org=org,
+                ctx=_ctx(),
+            )
+
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl.api.routes.memory.preview_memory_correction",
+            AsyncMock(return_value=denied),
+        ),
+        patch(
+            "sibyl.api.routes.memory.apply_memory_correction",
+            AsyncMock(return_value=MemoryCorrectionResult(applied=False, preview=denied)),
+        ),
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        pytest.raises(HTTPException) as exc,
+    ):
+        await invoke()
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "memory_source_not_found"
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["policy_reason"] == "replacement_source_not_found"
+
+
+@pytest.mark.asyncio
 async def test_preview_memory_correction_audits_lifecycle_action() -> None:
     org = _org()
     memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
@@ -2114,6 +2359,7 @@ async def test_preview_memory_correction_audits_lifecycle_action() -> None:
         audit_action="memory.correction.hide",
         metadata={"policy_reasons": ["private_principal_bound"]},
         current_revision=memory.revision,
+        intended_outcome_satisfied=True,
     )
 
     with (
@@ -2126,7 +2372,11 @@ async def test_preview_memory_correction_audits_lifecycle_action() -> None:
     ):
         response = await preview_memory_correction_route(
             "memory-1",
-            MemoryCorrectionRequest(action="hide", reason="outdated"),
+            MemoryCorrectionRequest(
+                action="hide",
+                reason="outdated",
+                metadata={"_provider_recovery": {"operation_id": "internal"}},
+            ),
             http_request=_http_request(),
             org=org,
             ctx=_ctx(org_role=OrganizationRole.OWNER),
@@ -2137,6 +2387,7 @@ async def test_preview_memory_correction_audits_lifecycle_action() -> None:
     assert response.audit_action == "memory.correction.hide"
     assert response.affected_derived_ids == ["entity-1"]
     assert response.current_revision == memory.revision
+    assert response.intended_outcome_satisfied is True
     preview_call.assert_awaited_once_with(
         organization_id=str(org.id),
         source_id="memory-1",
@@ -2152,6 +2403,7 @@ async def test_preview_memory_correction_audits_lifecycle_action() -> None:
     audit.assert_awaited_once()
     assert audit.await_args.kwargs["action"] == "memory.correction.hide.preview"
     assert audit.await_args.kwargs["source_ids"] == ["memory-1"]
+    assert "_provider_recovery" not in str(audit.await_args.kwargs["details"])
 
 
 @pytest.mark.asyncio
@@ -2253,7 +2505,8 @@ async def test_apply_memory_correction_recovers_source_history_before_receipt() 
         id="memory-1",
         organization_id=str(org.id),
         source_id="source-1",
-        revision=2,
+        revision=7,
+        review_state="stale",
         metadata={
             "correction_history": [
                 {
@@ -2273,9 +2526,16 @@ async def test_apply_memory_correction_recovers_source_history_before_receipt() 
                         "synthesis_impact": {"excluded_from_synthesis": True},
                         "policy_reasons": ["private_principal_bound"],
                         "current_revision": 1,
+                        "intended_outcome_satisfied": False,
+                        "result": {
+                            "revision": 2,
+                            "updated_review_state": "pending",
+                            "lifecycle": {"state": "active", "flags": ["hidden"]},
+                            "reflection_finding": None,
+                        },
                     },
                 }
-            ]
+            ],
         },
     )
     request = MemoryCorrectionRequest(
@@ -2296,20 +2556,33 @@ async def test_apply_memory_correction_recovers_source_history_before_receipt() 
         patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
         patch("sibyl.api.routes.memory.replay_idempotent_response", side_effect=recover),
         patch("sibyl.api.routes.memory.apply_memory_correction", AsyncMock()) as apply,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await apply_memory_correction_route.__wrapped__.__wrapped__(
             "source-1",
             request,
             http_request=http_request,
             org=org,
-            ctx=_ctx(org_role=OrganizationRole.OWNER),
+            ctx=_ctx(
+                org_role=OrganizationRole.OWNER,
+                agent_id="hermes:home:nova",
+                delegated_authority="household-agent",
+            ),
         )
 
     assert response.applied is True
     assert response.revision == 2
     assert response.current_revision == 1
+    assert response.intended_outcome_satisfied is False
+    assert response.updated_review_state == "pending"
+    assert response.lifecycle == {"state": "active", "flags": ["hidden"]}
     assert response.mutation_receipt is not None
+    assert response.mutation_receipt.revision == 2
     assert response.mutation_receipt.affected_records == ["raw_captures:memory-1"]
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["details"]["agent_id"] == "hermes:home:nova"
+    assert audit.await_args.kwargs["details"]["delegated_authority"] == "household-agent"
+    assert audit.await_args.kwargs["event_id"]
     apply.assert_not_awaited()
 
 

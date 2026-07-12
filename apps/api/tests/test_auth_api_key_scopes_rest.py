@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
@@ -291,6 +292,25 @@ async def test_memory_provider_profile_rejects_conflicting_agent_identity() -> N
             "sibyl.auth.dependencies.authenticate_api_key",
             AsyncMock(return_value=_memory_provider_auth()),
         ),
+        pytest.raises(HTTPException) as exc,
+    ):
+        await resolve_claims(request, _session=object())
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail["error"] == "agent_identity_conflict"
+
+
+@pytest.mark.asyncio
+async def test_any_agent_bound_key_rejects_conflicting_agent_identity() -> None:
+    request = _make_request(
+        method="POST",
+        path="/api/memory/raw/recall",
+        token="sk_live_test",
+        json_body={"agent_id": "hermes:home:other", "query": "status"},
+    )
+    auth = replace(_memory_provider_auth(), capability_profile=None)
+    with (
+        patch("sibyl.auth.dependencies.authenticate_api_key", AsyncMock(return_value=auth)),
         pytest.raises(HTTPException) as exc,
     ):
         await resolve_claims(request, _session=object())

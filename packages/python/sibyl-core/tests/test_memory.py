@@ -512,6 +512,193 @@ async def test_memory_correction_preview_treats_deferred_review_as_active(
 
 
 @pytest.mark.asyncio
+async def test_memory_correction_preview_preserves_outcome_across_orthogonal_actions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_review_candidate(
+        id="source-1",
+        metadata={
+            "lifecycle_state": "active",
+            "lifecycle_flags": ["hidden"],
+            "lifecycle_action": "hide",
+        },
+    )
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+
+    satisfied = await preview_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="hide",
+    )
+    memory.metadata["lifecycle_action"] = "mark_sensitive"
+    hidden_after_other_action = await preview_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="hide",
+    )
+    memory.metadata["lifecycle_flags"] = []
+    hidden_flag_missing = await preview_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="hide",
+    )
+    memory.metadata.update(
+        {
+            "lifecycle_state": "contested",
+            "lifecycle_flags": ["hidden"],
+            "lifecycle_action": "hide",
+            "stale_at": "2026-07-12T12:00:00Z",
+        }
+    )
+    stale_then_hidden = await preview_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="mark_stale",
+    )
+    memory.metadata.update(
+        {
+            "lifecycle_state": "active",
+            "lifecycle_flags": ["sensitive", "hidden"],
+            "lifecycle_action": "hide",
+        }
+    )
+    sensitive_then_hidden = await preview_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="mark_sensitive",
+    )
+
+    assert satisfied.intended_outcome_satisfied is True
+    assert hidden_after_other_action.intended_outcome_satisfied is True
+    assert hidden_flag_missing.intended_outcome_satisfied is False
+    assert stale_then_hidden.intended_outcome_satisfied is True
+    assert sensitive_then_hidden.intended_outcome_satisfied is True
+
+
+@pytest.mark.asyncio
+async def test_memory_correction_preview_compares_revised_content_and_reference_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    revised = _raw_review_candidate(
+        id="revised-1",
+        raw_content="Current corrected body",
+        metadata={
+            "lifecycle_state": "active",
+            "lifecycle_flags": [],
+            "lifecycle_action": "revise",
+        },
+    )
+    replacement = _raw_review_candidate(id="replacement-1", source_id="replacement-source")
+    superseded = _raw_review_candidate(
+        id="superseded-1",
+        metadata={
+            "lifecycle_state": "superseded",
+            "lifecycle_flags": [],
+            "lifecycle_action": "supersede",
+            "superseded_by_source_id": replacement.id,
+        },
+    )
+
+    async def load(*, memory_id: str, **_: object) -> RawMemory | None:
+        return {
+            revised.id: revised,
+            superseded.id: superseded,
+            replacement.id: replacement,
+        }.get(memory_id)
+
+    monkeypatch.setattr(memory_module, "get_raw_memory", load)
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+
+    revised_preview = await preview_memory_correction(
+        organization_id="org-1",
+        source_id=revised.id,
+        principal_id="user-1",
+        action="revise",
+        revised_content="Current corrected body",
+    )
+    supersede_preview = await preview_memory_correction(
+        organization_id="org-1",
+        source_id=superseded.id,
+        principal_id="user-1",
+        action="supersede",
+        replacement_source_id=replacement.id,
+    )
+
+    assert revised_preview.allowed is False
+    assert revised_preview.reason == "unchanged_revised_content"
+    assert revised_preview.intended_outcome_satisfied is True
+    assert supersede_preview.intended_outcome_satisfied is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("action", "reference_field", "source_state", "reference_state", "reason"),
+    [
+        (
+            "supersede",
+            "superseded_by_source_id",
+            "superseded",
+            "hidden",
+            "replacement_source_not_recallable",
+        ),
+        (
+            "mark_duplicate",
+            "duplicate_of_source_id",
+            "contested",
+            "deleted",
+            "duplicate_source_not_recallable",
+        ),
+    ],
+)
+async def test_correction_outcome_survives_nonrecallable_reference(
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+    reference_field: str,
+    source_state: str,
+    reference_state: str,
+    reason: str,
+) -> None:
+    reference = _raw_review_candidate(
+        id="reference-1",
+        review_state=reference_state,
+    )
+    source = _raw_review_candidate(
+        id="source-1",
+        metadata={
+            "lifecycle_state": source_state,
+            "lifecycle_flags": [],
+            "lifecycle_action": action,
+            reference_field: reference.id,
+        },
+    )
+
+    async def load(*, memory_id: str, **_: object) -> RawMemory | None:
+        return {source.id: source, reference.id: reference}.get(memory_id)
+
+    monkeypatch.setattr(memory_module, "get_raw_memory", load)
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+
+    preview = await preview_memory_correction(
+        organization_id="org-1",
+        source_id=source.id,
+        principal_id="user-1",
+        action=action,
+        replacement_source_id=reference.id if action == "supersede" else None,
+        duplicate_of_source_id=reference.id if action == "mark_duplicate" else None,
+    )
+
+    assert preview.allowed is False
+    assert preview.reason == reason
+    assert preview.intended_outcome_satisfied is True
+
+
+@pytest.mark.asyncio
 async def test_memory_correction_preview_fails_closed_for_unknown_lifecycle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -582,6 +769,7 @@ async def test_apply_memory_correction_marks_hidden_and_preserves_history(
     assert recovery["operation_id"] == "correction-operation-1"
     assert recovery["affected_source_ids"] == ["source-1"]
     assert recovery["current_revision"] == 1
+    assert recovery["intended_outcome_satisfied"] is False
     save_raw_memory.assert_awaited_once()
 
 
@@ -1203,6 +1391,54 @@ async def test_promote_review_candidate_requires_explicit_target(
     assert not result.success
     assert result.reason == "missing_promote_to_scope"
     persist.assert_not_awaited()
+
+
+@pytest.mark.parametrize("promotion_kind", ["reflection", "raw"])
+def test_promotion_to_entity_strips_provider_recovery_metadata(
+    promotion_kind: str,
+) -> None:
+    proof = {"operation_id": "correction-operation-1", "result": {"revision": 2}}
+    memory = _raw_review_candidate(
+        metadata={
+            **_raw_review_candidate().metadata,
+            "correction_history": [
+                {
+                    "action": "hide",
+                    "_provider_recovery": proof,
+                }
+            ],
+        }
+    )
+    if promotion_kind == "reflection":
+        candidate = memory_module._candidate_from_review_memory(
+            memory,
+            raw_source_ids=["source-1"],
+            target_scope=MemoryScope.PRIVATE,
+            target_scope_key=None,
+            domain=None,
+        )
+    else:
+        candidate = memory_module._candidate_from_raw_memory(
+            memory,
+            target_scope=MemoryScope.PRIVATE,
+            target_scope_key=None,
+            domain=None,
+        )
+    entity = memory_module._entity_from_candidate(
+        candidate,
+        organization_id="org-1",
+        principal_id="user-1",
+        domain=None,
+        project=None,
+        source_id=memory.id,
+        memory_scope=MemoryScope.PRIVATE,
+        scope_key=None,
+        policy_metadata={"policy_allowed": True},
+    )
+
+    assert "_provider_recovery" in str(memory.metadata)
+    assert "_provider_recovery" not in str(candidate.metadata)
+    assert "_provider_recovery" not in str(entity.metadata)
 
 
 @pytest.mark.asyncio

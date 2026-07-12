@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from sibyl.api.idempotency import (
     complete_idempotency_record,
+    idempotency_claim_lease,
     idempotency_request_hash,
     provider_request_body,
     provider_request_hash,
@@ -477,3 +478,79 @@ async def test_payload_mismatch_has_structured_conflict_code() -> None:
         )
 
     assert error.value.detail["code"] == "idempotency_payload_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_claim_lease_heartbeats_and_advances_request_fence() -> None:
+    claim = ApiIdempotencyRecord(
+        organization_id=uuid4(),
+        principal_id="user-1",
+        idempotency_key="remember-1",
+        method="POST",
+        path="/memory/raw",
+        request_hash="hash-1",
+        response_status_code=102,
+        response_body={},
+        claim_revision=2,
+    )
+    request = SimpleNamespace(
+        headers={"Idempotency-Key": "remember-1"},
+        state=SimpleNamespace(_sibyl_idempotency_claim=claim),
+    )
+    heartbeat_seen = asyncio.Event()
+    calls = 0
+
+    async def compare_and_set(*_args: object, **kwargs: object) -> ApiIdempotencyRecord:
+        nonlocal calls
+        calls += 1
+        record = kwargs["record"]
+        assert isinstance(record, ApiIdempotencyRecord)
+        if calls >= 2:
+            heartbeat_seen.set()
+        return record
+
+    with patch(
+        "sibyl.api.idempotency.content_runtime.compare_and_set_api_idempotency_record",
+        side_effect=compare_and_set,
+    ):
+        async with idempotency_claim_lease(
+            request,
+            content_session=None,
+            heartbeat_seconds=0.001,
+        ):
+            await asyncio.wait_for(heartbeat_seen.wait(), timeout=1)
+
+    assert calls >= 2
+    assert request.state._sibyl_idempotency_claim.claim_revision >= 4
+
+
+@pytest.mark.asyncio
+async def test_claim_lease_aborts_before_side_effect_after_fence_loss() -> None:
+    claim = ApiIdempotencyRecord(
+        organization_id=uuid4(),
+        principal_id="user-1",
+        idempotency_key="remember-1",
+        method="POST",
+        path="/memory/raw",
+        request_hash="hash-1",
+        response_status_code=102,
+        response_body={},
+    )
+    request = SimpleNamespace(
+        headers={"Idempotency-Key": "remember-1"},
+        state=SimpleNamespace(_sibyl_idempotency_claim=claim),
+    )
+    side_effect_applied = False
+
+    with (
+        patch(
+            "sibyl.api.idempotency.content_runtime.compare_and_set_api_idempotency_record",
+            AsyncMock(return_value=None),
+        ),
+        pytest.raises(HTTPException) as error,
+    ):
+        async with idempotency_claim_lease(request, content_session=None):
+            side_effect_applied = True
+
+    assert error.value.detail["code"] == "idempotency_recovery_conflict"
+    assert side_effect_applied is False

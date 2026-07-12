@@ -918,9 +918,10 @@ async def _log_audit_event(
     organization_id: UUID | None,
     request: Request | None,
     details: SurrealRecord,
+    event_id: str | None = None,
 ) -> str | None:
     now = _utcnow()
-    audit_id = str(uuid4())
+    audit_id = event_id or str(uuid4())
     record = {
         "uuid": audit_id,
         "user_id": _uuid_str(user_id),
@@ -933,7 +934,14 @@ async def _log_audit_event(
         "updated_at": now,
     }
     try:
-        await client.execute_query("CREATE audit_logs CONTENT $record;", record=record)
+        if event_id is None:
+            await client.execute_query("CREATE audit_logs CONTENT $record;", record=record)
+        else:
+            await client.execute_query(
+                "UPSERT audit_logs CONTENT $record WHERE uuid = $uuid;",
+                uuid=audit_id,
+                record=record,
+            )
     except Exception as exc:
         if _is_transient_connection_error(exc):
             logger.warning(

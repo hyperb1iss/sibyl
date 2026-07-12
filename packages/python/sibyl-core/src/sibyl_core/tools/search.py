@@ -32,6 +32,7 @@ from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,
     RawMemoryRecallResult,
+    raw_memory_public_metadata,
 )
 from sibyl_core.services.surreal_content import (
     recall_raw_memory_with_sources as recall_raw_memory,
@@ -605,7 +606,7 @@ def _raw_memory_search_result(
             "scope_key": memory.scope_key,
             "capture_surface": memory.capture_surface,
             "tags": list(memory.tags),
-            **memory.metadata,
+            **raw_memory_public_metadata(memory.metadata),
         },
     )
     if include_content:
