@@ -66,6 +66,16 @@ def test_ablation_plan_freezes_five_arms_and_three_reader_configs(tmp_path: Path
         for build in representation["memory_builds"].values()
     )
     assert all(
+        "--question-ids" in build["command"]
+        for representation in plan["representations"]
+        for build in representation["memory_builds"].values()
+    )
+    for representation in plan["representations"]:
+        for domain, build in representation["memory_builds"].items():
+            question_id_index = build["command"].index("--question-ids")
+            output_index = build["command"].index("--output-dir")
+            assert build["command"][question_id_index + 1 : output_index] == [f"q-{domain}"]
+    assert all(
         run["command"].count("retrieve") == 1
         for arm in plan["retrieval_arms"]
         for run in arm["retrieval_runs"].values()
