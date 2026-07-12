@@ -163,6 +163,7 @@ tasks:
   fmt:
     deps:
       - root:format
+      - root:inventory-format
       - docs:format
       - skills:format
       - infra:format
@@ -447,12 +448,27 @@ tasks:
 
   inventory-lint:
     script:
-      uv run ruff check tools benchmarks/provider_usage.py && uv run ruff format --check tools
-      benchmarks/provider_usage.py
+      uv run ruff check tools benchmarks/provider_usage.py
+      benchmarks/longmemeval_v2_diagnostics.py && uv run ruff format --check tools
+      benchmarks/provider_usage.py benchmarks/longmemeval_v2_diagnostics.py
     inputs:
       - tools/**/*.py
       - benchmarks/provider_usage.py
+      - benchmarks/longmemeval_v2_diagnostics.py
+      - benchmarks/longmemeval_v2_diagnostic_slice.json
       - pyproject.toml
+
+  inventory-format:
+    command:
+      uv run ruff format tools benchmarks/provider_usage.py
+      benchmarks/longmemeval_v2_diagnostics.py
+    inputs:
+      - tools/**/*.py
+      - benchmarks/provider_usage.py
+      - benchmarks/longmemeval_v2_diagnostics.py
+      - pyproject.toml
+    options:
+      cache: false
 
   inventory-typecheck:
     command: uv run ty check tools
@@ -674,7 +690,8 @@ tasks:
       tools/tests/test_compare_eval_reports.py tools/tests/test_context_pack_eval_script.py
       tools/tests/test_longmemeval_bench.py tools/tests/test_longmemeval_live.py
       tools/tests/test_longmemeval_replay.py
-      tools/tests/test_longmemeval_v2_probe.py tools/tests/test_longmemeval_v2_official.py -v
+      tools/tests/test_longmemeval_v2_probe.py tools/tests/test_longmemeval_v2_official.py
+      tools/tests/test_longmemeval_v2_diagnostics.py -v
     inputs:
       - tools/**/*.py
       - .github/workflows/eval.yml
@@ -687,6 +704,8 @@ tasks:
       - benchmarks/longmemeval_replay.py
       - benchmarks/longmemeval_v2_probe.py
       - benchmarks/longmemeval_v2_official.py
+      - benchmarks/longmemeval_v2_diagnostics.py
+      - benchmarks/longmemeval_v2_diagnostic_slice.json
       - benchmarks/provider_usage.py
       - benchmarks/longmemeval_v2_memory/**/*.py
       - benchmarks/results/ai-memory/**/*.json
@@ -1256,6 +1275,11 @@ tasks:
 
   bench-longmemeval-v2-official:
     command: uv run python benchmarks/longmemeval_v2_official.py
+    options:
+      cache: false
+
+  bench-longmemeval-v2-diagnostics:
+    command: uv run python benchmarks/longmemeval_v2_diagnostics.py
     options:
       cache: false
 

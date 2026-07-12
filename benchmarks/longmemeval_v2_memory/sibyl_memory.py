@@ -149,6 +149,38 @@ def search_results_to_memory_context(
     return context
 
 
+def build_retrieval_trace(
+    results: list[dict[str, object]],
+    *,
+    max_items: int = DEFAULT_CONTEXT_ITEMS,
+    max_chars_per_item: int = DEFAULT_CONTEXT_CHARS_PER_ITEM,
+) -> list[dict[str, object]]:
+    trace: list[dict[str, object]] = []
+    for rank, result in enumerate(results[:max_items], start=1):
+        content = _stripped_str(result.get("content"))
+        if not content:
+            continue
+        metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+        state_indices = [int(value) for value in re.findall(r"^State\s+(\d+)\b", content, re.MULTILINE)]
+        trace.append(
+            {
+                "rank": rank,
+                "entity_id": _stripped_str(result.get("id")),
+                "trajectory_id": _stripped_str(
+                    metadata.get("longmemeval_v2_trajectory_id")
+                ),
+                "chunk_index": metadata.get("longmemeval_v2_chunk_index"),
+                "chunk_count": metadata.get("longmemeval_v2_chunk_count"),
+                "state_indices": state_indices,
+                "score": result.get("score"),
+                "content_chars": len(content),
+                "exposed_chars": min(len(content), max_chars_per_item),
+                "result_origin": _stripped_str(result.get("result_origin")),
+            }
+        )
+    return trace
+
+
 @register_memory
 class SibylLiveApiMemory(Memory):
     memory_type = "sibyl_live_api"
@@ -329,6 +361,11 @@ class SibylLiveApiMemory(Memory):
         )
         raw_results = response.get("results")
         results = [item for item in raw_results if isinstance(item, dict)] if isinstance(raw_results, list) else []
+        self._query_local.retrieval_trace = build_retrieval_trace(
+            results,
+            max_items=self.max_context_items,
+            max_chars_per_item=self.max_context_chars_per_item,
+        )
         return search_results_to_memory_context(
             results,
             max_items=self.max_context_items,
@@ -362,6 +399,9 @@ class SibylLiveApiMemory(Memory):
             "search_content_max_chars": self.max_context_chars_per_item,
             "search_metadata": dict(
                 getattr(self._query_local, "search_metadata", {})
+            ),
+            "retrieval_trace": list(
+                getattr(self._query_local, "retrieval_trace", [])
             ),
         }
 

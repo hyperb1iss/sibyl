@@ -1,0 +1,256 @@
+{
+  "cases": [
+    {
+      "baseline_failure_class": "trajectory_selection_miss",
+      "baseline_score_bool": false,
+      "domain": "enterprise",
+      "question_id": "2975030d",
+      "question_type": "static-environment"
+    },
+    {
+      "baseline_failure_class": "state_selection_miss",
+      "baseline_score_bool": false,
+      "domain": "enterprise",
+      "question_id": "658fa827",
+      "question_type": "dynamic-environment"
+    },
+    {
+      "baseline_failure_class": "state_selection_miss",
+      "baseline_score_bool": false,
+      "domain": "enterprise",
+      "question_id": "767e4106",
+      "question_type": "procedure"
+    },
+    {
+      "baseline_failure_class": "state_selection_miss",
+      "baseline_score_bool": false,
+      "domain": "enterprise",
+      "question_id": "8f752563",
+      "question_type": "static-environment"
+    },
+    {
+      "baseline_failure_class": "evidence_exposure_miss",
+      "baseline_score_bool": false,
+      "domain": "enterprise",
+      "question_id": "87711b62",
+      "question_type": "dynamic-environment"
+    },
+    {
+      "baseline_failure_class": "evidence_exposure_miss",
+      "baseline_score_bool": false,
+      "domain": "enterprise",
+      "question_id": "0f8c85a6",
+      "question_type": "static-environment"
+    },
+    {
+      "baseline_failure_class": "reader_or_scoring_miss",
+      "baseline_score_bool": false,
+      "domain": "enterprise",
+      "question_id": "25b00876",
+      "question_type": "procedure"
+    },
+    {
+      "baseline_failure_class": "trajectory_selection_miss",
+      "baseline_score_bool": false,
+      "domain": "enterprise",
+      "question_id": "927c65a2",
+      "question_type": "static-environment"
+    },
+    {
+      "baseline_failure_class": "state_selection_miss",
+      "baseline_score_bool": false,
+      "domain": "enterprise",
+      "question_id": "82cdfcc3",
+      "question_type": "dynamic-environment"
+    },
+    {
+      "baseline_failure_class": "state_selection_miss",
+      "baseline_score_bool": false,
+      "domain": "enterprise",
+      "question_id": "9680f077",
+      "question_type": "static-environment"
+    },
+    {
+      "baseline_failure_class": "evidence_exposure_miss",
+      "baseline_score_bool": false,
+      "domain": "enterprise",
+      "question_id": "17a03f9b",
+      "question_type": "static-environment"
+    },
+    {
+      "baseline_failure_class": "state_selection_miss",
+      "baseline_score_bool": false,
+      "domain": "enterprise",
+      "question_id": "901b7d17",
+      "question_type": "dynamic-environment"
+    },
+    {
+      "baseline_failure_class": "unlabeled_exact_evidence",
+      "baseline_score_bool": true,
+      "domain": "enterprise",
+      "question_id": "2f6a21cd",
+      "question_type": "errors-gotchas"
+    },
+    {
+      "baseline_failure_class": "unlabeled_exact_evidence",
+      "baseline_score_bool": true,
+      "domain": "enterprise",
+      "question_id": "75816b26",
+      "question_type": "procedure"
+    },
+    {
+      "baseline_failure_class": "unlabeled_exact_evidence",
+      "baseline_score_bool": true,
+      "domain": "enterprise",
+      "question_id": "302bf60e",
+      "question_type": "errors-gotchas"
+    },
+    {
+      "baseline_failure_class": "unlabeled_exact_evidence",
+      "baseline_score_bool": true,
+      "domain": "enterprise",
+      "question_id": "af2ebaed",
+      "question_type": "errors-gotchas"
+    },
+    {
+      "baseline_failure_class": "trajectory_selection_miss",
+      "baseline_score_bool": false,
+      "domain": "web",
+      "question_id": "6652c337",
+      "question_type": "dynamic-environment"
+    },
+    {
+      "baseline_failure_class": "trajectory_selection_miss",
+      "baseline_score_bool": false,
+      "domain": "web",
+      "question_id": "d6da3938",
+      "question_type": "static-environment"
+    },
+    {
+      "baseline_failure_class": "state_selection_miss",
+      "baseline_score_bool": false,
+      "domain": "web",
+      "question_id": "e71f7c92",
+      "question_type": "dynamic-environment"
+    },
+    {
+      "baseline_failure_class": "state_selection_miss",
+      "baseline_score_bool": false,
+      "domain": "web",
+      "question_id": "d16a18fe",
+      "question_type": "procedure"
+    },
+    {
+      "baseline_failure_class": "state_selection_miss",
+      "baseline_score_bool": false,
+      "domain": "web",
+      "question_id": "896017e0",
+      "question_type": "static-environment"
+    },
+    {
+      "baseline_failure_class": "state_selection_miss",
+      "baseline_score_bool": false,
+      "domain": "web",
+      "question_id": "e532c01e",
+      "question_type": "static-environment-abs"
+    },
+    {
+      "baseline_failure_class": "evidence_exposure_miss",
+      "baseline_score_bool": false,
+      "domain": "web",
+      "question_id": "f9f9cd61",
+      "question_type": "dynamic-environment"
+    },
+    {
+      "baseline_failure_class": "evidence_exposure_miss",
+      "baseline_score_bool": false,
+      "domain": "web",
+      "question_id": "3f366e15",
+      "question_type": "static-environment"
+    },
+    {
+      "baseline_failure_class": "reader_or_scoring_miss",
+      "baseline_score_bool": false,
+      "domain": "web",
+      "question_id": "c36b0d68",
+      "question_type": "dynamic-environment"
+    },
+    {
+      "baseline_failure_class": "reader_or_scoring_miss",
+      "baseline_score_bool": false,
+      "domain": "web",
+      "question_id": "0a4a47e6",
+      "question_type": "static-environment"
+    },
+    {
+      "baseline_failure_class": "trajectory_selection_miss",
+      "baseline_score_bool": false,
+      "domain": "web",
+      "question_id": "436c58d5",
+      "question_type": "static-environment"
+    },
+    {
+      "baseline_failure_class": "state_selection_miss",
+      "baseline_score_bool": false,
+      "domain": "web",
+      "question_id": "11dac74b",
+      "question_type": "dynamic-environment"
+    },
+    {
+      "baseline_failure_class": "retrieval_supported_success",
+      "baseline_score_bool": true,
+      "domain": "web",
+      "question_id": "691cd1da",
+      "question_type": "dynamic-environment"
+    },
+    {
+      "baseline_failure_class": "retrieval_supported_success",
+      "baseline_score_bool": true,
+      "domain": "web",
+      "question_id": "60c7ca22",
+      "question_type": "procedure"
+    },
+    {
+      "baseline_failure_class": "unlabeled_exact_evidence",
+      "baseline_score_bool": true,
+      "domain": "web",
+      "question_id": "91d0775e",
+      "question_type": "dynamic-environment"
+    },
+    {
+      "baseline_failure_class": "unlabeled_exact_evidence",
+      "baseline_score_bool": true,
+      "domain": "web",
+      "question_id": "910135bb",
+      "question_type": "errors-gotchas"
+    }
+  ],
+  "decision_thresholds": {
+    "go": {
+      "exact_context_recall_at_10_absolute_gain": 0.15,
+      "multi_state_evidence_coverage_at_10_absolute_gain": 0.1
+    },
+    "no_go": {
+      "all_arms_exact_context_recall_gain_below": 0.08
+    },
+    "research_more": {
+      "exact_context_recall_gain_max": 0.15,
+      "exact_context_recall_gain_min": 0.08
+    }
+  },
+  "max_rank": 10,
+  "schema_version": "sibyl-longmemeval-v2-diagnostic-slice-v1",
+  "selection_policy": "deterministic round-robin by failure class and question type",
+  "source_artifacts": {
+    "enterprise": {
+      "haystack_sha256": "sha256:7c98f42159050b83ed98e099d6fa9bdab0cf9e4200179036b86579df3a5f4ce4",
+      "per_question_sha256": "sha256:147764d2f5614530bfa46e5e5bd4ac58c3fd529209045c7c7a079f13fd569ae8",
+      "question_count": 211
+    },
+    "web": {
+      "haystack_sha256": "sha256:07a453d5f267be5098c13c7fd70cc9338d6fca042deec08ddd79eddba42d719d",
+      "per_question_sha256": "sha256:0ee6aad9a08cf47d174df4ca5f4c840301126f5a313d5301cc58ef7f05bfda70",
+      "question_count": 240
+    }
+  }
+}

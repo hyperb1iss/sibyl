@@ -695,6 +695,7 @@ def test_sibyl_memory_oversized_blocks_split_on_line_boundaries() -> None:
 
 def test_sibyl_memory_context_formats_retrieved_content() -> None:
     module = _load_memory_module()
+    trace_content = "State 3\nThe priority filter was selected."
 
     context = module.search_results_to_memory_context(
         [
@@ -721,6 +722,36 @@ def test_sibyl_memory_context_formats_retrieved_content() -> None:
                 "Score: 0.875\n\n"
                 "The priority filter was"
             ),
+        }
+    ]
+    assert module.build_retrieval_trace(
+        [
+            {
+                "id": "entity:t1-0",
+                "content": trace_content,
+                "score": 0.875,
+                "result_origin": "graph",
+                "metadata": {
+                    "longmemeval_v2_trajectory_id": "t1",
+                    "longmemeval_v2_chunk_index": 0,
+                    "longmemeval_v2_chunk_count": 2,
+                },
+            }
+        ],
+        max_items=1,
+        max_chars_per_item=24,
+    ) == [
+        {
+            "rank": 1,
+            "entity_id": "entity:t1-0",
+            "trajectory_id": "t1",
+            "chunk_index": 0,
+            "chunk_count": 2,
+            "state_indices": [3],
+            "score": 0.875,
+            "content_chars": len(trace_content),
+            "exposed_chars": 24,
+            "result_origin": "graph",
         }
     ]
 
@@ -1172,6 +1203,7 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
         "retrieval_mode": "native",
         "stage_timings_ms": {"total": 12.5},
     }
+    assert metadata["retrieval_trace"] == []
     assert metadata["api_runtime"]["runtime"] == {
         "commit": "abc123",
         "git_dirty": False,
