@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -333,6 +334,9 @@ async def context_search(
 
     from sibyl_core.tools.responses import SearchResponse
 
+    search_started_at = time.perf_counter()
+    stage_timings_ms: dict[str, float] = {}
+    stage_started_at = time.perf_counter()
     limit = max(1, min(limit, 50))
     search_plan = replace(
         plan,
@@ -342,7 +346,9 @@ async def context_search(
     client = runtime.client
     requested_types = {value.lower() for value in types or ()}
     search_filter = _search_filter_for_plan(search_plan, requested_types=requested_types)
+    stage_timings_ms["runtime_setup"] = _elapsed_ms(stage_started_at)
 
+    stage_started_at = time.perf_counter()
     raw_task = _recall_raw_candidates(
         plan=search_plan,
         facet=facet,
@@ -394,7 +400,9 @@ async def context_search(
     )
     raw_candidates = list(raw_source.candidates)
     graph_candidate_lists = [list(source.candidates) for source in graph_sources]
+    stage_timings_ms["lexical_candidates"] = _elapsed_ms(stage_started_at)
 
+    stage_started_at = time.perf_counter()
     vector_plan = _vector_scoped_plan(
         search_plan,
         include_nodes=node_sources_allowed,
@@ -407,6 +415,9 @@ async def context_search(
         embedding_provider=embedding_provider,
     )
     vector_candidate_lists = [vector_fetch.node_candidates, vector_fetch.edge_candidates]
+    stage_timings_ms["vector_candidates"] = _elapsed_ms(stage_started_at)
+
+    stage_started_at = time.perf_counter()
     graph_expansion_source = await _gather_graph_expansion_source(
         _graph_expansion_candidates(
             client=client,
@@ -421,6 +432,9 @@ async def context_search(
         )
     )
     graph_expansion_candidates = list(graph_expansion_source.candidates)
+    stage_timings_ms["graph_expansion"] = _elapsed_ms(stage_started_at)
+
+    stage_started_at = time.perf_counter()
     candidate_source_metadata = _candidate_source_metadata(
         (raw_source, *graph_sources, graph_expansion_source),
         extra_failures=raw_failures,
@@ -454,6 +468,9 @@ async def context_search(
     temporal_target = resolve_temporal_reference(search_plan.query, datetime.now(UTC))
     fusion_backend = fusion_backend_from_env()
     fusion_failures: list[CandidateSourceFailure] = []
+    stage_timings_ms["candidate_filtering"] = _elapsed_ms(stage_started_at)
+
+    stage_started_at = time.perf_counter()
     fusion = await _fuse_candidates_for_plan(
         client=client,
         source_lists=filtered_lists,
@@ -464,6 +481,9 @@ async def context_search(
         fusion_failures=fusion_failures,
     )
     fused = fusion.candidates
+    stage_timings_ms["fusion"] = _elapsed_ms(stage_started_at)
+
+    stage_started_at = time.perf_counter()
     if search_plan.query.strip():
         fused = await asyncio.to_thread(
             _apply_query_coverage_to_fused,
@@ -471,6 +491,9 @@ async def context_search(
             fused,
             temporal_target=temporal_target,
         )
+    stage_timings_ms["query_coverage"] = _elapsed_ms(stage_started_at)
+
+    stage_started_at = time.perf_counter()
     results = [
         _search_result_from_candidate(
             candidate,
@@ -480,6 +503,8 @@ async def context_search(
         )
         for candidate, score, fusion_metadata in fused
     ]
+    stage_timings_ms["materialization"] = _elapsed_ms(stage_started_at)
+    stage_timings_ms["total"] = _elapsed_ms(search_started_at)
     return SearchResponse(
         results=results,
         total=len(results),
@@ -496,11 +521,16 @@ async def context_search(
             **candidate_source_metadata,
             **raw_recall_metadata,
             **vector_fetch.as_metadata(),
+            "stage_timings_ms": stage_timings_ms,
         },
         graph_count=len([result for result in results if result.result_origin == "graph"]),
         document_count=0,
         limit=limit,
     )
+
+
+def _elapsed_ms(started_at: float) -> float:
+    return (time.perf_counter() - started_at) * 1000.0
 
 
 def _api_key_scope_allowed(

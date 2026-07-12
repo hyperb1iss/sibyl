@@ -245,6 +245,7 @@ class SibylLiveApiMemory(Memory):
         self._pending_projection_job_ids: set[str] = set()
         self._finalize_lock = threading.Lock()
         self._ingest_finalized = False
+        self._query_local = threading.local()
         self._client = _new_http_client(
             self.api_url,
             timeout_seconds=self.api_timeout_seconds,
@@ -320,6 +321,10 @@ class SibylLiveApiMemory(Memory):
             "limit": min(max(self.search_limit, self.max_context_items), 50),
         }
         response = self._request_json("POST", "/search", json=payload)
+        filters = response.get("filters")
+        self._query_local.search_metadata = (
+            dict(filters) if isinstance(filters, dict) else {}
+        )
         raw_results = response.get("results")
         results = [item for item in raw_results if isinstance(item, dict)] if isinstance(raw_results, list) else []
         return search_results_to_memory_context(
@@ -351,6 +356,9 @@ class SibylLiveApiMemory(Memory):
             "pending_memory_projection_jobs": len(self._pending_projection_job_ids),
             "returned_context_items": len(memory_context),
             "search_content_max_chars": self.max_context_chars_per_item,
+            "search_metadata": dict(
+                getattr(self._query_local, "search_metadata", {})
+            ),
         }
 
     def _remember_embedding_backfill_jobs(self, response: dict[str, object]) -> None:

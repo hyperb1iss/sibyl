@@ -928,26 +928,48 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
                 }
             }
         if path == "/search":
-            return {"results": []}
+            return {
+                "results": [],
+                "filters": {
+                    "retrieval_mode": "native",
+                    "stage_timings_ms": {"total": 12.5},
+                },
+            }
         raise AssertionError(f"unexpected path: {path}")
 
     memory.project_id = "project_lme"
+    memory.api_url = "http://localhost:3434/api"
+    memory.run_id = "run_lme"
     memory.search_limit = 12
     memory.max_context_items = 8
     memory.max_context_chars_per_item = TEST_CONTEXT_MAX_CHARS
+    memory.inserted_trajectories = 2
+    memory.created_entities = 4
+    memory.defer_embeddings = True
     memory.embedding_job_wait_timeout_seconds = 5.0
     memory.embedding_job_poll_seconds = 0.0
     memory._pending_embedding_job_ids = {"embed-lme-v2-1"}
     memory._pending_projection_job_ids = {"project-lme-v2-1"}
     memory._finalize_lock = threading.Lock()
+    memory._query_local = threading.local()
     memory._ingest_finalized = False
     memory._request_json = fake_request
 
     memory.finalize_ingest()
     assert memory.query("Which filter was selected?") == []
+    metadata = memory.post_query_hook(
+        query="Which filter was selected?",
+        query_image=None,
+        memory_context=[],
+    )
     memory.finalize_ingest()
 
     assert calls == ["/jobs/status", "/jobs/status", "/search"]
+    assert metadata is not None
+    assert metadata["search_metadata"] == {
+        "retrieval_mode": "native",
+        "stage_timings_ms": {"total": 12.5},
+    }
 
 
 def test_sibyl_memory_polls_pending_jobs_in_one_batch() -> None:

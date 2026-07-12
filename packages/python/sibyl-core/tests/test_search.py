@@ -1499,6 +1499,20 @@ async def test_context_search_pushes_facet_types_into_graph_queries(
     assert response.filters["vector_candidate_count"] == 0
     assert response.filters["candidate_source_degraded"] is False
     assert response.filters["candidate_source_failure_count"] == 0
+    stage_timings = response.filters["stage_timings_ms"]
+    assert set(stage_timings) == {
+        "runtime_setup",
+        "lexical_candidates",
+        "vector_candidates",
+        "graph_expansion",
+        "candidate_filtering",
+        "fusion",
+        "query_coverage",
+        "materialization",
+        "total",
+    }
+    assert all(value >= 0 for value in stage_timings.values())
+    assert stage_timings["total"] >= max(stage_timings.values())
     assert client.calls
     assert all("FROM relates_to" not in query for query, _ in client.calls)
     assert all("FROM episode" not in query for query, _ in client.calls)
