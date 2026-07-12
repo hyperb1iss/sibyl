@@ -372,6 +372,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--search-limit", type=int, default=12)
     parser.add_argument("--max-context-items", type=int, default=8)
     parser.add_argument("--max-context-chars-per-item", type=int, default=18_000)
+    parser.add_argument("--max-chunks-per-trajectory", type=int, default=2)
+    parser.add_argument("--neighbor-stitch-items", type=int, default=2)
+    parser.add_argument("--neighbor-stitch-span", type=int, default=1)
     parser.add_argument("--include-screenshot-refs", action="store_true")
     parser.add_argument("--inline-embeddings", action="store_true")
     parser.add_argument("--api-timeout-seconds", type=float, default=600.0)
@@ -432,6 +435,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--api-retry-base-delay-seconds must be non-negative")
     if args.api_retry_max_delay_seconds < 0:
         parser.error("--api-retry-max-delay-seconds must be non-negative")
+    if args.max_chunks_per_trajectory < 1:
+        parser.error("--max-chunks-per-trajectory must be positive")
+    if args.neighbor_stitch_items < 0:
+        parser.error("--neighbor-stitch-items must be non-negative")
+    if args.neighbor_stitch_span < 0:
+        parser.error("--neighbor-stitch-span must be non-negative")
     return args
 
 
@@ -529,6 +538,9 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "search_limit": args.search_limit,
         "max_context_items": args.max_context_items,
         "max_context_chars_per_item": args.max_context_chars_per_item,
+        "max_chunks_per_trajectory": args.max_chunks_per_trajectory,
+        "neighbor_stitch_items": args.neighbor_stitch_items,
+        "neighbor_stitch_span": args.neighbor_stitch_span,
         "include_screenshot_refs": args.include_screenshot_refs,
         "defer_embeddings": not args.inline_embeddings,
         "api_timeout_seconds": args.api_timeout_seconds,
@@ -602,6 +614,9 @@ def build_run_plan(
         "memory_api_retry_attempts": args.api_retry_attempts,
         "memory_api_retry_base_delay_seconds": args.api_retry_base_delay_seconds,
         "memory_api_retry_max_delay_seconds": args.api_retry_max_delay_seconds,
+        "max_chunks_per_trajectory": args.max_chunks_per_trajectory,
+        "neighbor_stitch_items": args.neighbor_stitch_items,
+        "neighbor_stitch_span": args.neighbor_stitch_span,
         "evaluator_model": args.evaluator_model,
         "evaluator_retry_attempts": args.evaluator_retry_attempts,
         "provider_usage": {

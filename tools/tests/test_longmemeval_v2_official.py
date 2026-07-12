@@ -36,6 +36,9 @@ EXPECTED_LATENCY_P95_MS = 4_000.0
 EXPECTED_EMBEDDING_REQUESTS = 10
 EXPECTED_READER_REQUESTS = 6
 EXPECTED_JUDGE_REQUESTS = 2
+EXPECTED_MAX_CHUNKS_PER_TRAJECTORY = 2
+EXPECTED_NEIGHBOR_STITCH_ITEMS = 2
+EXPECTED_NEIGHBOR_STITCH_SPAN = 1
 TEST_CONTENT_MAX_CHARS = 420
 TEST_CONTEXT_MAX_CHARS = 800
 
@@ -154,6 +157,12 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(tmp_path: Path)
     assert memory_config["memory_params"]["defer_embeddings"] is True
     assert memory_config["memory_params"]["content_max_chars"] == EXPECTED_CONTENT_MAX_CHARS
     assert (
+        memory_config["memory_params"]["max_chunks_per_trajectory"]
+        == EXPECTED_MAX_CHUNKS_PER_TRAJECTORY
+    )
+    assert memory_config["memory_params"]["neighbor_stitch_items"] == EXPECTED_NEIGHBOR_STITCH_ITEMS
+    assert memory_config["memory_params"]["neighbor_stitch_span"] == EXPECTED_NEIGHBOR_STITCH_SPAN
+    assert (
         memory_config["memory_params"]["api_timeout_seconds"] == EXPECTED_MEMORY_API_TIMEOUT_SECONDS
     )
     assert (
@@ -176,6 +185,9 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(tmp_path: Path)
     assert plan["evaluator_retry_attempts"] == EXPECTED_EVALUATOR_RETRY_ATTEMPTS
     assert plan["memory_api_timeout_seconds"] == EXPECTED_MEMORY_API_TIMEOUT_SECONDS
     assert plan["memory_api_retry_attempts"] == EXPECTED_MEMORY_API_RETRY_ATTEMPTS
+    assert plan["max_chunks_per_trajectory"] == EXPECTED_MAX_CHUNKS_PER_TRAJECTORY
+    assert plan["neighbor_stitch_items"] == EXPECTED_NEIGHBOR_STITCH_ITEMS
+    assert plan["neighbor_stitch_span"] == EXPECTED_NEIGHBOR_STITCH_SPAN
     assert plan["honesty_contract"]["answer_gold_visible_to_memory"] is False
     assert plan["required_trajectory_count"] == EXPECTED_REQUIRED_TRAJECTORIES
     assert plan["requirements"]["trajectories_jsonl_exists"] is True
@@ -757,6 +769,7 @@ def test_sibyl_memory_context_formats_retrieved_content() -> None:
             "type": "text",
             "value": (
                 "Retrieved evidence rank 1\n"
+                "Retrieval: search\n"
                 "Trajectory: t1\n"
                 "Chunk: 0\n"
                 "Score: 0.875\n\n"
@@ -792,8 +805,87 @@ def test_sibyl_memory_context_formats_retrieved_content() -> None:
             "content_chars": len(trace_content),
             "exposed_chars": 24,
             "result_origin": "graph",
+            "selection_origin": "search",
+            "search_rank": None,
+            "neighbor_of_search_rank": None,
+            "neighbor_distance": None,
         }
     ]
+
+
+def test_sibyl_memory_assembles_diverse_seeds_with_neighbors() -> None:
+    module = _load_memory_module()
+    t1_seed = _search_result("t1", chunk_index=1, state_index=1, score=1.0)
+    results = [
+        t1_seed,
+        _search_result("t1", chunk_index=2, state_index=2, score=0.9),
+        _search_result("t2", chunk_index=0, state_index=0, score=0.8),
+        _search_result("t3", chunk_index=0, state_index=0, score=0.7),
+    ]
+    catalog = {
+        "t1": {
+            0: _search_result("t1", chunk_index=0, state_index=0, score=0.0),
+            1: t1_seed,
+            2: results[1],
+        }
+    }
+
+    assembled, metadata = module.assemble_context_results(
+        results,
+        chunk_catalog=catalog,
+        max_items=4,
+        max_chunks_per_trajectory=2,
+        neighbor_stitch_items=1,
+        neighbor_stitch_span=1,
+    )
+
+    assert [result["metadata"]["longmemeval_v2_trajectory_id"] for result in assembled] == [
+        "t1",
+        "t2",
+        "t3",
+        "t1",
+    ]
+    assert [result["_selection_origin"] for result in assembled] == [
+        "search",
+        "search",
+        "search",
+        "neighbor",
+    ]
+    assert assembled[-1]["metadata"]["longmemeval_v2_chunk_index"] == 0
+    assert metadata["selected_search_seed_count"] == len(assembled) - 1
+    assert metadata["stitched_neighbor_count"] == 1
+
+
+def test_sibyl_memory_chunk_catalog_round_trips(tmp_path: Path) -> None:
+    module = _load_memory_module()
+    catalog = {
+        "t1": {
+            0: _search_result("t1", chunk_index=0, state_index=0, score=0.0),
+            1: _search_result("t1", chunk_index=1, state_index=1, score=0.0),
+        }
+    }
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    memory._chunk_catalog = catalog
+    memory._pending_embedding_job_ids = set()
+    memory._pending_projection_job_ids = set()
+    memory._finalize_lock = threading.Lock()
+    memory._ingest_finalized = True
+
+    memory._save_backend(tmp_path)
+
+    restored = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(restored, {})
+    restored._pending_embedding_job_ids = set()
+    restored._pending_projection_job_ids = set()
+    restored._ingest_finalized = False
+    restored._load_backend(tmp_path)
+
+    assert (tmp_path / module.CHUNK_CATALOG_FILENAME).is_file()
+    assert restored._chunk_catalog == catalog
+    assert restored.created_entities == len(catalog["t1"])
+    assert restored.inserted_trajectories == len(catalog)
+    assert restored._ingest_finalized is True
 
 
 def test_sibyl_memory_query_context_exposes_only_question_and_image() -> None:
@@ -1242,6 +1334,15 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
     assert metadata["search_metadata"] == {
         "retrieval_mode": "native",
         "stage_timings_ms": {"total": 12.5},
+        "adapter_assembly": {
+            "input_result_count": 0,
+            "selected_search_seed_count": 0,
+            "stitched_neighbor_count": 0,
+            "output_result_count": 0,
+            "max_chunks_per_trajectory": EXPECTED_MAX_CHUNKS_PER_TRAJECTORY,
+            "neighbor_stitch_items": EXPECTED_NEIGHBOR_STITCH_ITEMS,
+            "neighbor_stitch_span": EXPECTED_NEIGHBOR_STITCH_SPAN,
+        },
     }
     assert metadata["retrieval_trace"] == []
     assert metadata["api_runtime"]["runtime"] == {
@@ -1640,4 +1741,27 @@ def _trajectory(trajectory_id: str, *, tree: str = "button Priority") -> dict[st
                 "screenshot": f"screenshots/{trajectory_id}/1.png",
             },
         ],
+    }
+
+
+def _search_result(
+    trajectory_id: str,
+    *,
+    chunk_index: int,
+    state_index: int,
+    score: float,
+) -> dict[str, object]:
+    return {
+        "id": f"entity:{trajectory_id}:{chunk_index}",
+        "type": "session",
+        "name": f"Trajectory {trajectory_id} chunk {chunk_index}",
+        "content": f"State {state_index}\nEvidence",
+        "score": score,
+        "result_origin": "graph",
+        "metadata": {
+            "longmemeval_v2_trajectory_id": trajectory_id,
+            "longmemeval_v2_chunk_index": chunk_index,
+            "longmemeval_v2_state_index": state_index,
+            "longmemeval_v2_state_indices": [state_index],
+        },
     }

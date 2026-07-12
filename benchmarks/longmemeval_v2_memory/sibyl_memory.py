@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import gzip
 import itertools
+import json as json_module
 import os
 import re
 import sys
@@ -68,8 +70,12 @@ DEFAULT_EMBEDDING_JOB_POLL_SECONDS = 0.5
 DEFAULT_BULK_MAX_ENTITIES = 32
 DEFAULT_BULK_MAX_CONTENT_CHARS = 512_000
 DEFAULT_EMBEDDING_BACKFILL_MAX_PENDING_JOBS = 8
+DEFAULT_MAX_CHUNKS_PER_TRAJECTORY = 2
+DEFAULT_NEIGHBOR_STITCH_ITEMS = 2
+DEFAULT_NEIGHBOR_STITCH_SPAN = 1
 JOB_STATUS_BATCH_SIZE = 64
 MAX_BULK_CREATE = 128
+CHUNK_CATALOG_FILENAME = "chunk_catalog.jsonl.gz"
 RETRYABLE_HTTP_STATUS_CODES = frozenset({408, 409, 425, 429})
 
 _AUTH_CACHE: dict[tuple[str, str, str], dict[str, str]] = {}
@@ -155,8 +161,10 @@ def search_results_to_memory_context(
         trajectory_id = _stripped_str(metadata.get("longmemeval_v2_trajectory_id"))
         chunk_index = metadata.get("longmemeval_v2_chunk_index")
         score = result.get("score")
+        selection_origin = _stripped_str(result.get("_selection_origin")) or "search"
         header = [
             f"Retrieved evidence rank {rank}",
+            f"Retrieval: {selection_origin}",
             f"Trajectory: {trajectory_id or 'unknown'}",
             f"Chunk: {chunk_index if isinstance(chunk_index, int) else 'unknown'}",
             f"Score: {score if isinstance(score, int | float) else 'unknown'}",
@@ -182,7 +190,15 @@ def build_retrieval_trace(
         if not content:
             continue
         metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
-        state_indices = [int(value) for value in re.findall(r"^State\s+(\d+)\b", content, re.MULTILINE)]
+        metadata_state_indices = metadata.get("longmemeval_v2_state_indices")
+        state_indices = (
+            [int(value) for value in metadata_state_indices if isinstance(value, int)]
+            if isinstance(metadata_state_indices, list)
+            else [
+                int(value)
+                for value in re.findall(r"^State\s+(\d+)\b", content, re.MULTILINE)
+            ]
+        )
         trace.append(
             {
                 "rank": rank,
@@ -197,9 +213,182 @@ def build_retrieval_trace(
                 "content_chars": len(content),
                 "exposed_chars": min(len(content), max_chars_per_item),
                 "result_origin": _stripped_str(result.get("result_origin")),
+                "selection_origin": _stripped_str(result.get("_selection_origin"))
+                or "search",
+                "search_rank": result.get("_search_rank"),
+                "neighbor_of_search_rank": result.get("_neighbor_of_search_rank"),
+                "neighbor_distance": result.get("_neighbor_distance"),
             }
         )
     return trace
+
+
+def assemble_context_results(
+    results: list[dict[str, object]],
+    *,
+    chunk_catalog: dict[str, dict[int, dict[str, object]]],
+    max_items: int,
+    max_chunks_per_trajectory: int,
+    neighbor_stitch_items: int,
+    neighbor_stitch_span: int,
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    max_items = max(1, max_items)
+    max_chunks_per_trajectory = max(1, max_chunks_per_trajectory)
+    neighbor_stitch_items = max(0, min(neighbor_stitch_items, max_items - 1))
+    neighbor_stitch_span = max(0, neighbor_stitch_span)
+    ranked = []
+    for search_rank, result in enumerate(results, start=1):
+        candidate = dict(result)
+        candidate["_selection_origin"] = "search"
+        candidate["_search_rank"] = search_rank
+        ranked.append(candidate)
+
+    neighbor_budget = neighbor_stitch_items if chunk_catalog and neighbor_stitch_span else 0
+    seed_limit = max_items - neighbor_budget
+    seeds = _select_diverse_results(
+        ranked,
+        limit=seed_limit,
+        max_chunks_per_trajectory=max_chunks_per_trajectory,
+    )
+    selected = list(seeds)
+    selected_keys = {_result_chunk_key(result) for result in selected}
+    neighbors = _neighbor_results(
+        seeds,
+        chunk_catalog=chunk_catalog,
+        selected_keys=selected_keys,
+        limit=neighbor_budget,
+        span=neighbor_stitch_span,
+    )
+    selected.extend(neighbors)
+    if len(selected) < max_items:
+        fallback = _select_diverse_results(
+            ranked,
+            limit=max_items,
+            max_chunks_per_trajectory=max_chunks_per_trajectory,
+        )
+        for result in fallback:
+            key = _result_chunk_key(result)
+            if key in selected_keys:
+                continue
+            selected.append(result)
+            selected_keys.add(key)
+            if len(selected) >= max_items:
+                break
+    return selected, {
+        "input_result_count": len(results),
+        "selected_search_seed_count": len(seeds),
+        "stitched_neighbor_count": len(neighbors),
+        "output_result_count": len(selected),
+        "max_chunks_per_trajectory": max_chunks_per_trajectory,
+        "neighbor_stitch_items": neighbor_stitch_items,
+        "neighbor_stitch_span": neighbor_stitch_span,
+    }
+
+
+def _select_diverse_results(
+    results: list[dict[str, object]],
+    *,
+    limit: int,
+    max_chunks_per_trajectory: int,
+) -> list[dict[str, object]]:
+    selected: list[dict[str, object]] = []
+    selected_keys: set[tuple[str, int | str]] = set()
+    trajectory_counts: Counter[str] = Counter()
+    for diversity_pass in ("trajectory", "state"):
+        for result in results:
+            trajectory_id, state_key = _result_diversity_key(result)
+            result_key = _result_chunk_key(result)
+            if result_key in selected_keys:
+                continue
+            if trajectory_counts[trajectory_id] >= max_chunks_per_trajectory:
+                continue
+            if diversity_pass == "trajectory" and trajectory_counts[trajectory_id] > 0:
+                continue
+            if diversity_pass == "state" and any(
+                _result_diversity_key(existing) == (trajectory_id, state_key)
+                for existing in selected
+            ):
+                continue
+            selected.append(result)
+            selected_keys.add(result_key)
+            trajectory_counts[trajectory_id] += 1
+            if len(selected) >= limit:
+                return selected
+    return selected
+
+
+def _neighbor_results(
+    seeds: list[dict[str, object]],
+    *,
+    chunk_catalog: dict[str, dict[int, dict[str, object]]],
+    selected_keys: set[tuple[str, int | str]],
+    limit: int,
+    span: int,
+) -> list[dict[str, object]]:
+    neighbors: list[dict[str, object]] = []
+    for seed in seeds:
+        trajectory_id, chunk_index = _result_chunk_key(seed)
+        if not isinstance(chunk_index, int):
+            continue
+        trajectory_catalog = chunk_catalog.get(trajectory_id, {})
+        for distance in range(1, span + 1):
+            for neighbor_index in (chunk_index - distance, chunk_index + distance):
+                key = (trajectory_id, neighbor_index)
+                catalog_result = trajectory_catalog.get(neighbor_index)
+                if catalog_result is None or key in selected_keys:
+                    continue
+                neighbor = dict(catalog_result)
+                neighbor["score"] = seed.get("score")
+                neighbor["_selection_origin"] = "neighbor"
+                neighbor["_neighbor_of_search_rank"] = seed.get("_search_rank")
+                neighbor["_neighbor_distance"] = distance
+                neighbors.append(neighbor)
+                selected_keys.add(key)
+                if len(neighbors) >= limit:
+                    return neighbors
+    return neighbors
+
+
+def _result_diversity_key(result: dict[str, object]) -> tuple[str, int | str]:
+    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    trajectory_id = _stripped_str(metadata.get("longmemeval_v2_trajectory_id"))
+    if not trajectory_id:
+        trajectory_id = _stripped_str(result.get("id")) or f"unknown:{id(result)}"
+    state_index = metadata.get("longmemeval_v2_state_index")
+    state_key: int | str = state_index if isinstance(state_index, int) else "unknown"
+    return trajectory_id, state_key
+
+
+def _result_chunk_key(result: dict[str, object]) -> tuple[str, int | str]:
+    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    trajectory_id = _stripped_str(metadata.get("longmemeval_v2_trajectory_id"))
+    if not trajectory_id:
+        trajectory_id = _stripped_str(result.get("id")) or f"unknown:{id(result)}"
+    chunk_index = metadata.get("longmemeval_v2_chunk_index")
+    chunk_key: int | str = chunk_index if isinstance(chunk_index, int) else trajectory_id
+    return trajectory_id, chunk_key
+
+
+def _catalog_results(
+    payloads: list[dict[str, object]],
+) -> dict[str, dict[int, dict[str, object]]]:
+    catalog: dict[str, dict[int, dict[str, object]]] = {}
+    for payload in payloads:
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        trajectory_id = _stripped_str(metadata.get("longmemeval_v2_trajectory_id"))
+        chunk_index = metadata.get("longmemeval_v2_chunk_index")
+        if not trajectory_id or not isinstance(chunk_index, int):
+            continue
+        catalog.setdefault(trajectory_id, {})[chunk_index] = {
+            "id": f"catalog:{trajectory_id}:{chunk_index}",
+            "type": payload.get("entity_type"),
+            "name": payload.get("name"),
+            "content": payload.get("content"),
+            "score": 0.0,
+            "result_origin": "graph",
+            "metadata": dict(metadata),
+        }
+    return catalog
 
 
 @register_memory
@@ -226,6 +415,30 @@ class SibylLiveApiMemory(Memory):
             memory_params,
             "max_context_chars_per_item",
             DEFAULT_CONTEXT_CHARS_PER_ITEM,
+        )
+        self.max_chunks_per_trajectory = max(
+            1,
+            _param_int(
+                memory_params,
+                "max_chunks_per_trajectory",
+                DEFAULT_MAX_CHUNKS_PER_TRAJECTORY,
+            ),
+        )
+        self.neighbor_stitch_items = max(
+            0,
+            _param_int(
+                memory_params,
+                "neighbor_stitch_items",
+                DEFAULT_NEIGHBOR_STITCH_ITEMS,
+            ),
+        )
+        self.neighbor_stitch_span = max(
+            0,
+            _param_int(
+                memory_params,
+                "neighbor_stitch_span",
+                DEFAULT_NEIGHBOR_STITCH_SPAN,
+            ),
         )
         self.include_screenshot_refs = _param_bool(
             memory_params,
@@ -300,6 +513,7 @@ class SibylLiveApiMemory(Memory):
         self._finalize_lock = threading.Lock()
         self._ingest_finalized = False
         self._query_local = threading.local()
+        self._chunk_catalog: dict[str, dict[int, dict[str, object]]] = {}
         self._client = _new_http_client(
             self.api_url,
             timeout_seconds=self.api_timeout_seconds,
@@ -311,6 +525,7 @@ class SibylLiveApiMemory(Memory):
         self.api_runtime = self._request_json("GET", "/health")
         if not self.project_id:
             self.project_id = self._create_project()
+        self.memory_params["project_id"] = self.project_id
 
     def set_query_context(self, **kwargs: object) -> None:
         question_item = kwargs.get("question_item")
@@ -329,6 +544,11 @@ class SibylLiveApiMemory(Memory):
             content_max_chars=self.content_max_chars,
             include_screenshot_refs=self.include_screenshot_refs,
         )
+        chunk_catalog = getattr(self, "_chunk_catalog", None)
+        if chunk_catalog is None:
+            chunk_catalog = {}
+            self._chunk_catalog = chunk_catalog
+        chunk_catalog.update(_catalog_results(payloads))
         for batch in _payload_batches(
             payloads,
             max_entities=self.bulk_max_entities,
@@ -382,20 +602,79 @@ class SibylLiveApiMemory(Memory):
         )
         raw_results = response.get("results")
         results = [item for item in raw_results if isinstance(item, dict)] if isinstance(raw_results, list) else []
-        self._query_local.retrieval_trace = build_retrieval_trace(
+        assembled_results, assembly_metadata = assemble_context_results(
             results,
+            chunk_catalog=getattr(self, "_chunk_catalog", {}),
+            max_items=self.max_context_items,
+            max_chunks_per_trajectory=getattr(
+                self,
+                "max_chunks_per_trajectory",
+                DEFAULT_MAX_CHUNKS_PER_TRAJECTORY,
+            ),
+            neighbor_stitch_items=getattr(
+                self,
+                "neighbor_stitch_items",
+                DEFAULT_NEIGHBOR_STITCH_ITEMS,
+            ),
+            neighbor_stitch_span=getattr(
+                self,
+                "neighbor_stitch_span",
+                DEFAULT_NEIGHBOR_STITCH_SPAN,
+            ),
+        )
+        self._query_local.search_metadata["adapter_assembly"] = assembly_metadata
+        self._query_local.retrieval_trace = build_retrieval_trace(
+            assembled_results,
             max_items=self.max_context_items,
             max_chars_per_item=self.max_context_chars_per_item,
         )
         return search_results_to_memory_context(
-            results,
+            assembled_results,
             max_items=self.max_context_items,
             max_chars_per_item=self.max_context_chars_per_item,
         )
 
     def _save_backend(self, output_dir: Path) -> None:
-        del output_dir
         self.finalize_ingest()
+        catalog_path = output_dir / CHUNK_CATALOG_FILENAME
+        with gzip.open(catalog_path, "wt", encoding="utf-8") as handle:
+            for trajectory_id in sorted(self._chunk_catalog):
+                for chunk_index in sorted(self._chunk_catalog[trajectory_id]):
+                    handle.write(
+                        json_module.dumps(self._chunk_catalog[trajectory_id][chunk_index])
+                        + "\n"
+                    )
+
+    def _load_backend(self, input_dir: Path) -> None:
+        catalog_path = input_dir / CHUNK_CATALOG_FILENAME
+        if not catalog_path.is_file():
+            msg = f"Missing saved chunk catalog: {catalog_path}"
+            raise RuntimeError(msg)
+        catalog: dict[str, dict[int, dict[str, object]]] = {}
+        with gzip.open(catalog_path, "rt", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                loaded = json_module.loads(line)
+                if not isinstance(loaded, dict):
+                    continue
+                metadata = (
+                    loaded.get("metadata")
+                    if isinstance(loaded.get("metadata"), dict)
+                    else {}
+                )
+                trajectory_id = _stripped_str(
+                    metadata.get("longmemeval_v2_trajectory_id")
+                )
+                chunk_index = metadata.get("longmemeval_v2_chunk_index")
+                if trajectory_id and isinstance(chunk_index, int):
+                    catalog.setdefault(trajectory_id, {})[chunk_index] = loaded
+        self._chunk_catalog = catalog
+        self.created_entities = sum(len(chunks) for chunks in catalog.values())
+        self.inserted_trajectories = len(catalog)
+        self._pending_embedding_job_ids.clear()
+        self._pending_projection_job_ids.clear()
+        self._ingest_finalized = True
 
     def post_query_hook(
         self,
