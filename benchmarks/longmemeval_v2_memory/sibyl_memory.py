@@ -73,6 +73,8 @@ DEFAULT_EMBEDDING_BACKFILL_MAX_PENDING_JOBS = 8
 DEFAULT_MAX_CHUNKS_PER_TRAJECTORY = 2
 DEFAULT_NEIGHBOR_STITCH_ITEMS = 2
 DEFAULT_NEIGHBOR_STITCH_SPAN = 1
+DEFAULT_CHUNKING_MODE = "state"
+CHUNKING_MODES = frozenset({"trajectory", "state"})
 JOB_STATUS_BATCH_SIZE = 64
 MAX_BULK_CREATE = 128
 CHUNK_CATALOG_FILENAME = "chunk_catalog.jsonl.gz"
@@ -101,6 +103,7 @@ SAVED_MEMORY_IDENTITY_KEYS = frozenset(
         "project_id",
         "run_id",
         "content_max_chars",
+        "chunking_mode",
         "include_screenshot_refs",
         "defer_embeddings",
     }
@@ -112,18 +115,26 @@ _INSTANCE_COUNTER = itertools.count(1)
 
 
 class TrajectoryTextChunk:
-    __slots__ = ("content", "state_index", "state_part_count", "state_part_index")
+    __slots__ = (
+        "content",
+        "state_index",
+        "state_indices",
+        "state_part_count",
+        "state_part_index",
+    )
 
     def __init__(
         self,
         *,
         content: str,
         state_index: int,
+        state_indices: tuple[int, ...] | None = None,
         state_part_index: int,
         state_part_count: int,
     ) -> None:
         self.content = content
         self.state_index = state_index
+        self.state_indices = state_indices or (state_index,)
         self.state_part_index = state_part_index
         self.state_part_count = state_part_count
 
@@ -134,10 +145,15 @@ def build_entity_payloads_for_trajectory(
     project_id: str,
     run_id: str,
     content_max_chars: int = DEFAULT_CONTENT_MAX_CHARS,
+    chunking_mode: str = DEFAULT_CHUNKING_MODE,
     include_screenshot_refs: bool = False,
 ) -> list[dict[str, object]]:
     trajectory = LongMemEvalV2Trajectory.from_mapping(trajectory_raw)
-    chunks = _trajectory_chunks(
+    if chunking_mode not in CHUNKING_MODES:
+        msg = f"Unknown chunking_mode {chunking_mode!r}; expected one of {sorted(CHUNKING_MODES)}"
+        raise ValueError(msg)
+    chunk_builder = _grouped_trajectory_chunks if chunking_mode == "trajectory" else _trajectory_chunks
+    chunks = chunk_builder(
         trajectory,
         max_chars=content_max_chars,
         include_screenshot_refs=include_screenshot_refs,
@@ -158,7 +174,7 @@ def build_entity_payloads_for_trajectory(
                     "longmemeval_v2_chunk_index": chunk_index,
                     "longmemeval_v2_chunk_count": len(chunks),
                     "longmemeval_v2_state_index": chunk.state_index,
-                    "longmemeval_v2_state_indices": [chunk.state_index],
+                    "longmemeval_v2_state_indices": list(chunk.state_indices),
                     "longmemeval_v2_state_part_index": chunk.state_part_index,
                     "longmemeval_v2_state_part_count": chunk.state_part_count,
                     "longmemeval_v2_domain": trajectory.domain,
@@ -166,7 +182,12 @@ def build_entity_payloads_for_trajectory(
                     "longmemeval_v2_goal": trajectory.goal,
                     "longmemeval_v2_outcome": trajectory.outcome,
                     "capture_surface": "longmemeval-v2-official",
-                    "entity_content_projection_policy": "v2-identity-state-chunks-v2",
+                    "longmemeval_v2_chunking_mode": chunking_mode,
+                    "entity_content_projection_policy": (
+                        "v2-trajectory-state-chunks-v1"
+                        if chunking_mode == "trajectory"
+                        else "v2-identity-state-chunks-v2"
+                    ),
                 },
                 "tags": ["longmemeval-v2", trajectory.domain, trajectory.environment],
             }
@@ -497,6 +518,17 @@ class SibylLiveApiMemory(Memory):
             "content_max_chars",
             DEFAULT_CONTENT_MAX_CHARS,
         )
+        self.chunking_mode = _param_str(
+            memory_params,
+            "chunking_mode",
+            DEFAULT_CHUNKING_MODE,
+        )
+        if self.chunking_mode not in CHUNKING_MODES:
+            msg = (
+                f"Unknown chunking_mode {self.chunking_mode!r}; "
+                f"expected one of {sorted(CHUNKING_MODES)}"
+            )
+            raise ValueError(msg)
         self.search_limit = _param_int(memory_params, "search_limit", DEFAULT_SEARCH_LIMIT)
         self.max_context_items = _param_int(
             memory_params,
@@ -634,6 +666,7 @@ class SibylLiveApiMemory(Memory):
             project_id=self.project_id,
             run_id=self.run_id,
             content_max_chars=self.content_max_chars,
+            chunking_mode=getattr(self, "chunking_mode", DEFAULT_CHUNKING_MODE),
             include_screenshot_refs=self.include_screenshot_refs,
         )
         chunk_catalog = getattr(self, "_chunk_catalog", None)
@@ -1097,15 +1130,75 @@ def _trajectory_text_chunks(
     *,
     max_chars: int,
     include_screenshot_refs: bool,
+    chunking_mode: str = DEFAULT_CHUNKING_MODE,
 ) -> list[str]:
+    chunk_builder = _grouped_trajectory_chunks if chunking_mode == "trajectory" else _trajectory_chunks
     return [
         chunk.content
-        for chunk in _trajectory_chunks(
+        for chunk in chunk_builder(
             trajectory,
             max_chars=max_chars,
             include_screenshot_refs=include_screenshot_refs,
         )
     ]
+
+
+def _grouped_trajectory_chunks(
+    trajectory: LongMemEvalV2Trajectory,
+    *,
+    max_chars: int,
+    include_screenshot_refs: bool,
+) -> list[TrajectoryTextChunk]:
+    header = _trajectory_header(trajectory)
+    chunks: list[TrajectoryTextChunk] = []
+    current = header
+    current_state_indices: list[int] = []
+    for state in trajectory.states:
+        block = _state_text(state, include_screenshot_refs=include_screenshot_refs)
+        candidate = f"{current}\n\n{block}"
+        if len(candidate) <= max_chars:
+            current = candidate
+            current_state_indices.append(state.state_index)
+            continue
+        if current != header:
+            chunks.append(
+                TrajectoryTextChunk(
+                    content=current,
+                    state_index=current_state_indices[0],
+                    state_indices=tuple(current_state_indices),
+                    state_part_index=0,
+                    state_part_count=1,
+                )
+            )
+            current = f"{header}\n\n{block}"
+            current_state_indices = [state.state_index]
+            if len(current) <= max_chars:
+                continue
+        pieces = _split_oversized_block(header, block, max_chars=max_chars)
+        part_count = len(pieces)
+        chunks.extend(
+            TrajectoryTextChunk(
+                content=piece,
+                state_index=state.state_index,
+                state_indices=(state.state_index,),
+                state_part_index=part_index,
+                state_part_count=part_count,
+            )
+            for part_index, piece in enumerate(pieces)
+        )
+        current = header
+        current_state_indices = []
+    if current != header or not chunks:
+        chunks.append(
+            TrajectoryTextChunk(
+                content=current,
+                state_index=current_state_indices[0] if current_state_indices else 0,
+                state_indices=tuple(current_state_indices) or (0,),
+                state_part_index=0,
+                state_part_count=1,
+            )
+        )
+    return chunks
 
 
 def _trajectory_chunks(
@@ -1114,16 +1207,7 @@ def _trajectory_chunks(
     max_chars: int,
     include_screenshot_refs: bool,
 ) -> list[TrajectoryTextChunk]:
-    header = "\n".join(
-        [
-            f"Trajectory: {trajectory.id}",
-            f"Domain: {trajectory.domain}",
-            f"Environment: {trajectory.environment}",
-            f"Outcome: {trajectory.outcome}",
-            f"Goal: {trajectory.goal}",
-            f"Start URL: {trajectory.start_url}",
-        ]
-    )
+    header = _trajectory_header(trajectory)
     chunks: list[TrajectoryTextChunk] = []
     for state in trajectory.states:
         chunks.extend(
@@ -1144,6 +1228,31 @@ def _trajectory_chunks(
             )
         )
     return chunks
+
+
+def _trajectory_header(trajectory: LongMemEvalV2Trajectory) -> str:
+    return "\n".join(
+        [
+            f"Trajectory: {trajectory.id}",
+            f"Domain: {trajectory.domain}",
+            f"Environment: {trajectory.environment}",
+            f"Outcome: {trajectory.outcome}",
+            f"Goal: {trajectory.goal}",
+            f"Start URL: {trajectory.start_url}",
+        ]
+    )
+
+
+def _state_text(state: LongMemEvalV2State, *, include_screenshot_refs: bool) -> str:
+    parts = [f"State {state.state_index}", f"URL: {state.url}"]
+    if state.action:
+        parts.append(f"Action: {state.action}")
+    if state.thought:
+        parts.append(f"Thought: {state.thought}")
+    if include_screenshot_refs and state.screenshot:
+        parts.append(f"Screenshot: {state.screenshot}")
+    parts.append(f"Accessibility tree:\n{state.accessibility_tree}")
+    return "\n".join(parts)
 
 
 def _state_chunks(

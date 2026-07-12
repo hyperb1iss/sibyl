@@ -158,6 +158,7 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(tmp_path: Path)
     assert memory_config["memory_params"]["allow_localhost"] is True
     assert memory_config["memory_params"]["defer_embeddings"] is True
     assert memory_config["memory_params"]["content_max_chars"] == EXPECTED_CONTENT_MAX_CHARS
+    assert memory_config["memory_params"]["chunking_mode"] == "state"
     assert (
         memory_config["memory_params"]["max_chunks_per_trajectory"]
         == EXPECTED_MAX_CHUNKS_PER_TRAJECTORY
@@ -187,6 +188,7 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(tmp_path: Path)
     assert plan["evaluator_retry_attempts"] == EXPECTED_EVALUATOR_RETRY_ATTEMPTS
     assert plan["memory_api_timeout_seconds"] == EXPECTED_MEMORY_API_TIMEOUT_SECONDS
     assert plan["memory_api_retry_attempts"] == EXPECTED_MEMORY_API_RETRY_ATTEMPTS
+    assert plan["chunking_mode"] == "state"
     assert plan["max_chunks_per_trajectory"] == EXPECTED_MAX_CHUNKS_PER_TRAJECTORY
     assert plan["neighbor_stitch_items"] == EXPECTED_NEIGHBOR_STITCH_ITEMS
     assert plan["neighbor_stitch_span"] == EXPECTED_NEIGHBOR_STITCH_SPAN
@@ -705,6 +707,25 @@ def test_sibyl_memory_payloads_chunk_trajectory_by_state() -> None:
         for payload in payloads
     )
     assert any("Screenshot:" in str(payload["content"]) for payload in payloads)
+
+
+def test_sibyl_memory_trajectory_chunking_preserves_legacy_grouping() -> None:
+    module = _load_memory_module()
+    payloads = module.build_entity_payloads_for_trajectory(
+        _trajectory("t1"),
+        project_id="project_lme",
+        run_id="run_lme",
+        content_max_chars=2_000,
+        chunking_mode="trajectory",
+    )
+
+    assert len(payloads) == 1
+    assert payloads[0]["metadata"]["longmemeval_v2_state_indices"] == [0, 1]
+    assert payloads[0]["metadata"]["longmemeval_v2_chunking_mode"] == "trajectory"
+    assert (
+        payloads[0]["metadata"]["entity_content_projection_policy"]
+        == "v2-trajectory-state-chunks-v1"
+    )
 
 
 def test_sibyl_memory_oversized_state_parts_repeat_identity() -> None:

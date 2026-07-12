@@ -388,6 +388,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--allow-localhost", action="store_true")
     parser.add_argument("--no-signup", action="store_true")
     parser.add_argument("--content-max-chars", type=int, default=18_000)
+    parser.add_argument("--chunking-mode", choices=["trajectory", "state"], default="state")
     parser.add_argument("--search-limit", type=int, default=12)
     parser.add_argument("--max-context-items", type=int, default=8)
     parser.add_argument("--max-context-chars-per-item", type=int, default=18_000)
@@ -554,6 +555,7 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "allow_localhost": args.allow_localhost,
         "allow_signup": not args.no_signup,
         "content_max_chars": args.content_max_chars,
+        "chunking_mode": args.chunking_mode,
         "search_limit": args.search_limit,
         "max_context_items": args.max_context_items,
         "max_context_chars_per_item": args.max_context_chars_per_item,
@@ -665,6 +667,7 @@ def build_run_plan(
         "memory_api_retry_attempts": args.api_retry_attempts,
         "memory_api_retry_base_delay_seconds": args.api_retry_base_delay_seconds,
         "memory_api_retry_max_delay_seconds": args.api_retry_max_delay_seconds,
+        "chunking_mode": args.chunking_mode,
         "max_chunks_per_trajectory": args.max_chunks_per_trajectory,
         "neighbor_stitch_items": args.neighbor_stitch_items,
         "neighbor_stitch_span": args.neighbor_stitch_span,
