@@ -1430,10 +1430,10 @@ class RelationshipManager:
         type_values: Sequence[str],
         limit: int,
     ) -> list[SurrealRecord]:
-        batch_limit = min(max(limit * len(seed_ids), limit), 5000)
-        rows = normalize_records(
-            await self._client.execute_query(
-                f"""
+        async def get_seed_rows(seed_id: str) -> list[SurrealRecord]:
+            return normalize_records(
+                await self._client.execute_query(
+                    f"""
                 SELECT id AS record_id,
                        uuid,
                        name,
@@ -1451,71 +1451,26 @@ class RelationshipManager:
                        {_related_entity_projection(related_side)}
                 FROM relates_to
                 WHERE group_id = $group_id
-                  AND {endpoint_field} IN $entity_ids
+                  AND {endpoint_field} = $entity_id
                   AND {related_side}.group_id = $group_id
                 """
-                + type_clause
-                + """
+                    + type_clause
+                    + """
                 ORDER BY created_at DESC, uuid DESC
                 LIMIT $limit;
                 """,
-                group_id=self._group_id,
-                entity_ids=list(seed_ids),
-                relationship_types=type_values,
-                limit=batch_limit,
-            )
-        )
-        for row in rows:
-            row["direction"] = direction
-            row.setdefault("seed_uuid", row.get(endpoint_alias))
-        if len(rows) < batch_limit:
-            return rows
-
-        counts: dict[str, int] = {}
-        for row in rows:
-            endpoint_id = row.get(endpoint_alias)
-            if isinstance(endpoint_id, str):
-                counts[endpoint_id] = counts.get(endpoint_id, 0) + 1
-
-        for seed_id in seed_ids:
-            if counts.get(seed_id, 0) >= limit:
-                continue
-            rows.extend(
-                normalize_records(
-                    await self._client.execute_query(
-                        f"""
-                        SELECT id AS record_id,
-                               uuid,
-                               name,
-                               fact,
-                               group_id,
-                               episodes,
-                               attributes,
-                               created_at,
-                               expired_at,
-                               valid_at,
-                               invalid_at,
-                               source_id AS source_uuid,
-                               target_id AS target_uuid,
-                               {endpoint_field} AS seed_uuid,
-                               {_related_entity_projection(related_side)}
-                        FROM relates_to
-                        WHERE group_id = $group_id
-                          AND {endpoint_field} = $entity_id
-                          AND {related_side}.group_id = $group_id
-                        """
-                        + type_clause
-                        + """
-                        ORDER BY created_at DESC, uuid DESC
-                        LIMIT $limit;
-                        """,
-                        group_id=self._group_id,
-                        entity_id=seed_id,
-                        relationship_types=type_values,
-                        limit=limit,
-                    )
+                    group_id=self._group_id,
+                    entity_id=seed_id,
+                    relationship_types=type_values,
+                    limit=limit,
                 )
             )
+
+        rows = [
+            row
+            for seed_rows in await asyncio.gather(*(get_seed_rows(seed_id) for seed_id in seed_ids))
+            for row in seed_rows
+        ]
         for row in rows:
             row["direction"] = direction
             row.setdefault("seed_uuid", row.get(endpoint_alias))

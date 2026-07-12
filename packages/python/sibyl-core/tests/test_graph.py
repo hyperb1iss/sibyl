@@ -132,7 +132,9 @@ class _RelatedBatchClient:
     async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
         self.calls.append((query, params))
         now = datetime.now(UTC)
-        if "FROM relates_to" in query and "source_id IN $entity_ids" in query:
+        if "FROM relates_to" in query and "source_id = $entity_id" in query:
+            if params["entity_id"] != "seed-a":
+                return []
             return [
                 _related_edge_row(
                     uuid="rel_seed_a_target_a",
@@ -151,16 +153,21 @@ class _RelatedBatchClient:
                     created_at=now,
                 ),
             ]
-        if "FROM relates_to" in query and "target_id IN $entity_ids" in query:
+        if "FROM relates_to" in query and "target_id = $entity_id" in query:
+            if params["entity_id"] == "seed-a":
+                return [
+                    _related_edge_row(
+                        uuid="rel_source_a_seed_a",
+                        source_id="source-a",
+                        target_id="seed-a",
+                        related_id="source-a",
+                        group_id=self.group_id,
+                        created_at=now,
+                    )
+                ]
+            if params["entity_id"] != "seed-b":
+                return []
             return [
-                _related_edge_row(
-                    uuid="rel_source_a_seed_a",
-                    source_id="source-a",
-                    target_id="seed-a",
-                    related_id="source-a",
-                    group_id=self.group_id,
-                    created_at=now,
-                ),
                 _related_edge_row(
                     uuid="rel_seed_a_seed_b",
                     source_id="seed-a",
@@ -245,7 +252,19 @@ class _CappedRelatedBatchClient:
     async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
         self.calls.append((query, params))
         now = datetime.now(UTC)
-        if "FROM relates_to" in query and "source_id IN $entity_ids" in query:
+        if "FROM relates_to" in query and "source_id = $entity_id" in query:
+            if params["entity_id"] == "seed-b":
+                return [
+                    _related_edge_row(
+                        uuid="rel_seed_b_target_b",
+                        source_id="seed-b",
+                        target_id="target-b",
+                        group_id=self.group_id,
+                        created_at=now,
+                    )
+                ]
+            if params["entity_id"] != "seed-a":
+                return []
             return [
                 _related_edge_row(
                     uuid=f"rel_seed_a_target_{index}",
@@ -256,20 +275,8 @@ class _CappedRelatedBatchClient:
                 )
                 for index in range(cast("int", params["limit"]))
             ]
-        if "FROM relates_to" in query and "target_id IN $entity_ids" in query:
+        if "FROM relates_to" in query and "target_id = $entity_id" in query:
             return []
-        if "FROM relates_to" in query and "source_id = $entity_id" in query:
-            if params["entity_id"] != "seed-b":
-                return []
-            return [
-                _related_edge_row(
-                    uuid="rel_seed_b_target_b",
-                    source_id="seed-b",
-                    target_id="target-b",
-                    group_id=self.group_id,
-                    created_at=now,
-                )
-            ]
         if "FROM entity" in query:
             entity_ids = cast("list[str]", params["entity_ids"])
             return [
@@ -2454,11 +2461,11 @@ async def test_native_relationship_batch_uses_native_traversal_projection() -> N
 
     relates_queries = [call for call in client.calls if "FROM relates_to" in call[0]]
     entity_queries = [call for call in client.calls if "FROM entity" in call[0]]
-    assert len(relates_queries) == 2
+    assert len(relates_queries) == 4
     assert entity_queries == []
-    assert all("IN $entity_ids" in query for query, _ in relates_queries)
-    assert all("$entity_id" not in params for _, params in relates_queries)
-    assert [params["limit"] for _, params in relates_queries] == [6, 6]
+    assert all("= $entity_id" in query for query, _ in relates_queries)
+    assert {params["entity_id"] for _, params in relates_queries} == {"seed-a", "seed-b"}
+    assert all(params["limit"] == 3 for _, params in relates_queries)
     assert any("out.uuid AS related_uuid" in query for query, _ in relates_queries)
     assert any("in.uuid AS related_uuid" in query for query, _ in relates_queries)
 
@@ -2503,7 +2510,7 @@ async def test_native_relationship_batch_reads_directions_concurrently(
 
 
 @pytest.mark.asyncio
-async def test_native_relationship_batch_tops_up_underfilled_seeds_when_capped() -> None:
+async def test_native_relationship_batch_applies_limit_per_seed_with_indexed_queries() -> None:
     client = _CappedRelatedBatchClient()
     relationship_manager = RelationshipManager(
         cast("SurrealGraphClient", client),
@@ -2517,16 +2524,10 @@ async def test_native_relationship_batch_tops_up_underfilled_seeds_when_capped()
 
     relates_queries = [call for call in client.calls if "FROM relates_to" in call[0]]
     entity_queries = [call for call in client.calls if "FROM entity" in call[0]]
-    assert len(relates_queries) == 3
+    assert len(relates_queries) == 4
     assert entity_queries == []
-    assert any("source_id IN $entity_ids" in query for query, _ in relates_queries)
-    assert any("target_id IN $entity_ids" in query for query, _ in relates_queries)
-    top_up_calls = [
-        params for query, params in relates_queries if "source_id = $entity_id" in query
-    ]
-    assert top_up_calls == [
-        {"group_id": client.group_id, "entity_id": "seed-b", "relationship_types": [], "limit": 2}
-    ]
+    assert all("= $entity_id" in query for query, _ in relates_queries)
+    assert all(params["limit"] == 2 for _, params in relates_queries)
     assert [entity.id for entity, _ in related["seed-a"]] == ["target-0", "target-1"]
     assert [entity.id for entity, _ in related["seed-b"]] == ["target-b"]
 
