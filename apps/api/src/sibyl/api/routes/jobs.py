@@ -6,11 +6,13 @@ Provides REST API for:
 - Cancelling jobs
 """
 
+import asyncio
 from typing import Any
 from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from sibyl.auth.dependencies import get_current_organization, require_org_admin
 from sibyl.coordination.broker import job_organization_id
@@ -21,6 +23,10 @@ from sibyl.persistence.content_runtime import (
 from sibyl_core.auth import AuthOrganization
 
 log = structlog.get_logger()
+
+
+class JobStatusBatchRequest(BaseModel):
+    job_ids: list[str] = Field(min_length=1, max_length=64)
 
 
 async def _source_visible_to_org(
@@ -187,6 +193,63 @@ async def list_jobs(
         return {"jobs": [], "total": 0, "error": "Failed to list jobs"}
 
 
+def _job_status_payload(info: Any) -> dict[str, Any]:
+    return {
+        "job_id": info.job_id,
+        "function": info.function,
+        "status": info.status.value,
+        "enqueue_time": info.enqueue_time.isoformat() if info.enqueue_time else None,
+        "start_time": info.start_time.isoformat() if info.start_time else None,
+        "finish_time": info.finish_time.isoformat() if info.finish_time else None,
+        "result": info.result,
+        "error": info.error,
+    }
+
+
+def _missing_job_status_payload(job_id: str) -> dict[str, Any]:
+    return {
+        "job_id": job_id,
+        "function": "unknown",
+        "status": "not_found",
+        "enqueue_time": None,
+        "start_time": None,
+        "finish_time": None,
+        "result": None,
+        "error": None,
+    }
+
+
+@router.post("/status")
+async def get_jobs_status(
+    batch: JobStatusBatchRequest,
+    org: AuthOrganization = Depends(get_current_organization),
+) -> dict[str, Any]:
+    """Get statuses for multiple jobs with one authenticated request."""
+    from sibyl.jobs import JobStatus, get_job_status
+
+    job_ids = list(dict.fromkeys(batch.job_ids))
+    try:
+        infos = await asyncio.gather(*(get_job_status(job_id) for job_id in job_ids))
+        visible_source_ids = await _resolve_visible_source_ids(infos, org=org)
+        jobs: dict[str, dict[str, Any]] = {}
+        for job_id, info in zip(job_ids, infos, strict=True):
+            if info.status == JobStatus.NOT_FOUND or not await _job_visible_to_org(
+                info,
+                org=org,
+                visible_source_ids=visible_source_ids,
+            ):
+                jobs[job_id] = _missing_job_status_payload(job_id)
+            else:
+                jobs[job_id] = _job_status_payload(info)
+        return {"jobs": jobs}
+    except Exception as exc:
+        log.warning("Failed to get batch job status", job_count=len(job_ids), error=str(exc))
+        raise HTTPException(
+            status_code=503,
+            detail="Failed to get job statuses. Is Redis available?",
+        ) from exc
+
+
 @router.post("/consolidation")
 async def trigger_consolidation(
     org: AuthOrganization = Depends(get_current_organization),
@@ -285,16 +348,7 @@ async def get_job(
         if not await _job_visible_to_org(info, org=org):
             raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
 
-        return {
-            "job_id": info.job_id,
-            "function": info.function,
-            "status": info.status.value,
-            "enqueue_time": info.enqueue_time.isoformat() if info.enqueue_time else None,
-            "start_time": info.start_time.isoformat() if info.start_time else None,
-            "finish_time": info.finish_time.isoformat() if info.finish_time else None,
-            "result": info.result,
-            "error": info.error,
-        }
+        return _job_status_payload(info)
     except HTTPException:
         raise
     except Exception as e:

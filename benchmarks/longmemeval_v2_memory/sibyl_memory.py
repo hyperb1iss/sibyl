@@ -68,6 +68,7 @@ DEFAULT_EMBEDDING_JOB_POLL_SECONDS = 0.5
 DEFAULT_BULK_MAX_ENTITIES = 32
 DEFAULT_BULK_MAX_CONTENT_CHARS = 512_000
 DEFAULT_EMBEDDING_BACKFILL_MAX_PENDING_JOBS = 8
+JOB_STATUS_BATCH_SIZE = 64
 MAX_BULK_CREATE = 128
 RETRYABLE_HTTP_STATUS_CODES = frozenset({408, 409, 425, 429})
 
@@ -380,8 +381,25 @@ class SibylLiveApiMemory(Memory):
         last_statuses: dict[str, str] = {}
         while pending:
             made_progress = False
+            pending_job_ids = sorted(pending)
+            statuses: dict[str, object] = {}
+            for offset in range(0, len(pending_job_ids), JOB_STATUS_BATCH_SIZE):
+                job_id_batch = pending_job_ids[offset : offset + JOB_STATUS_BATCH_SIZE]
+                response = self._request_json(
+                    "POST",
+                    "/jobs/status",
+                    json={"job_ids": job_id_batch},
+                )
+                batch_statuses = response.get("jobs")
+                if not isinstance(batch_statuses, dict):
+                    msg = f"invalid {job_name} batch status response"
+                    raise RuntimeError(msg)
+                statuses.update(batch_statuses)
             for job_id in sorted(pending):
-                status = self._request_json("GET", f"/jobs/{job_id}")
+                status = statuses.get(job_id)
+                if not isinstance(status, dict):
+                    msg = f"missing {job_name} status for {job_id}"
+                    raise RuntimeError(msg)
                 status_value = _stripped_str(status.get("status")) or "unknown"
                 if last_statuses.get(job_id) != status_value:
                     made_progress = True

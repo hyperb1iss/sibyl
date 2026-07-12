@@ -10,14 +10,17 @@ import pytest
 from fastapi import HTTPException
 
 from sibyl.api.routes.jobs import (
+    JobStatusBatchRequest,
     _job_visible_to_org,
     cancel_job,
+    get_jobs_status,
     jobs_health,
     list_jobs,
     trigger_consolidation,
     trigger_priority_decay,
     trigger_reflection_dream_cycle,
 )
+from sibyl.coordination.broker import JobInfo, JobStatus
 
 
 class TestJobVisibility:
@@ -216,6 +219,39 @@ class TestListJobsRoute:
             "crawl:embedded-visible",
         ]
         assert response["total"] == 2
+
+
+class TestBatchJobStatusRoute:
+    @pytest.mark.asyncio
+    async def test_batch_status_returns_visible_jobs_and_hides_other_orgs(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        jobs = {
+            "visible": JobInfo(
+                job_id="visible",
+                function="project_memory_batch",
+                status=JobStatus.IN_PROGRESS,
+                organization_id=str(org.id),
+            ),
+            "hidden": JobInfo(
+                job_id="hidden",
+                function="project_memory_batch",
+                status=JobStatus.COMPLETE,
+                organization_id="00000000-0000-0000-0000-000000000999",
+            ),
+        }
+
+        with patch(
+            "sibyl.jobs.get_job_status",
+            AsyncMock(side_effect=lambda job_id: jobs[job_id]),
+        ):
+            response = await get_jobs_status(
+                batch=JobStatusBatchRequest(job_ids=["visible", "hidden", "visible"]),
+                org=org,
+            )
+
+        assert response["jobs"]["visible"]["status"] == "in_progress"
+        assert response["jobs"]["hidden"]["status"] == "not_found"
+        assert len(response["jobs"]) == 2
 
 
 class TestJobsHealthRoute:

@@ -755,8 +755,9 @@ def test_sibyl_memory_embedding_wait_timeout_resets_on_progress(monkeypatch, cap
         json: dict[str, object] | None = None,
         params: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        del method, path, json, params
-        return status_responses.pop(0)
+        del method, path, params
+        assert json == {"job_ids": ["embed-lme-v2-1"]}
+        return {"jobs": {"embed-lme-v2-1": status_responses.pop(0)}}
 
     def fake_sleep(seconds: float) -> None:
         clock[0] += seconds
@@ -791,8 +792,9 @@ def test_sibyl_memory_embedding_wait_times_out_without_progress(monkeypatch) -> 
         json: dict[str, object] | None = None,
         params: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        del method, path, json, params
-        return {"status": "queued"}
+        del method, path, params
+        assert json == {"job_ids": ["embed-lme-v2-1"]}
+        return {"jobs": {"embed-lme-v2-1": {"status": "queued"}}}
 
     def fake_sleep(seconds: float) -> None:
         clock[0] += seconds
@@ -819,15 +821,19 @@ def test_sibyl_memory_projection_rejects_partial_job_result() -> None:
     memory.embedding_job_poll_seconds = 0.1
     memory._pending_projection_job_ids = {"project-lme-v2-1"}
     memory._request_json = lambda *_args, **_kwargs: {
-        "status": "complete",
-        "error": None,
-        "result": {
-            "projection_state": "partial",
-            "errors": ["Transaction conflict: Resource busy"],
+        "jobs": {
+            "project-lme-v2-1": {
+                "status": "complete",
+                "error": None,
+                "result": {
+                    "projection_state": "partial",
+                    "errors": ["Transaction conflict: Resource busy"],
+                },
+            },
         },
     }
 
-    with pytest.raises(RuntimeError, match="completed partially.*Resource busy"):
+    with pytest.raises(RuntimeError, match=r"completed partially.*Resource busy"):
         memory._drain_memory_projections()
 
     assert memory._pending_projection_job_ids == {"project-lme-v2-1"}
@@ -838,11 +844,11 @@ def test_sibyl_memory_query_waits_for_background_jobs_before_search() -> None:
     memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
     module.Memory.__init__(memory, {})
     status_responses: dict[str, list[dict[str, object]]] = {
-        "/jobs/embed-lme-v2-1": [
+        "embed-lme-v2-1": [
             {"status": "queued"},
             {"status": "complete", "error": None},
         ],
-        "/jobs/project-lme-v2-1": [
+        "project-lme-v2-1": [
             {"status": "queued"},
             {"status": "complete", "error": None},
         ],
@@ -859,8 +865,13 @@ def test_sibyl_memory_query_waits_for_background_jobs_before_search() -> None:
     ) -> dict[str, object]:
         del method, params
         calls.append(path)
-        if path in status_responses:
-            return status_responses[path].pop(0)
+        if path == "/jobs/status":
+            assert isinstance(json, dict)
+            job_ids = json["job_ids"]
+            assert isinstance(job_ids, list)
+            assert len(job_ids) == 1
+            job_id = str(job_ids[0])
+            return {"jobs": {job_id: status_responses[job_id].pop(0)}}
         if path == "/search":
             assert isinstance(json, dict)
             search_payloads.append(json)
@@ -894,14 +905,79 @@ def test_sibyl_memory_query_waits_for_background_jobs_before_search() -> None:
     assert context[0]["value"].endswith("x" * TEST_CONTEXT_MAX_CHARS)
     assert search_payloads[0]["content_max_chars"] == TEST_CONTEXT_MAX_CHARS
     assert calls == [
-        "/jobs/embed-lme-v2-1",
-        "/jobs/embed-lme-v2-1",
-        "/jobs/project-lme-v2-1",
-        "/jobs/project-lme-v2-1",
+        "/jobs/status",
+        "/jobs/status",
+        "/jobs/status",
+        "/jobs/status",
         "/search",
     ]
     assert memory._pending_embedding_job_ids == set()
     assert memory._pending_projection_job_ids == set()
+
+
+def test_sibyl_memory_polls_pending_jobs_in_one_batch() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    requests: list[dict[str, object]] = []
+
+    def fake_request(
+        method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        del params
+        assert method == "POST"
+        assert path == "/jobs/status"
+        assert isinstance(json, dict)
+        requests.append(json)
+        job_ids = json["job_ids"]
+        assert isinstance(job_ids, list)
+        return {"jobs": {job_id: {"status": "complete", "error": None} for job_id in job_ids}}
+
+    memory.embedding_job_wait_timeout_seconds = 1.0
+    memory.embedding_job_poll_seconds = 0.1
+    memory._pending_embedding_job_ids = {"embed-1", "embed-2", "embed-3"}
+    memory._request_json = fake_request
+
+    memory._drain_embedding_backfills()
+
+    assert requests == [{"job_ids": ["embed-1", "embed-2", "embed-3"]}]
+
+
+def test_sibyl_memory_chunks_large_job_status_batches() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    requested_batches: list[list[str]] = []
+
+    def fake_request(
+        method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        del params
+        assert method == "POST"
+        assert path == "/jobs/status"
+        assert isinstance(json, dict)
+        job_ids = json["job_ids"]
+        assert isinstance(job_ids, list)
+        job_id_batch = [str(job_id) for job_id in job_ids]
+        requested_batches.append(job_id_batch)
+        return {"jobs": {job_id: {"status": "complete", "error": None} for job_id in job_id_batch}}
+
+    memory.embedding_job_wait_timeout_seconds = 1.0
+    memory.embedding_job_poll_seconds = 0.1
+    memory._pending_embedding_job_ids = {f"embed-{index:02d}" for index in range(65)}
+    memory._request_json = fake_request
+
+    memory._drain_embedding_backfills()
+
+    assert [len(batch) for batch in requested_batches] == [64, 1]
 
 
 def _write_dataset(root: Path) -> None:
