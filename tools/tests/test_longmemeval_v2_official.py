@@ -31,6 +31,11 @@ EXPECTED_TRANSIENT_READER_ATTEMPTS = 2
 EXPECTED_EVALUATOR_RETRY_ATTEMPTS = 3
 EXPECTED_TRANSIENT_EVALUATOR_ATTEMPTS = 2
 EXPECTED_COMBINED_QUESTION_COUNT = 4
+EXPECTED_LATENCY_P50_MS = 2_000.0
+EXPECTED_LATENCY_P95_MS = 4_000.0
+EXPECTED_EMBEDDING_REQUESTS = 10
+EXPECTED_READER_REQUESTS = 6
+EXPECTED_JUDGE_REQUESTS = 2
 TEST_CONTENT_MAX_CHARS = 420
 TEST_CONTEXT_MAX_CHARS = 800
 
@@ -236,10 +241,27 @@ def test_official_runner_receipt_only_emits_citable_contract(tmp_path: Path) -> 
     assert receipt["dataset"]["question_count"] == EXPECTED_COMBINED_QUESTION_COUNT
     assert isinstance(receipt["dataset"]["question_count"], int)
     assert receipt["source_runs"]["complete"] is True
+    assert receipt["source_runs"]["integrity_complete"] is True
+    assert receipt["source_runs"]["api_runtime_consistent"] is True
     assert set(receipt["source_runs"]["domains"]) == {"web", "enterprise"}
+    assert receipt["source_runs"]["domains"]["web"]["runtime_inputs"]["questions"][
+        "sha256"
+    ].startswith("sha256:")
+    effective_config = receipt["source_runs"]["domains"]["web"]["effective_memory_config"]
+    assert "api_token" not in effective_config["memory_params"]
+    assert "email" not in effective_config["memory_params"]
+    assert "password" not in effective_config["memory_params"]
+    assert receipt["runner_provenance"]["sibyl_commit"] != "unknown"
     assert receipt["metrics"]["lafs_gain"] == EXPECTED_LAFS_GAIN
     assert receipt["metrics"]["memory_query_avg_seconds"] == EXPECTED_MEMORY_QUERY_AVG_SECONDS
-    assert receipt["metrics"]["latency_p95_ms"] > 0
+    assert receipt["metrics"]["latency_p50_ms"] == EXPECTED_LATENCY_P50_MS
+    assert receipt["metrics"]["latency_p95_ms"] == EXPECTED_LATENCY_P95_MS
+    assert receipt["metrics"]["max_latency_ms"] == EXPECTED_LATENCY_P95_MS
+    assert receipt["accounting"]["embedding"]["calls"] == EXPECTED_EMBEDDING_REQUESTS
+    assert receipt["accounting"]["reader"]["requests"] == EXPECTED_READER_REQUESTS
+    assert receipt["accounting"]["judge"]["requests"] == EXPECTED_JUDGE_REQUESTS
+    assert receipt["accounting"]["cost"]["provider_reported_total_usd"] == pytest.approx(0.1026)
+    assert receipt["accounting"]["cost"]["coverage_complete"] is True
     assert {check["status"] for check in receipt["checks"]} == {"PASS"}
     assert eval_gate.evaluate_report(receipt, profile="longmemeval-v2") == []
 
@@ -290,7 +312,60 @@ def test_longmemeval_v2_receipt_gate_rejects_missing_lafs(tmp_path: Path) -> Non
     failures = eval_gate.evaluate_report(receipt, profile="longmemeval-v2")
 
     assert "metrics['lafs_gain'] must be finite numeric" in failures
-    assert "checks[4] status must be 'PASS'" in failures
+    assert "checks[5] status must be 'PASS'" in failures
+
+
+def test_longmemeval_v2_receipt_rejects_corrupt_provider_usage(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    data_root = tmp_path / "data"
+    web_output_dir = tmp_path / "runs" / "web"
+    enterprise_output_dir = tmp_path / "runs" / "enterprise"
+    combined_dir = tmp_path / "combined"
+    official_repo = _write_official_repo(tmp_path / "official")
+    _write_dataset(data_root)
+    _write_official_outputs(web_output_dir, domain="web")
+    _write_official_outputs(enterprise_output_dir, domain="enterprise")
+    _write_combined_outputs(combined_dir)
+    with (web_output_dir / "provider_usage" / "reader.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write("{truncated\n")
+
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(data_root),
+            "--domain",
+            "combined",
+            "--output-dir",
+            str(tmp_path / "receipt"),
+            "--official-repo",
+            str(official_repo),
+            "--receipt-only",
+            "--metric-overview",
+            str(combined_dir / "metric_overview.json"),
+            "--combined-metrics",
+            str(combined_dir / "aggregated_metrics.json"),
+            "--submission-overview",
+            str(combined_dir / "submission_overview.json"),
+            "--web-output-dir",
+            str(web_output_dir),
+            "--enterprise-output-dir",
+            str(enterprise_output_dir),
+        ]
+    )
+    args.command_args = []
+    receipt = module.build_receipt_from_artifacts(
+        args=args,
+        data_root=data_root,
+        output_dir=tmp_path / "receipt",
+    )
+
+    assert receipt["source_runs"]["integrity_complete"] is False
+    assert (
+        receipt["source_runs"]["domains"]["web"]["provider_usage"]["reader"]["invalid_line_count"]
+        == 1
+    )
+    source_check = next(check for check in receipt["checks"] if check["name"] == "source runs")
+    assert source_check["status"] == "FAIL"
 
 
 def test_longmemeval_v2_receipt_redacts_sensitive_command_args() -> None:
@@ -1245,6 +1320,38 @@ def _write_official_repo(root: Path) -> Path:
 
 def _write_official_outputs(output_dir: Path, *, domain: str = "enterprise") -> None:
     output_dir.mkdir(parents=True)
+    run_id = f"run-{domain}"
+    runtime_dir = output_dir / "runtime_inputs"
+    runtime_dir.mkdir()
+    (output_dir / "longmemeval_v2_official_plan.json").write_text(
+        json.dumps({"run_id": run_id, "domain": domain}),
+        encoding="utf-8",
+    )
+    (runtime_dir / "questions.json").write_text(
+        json.dumps([{"id": f"q-{domain}", "question": "Which filter was selected?"}]),
+        encoding="utf-8",
+    )
+    (runtime_dir / "haystack.json").write_text(
+        json.dumps({f"q-{domain}": ["t1", "t2"]}),
+        encoding="utf-8",
+    )
+    (runtime_dir / "memory_config.json").write_text(
+        json.dumps(
+            {
+                "memory_type": "sibyl_live_api",
+                "memory_params": {
+                    "run_id": run_id,
+                    "api_url": "http://localhost:3434/api",
+                    "api_token": "secret-token",
+                    "email": "eval@example.test",
+                    "password": "secret-password",
+                    "search_limit": 12,
+                    "max_context_items": 8,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     (output_dir / "run_args.json").write_text(
         json.dumps(
             {
@@ -1297,8 +1404,83 @@ def _write_official_outputs(output_dir: Path, *, domain: str = "enterprise") -> 
     )
     (output_dir / "per_question.jsonl").write_text(
         "\n".join(
-            json.dumps({"id": question_id, "memory_query_seconds": latency})
+            json.dumps(
+                {
+                    "id": question_id,
+                    "memory_query_duration_seconds": latency,
+                    "memory_post_query_metadata": {
+                        "api_runtime": {
+                            "status": "healthy",
+                            "version": "1.1.0",
+                            "runtime": {"commit": "api-commit", "git_dirty": False},
+                        },
+                        "ingest_embedding_usage": {
+                            "provider": "openai",
+                            "model": "text-embedding-3-small",
+                            "requests": 2,
+                            "inputs": 4,
+                            "prompt_tokens": 50,
+                            "total_tokens": 50,
+                            "cost_reported_requests": 2,
+                            "cost_usd": 0.001,
+                        },
+                        "search_metadata": {
+                            "embedding_usage": {
+                                "provider": "openai",
+                                "model": "text-embedding-3-small",
+                                "requests": 1,
+                                "inputs": 1,
+                                "prompt_tokens": 5,
+                                "total_tokens": 5,
+                                "cost_reported_requests": 1,
+                                "cost_usd": 0.0001,
+                            }
+                        },
+                    },
+                }
+            )
             for question_id, latency in (("q1", 1.0), ("q2", 2.0), ("q3", 4.0))
+        ),
+        encoding="utf-8",
+    )
+    usage_dir = output_dir / "provider_usage"
+    usage_dir.mkdir()
+    (usage_dir / "reader.jsonl").write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "role": "reader",
+                    "requested_model": "Qwen/Qwen3.5-9B",
+                    "provider_model": "qwen/qwen3.5-9b",
+                    "response_id": f"reader-{domain}-{index}",
+                    "usage": {
+                        "prompt_tokens": 100,
+                        "completion_tokens": 20,
+                        "total_tokens": 120,
+                        "cost_usd": 0.01,
+                    },
+                }
+            )
+            for index in range(3)
+        ),
+        encoding="utf-8",
+    )
+    (usage_dir / "judge.jsonl").write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "role": "judge",
+                "requested_model": "gpt-5.2",
+                "provider_model": "gpt-5.2-2026-06-01",
+                "response_id": f"judge-{domain}",
+                "usage": {
+                    "prompt_tokens": 50,
+                    "completion_tokens": 10,
+                    "total_tokens": 60,
+                    "cost_usd": 0.02,
+                },
+            }
         ),
         encoding="utf-8",
     )

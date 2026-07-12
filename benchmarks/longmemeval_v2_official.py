@@ -31,6 +31,7 @@ if str(ROOT) not in sys.path:
 if str(CORE_SRC) not in sys.path:
     sys.path.insert(0, str(CORE_SRC))
 
+from benchmarks.git_provenance import git_provenance  # noqa: E402
 from benchmarks.provider_usage import (  # noqa: E402
     AsyncUsageTrackingClient,
     ProviderUsageRecorder,
@@ -69,6 +70,7 @@ _SENSITIVE_COMMAND_FLAGS = frozenset(
     }
 )
 _SENSITIVE_COMMAND_SUBSTRINGS = ("secret", "token", "password", "api-key", "apikey")
+_SENSITIVE_CONFIG_KEYS = frozenset({"api_token", "email", "password"})
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -77,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
     data_root = Path(args.data_root).expanduser().resolve()
     output_dir = Path(args.output_dir).expanduser().resolve()
     if args.receipt_only:
+        output_dir.mkdir(parents=True, exist_ok=True)
         receipt = build_receipt_from_artifacts(
             args=args, data_root=data_root, output_dir=output_dir
         )
@@ -536,6 +539,7 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "bulk_max_entities": args.bulk_max_entities,
         "bulk_max_content_chars": args.bulk_max_content_chars,
         "embedding_backfill_max_pending_jobs": args.embedding_backfill_max_pending_jobs,
+        "runner_provenance": git_provenance(ROOT),
     }
     return {"memory_type": "sibyl_live_api", "memory_params": params}
 
@@ -569,6 +573,8 @@ def build_run_plan(
     )
     return {
         "schema_version": PLAN_SCHEMA_VERSION,
+        "run_id": args.run_id,
+        "runner_provenance": git_provenance(ROOT),
         "domain": args.domain,
         "tier": args.tier,
         "method": DEFAULT_METHOD,
@@ -787,6 +793,7 @@ def build_receipt_from_artifacts(
             source_runs=source_runs,
             fallback_rows=per_question_rows,
         ),
+        source_runs=source_runs,
     )
     metrics.update(accounting_metric_aliases(accounting))
     official_repo_record = {
@@ -814,6 +821,7 @@ def build_receipt_from_artifacts(
         submission_overview_path=submission_overview_path,
         submission_archive_path=submission_archive_path,
     )
+    runner_provenance = git_provenance(ROOT)
     source_reader_model = _consistent_source_run_arg(source_runs, "model")
     source_reader_base_url = _consistent_source_run_arg(source_runs, "base_url")
     source_evaluator_model = _consistent_source_run_arg(source_runs, "evaluator_model")
@@ -861,6 +869,7 @@ def build_receipt_from_artifacts(
         "suite_version": "official-harness-v1",
         "generated_at": datetime.now(UTC).isoformat(),
         "sibyl_commit": git_commit(ROOT),
+        "runner_provenance": runner_provenance,
         "command": [
             "benchmarks/longmemeval_v2_official.py",
             *_redacted_command_args(args.command_args),
@@ -904,19 +913,54 @@ def load_receipt_source_runs(
 
     source_runs: list[dict[str, Any]] = []
     for domain, source_dir in source_dirs:
+        plan_path = source_dir / "longmemeval_v2_official_plan.json"
         run_args_path = source_dir / "run_args.json"
         aggregated_path = source_dir / "aggregated_metrics.json"
         per_question_path = source_dir / "per_question.jsonl"
+        runtime_dir = source_dir / "runtime_inputs"
+        runtime_questions_path = runtime_dir / "questions.json"
+        runtime_haystack_path = runtime_dir / "haystack.json"
+        memory_config_path = runtime_dir / "memory_config.json"
+        reader_usage_path = source_dir / "provider_usage" / "reader.jsonl"
+        judge_usage_path = source_dir / "provider_usage" / "judge.jsonl"
+        plan = _load_json_if_exists(plan_path)
+        memory_config = _load_json_if_exists(memory_config_path)
+        run_id = _first_string(
+            plan.get("run_id"),
+            _nested_value(memory_config, "memory_params", "run_id"),
+        )
+        reader_usage_log = _load_usage_log(
+            reader_usage_path,
+            run_id=run_id,
+            role="reader",
+        )
+        judge_usage_log = _load_usage_log(
+            judge_usage_path,
+            run_id=run_id,
+            role="judge",
+        )
         source_runs.append(
             {
                 "domain": domain,
                 "output_dir": source_dir,
+                "plan_path": plan_path,
                 "run_args_path": run_args_path,
                 "aggregated_path": aggregated_path,
                 "per_question_path": per_question_path,
+                "runtime_questions_path": runtime_questions_path,
+                "runtime_haystack_path": runtime_haystack_path,
+                "memory_config_path": memory_config_path,
+                "reader_usage_path": reader_usage_path,
+                "judge_usage_path": judge_usage_path,
+                "plan": plan,
                 "run_args": _load_json_if_exists(run_args_path),
                 "aggregated_metrics": _load_json_if_exists(aggregated_path),
                 "per_question_rows": _load_jsonl_if_exists(per_question_path),
+                "memory_config": memory_config,
+                "reader_usage_events": reader_usage_log["events"],
+                "reader_usage_invalid_lines": reader_usage_log["invalid_lines"],
+                "judge_usage_events": judge_usage_log["events"],
+                "judge_usage_invalid_lines": judge_usage_log["invalid_lines"],
             }
         )
     return source_runs
@@ -932,11 +976,35 @@ def build_source_runs_receipt(
         domain = str(source_run["domain"])
         run_args = source_run["run_args"]
         output_dir = source_run["output_dir"]
+        api_runtime, api_runtime_consistent = _source_api_runtime(
+            source_run["per_question_rows"]
+        )
         domains[domain] = {
             "output_dir": str(output_dir),
+            "plan": artifact_path_record(source_run["plan_path"]),
             "run_args": artifact_path_record(source_run["run_args_path"]),
             "aggregated_metrics": artifact_path_record(source_run["aggregated_path"]),
             "per_question": artifact_path_record(source_run["per_question_path"]),
+            "runtime_inputs": {
+                "questions": artifact_path_record(source_run["runtime_questions_path"]),
+                "haystack": artifact_path_record(source_run["runtime_haystack_path"]),
+                "memory_config": artifact_path_record(source_run["memory_config_path"]),
+            },
+            "provider_usage": {
+                "reader": {
+                    **artifact_path_record(source_run["reader_usage_path"]),
+                    "event_count": len(source_run["reader_usage_events"]),
+                    "invalid_line_count": source_run["reader_usage_invalid_lines"],
+                },
+                "judge": {
+                    **artifact_path_record(source_run["judge_usage_path"]),
+                    "event_count": len(source_run["judge_usage_events"]),
+                    "invalid_line_count": source_run["judge_usage_invalid_lines"],
+                },
+            },
+            "effective_memory_config": _sanitize_config(source_run["memory_config"]),
+            "api_runtime": api_runtime,
+            "api_runtime_consistent": api_runtime_consistent,
             "reader_model": run_args.get("model"),
             "reader_base_url": run_args.get("base_url"),
             "evaluator_model": run_args.get("evaluator_model"),
@@ -952,10 +1020,32 @@ def build_source_runs_receipt(
         and domains[domain]["per_question"]["exists"]
         for domain in expected_domains
     )
+    integrity_complete = all(
+        domain in domains
+        and domains[domain]["plan"]["exists"]
+        and all(
+            record["exists"]
+            for record in domains[domain]["runtime_inputs"].values()
+        )
+        and all(
+            record["exists"]
+            and record["event_count"] > 0
+            and record["invalid_line_count"] == 0
+            for record in domains[domain]["provider_usage"].values()
+        )
+        for domain in expected_domains
+    )
     return {
         "expected_domains": list(expected_domains),
         "domains": domains,
         "complete": complete,
+        "integrity_complete": integrity_complete,
+        "api_runtime_consistent": all(
+            domain in domains
+            and domains[domain]["api_runtime_consistent"]
+            and _runtime_provenance_complete(domains[domain]["api_runtime"])
+            for domain in expected_domains
+        ),
         "model_consistent": _source_run_values_consistent(source_runs, "model")
         and _source_run_values_consistent(source_runs, "evaluator_model"),
         "method_consistent": _source_run_values_consistent(source_runs, "method"),
@@ -1154,6 +1244,7 @@ def build_receipt_accounting(
     metrics: dict[str, float | None],
     aggregated_metrics: dict[str, Any],
     per_question_rows: list[dict[str, Any]],
+    source_runs: list[dict[str, Any]],
 ) -> dict[str, Any]:
     latencies = [
         latency
@@ -1188,6 +1279,27 @@ def build_receipt_accounting(
     )
     completion_tokens = _as_number(tokens.get("completion_tokens")) or 0.0
     total_tokens = _as_number(tokens.get("total_tokens")) or (prompt_tokens + completion_tokens)
+    embedding = _embedding_accounting(source_runs)
+    reader = _provider_accounting(
+        source_runs,
+        role="reader",
+        fallback_input_tokens=prompt_tokens,
+        fallback_output_tokens=completion_tokens,
+    )
+    judge = _provider_accounting(
+        source_runs,
+        role="judge",
+        fallback_input_tokens=0.0,
+        fallback_output_tokens=0.0,
+    )
+    provider_reported_total_usd = sum(
+        float(section["provider_reported_cost_usd"])
+        for section in (embedding, reader, judge)
+    )
+    cost_coverage_complete = all(
+        bool(section["cost_coverage_complete"])
+        for section in (embedding, reader, judge)
+    )
 
     return {
         "schema_version": ACCOUNTING_SCHEMA_VERSION,
@@ -1205,31 +1317,175 @@ def build_receipt_accounting(
             "estimator": "official-harness-token-counters",
             "source": "official aggregated token counters",
         },
-        "embedding": {
-            "calls": 0,
-            "provider": "not-applicable",
-            "model": "not-applicable",
-            "estimated_input_tokens": 0.0,
-            "estimated_cost_usd": 0.0,
-            "cost_basis": "official V2 runner delegates embeddings outside Sibyl receipt",
-        },
-        "reader": {
-            "estimated_input_tokens": prompt_tokens,
-            "estimated_output_tokens": completion_tokens,
-            "estimated_cost_usd": 0.0,
-            "cost_basis": "official reader token estimate; local/self-hosted reader cost not priced",
-        },
-        "judge": {
-            "estimated_input_tokens": 0.0,
-            "estimated_output_tokens": 0.0,
-            "estimated_cost_usd": 0.0,
-            "cost_basis": "official evaluator cost not priced by runner",
-        },
+        "embedding": embedding,
+        "reader": reader,
+        "judge": judge,
         "cost": {
-            "estimated_total_usd": 0.0,
+            "estimated_total_usd": provider_reported_total_usd,
+            "provider_reported_total_usd": provider_reported_total_usd,
             "currency": "USD",
-            "enforcement": "receipt-recorded; external runtime pricing is model/provider dependent",
+            "coverage_complete": cost_coverage_complete,
+            "is_lower_bound": not cost_coverage_complete,
+            "enforcement": (
+                "provider-reported cost only; unpriced requests remain explicit and are not "
+                "silently estimated"
+            ),
         },
+    }
+
+
+def _embedding_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
+    ingest_records: list[dict[str, Any]] = []
+    query_records: list[dict[str, Any]] = []
+    tracking_complete = bool(source_runs)
+    for source_run in source_runs:
+        rows = source_run["per_question_rows"]
+        ingest_candidates = [
+            usage
+            for row in rows
+            if isinstance(
+                usage := _nested_value(
+                    row,
+                    "memory_post_query_metadata",
+                    "ingest_embedding_usage",
+                ),
+                dict,
+            )
+            and usage
+        ]
+        if ingest_candidates:
+            ingest_records.append(ingest_candidates[0])
+        else:
+            tracking_complete = False
+        for row in rows:
+            usage = _nested_value(
+                row,
+                "memory_post_query_metadata",
+                "search_metadata",
+                "embedding_usage",
+            )
+            if isinstance(usage, dict) and usage:
+                query_records.append(usage)
+            else:
+                tracking_complete = False
+    ingest = _summarize_embedding_usage(ingest_records)
+    query = _summarize_embedding_usage(query_records)
+    requests = int(ingest["requests"] + query["requests"])
+    priced_requests = int(
+        ingest["cost_reported_requests"] + query["cost_reported_requests"]
+    )
+    provider_reported_cost_usd = float(
+        ingest["provider_reported_cost_usd"] + query["provider_reported_cost_usd"]
+    )
+    providers = sorted(set(ingest["providers"]) | set(query["providers"]))
+    models = sorted(set(ingest["models"]) | set(query["models"]))
+    return {
+        "calls": requests,
+        "requests": requests,
+        "priced_requests": priced_requests,
+        "provider": ",".join(providers) or "unknown",
+        "model": ",".join(models) or "unknown",
+        "providers": providers,
+        "models": models,
+        "estimated_input_tokens": float(ingest["input_tokens"] + query["input_tokens"]),
+        "estimated_output_tokens": 0.0,
+        "provider_reported_cost_usd": provider_reported_cost_usd,
+        "estimated_cost_usd": provider_reported_cost_usd,
+        "cost_coverage_complete": tracking_complete and priced_requests == requests,
+        "tracking_complete": tracking_complete,
+        "ingest": ingest,
+        "query": query,
+        "cost_basis": "Sibyl embedding provider response usage",
+    }
+
+
+def _summarize_embedding_usage(records: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "requests": int(sum(_number_from(record, ("requests",)) or 0 for record in records)),
+        "inputs": int(sum(_number_from(record, ("inputs",)) or 0 for record in records)),
+        "input_tokens": sum(
+            _number_from(record, ("prompt_tokens",), ("total_tokens",)) or 0.0
+            for record in records
+        ),
+        "cost_reported_requests": int(
+            sum(
+                _number_from(record, ("cost_reported_requests",)) or 0
+                for record in records
+            )
+        ),
+        "provider_reported_cost_usd": sum(
+            _number_from(record, ("cost_usd",)) or 0.0 for record in records
+        ),
+        "providers": sorted(
+            {
+                provider
+                for record in records
+                if isinstance(provider := record.get("provider"), str) and provider
+            }
+        ),
+        "models": sorted(
+            {
+                model
+                for record in records
+                if isinstance(model := record.get("model"), str) and model
+            }
+        ),
+    }
+
+
+def _provider_accounting(
+    source_runs: list[dict[str, Any]],
+    *,
+    role: str,
+    fallback_input_tokens: float,
+    fallback_output_tokens: float,
+) -> dict[str, Any]:
+    event_key = f"{role}_usage_events"
+    path_key = f"{role}_usage_path"
+    events = [event for source_run in source_runs for event in source_run[event_key]]
+    tracking_complete = bool(source_runs) and all(
+        source_run[path_key].is_file()
+        and source_run[f"{role}_usage_invalid_lines"] == 0
+        for source_run in source_runs
+    )
+    input_tokens = sum(
+        _number_from(event, ("usage", "prompt_tokens")) or 0.0 for event in events
+    )
+    output_tokens = sum(
+        _number_from(event, ("usage", "completion_tokens")) or 0.0 for event in events
+    )
+    costs = [
+        cost
+        for event in events
+        if (cost := _number_from(event, ("usage", "cost_usd"))) is not None
+    ]
+    request_count = len(events)
+    priced_requests = len(costs)
+    provider_reported_cost_usd = sum(costs)
+    return {
+        "requests": request_count,
+        "priced_requests": priced_requests,
+        "requested_models": sorted(
+            {
+                model
+                for event in events
+                if isinstance(model := event.get("requested_model"), str) and model
+            }
+        ),
+        "provider_models": sorted(
+            {
+                model
+                for event in events
+                if isinstance(model := event.get("provider_model"), str) and model
+            }
+        ),
+        "estimated_input_tokens": input_tokens if events else fallback_input_tokens,
+        "estimated_output_tokens": output_tokens if events else fallback_output_tokens,
+        "provider_reported_cost_usd": provider_reported_cost_usd,
+        "estimated_cost_usd": provider_reported_cost_usd,
+        "cost_coverage_complete": tracking_complete and priced_requests == request_count,
+        "tracking_complete": tracking_complete,
+        "cost_basis": "provider response usage sidecar",
     }
 
 
@@ -1333,6 +1589,11 @@ def build_artifact_receipt(
     paths = {
         "output_dir": output_dir,
         "plan": plan_path,
+        "runtime_questions": output_dir / "runtime_inputs" / "questions.json",
+        "runtime_haystack": output_dir / "runtime_inputs" / "haystack.json",
+        "memory_config": output_dir / "runtime_inputs" / "memory_config.json",
+        "reader_provider_usage": output_dir / "provider_usage" / "reader.jsonl",
+        "judge_provider_usage": output_dir / "provider_usage" / "judge.jsonl",
         "aggregated_metrics": aggregated_path,
         "per_question": per_question_path,
         "run_args": run_args_path,
@@ -1374,9 +1635,17 @@ def build_receipt_checks(receipt: dict[str, Any]) -> list[dict[str, Any]]:
         check(
             "source runs",
             receipt.get("source_runs", {}).get("complete") is True
+            and receipt.get("source_runs", {}).get("integrity_complete") is True
             and receipt.get("source_runs", {}).get("model_consistent") is True,
-            "source web/enterprise run artifacts are present and model-consistent",
+            "source artifacts, runtime inputs, and provider logs are present",
             ["source runs"],
+        ),
+        check(
+            "runtime provenance",
+            _runtime_provenance_complete(receipt.get("runner_provenance"))
+            and receipt.get("source_runs", {}).get("api_runtime_consistent") is True,
+            "runner and serving API commits are recorded consistently",
+            ["runtime provenance"],
         ),
         check(
             "leaderboard metrics",
@@ -1494,6 +1763,90 @@ def _load_jsonl_if_exists(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _load_usage_log(path: Path, *, run_id: str, role: str) -> dict[str, Any]:
+    if not path.is_file():
+        return {"events": [], "invalid_lines": 0}
+    events: list[dict[str, Any]] = []
+    invalid_lines = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            loaded = json.loads(line)
+        except json.JSONDecodeError:
+            invalid_lines += 1
+            continue
+        if not isinstance(loaded, dict):
+            invalid_lines += 1
+            continue
+        if run_id and loaded.get("run_id") != run_id:
+            continue
+        if loaded.get("role") != role or not isinstance(loaded.get("usage"), dict):
+            invalid_lines += 1
+            continue
+        events.append(loaded)
+    return {"events": events, "invalid_lines": invalid_lines}
+
+
+def _sanitize_config(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _sanitize_config(item)
+            for key, item in value.items()
+            if str(key).lower() not in _SENSITIVE_CONFIG_KEYS
+        }
+    if isinstance(value, list):
+        return [_sanitize_config(item) for item in value]
+    return value
+
+
+def _source_api_runtime(rows: list[dict[str, Any]]) -> tuple[dict[str, Any], bool]:
+    runtimes = [
+        runtime
+        for row in rows
+        if isinstance(
+            runtime := _nested_value(
+                row,
+                "memory_post_query_metadata",
+                "api_runtime",
+            ),
+            dict,
+        )
+        and runtime
+    ]
+    if not runtimes:
+        return {}, False
+    serialized = {json.dumps(runtime, sort_keys=True) for runtime in runtimes}
+    return dict(runtimes[0]), len(serialized) == 1 and len(runtimes) == len(rows)
+
+
+def _runtime_provenance_complete(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    direct_commit = value.get("sibyl_commit")
+    if isinstance(direct_commit, str):
+        return bool(direct_commit.strip()) and direct_commit != "unknown"
+    version = value.get("version")
+    runtime = value.get("runtime")
+    commit = runtime.get("commit") if isinstance(runtime, dict) else None
+    return (
+        isinstance(version, str)
+        and bool(version.strip())
+        and isinstance(commit, str)
+        and bool(commit.strip())
+        and commit != "unknown"
+    )
+
+
+def _nested_value(mapping: Any, *path: str) -> Any:
+    current = mapping
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
 def _first_string(*values: Any) -> str:
     for value in values:
         if isinstance(value, str) and value.strip():
@@ -1550,6 +1903,7 @@ def _contains_fragment(value: Any, fragment: str) -> bool:
 
 def _extract_case_latency_seconds(row: dict[str, Any]) -> float | None:
     seconds_paths = (
+        ("memory_query_duration_seconds",),
         ("memory_query_seconds",),
         ("memory_query_avg_seconds",),
         ("memory_query_latency_seconds",),
