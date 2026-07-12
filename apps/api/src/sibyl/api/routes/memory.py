@@ -2105,11 +2105,12 @@ async def remember_raw(
 
     started_at = time.perf_counter()
     try:
+        agent_id = getattr(ctx, "agent_id", None) or request.agent_id
         capture_surface = AGENT_DIARY_CAPTURE_SURFACE if request.diary else request.capture_surface
         source_id = request.source_id or f"{capture_surface}:manual"
         _validate_diary_request(
             diary=request.diary,
-            agent_id=request.agent_id,
+            agent_id=agent_id,
             memory_scope=request.memory_scope,
         )
         await _authorize_project_filter(
@@ -2136,7 +2137,9 @@ async def remember_raw(
             request=http_request,
             project_id=request.project_id,
         )
-        idempotency_payload = {"body": request.model_dump(mode="json")}
+        idempotency_body = request.model_dump(mode="json")
+        idempotency_body["agent_id"] = agent_id
+        idempotency_payload = {"body": idempotency_body}
         replayed = await replay_idempotent_response(
             http_request,
             organization_id=org.id,
@@ -2158,9 +2161,11 @@ async def remember_raw(
         metadata = _diary_metadata(
             metadata=request.metadata,
             diary=request.diary,
-            agent_id=request.agent_id,
+            agent_id=agent_id,
             project_id=request.project_id,
         )
+        if agent_id:
+            metadata["agent_id"] = agent_id
         memory = await remember_raw_memory(
             organization_id=str(org.id),
             principal_id=principal_id,
@@ -2187,7 +2192,7 @@ async def remember_raw(
             policy_allowed=write_decision.allowed,
             policy_reason=write_decision.reason,
             details={
-                "agent_id": request.agent_id,
+                "agent_id": agent_id,
                 "capture_flags": {
                     "basis": metadata.get("basis"),
                     "pinned": metadata.get("pinned"),

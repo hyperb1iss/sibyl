@@ -814,6 +814,7 @@ async def context_pack(
             project=request.project,
         )
         retrieval_goal = normalize_retrieval_question(request.goal)
+        agent_id = getattr(ctx, "agent_id", None) or request.agent_id
 
         async def compile_pack() -> ContextPack:
             return await compile_context(
@@ -825,7 +826,7 @@ async def context_pack(
                 project=request.project,
                 accessible_projects=accessible_projects,
                 principal_id=ctx.user_id,
-                agent_id=request.agent_id,
+                agent_id=agent_id,
                 organization_id=str(org.id),
                 limit=request.limit,
                 include_related=request.include_related,
@@ -866,7 +867,7 @@ async def context_pack(
             project=request.project,
             accessible_projects=accessible_projects,
             source_surface="context_pack",
-            agent_id=request.agent_id,
+            agent_id=agent_id,
             limit=request.limit,
             include_related=request.include_related,
             related_limit=request.related_limit,

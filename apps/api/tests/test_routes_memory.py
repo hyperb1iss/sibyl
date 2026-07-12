@@ -80,6 +80,7 @@ def _ctx(
     user_id: str = "user-123",
     org_role: OrganizationRole = OrganizationRole.MEMBER,
     api_key_memory_scope_keys: set[str] | None = None,
+    agent_id: str | None = None,
 ) -> MagicMock:
     ctx = MagicMock()
     ctx.user_id = user_id
@@ -88,6 +89,8 @@ def _ctx(
     # Set explicitly: a bare MagicMock would hand production code an
     # auto-created attribute that is neither a grant set nor None.
     ctx.api_key_memory_scope_keys = api_key_memory_scope_keys
+    # Same hazard: a truthy MagicMock here would outrank request.agent_id.
+    ctx.agent_id = agent_id
     return ctx
 
 
@@ -623,6 +626,51 @@ async def test_remember_raw_diary_requires_agent_id() -> None:
 
     assert exc.value.status_code == 400
     remember.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_remember_raw_diary_uses_authenticated_agent_id() -> None:
+    org = _org()
+    with patch(
+        "sibyl.api.routes.memory.remember_raw_memory",
+        AsyncMock(
+            return_value=_memory(
+                organization_id=str(org.id),
+                source_id="agent_diary:manual",
+                capture_surface="agent_diary",
+                metadata={
+                    "agent_id": "hermes:home:nova",
+                    "memory_kind": "agent_diary",
+                },
+            )
+        ),
+    ) as remember:
+        await remember_raw(
+            RawMemoryRememberRequest(raw_content="private state", diary=True),
+            org=org,
+            ctx=_ctx(agent_id="hermes:home:nova"),
+        )
+
+    assert remember.await_args.kwargs["metadata"]["agent_id"] == "hermes:home:nova"
+
+
+@pytest.mark.asyncio
+async def test_remember_raw_overwrites_metadata_with_authenticated_agent_id() -> None:
+    org = _org()
+    with patch(
+        "sibyl.api.routes.memory.remember_raw_memory",
+        AsyncMock(return_value=_memory(organization_id=str(org.id))),
+    ) as remember:
+        await remember_raw(
+            RawMemoryRememberRequest(
+                raw_content="completed turn",
+                metadata={"agent_id": "request-controlled"},
+            ),
+            org=org,
+            ctx=_ctx(agent_id="hermes:home:nova"),
+        )
+
+    assert remember.await_args.kwargs["metadata"]["agent_id"] == "hermes:home:nova"
 
 
 @pytest.mark.asyncio

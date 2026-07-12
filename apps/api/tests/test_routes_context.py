@@ -138,8 +138,12 @@ def _pack_with_usage() -> ContextPack:
     )
 
 
-def _ctx() -> SimpleNamespace:
-    return SimpleNamespace(user_id="user-123", api_key_memory_scope_keys=None)
+def _ctx(*, agent_id: str | None = None) -> SimpleNamespace:
+    return SimpleNamespace(
+        user_id="user-123",
+        agent_id=agent_id,
+        api_key_memory_scope_keys=None,
+    )
 
 
 def _http_request() -> SimpleNamespace:
@@ -1632,6 +1636,27 @@ class TestContextPackRoute:
             )
 
         assert compile_context.await_args.kwargs["agent_id"] == "nova"
+
+    @pytest.mark.asyncio
+    async def test_context_pack_prefers_authenticated_agent_id(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch(
+                "sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())
+            ) as compile_context,
+        ):
+            await context_pack(
+                request=ContextPackRequest(goal="ship faster"),
+                org=org,
+                ctx=_ctx(agent_id="hermes:home:nova"),
+            )
+
+        assert compile_context.await_args.kwargs["agent_id"] == "hermes:home:nova"
 
     @pytest.mark.asyncio
     async def test_context_pack_rejects_inaccessible_project(self) -> None:
