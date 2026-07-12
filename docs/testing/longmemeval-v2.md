@@ -80,6 +80,84 @@ moon run bench-longmemeval-v2-official-full -- \
   --skip-evaluation
 ```
 
+## Resumable Phase-0 Ablations
+
+The phase-0 workflow separates expensive memory construction from cheap retrieval and reader
+experiments. It builds three memory representations once, evaluates exactly five retrieval arms on
+the frozen diagnostic slice, then permits exactly three fixed-reader configurations only after a
+deterministic `GO` decision.
+
+Validate that the official loader and its import-time dependencies are available:
+
+```bash
+moon run bench-longmemeval-v2-ablations -- doctor \
+  --official-repo .moon/cache/longmemeval-v2-official
+```
+
+Materialize the complete experiment plan without model calls or service changes:
+
+```bash
+moon run bench-longmemeval-v2-ablations -- plan \
+  --official-repo .moon/cache/longmemeval-v2-official \
+  --data-root .moon/cache/benchmarks/longmemeval-v2-full \
+  --output-root .moon/cache/evals/lme-v2-phase0 \
+  --output .moon/cache/evals/lme-v2-phase0/ablation_plan.json \
+  --api-url http://127.0.0.1:3434/api \
+  --allow-localhost
+```
+
+The plan contains executable Moon command arrays for:
+
+1. `trajectory_18k`, `state_18k`, and `state_8k` memory builds for both domains.
+2. Five retrieval-only arms over the 32 frozen questions.
+3. One diagnostic report per arm.
+4. The pre-registered `GO`, `NO-GO`, and `RESEARCH-MORE` thresholds.
+
+Each memory-build command includes `--save-memory`, `--skip-evaluation`, and a dedicated
+`--checkpoint-dir`. After each completed trajectory, the adapter appends its local chunk catalog
+and atomically records the completed IDs, pending background job IDs, project, run, representation,
+and provider usage. Re-running the same command against the same isolated API and database resumes
+from the last durable trajectory. The checkpoint does not contain the SurrealDB data itself, so it
+cannot resume against a fresh or deleted database.
+
+Each completed memory artifact contains:
+
+- `memory_config.json`, without API tokens, email addresses, or passwords.
+- `chunk_catalog.jsonl.gz`, used for neighbor stitching without another ingest.
+- `memory_manifest.json`, with hashes, ingest provenance, and provider-reported embedding cost.
+
+Retrieval runs append and fsync one result per completed question. A restart validates the run and
+memory hashes, skips completed question IDs, and rewrites a deterministic final JSONL file. Query
+embedding cost and latency are summarized in `retrieval_summary.json`.
+
+After all five diagnostic reports exist, evaluate the frozen promotion gate:
+
+```bash
+moon run bench-longmemeval-v2-ablations -- gate \
+  --slice benchmarks/longmemeval_v2_diagnostic_slice.json \
+  --arm trajectory_18k=.moon/cache/evals/lme-v2-phase0/diagnostics/trajectory_18k/diagnostic_report.json \
+  --arm state_18k=.moon/cache/evals/lme-v2-phase0/diagnostics/state_18k/diagnostic_report.json \
+  --arm state_8k=.moon/cache/evals/lme-v2-phase0/diagnostics/state_8k/diagnostic_report.json \
+  --arm state_8k_diverse=.moon/cache/evals/lme-v2-phase0/diagnostics/state_8k_diverse/diagnostic_report.json \
+  --arm state_8k_diverse_neighbors=.moon/cache/evals/lme-v2-phase0/diagnostics/state_8k_diverse_neighbors/diagnostic_report.json \
+  --output .moon/cache/evals/lme-v2-phase0/ablation_gate.json
+```
+
+The initial experiment plan contains the two baseline fixed-reader commands. Run those only after
+the retrieval gate permits reader work. `reader-plan` rejects every decision except `GO`. With a
+passing gate and completed baseline reader runs, it derives the observed median baseline context
+budget and emits exactly three configurations: baseline, winner, and winner with matched context
+tokens.
+
+```bash
+moon run bench-longmemeval-v2-ablations -- reader-plan \
+  --plan .moon/cache/evals/lme-v2-phase0/ablation_plan.json \
+  --gate .moon/cache/evals/lme-v2-phase0/ablation_gate.json \
+  --baseline-run web=.moon/cache/evals/lme-v2-phase0/reader/baseline_fixed_reader/web \
+  --baseline-run enterprise=.moon/cache/evals/lme-v2-phase0/reader/baseline_fixed_reader/enterprise \
+  --output .moon/cache/evals/lme-v2-phase0/reader_plan.json
+```
+
 A leaderboard-valid operating point needs both domains at the same tier and method:
 
 ```bash

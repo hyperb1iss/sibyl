@@ -449,23 +449,26 @@ tasks:
   inventory-lint:
     script:
       uv run ruff check tools benchmarks/provider_usage.py
-      benchmarks/longmemeval_v2_diagnostics.py && uv run ruff format --check tools
-      benchmarks/provider_usage.py benchmarks/longmemeval_v2_diagnostics.py
+      benchmarks/longmemeval_v2_diagnostics.py benchmarks/longmemeval_v2_ablations.py && uv run
+      ruff format --check tools benchmarks/provider_usage.py benchmarks/longmemeval_v2_diagnostics.py
+      benchmarks/longmemeval_v2_ablations.py
     inputs:
       - tools/**/*.py
       - benchmarks/provider_usage.py
       - benchmarks/longmemeval_v2_diagnostics.py
+      - benchmarks/longmemeval_v2_ablations.py
       - benchmarks/longmemeval_v2_diagnostic_slice.json
       - pyproject.toml
 
   inventory-format:
     command:
       uv run ruff format tools benchmarks/provider_usage.py
-      benchmarks/longmemeval_v2_diagnostics.py
+      benchmarks/longmemeval_v2_diagnostics.py benchmarks/longmemeval_v2_ablations.py
     inputs:
       - tools/**/*.py
       - benchmarks/provider_usage.py
       - benchmarks/longmemeval_v2_diagnostics.py
+      - benchmarks/longmemeval_v2_ablations.py
       - pyproject.toml
     options:
       cache: false
@@ -691,7 +694,7 @@ tasks:
       tools/tests/test_longmemeval_bench.py tools/tests/test_longmemeval_live.py
       tools/tests/test_longmemeval_replay.py
       tools/tests/test_longmemeval_v2_probe.py tools/tests/test_longmemeval_v2_official.py
-      tools/tests/test_longmemeval_v2_diagnostics.py -v
+      tools/tests/test_longmemeval_v2_diagnostics.py tools/tests/test_longmemeval_v2_ablations.py -v
     inputs:
       - tools/**/*.py
       - .github/workflows/eval.yml
@@ -705,6 +708,7 @@ tasks:
       - benchmarks/longmemeval_v2_probe.py
       - benchmarks/longmemeval_v2_official.py
       - benchmarks/longmemeval_v2_diagnostics.py
+      - benchmarks/longmemeval_v2_ablations.py
       - benchmarks/longmemeval_v2_diagnostic_slice.json
       - benchmarks/provider_usage.py
       - benchmarks/longmemeval_v2_memory/**/*.py
@@ -1280,6 +1284,13 @@ tasks:
 
   bench-longmemeval-v2-diagnostics:
     command: uv run python benchmarks/longmemeval_v2_diagnostics.py
+    options:
+      cache: false
+
+  bench-longmemeval-v2-ablations:
+    command:
+      uv run --with numpy --with openai --with openai-agents --with pillow --with tqdm
+      --with transformers python benchmarks/longmemeval_v2_ablations.py
     options:
       cache: false
 
