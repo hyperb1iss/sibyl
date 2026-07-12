@@ -32,6 +32,7 @@ from sibyl_core.tools.context import (
     context_item_source_id,
     context_pack_to_dict,
     context_pack_to_markdown,
+    render_context_pack_markdown,
 )
 from sibyl_core.tools.responses import SearchResponse, SearchResult
 
@@ -1753,6 +1754,24 @@ def test_markdown_token_budget_trims_items() -> None:
     assert len(trimmed) <= 200 * 4 + 120
     assert "Decision 0" in trimmed
     assert "Trimmed to ~200 tokens" in trimmed
+
+
+def test_markdown_render_reports_only_emitted_item_ids() -> None:
+    pack = _budget_pack(8)
+
+    rendered = render_context_pack_markdown(
+        pack,
+        max_items=8,
+        items_per_section=8,
+        token_budget=200,
+    )
+
+    assert rendered.rendered_item_ids
+    assert len(rendered.rendered_item_ids) < 8
+    assert rendered.rendered_item_ids == tuple(
+        f"decision-{index}" for index in range(len(rendered.rendered_item_ids))
+    )
+    assert all(item_id in rendered.markdown for item_id in rendered.rendered_item_ids)
 
 
 def test_markdown_renderer_prioritizes_relevant_recent_memory() -> None:

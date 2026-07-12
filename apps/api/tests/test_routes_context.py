@@ -355,6 +355,7 @@ class TestContextPackRoute:
         assert response.layer == ContextLayer.RECALL
         assert response.markdown is not None
         assert response.markdown.startswith("# Sibyl Context Pack")
+        assert response.rendered_item_ids == []
         assert compile_context.await_args.kwargs["accessible_projects"] == {"proj_1"}
         assert compile_context.await_args.kwargs["retrieval_query"] == "ship faster"
         assert compile_context.await_args.kwargs["layer"] == ContextLayer.RECALL
@@ -1320,6 +1321,29 @@ class TestContextPackRoute:
 
         assert exc_info.value.status_code == 500
         compile_context.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_context_pack_can_defer_exposure_and_reports_rendered_ids(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["project-sibyl"]),
+            ),
+            patch(
+                "sibyl_core.tools.context.compile_context",
+                AsyncMock(return_value=_pack_with_quality()),
+            ) as compile_context,
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(goal="ship faster", record_exposure=False),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        assert response.rendered_item_ids == ["decision_1"]
+        assert compile_context.await_args.kwargs["record_exposure"] is False
 
     @pytest.mark.asyncio
     async def test_context_pack_forwards_api_key_memory_scope_keys(self) -> None:

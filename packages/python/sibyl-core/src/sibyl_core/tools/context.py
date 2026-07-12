@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 import structlog
@@ -885,6 +885,12 @@ _MARKDOWN_CHARS_PER_TOKEN = 4
 _ACTIVE_WORK_ANCHOR_INTENTS = frozenset({ContextIntent.BUILD, ContextIntent.GENERAL})
 
 
+@dataclass(frozen=True, slots=True)
+class ContextMarkdownRender:
+    markdown: str
+    rendered_item_ids: tuple[str, ...]
+
+
 def _has_active_lookup(section: ContextSection) -> bool:
     return section.facet is ContextFacet.ACTIVE_WORK and any(
         item.metadata.get("active_lookup") for item in section.items
@@ -967,7 +973,7 @@ def _item_markdown_lines(
     return lines
 
 
-def context_pack_to_markdown(
+def render_context_pack_markdown(
     pack: ContextPack,
     *,
     max_items: int = 8,
@@ -975,7 +981,7 @@ def context_pack_to_markdown(
     max_content_chars: int = 280,
     include_related: bool = True,
     token_budget: int | None = None,
-) -> str:
+) -> ContextMarkdownRender:
     """Render a context pack as compact Markdown for agent injection.
 
     token_budget caps the rendered size at roughly that many tokens
@@ -1004,6 +1010,7 @@ def context_pack_to_markdown(
     used = sum(len(line) + 1 for line in lines)
     remaining = max_items
     emitted_items = 0
+    rendered_item_ids: list[str] = []
     trimmed = False
     for section in _sections_for_markdown(pack.sections, intent=pack.intent):
         if remaining <= 0 or trimmed:
@@ -1028,6 +1035,7 @@ def context_pack_to_markdown(
             used += block_chars
             section_emitted = True
             emitted_items += 1
+            rendered_item_ids.append(item.id)
             remaining -= 1
 
     if trimmed:
@@ -1035,7 +1043,31 @@ def context_pack_to_markdown(
     elif pack.usage_hint:
         lines.extend(["", f"_Hint: {pack.usage_hint}_"])
 
-    return "\n".join(lines)
+    return ContextMarkdownRender(
+        markdown="\n".join(lines),
+        rendered_item_ids=tuple(rendered_item_ids),
+    )
+
+
+def context_pack_to_markdown(
+    pack: ContextPack,
+    *,
+    max_items: int = 8,
+    items_per_section: int = 3,
+    max_content_chars: int = 280,
+    include_related: bool = True,
+    token_budget: int | None = None,
+) -> str:
+    """Render a context pack as compact Markdown for agent injection."""
+
+    return render_context_pack_markdown(
+        pack,
+        max_items=max_items,
+        items_per_section=items_per_section,
+        max_content_chars=max_content_chars,
+        include_related=include_related,
+        token_budget=token_budget,
+    ).markdown
 
 
 async def _attach_related_items(
@@ -1514,6 +1546,7 @@ def context_pack_to_dict(pack: ContextPack) -> dict[str, Any]:
 __all__ = [
     "FACET_TYPES",
     "INTENT_FACETS",
+    "ContextMarkdownRender",
     "compile_context",
     "context_item_freshness",
     "context_item_lifecycle_flags",
@@ -1522,4 +1555,5 @@ __all__ = [
     "context_item_source_id",
     "context_pack_to_dict",
     "context_pack_to_markdown",
+    "render_context_pack_markdown",
 ]

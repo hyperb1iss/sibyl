@@ -157,3 +157,7 @@ class ContextPackResponse(BaseModel):
         default=None,
         description="Enhanced evidence retrieved concurrently with the context pack",
     )
+    rendered_item_ids: list[str] = Field(
+        default_factory=list,
+        description="Top-level item IDs included in the rendered Markdown",
+    )
