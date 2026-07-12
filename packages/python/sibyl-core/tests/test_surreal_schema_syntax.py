@@ -26,6 +26,7 @@ from sibyl_core.backends.surreal.content_schema import (
     CONTENT_ENTITY_ANCHOR_MIGRATION_DEFINITIONS,
     CONTENT_EXTRACTED_INTO_RELATION_MIGRATION_DEFINITIONS,
     CONTENT_HIGHLIGHT_SNIPPET_MIGRATION_DEFINITIONS,
+    CONTENT_IDEMPOTENCY_CLAIM_CAS_MIGRATION_DEFINITIONS,
     CONTENT_LIFECYCLE_REVIEW_SPLIT_MIGRATION_DEFINITIONS,
     CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS,
     CONTENT_LOOKUP_INDEX_MIGRATION_DEFINITIONS,
@@ -601,6 +602,21 @@ def test_content_raw_capture_required_fields_have_terminal_repair() -> None:
     assert "metadata.citation_count" in migration_sql
     assert "metadata.misled_count" in migration_sql
     assert CONTENT_RAW_CAPTURE_REQUIRED_FIELD_REPAIR_DEFINITIONS.strip().splitlines()[0] in (
+        migration_sql
+    )
+
+
+def test_content_idempotency_claim_cas_is_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration = next(item for item in migrations if item.name == "content_idempotency_claim_cas")
+    migration_sql = "\n".join(migration.statements)
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 24
+    for field in ("claim_token", "claim_revision", "updated_at"):
+        assert f"DEFINE FIELD IF NOT EXISTS {field} ON api_idempotency_records" in migration_sql
+        assert f"DEFINE FIELD OVERWRITE {field} ON api_idempotency_records" in migration_sql
+    assert "claim_token = claim_token ?? uuid" in migration_sql
+    assert CONTENT_IDEMPOTENCY_CLAIM_CAS_MIGRATION_DEFINITIONS.strip().splitlines()[0] in (
         migration_sql
     )
 

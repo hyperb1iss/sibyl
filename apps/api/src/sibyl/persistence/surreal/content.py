@@ -639,7 +639,10 @@ def _api_idempotency_from_record(record: Mapping[str, object]) -> ApiIdempotency
         request_hash=_coerce_str(record.get("request_hash")),
         response_status_code=_coerce_int(record.get("response_status_code")),
         response_body=_coerce_dict(record.get("response_body")),
+        claim_token=_coerce_str(record.get("claim_token")),
+        claim_revision=max(_coerce_int(record.get("claim_revision")), 1),
         created_at=_coerce_datetime(record.get("created_at")) or now,
+        updated_at=_coerce_datetime(record.get("updated_at")) or now,
     )
 
 
@@ -654,7 +657,10 @@ def _api_idempotency_record(record: ApiIdempotencyRecord) -> SurrealRecord:
         "request_hash": record.request_hash,
         "response_status_code": record.response_status_code,
         "response_body": dict(record.response_body),
+        "claim_token": record.claim_token,
+        "claim_revision": record.claim_revision,
         "created_at": record.created_at,
+        "updated_at": record.updated_at,
     }
 
 
@@ -1916,6 +1922,38 @@ async def save_api_idempotency_record(
             record=_api_idempotency_record(record),
         )
     return _api_idempotency_from_record(saved)
+
+
+async def compare_and_set_api_idempotency_record(
+    _session: object,
+    *,
+    record: ApiIdempotencyRecord,
+    expected_claim_token: str,
+    expected_claim_revision: int,
+    pending_status_code: int,
+    stale_before: datetime | None = None,
+) -> ApiIdempotencyRecord | None:
+    """Replace one pending claim only while its fencing token still matches."""
+    stale_clause = " AND updated_at <= $stale_before" if stale_before is not None else ""
+    async with surreal_content_client() as client:
+        saved = await _select_one(
+            client,
+            "UPDATE api_idempotency_records CONTENT $record "
+            "WHERE uuid = $uuid "
+            "AND organization_id = $organization_id "
+            "AND claim_token = $expected_claim_token "
+            "AND claim_revision = $expected_claim_revision "
+            "AND response_status_code = $pending_status_code"
+            f"{stale_clause} RETURN AFTER;",
+            uuid=str(record.id),
+            organization_id=str(record.organization_id),
+            expected_claim_token=expected_claim_token,
+            expected_claim_revision=expected_claim_revision,
+            pending_status_code=pending_status_code,
+            stale_before=stale_before,
+            record=_api_idempotency_record(record),
+        )
+    return _api_idempotency_from_record(saved) if saved is not None else None
 
 
 async def _load_document_entity_chunk(

@@ -62,7 +62,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 24
+CONTENT_SCHEMA_CURRENT_VERSION = 25
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -567,6 +567,21 @@ DEFINE FIELD OVERWRITE misled_count ON raw_captures TYPE int DEFAULT 0;
 """
 )
 
+CONTENT_IDEMPOTENCY_CLAIM_CAS_MIGRATION_DEFINITIONS = """
+DEFINE FIELD IF NOT EXISTS claim_token ON api_idempotency_records TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS claim_revision ON api_idempotency_records TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS updated_at ON api_idempotency_records TYPE option<datetime>;
+UPDATE api_idempotency_records SET
+    claim_token = claim_token ?? uuid,
+    claim_revision = claim_revision ?? 1,
+    updated_at = updated_at ?? created_at ?? time::now()
+WHERE claim_token = NONE OR claim_revision = NONE OR updated_at = NONE;
+DEFINE FIELD OVERWRITE claim_token ON api_idempotency_records TYPE string;
+DEFINE FIELD OVERWRITE claim_revision ON api_idempotency_records TYPE int DEFAULT 1
+    ASSERT $value >= 1;
+DEFINE FIELD OVERWRITE updated_at ON api_idempotency_records TYPE datetime DEFAULT time::now();
+"""
+
 
 # `DEFINE TABLE IF NOT EXISTS ... SCHEMAFULL` silently no-ops against a table Surreal
 # already auto-created SCHEMALESS on an application write, so a table whose writer shipped
@@ -726,6 +741,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=24,
             name="content_schemafull_repair",
             statements=tuple(split_statements(CONTENT_SCHEMAFULL_REPAIR_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=25,
+            name="content_idempotency_claim_cas",
+            statements=tuple(split_statements(CONTENT_IDEMPOTENCY_CLAIM_CAS_MIGRATION_DEFINITIONS)),
         ),
     )
 

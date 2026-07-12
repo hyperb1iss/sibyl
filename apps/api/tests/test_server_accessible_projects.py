@@ -499,6 +499,7 @@ async def test_remember_mcp_memory_replays_idempotent_receipt() -> None:
     )
     get_idempotency = AsyncMock(return_value=None)
     save_idempotency = AsyncMock(side_effect=lambda _session, *, record: record)
+    complete_idempotency = AsyncMock(side_effect=lambda _session, *, record, **_kwargs: record)
     kwargs = {
         "title": "Use receipts",
         "content": "Agent writes need durable proof.",
@@ -528,6 +529,10 @@ async def test_remember_mcp_memory_replays_idempotent_receipt() -> None:
             "sibyl.persistence.content_runtime.save_api_idempotency_record",
             save_idempotency,
         ),
+        patch(
+            "sibyl.persistence.content_runtime.compare_and_set_api_idempotency_record",
+            complete_idempotency,
+        ),
     ):
         result = await _remember_mcp_memory(**kwargs)
 
@@ -539,8 +544,9 @@ async def test_remember_mcp_memory_replays_idempotent_receipt() -> None:
         "idempotency_key": "remember-1",
         "replayed": False,
     }
-    assert save_idempotency.await_count == 2
-    saved_record = save_idempotency.await_args.kwargs["record"]
+    save_idempotency.assert_awaited_once()
+    complete_idempotency.assert_awaited_once()
+    saved_record = complete_idempotency.await_args.kwargs["record"]
     add.reset_mock()
     remember_raw.reset_mock()
 

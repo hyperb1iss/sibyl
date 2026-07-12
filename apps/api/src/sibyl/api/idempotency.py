@@ -8,6 +8,8 @@ import hashlib
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import replace
+from datetime import UTC, datetime
+from enum import StrEnum
 from functools import wraps
 from inspect import signature
 from uuid import UUID, uuid4
@@ -27,6 +29,19 @@ _PENDING_RESPONSE_STATUS = 102
 _REQUEST_CLAIM_ATTRIBUTE = "_sibyl_idempotency_claim"
 
 log = structlog.get_logger()
+
+
+class IdempotencyConflictCode(StrEnum):
+    LOCK_HELD = "idempotency_lock_held"
+    PAYLOAD_MISMATCH = "idempotency_payload_mismatch"
+    INTERRUPTED_PENDING = "idempotency_interrupted_pending"
+
+
+def idempotency_conflict(code: IdempotencyConflictCode, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={"code": code.value, "message": message},
+    )
 
 
 def idempotency_key(request: object | None) -> str | None:
@@ -129,49 +144,93 @@ async def complete_idempotency_record(
     response_status_code: int,
     response_body: dict[str, object],
     content_session: object,
-) -> None:
+) -> ApiIdempotencyRecord:
+    now = datetime.now(UTC).replace(tzinfo=None)
     completed = replace(
         claim,
         response_status_code=response_status_code,
         response_body=response_body,
+        claim_revision=claim.claim_revision + 1,
+        updated_at=now,
     )
     try:
-        await content_runtime.save_api_idempotency_record(
+        saved = await content_runtime.compare_and_set_api_idempotency_record(
             content_session,
             record=completed,
+            expected_claim_token=claim.claim_token,
+            expected_claim_revision=claim.claim_revision,
+            pending_status_code=_PENDING_RESPONSE_STATUS,
         )
+        if saved is not None:
+            return saved
     except Exception as exc:
-        try:
-            confirmed = await content_runtime.get_api_idempotency_record(
-                content_session,
-                organization_id=claim.organization_id,
-                principal_id=claim.principal_id,
-                idempotency_key=claim.idempotency_key,
-                method=claim.method,
-                path=claim.path,
-            )
-        except Exception:
-            confirmed = None
-        if (
-            confirmed is not None
-            and confirmed.id == claim.id
-            and confirmed.response_status_code == response_status_code
-            and confirmed.response_body == response_body
-        ):
-            return
-        log.exception(
-            "api_idempotency_completion_failed",
+        completion_error = exc
+    else:
+        completion_error = RuntimeError("idempotency claim changed before receipt completion")
+
+    try:
+        confirmed = await content_runtime.get_api_idempotency_record(
+            content_session,
+            organization_id=claim.organization_id,
+            principal_id=claim.principal_id,
+            idempotency_key=claim.idempotency_key,
             method=claim.method,
             path=claim.path,
-            organization_id=str(claim.organization_id),
         )
-        raise HTTPException(
-            status_code=503,
-            detail=(
+    except Exception:
+        confirmed = None
+    if (
+        confirmed is not None
+        and confirmed.id == claim.id
+        and confirmed.request_hash == claim.request_hash
+        and confirmed.response_status_code == response_status_code
+        and confirmed.response_body == response_body
+    ):
+        return confirmed
+    log.error(
+        "api_idempotency_completion_failed",
+        method=claim.method,
+        path=claim.path,
+        organization_id=str(claim.organization_id),
+        error_type=type(completion_error).__name__,
+    )
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "code": "idempotency_receipt_pending",
+            "message": (
                 "Mutation applied, but its receipt is still pending. "
                 "Retrying this idempotency key will not execute it again."
             ),
-        ) from exc
+        },
+    ) from completion_error
+
+
+async def try_reclaim_idempotency_record(
+    claim: ApiIdempotencyRecord,
+    *,
+    stale_before: datetime,
+    content_session: object,
+) -> ApiIdempotencyRecord | None:
+    """Rotate a stale claim after the caller has verified its mutation did not land."""
+    if not idempotency_record_pending(claim) or claim.updated_at > stale_before:
+        return None
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    reclaimed = replace(
+        claim,
+        claim_token=str(uuid4()),
+        claim_revision=claim.claim_revision + 1,
+        updated_at=now,
+    )
+    return await content_runtime.compare_and_set_api_idempotency_record(
+        content_session,
+        record=reclaimed,
+        expected_claim_token=claim.claim_token,
+        expected_claim_revision=claim.claim_revision,
+        pending_status_code=_PENDING_RESPONSE_STATUS,
+        stale_before=stale_before,
+    )
 
 
 def idempotency_record_pending(record: ApiIdempotencyRecord) -> bool:
@@ -287,9 +346,9 @@ def serialize_idempotent_request[**P, R](
             ):
                 return await func(*args, **kwargs)
         except LockAcquisitionError as exc:
-            raise HTTPException(
-                status_code=409,
-                detail="An identical idempotent request is still in progress. Please retry.",
+            raise idempotency_conflict(
+                IdempotencyConflictCode.LOCK_HELD,
+                "An identical idempotent request is still in progress. Please retry.",
             ) from exc
 
     return wrapper
@@ -324,14 +383,14 @@ async def replay_idempotent_response[ResponseModelT: BaseModel](
         _store_request_claim(request, record)
         return None
     if record.request_hash != request_hash:
-        raise HTTPException(
-            status_code=409,
-            detail="Idempotency-Key was already used for a different request",
+        raise idempotency_conflict(
+            IdempotencyConflictCode.PAYLOAD_MISMATCH,
+            "Idempotency-Key was already used for a different request",
         )
     if idempotency_record_pending(record):
-        raise HTTPException(
-            status_code=409,
-            detail=(
+        raise idempotency_conflict(
+            IdempotencyConflictCode.INTERRUPTED_PENDING,
+            (
                 "Idempotent operation is still in progress or was interrupted before "
                 "its receipt completed"
             ),

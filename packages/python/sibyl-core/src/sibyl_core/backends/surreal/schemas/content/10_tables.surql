@@ -210,7 +210,10 @@ DEFINE FIELD IF NOT EXISTS path ON api_idempotency_records TYPE string;
 DEFINE FIELD IF NOT EXISTS request_hash ON api_idempotency_records TYPE string;
 DEFINE FIELD IF NOT EXISTS response_status_code ON api_idempotency_records TYPE int;
 DEFINE FIELD IF NOT EXISTS response_body ON api_idempotency_records TYPE object FLEXIBLE DEFAULT {{}};
+DEFINE FIELD IF NOT EXISTS claim_token ON api_idempotency_records TYPE string;
+DEFINE FIELD IF NOT EXISTS claim_revision ON api_idempotency_records TYPE int DEFAULT 1;
 DEFINE FIELD IF NOT EXISTS created_at ON api_idempotency_records TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS updated_at ON api_idempotency_records TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX IF NOT EXISTS idx_api_idempotency_records_uuid ON api_idempotency_records FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_api_idempotency_records_scope ON api_idempotency_records

@@ -148,7 +148,10 @@ class ApiIdempotencyRecord:
     response_status_code: int
     response_body: dict[str, object]
     id: UUID = field(default_factory=uuid4)
+    claim_token: str = field(default_factory=lambda: str(uuid4()))
+    claim_revision: int = 1
     created_at: datetime = field(default_factory=utcnow_naive)
+    updated_at: datetime = field(default_factory=utcnow_naive)
 
 
 @dataclass(frozen=True)

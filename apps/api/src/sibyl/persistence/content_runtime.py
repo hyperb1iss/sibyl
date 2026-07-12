@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from sibyl.persistence.surreal.content import (
     check_relational_backend_health,
+    compare_and_set_api_idempotency_record,
     count_remaining_unlinked_chunks,
     create_crawl_source_record,
     delete_crawl_source_record,
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "check_relational_backend_health",
+    "compare_and_set_api_idempotency_record",
     "count_remaining_unlinked_chunks",
     "create_crawl_source_record",
     "delete_crawl_source_record",

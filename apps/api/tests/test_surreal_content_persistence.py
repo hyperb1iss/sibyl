@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -37,6 +38,7 @@ from sibyl.persistence.surreal.backups import (
     update_backup_settings,
 )
 from sibyl.persistence.surreal.content import (
+    compare_and_set_api_idempotency_record,
     create_crawl_source_record,
     delete_crawl_source_record,
     delete_crawled_document_record,
@@ -459,6 +461,52 @@ async def test_api_idempotency_record_round_trips_through_surreal(
     assert params["uuid"] == str(record.id)
     assert params["organization_id"] == str(record.organization_id)
     assert params["record"]["response_body"] == {"id": "episode_123"}
+    assert params["record"]["claim_token"] == record.claim_token
+    assert params["record"]["claim_revision"] == 1
+
+
+@pytest.mark.asyncio
+async def test_api_idempotency_claim_compare_and_set_is_fenced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = ApiIdempotencyRecord(
+        organization_id=uuid4(),
+        principal_id="user-123",
+        idempotency_key="idem-123",
+        method="POST",
+        path="/memory/raw",
+        request_hash="hash-123",
+        response_status_code=102,
+        response_body={},
+        claim_token="claim-1",
+        claim_revision=2,
+    )
+    updated = replace(record, claim_token="claim-2", claim_revision=3)
+    client = _QueuedContentClient([[surreal_content._api_idempotency_record(updated)]])
+
+    @asynccontextmanager
+    async def client_scope():
+        yield client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", client_scope)
+
+    saved = await compare_and_set_api_idempotency_record(
+        None,
+        record=updated,
+        expected_claim_token="claim-1",
+        expected_claim_revision=2,
+        pending_status_code=102,
+        stale_before=record.updated_at,
+    )
+
+    assert saved == updated
+    query, params = client.calls[0]
+    assert "claim_token = $expected_claim_token" in query
+    assert "claim_revision = $expected_claim_revision" in query
+    assert "response_status_code = $pending_status_code" in query
+    assert "updated_at <= $stale_before" in query
+    assert params["expected_claim_token"] == "claim-1"
+    assert params["expected_claim_revision"] == 2
 
 
 def test_raw_capture_record_preserves_first_class_lifecycle_fields() -> None:

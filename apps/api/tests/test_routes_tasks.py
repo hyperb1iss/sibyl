@@ -359,6 +359,7 @@ async def test_create_task_saves_idempotent_response_after_success() -> None:
         relationship_manager=SimpleNamespace(create=AsyncMock(return_value="rel-123")),
     )
     save_record = AsyncMock(side_effect=lambda _session, *, record: record)
+    complete_record = AsyncMock(side_effect=lambda _session, *, record, **_kwargs: record)
 
     with (
         patch("sibyl.api.routes.tasks.verify_entity_project_access", AsyncMock()),
@@ -369,6 +370,10 @@ async def test_create_task_saves_idempotent_response_after_success() -> None:
         patch(
             "sibyl.api.idempotency.content_runtime.save_api_idempotency_record",
             save_record,
+        ),
+        patch(
+            "sibyl.api.idempotency.content_runtime.compare_and_set_api_idempotency_record",
+            complete_record,
         ),
         patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock(return_value=runtime)),
         patch("sibyl.api.routes.tasks.broadcast_event", AsyncMock()),
@@ -382,8 +387,9 @@ async def test_create_task_saves_idempotent_response_after_success() -> None:
         )
 
     assert response.task_id == "task-123"
-    assert save_record.await_count == 2
-    saved = save_record.await_args.kwargs["record"]
+    save_record.assert_awaited_once()
+    complete_record.assert_awaited_once()
+    saved = complete_record.await_args.kwargs["record"]
     assert saved.organization_id == org.id
     assert saved.principal_id == str(user.id)
     assert saved.idempotency_key == "idem-task"
@@ -707,6 +713,7 @@ class TestNotesRoute:
             relationship_manager=SimpleNamespace(create=AsyncMock(return_value="rel-123")),
         )
         save_record = AsyncMock(side_effect=lambda _session, *, record: record)
+        complete_record = AsyncMock(side_effect=lambda _session, *, record, **_kwargs: record)
 
         with (
             patch(
@@ -723,6 +730,10 @@ class TestNotesRoute:
                 "sibyl.api.idempotency.content_runtime.save_api_idempotency_record",
                 save_record,
             ),
+            patch(
+                "sibyl.api.idempotency.content_runtime.compare_and_set_api_idempotency_record",
+                complete_record,
+            ),
             patch("sibyl.api.routes.tasks.broadcast_event", AsyncMock()),
         ):
             response = await create_note(
@@ -738,8 +749,9 @@ class TestNotesRoute:
         assert response.content == "Save me"
         manager.create_direct.assert_awaited_once()
         runtime.relationship_manager.create.assert_awaited_once()
-        assert save_record.await_count == 2
-        saved = save_record.await_args.kwargs["record"]
+        save_record.assert_awaited_once()
+        complete_record.assert_awaited_once()
+        saved = complete_record.await_args.kwargs["record"]
         assert saved.organization_id == org.id
         assert saved.principal_id == str(user.id)
         assert saved.idempotency_key == "idem-note"
