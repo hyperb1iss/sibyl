@@ -1015,18 +1015,12 @@ def load_receipt_source_runs(
         judge_usage_path = source_dir / "provider_usage" / "judge.jsonl"
         plan = _load_json_if_exists(plan_path)
         memory_config = _load_json_if_exists(memory_config_path)
-        run_id = _first_string(
-            plan.get("run_id"),
-            _nested_value(memory_config, "memory_params", "run_id"),
-        )
         reader_usage_log = _load_usage_log(
             reader_usage_path,
-            run_id=run_id,
             role="reader",
         )
         judge_usage_log = _load_usage_log(
             judge_usage_path,
-            run_id=run_id,
             role="judge",
         )
         source_runs.append(
@@ -1049,8 +1043,10 @@ def load_receipt_source_runs(
                 "memory_config": memory_config,
                 "reader_usage_events": reader_usage_log["events"],
                 "reader_usage_invalid_lines": reader_usage_log["invalid_lines"],
+                "reader_usage_run_ids": reader_usage_log["run_ids"],
                 "judge_usage_events": judge_usage_log["events"],
                 "judge_usage_invalid_lines": judge_usage_log["invalid_lines"],
+                "judge_usage_run_ids": judge_usage_log["run_ids"],
             }
         )
     return source_runs
@@ -1085,11 +1081,15 @@ def build_source_runs_receipt(
                     **artifact_path_record(source_run["reader_usage_path"]),
                     "event_count": len(source_run["reader_usage_events"]),
                     "invalid_line_count": source_run["reader_usage_invalid_lines"],
+                    "run_ids": source_run["reader_usage_run_ids"],
+                    "attempt_count": len(source_run["reader_usage_run_ids"]),
                 },
                 "judge": {
                     **artifact_path_record(source_run["judge_usage_path"]),
                     "event_count": len(source_run["judge_usage_events"]),
                     "invalid_line_count": source_run["judge_usage_invalid_lines"],
+                    "run_ids": source_run["judge_usage_run_ids"],
+                    "attempt_count": len(source_run["judge_usage_run_ids"]),
                 },
             },
             "effective_memory_config": _sanitize_config(source_run["memory_config"]),
@@ -1853,9 +1853,9 @@ def _load_jsonl_if_exists(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def _load_usage_log(path: Path, *, run_id: str, role: str) -> dict[str, Any]:
+def _load_usage_log(path: Path, *, role: str) -> dict[str, Any]:
     if not path.is_file():
-        return {"events": [], "invalid_lines": 0}
+        return {"events": [], "invalid_lines": 0, "run_ids": []}
     events: list[dict[str, Any]] = []
     invalid_lines = 0
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -1869,13 +1869,21 @@ def _load_usage_log(path: Path, *, run_id: str, role: str) -> dict[str, Any]:
         if not isinstance(loaded, dict):
             invalid_lines += 1
             continue
-        if run_id and loaded.get("run_id") != run_id:
-            continue
         if loaded.get("role") != role or not isinstance(loaded.get("usage"), dict):
             invalid_lines += 1
             continue
         events.append(loaded)
-    return {"events": events, "invalid_lines": invalid_lines}
+    return {
+        "events": events,
+        "invalid_lines": invalid_lines,
+        "run_ids": sorted(
+            {
+                run_id
+                for event in events
+                if isinstance(run_id := event.get("run_id"), str) and run_id
+            }
+        ),
+    }
 
 
 def _sanitize_config(value: Any) -> Any:

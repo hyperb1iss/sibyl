@@ -12,6 +12,7 @@ import pytest
 EXPECTED_ARM_COUNT = 5
 EXPECTED_REPRESENTATION_COUNT = 3
 EXPECTED_READER_COMMAND_COUNT = 6
+EXPECTED_PROVENANCE_ATTEMPTS = 2
 EXPECTED_MATCHED_CONTEXT_TOKENS = 250
 EXPECTED_EMBEDDING_COST_USD = 0.03
 
@@ -131,6 +132,22 @@ def test_ablation_gate_enforces_go_no_go_and_research_more(tmp_path: Path) -> No
     assert gate["reader_phase_allowed"] is True
     assert gate["winner_arm"] == "state_8k_diverse_neighbors"
 
+    masked_paths = _write_reports(
+        tmp_path / "masked",
+        module,
+        exact={
+            "state_8k_diverse": 0.40,
+            "state_8k_diverse_neighbors": 0.36,
+        },
+        multi={
+            "state_8k_diverse": 0.15,
+            "state_8k_diverse_neighbors": 0.20,
+        },
+    )
+    masked = module.evaluate_ablation_reports(masked_paths, slice_record=slice_record)
+    assert masked["decision"] == "GO"
+    assert masked["winner_arm"] == "state_8k_diverse_neighbors"
+
     no_go_paths = _write_reports(tmp_path / "no-go", module, exact={}, multi={})
     no_go = module.evaluate_ablation_reports(no_go_paths, slice_record=slice_record)
     assert no_go["decision"] == "NO-GO"
@@ -235,6 +252,38 @@ def test_retrieval_accounting_combines_saved_ingest_and_query_cost() -> None:
     assert accounting["embedding_accounting"]["cost_coverage_complete"] is True
 
 
+def test_retrieval_resume_ignores_provenance_drift(tmp_path: Path) -> None:
+    module = _load_module()
+    path = tmp_path / "retrieval_run.json"
+    identity = {
+        "domain": "web",
+        "arm": {"name": "state_8k_diverse"},
+        "question_ids": ["q-web"],
+        "memory_artifact_sha256": "sha256:memory",
+    }
+
+    module.ensure_run_identity(
+        path,
+        identity=identity,
+        provenance={"runner": {"commit": "one", "dirty": True}},
+    )
+    module.ensure_run_identity(
+        path,
+        identity=identity,
+        provenance={"runner": {"commit": "two", "dirty": False}},
+    )
+
+    record = module.load_json(path)
+    assert record["identity"] == identity
+    assert len(record["provenance_attempts"]) == EXPECTED_PROVENANCE_ATTEMPTS
+    with pytest.raises(RuntimeError, match="changed identity"):
+        module.ensure_run_identity(
+            path,
+            identity={**identity, "memory_artifact_sha256": "sha256:other"},
+            provenance={},
+        )
+
+
 class _FakeMemory:
     def __init__(self) -> None:
         self.queries: list[tuple[str, str | None]] = []
@@ -294,6 +343,7 @@ def _write_inputs(tmp_path: Path) -> tuple[Path, Path]:
                     {"question_id": "q-enterprise", "domain": "enterprise"},
                 ],
                 "decision_thresholds": {
+                    "selection_rule": "any_arm_meets_both",
                     "go": {
                         "exact_context_recall_at_10_absolute_gain": 0.15,
                         "multi_state_evidence_coverage_at_10_absolute_gain": 0.10,

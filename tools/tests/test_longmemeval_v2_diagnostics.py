@@ -97,11 +97,78 @@ def test_diagnostics_separate_selection_exposure_and_reader_failures(tmp_path: P
     mismatched_slice = {
         **slice_record,
         "source_artifacts": {
-            "web": {"haystack_sha256": "sha256:mismatch"},
+            "web": {"slice_haystack_sha256": "sha256:mismatch"},
         },
     }
     with pytest.raises(ValueError, match="haystack hash mismatch"):
         module.validate_slice_sources(mismatched_slice, sources)
+
+
+def test_frozen_slice_accepts_matching_candidate_haystack_subset(tmp_path: Path) -> None:
+    module = _load_module()
+    questions = [_question(question_id) for question_id in ("q1", "q2", "q3")]
+    trajectories = [_trajectory("t-evidence", tree="The priority filter is selected.")]
+    full_run = tmp_path / "full"
+    full_runtime = full_run / "runtime_inputs"
+    full_runtime.mkdir(parents=True)
+    full_haystack = {question["id"]: ["t-evidence"] for question in questions}
+    (full_runtime / "haystack.json").write_text(
+        json.dumps(full_haystack),
+        encoding="utf-8",
+    )
+    _write_jsonl(
+        full_run / "per_question.jsonl",
+        [
+            _result(
+                str(question["id"]),
+                trajectory_id="t-evidence",
+                content="The priority filter is selected.",
+            )
+            for question in questions
+        ],
+    )
+    question_index = {str(row["id"]): row for row in questions}
+    trajectory_index = {str(row["id"]): row for row in trajectories}
+    rows, sources = module.build_trace_rows(
+        runs={"web": full_run},
+        questions=question_index,
+        trajectories=trajectory_index,
+        max_rank=10,
+    )
+    slice_record = module.build_diagnostic_slice(
+        rows,
+        source_artifacts=sources,
+        size_per_domain=2,
+        max_rank=10,
+    )
+    selected_ids = {case["question_id"] for case in slice_record["cases"]}
+
+    candidate_run = tmp_path / "candidate"
+    candidate_runtime = candidate_run / "runtime_inputs"
+    candidate_runtime.mkdir(parents=True)
+    (candidate_runtime / "haystack.json").write_text(
+        json.dumps({question_id: full_haystack[question_id] for question_id in selected_ids}),
+        encoding="utf-8",
+    )
+    _write_jsonl(
+        candidate_run / "per_question.jsonl",
+        [
+            _result(
+                question_id,
+                trajectory_id="t-evidence",
+                content="The priority filter is selected.",
+            )
+            for question_id in selected_ids
+        ],
+    )
+    _, candidate_sources = module.build_trace_rows(
+        runs={"web": candidate_run},
+        questions=question_index,
+        trajectories=trajectory_index,
+        max_rank=10,
+    )
+
+    module.validate_slice_sources(slice_record, candidate_sources)
 
 
 def _question(question_id: str) -> dict[str, object]:

@@ -43,9 +43,11 @@ EXPECTED_NEIGHBOR_STITCH_SPAN = 1
 EXPECTED_SEARCH_LIMIT_OVERRIDE = 24
 EXPECTED_SAVED_USAGE_REQUESTS = 2
 EXPECTED_SAVED_USAGE_COST_USD = 0.25
+EXPECTED_USAGE_ATTEMPTS = 2
 TEST_CONTENT_MAX_CHARS = 420
 TEST_CONTEXT_MAX_CHARS = 800
 TEST_CREDENTIAL = "fresh-credential"
+TEST_EMAIL = "eval@example.test"
 
 
 class _RequestCall(TypedDict):
@@ -144,11 +146,11 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(
                 "--plan-only",
                 "--allow-localhost",
                 "--api-token",
-                "token-sentinel",
+                TEST_CREDENTIAL,
                 "--email",
-                "email-sentinel@example.test",
+                TEST_EMAIL,
                 "--password",
-                "password-sentinel",
+                TEST_CREDENTIAL,
             ]
         )
         == 0
@@ -170,15 +172,7 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(
     assert [row["id"] for row in runtime_questions] == ["q-enterprise"]
     assert runtime_haystack == {"q-enterprise": ["t1", "t2"]}
     assert memory_config["memory_type"] == "sibyl_live_api"
-    assert "api_token" not in memory_config["memory_params"]
-    assert "email" not in memory_config["memory_params"]
-    assert "password" not in memory_config["memory_params"]
-    assert "token-sentinel" not in json.dumps(memory_config)
-    assert "email-sentinel@example.test" not in json.dumps(memory_config)
-    assert "password-sentinel" not in json.dumps(memory_config)
-    assert os.environ["SIBYL_API_TOKEN"] == "token-sentinel"
-    assert os.environ["LME_SIBYL_EMAIL"] == "email-sentinel@example.test"
-    assert os.environ["LME_SIBYL_PASSWORD"] == "password-sentinel"
+    _assert_credentials_stay_process_local(memory_config)
     assert memory_config["memory_params"]["allow_localhost"] is True
     assert memory_config["memory_params"]["defer_embeddings"] is True
     assert memory_config["memory_params"]["content_max_chars"] == EXPECTED_CONTENT_MAX_CHARS
@@ -407,6 +401,30 @@ def test_longmemeval_v2_receipt_rejects_corrupt_provider_usage(tmp_path: Path) -
     )
     source_check = next(check for check in receipt["checks"] if check["name"] == "source runs")
     assert source_check["status"] == "FAIL"
+
+
+def test_usage_log_accounts_for_all_output_attempts(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    path = tmp_path / "reader.jsonl"
+    path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "role": "reader",
+                    "usage": {"total_tokens": 10},
+                }
+            )
+            for run_id in ("attempt-one", "attempt-two")
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    usage = module._load_usage_log(path, role="reader")
+
+    assert len(usage["events"]) == EXPECTED_USAGE_ATTEMPTS
+    assert usage["run_ids"] == ["attempt-one", "attempt-two"]
 
 
 def test_longmemeval_v2_receipt_redacts_sensitive_command_args() -> None:
@@ -1759,6 +1777,18 @@ def _write_dataset(root: Path) -> None:
         "\n".join(json.dumps(_trajectory(trajectory_id)) for trajectory_id in ["t1", "t2", "t3"]),
         encoding="utf-8",
     )
+
+
+def _assert_credentials_stay_process_local(memory_config: dict[str, object]) -> None:
+    params = memory_config["memory_params"]
+    assert isinstance(params, dict)
+    assert not {"api_token", "email", "password"} & params.keys()
+    serialized = json.dumps(memory_config)
+    assert TEST_CREDENTIAL not in serialized
+    assert TEST_EMAIL not in serialized
+    assert os.environ["SIBYL_API_TOKEN"] == TEST_CREDENTIAL
+    assert os.environ["LME_SIBYL_EMAIL"] == TEST_EMAIL
+    assert os.environ["LME_SIBYL_PASSWORD"] == TEST_CREDENTIAL
 
 
 def _write_official_repo(root: Path) -> Path:

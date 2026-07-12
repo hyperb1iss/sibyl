@@ -148,12 +148,18 @@ def build_trace_rows(
         per_question_path = run_dir / "per_question.jsonl"
         haystack_path = run_dir / "runtime_inputs" / "haystack.json"
         haystack = load_json(haystack_path)
+        results = load_jsonl(per_question_path)
+        evaluated_question_ids = [str(result.get("question_id") or "") for result in results]
         sources[domain] = {
             "per_question_sha256": sha256_file(per_question_path),
             "haystack_sha256": sha256_file(haystack_path),
+            "evaluated_haystack_sha256": haystack_subset_sha256(
+                haystack,
+                evaluated_question_ids,
+            ),
             "question_count": 0,
         }
-        for result in load_jsonl(per_question_path):
+        for result in results:
             question_id = str(result.get("question_id") or "")
             question = questions.get(question_id)
             if question is None:
@@ -236,6 +242,7 @@ def build_question_trace(
         "baseline_score_bool": score_bool if isinstance(score_bool, bool) else None,
         "answer_sha256": sha256_text(answer),
         "answer_length": len(answer),
+        "haystack_entry_sha256": sha256_json(haystack_ids),
         "exact_evidence_eligible": evidence_eligible,
         "exact_evidence_trajectory_ids": evidence_trajectories,
         "exact_evidence_states": evidence_states,
@@ -444,13 +451,24 @@ def build_diagnostic_slice(
             remaining = [row for row in domain_rows if row["question_id"] not in chosen_ids]
             chosen.extend(stable_rows(remaining)[: size_per_domain - len(chosen)])
         selected.extend(slice_case(row) for row in chosen[:size_per_domain])
+    slice_sources = {domain: dict(source) for domain, source in source_artifacts.items()}
+    for domain, source in slice_sources.items():
+        selected_ids = {str(case["question_id"]) for case in selected if case["domain"] == domain}
+        source["slice_haystack_sha256"] = sha256_json(
+            {
+                str(row["question_id"]): row["haystack_entry_sha256"]
+                for row in trace_rows
+                if row["domain"] == domain and row["question_id"] in selected_ids
+            }
+        )
     return {
         "schema_version": SLICE_SCHEMA_VERSION,
         "selection_policy": "deterministic round-robin by failure class and question type",
-        "source_artifacts": source_artifacts,
+        "source_artifacts": slice_sources,
         "max_rank": max_rank,
         "cases": selected,
         "decision_thresholds": {
+            "selection_rule": "any_arm_meets_both",
             "go": {
                 "exact_context_recall_at_10_absolute_gain": 0.15,
                 "multi_state_evidence_coverage_at_10_absolute_gain": 0.10,
@@ -480,9 +498,21 @@ def validate_slice_sources(
         if not isinstance(expected, dict) or current is None:
             msg = f"Diagnostic slice source domain {domain!r} is unavailable"
             raise ValueError(msg)
-        if expected.get("haystack_sha256") != current.get("haystack_sha256"):
+        if expected.get("slice_haystack_sha256") != current.get("evaluated_haystack_sha256"):
             msg = f"Diagnostic slice haystack hash mismatch for {domain}"
             raise ValueError(msg)
+
+
+def haystack_subset_sha256(
+    haystack: dict[str, Any],
+    question_ids: list[str],
+) -> str:
+    subset = {}
+    for question_id in sorted(set(question_ids)):
+        if question_id not in haystack:
+            raise ValueError(f"Missing haystack for question {question_id!r}")
+        subset[question_id] = sha256_json(haystack[question_id])
+    return sha256_json(subset)
 
 
 def round_robin_strata(rows: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:

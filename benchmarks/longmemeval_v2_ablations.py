@@ -374,10 +374,17 @@ def run_retrieval_command(args: argparse.Namespace) -> int:
         "arm": arm,
         "question_ids": [item["id"] for item in questions],
         "memory_artifact_sha256": memory_artifact_sha256(memory_dir),
+    }
+    run_provenance = {
+        "recorded_at": datetime.now(UTC).isoformat(),
         "official_repo_provenance": git_provenance(official_repo),
         "runner_provenance": git_provenance(ROOT),
     }
-    ensure_run_identity(output_dir / "retrieval_run.json", run_identity)
+    ensure_run_identity(
+        output_dir / "retrieval_run.json",
+        identity=run_identity,
+        provenance=run_provenance,
+    )
     memory = load_saved_memory(
         official_repo=official_repo,
         memory_dir=memory_dir,
@@ -400,6 +407,7 @@ def run_retrieval_command(args: argparse.Namespace) -> int:
         output_dir / "retrieval_summary.json",
         {
             **run_identity,
+            "provenance": run_provenance,
             "completed_at": datetime.now(UTC).isoformat(),
             "question_count": len(records),
             "completed_question_ids": [record["question_id"] for record in records],
@@ -540,7 +548,7 @@ def evaluate_ablation_reports(
             }
         )
     candidates = [item for item in comparisons if item["name"] != BASELINE_ARM]
-    winner = max(
+    reporting_winner = max(
         candidates,
         key=lambda item: (
             item["exact_context_recall_gain"],
@@ -549,26 +557,43 @@ def evaluate_ablation_reports(
         ),
     )
     thresholds = slice_record["decision_thresholds"]
+    selection_rule = thresholds.get("selection_rule")
+    if selection_rule != "any_arm_meets_both":
+        raise ValueError(f"Unsupported ablation selection rule: {selection_rule!r}")
     go = thresholds["go"]
     no_go = thresholds["no_go"]
-    if (
-        winner["exact_context_recall_gain"] >= go["exact_context_recall_at_10_absolute_gain"]
-        and winner["multi_state_evidence_coverage_gain"]
+    qualifying = [
+        item
+        for item in candidates
+        if item["exact_context_recall_gain"] >= go["exact_context_recall_at_10_absolute_gain"]
+        and item["multi_state_evidence_coverage_gain"]
         >= go["multi_state_evidence_coverage_at_10_absolute_gain"]
-    ):
+    ]
+    if qualifying:
         decision = "GO"
+        winner = max(
+            qualifying,
+            key=lambda item: (
+                item["exact_context_recall_gain"],
+                item["multi_state_evidence_coverage_gain"],
+                item["name"],
+            ),
+        )
     elif all(
         item["exact_context_recall_gain"] < no_go["all_arms_exact_context_recall_gain_below"]
         for item in candidates
     ):
         decision = "NO-GO"
+        winner = reporting_winner
     else:
         decision = "RESEARCH-MORE"
+        winner = reporting_winner
     return {
         "schema_version": GATE_SCHEMA_VERSION,
         "created_at": datetime.now(UTC).isoformat(),
         "decision": decision,
         "reader_phase_allowed": decision == "GO",
+        "selection_rule": selection_rule,
         "baseline_arm": BASELINE_ARM,
         "winner_arm": winner["name"],
         "thresholds": deepcopy(thresholds),
@@ -986,12 +1011,32 @@ def parse_named_paths(values: list[str]) -> dict[str, Path]:
     return parsed
 
 
-def ensure_run_identity(path: Path, identity: dict[str, Any]) -> None:
+def ensure_run_identity(
+    path: Path,
+    *,
+    identity: dict[str, Any],
+    provenance: dict[str, Any],
+) -> None:
     if path.exists():
-        if load_json(path) != identity:
+        loaded = load_json(path)
+        existing_identity = loaded.get("identity")
+        if not isinstance(existing_identity, dict):
+            existing_identity = {key: loaded.get(key) for key in identity}
+        if existing_identity != identity:
             raise RuntimeError(f"Refusing to resume retrieval with changed identity: {path}")
-        return
-    write_json(path, identity)
+        attempts = loaded.get("provenance_attempts")
+        provenance_attempts = list(attempts) if isinstance(attempts, list) else []
+    else:
+        provenance_attempts = []
+    provenance_attempts.append(provenance)
+    write_json(
+        path,
+        {
+            "schema_version": SCHEMA_VERSION,
+            "identity": identity,
+            "provenance_attempts": provenance_attempts,
+        },
+    )
 
 
 def memory_artifact_sha256(memory_dir: Path) -> str:

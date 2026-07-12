@@ -236,21 +236,26 @@
     "research_more": {
       "exact_context_recall_gain_max": 0.15,
       "exact_context_recall_gain_min": 0.08
-    }
+    },
+    "selection_rule": "any_arm_meets_both"
   },
   "max_rank": 10,
   "schema_version": "sibyl-longmemeval-v2-diagnostic-slice-v1",
   "selection_policy": "deterministic round-robin by failure class and question type",
   "source_artifacts": {
     "enterprise": {
+      "evaluated_haystack_sha256": "sha256:d77a0462f70af6c6476a4514a15c6c1c2fe1826e37e6930194f2459f10ed5cbb",
       "haystack_sha256": "sha256:7c98f42159050b83ed98e099d6fa9bdab0cf9e4200179036b86579df3a5f4ce4",
       "per_question_sha256": "sha256:147764d2f5614530bfa46e5e5bd4ac58c3fd529209045c7c7a079f13fd569ae8",
-      "question_count": 211
+      "question_count": 211,
+      "slice_haystack_sha256": "sha256:131e678bcab4effeafa9b91c5df01b26903c13bb6c6fd6ee0eff4d5551b15074"
     },
     "web": {
+      "evaluated_haystack_sha256": "sha256:695f38aba0c7a9b48dad50f70db520a145c0076a84f54cb929379933a2f2010c",
       "haystack_sha256": "sha256:07a453d5f267be5098c13c7fd70cc9338d6fca042deec08ddd79eddba42d719d",
       "per_question_sha256": "sha256:0ee6aad9a08cf47d174df4ca5f4c840301126f5a313d5301cc58ef7f05bfda70",
-      "question_count": 240
+      "question_count": 240,
+      "slice_haystack_sha256": "sha256:4615820ba1784bddef68e678bddf37a8d5916c35b3d07579c21562ac7c865302"
     }
   }
 }
