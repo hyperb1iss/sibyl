@@ -1540,6 +1540,7 @@ def _correction_metadata(
     duplicate_of_source_id: str | None,
     revised_content: str | None,
     principal_id: str | None,
+    provider_operation_id: str | None,
 ) -> dict[str, object]:
     metadata = dict(memory.metadata)
     history = list(_metadata_dict_values(metadata, "correction_history"))
@@ -1612,20 +1613,30 @@ def _correction_metadata(
             flags=preview.target_lifecycle_flags,
             reversible=preview.reversible,
         )
-    history.append(
-        {
-            "action": preview.action,
-            "audit_action": preview.audit_action,
-            "reason": reason or preview.reason,
-            "target_lifecycle_state": preview.target_lifecycle_state,
-            "target_lifecycle_flags": preview.target_lifecycle_flags,
-            "created_at": now,
-            "replacement_source_id": replacement_source_id,
-            "duplicate_of_source_id": duplicate_of_source_id,
-            "prior_revision": memory.revision,
-            "created_by_user_id": principal_id,
+    history_entry: dict[str, object] = {
+        "action": preview.action,
+        "audit_action": preview.audit_action,
+        "reason": reason or preview.reason,
+        "target_lifecycle_state": preview.target_lifecycle_state,
+        "target_lifecycle_flags": preview.target_lifecycle_flags,
+        "created_at": now,
+        "replacement_source_id": replacement_source_id,
+        "duplicate_of_source_id": duplicate_of_source_id,
+        "prior_revision": memory.revision,
+        "created_by_user_id": principal_id,
+    }
+    if provider_operation_id:
+        history_entry["_provider_recovery"] = {
+            "operation_id": provider_operation_id,
+            "affected_source_ids": list(preview.affected_source_ids),
+            "affected_derived_ids": list(preview.affected_derived_ids),
+            "reversible": preview.reversible,
+            "recall_impact": dict(preview.recall_impact),
+            "synthesis_impact": dict(preview.synthesis_impact),
+            "policy_reasons": _metadata_str_values(preview.metadata or {}, "policy_reasons"),
+            "current_revision": preview.current_revision,
         }
-    )
+    history.append(history_entry)
     metadata["correction_history"] = history
     metadata = with_memory_lifecycle_metadata(metadata, lifecycle)
     return with_reflection_finding_metadata(
@@ -1665,6 +1676,7 @@ async def apply_memory_correction(
     duplicate_of_source_id: str | None = None,
     revised_content: str | None = None,
     expected_revision: int | None = None,
+    provider_operation_id: str | None = None,
 ) -> MemoryCorrectionResult:
     preview = await preview_memory_correction(
         organization_id=organization_id,
@@ -1723,6 +1735,7 @@ async def apply_memory_correction(
             duplicate_of_source_id=canonical_duplicate_of_source_id,
             revised_content=revised_content,
             principal_id=principal_id,
+            provider_operation_id=provider_operation_id,
         ),
     )
     save_kwargs: dict[str, Any] = {}

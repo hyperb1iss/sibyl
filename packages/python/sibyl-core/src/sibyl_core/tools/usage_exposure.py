@@ -103,7 +103,7 @@ async def _annotate_exposures(
     target_factory: Any,
     metadata_factory: Any,
 ) -> dict[str, object]:
-    session_key, message_key = _usage_keys(
+    session_key, message_key = usage_exposure_keys(
         source_surface=source_surface,
         organization_id=organization_id,
         principal_id=principal_id,
@@ -465,7 +465,7 @@ def _mark_excluded(
     }
 
 
-def _usage_keys(
+def usage_exposure_keys(
     *,
     source_surface: str,
     organization_id: str | None,
@@ -503,4 +503,5 @@ __all__ = [
     "_USAGE_EXPOSURE_SUMMARY_KEY",
     "annotate_context_item_exposures",
     "annotate_search_result_exposures",
+    "usage_exposure_keys",
 ]

@@ -14,8 +14,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.idempotency import (
+    PROVIDER_REQUEST_HASH_METADATA_KEY,
+    IdempotencyConflictCode,
+    idempotency_conflict,
     idempotency_key,
     mutation_receipt,
+    provider_request_body,
+    provider_request_hash,
     replay_idempotent_response,
     save_idempotent_response,
     serialize_idempotent_request,
@@ -135,12 +140,20 @@ from sibyl_core.services.surreal_content import (
     get_raw_memory,
     get_raw_memory_by_source_id,
     get_raw_memory_lineage,
+    get_shared_surreal_content_client,
     list_reflection_candidate_reviews,
     recall_raw_memory_with_sources as recall_raw_memory,
     remember_raw_memory,
     save_raw_memory,
 )
-from sibyl_core.tools.usage_exposure import annotate_context_item_exposures
+from sibyl_core.services.usage import (
+    MemoryUsageItemKind,
+    list_memory_usage_exposure_proofs,
+)
+from sibyl_core.tools.usage_exposure import (
+    annotate_context_item_exposures,
+    usage_exposure_keys,
+)
 
 log = structlog.get_logger()
 
@@ -264,6 +277,32 @@ async def _authorized_exposure_item(
             project_id=project_id,
         ),
     )
+
+
+def _provider_recovery_conflict(message: str) -> HTTPException:
+    return idempotency_conflict(IdempotencyConflictCode.RECOVERY_CONFLICT, message)
+
+
+def _exposure_usage_metadata(
+    request: ContextExposureRequest,
+    *,
+    operation_id: str,
+) -> dict[str, object]:
+    return {
+        **request.metadata.model_dump(mode="json", exclude_none=True),
+        "provider_operation_id": operation_id,
+        "item_ids": list(request.exposed_ids),
+    }
+
+
+def _exposure_proof_target(item: ContextItem) -> tuple[str, MemoryUsageItemKind, str]:
+    if item.id.startswith("raw_memory:"):
+        return (
+            item.id,
+            MemoryUsageItemKind.RAW_CAPTURE,
+            item.id.removeprefix("raw_memory:"),
+        )
+    return (item.id, MemoryUsageItemKind.GRAPH_ENTITY, item.id)
 
 
 def _log_policy_decision(
@@ -599,7 +638,7 @@ def _raw_memory_response(
         title=memory.title,
         raw_content=memory.raw_content,
         tags=memory.tags,
-        metadata=memory.metadata,
+        metadata=_public_memory_metadata(memory),
         provenance=memory.provenance,
         capture_surface=memory.capture_surface,
         captured_at=memory.captured_at,
@@ -1307,12 +1346,26 @@ def _metadata_dicts(value: object) -> list[dict[str, Any]]:
     return [dict(item) for item in value if isinstance(item, dict)]
 
 
+def _public_correction_history(value: object) -> list[dict[str, Any]]:
+    return [
+        {key: item for key, item in entry.items() if key != "_provider_recovery"}
+        for entry in _metadata_dicts(value)
+    ]
+
+
+def _public_memory_metadata(memory: RawMemory) -> dict[str, object]:
+    metadata = dict(memory.metadata)
+    if "correction_history" in metadata:
+        metadata["correction_history"] = _public_correction_history(metadata["correction_history"])
+    return metadata
+
+
 def _correction_history(
     *,
     memory: RawMemory,
     audit_events: list[MemoryAuditEventResponse],
 ) -> list[dict[str, Any]]:
-    history = _metadata_dicts(memory.metadata.get("correction_history"))
+    history = _public_correction_history(memory.metadata.get("correction_history"))
     for event in audit_events:
         if not (
             event.action.startswith("memory.correction")
@@ -1335,6 +1388,56 @@ def _correction_history(
             }
         )
     return history
+
+
+def _provider_correction_preview(
+    *,
+    memory: RawMemory,
+    operation_id: str,
+    principal_id: str,
+    request: MemoryCorrectionRequest,
+) -> MemoryCorrectionPreview | None:
+    for entry in reversed(_metadata_dicts(memory.metadata.get("correction_history"))):
+        recovery = entry.get("_provider_recovery")
+        if not isinstance(recovery, dict) or recovery.get("operation_id") != operation_id:
+            continue
+        if (
+            entry.get("created_by_user_id") != principal_id
+            or entry.get("action") != request.action
+            or entry.get("prior_revision") != request.expected_revision
+        ):
+            raise _provider_recovery_conflict(
+                "Correction recovery found a mismatched actor, action, or prior revision"
+            )
+        return MemoryCorrectionPreview(
+            allowed=True,
+            source_id=memory.id,
+            action=str(entry["action"]),
+            reason=str(entry.get("reason") or "correction_applied"),
+            target_lifecycle_state=str(entry.get("target_lifecycle_state") or "active"),
+            target_lifecycle_flags=_str_list(entry.get("target_lifecycle_flags")),
+            affected_source_ids=_str_list(recovery.get("affected_source_ids")),
+            affected_derived_ids=_str_list(recovery.get("affected_derived_ids")),
+            reversible=bool(recovery.get("reversible")),
+            recall_impact=(
+                dict(recovery["recall_impact"])
+                if isinstance(recovery.get("recall_impact"), dict)
+                else {}
+            ),
+            synthesis_impact=(
+                dict(recovery["synthesis_impact"])
+                if isinstance(recovery.get("synthesis_impact"), dict)
+                else {}
+            ),
+            audit_action=str(entry.get("audit_action") or "memory.correction"),
+            metadata={"policy_reasons": _str_list(recovery.get("policy_reasons"))},
+            current_revision=(
+                int(recovery["current_revision"])
+                if isinstance(recovery.get("current_revision"), int)
+                else request.expected_revision
+            ),
+        )
+    return None
 
 
 def _promotion_state(
@@ -1409,7 +1512,7 @@ def _memory_source_inspect_response(
     audit_events: list[MemoryAuditEventResponse],
 ) -> MemorySourceInspectResponse:
     content_redacted = not policy_decision.allowed or _memory_lifecycle_redacts_content(memory)
-    metadata = dict(memory.metadata)
+    metadata = _public_memory_metadata(memory)
     if content_redacted:
         metadata.pop("memory_lifecycle", None)
         metadata.pop("reflection_findings", None)
@@ -1820,19 +1923,6 @@ async def expose_memory_context(
     )
     idempotency_path = "/memory/expose"
     idempotency_payload = {"body": request.model_dump(mode="json")}
-    replayed = await replay_idempotent_response(
-        http_request,
-        organization_id=org.id,
-        principal_id=principal_id,
-        method="POST",
-        path=idempotency_path,
-        payload=idempotency_payload,
-        response_model=ContextExposureResponse,
-        content_session=None,
-    )
-    if replayed is not None:
-        return replayed
-
     graph_runtime = (
         await get_surreal_graph_runtime(str(org.id))
         if any(not exposed_id.startswith("raw_memory:") for exposed_id in request.exposed_ids)
@@ -1857,6 +1947,63 @@ async def expose_memory_context(
         for exposed_id, item in zip(request.exposed_ids, candidates, strict=True)
         if item is None
     ]
+    usage_metadata = _exposure_usage_metadata(request, operation_id=operation_id)
+
+    async def recover_pending_exposure(_: object) -> ContextExposureResponse | None:
+        session_key, message_key = usage_exposure_keys(
+            source_surface=request.source_surface,
+            organization_id=str(org.id),
+            principal_id=principal_id,
+            project_id=request.project_id,
+            request_metadata=usage_metadata,
+        )
+        content_client = await get_shared_surreal_content_client()
+        proofs = await list_memory_usage_exposure_proofs(
+            content_client,
+            organization_id=str(org.id),
+            session_key=session_key,
+            message_key=message_key,
+            source_surface=request.source_surface,
+        )
+        if not proofs:
+            return None
+        expected = {_exposure_proof_target(item) for item in authorized_items}
+        actual = {(proof.response_id, proof.item_kind, proof.item_id) for proof in proofs}
+        scope_matches = all(
+            proof.principal_id == principal_id and proof.project_id == request.project_id
+            for proof in proofs
+        )
+        if actual != expected or not scope_matches:
+            raise _provider_recovery_conflict(
+                "Exposure recovery found usage events with a mismatched delivered set or scope"
+            )
+        recorded_ids = [item.id for item in authorized_items]
+        return ContextExposureResponse(
+            recorded_ids=recorded_ids,
+            excluded_ids=[],
+            denied_ids=denied_ids,
+            mutation_receipt=mutation_receipt(
+                http_request,
+                applied=bool(recorded_ids),
+                revision=1 if recorded_ids else None,
+                affected_records=recorded_ids,
+            ),
+        )
+
+    replayed = await replay_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=principal_id,
+        method="POST",
+        path=idempotency_path,
+        payload=idempotency_payload,
+        response_model=ContextExposureResponse,
+        content_session=None,
+        recover_pending=recover_pending_exposure,
+    )
+    if replayed is not None:
+        return replayed
+
     if authorized_items:
         await annotate_context_item_exposures(
             authorized_items,
@@ -1864,11 +2011,7 @@ async def expose_memory_context(
             principal_id=principal_id,
             project_id=request.project_id,
             source_surface=request.source_surface,
-            request_metadata={
-                **request.metadata.model_dump(mode="json", exclude_none=True),
-                "provider_operation_id": operation_id,
-                "item_ids": list(request.exposed_ids),
-            },
+            request_metadata=usage_metadata,
         )
 
     recorded_ids = [
@@ -2139,7 +2282,66 @@ async def remember_raw(
         )
         idempotency_body = request.model_dump(mode="json")
         idempotency_body["agent_id"] = agent_id
+        provider_body = await provider_request_body(
+            http_request,
+            request,
+        )
+        canonical_provider_hash = provider_request_hash(provider_body)
+        provider_operation_id = request.metadata.get("provider_operation_id")
+        supplied_provider_hash = request.metadata.get(PROVIDER_REQUEST_HASH_METADATA_KEY)
+        if provider_operation_id is not None and not str(provider_operation_id).strip():
+            raise _provider_recovery_conflict("provider_operation_id cannot be empty")
+        if supplied_provider_hash is not None and supplied_provider_hash != canonical_provider_hash:
+            raise _provider_recovery_conflict(
+                "provider_request_hash does not match the canonical raw request body"
+            )
+
+        metadata = _diary_metadata(
+            metadata=request.metadata,
+            diary=request.diary,
+            agent_id=agent_id,
+            project_id=request.project_id,
+        )
+        if agent_id:
+            metadata["agent_id"] = agent_id
+        if provider_operation_id is not None:
+            metadata["provider_operation_id"] = str(provider_operation_id)
+            metadata[PROVIDER_REQUEST_HASH_METADATA_KEY] = canonical_provider_hash
+
         idempotency_payload = {"body": idempotency_body}
+
+        async def recover_pending_raw(_: object) -> RawMemoryResponse | None:
+            existing = await get_raw_memory_by_source_id(
+                organization_id=str(org.id),
+                source_id=source_id,
+            )
+            if existing is None:
+                return None
+            existing_scope = existing.memory_scope.value
+            matches = (
+                existing.principal_id == principal_id
+                and existing_scope == request.memory_scope
+                and existing.scope_key == request.scope_key
+                and existing.metadata.get("provider_operation_id") == str(provider_operation_id)
+                and existing.metadata.get(PROVIDER_REQUEST_HASH_METADATA_KEY)
+                == canonical_provider_hash
+            )
+            if not matches:
+                raise _provider_recovery_conflict(
+                    "Raw recovery found a source with mismatched operation, request, principal, "
+                    "or scope"
+                )
+            return _raw_memory_response(
+                existing,
+                policy_reason=write_decision.reason,
+                receipt=mutation_receipt(
+                    http_request,
+                    applied=True,
+                    revision=existing.revision,
+                    affected_records=[f"raw_captures:{existing.id}"],
+                ),
+            )
+
         replayed = await replay_idempotent_response(
             http_request,
             organization_id=org.id,
@@ -2149,6 +2351,7 @@ async def remember_raw(
             payload=idempotency_payload,
             response_model=RawMemoryResponse,
             content_session=None,
+            recover_pending=(recover_pending_raw if provider_operation_id is not None else None),
         )
         if replayed is not None:
             telemetry_registry().record_memory_operation(
@@ -2158,14 +2361,6 @@ async def remember_raw(
                 result_count=1,
             )
             return replayed
-        metadata = _diary_metadata(
-            metadata=request.metadata,
-            diary=request.diary,
-            agent_id=agent_id,
-            project_id=request.project_id,
-        )
-        if agent_id:
-            metadata["agent_id"] = agent_id
         memory = await remember_raw_memory(
             organization_id=str(org.id),
             principal_id=principal_id,
@@ -2763,6 +2958,39 @@ async def apply_memory_correction_route(
     )
     idempotency_path = f"/memory/inspect/{source_id}/corrections"
     idempotency_payload = {"body": request.model_dump(mode="json")}
+    provider_operation_id = request.metadata.get("provider_operation_id")
+    if provider_operation_id is not None and (
+        not str(provider_operation_id).strip() or request.expected_revision is None
+    ):
+        raise _provider_recovery_conflict(
+            "Provider corrections require a non-empty operation ID and expected revision"
+        )
+
+    async def recover_pending_correction(_: object) -> MemoryCorrectionResponse | None:
+        preview = _provider_correction_preview(
+            memory=memory,
+            operation_id=str(provider_operation_id),
+            principal_id=principal_id,
+            request=request,
+        )
+        if preview is None:
+            return None
+        return _correction_result_response(
+            MemoryCorrectionResult(
+                applied=True,
+                preview=preview,
+                updated_memory=memory,
+            ),
+            receipt=mutation_receipt(
+                http_request,
+                applied=True,
+                revision=memory.revision,
+                affected_records=[
+                    f"raw_captures:{affected_id}" for affected_id in preview.affected_source_ids
+                ],
+            ),
+        )
+
     replayed = await replay_idempotent_response(
         http_request,
         organization_id=org.id,
@@ -2772,6 +3000,7 @@ async def apply_memory_correction_route(
         payload=idempotency_payload,
         response_model=MemoryCorrectionResponse,
         content_session=None,
+        recover_pending=(recover_pending_correction if provider_operation_id is not None else None),
     )
     if replayed is not None:
         return replayed
@@ -2789,6 +3018,8 @@ async def apply_memory_correction_route(
     }
     if request.expected_revision is not None:
         correction_kwargs["expected_revision"] = request.expected_revision
+    if provider_operation_id is not None:
+        correction_kwargs["provider_operation_id"] = str(provider_operation_id)
     result = await apply_memory_correction(
         **correction_kwargs,
     )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import cast
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -21,6 +22,7 @@ from sibyl_core.services.usage import (
     MemoryUsageSignal,
     MemoryUsageStamp,
     _stamp_graph_entity,
+    list_memory_usage_exposure_proofs,
     record_memory_usage,
 )
 
@@ -133,6 +135,43 @@ def _max_datetime(current: datetime | None, candidate: datetime | None) -> datet
     if current is None:
         return candidate
     return max(current, candidate)
+
+
+@pytest.mark.asyncio
+async def test_list_memory_usage_exposure_proofs_preserves_delivery_identity() -> None:
+    client = cast(
+        "SurrealContentClient",
+        type(
+            "Client",
+            (),
+            {
+                "execute_query": AsyncMock(
+                    return_value=[
+                        {
+                            "response_id": "raw_memory:memory-1",
+                            "item_kind": "raw_capture",
+                            "item_id": "memory-1",
+                            "principal_id": "user-1",
+                            "project_id": "project-1",
+                        }
+                    ]
+                )
+            },
+        )(),
+    )
+
+    proofs = await list_memory_usage_exposure_proofs(
+        client,
+        organization_id="org-1",
+        session_key="session-1",
+        message_key="message-1",
+        source_surface="hermes_memory_provider",
+    )
+
+    assert len(proofs) == 1
+    assert proofs[0].response_id == "raw_memory:memory-1"
+    assert proofs[0].item_kind is MemoryUsageItemKind.RAW_CAPTURE
+    assert proofs[0].principal_id == "user-1"
 
 
 @pytest.mark.asyncio

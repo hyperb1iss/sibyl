@@ -2386,6 +2386,7 @@ async def test_content_archive_export_can_scope_to_one_organization(
                 "path": "/api/test",
                 "request_hash": f"hash-{suffix}",
                 "response_status_code": 200,
+                "claim_token": str(uuid4()),
             },
         )
         await surreal_content_client.execute_query(

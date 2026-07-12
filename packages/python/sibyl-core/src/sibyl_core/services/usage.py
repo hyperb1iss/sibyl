@@ -63,6 +63,15 @@ class MemoryUsageWriteResult:
     stamps: tuple[MemoryUsageStamp, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class MemoryUsageExposureProof:
+    response_id: str
+    item_kind: MemoryUsageItemKind
+    item_id: str
+    principal_id: str | None
+    project_id: str | None
+
+
 _EVENT_INSERT_QUERY = """
 INSERT INTO memory_usage_events $rows ON DUPLICATE KEY UPDATE
     uuid = uuid,
@@ -162,6 +171,16 @@ WHERE organization_id = $organization_id
     AND item_id = $item_id;
 """
 
+_EXPOSURE_PROOF_QUERY = """
+SELECT item_kind, item_id, principal_id, project_id, metadata.response_id AS response_id
+FROM memory_usage_events
+WHERE organization_id = $organization_id
+    AND session_key = $session_key
+    AND message_key = $message_key
+    AND source_surface = $source_surface
+    AND signal_type = "exposure";
+"""
+
 _GRAPH_ENTITY_STAMP_QUERY = """
 UPDATE entity SET
     last_recalled_at = IF last_recalled_at != NONE
@@ -232,6 +251,35 @@ async def record_memory_usage(
             )
 
     return MemoryUsageWriteResult(events_processed=len(rows), stamps=tuple(stamps))
+
+
+async def list_memory_usage_exposure_proofs(
+    content_client: UsageContentClient,
+    *,
+    organization_id: str,
+    session_key: str,
+    message_key: str,
+    source_surface: str,
+) -> tuple[MemoryUsageExposureProof, ...]:
+    rows = normalize_records(
+        await content_client.execute_query(
+            _EXPOSURE_PROOF_QUERY,
+            organization_id=organization_id,
+            session_key=session_key,
+            message_key=message_key,
+            source_surface=source_surface,
+        )
+    )
+    return tuple(
+        MemoryUsageExposureProof(
+            response_id=str(row.get("response_id") or ""),
+            item_kind=MemoryUsageItemKind(str(row["item_kind"])),
+            item_id=str(row["item_id"]),
+            principal_id=_optional_text(row.get("principal_id")),
+            project_id=_optional_text(row.get("project_id")),
+        )
+        for row in rows
+    )
 
 
 def _event_record(event: MemoryUsageEvent) -> dict[str, object]:
@@ -446,9 +494,11 @@ def _int_count(value: object) -> int:
 
 __all__ = [
     "MemoryUsageEvent",
+    "MemoryUsageExposureProof",
     "MemoryUsageItemKind",
     "MemoryUsageSignal",
     "MemoryUsageStamp",
     "MemoryUsageWriteResult",
+    "list_memory_usage_exposure_proofs",
     "record_memory_usage",
 ]

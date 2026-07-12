@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
+from sibyl.api.idempotency import provider_request_hash
 from sibyl.api.routes.memory import (
     add_memory_space_member_record,
     apply_memory_correction_route,
@@ -55,6 +56,7 @@ from sibyl.auth.api_key_common import api_key_memory_scope_key
 from sibyl.jobs import source_imports
 from sibyl.services.recall_limits import RecallConcurrencyLimitExceededError
 from sibyl_core.auth import OrganizationRole, ProjectRole
+from sibyl_core.errors import RevisionConflictError
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceResult
 from sibyl_core.models.context import ContextFacet, ContextItem
 from sibyl_core.services.memory import (
@@ -67,6 +69,7 @@ from sibyl_core.services.memory import (
     ReflectionPromotionResult,
 )
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory, RawMemoryRecallResult
+from sibyl_core.services.usage import MemoryUsageItemKind
 
 
 def _org() -> MagicMock:
@@ -295,6 +298,54 @@ async def test_remember_raw_uses_current_org_and_principal() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_remember_raw_recovers_matching_source_before_receipt() -> None:
+    org = _org()
+    operation_id = "turn-operation-1"
+    request = RawMemoryRememberRequest(
+        title="Hermes turn session/1",
+        raw_content="[User]\nRemember this\n\n[Assistant]\nRemembered",
+        source_id="hermes:turn:agent:session:1:1:hash",
+        metadata={"provider_operation_id": operation_id},
+        capture_surface="hermes_memory_provider",
+    )
+    body = request.model_dump(mode="json", exclude_unset=True)
+    request.metadata["provider_request_hash"] = provider_request_hash(body)
+    existing = _memory(
+        organization_id=str(org.id),
+        source_id=str(request.source_id),
+        metadata=dict(request.metadata),
+        capture_surface=request.capture_surface,
+    )
+    http_request = _idempotent_http_request()
+    http_request.headers["Idempotency-Key"] = f"hermes-turn-{operation_id}"
+
+    async def recover(*_: object, **kwargs: object) -> object:
+        callback = kwargs["recover_pending"]
+        assert callable(callback)
+        return await callback(object())
+
+    with (
+        patch("sibyl.api.routes.memory.replay_idempotent_response", side_effect=recover),
+        patch(
+            "sibyl.api.routes.memory.get_raw_memory_by_source_id",
+            AsyncMock(return_value=existing),
+        ),
+        patch("sibyl.api.routes.memory.remember_raw_memory", AsyncMock()) as remember,
+    ):
+        response = await remember_raw.__wrapped__(
+            request,
+            http_request=http_request,
+            org=org,
+            ctx=_ctx(),
+        )
+
+    assert response.id == existing.id
+    assert response.mutation_receipt is not None
+    assert response.mutation_receipt.affected_records == ["raw_captures:memory-1"]
+    remember.assert_not_awaited()
+
+
 def test_context_exposure_request_rejects_duplicate_or_malformed_ids() -> None:
     with pytest.raises(ValueError, match="unique syntactically valid"):
         ContextExposureRequest(
@@ -391,6 +442,69 @@ async def test_expose_memory_context_requires_idempotency_key() -> None:
 
     assert exc.value.status_code == 400
     assert exc.value.detail == "Idempotency-Key is required"
+
+
+@pytest.mark.asyncio
+async def test_expose_memory_context_recovers_write_before_receipt() -> None:
+    org = _org()
+    http_request = _idempotent_http_request()
+    delivered = ContextItem(
+        id="decision_1",
+        type="decision",
+        name="Recovered decision",
+        content="",
+        score=0.0,
+        facet=ContextFacet.DECISIONS,
+        reason="delivered context acknowledgment",
+        metadata={"candidate_kind": "node", "project_id": "project_1"},
+    )
+
+    async def recover(*_: object, **kwargs: object) -> object:
+        callback = kwargs["recover_pending"]
+        assert callable(callback)
+        return await callback(object())
+
+    with (
+        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
+        patch(
+            "sibyl.api.routes.memory._authorized_exposure_item",
+            AsyncMock(return_value=delivered),
+        ),
+        patch(
+            "sibyl.api.routes.memory.get_surreal_graph_runtime",
+            AsyncMock(return_value=MagicMock()),
+        ),
+        patch("sibyl.api.routes.memory.replay_idempotent_response", side_effect=recover),
+        patch(
+            "sibyl.api.routes.memory.get_shared_surreal_content_client",
+            AsyncMock(return_value=MagicMock()),
+        ),
+        patch(
+            "sibyl.api.routes.memory.list_memory_usage_exposure_proofs",
+            AsyncMock(
+                return_value=(
+                    SimpleNamespace(
+                        response_id="decision_1",
+                        item_kind=MemoryUsageItemKind.GRAPH_ENTITY,
+                        item_id="decision_1",
+                        principal_id="user-123",
+                        project_id="project_1",
+                    ),
+                )
+            ),
+        ),
+        patch("sibyl.api.routes.memory.annotate_context_item_exposures", AsyncMock()) as annotate,
+    ):
+        response = await expose_memory_context.__wrapped__(
+            ContextExposureRequest(exposed_ids=["decision_1"], project_id="project_1"),
+            http_request=http_request,
+            org=org,
+            ctx=_ctx(),
+        )
+
+    assert response.recorded_ids == ["decision_1"]
+    assert response.mutation_receipt.affected_records == ["decision_1"]
+    annotate.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2129,6 +2243,104 @@ async def test_apply_memory_correction_returns_updated_review_state() -> None:
     audit.assert_awaited_once()
     assert audit.await_args.kwargs["action"] == "memory.correction.hide"
     assert audit.await_args.kwargs["policy_allowed"] is True
+
+
+@pytest.mark.asyncio
+async def test_apply_memory_correction_recovers_source_history_before_receipt() -> None:
+    org = _org()
+    operation_id = "correction-operation-1"
+    memory = _memory(
+        id="memory-1",
+        organization_id=str(org.id),
+        source_id="source-1",
+        revision=2,
+        metadata={
+            "correction_history": [
+                {
+                    "action": "hide",
+                    "audit_action": "memory.correction.hide",
+                    "reason": "outdated",
+                    "target_lifecycle_state": "active",
+                    "target_lifecycle_flags": ["hidden"],
+                    "prior_revision": 1,
+                    "created_by_user_id": "user-123",
+                    "_provider_recovery": {
+                        "operation_id": operation_id,
+                        "affected_source_ids": ["memory-1"],
+                        "affected_derived_ids": [],
+                        "reversible": True,
+                        "recall_impact": {"excluded_from_recall": True},
+                        "synthesis_impact": {"excluded_from_synthesis": True},
+                        "policy_reasons": ["private_principal_bound"],
+                        "current_revision": 1,
+                    },
+                }
+            ]
+        },
+    )
+    request = MemoryCorrectionRequest(
+        action="hide",
+        reason="outdated",
+        expected_revision=1,
+        metadata={"provider_operation_id": operation_id},
+    )
+    http_request = _idempotent_http_request()
+    http_request.headers["Idempotency-Key"] = f"hermes-correction-{operation_id}"
+
+    async def recover(*_: object, **kwargs: object) -> object:
+        callback = kwargs["recover_pending"]
+        assert callable(callback)
+        return await callback(object())
+
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch("sibyl.api.routes.memory.replay_idempotent_response", side_effect=recover),
+        patch("sibyl.api.routes.memory.apply_memory_correction", AsyncMock()) as apply,
+    ):
+        response = await apply_memory_correction_route.__wrapped__.__wrapped__(
+            "source-1",
+            request,
+            http_request=http_request,
+            org=org,
+            ctx=_ctx(org_role=OrganizationRole.OWNER),
+        )
+
+    assert response.applied is True
+    assert response.revision == 2
+    assert response.current_revision == 1
+    assert response.mutation_receipt is not None
+    assert response.mutation_receipt.affected_records == ["raw_captures:memory-1"]
+    apply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_apply_memory_correction_returns_structured_revision_conflict() -> None:
+    org = _org()
+    memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
+
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl.api.routes.memory.apply_memory_correction",
+            AsyncMock(side_effect=RevisionConflictError("memory-1", 1, 2)),
+        ),
+        pytest.raises(HTTPException) as error,
+    ):
+        await apply_memory_correction_route(
+            "memory-1",
+            MemoryCorrectionRequest(action="hide", expected_revision=1),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(org_role=OrganizationRole.OWNER),
+        )
+
+    assert error.value.status_code == 409
+    assert error.value.detail == {
+        "code": "revision_conflict",
+        "identifier": "memory-1",
+        "expected_revision": 1,
+        "actual_revision": 2,
+    }
 
 
 @pytest.mark.asyncio

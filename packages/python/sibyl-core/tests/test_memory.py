@@ -554,6 +554,7 @@ async def test_apply_memory_correction_marks_hidden_and_preserves_history(
         principal_id="user-1",
         action="hide",
         reason="No longer useful",
+        provider_operation_id="correction-operation-1",
     )
 
     assert result.applied
@@ -577,6 +578,10 @@ async def test_apply_memory_correction_marks_hidden_and_preserves_history(
     assert findings[-1].target_source_id == "source-1"
     assert result.updated_memory.metadata["correction_history"][0] == {"action": "mark_stale"}
     assert result.updated_memory.metadata["correction_history"][1]["action"] == "hide"
+    recovery = result.updated_memory.metadata["correction_history"][1]["_provider_recovery"]
+    assert recovery["operation_id"] == "correction-operation-1"
+    assert recovery["affected_source_ids"] == ["source-1"]
+    assert recovery["current_revision"] == 1
     save_raw_memory.assert_awaited_once()
 
 

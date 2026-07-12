@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import hashlib
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from functools import wraps
 from inspect import signature
@@ -27,6 +28,7 @@ IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 _MAX_IDEMPOTENCY_KEY_LENGTH = 255
 _PENDING_RESPONSE_STATUS = 102
 _REQUEST_CLAIM_ATTRIBUTE = "_sibyl_idempotency_claim"
+PROVIDER_REQUEST_HASH_METADATA_KEY = "provider_request_hash"
 
 log = structlog.get_logger()
 
@@ -35,6 +37,7 @@ class IdempotencyConflictCode(StrEnum):
     LOCK_HELD = "idempotency_lock_held"
     PAYLOAD_MISMATCH = "idempotency_payload_mismatch"
     INTERRUPTED_PENDING = "idempotency_interrupted_pending"
+    RECOVERY_CONFLICT = "idempotency_recovery_conflict"
 
 
 def idempotency_conflict(code: IdempotencyConflictCode, message: str) -> HTTPException:
@@ -76,6 +79,39 @@ def mutation_receipt(
 def idempotency_request_hash(payload: object) -> str:
     encoded = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def provider_request_hash(body: dict[str, object]) -> str:
+    normalized = copy.deepcopy(body)
+    metadata = normalized.get("metadata")
+    if isinstance(metadata, dict):
+        metadata.pop(PROVIDER_REQUEST_HASH_METADATA_KEY, None)
+    encoded = json.dumps(
+        normalized,
+        sort_keys=True,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+async def provider_request_body(
+    request: object,
+    parsed_body: BaseModel,
+) -> dict[str, object]:
+    raw_body: object | None = None
+    load_json = getattr(request, "json", None)
+    if callable(load_json):
+        try:
+            raw_body = await load_json()
+        except (TypeError, ValueError):
+            raw_body = None
+    return (
+        copy.deepcopy(raw_body)
+        if isinstance(raw_body, dict)
+        else parsed_body.model_dump(mode="json", exclude_unset=True)
+    )
 
 
 async def reserve_idempotency_record(
@@ -364,6 +400,9 @@ async def replay_idempotent_response[ResponseModelT: BaseModel](
     payload: object,
     response_model: type[ResponseModelT],
     content_session: object,
+    recover_pending: Callable[[ApiIdempotencyRecord], Awaitable[ResponseModelT | None]]
+    | None = None,
+    pending_stale_after_seconds: float = LOCK_TTL_SECONDS,
 ) -> ResponseModelT | None:
     key = idempotency_key(request)
     if key is None:
@@ -388,6 +427,31 @@ async def replay_idempotent_response[ResponseModelT: BaseModel](
             "Idempotency-Key was already used for a different request",
         )
     if idempotency_record_pending(record):
+        if recover_pending is not None:
+            recovered = await recover_pending(record)
+            if recovered is not None:
+                receipt = getattr(recovered, "mutation_receipt", None)
+                if isinstance(receipt, MutationReceipt):
+                    receipt.replayed = True
+                await complete_idempotency_record(
+                    record,
+                    response_status_code=200,
+                    response_body=recovered.model_dump(mode="json"),
+                    content_session=content_session,
+                )
+                return recovered
+
+            stale_before = datetime.now(UTC).replace(tzinfo=None) - timedelta(
+                seconds=pending_stale_after_seconds
+            )
+            reclaimed = await try_reclaim_idempotency_record(
+                record,
+                stale_before=stale_before,
+                content_session=content_session,
+            )
+            if reclaimed is not None:
+                _store_request_claim(request, reclaimed)
+                return None
         raise idempotency_conflict(
             IdempotencyConflictCode.INTERRUPTED_PENDING,
             (

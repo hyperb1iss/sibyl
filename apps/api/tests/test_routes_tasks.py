@@ -432,6 +432,7 @@ class TestCompleteTaskRoute:
         episode_enqueue = AsyncMock(return_value="learning_episode:task-123")
         procedure_enqueue = AsyncMock(return_value="learning_procedure:task-123")
         save_record = AsyncMock(side_effect=lambda _session, *, record: record)
+        complete_record = AsyncMock(side_effect=lambda _session, *, record, **_kwargs: record)
 
         with (
             patch(
@@ -452,6 +453,10 @@ class TestCompleteTaskRoute:
             patch(
                 "sibyl.api.idempotency.content_runtime.save_api_idempotency_record",
                 save_record,
+            ),
+            patch(
+                "sibyl.api.idempotency.content_runtime.compare_and_set_api_idempotency_record",
+                complete_record,
             ),
         ):
             response = await complete_task(
@@ -517,8 +522,9 @@ class TestCompleteTaskRoute:
         assert response.mutation_receipt.revision == 2
         assert response.mutation_receipt.idempotency_key == "idem-complete"
         assert response.mutation_receipt.affected_records == ["entity:task-123"]
-        assert save_record.await_count == 2
-        saved = save_record.await_args.kwargs["record"]
+        save_record.assert_awaited_once()
+        complete_record.assert_awaited_once()
+        saved = complete_record.await_args.kwargs["record"]
         assert saved.path == "/tasks/task-123/complete"
         assert saved.response_body["mutation_receipt"]["revision"] == 2
         assert saved.response_body["action"] == "complete_task"

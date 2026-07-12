@@ -14,6 +14,8 @@ from pydantic import BaseModel
 from sibyl.api.idempotency import (
     complete_idempotency_record,
     idempotency_request_hash,
+    provider_request_body,
+    provider_request_hash,
     replay_idempotent_response,
     save_idempotent_response,
     serialize_idempotent_request,
@@ -25,6 +27,39 @@ from sibyl.persistence.content_common import ApiIdempotencyRecord
 
 class _MutationResponse(BaseModel):
     value: str
+
+
+def test_provider_request_hash_omits_only_its_metadata_field() -> None:
+    body = {
+        "raw_content": "remember me",
+        "metadata": {
+            "provider_operation_id": "operation-1",
+            "provider_request_hash": "self-reference",
+        },
+    }
+
+    assert provider_request_hash(body) == idempotency_request_hash(
+        {
+            "raw_content": "remember me",
+            "metadata": {"provider_operation_id": "operation-1"},
+        }
+    )
+    assert body["metadata"]["provider_request_hash"] == "self-reference"
+
+
+@pytest.mark.asyncio
+async def test_provider_request_body_preserves_only_wire_fields() -> None:
+    class _ProviderBody(BaseModel):
+        raw_content: str
+        diary: bool = False
+        agent_id: str | None = None
+
+    body = await provider_request_body(
+        SimpleNamespace(),
+        _ProviderBody(raw_content="memory"),
+    )
+
+    assert body == {"raw_content": "memory"}
 
 
 @pytest.mark.asyncio
@@ -317,6 +352,96 @@ async def test_fresh_pending_claim_cannot_reclaim() -> None:
 
     assert reclaimed is None
     compare.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pending_recovery_completes_receipt_without_reexecuting() -> None:
+    claim = ApiIdempotencyRecord(
+        organization_id=uuid4(),
+        principal_id="user-1",
+        idempotency_key="remember-1",
+        method="POST",
+        path="/memory/raw",
+        request_hash=idempotency_request_hash({"body": {"title": "Recovered"}}),
+        response_status_code=102,
+        response_body={},
+    )
+    recovered = _MutationResponse(value="already-applied")
+    request = SimpleNamespace(headers={"Idempotency-Key": "remember-1"})
+
+    with (
+        patch(
+            "sibyl.api.idempotency.reserve_idempotency_record",
+            AsyncMock(return_value=(claim, False)),
+        ),
+        patch(
+            "sibyl.api.idempotency.complete_idempotency_record",
+            AsyncMock(return_value=replace(claim, response_status_code=200)),
+        ) as complete,
+    ):
+        response = await replay_idempotent_response(
+            request,
+            organization_id=claim.organization_id,
+            principal_id=claim.principal_id,
+            method=claim.method,
+            path=claim.path,
+            payload={"body": {"title": "Recovered"}},
+            response_model=_MutationResponse,
+            content_session=None,
+            recover_pending=AsyncMock(return_value=recovered),
+        )
+
+    assert response == recovered
+    complete.assert_awaited_once()
+    assert complete.await_args.kwargs["response_body"] == {"value": "already-applied"}
+
+
+@pytest.mark.asyncio
+async def test_stale_pending_recovery_reclaims_only_after_absence_proof() -> None:
+    claim = ApiIdempotencyRecord(
+        organization_id=uuid4(),
+        principal_id="user-1",
+        idempotency_key="remember-1",
+        method="POST",
+        path="/memory/raw",
+        request_hash=idempotency_request_hash({"body": {"title": "Retry"}}),
+        response_status_code=102,
+        response_body={},
+        updated_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=5),
+    )
+    reclaimed = replace(claim, claim_token="claim-2", claim_revision=2)
+    request = SimpleNamespace(
+        headers={"Idempotency-Key": "remember-1"},
+        state=SimpleNamespace(),
+    )
+    absence_proof = AsyncMock(return_value=None)
+
+    with (
+        patch(
+            "sibyl.api.idempotency.reserve_idempotency_record",
+            AsyncMock(return_value=(claim, False)),
+        ),
+        patch(
+            "sibyl.api.idempotency.try_reclaim_idempotency_record",
+            AsyncMock(return_value=reclaimed),
+        ) as reclaim,
+    ):
+        response = await replay_idempotent_response(
+            request,
+            organization_id=claim.organization_id,
+            principal_id=claim.principal_id,
+            method=claim.method,
+            path=claim.path,
+            payload={"body": {"title": "Retry"}},
+            response_model=_MutationResponse,
+            content_session=None,
+            recover_pending=absence_proof,
+        )
+
+    assert response is None
+    absence_proof.assert_awaited_once_with(claim)
+    reclaim.assert_awaited_once()
+    assert request.state._sibyl_idempotency_claim == reclaimed
 
 
 @pytest.mark.asyncio

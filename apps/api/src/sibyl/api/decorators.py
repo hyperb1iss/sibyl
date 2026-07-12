@@ -77,7 +77,10 @@ def handle_workflow_errors(
                 ) from e
 
             except RevisionConflictError as e:
-                raise HTTPException(status_code=409, detail=e.details) from e
+                raise HTTPException(
+                    status_code=409,
+                    detail={"code": "revision_conflict", **e.details},
+                ) from e
 
             except HTTPException:
                 raise

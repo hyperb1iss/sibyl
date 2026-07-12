@@ -941,6 +941,7 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service() -> Non
     }
     get_idempotency = AsyncMock(return_value=None)
     save_idempotency = AsyncMock(side_effect=lambda _session, *, record: record)
+    complete_idempotency = AsyncMock(side_effect=lambda _session, *, record, **_kwargs: record)
 
     with (
         patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
@@ -959,6 +960,10 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service() -> Non
         patch(
             "sibyl.persistence.content_runtime.save_api_idempotency_record",
             save_idempotency,
+        ),
+        patch(
+            "sibyl.persistence.content_runtime.compare_and_set_api_idempotency_record",
+            complete_idempotency,
         ),
         patch("sibyl_core.tools.manage.manage", manage),
     ):
@@ -1016,8 +1021,9 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service() -> Non
     # Deprecation pointer is preserved for MCP clients.
     assert result["data"]["deprecation"]["use_instead"] == "POST /tasks/{id}/complete"
 
-    assert save_idempotency.await_count == 2
-    saved_record = save_idempotency.await_args.kwargs["record"]
+    save_idempotency.assert_awaited_once()
+    complete_idempotency.assert_awaited_once()
+    saved_record = complete_idempotency.await_args.kwargs["record"]
     transition.reset_mock()
 
     with (
