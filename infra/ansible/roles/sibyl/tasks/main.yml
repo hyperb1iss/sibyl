@@ -13,25 +13,32 @@
       sibyl_anthropic_api_key and sibyl_cf_api_token. Supply them through vault-backed variables.
 
 # ─── Docker engine ─────────────────────────────────────────────────────────────
-- name: Create the apt keyring directory
-  ansible.builtin.file:
-    path: /etc/apt/keyrings
-    state: directory
-    mode: "0755"
-
-- name: Install the Docker apt signing key
-  ansible.builtin.get_url:
-    url: https://download.docker.com/linux/ubuntu/gpg
-    dest: /etc/apt/keyrings/docker.asc
-    mode: "0644"
+# deb822_repository (the apt_repository replacement) needs python3-debian
+# on the managed host.
+- name: Install deb822 repository prerequisites
+  ansible.builtin.apt:
+    name: python3-debian
+    state: present
+    update_cache: true
 
 - name: Add the Docker apt repository
-  ansible.builtin.apt_repository:
-    repo: >-
-      deb [arch={{ sibyl_docker_arch }} signed-by=/etc/apt/keyrings/docker.asc]
-      https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
-    filename: docker
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: deb
+    uris: https://download.docker.com/linux/ubuntu
+    suites: "{{ ansible_distribution_release }}"
+    components: stable
+    architectures: "{{ sibyl_docker_arch }}"
+    signed_by: https://download.docker.com/linux/ubuntu/gpg
     state: present
+
+- name: Remove the pre-deb822 repository entry and key
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/docker.list
+    - /etc/apt/keyrings/docker.asc
 
 - name: Install Docker Engine and the Compose plugin
   ansible.builtin.apt:
