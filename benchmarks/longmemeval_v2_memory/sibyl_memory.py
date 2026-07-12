@@ -243,6 +243,8 @@ class SibylLiveApiMemory(Memory):
         self.created_entities = 0
         self._pending_embedding_job_ids: set[str] = set()
         self._pending_projection_job_ids: set[str] = set()
+        self._finalize_lock = threading.Lock()
+        self._ingest_finalized = False
         self._client = _new_http_client(
             self.api_url,
             timeout_seconds=self.api_timeout_seconds,
@@ -256,16 +258,14 @@ class SibylLiveApiMemory(Memory):
 
     def set_query_context(self, **kwargs: object) -> None:
         question_item = kwargs.get("question_item")
-        if isinstance(question_item, dict):
-            kwargs = {
-                **kwargs,
-                "question_item": {
-                    key: value for key, value in question_item.items() if key != "answer"
-                },
-            }
-        super().set_query_context(**kwargs)
+        safe_context = {
+            "question": question_item.get("question") if isinstance(question_item, dict) else None,
+            "image": question_item.get("image") if isinstance(question_item, dict) else None,
+        }
+        super().set_query_context(**safe_context)
 
     def insert(self, trajectory: dict[str, object]) -> None:
+        self._ingest_finalized = False
         payloads = build_entity_payloads_for_trajectory(
             trajectory,
             project_id=self.project_id,
@@ -292,9 +292,21 @@ class SibylLiveApiMemory(Memory):
                 self._drain_memory_projections()
         self.inserted_trajectories += 1
 
+    def finalize_ingest(self) -> None:
+        with self._finalize_lock:
+            if self._ingest_finalized:
+                return
+            self._drain_embedding_backfills()
+            self._drain_memory_projections()
+            self._ingest_finalized = True
+
     def query(self, query: str, query_image: str | None = None) -> list[MemoryContextItem]:
-        self._drain_embedding_backfills()
-        self._drain_memory_projections()
+        pending_jobs = len(self._pending_embedding_job_ids) + len(
+            self._pending_projection_job_ids
+        )
+        if pending_jobs or not self._ingest_finalized:
+            msg = f"memory ingestion has {pending_jobs} pending jobs; call finalize_ingest first"
+            raise RuntimeError(msg)
         payload = {
             "query": query,
             "types": ["session"],
@@ -315,6 +327,10 @@ class SibylLiveApiMemory(Memory):
             max_items=self.max_context_items,
             max_chars_per_item=self.max_context_chars_per_item,
         )
+
+    def _save_backend(self, output_dir: Path) -> None:
+        del output_dir
+        self.finalize_ingest()
 
     def post_query_hook(
         self,

@@ -108,7 +108,6 @@ _CAPITALIZED_STOPWORDS = {
     "Assistant",
     "ChatGPT",
     "Human",
-    "LongMemEval",
     "Question",
     "Session",
     "User",

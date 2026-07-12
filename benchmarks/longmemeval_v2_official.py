@@ -120,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     import evaluation.qa_eval_metrics as official_metrics  # noqa: PLC0415
 
     install_reader_retry(official_harness, args=args)
+    install_memory_finalize(official_harness)
     install_evaluator_retry(official_metrics, args=args)
 
     old_argv = sys.argv
@@ -195,6 +196,21 @@ def install_reader_retry(official_harness: Any, *, args: argparse.Namespace) -> 
         raise RuntimeError(msg)
 
     official_harness.call_reader_model_async = call_reader_model_async_with_retry
+
+
+def install_memory_finalize(official_harness: Any) -> None:
+    original = official_harness.build_prompt_row
+
+    def build_prompt_row_with_finalized_memory(*call_args: Any, **call_kwargs: Any) -> Any:
+        memory = call_kwargs.get("memory")
+        if memory is None and len(call_args) >= 3:
+            memory = call_args[2]
+        finalize_ingest = getattr(memory, "finalize_ingest", None)
+        if callable(finalize_ingest):
+            finalize_ingest()
+        return original(*call_args, **call_kwargs)
+
+    official_harness.build_prompt_row = build_prompt_row_with_finalized_memory
 
 
 def is_transient_reader_exception(exc: Exception) -> bool:

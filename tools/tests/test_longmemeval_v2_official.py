@@ -4,6 +4,7 @@ import importlib.util
 import json
 import shutil
 import subprocess
+import threading
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -463,6 +464,27 @@ def test_official_runner_does_not_retry_other_evaluator_value_error() -> None:
     assert attempts == 1
 
 
+def test_official_runner_finalizes_memory_before_prompt_building() -> None:
+    module = _load_runner_module()
+    calls: list[str] = []
+
+    class FakeMemory:
+        def finalize_ingest(self) -> None:
+            calls.append("finalize")
+
+    def build_prompt_row(*args: object, **kwargs: object) -> dict[str, bool]:
+        del args, kwargs
+        calls.append("build")
+        return {"ok": True}
+
+    harness = SimpleNamespace(build_prompt_row=build_prompt_row)
+    memory = FakeMemory()
+    module.install_memory_finalize(harness)
+
+    assert harness.build_prompt_row({}, memory=memory) == {"ok": True}
+    assert calls == ["finalize", "build"]
+
+
 def test_sibyl_memory_request_retries_transient_timeout(capsys) -> None:
     module = _load_memory_module()
     memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
@@ -561,7 +583,7 @@ def test_sibyl_memory_context_formats_retrieved_content() -> None:
     ]
 
 
-def test_sibyl_memory_query_context_strips_gold_answer() -> None:
+def test_sibyl_memory_query_context_exposes_only_question_and_image() -> None:
     module = _load_memory_module()
     memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
     module.Memory.__init__(memory, {})
@@ -571,14 +593,16 @@ def test_sibyl_memory_query_context_strips_gold_answer() -> None:
         question_item={
             "id": "q1",
             "question": "Which filter was selected?",
+            "question_type": "static-environment",
+            "eval_function": "norm_phrase_match",
+            "image": "question.png",
             "answer": "Priority",
         },
     )
 
-    context = memory.get_query_context()
-    assert context["question_item"] == {
-        "id": "q1",
+    assert memory.get_query_context() == {
         "question": "Which filter was selected?",
+        "image": "question.png",
     }
 
 
@@ -839,22 +863,47 @@ def test_sibyl_memory_projection_rejects_partial_job_result() -> None:
     assert memory._pending_projection_job_ids == {"project-lme-v2-1"}
 
 
-def test_sibyl_memory_query_waits_for_background_jobs_before_search() -> None:
+def test_sibyl_memory_query_rejects_unfinalized_background_jobs() -> None:
     module = _load_memory_module()
     memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
     module.Memory.__init__(memory, {})
-    status_responses: dict[str, list[dict[str, object]]] = {
-        "embed-lme-v2-1": [
-            {"status": "queued"},
-            {"status": "complete", "error": None},
-        ],
-        "project-lme-v2-1": [
-            {"status": "queued"},
-            {"status": "complete", "error": None},
-        ],
-    }
     calls: list[str] = []
-    search_payloads: list[dict[str, object]] = []
+
+    def fake_request(
+        method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        del method, params
+        calls.append(path)
+        raise AssertionError(f"unexpected path: {path}")
+
+    memory.project_id = "project_lme"
+    memory.search_limit = 12
+    memory.max_context_items = 8
+    memory.max_context_chars_per_item = TEST_CONTEXT_MAX_CHARS
+    memory.embedding_job_wait_timeout_seconds = 5.0
+    memory.embedding_job_poll_seconds = 0.0
+    memory._pending_embedding_job_ids = {"embed-lme-v2-1"}
+    memory._pending_projection_job_ids = {"project-lme-v2-1"}
+    memory._ingest_finalized = False
+    memory._request_json = fake_request
+
+    with pytest.raises(RuntimeError, match="call finalize_ingest first"):
+        memory.query("Which filter was selected?")
+
+    assert calls == []
+    assert memory._pending_embedding_job_ids == {"embed-lme-v2-1"}
+    assert memory._pending_projection_job_ids == {"project-lme-v2-1"}
+
+
+def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    calls: list[str] = []
 
     def fake_request(
         method: str,
@@ -870,23 +919,16 @@ def test_sibyl_memory_query_waits_for_background_jobs_before_search() -> None:
             job_ids = json["job_ids"]
             assert isinstance(job_ids, list)
             assert len(job_ids) == 1
-            job_id = str(job_ids[0])
-            return {"jobs": {job_id: status_responses[job_id].pop(0)}}
-        if path == "/search":
-            assert isinstance(json, dict)
-            search_payloads.append(json)
             return {
-                "results": [
-                    {
-                        "content": "x" * 900,
-                        "score": 0.9,
-                        "metadata": {
-                            "longmemeval_v2_trajectory_id": "t1",
-                            "longmemeval_v2_chunk_index": 0,
-                        },
+                "jobs": {
+                    str(job_ids[0]): {
+                        "status": "complete",
+                        "error": None,
                     }
-                ]
+                }
             }
+        if path == "/search":
+            return {"results": []}
         raise AssertionError(f"unexpected path: {path}")
 
     memory.project_id = "project_lme"
@@ -897,22 +939,15 @@ def test_sibyl_memory_query_waits_for_background_jobs_before_search() -> None:
     memory.embedding_job_poll_seconds = 0.0
     memory._pending_embedding_job_ids = {"embed-lme-v2-1"}
     memory._pending_projection_job_ids = {"project-lme-v2-1"}
+    memory._finalize_lock = threading.Lock()
+    memory._ingest_finalized = False
     memory._request_json = fake_request
 
-    context = memory.query("Which filter was selected?")
+    memory.finalize_ingest()
+    assert memory.query("Which filter was selected?") == []
+    memory.finalize_ingest()
 
-    assert len(context) == 1
-    assert context[0]["value"].endswith("x" * TEST_CONTEXT_MAX_CHARS)
-    assert search_payloads[0]["content_max_chars"] == TEST_CONTEXT_MAX_CHARS
-    assert calls == [
-        "/jobs/status",
-        "/jobs/status",
-        "/jobs/status",
-        "/jobs/status",
-        "/search",
-    ]
-    assert memory._pending_embedding_job_ids == set()
-    assert memory._pending_projection_job_ids == set()
+    assert calls == ["/jobs/status", "/jobs/status", "/search"]
 
 
 def test_sibyl_memory_polls_pending_jobs_in_one_batch() -> None:
