@@ -900,6 +900,21 @@ def api_key_create(
         "--memory-spaces",
         help="Comma-separated memory-space IDs this key may access",
     ),
+    agent_id: str | None = typer.Option(
+        None,
+        "--agent-id",
+        help="Authenticated agent identity bound to this key",
+    ),
+    delegated_authority: str | None = typer.Option(
+        None,
+        "--delegated-authority",
+        help="Delegated authority represented by this key",
+    ),
+    capability_profile: str | None = typer.Option(
+        None,
+        "--capability-profile",
+        help="Capability profile (memory_provider)",
+    ),
     expires_days: int | None = typer.Option(
         None,
         "--expires-days",
@@ -929,6 +944,9 @@ def api_key_create(
             scopes=scope_list,
             project_ids=project_ids,
             memory_space_ids=memory_space_ids,
+            agent_id=agent_id,
+            delegated_authority=delegated_authority,
+            capability_profile=capability_profile,
             expires_days=expires_days,
         )
 

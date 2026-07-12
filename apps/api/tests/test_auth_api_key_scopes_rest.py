@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
@@ -12,7 +13,14 @@ from sibyl.auth.api_key_common import ApiKeyAuth, ApiKeyMemorySpaceAuth
 from sibyl.auth.dependencies import resolve_claims
 
 
-def _make_request(*, method: str, path: str, token: str) -> Request:
+def _make_request(
+    *, method: str, path: str, token: str, json_body: dict[str, object] | None = None
+) -> Request:
+    body = json.dumps(json_body).encode() if json_body is not None else b""
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": body, "more_body": False}
+
     scope = {
         "type": "http",
         "method": method.upper(),
@@ -26,7 +34,21 @@ def _make_request(*, method: str, path: str, token: str) -> Request:
         "server": ("testserver", 80),
         "client": ("127.0.0.1", 12345),
     }
-    return Request(scope)
+    return Request(scope, receive)
+
+
+def _memory_provider_auth() -> ApiKeyAuth:
+    return ApiKeyAuth(
+        api_key_id=UUID("00000000-0000-0000-0000-000000000000"),
+        user_id=UUID("00000000-0000-0000-0000-000000000001"),
+        organization_id=UUID("00000000-0000-0000-0000-000000000002"),
+        scopes=["api:write"],
+        project_ids=["project-alpha"],
+        memory_space_ids=[UUID("00000000-0000-0000-0000-000000000003")],
+        agent_id="hermes:home:nova",
+        delegated_authority="household-agent",
+        capability_profile="memory_provider",
+    )
 
 
 @pytest.mark.asyncio
@@ -175,3 +197,103 @@ async def test_api_key_rest_allows_write_with_api_write() -> None:
         assert claims is not None
         assert claims["typ"] == "api_key"
         assert "api:write" in claims["scopes"]
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "json_body"),
+    [
+        ("GET", "/api/auth/me", None),
+        ("POST", "/api/context/pack", {"agent_id": "hermes:home:nova"}),
+        ("POST", "/api/memory/expose", {}),
+        ("POST", "/api/memory/raw", {"agent_id": "hermes:home:nova"}),
+        (
+            "POST",
+            "/api/memory/inspect/raw_memory:one/corrections/preview",
+            {"action": "mark_stale"},
+        ),
+        (
+            "POST",
+            "/api/memory/inspect/raw_memory:one/corrections",
+            {"action": "revise"},
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_memory_provider_profile_allows_only_memory_contract_endpoints(
+    method: str,
+    path: str,
+    json_body: dict[str, object] | None,
+) -> None:
+    request = _make_request(
+        method=method,
+        path=path,
+        token="sk_live_test",
+        json_body=json_body,
+    )
+    with patch(
+        "sibyl.auth.dependencies.authenticate_api_key",
+        AsyncMock(return_value=_memory_provider_auth()),
+    ):
+        claims = await resolve_claims(request, _session=object())
+
+    assert claims is not None
+    assert claims["agent_id"] == "hermes:home:nova"
+    assert claims["delegated_authority"] == "household-agent"
+    assert claims["capability_profile"] == "memory_provider"
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "json_body"),
+    [
+        ("GET", "/api/tasks", None),
+        ("POST", "/api/entities", {}),
+        ("POST", "/api/context/reflect", {}),
+        ("POST", "/api/memory/share", {}),
+        ("POST", "/api/memory/inspect/raw_memory:one/corrections", {"action": "delete"}),
+        ("POST", "/api/memory/inspect/raw_memory:one/corrections", {"action": "redact"}),
+    ],
+)
+@pytest.mark.asyncio
+async def test_memory_provider_profile_rejects_every_other_operation(
+    method: str,
+    path: str,
+    json_body: dict[str, object] | None,
+) -> None:
+    request = _make_request(
+        method=method,
+        path=path,
+        token="sk_live_test",
+        json_body=json_body,
+    )
+    with (
+        patch(
+            "sibyl.auth.dependencies.authenticate_api_key",
+            AsyncMock(return_value=_memory_provider_auth()),
+        ),
+        pytest.raises(HTTPException) as exc,
+    ):
+        await resolve_claims(request, _session=object())
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail["error"] == "capability_profile_forbidden"
+
+
+@pytest.mark.asyncio
+async def test_memory_provider_profile_rejects_conflicting_agent_identity() -> None:
+    request = _make_request(
+        method="POST",
+        path="/api/context/pack",
+        token="sk_live_test",
+        json_body={"agent_id": "hermes:home:other"},
+    )
+    with (
+        patch(
+            "sibyl.auth.dependencies.authenticate_api_key",
+            AsyncMock(return_value=_memory_provider_auth()),
+        ),
+        pytest.raises(HTTPException) as exc,
+    ):
+        await resolve_claims(request, _session=object())
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail["error"] == "agent_identity_conflict"

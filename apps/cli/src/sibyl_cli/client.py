@@ -825,6 +825,9 @@ class SibylClient:
         scopes: list[str] | None = None,
         project_ids: list[str] | None = None,
         memory_space_ids: list[str] | None = None,
+        agent_id: str | None = None,
+        delegated_authority: str | None = None,
+        capability_profile: str | None = None,
         expires_days: int | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"name": name, "live": live}
@@ -834,6 +837,12 @@ class SibylClient:
             payload["project_ids"] = project_ids
         if memory_space_ids is not None:
             payload["memory_space_ids"] = memory_space_ids
+        if agent_id is not None:
+            payload["agent_id"] = agent_id
+        if delegated_authority is not None:
+            payload["delegated_authority"] = delegated_authority
+        if capability_profile is not None:
+            payload["capability_profile"] = capability_profile
         if expires_days is not None:
             payload["expires_days"] = expires_days
         return await self._request("POST", "/auth/api-keys", json=payload)

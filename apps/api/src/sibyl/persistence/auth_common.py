@@ -64,6 +64,9 @@ class RepositoryAuthContextResolver:
             organization=organization,
             org_role=membership.role if membership is not None else None,
             scopes=scopes,
+            agent_id=self._parse_optional_string(claims.get("agent_id")),
+            delegated_authority=self._parse_optional_string(claims.get("delegated_authority")),
+            capability_profile=self._parse_optional_string(claims.get("capability_profile")),
         )
 
     def _parse_subject(self, claims: Mapping[str, object]) -> UUID:
@@ -77,3 +80,7 @@ class RepositoryAuthContextResolver:
             return UUID(str(value))
         except ValueError:
             return None
+
+    def _parse_optional_string(self, value: object) -> str | None:
+        normalized = str(value).strip() if value is not None else ""
+        return normalized or None

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import re
+from collections.abc import Mapping
 from typing import cast
 from uuid import UUID
 
@@ -35,6 +37,28 @@ _SAFE_HTTP_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _REST_READ_SCOPES = frozenset({"api:read", "api:write"})
 _REST_WRITE_SCOPE = "api:write"
 _VALIDATED_AUTH_CLAIMS_ATTR = "validated_auth_claims"
+_MEMORY_PROVIDER_PROFILE = "memory_provider"
+_MEMORY_PROVIDER_ENDPOINTS = frozenset(
+    {
+        ("GET", "/api/auth/me"),
+        ("POST", "/api/context/pack"),
+        ("POST", "/api/memory/expose"),
+        ("POST", "/api/memory/raw"),
+    }
+)
+_MEMORY_PROVIDER_CORRECTION_PATH = re.compile(r"^/api/memory/inspect/.+/corrections(?:/preview)?$")
+_MEMORY_PROVIDER_CORRECTION_ACTIONS = frozenset(
+    {
+        "hide",
+        "mark_duplicate",
+        "mark_sensitive",
+        "mark_stale",
+        "mark_wrong",
+        "restore",
+        "revise",
+        "supersede",
+    }
+)
 
 # Security warning at startup if auth is disabled
 if settings.disable_auth:
@@ -73,6 +97,56 @@ def _insufficient_api_scope(*, scopes: list[str], method: str) -> HTTPException:
     )
 
 
+def _capability_profile_forbidden(*, method: str, path: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "error": "capability_profile_forbidden",
+            "message": "This API key cannot access the requested operation.",
+            "details": {"method": method.upper(), "path": path},
+        },
+    )
+
+
+async def _request_body_mapping(request: Request) -> Mapping[str, object] | None:
+    try:
+        body = await request.json()
+    except (UnicodeDecodeError, ValueError):
+        return None
+    return body if isinstance(body, Mapping) else None
+
+
+async def _enforce_memory_provider_profile(request: Request, auth: ApiKeyAuth) -> None:
+    if getattr(auth, "capability_profile", None) != _MEMORY_PROVIDER_PROFILE:
+        return
+
+    method = request.method.upper()
+    path = request.url.path.rstrip("/") or "/"
+    if (method, path) in _MEMORY_PROVIDER_ENDPOINTS:
+        pass
+    elif method == "POST" and _MEMORY_PROVIDER_CORRECTION_PATH.fullmatch(path):
+        body = await _request_body_mapping(request)
+        action = str(body.get("action") or "") if body is not None else ""
+        if action not in _MEMORY_PROVIDER_CORRECTION_ACTIONS:
+            raise _capability_profile_forbidden(method=method, path=path)
+    else:
+        raise _capability_profile_forbidden(method=method, path=path)
+
+    agent_id = getattr(auth, "agent_id", None)
+    if agent_id is None or method != "POST":
+        return
+    body = await _request_body_mapping(request)
+    request_agent_id = body.get("agent_id") if body is not None else None
+    if request_agent_id is not None and str(request_agent_id) != agent_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "agent_identity_conflict",
+                "message": "Request agent identity conflicts with the authenticated API key.",
+            },
+        )
+
+
 def _api_key_claims(auth: ApiKeyAuth, *, scopes: list[str]) -> dict[str, object]:
     claims: dict[str, object] = {
         "sub": str(auth.user_id),
@@ -89,6 +163,12 @@ def _api_key_claims(auth: ApiKeyAuth, *, scopes: list[str]) -> dict[str, object]
         ]
     if auth.memory_spaces is not None:
         claims["api_key_memory_scope_keys"] = [space.policy_key for space in auth.memory_spaces]
+    if agent_id := getattr(auth, "agent_id", None):
+        claims["agent_id"] = agent_id
+    if delegated_authority := getattr(auth, "delegated_authority", None):
+        claims["delegated_authority"] = delegated_authority
+    if capability_profile := getattr(auth, "capability_profile", None):
+        claims["capability_profile"] = capability_profile
     return claims
 
 
@@ -133,6 +213,7 @@ async def resolve_claims(
                     scopes=scopes, method=request.method
                 ):
                     raise _insufficient_api_scope(scopes=scopes, method=request.method)
+                await _enforce_memory_provider_profile(request, auth)
                 api_key_claims = _api_key_claims(auth, scopes=scopes)
                 setattr(request.state, _VALIDATED_AUTH_CLAIMS_ATTR, api_key_claims)
                 return api_key_claims

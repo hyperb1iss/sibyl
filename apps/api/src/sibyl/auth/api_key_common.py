@@ -101,3 +101,6 @@ class ApiKeyAuth:
     project_ids: list[str] | None = None
     memory_space_ids: list[UUID] | None = None
     memory_spaces: list[ApiKeyMemorySpaceAuth] | None = None
+    agent_id: str | None = None
+    delegated_authority: str | None = None
+    capability_profile: str | None = None

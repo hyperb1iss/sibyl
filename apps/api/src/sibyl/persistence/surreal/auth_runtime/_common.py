@@ -895,6 +895,12 @@ def _api_key_claim_payload(auth: ApiKeyAuth) -> SurrealRecord:
         payload["api_key_memory_scope_keys"] = [
             memory_space.policy_key for memory_space in auth.memory_spaces
         ]
+    if agent_id := getattr(auth, "agent_id", None):
+        payload["agent_id"] = agent_id
+    if delegated_authority := getattr(auth, "delegated_authority", None):
+        payload["delegated_authority"] = delegated_authority
+    if capability_profile := getattr(auth, "capability_profile", None):
+        payload["capability_profile"] = capability_profile
     return payload
 
 

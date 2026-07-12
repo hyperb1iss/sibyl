@@ -1421,6 +1421,19 @@ async def verify_entity_project_access(
             required_role=required_role,
             actual_role=None,
         )
+    api_key_allowed = getattr(ctx, "api_key_project_ids", None)
+    if (
+        entity_project_id is not None
+        and api_key_allowed is not None
+        and entity_project_id not in api_key_allowed
+    ):
+        from sibyl.auth.authorization import ProjectAuthorizationError
+
+        raise ProjectAuthorizationError(
+            project_id=entity_project_id,
+            required_role=required_role,
+            actual_role=None,
+        )
     if entity_project_id is None:
         if _role_value(ctx.org_role) in _ORG_ADMIN_ROLE_VALUES:
             return ProjectRole.OWNER

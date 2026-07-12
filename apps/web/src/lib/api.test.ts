@@ -370,6 +370,9 @@ describe('backend record normalizers', () => {
               key_prefix: 'sk_ci',
               scopes: ['mcp'],
               project_ids: ['p1'],
+              agent_id: 'hermes:home:nova',
+              delegated_authority: 'household-agent',
+              capability_profile: 'memory_provider',
               last_used_at: '2026-05-01T00:00:00Z',
             },
             { id: 'k2', name: 'bare' },
@@ -388,6 +391,9 @@ describe('backend record normalizers', () => {
       scopes: ['mcp'],
       project_ids: ['p1'],
       memory_space_ids: [],
+      agent_id: 'hermes:home:nova',
+      delegated_authority: 'household-agent',
+      capability_profile: 'memory_provider',
       last_used_at: '2026-05-01T00:00:00Z',
       expires_at: null,
       created_at: null,
@@ -399,6 +405,9 @@ describe('backend record normalizers', () => {
       scopes: [],
       project_ids: [],
       memory_space_ids: [],
+      agent_id: null,
+      delegated_authority: null,
+      capability_profile: null,
     });
   });
 
@@ -422,6 +431,41 @@ describe('backend record normalizers', () => {
     expect(result.api_key).toMatchObject({ id: 'k9', name: 'fresh', prefix: 'sk_fresh' });
     // the raw one-time secret must not bleed into the normalized record shape
     expect(result.api_key).not.toHaveProperty('api_key');
+  });
+
+  it('sends the complete Hermes memory-provider key contract', async () => {
+    const { calls } = scriptFetch([
+      {
+        match: '/auth/api-keys',
+        response: jsonResponse({
+          id: 'k-hermes',
+          name: 'Hermes',
+          prefix: 'sk_hermes',
+          api_key: 'sk_hermes_secret',
+        }),
+      },
+    ]);
+
+    const { api } = await import('./api');
+    await api.security.apiKeys.create({
+      name: 'Hermes',
+      scopes: ['api:write'],
+      project_ids: ['project-alpha'],
+      memory_space_ids: ['space-alpha'],
+      agent_id: 'hermes:home:nova',
+      delegated_authority: 'household-agent',
+      capability_profile: 'memory_provider',
+    });
+
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      name: 'Hermes',
+      scopes: ['api:write'],
+      project_ids: ['project-alpha'],
+      memory_space_ids: ['space-alpha'],
+      agent_id: 'hermes:home:nova',
+      delegated_authority: 'household-agent',
+      capability_profile: 'memory_provider',
+    });
   });
 
   it('passes session records through under the sessions envelope', async () => {

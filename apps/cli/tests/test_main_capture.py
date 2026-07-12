@@ -263,6 +263,9 @@ async def test_create_api_key_client_posts_scope_restrictions() -> None:
         scopes=["mcp"],
         project_ids=["project-alpha"],
         memory_space_ids=["00000000-0000-0000-0000-000000000003"],
+        agent_id="hermes:home:nova",
+        delegated_authority="household-agent",
+        capability_profile="memory_provider",
     )
 
     assert data == {"id": "key-1"}
@@ -275,6 +278,9 @@ async def test_create_api_key_client_posts_scope_restrictions() -> None:
             "scopes": ["mcp"],
             "project_ids": ["project-alpha"],
             "memory_space_ids": ["00000000-0000-0000-0000-000000000003"],
+            "agent_id": "hermes:home:nova",
+            "delegated_authority": "household-agent",
+            "capability_profile": "memory_provider",
         },
     )
 

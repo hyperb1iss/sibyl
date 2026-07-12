@@ -87,6 +87,9 @@ class AuthContext:
     api_key_project_ids: frozenset[str] | None = None
     api_key_memory_space_ids: frozenset[str] | None = None
     api_key_memory_scope_keys: frozenset[str] | None = None
+    agent_id: str | None = None
+    delegated_authority: str | None = None
+    capability_profile: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "user", coerce_auth_user(self.user))
@@ -108,6 +111,17 @@ class AuthContext:
             self,
             "api_key_memory_scope_keys",
             _frozen_string_set(self.api_key_memory_scope_keys),
+        )
+        object.__setattr__(self, "agent_id", _optional_string(self.agent_id))
+        object.__setattr__(
+            self,
+            "delegated_authority",
+            _optional_string(self.delegated_authority),
+        )
+        object.__setattr__(
+            self,
+            "capability_profile",
+            _optional_string(self.capability_profile),
         )
 
     @property
@@ -149,8 +163,8 @@ class AuthContext:
             accessible_projects=_frozen_string_set(accessible_projects),
             accessible_teams=_frozen_string_set(accessible_teams),
             accessible_delegations=_frozen_string_set(accessible_delegations),
-            delegated_authority=delegated_authority,
-            agent_id=agent_id,
+            delegated_authority=self.delegated_authority or delegated_authority,
+            agent_id=self.agent_id or agent_id,
             project_id=project_id,
             memory_space=memory_space,
             scope_key=scope_key,

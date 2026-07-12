@@ -772,4 +772,7 @@ class SurrealAuthContextResolver(RepositoryAuthContextResolver):
             api_key_project_ids=api_key_project_ids,
             api_key_memory_space_ids=api_key_memory_space_ids,
             api_key_memory_scope_keys=api_key_memory_scope_keys,
+            agent_id=_claim_optional_str(claims.get("agent_id")),
+            delegated_authority=_claim_optional_str(claims.get("delegated_authority")),
+            capability_profile=_claim_optional_str(claims.get("capability_profile")),
         )

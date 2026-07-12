@@ -1115,6 +1115,9 @@ async def test_authenticate_api_key_batches_last_used_and_project_scopes(
                     "key_salt": salt_hex,
                     "key_hash": hash_hex,
                     "scopes": ["api:read"],
+                    "agent_id": "hermes:home:nova",
+                    "delegated_authority": "household-agent",
+                    "capability_profile": "memory_provider",
                     "revoked_at": None,
                     "expires_at": None,
                 }
@@ -1167,6 +1170,9 @@ async def test_authenticate_api_key_batches_last_used_and_project_scopes(
     assert auth.memory_space_ids == [memory_space_id]
     assert auth.memory_spaces is not None
     assert auth.memory_spaces[0].policy_key.endswith("project-alpha")
+    assert auth.agent_id == "hermes:home:nova"
+    assert auth.delegated_authority == "household-agent"
+    assert auth.capability_profile == "memory_provider"
     assert len(client.calls) == 6
     scope_query, scope_params = client.calls[1]
     assert "UPDATE api_keys" in scope_query
@@ -1233,6 +1239,9 @@ async def test_create_api_key_writes_project_and_memory_space_scopes(
         scopes=["mcp"],
         project_ids=["project-alpha"],
         memory_space_ids=[memory_space_id],
+        agent_id="hermes:home:nova",
+        delegated_authority="household-agent",
+        capability_profile="memory_provider",
         expires_at=None,
         request=None,
     )
@@ -1247,6 +1256,11 @@ async def test_create_api_key_writes_project_and_memory_space_scopes(
     memory_query, memory_params = client.calls[1]
     assert "FROM memory_spaces" in memory_query
     assert memory_params["memory_space_ids"] == [str(memory_space_id)]
+    create_query, create_params = client.calls[2]
+    assert create_query == "CREATE api_keys CONTENT $record;"
+    assert create_params["record"]["agent_id"] == "hermes:home:nova"
+    assert create_params["record"]["delegated_authority"] == "household-agent"
+    assert create_params["record"]["capability_profile"] == "memory_provider"
     scope_query, scope_params = client.calls[3]
     assert scope_query == "CREATE api_key_project_scopes CONTENT $record;"
     assert scope_params["record"]["api_key_id"] == str(created_key_id)
@@ -2499,6 +2513,33 @@ async def test_verify_entity_project_access_admin_skips_project_lookup(
     )
 
     assert role is ProjectRole.OWNER
+
+
+@pytest.mark.asyncio
+async def test_verify_entity_project_access_restricted_admin_cannot_bypass_key_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = SimpleNamespace(
+        organization=SimpleNamespace(id=uuid4()),
+        user=SimpleNamespace(id=uuid4()),
+        org_role="owner",
+        api_key_project_ids=["project_allowed"],
+    )
+
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: (_ for _ in ()).throw(AssertionError("unexpected auth storage")),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await surreal_auth_runtime.verify_entity_project_access(
+            ctx=ctx,
+            entity_project_id="project_hidden",
+            required_role=ProjectRole.VIEWER,
+        )
+
+    assert exc.value.status_code == 403
 
 
 @pytest.mark.asyncio

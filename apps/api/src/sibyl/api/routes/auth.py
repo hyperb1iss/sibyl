@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from html import escape
 from ipaddress import ip_address, ip_network
-from typing import Protocol
+from typing import Literal, Protocol
 from urllib.parse import quote, urlencode, urlparse
 from uuid import UUID
 
@@ -123,6 +123,9 @@ class ApiKeyCreateRequest(BaseModel):
         default_factory=list,
         description="Optional memory-space IDs this key may access",
     )
+    agent_id: str | None = Field(default=None, min_length=1, max_length=255)
+    delegated_authority: str | None = Field(default=None, min_length=1, max_length=255)
+    capability_profile: Literal["memory_provider"] | None = None
     expires_days: int | None = Field(
         default=None, ge=1, le=365, description="Optional expiry in days"
     )
@@ -1670,6 +1673,9 @@ async def list_api_keys(
                 "scopes": list(k.scopes or []),
                 "project_ids": list(getattr(k, "project_ids", []) or []),
                 "memory_space_ids": list(getattr(k, "memory_space_ids", []) or []),
+                "agent_id": getattr(k, "agent_id", None),
+                "delegated_authority": getattr(k, "delegated_authority", None),
+                "capability_profile": getattr(k, "capability_profile", None),
                 "expires_at": k.expires_at,
                 "revoked_at": k.revoked_at,
                 "last_used_at": k.last_used_at,
@@ -1703,6 +1709,9 @@ async def create_api_key(
         scopes=body.scopes,
         project_ids=body.project_ids,
         memory_space_ids=body.memory_space_ids,
+        agent_id=body.agent_id,
+        delegated_authority=body.delegated_authority,
+        capability_profile=body.capability_profile,
         expires_at=expires_at,
         request=request,
     )
@@ -1713,6 +1722,9 @@ async def create_api_key(
         "scopes": list(record.scopes or []),
         "project_ids": list(getattr(record, "project_ids", []) or []),
         "memory_space_ids": list(getattr(record, "memory_space_ids", []) or []),
+        "agent_id": getattr(record, "agent_id", None),
+        "delegated_authority": getattr(record, "delegated_authority", None),
+        "capability_profile": getattr(record, "capability_profile", None),
         "expires_at": record.expires_at,
         "api_key": raw,
     }
@@ -1741,6 +1753,20 @@ async def revoke_api_key(
 async def me(
     ctx: AuthContext = Depends(get_auth_context),
 ):
+    credential = (
+        {
+            "type": "api_key",
+            "id": ctx.api_key_id,
+            "scopes": sorted(ctx.scopes),
+            "project_ids": sorted(ctx.api_key_project_ids or ()),
+            "memory_space_ids": sorted(ctx.api_key_memory_space_ids or ()),
+            "agent_id": ctx.agent_id,
+            "delegated_authority": ctx.delegated_authority,
+            "capability_profile": ctx.capability_profile,
+        }
+        if ctx.api_key_id is not None
+        else {"type": "session"}
+    )
     return {
         "user": {
             "id": str(ctx.user.id),
@@ -1760,6 +1786,7 @@ async def me(
             else None
         ),
         "org_role": ctx.org_role.value if ctx.org_role else None,
+        "credential": credential,
     }
 
 

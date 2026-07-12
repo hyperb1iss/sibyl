@@ -22,6 +22,7 @@ from sibyl.persistence.surreal.auth_runtime._common import (
     _auth_client_scope,
     _coerce_optional_uuid,
     _log_audit_event,
+    _optional_str,
     _role_value,
     _scopes_list,
     _SurrealRepository,
@@ -123,6 +124,9 @@ async def authenticate_api_key(raw_key: str):
                 project_ids=project_ids or None,
                 memory_space_ids=[space.memory_space_id for space in memory_spaces] or None,
                 memory_spaces=memory_spaces or None,
+                agent_id=_optional_str(candidate.get("agent_id")),
+                delegated_authority=_optional_str(candidate.get("delegated_authority")),
+                capability_profile=_optional_str(candidate.get("capability_profile")),
             )
     return None
 
@@ -285,6 +289,9 @@ async def create_api_key_for_user(
     scopes: list[str],
     project_ids: list[str] | None = None,
     memory_space_ids: list[UUID] | None = None,
+    agent_id: str | None = None,
+    delegated_authority: str | None = None,
+    capability_profile: str | None = None,
     expires_at,
     request,
 ):
@@ -312,6 +319,9 @@ async def create_api_key_for_user(
             "key_salt": salt_hex,
             "key_hash": hash_hex,
             "scopes": [scope.strip() for scope in scopes if str(scope).strip()],
+            "agent_id": agent_id,
+            "delegated_authority": delegated_authority,
+            "capability_profile": capability_profile,
             "expires_at": _coerce_datetime(expires_at),
             "revoked_at": None,
             "last_used_at": None,
@@ -346,6 +356,8 @@ async def create_api_key_for_user(
             request=request,
             details={
                 "api_key_id": str(key.id),
+                "agent_id": agent_id,
+                "capability_profile": capability_profile,
                 "memory_space_scope_count": len(resolved_memory_space_ids),
                 "name": key.name,
                 "prefix": key.key_prefix,

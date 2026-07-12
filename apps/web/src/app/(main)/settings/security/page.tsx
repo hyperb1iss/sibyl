@@ -341,6 +341,11 @@ function keyExpiryState(expiresAt: string | null): KeyExpiry {
 function ApiKeysSection() {
   const [showCreate, setShowCreate] = useState(false);
   const [newKeyName, setNewKeyName] = useState('');
+  const [memoryProvider, setMemoryProvider] = useState(false);
+  const [agentId, setAgentId] = useState('');
+  const [delegatedAuthority, setDelegatedAuthority] = useState('');
+  const [projectId, setProjectId] = useState('');
+  const [memorySpaceId, setMemorySpaceId] = useState('');
   const [newKey, setNewKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [pendingRevoke, setPendingRevoke] = useState<{ id: string; name: string } | null>(null);
@@ -352,9 +357,25 @@ function ApiKeysSection() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newKeyName.trim()) return;
+    if (memoryProvider && (!agentId.trim() || !projectId.trim() || !memorySpaceId.trim())) {
+      toast.error('Hermes provider keys require an agent, project, and memory space');
+      return;
+    }
 
     try {
-      const result = await createKey.mutateAsync({ name: newKeyName.trim() });
+      const result = await createKey.mutateAsync({
+        name: newKeyName.trim(),
+        ...(memoryProvider
+          ? {
+              scopes: ['api:write'],
+              project_ids: [projectId.trim()],
+              memory_space_ids: [memorySpaceId.trim()],
+              agent_id: agentId.trim(),
+              delegated_authority: delegatedAuthority.trim() || undefined,
+              capability_profile: 'memory_provider' as const,
+            }
+          : {}),
+      });
       setNewKey(result.key);
       setNewKeyName('');
     } catch (err) {
@@ -373,6 +394,11 @@ function ApiKeysSection() {
   const handleDismissNewKey = () => {
     setNewKey(null);
     setShowCreate(false);
+    setMemoryProvider(false);
+    setAgentId('');
+    setDelegatedAuthority('');
+    setProjectId('');
+    setMemorySpaceId('');
   };
 
   const handleConfirmRevoke = async () => {
@@ -462,6 +488,74 @@ function ApiKeysSection() {
             placeholder="e.g., Production API, CI/CD Pipeline"
             autoFocus
           />
+          <div className="mt-4">
+            <Checkbox
+              checked={memoryProvider}
+              onCheckedChange={checked => setMemoryProvider(checked === true)}
+              label="Hermes memory provider"
+              description="Restrict this key to Sibyl memory lifecycle endpoints."
+            />
+          </div>
+          {memoryProvider && (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div>
+                <label
+                  htmlFor="api-key-agent-id"
+                  className="block text-xs text-sc-fg-subtle uppercase tracking-wide mb-1"
+                >
+                  Agent ID
+                </label>
+                <Input
+                  id="api-key-agent-id"
+                  value={agentId}
+                  onChange={e => setAgentId(e.target.value)}
+                  placeholder="hermes:home:nova"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="api-key-delegated-authority"
+                  className="block text-xs text-sc-fg-subtle uppercase tracking-wide mb-1"
+                >
+                  Delegated Authority
+                </label>
+                <Input
+                  id="api-key-delegated-authority"
+                  value={delegatedAuthority}
+                  onChange={e => setDelegatedAuthority(e.target.value)}
+                  placeholder="household-agent"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="api-key-project-id"
+                  className="block text-xs text-sc-fg-subtle uppercase tracking-wide mb-1"
+                >
+                  Project ID
+                </label>
+                <Input
+                  id="api-key-project-id"
+                  value={projectId}
+                  onChange={e => setProjectId(e.target.value)}
+                  placeholder="project_..."
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="api-key-memory-space-id"
+                  className="block text-xs text-sc-fg-subtle uppercase tracking-wide mb-1"
+                >
+                  Memory Space ID
+                </label>
+                <Input
+                  id="api-key-memory-space-id"
+                  value={memorySpaceId}
+                  onChange={e => setMemorySpaceId(e.target.value)}
+                  placeholder="Memory-space UUID"
+                />
+              </div>
+            </div>
+          )}
           <div className="flex gap-2 justify-end mt-3">
             <Button variant="ghost" onClick={() => setShowCreate(false)} type="button">
               Cancel
@@ -527,6 +621,10 @@ function ApiKeysSection() {
                         {isExpired ? 'Expired' : 'Expires'} {formatDate(key.expires_at)}
                       </span>
                     )}
+                    {key.capability_profile === 'memory_provider' && (
+                      <span className="text-sc-purple">Hermes memory provider</span>
+                    )}
+                    {key.agent_id && <code className="text-sc-cyan">{key.agent_id}</code>}
                   </div>
                 </div>
                 <IconButton

@@ -1230,6 +1230,9 @@ export interface ApiKey {
   scopes: string[];
   project_ids: string[];
   memory_space_ids: string[];
+  agent_id: string | null;
+  delegated_authority: string | null;
+  capability_profile: 'memory_provider' | null;
   last_used_at: string | null;
   expires_at: string | null;
   created_at: string | null;
@@ -1244,6 +1247,9 @@ export interface ApiKeyCreateRequest {
   scopes?: string[];
   project_ids?: string[];
   memory_space_ids?: string[];
+  agent_id?: string;
+  delegated_authority?: string;
+  capability_profile?: 'memory_provider';
   expires_in_days?: number;
 }
 
@@ -1260,6 +1266,9 @@ interface ApiKeyBackendRecord {
   scopes?: string[];
   project_ids?: string[];
   memory_space_ids?: string[];
+  agent_id?: string | null;
+  delegated_authority?: string | null;
+  capability_profile?: 'memory_provider' | null;
   last_used_at?: string | null;
   expires_at?: string | null;
   created_at?: string | null;
@@ -1281,6 +1290,9 @@ function normalizeApiKey(record: ApiKeyBackendRecord): ApiKey {
     scopes: record.scopes ?? [],
     project_ids: record.project_ids ?? [],
     memory_space_ids: record.memory_space_ids ?? [],
+    agent_id: record.agent_id ?? null,
+    delegated_authority: record.delegated_authority ?? null,
+    capability_profile: record.capability_profile ?? null,
     last_used_at: record.last_used_at ?? null,
     expires_at: record.expires_at ?? null,
     created_at: record.created_at ?? null,
@@ -2486,6 +2498,9 @@ export const api = {
             scopes: data.scopes,
             project_ids: data.project_ids,
             memory_space_ids: data.memory_space_ids,
+            agent_id: data.agent_id,
+            delegated_authority: data.delegated_authority,
+            capability_profile: data.capability_profile,
             expires_days: data.expires_in_days,
           }),
         });

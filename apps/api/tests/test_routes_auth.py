@@ -1263,6 +1263,9 @@ async def test_create_api_key_uses_runtime_helper(monkeypatch: pytest.MonkeyPatc
         scopes=["mcp"],
         project_ids=["project-alpha"],
         memory_space_ids=[str(memory_space_id)],
+        agent_id="hermes:home:nova",
+        delegated_authority="household-agent",
+        capability_profile="memory_provider",
         expires_at=None,
     )
     create_key = AsyncMock(return_value=(record, "raw-secret"))
@@ -1274,6 +1277,9 @@ async def test_create_api_key_uses_runtime_helper(monkeypatch: pytest.MonkeyPatc
             name="CLI",
             project_ids=["project-alpha"],
             memory_space_ids=[memory_space_id],
+            agent_id="hermes:home:nova",
+            delegated_authority="household-agent",
+            capability_profile="memory_provider",
         ),
         ctx=ctx,
         _admin=None,
@@ -1290,6 +1296,9 @@ async def test_create_api_key_uses_runtime_helper(monkeypatch: pytest.MonkeyPatc
         scopes=["mcp"],
         project_ids=["project-alpha"],
         memory_space_ids=[memory_space_id],
+        agent_id="hermes:home:nova",
+        delegated_authority="household-agent",
+        capability_profile="memory_provider",
         expires_at=None,
         request=request,
     )
@@ -1307,6 +1316,11 @@ def test_api_key_create_request_normalizes_scopes() -> None:
 def test_api_key_create_request_rejects_unknown_scopes() -> None:
     with pytest.raises(ValueError, match="unsupported API key scopes: admin"):
         auth_routes.ApiKeyCreateRequest(name="CLI", scopes=["mcp", "admin"])
+
+
+def test_api_key_create_request_rejects_unknown_capability_profile() -> None:
+    with pytest.raises(ValueError, match="memory_provider"):
+        auth_routes.ApiKeyCreateRequest(name="CLI", capability_profile="admin")
 
 
 def test_api_key_create_request_rejects_empty_scopes() -> None:
@@ -1337,6 +1351,38 @@ async def test_me_uses_auth_context_payload() -> None:
     assert response["user"]["email"] == "nova@example.com"
     assert response["organization"]["slug"] == "sibyl"
     assert response["org_role"] == "admin"
+    assert response["credential"] == {"type": "session"}
+
+
+@pytest.mark.asyncio
+async def test_me_exposes_safe_api_key_credential_metadata() -> None:
+    base = _ctx()
+    memory_space_id = str(uuid4())
+    ctx = AuthContext(
+        user=base.user,
+        organization=base.organization,
+        org_role=base.org_role,
+        scopes=frozenset({"api:write"}),
+        api_key_id=str(uuid4()),
+        api_key_project_ids=frozenset({"project-alpha"}),
+        api_key_memory_space_ids=frozenset({memory_space_id}),
+        agent_id="hermes:home:nova",
+        delegated_authority="household-agent",
+        capability_profile="memory_provider",
+    )
+
+    response = await auth_routes.me(ctx=ctx)
+
+    assert response["credential"] == {
+        "type": "api_key",
+        "id": ctx.api_key_id,
+        "scopes": ["api:write"],
+        "project_ids": ["project-alpha"],
+        "memory_space_ids": [memory_space_id],
+        "agent_id": "hermes:home:nova",
+        "delegated_authority": "household-agent",
+        "capability_profile": "memory_provider",
+    }
 
 
 @pytest.mark.asyncio
