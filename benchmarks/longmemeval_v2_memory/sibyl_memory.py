@@ -906,6 +906,7 @@ class SibylLiveApiMemory(Memory):
         if not config_path.exists():
             _write_json_atomic(config_path, self.memory_config)
         catalog_path = self.checkpoint_dir / CHECKPOINT_CATALOG_FILENAME
+        self._truncate_checkpoint_catalog(catalog_path)
         checkpoint_results = _catalog_results(payloads)
         with catalog_path.open("a", encoding="utf-8") as handle:
             for trajectory_id in sorted(checkpoint_results):
@@ -920,6 +921,27 @@ class SibylLiveApiMemory(Memory):
             handle.flush()
             os.fsync(handle.fileno())
         self._write_checkpoint_manifest(finalized=False)
+
+    def _truncate_checkpoint_catalog(self, catalog_path: Path) -> None:
+        if self.checkpoint_dir is None:
+            return
+        manifest_path = self.checkpoint_dir / CHECKPOINT_MANIFEST_FILENAME
+        if not manifest_path.is_file():
+            return
+        manifest = json_module.loads(manifest_path.read_text(encoding="utf-8"))
+        catalog_size = manifest.get("catalog_size") if isinstance(manifest, dict) else None
+        if isinstance(catalog_size, bool) or not isinstance(catalog_size, int):
+            raise RuntimeError(f"Invalid ingest checkpoint catalog size: {manifest_path}")
+        actual_size = catalog_path.stat().st_size
+        if actual_size < catalog_size:
+            msg = f"Ingest checkpoint catalog is shorter than its manifest: {catalog_path}"
+            raise RuntimeError(msg)
+        if actual_size == catalog_size:
+            return
+        with catalog_path.open("r+b") as handle:
+            handle.truncate(catalog_size)
+            handle.flush()
+            os.fsync(handle.fileno())
 
     def _write_checkpoint_manifest(self, *, finalized: bool) -> None:
         if self.checkpoint_dir is None:

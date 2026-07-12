@@ -23,7 +23,7 @@ from sibyl.api.schemas import (
 )
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl_core.auth import ProjectRole
-from sibyl_core.models.entities import Entity, EntityType
+from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 
 
 def _request() -> MagicMock:
@@ -343,7 +343,16 @@ async def test_requeue_entity_background_jobs_uses_persisted_entities() -> None:
         organization_id=str(org.id),
         metadata={"project_id": "project_shared"},
     )
-    runtime = SimpleNamespace(entity_manager=SimpleNamespace(get=AsyncMock(return_value=entity)))
+    relationship = Relationship(
+        id="rel-session-pattern",
+        source_id=entity.id,
+        target_id="pattern_shared",
+        relationship_type=RelationshipType.RELATED_TO,
+    )
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(get=AsyncMock(return_value=entity)),
+        relationship_manager=SimpleNamespace(get_for_entity=AsyncMock(return_value=[relationship])),
+    )
 
     with (
         patch(
@@ -354,6 +363,10 @@ async def test_requeue_entity_background_jobs_uses_persisted_entities() -> None:
             "sibyl.api.routes.entities.verify_entity_project_access",
             AsyncMock(),
         ) as verify_access,
+        patch(
+            "sibyl.api.routes.entities._require_entity_read_access",
+            AsyncMock(return_value={"project_shared"}),
+        ) as require_read_access,
         patch(
             "sibyl.api.routes.entities.extract_projected_memory_entities",
             MagicMock(return_value=[{"entity_type": "fact"}]),
@@ -384,9 +397,11 @@ async def test_requeue_entity_background_jobs_uses_persisted_entities() -> None:
         required_role=ProjectRole.CONTRIBUTOR,
         require_existing_project=True,
     )
+    require_read_access.assert_awaited_once_with(ctx, entity)
     embedding_payload, embedding_group = enqueue_embeddings.await_args.args
     assert embedding_group == str(org.id)
     assert embedding_payload[0]["id"] == entity.id
+    assert enqueue_embeddings.await_args.kwargs["relationships"][0]["id"] == relationship.id
     projection_payload, projection_group = enqueue_projection.await_args.args
     assert projection_group == str(org.id)
     assert projection_payload[0]["id"] == entity.id
@@ -394,6 +409,47 @@ async def test_requeue_entity_background_jobs_uses_persisted_entities() -> None:
     assert response.entity_ids == [entity.id]
     assert response.background_jobs["embedding_backfill"]["job_ids"] == ["embed-restored"]
     assert response.background_jobs["memory_projection"]["job_ids"] == ["projection-restored"]
+
+
+@pytest.mark.asyncio
+async def test_requeue_entity_background_jobs_hides_unreadable_entities() -> None:
+    entity = Entity(
+        id="session_private",
+        entity_type=EntityType.SESSION,
+        name="Private session",
+        content="private memory",
+        organization_id=str(_org().id),
+        metadata={"memory_scope": "private"},
+    )
+    runtime = SimpleNamespace(entity_manager=SimpleNamespace(get=AsyncMock(return_value=entity)))
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "sibyl.api.routes.entities._require_entity_read_access",
+            AsyncMock(side_effect=HTTPException(status_code=404, detail="Entity not found")),
+        ),
+        patch(
+            "sibyl.jobs.queue.enqueue_entity_embedding_backfill",
+            AsyncMock(),
+        ) as enqueue_embeddings,
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await requeue_entity_background_jobs(
+            request=EntityBackgroundJobsRequeueRequest(
+                entity_ids=[entity.id],
+                jobs=["embedding_backfill"],
+            ),
+            org=_org(),
+            ctx=_ctx(),
+            content_session="session",
+        )
+
+    assert exc_info.value.status_code == 404
+    enqueue_embeddings.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ Full create, read, update, delete operations for all entity types.
 Transparently handles both graph entities and document chunks.
 """
 
+import asyncio
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated, Any
@@ -1585,6 +1586,7 @@ async def requeue_entity_background_jobs(
         entity = await runtime.entity_manager.get(entity_id)
         if entity is None:
             raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
+        await _require_entity_read_access(ctx, entity)
         project_id = (
             entity.id
             if entity.entity_type is EntityType.PROJECT
@@ -1607,12 +1609,25 @@ async def requeue_entity_background_jobs(
     if "embedding_backfill" in requested_jobs:
         from sibyl.jobs.queue import enqueue_entity_embedding_backfill
 
-        job_id = await enqueue_entity_embedding_backfill(serialized, group_id)
+        relationship_groups = await asyncio.gather(
+            *(runtime.relationship_manager.get_for_entity(entity.id) for entity in entities)
+        )
+        relationships = {
+            relationship.id: relationship for group in relationship_groups for relationship in group
+        }
+        serialized_relationships = [
+            relationship.model_dump(mode="json") for relationship in relationships.values()
+        ]
+        job_id = await enqueue_entity_embedding_backfill(
+            serialized,
+            group_id,
+            relationships=serialized_relationships,
+        )
         background_jobs["embedding_backfill"] = {
             "status": "queued",
             "job_ids": [job_id],
             "queued_entities": len(entities),
-            "queued_relationships": 0,
+            "queued_relationships": len(serialized_relationships),
         }
     if "memory_projection" in requested_jobs:
         from sibyl.jobs.queue import enqueue_memory_projection

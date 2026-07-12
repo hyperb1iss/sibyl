@@ -1032,14 +1032,7 @@ def test_sibyl_memory_ingest_checkpoint_resumes_completed_trajectory(tmp_path: P
     with catalog_path.open("ab") as handle:
         handle.write(b"interrupted trailing bytes")
 
-    restored = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
-    module.Memory.__init__(restored, {})
-    restored.api_url = memory.api_url
-    restored.project_id = memory.project_id
-    restored.run_id = memory.run_id
-    restored.chunking_mode = memory.chunking_mode
-    restored.content_max_chars = memory.content_max_chars
-    restored._load_checkpoint(checkpoint_dir)
+    restored = _reload_checkpoint(module, memory, checkpoint_dir)
 
     assert restored._completed_trajectory_ids == {"t1"}
     assert restored._pending_embedding_job_ids == {"embed-1"}
@@ -1052,6 +1045,21 @@ def test_sibyl_memory_ingest_checkpoint_resumes_completed_trajectory(tmp_path: P
         f"completed trajectory was reinserted: {args}, {kwargs}"
     )
     restored.insert(_trajectory("t1"))
+
+    second_payloads = module.build_entity_payloads_for_trajectory(
+        _trajectory("t2"),
+        project_id="project_saved",
+        run_id="run-saved",
+    )
+    restored.checkpoint_dir = checkpoint_dir
+    restored._completed_trajectory_ids.add("t2")
+    restored._chunk_catalog.update(module._catalog_results(second_payloads))
+    restored._append_checkpoint(second_payloads)
+
+    reloaded = _reload_checkpoint(module, memory, checkpoint_dir)
+
+    assert reloaded._completed_trajectory_ids == {"t1", "t2"}
+    assert set(reloaded._chunk_catalog) == {"t1", "t2"}
 
 
 def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
@@ -1956,6 +1964,21 @@ def _assert_credentials_stay_process_local(memory_config: dict[str, object]) -> 
     assert os.environ["SIBYL_API_TOKEN"] == TEST_CREDENTIAL
     assert os.environ["LME_SIBYL_EMAIL"] == TEST_EMAIL
     assert os.environ["LME_SIBYL_PASSWORD"] == TEST_CREDENTIAL
+
+
+def _reload_checkpoint(module: ModuleType, source: Any, checkpoint_dir: Path) -> Any:
+    restored = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(restored, {})
+    for attribute in (
+        "api_url",
+        "project_id",
+        "run_id",
+        "chunking_mode",
+        "content_max_chars",
+    ):
+        setattr(restored, attribute, getattr(source, attribute))
+    restored._load_checkpoint(checkpoint_dir)
+    return restored
 
 
 def _write_official_repo(root: Path) -> Path:
