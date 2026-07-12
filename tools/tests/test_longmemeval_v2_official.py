@@ -939,6 +939,11 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
 
     memory.project_id = "project_lme"
     memory.api_url = "http://localhost:3434/api"
+    memory.api_runtime = {
+        "status": "healthy",
+        "version": "1.1.0",
+        "runtime": {"commit": "abc123", "git_dirty": False},
+    }
     memory.run_id = "run_lme"
     memory.search_limit = 12
     memory.max_context_items = 8
@@ -969,6 +974,10 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
     assert metadata["search_metadata"] == {
         "retrieval_mode": "native",
         "stage_timings_ms": {"total": 12.5},
+    }
+    assert metadata["api_runtime"]["runtime"] == {
+        "commit": "abc123",
+        "git_dirty": False,
     }
 
 

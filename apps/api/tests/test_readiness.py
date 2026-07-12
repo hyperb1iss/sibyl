@@ -33,6 +33,13 @@ def test_liveness_health_stays_cheap_and_unauthenticated() -> None:
     body = response.json()
     assert body["status"] == "healthy"
     assert "version" in body
+    assert set(body["runtime"]) == {
+        "commit",
+        "commit_source",
+        "git_dirty",
+        "git_status",
+        "dirty_source",
+    }
 
 
 def test_readiness_returns_200_when_dependencies_ready() -> None:

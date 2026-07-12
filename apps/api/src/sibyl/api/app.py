@@ -6,6 +6,7 @@ Creates the REST API app that gets mounted alongside MCP.
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import structlog
 from fastapi import FastAPI, HTTPException, Request
@@ -62,6 +63,7 @@ from sibyl.api.routes import (
 from sibyl.api.websocket import websocket_handler
 from sibyl.auth.middleware import AuthMiddleware
 from sibyl.config import settings
+from sibyl.runtime_provenance import get_runtime_provenance
 from sibyl.runtime_services import RuntimeServices
 from sibyl.services.telemetry import schedule_runtime_rollup_persist
 from sibyl_core.observability import telemetry_registry
@@ -148,6 +150,7 @@ def create_api_app() -> FastAPI:  # noqa: PLR0915
     Returns:
         Configured FastAPI app with all routes and middleware.
     """
+    runtime_provenance = get_runtime_provenance()
     app = FastAPI(
         title="Sibyl API",
         description="REST API for Sibyl Knowledge Graph",
@@ -308,7 +311,7 @@ def create_api_app() -> FastAPI:  # noqa: PLR0915
         }
 
     @app.get("/health")
-    async def health_check() -> dict[str, str]:
+    async def health_check() -> dict[str, Any]:
         """Public liveness check - no auth required.
 
         Asserts only that the process is up. Used by load balancers,
@@ -318,7 +321,11 @@ def create_api_app() -> FastAPI:  # noqa: PLR0915
         """
         from sibyl import __version__
 
-        return {"status": "healthy", "version": __version__}
+        return {
+            "status": "healthy",
+            "version": __version__,
+            "runtime": runtime_provenance,
+        }
 
     @app.get("/health/ready")
     async def readiness_check() -> JSONResponse:

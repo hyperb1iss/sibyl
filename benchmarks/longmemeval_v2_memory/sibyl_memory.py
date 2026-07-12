@@ -254,6 +254,7 @@ class SibylLiveApiMemory(Memory):
         self._refresh_token = ""
         self._cli_auth: dict[str, str] = {}
         self._authenticate(memory_params)
+        self.api_runtime = self._request_json("GET", "/health")
         if not self.project_id:
             self.project_id = self._create_project()
 
@@ -347,6 +348,7 @@ class SibylLiveApiMemory(Memory):
         return {
             "memory_type": self.memory_type,
             "api_url": self.api_url,
+            "api_runtime": dict(getattr(self, "api_runtime", {})),
             "project_id": self.project_id,
             "run_id": self.run_id,
             "inserted_trajectories": self.inserted_trajectories,
