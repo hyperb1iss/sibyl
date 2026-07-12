@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -115,8 +116,14 @@ def test_longmemeval_v2_download_patterns_default_to_text_context() -> None:
     assert "trajectory_screenshots/*.tar.gz" in full_patterns
 
 
-def test_official_runner_plan_materializes_honest_runtime_inputs(tmp_path: Path) -> None:
+def test_official_runner_plan_materializes_honest_runtime_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module = _load_runner_module()
+    monkeypatch.setenv("SIBYL_API_TOKEN", "before-test")
+    monkeypatch.setenv("LME_SIBYL_EMAIL", "before-test")
+    monkeypatch.setenv("LME_SIBYL_PASSWORD", "before-test")
     data_root = tmp_path / "data"
     output_dir = tmp_path / "out"
     _write_dataset(data_root)
@@ -136,6 +143,12 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(tmp_path: Path)
                 "1",
                 "--plan-only",
                 "--allow-localhost",
+                "--api-token",
+                "token-sentinel",
+                "--email",
+                "email-sentinel@example.test",
+                "--password",
+                "password-sentinel",
             ]
         )
         == 0
@@ -157,6 +170,15 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(tmp_path: Path)
     assert [row["id"] for row in runtime_questions] == ["q-enterprise"]
     assert runtime_haystack == {"q-enterprise": ["t1", "t2"]}
     assert memory_config["memory_type"] == "sibyl_live_api"
+    assert "api_token" not in memory_config["memory_params"]
+    assert "email" not in memory_config["memory_params"]
+    assert "password" not in memory_config["memory_params"]
+    assert "token-sentinel" not in json.dumps(memory_config)
+    assert "email-sentinel@example.test" not in json.dumps(memory_config)
+    assert "password-sentinel" not in json.dumps(memory_config)
+    assert os.environ["SIBYL_API_TOKEN"] == "token-sentinel"
+    assert os.environ["LME_SIBYL_EMAIL"] == "email-sentinel@example.test"
+    assert os.environ["LME_SIBYL_PASSWORD"] == "password-sentinel"
     assert memory_config["memory_params"]["allow_localhost"] is True
     assert memory_config["memory_params"]["defer_embeddings"] is True
     assert memory_config["memory_params"]["content_max_chars"] == EXPECTED_CONTENT_MAX_CHARS
@@ -1044,6 +1066,32 @@ def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
     requested["memory_params"]["content_max_chars"] = 8_000
     with pytest.raises(RuntimeError, match="content_max_chars"):
         module.SibylLiveApiMemory.reconcile_loaded_memory_config(saved, requested)
+
+
+def test_sibyl_memory_constructor_preserves_disabled_neighbor_stitching(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_memory_module()
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_authenticate", lambda *args: None)
+    monkeypatch.setattr(
+        module.SibylLiveApiMemory,
+        "_request_json",
+        lambda *args, **kwargs: {"status": "healthy"},
+    )
+
+    memory = module.SibylLiveApiMemory(
+        {
+            "allow_localhost": True,
+            "project_id": "project_test",
+            "neighbor_stitch_items": 0,
+            "neighbor_stitch_span": "0",
+        }
+    )
+    try:
+        assert memory.neighbor_stitch_items == 0
+        assert memory.neighbor_stitch_span == 0
+    finally:
+        memory._client.close()
 
 
 def test_official_runner_load_config_preserves_saved_ingest_identity(tmp_path: Path) -> None:

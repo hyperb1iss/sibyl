@@ -96,6 +96,7 @@ _SENSITIVE_CONFIG_KEYS = frozenset({"api_token", "email", "password"})
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     args.command_args = list(argv if argv is not None else sys.argv[1:])
+    install_memory_credentials(args)
     data_root = Path(args.data_root).expanduser().resolve()
     output_dir = Path(args.output_dir).expanduser().resolve()
     if args.receipt_only:
@@ -551,9 +552,6 @@ def materialize_runtime_haystack(
 def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
     params: dict[str, object] = {
         "api_url": args.api_url,
-        "api_token": args.api_token,
-        "email": args.email,
-        "password": args.password,
         "project_id": args.project_id,
         "run_id": args.run_id,
         "allow_localhost": args.allow_localhost,
@@ -593,6 +591,16 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
                 requested_config=config,
             )
     return config
+
+
+def install_memory_credentials(args: argparse.Namespace) -> None:
+    for environment_key, value in (
+        ("SIBYL_API_TOKEN", args.api_token),
+        ("LME_SIBYL_EMAIL", args.email),
+        ("LME_SIBYL_PASSWORD", args.password),
+    ):
+        if value:
+            os.environ[environment_key] = value
 
 
 def build_loaded_memory_config(

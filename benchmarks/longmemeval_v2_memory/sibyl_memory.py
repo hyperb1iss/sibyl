@@ -564,6 +564,7 @@ class SibylLiveApiMemory(Memory):
                 memory_params,
                 "neighbor_stitch_items",
                 DEFAULT_NEIGHBOR_STITCH_ITEMS,
+                minimum=0,
             ),
         )
         self.neighbor_stitch_span = max(
@@ -572,6 +573,7 @@ class SibylLiveApiMemory(Memory):
                 memory_params,
                 "neighbor_stitch_span",
                 DEFAULT_NEIGHBOR_STITCH_SPAN,
+                minimum=0,
             ),
         )
         self.include_screenshot_refs = _param_bool(
@@ -1806,14 +1808,20 @@ def _param_bool(params: dict[str, object], key: str, default: bool) -> bool:
     return default
 
 
-def _param_int(params: dict[str, object], key: str, default: int) -> int:
+def _param_int(
+    params: dict[str, object],
+    key: str,
+    default: int,
+    *,
+    minimum: int = 1,
+) -> int:
     value = params.get(key)
     if isinstance(value, bool):
         return default
     if isinstance(value, int):
-        return max(1, value)
+        return max(minimum, value)
     if isinstance(value, str) and re.fullmatch(r"\d+", value.strip()):
-        return max(1, int(value))
+        return max(minimum, int(value))
     return default
 
 
