@@ -22,6 +22,8 @@ from sibyl.api.idempotency import (
     serialize_idempotent_request,
 )
 from sibyl.api.schemas import (
+    EntityBackgroundJobsRequeueRequest,
+    EntityBackgroundJobsRequeueResponse,
     EntityBulkCreateRequest,
     EntityBulkCreateResponse,
     EntityCreate,
@@ -1560,6 +1562,85 @@ async def create_entities_bulk(
         entities=responses,
         created=len(responses),
         failed=0,
+        background_jobs=background_jobs,
+    )
+
+
+@router.post(
+    "/bulk/requeue-background-jobs",
+    response_model=EntityBackgroundJobsRequeueResponse,
+    dependencies=[Depends(require_org_role(*_WRITE_ROLES))],
+)
+async def requeue_entity_background_jobs(
+    request: EntityBackgroundJobsRequeueRequest,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+    content_session: Any = Depends(get_content_read_session_dependency),
+) -> EntityBackgroundJobsRequeueResponse:
+    group_id = str(org.id)
+    runtime = await get_entity_graph_runtime(group_id)
+    entities: list[Entity] = []
+    verified_project_ids: set[str] = set()
+    for entity_id in dict.fromkeys(request.entity_ids):
+        entity = await runtime.entity_manager.get(entity_id)
+        if entity is None:
+            raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
+        project_id = (
+            entity.id
+            if entity.entity_type is EntityType.PROJECT
+            else _entity_read_project_id(entity)
+        )
+        if project_id and project_id not in verified_project_ids:
+            await verify_entity_project_access(
+                content_session,
+                ctx,
+                project_id,
+                required_role=ProjectRole.CONTRIBUTOR,
+                require_existing_project=True,
+            )
+            verified_project_ids.add(project_id)
+        entities.append(entity)
+
+    requested_jobs = set(request.jobs)
+    serialized = [entity.model_dump(mode="json") for entity in entities]
+    background_jobs: dict[str, Any] = {}
+    if "embedding_backfill" in requested_jobs:
+        from sibyl.jobs.queue import enqueue_entity_embedding_backfill
+
+        job_id = await enqueue_entity_embedding_backfill(serialized, group_id)
+        background_jobs["embedding_backfill"] = {
+            "status": "queued",
+            "job_ids": [job_id],
+            "queued_entities": len(entities),
+            "queued_relationships": 0,
+        }
+    if "memory_projection" in requested_jobs:
+        from sibyl.jobs.queue import enqueue_memory_projection
+
+        projection_sources = [
+            entity for entity in entities if extract_projected_memory_entities(entity)
+        ]
+        if projection_sources:
+            projection_job_id = await enqueue_memory_projection(
+                [entity.model_dump(mode="json") for entity in projection_sources],
+                group_id,
+                created_source_ids=[entity.id for entity in projection_sources],
+            )
+            background_jobs["memory_projection"] = {
+                "status": "queued",
+                "job_ids": [projection_job_id],
+                "queued_sources": len(projection_sources),
+                "skipped_sources": len(entities) - len(projection_sources),
+            }
+        else:
+            background_jobs["memory_projection"] = {
+                "status": "skipped",
+                "job_ids": [],
+                "queued_sources": 0,
+                "skipped_sources": len(entities),
+            }
+    return EntityBackgroundJobsRequeueResponse(
+        entity_ids=[entity.id for entity in entities],
         background_jobs=background_jobs,
     )
 

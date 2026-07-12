@@ -12,12 +12,18 @@ from sibyl.api.routes.entities import (
     create_entities_bulk,
     create_entity,
     delete_entity,
+    requeue_entity_background_jobs,
     update_entity,
 )
-from sibyl.api.schemas import EntityBulkCreateRequest, EntityCreate, EntityUpdate
+from sibyl.api.schemas import (
+    EntityBackgroundJobsRequeueRequest,
+    EntityBulkCreateRequest,
+    EntityCreate,
+    EntityUpdate,
+)
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl_core.auth import ProjectRole
-from sibyl_core.models.entities import EntityType
+from sibyl_core.models.entities import Entity, EntityType
 
 
 def _request() -> MagicMock:
@@ -323,6 +329,71 @@ async def test_create_entities_bulk_can_defer_embeddings_to_backfill_job() -> No
     assert jobs["job_ids"] == ["embed-entities-1"]
     assert jobs["queued_entities"] == 1
     assert jobs["queued_relationships"] == 1
+
+
+@pytest.mark.asyncio
+async def test_requeue_entity_background_jobs_uses_persisted_entities() -> None:
+    org = _org()
+    ctx = _ctx()
+    entity = Entity(
+        id="session_one",
+        entity_type=EntityType.SESSION,
+        name="Session one",
+        content="I bought a Samsung TV for the den.",
+        organization_id=str(org.id),
+        metadata={"project_id": "project_shared"},
+    )
+    runtime = SimpleNamespace(entity_manager=SimpleNamespace(get=AsyncMock(return_value=entity)))
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "sibyl.api.routes.entities.verify_entity_project_access",
+            AsyncMock(),
+        ) as verify_access,
+        patch(
+            "sibyl.api.routes.entities.extract_projected_memory_entities",
+            MagicMock(return_value=[{"entity_type": "fact"}]),
+        ),
+        patch(
+            "sibyl.jobs.queue.enqueue_entity_embedding_backfill",
+            AsyncMock(return_value="embed-restored"),
+        ) as enqueue_embeddings,
+        patch(
+            "sibyl.jobs.queue.enqueue_memory_projection",
+            AsyncMock(return_value="projection-restored"),
+        ) as enqueue_projection,
+    ):
+        response = await requeue_entity_background_jobs(
+            request=EntityBackgroundJobsRequeueRequest(
+                entity_ids=[entity.id],
+                jobs=["embedding_backfill", "memory_projection"],
+            ),
+            org=org,
+            ctx=ctx,
+            content_session="session",
+        )
+
+    verify_access.assert_awaited_once_with(
+        "session",
+        ctx,
+        "project_shared",
+        required_role=ProjectRole.CONTRIBUTOR,
+        require_existing_project=True,
+    )
+    embedding_payload, embedding_group = enqueue_embeddings.await_args.args
+    assert embedding_group == str(org.id)
+    assert embedding_payload[0]["id"] == entity.id
+    projection_payload, projection_group = enqueue_projection.await_args.args
+    assert projection_group == str(org.id)
+    assert projection_payload[0]["id"] == entity.id
+    assert enqueue_projection.await_args.kwargs == {"created_source_ids": [entity.id]}
+    assert response.entity_ids == [entity.id]
+    assert response.background_jobs["embedding_backfill"]["job_ids"] == ["embed-restored"]
+    assert response.background_jobs["memory_projection"]["job_ids"] == ["projection-restored"]
 
 
 @pytest.mark.asyncio

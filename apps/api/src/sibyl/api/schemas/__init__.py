@@ -61,6 +61,8 @@ from .crawler import (
     LinkGraphStatusResponse,
 )
 from .entities import (
+    EntityBackgroundJobsRequeueRequest,
+    EntityBackgroundJobsRequeueResponse,
     EntityBase,
     EntityBulkCreateRequest,
     EntityBulkCreateResponse,
@@ -230,6 +232,8 @@ __all__ = [
     "DocumentRelatedEntitiesResponse",
     "DocumentRelatedEntity",
     "DocumentUpdateRequest",
+    "EntityBackgroundJobsRequeueRequest",
+    "EntityBackgroundJobsRequeueResponse",
     "EntityBase",
     "EntityBulkCreateRequest",
     "EntityBulkCreateResponse",

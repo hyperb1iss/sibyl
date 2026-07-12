@@ -110,6 +110,24 @@ class EntityBulkCreateResponse(BaseModel):
     background_jobs: dict[str, Any] = Field(default_factory=dict)
 
 
+class EntityBackgroundJobsRequeueRequest(BaseModel):
+    """Requeue derived entity work after a broker state loss."""
+
+    entity_ids: list[str] = Field(..., min_length=1, max_length=128)
+    jobs: list[Literal["embedding_backfill", "memory_projection"]] = Field(
+        ...,
+        min_length=1,
+        max_length=2,
+    )
+
+
+class EntityBackgroundJobsRequeueResponse(BaseModel):
+    """Background jobs recreated from persisted graph entities."""
+
+    entity_ids: list[str]
+    background_jobs: dict[str, Any] = Field(default_factory=dict)
+
+
 class RawCaptureSummary(BaseModel):
     """Summary view of a raw archived capture."""
 

@@ -9,7 +9,7 @@ import threading
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Protocol, TypedDict, cast
+from typing import Any, Protocol, TypedDict, cast
 
 import httpx
 import pytest
@@ -1020,6 +1020,10 @@ def test_sibyl_memory_ingest_checkpoint_resumes_completed_trajectory(tmp_path: P
     memory._completed_trajectory_ids = {"t1"}
     memory._pending_embedding_job_ids = {"embed-1"}
     memory._pending_projection_job_ids = {"project-1"}
+    memory._pending_job_entity_ids = {
+        "embed-1": ["session-one"],
+        "project-1": ["session-one"],
+    }
     memory.ingest_embedding_usage = {"requests": EXPECTED_SAVED_USAGE_REQUESTS}
     memory.ingest_api_runtime = {"version": "test"}
 
@@ -1040,6 +1044,7 @@ def test_sibyl_memory_ingest_checkpoint_resumes_completed_trajectory(tmp_path: P
     assert restored._completed_trajectory_ids == {"t1"}
     assert restored._pending_embedding_job_ids == {"embed-1"}
     assert restored._pending_projection_job_ids == {"project-1"}
+    assert restored._pending_job_entity_ids == memory._pending_job_entity_ids
     assert restored._chunk_catalog == memory._chunk_catalog
     assert restored.ingest_embedding_usage == {"requests": EXPECTED_SAVED_USAGE_REQUESTS}
 
@@ -1091,10 +1096,23 @@ def test_sibyl_memory_constructor_preserves_disabled_neighbor_stitching(
 ) -> None:
     module = _load_memory_module()
     monkeypatch.setattr(module.SibylLiveApiMemory, "_authenticate", lambda *args: None)
+
+    def fake_request(
+        _self: object,
+        method: str,
+        path: str,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        if path == "/health":
+            return {"status": "healthy"}
+        assert method == "GET"
+        assert path == "/entities/project_test"
+        return {"id": "project_test", "entity_type": "project"}
+
     monkeypatch.setattr(
         module.SibylLiveApiMemory,
         "_request_json",
-        lambda *args, **kwargs: {"status": "healthy"},
+        fake_request,
     )
 
     memory = module.SibylLiveApiMemory(
@@ -1110,6 +1128,17 @@ def test_sibyl_memory_constructor_preserves_disabled_neighbor_stitching(
         assert memory.neighbor_stitch_span == 0
     finally:
         memory._client.close()
+
+
+def test_sibyl_memory_rejects_invisible_saved_project() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    memory.project_id = "project_saved"
+    memory._request_json = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("not found"))
+
+    with pytest.raises(RuntimeError, match="not visible to the current API credentials"):
+        memory._verify_project_visibility()
 
 
 def test_official_runner_load_config_preserves_saved_ingest_identity(tmp_path: Path) -> None:
@@ -1237,6 +1266,7 @@ def test_sibyl_memory_insert_tracks_deferred_background_jobs() -> None:
         calls.append({"method": method, "path": path, "json": json or {}, "params": params or {}})
         return {
             "created": 1,
+            "entities": [{"id": "session-lme-v2-1"}],
             "background_jobs": {
                 "embedding_backfill": {
                     "status": "queued",
@@ -1273,6 +1303,75 @@ def test_sibyl_memory_insert_tracks_deferred_background_jobs() -> None:
     assert memory.inserted_trajectories == 1
     assert memory._pending_embedding_job_ids == {"embed-lme-v2-1"}
     assert memory._pending_projection_job_ids == {"project-lme-v2-1"}
+    assert memory._pending_job_entity_ids == {
+        "embed-lme-v2-1": ["session-lme-v2-1"],
+        "project-lme-v2-1": ["session-lme-v2-1"],
+    }
+
+
+def test_sibyl_memory_retries_write_after_pre_checkpoint_crash(tmp_path: Path) -> None:
+    module = _load_memory_module()
+    checkpoint_dir = tmp_path / "checkpoint"
+    requests: list[dict[str, object]] = []
+
+    def fake_request(
+        _method: str,
+        _path: str,
+        *,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        del params
+        requests.append(json or {})
+        return {
+            "created": 1,
+            "entities": [{"id": "session-deterministic"}],
+            "background_jobs": {
+                "embedding_backfill": {"job_ids": ["embed-deterministic"]},
+                "memory_projection": {"job_ids": ["projection-deterministic"]},
+            },
+        }
+
+    def new_memory() -> Any:
+        memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+        module.Memory.__init__(memory, {})
+        memory.api_url = "http://127.0.0.1:3434/api"
+        memory.project_id = "project_lme"
+        memory.run_id = "run_lme"
+        memory.chunking_mode = "state"
+        memory.content_max_chars = TEST_CONTENT_MAX_CHARS
+        memory.bulk_max_entities = 16
+        memory.bulk_max_content_chars = 200_000
+        memory.embedding_backfill_max_pending_jobs = 8
+        memory.include_screenshot_refs = False
+        memory.defer_embeddings = True
+        memory.checkpoint_dir = checkpoint_dir
+        memory.created_entities = 0
+        memory.inserted_trajectories = 0
+        memory.ingest_embedding_usage = {}
+        memory.ingest_api_runtime = {"version": "test"}
+        memory._chunk_catalog = {}
+        memory._completed_trajectory_ids = set()
+        memory._pending_embedding_job_ids = set()
+        memory._pending_projection_job_ids = set()
+        memory._pending_job_entity_ids = {}
+        memory._request_json = fake_request
+        return memory
+
+    interrupted = new_memory()
+    interrupted._append_checkpoint = lambda _payloads: (_ for _ in ()).throw(
+        RuntimeError("simulated crash")
+    )
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        interrupted.insert(_trajectory("t1"))
+    assert not (checkpoint_dir / module.CHECKPOINT_MANIFEST_FILENAME).exists()
+
+    resumed = new_memory()
+    resumed.insert(_trajectory("t1"))
+
+    assert len(requests) == EXPECTED_MEMORY_API_RETRY_CALLS
+    assert requests[0] == requests[1]
+    assert (checkpoint_dir / module.CHECKPOINT_MANIFEST_FILENAME).is_file()
 
 
 def test_sibyl_memory_project_creation_defers_and_tracks_embeddings() -> None:
@@ -1312,6 +1411,7 @@ def test_sibyl_memory_project_creation_defers_and_tracks_embeddings() -> None:
     assert memory._create_project() == "project_lme"
     assert requests[0]["defer_embeddings"] is True
     assert memory._pending_embedding_job_ids == {"embed-project-1"}
+    assert memory._pending_job_entity_ids == {"embed-project-1": ["project_lme"]}
 
 
 def test_sibyl_memory_batches_payloads_by_entity_count_and_content_size() -> None:
@@ -1701,6 +1801,73 @@ def test_sibyl_memory_polls_pending_jobs_in_one_batch() -> None:
     memory._drain_embedding_backfills()
 
     assert requests == [{"job_ids": ["embed-1", "embed-2", "embed-3"]}]
+
+
+def test_sibyl_memory_requeues_job_lost_after_broker_restart() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    paths: list[str] = []
+    status_calls = 0
+
+    def fake_request(
+        method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        nonlocal status_calls
+        del params
+        paths.append(path)
+        if path == "/jobs/status":
+            assert method == "POST"
+            assert json == {"job_ids": ["embed-lost"]}
+            status_calls += 1
+            status = "not_found" if status_calls == 1 else "complete"
+            return {
+                "jobs": {
+                    "embed-lost": {
+                        "status": status,
+                        "error": None,
+                        "result": {},
+                    }
+                }
+            }
+        assert path == "/entities/bulk/requeue-background-jobs"
+        assert json == {
+            "entity_ids": ["session-one"],
+            "jobs": ["embedding_backfill"],
+        }
+        return {
+            "entity_ids": ["session-one"],
+            "background_jobs": {
+                "embedding_backfill": {
+                    "status": "queued",
+                    "job_ids": ["embed-lost"],
+                }
+            },
+        }
+
+    memory.defer_embeddings = True
+    memory.checkpoint_dir = None
+    memory.embedding_job_wait_timeout_seconds = 1.0
+    memory.embedding_job_poll_seconds = 0.0
+    memory.ingest_embedding_usage = {}
+    memory._pending_embedding_job_ids = {"embed-lost"}
+    memory._pending_projection_job_ids = set()
+    memory._pending_job_entity_ids = {"embed-lost": ["session-one"]}
+    memory._request_json = fake_request
+
+    memory._drain_embedding_backfills()
+
+    assert paths == [
+        "/jobs/status",
+        "/entities/bulk/requeue-background-jobs",
+        "/jobs/status",
+    ]
+    assert memory._pending_embedding_job_ids == set()
+    assert memory._pending_job_entity_ids == {}
 
 
 def test_sibyl_memory_chunks_large_job_status_batches() -> None:
