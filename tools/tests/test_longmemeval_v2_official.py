@@ -677,7 +677,47 @@ def test_sibyl_memory_payloads_chunk_trajectory_by_state() -> None:
     assert all(len(str(payload["content"])) <= TEST_CONTENT_MAX_CHARS for payload in payloads)
     assert payloads[0]["metadata"]["project_id"] == "project_lme"
     assert payloads[0]["metadata"]["longmemeval_v2_trajectory_id"] == "t1"
+    assert all(
+        payload["metadata"]["longmemeval_v2_state_indices"]
+        == [payload["metadata"]["longmemeval_v2_state_index"]]
+        for payload in payloads
+    )
+    assert all(
+        f"State {payload['metadata']['longmemeval_v2_state_index']}" in str(payload["content"])
+        for payload in payloads
+    )
+    assert all(
+        payload["metadata"]["entity_content_projection_policy"] == "v2-identity-state-chunks-v2"
+        for payload in payloads
+    )
     assert any("Screenshot:" in str(payload["content"]) for payload in payloads)
+
+
+def test_sibyl_memory_oversized_state_parts_repeat_identity() -> None:
+    module = _load_memory_module()
+
+    payloads = module.build_entity_payloads_for_trajectory(
+        _trajectory("t1", tree="button " + ("Priority " * 300)),
+        project_id="project_lme",
+        run_id="run_lme",
+        content_max_chars=TEST_CONTENT_MAX_CHARS,
+    )
+    state_zero = [
+        payload for payload in payloads if payload["metadata"]["longmemeval_v2_state_index"] == 0
+    ]
+
+    assert len(state_zero) > 1
+    assert all("Trajectory: t1" in str(payload["content"]) for payload in state_zero)
+    assert all(
+        "State 0\nURL: https://example.test/start" in str(payload["content"])
+        for payload in state_zero
+    )
+    assert [
+        payload["metadata"]["longmemeval_v2_state_part_index"] for payload in state_zero
+    ] == list(range(len(state_zero)))
+    assert {payload["metadata"]["longmemeval_v2_state_part_count"] for payload in state_zero} == {
+        len(state_zero)
+    }
 
 
 def test_sibyl_memory_oversized_blocks_split_on_line_boundaries() -> None:
@@ -937,7 +977,7 @@ def test_sibyl_memory_drains_backfills_when_pending_threshold_is_reached() -> No
 
     memory.project_id = "project_lme"
     memory.run_id = "run_lme"
-    memory.content_max_chars = 20
+    memory.content_max_chars = TEST_CONTENT_MAX_CHARS
     memory.bulk_max_entities = 1
     memory.bulk_max_content_chars = 200_000
     memory.embedding_backfill_max_pending_jobs = 1
