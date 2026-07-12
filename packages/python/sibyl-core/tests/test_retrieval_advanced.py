@@ -2589,6 +2589,18 @@ class TestHybridSearch:
 
         assert result.total == 0
         assert result.metadata["sources"] == []
+        assert set(result.metadata["stage_timings_ms"]) == {
+            "seed_search",
+            "entity_linking",
+            "graph_traversal",
+            "fusion",
+            "reranking",
+            "keyword_boost",
+            "temporal_boost",
+            "query_coverage",
+            "total",
+        }
+        assert result.metadata["stage_timings_ms"]["total"] >= 0
 
     @pytest.mark.asyncio
     async def test_hybrid_search_marks_entity_manager_incomplete_on_vector_failure(
@@ -2624,6 +2636,7 @@ class TestHybridSearch:
 
         assert result.total >= 1
         assert "vector" in result.metadata["sources"]
+        assert all(value >= 0 for value in result.metadata["stage_timings_ms"].values())
 
     @pytest.mark.asyncio
     async def test_hybrid_search_reports_applied_reranking(self) -> None:

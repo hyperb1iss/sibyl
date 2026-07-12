@@ -860,7 +860,10 @@ class TestSearchTool:
         hybrid_search = AsyncMock(
             return_value=HybridResult(
                 results=[(entity, 0.95)],
-                metadata={"entity_manager_search_completed": True},
+                metadata={
+                    "entity_manager_search_completed": True,
+                    "stage_timings_ms": {"total": 7.5},
+                },
             )
         )
 
@@ -888,6 +891,18 @@ class TestSearchTool:
         assert len(default_response.results[0].content) == 500
         assert len(expanded_response.results[0].content) == 700
         assert expanded_response.filters["content_max_chars"] == 700
+        assert expanded_response.filters["graph_retrieval"]["stage_timings_ms"] == {"total": 7.5}
+        stage_timings = expanded_response.filters["stage_timings_ms"]
+        assert set(stage_timings) == {
+            "planning",
+            "graph_search",
+            "document_search",
+            "raw_memory_search",
+            "fusion",
+            "exposure",
+            "total",
+        }
+        assert all(value >= 0 for value in stage_timings.values())
 
     @pytest.mark.asyncio
     async def test_search_clamps_content_budget(self) -> None:

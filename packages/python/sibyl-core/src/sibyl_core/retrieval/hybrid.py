@@ -9,6 +9,7 @@ Implements a two-phase retrieval strategy:
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -514,6 +515,18 @@ async def hybrid_search(
     Returns:
         HybridResult with merged, scored results.
     """
+    search_started_at = time.perf_counter()
+    stage_timings_ms = {
+        "seed_search": 0.0,
+        "entity_linking": 0.0,
+        "graph_traversal": 0.0,
+        "fusion": 0.0,
+        "reranking": 0.0,
+        "keyword_boost": 0.0,
+        "temporal_boost": 0.0,
+        "query_coverage": 0.0,
+        "total": 0.0,
+    }
     if config is None:
         config = HybridConfig()
     reranking_receipt = _initial_reranking_receipt(config)
@@ -523,6 +536,7 @@ async def hybrid_search(
     log.info("hybrid_search_start", **query_log_fields(query), limit=limit)
 
     # Phase 1: native vector/fulltext seed search
+    stage_started_at = time.perf_counter()
     vector_attempt = await _vector_search_attempt(
         query,
         entity_manager,
@@ -531,6 +545,9 @@ async def hybrid_search(
         result_filter=result_filter,
     )
     vector_results = vector_attempt.results
+    stage_timings_ms["seed_search"] = _elapsed_ms(stage_started_at)
+
+    stage_started_at = time.perf_counter()
     link_search_skipped = False
     link_attempt = _VectorSearchAttempt([], True)
     should_link_entities = (
@@ -551,8 +568,10 @@ async def hybrid_search(
     link_results = [
         result for result in link_attempt.results if _entity_id(result[0]) not in vector_ids
     ]
+    stage_timings_ms["entity_linking"] = _elapsed_ms(stage_started_at)
 
     # Phase 2: Graph traversal from top vector results
+    stage_started_at = time.perf_counter()
     graph_results: list[tuple[Any, float]] = []
     graph_seed_results = [*vector_results[:5], *link_results[:5]]
     if graph_seed_results and config.graph_weight > 0:
@@ -576,8 +595,10 @@ async def hybrid_search(
                     for entity, score in graph_results
                     if _entity_matches_types(entity, entity_types)
                 ]
+    stage_timings_ms["graph_traversal"] = _elapsed_ms(stage_started_at)
 
     # Phase 3: Merge results using RRF
+    stage_started_at = time.perf_counter()
     result_lists = []
     weights = []
     list_names = []
@@ -593,6 +614,8 @@ async def hybrid_search(
         list_names.append("graph")
 
     if not result_lists:
+        stage_timings_ms["fusion"] = _elapsed_ms(stage_started_at)
+        stage_timings_ms["total"] = _elapsed_ms(search_started_at)
         if config.apply_reranking:
             reranking_receipt["reranking_skipped"] = "no_results"
         return HybridResult(
@@ -608,6 +631,7 @@ async def hybrid_search(
                 "graph_count": len(graph_results),
                 "reranking_applied": False,
                 "reranking": reranking_receipt,
+                "stage_timings_ms": stage_timings_ms,
             },
         )
 
@@ -633,8 +657,10 @@ async def hybrid_search(
             "fused_score": score,
         }
     merged.sort(key=lambda item: item[1], reverse=True)
+    stage_timings_ms["fusion"] = _elapsed_ms(stage_started_at)
 
     # Phase 4: Apply cross-encoder reranking (optional)
+    stage_started_at = time.perf_counter()
     reranking_applied = False
     if config.apply_reranking and merged:
         try:
@@ -661,14 +687,18 @@ async def hybrid_search(
         except Exception as e:
             log.warning("reranking_failed_continuing", error=str(e))
             reranking_receipt["reranking_failed"] = type(e).__name__
+    stage_timings_ms["reranking"] = _elapsed_ms(stage_started_at)
 
     # Phase 5: Apply lightweight lexical boosting
+    stage_started_at = time.perf_counter()
     keyword_boost_applied = False
     if config.apply_keyword_boost and merged:
         boosted, keyword_boost_applied = _apply_keyword_boost(query, merged)
         merged = boosted
+    stage_timings_ms["keyword_boost"] = _elapsed_ms(stage_started_at)
 
     # Phase 6: Apply temporal boosting
+    stage_started_at = time.perf_counter()
     temporal_target = resolve_temporal_reference(query, config.reference_time)
     if config.apply_temporal and merged:
         if temporal_target is not None:
@@ -679,7 +709,9 @@ async def hybrid_search(
                 decay_days=config.temporal_decay_days,
                 reference_time=config.reference_time,
             )
+    stage_timings_ms["temporal_boost"] = _elapsed_ms(stage_started_at)
 
+    stage_started_at = time.perf_counter()
     query_coverage_rerank_applied = False
     query_coverage_refinement_applied = False
     if config.apply_query_coverage_rerank and merged:
@@ -693,6 +725,8 @@ async def hybrid_search(
             merged,
             temporal_target=temporal_target,
         )
+    stage_timings_ms["query_coverage"] = _elapsed_ms(stage_started_at)
+    stage_timings_ms["total"] = _elapsed_ms(search_started_at)
 
     # Trim to limit
     final_results = merged[:limit]
@@ -714,6 +748,7 @@ async def hybrid_search(
         "query_coverage_refinement_applied": query_coverage_refinement_applied,
         "temporal_applied": config.apply_temporal,
         "temporal_target": temporal_target.isoformat() if temporal_target else None,
+        "stage_timings_ms": stage_timings_ms,
     }
 
     if include_metadata:
@@ -730,6 +765,10 @@ async def hybrid_search(
     )
 
     return HybridResult(results=final_results, metadata=metadata)
+
+
+def _elapsed_ms(started_at: float) -> float:
+    return (time.perf_counter() - started_at) * 1000.0
 
 
 async def simple_hybrid_search(

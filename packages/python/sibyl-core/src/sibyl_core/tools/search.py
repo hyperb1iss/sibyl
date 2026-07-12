@@ -1,7 +1,8 @@
 """Search tool for unified semantic search across Sibyl knowledge graph and documentation."""
 
 import asyncio
-from collections.abc import Sequence
+import time
+from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -52,6 +53,19 @@ DOCUMENT_SEARCH_GRAPH_JOIN_TIMEOUT_SECONDS = min(2.0, DOCUMENT_SEARCH_TIMEOUT_SE
 DEFAULT_SEARCH_CONTENT_MAX_CHARS = 500
 MAX_SEARCH_CONTENT_MAX_CHARS = 50_000
 SEARCH_PREVIEW_MAX_CHARS = 200
+
+
+async def _timed_search_source(
+    operation: Awaitable[Any],
+    *,
+    timings: dict[str, float],
+    stage: str,
+) -> Any:
+    started_at = time.perf_counter()
+    try:
+        return await operation
+    finally:
+        timings[stage] = (time.perf_counter() - started_at) * 1000.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -721,6 +735,18 @@ async def search(
         search("Next.js routing", source_name="next-dynenv")
         search("", types=["task"], status="todo", project="proj_auth")
     """
+    search_started_at = time.perf_counter()
+    stage_timings_ms = {
+        "planning": 0.0,
+        "graph_search": 0.0,
+        "document_search": 0.0,
+        "raw_memory_search": 0.0,
+        "fusion": 0.0,
+        "exposure": 0.0,
+        "total": 0.0,
+    }
+    planning_started_at = time.perf_counter()
+
     # Clamp limit and offset
     limit = max(1, min(limit, 50))
     offset = max(0, offset)
@@ -865,45 +891,53 @@ async def search(
             else DOCUMENT_SEARCH_TIMEOUT_SECONDS
         )
         document_search_task = asyncio.create_task(
-            with_timeout(
-                _search_documents(
-                    query=query,
-                    organization_id=organization_id,
-                    source_id=source_id,
-                    source_name=source_name,
-                    language=language,
-                    limit=limit,
-                    include_content=include_content,
-                    content_max_chars=content_max_chars,
+            _timed_search_source(
+                with_timeout(
+                    _search_documents(
+                        query=query,
+                        organization_id=organization_id,
+                        source_id=source_id,
+                        source_name=source_name,
+                        language=language,
+                        limit=limit,
+                        include_content=include_content,
+                        content_max_chars=content_max_chars,
+                    ),
+                    timeout_seconds=document_timeout_seconds,
+                    operation_name="document_search",
                 ),
-                timeout_seconds=document_timeout_seconds,
-                operation_name="document_search",
+                timings=stage_timings_ms,
+                stage="document_search",
             )
         )
 
     if search_raw_memory and query and organization_id and principal_id:
         raw_memory_search_task = asyncio.create_task(
-            with_timeout(
-                _search_raw_memories(
-                    query=query,
-                    organization_id=organization_id,
-                    principal_id=principal_id,
-                    memory_scope=memory_scope,
-                    scope_key=scope_key,
-                    project_id=project,
-                    source_id=source_id,
-                    participants=participants,
-                    labels=labels,
-                    thread_id=thread_id,
-                    occurred_after=occurred_after,
-                    occurred_before=occurred_before,
-                    as_of=resolved_as_of,
-                    limit=limit,
-                    include_content=include_content,
-                    content_max_chars=content_max_chars,
+            _timed_search_source(
+                with_timeout(
+                    _search_raw_memories(
+                        query=query,
+                        organization_id=organization_id,
+                        principal_id=principal_id,
+                        memory_scope=memory_scope,
+                        scope_key=scope_key,
+                        project_id=project,
+                        source_id=source_id,
+                        participants=participants,
+                        labels=labels,
+                        thread_id=thread_id,
+                        occurred_after=occurred_after,
+                        occurred_before=occurred_before,
+                        as_of=resolved_as_of,
+                        limit=limit,
+                        include_content=include_content,
+                        content_max_chars=content_max_chars,
+                    ),
+                    timeout_seconds=TIMEOUTS["search"],
+                    operation_name="raw_memory_search",
                 ),
-                timeout_seconds=TIMEOUTS["search"],
-                operation_name="raw_memory_search",
+                timings=stage_timings_ms,
+                stage="raw_memory_search",
             )
         )
 
@@ -930,10 +964,13 @@ async def search(
         assignee=assignee,
         since=since,
     )
+    stage_timings_ms["planning"] = (time.perf_counter() - planning_started_at) * 1000.0
 
     # =========================================================================
     # GRAPH SEARCH - Search knowledge graph entities
     # =========================================================================
+    graph_started_at = time.perf_counter()
+    graph_retrieval_metadata: dict[str, Any] = {}
     if search_graph and (query or graph_list_filters):
         try:
             if not organization_id:
@@ -1004,6 +1041,11 @@ async def search(
                         operation_name="hybrid_search",
                     )
                     raw_results = hybrid_result.results
+                    graph_retrieval_metadata = {
+                        key: value
+                        for key, value in hybrid_result.metadata.items()
+                        if key != "query"
+                    }
                     enhanced_search_exhausted = bool(
                         hybrid_result.metadata.get("entity_manager_search_completed")
                     )
@@ -1166,6 +1208,9 @@ async def search(
         except Exception as e:
             log.warning("graph_search_failed", error_type=type(e).__name__)
             _record_source_failure(source_failures, source="graph", error=e)
+    stage_timings_ms["graph_search"] = (time.perf_counter() - graph_started_at) * 1000.0
+    if graph_retrieval_metadata:
+        filters["graph_retrieval"] = graph_retrieval_metadata
 
     # =========================================================================
     # DOCUMENT SEARCH - Search crawled documentation
@@ -1198,6 +1243,7 @@ async def search(
     # =========================================================================
     # MERGE AND RANK RESULTS
     # =========================================================================
+    fusion_started_at = time.perf_counter()
     # Deduplicate by ID, keeping highest score for each entity
     seen_ids: dict[str, SearchResult] = {}
     for result in graph_results + doc_results + raw_memory_results:
@@ -1223,6 +1269,9 @@ async def search(
     paginated_results = all_results[offset : offset + limit]
     has_more = offset + len(paginated_results) < total_count
     _add_source_failure_filters(filters, source_failures)
+    stage_timings_ms["fusion"] = (time.perf_counter() - fusion_started_at) * 1000.0
+
+    exposure_started_at = time.perf_counter()
     if record_exposure and paginated_results and organization_id:
         try:
             filters[_USAGE_EXPOSURE_SUMMARY_KEY] = await with_timeout(
@@ -1254,6 +1303,9 @@ async def search(
                 error_type=type(exc).__name__,
                 exc_info=True,
             )
+    stage_timings_ms["exposure"] = (time.perf_counter() - exposure_started_at) * 1000.0
+    stage_timings_ms["total"] = (time.perf_counter() - search_started_at) * 1000.0
+    filters["stage_timings_ms"] = stage_timings_ms
 
     return SearchResponse(
         results=paginated_results,
