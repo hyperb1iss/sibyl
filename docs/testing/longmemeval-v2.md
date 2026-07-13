@@ -114,11 +114,11 @@ The plan contains executable Moon command arrays for:
 4. The pre-registered `GO`, `NO-GO`, and `RESEARCH-MORE` thresholds.
 
 Each memory-build command includes `--save-memory`, `--skip-evaluation`, and a dedicated
-`--checkpoint-dir`. After each completed trajectory, the adapter appends its local chunk catalog
-and atomically records the completed IDs, pending background job IDs, project, run, representation,
-and provider usage. Re-running the same command against the same isolated API and database resumes
-from the last durable trajectory. The checkpoint does not contain the SurrealDB data itself, so it
-cannot resume against a fresh or deleted database.
+`--checkpoint-dir`. After each completed trajectory, the adapter appends its local chunk catalog and
+atomically records the completed IDs, pending background job IDs, project, run, representation, and
+provider usage. Re-running the same command against the same isolated API and database resumes from
+the last durable trajectory. The checkpoint does not contain the SurrealDB data itself, so it cannot
+resume against a fresh or deleted database.
 
 Each completed memory artifact contains:
 
