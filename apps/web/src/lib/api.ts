@@ -1823,20 +1823,24 @@ export interface MaintenanceJobResponse {
 // API Functions
 // =============================================================================
 
-// Track if we're currently refreshing to prevent multiple refresh attempts
+type RefreshResult = 'refreshed' | 'terminal' | 'transient';
+
+const AUTH_REFRESH_LOCK = 'sibyl-auth-refresh';
+
 let isRefreshing = false;
-let refreshPromise: Promise<boolean> | null = null;
+let refreshPromise: Promise<RefreshResult> | null = null;
 let refreshCooldownUntil = 0;
 let logoutPromise: Promise<void> | null = null;
 
 /**
  * Try to refresh the access token using the refresh token cookie.
- * Returns true if refresh succeeded, false if it failed.
+ * Distinguishes expired sessions from temporary refresh failures so network
+ * and service brownouts do not log the user out.
  */
-async function tryRefreshToken(): Promise<boolean> {
+async function tryRefreshToken(): Promise<RefreshResult> {
   const now = Date.now();
   if (now < refreshCooldownUntil) {
-    return false;
+    return 'transient';
   }
 
   // If already refreshing, wait for that to complete
@@ -1854,7 +1858,12 @@ async function tryRefreshToken(): Promise<boolean> {
       });
       if (response.ok) {
         refreshCooldownUntil = 0;
-        return true;
+        return 'refreshed';
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        refreshCooldownUntil = 0;
+        return 'terminal';
       }
 
       const retryAfter = response.headers.get('Retry-After');
@@ -1862,22 +1871,22 @@ async function tryRefreshToken(): Promise<boolean> {
         const retryAfterSeconds = Number(retryAfter);
         if (Number.isFinite(retryAfterSeconds)) {
           refreshCooldownUntil = Date.now() + retryAfterSeconds * 1000;
-          return false;
+          return 'transient';
         }
 
         const retryAt = Date.parse(retryAfter);
         if (!Number.isNaN(retryAt)) {
           refreshCooldownUntil = Math.max(Date.now() + 30_000, retryAt);
-          return false;
+          return 'transient';
         }
       }
 
       // Default cooldown to avoid hammering refresh on repeated 401s across many requests.
       refreshCooldownUntil = Date.now() + (response.status === 429 ? 60_000 : 30_000);
-      return false;
+      return 'transient';
     } catch {
       refreshCooldownUntil = Date.now() + 30_000;
-      return false;
+      return 'transient';
     } finally {
       isRefreshing = false;
       refreshPromise = null;
@@ -1885,6 +1894,46 @@ async function tryRefreshToken(): Promise<boolean> {
   })();
 
   return refreshPromise;
+}
+
+async function refreshAndRetry(
+  makeRequest: () => Promise<Response>,
+  unauthorizedResponse: Response
+): Promise<Response> {
+  const refreshResult = await tryRefreshToken();
+  if (refreshResult === 'terminal') return unauthorizedResponse;
+  if (refreshResult === 'transient') {
+    throw new Error('Authentication refresh temporarily unavailable');
+  }
+  return makeRequest();
+}
+
+async function recoverUnauthorized(
+  makeRequest: () => Promise<Response>,
+  unauthorizedResponse: Response
+): Promise<Response> {
+  if (typeof navigator === 'undefined' || navigator.locks === undefined) {
+    return refreshAndRetry(makeRequest, unauthorizedResponse);
+  }
+
+  const refreshResult = await navigator.locks.request(AUTH_REFRESH_LOCK, async () => {
+    try {
+      const currentSessionResponse = await fetch(`${API_BASE}/auth/me`, {
+        credentials: 'include',
+      });
+      if (currentSessionResponse.ok) return 'refreshed';
+      if (currentSessionResponse.status !== 401) return 'transient';
+      return tryRefreshToken();
+    } catch {
+      return 'transient';
+    }
+  });
+
+  if (refreshResult === 'terminal') return unauthorizedResponse;
+  if (refreshResult === 'transient') {
+    throw new Error('Authentication refresh temporarily unavailable');
+  }
+  return makeRequest();
 }
 
 async function bestEffortLogout(): Promise<void> {
@@ -1944,8 +1993,7 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
     // Handle 401 - try to refresh token before redirecting to login
     if (response.status === 401 && typeof window !== 'undefined') {
       if (shouldRedirectAuthFailure(endpoint)) {
-        const refreshed = await tryRefreshToken();
-        const retryResponse = await makeRequest();
+        const retryResponse = await recoverUnauthorized(makeRequest, response);
 
         if (retryResponse.ok) {
           if (retryResponse.status === 204) {
@@ -1959,9 +2007,6 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
         }
 
         const error = await retryResponse.text();
-        if (!refreshed) {
-          throw new Error(error || `API error after refresh retry: ${retryResponse.status}`);
-        }
         throw new Error(error || `API error: ${retryResponse.status}`);
       }
     }
@@ -1988,14 +2033,10 @@ async function fetchApiBlob(endpoint: string): Promise<Blob> {
   if (!response.ok) {
     if (response.status === 401 && typeof window !== 'undefined') {
       if (shouldRedirectAuthFailure(endpoint)) {
-        const refreshed = await tryRefreshToken();
-        const retryResponse = await makeRequest();
+        const retryResponse = await recoverUnauthorized(makeRequest, response);
         if (retryResponse.ok) return retryResponse.blob();
         if (retryResponse.status === 401) return redirectToLogin();
         const error = await retryResponse.text();
-        if (!refreshed) {
-          throw new Error(error || `API error after refresh retry: ${retryResponse.status}`);
-        }
         throw new Error(error || `API error: ${retryResponse.status}`);
       }
     }

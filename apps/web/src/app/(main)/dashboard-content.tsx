@@ -43,11 +43,40 @@ import {
 import { useProjectFilters } from '@/lib/project-context';
 
 interface DashboardContentProps {
-  initialStats: StatsResponse;
+  initialStats?: StatsResponse;
 }
 
 // Mini ring chart component for entity distribution
-function EntityRingChart({ counts }: { counts: Record<string, number> }) {
+function EntityRingChart({
+  counts,
+  unavailable,
+}: {
+  counts?: Record<string, number>;
+  unavailable: boolean;
+}) {
+  if (counts === undefined) {
+    if (unavailable) {
+      return (
+        <div className="flex w-24 flex-col items-center justify-center gap-1 text-center sm:w-32">
+          <div className="flex h-24 w-24 items-center justify-center rounded-full border-4 border-sc-yellow/20 sm:h-32 sm:w-32">
+            <Database width={24} height={24} className="text-sc-yellow" />
+          </div>
+          <span className="text-[10px] text-sc-fg-muted sm:text-xs">Stats unavailable</span>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        className="flex h-24 w-24 items-center justify-center rounded-full border-4 border-sc-fg-subtle/20 sm:h-32 sm:w-32"
+        role="status"
+        aria-label="Loading memory statistics"
+      >
+        <div className="h-14 w-14 animate-pulse rounded-full bg-sc-fg-subtle/10 sm:h-20 sm:w-20" />
+      </div>
+    );
+  }
+
   const entries = Object.entries(counts).filter(([_, count]) => count > 0);
   const total = entries.reduce((sum, [_, count]) => sum + count, 0);
 
@@ -350,7 +379,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
   const { openCaptureMemory } = useCaptureMemory();
   const projectFilters = useProjectFilters();
   const { data: health, isLoading: healthLoading } = useHealth();
-  const { data: stats } = useStats(initialStats);
+  const { data: stats, isError: statsUnavailable } = useStats(initialStats);
   const { data: me } = useMe();
   const { data: orgMetrics } = useOrgMetrics();
   const { data: telemetry } = useTelemetrySummary({ window_seconds: 900, rollup_limit: 120 });
@@ -409,7 +438,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
 
   // First-run: an org with no captured knowledge gets the onboarding checklist
   // instead of an all-zero KPI grid. The rich dashboard returns once populated.
-  const totalEntities = stats?.total_entities ?? 0;
+  const totalEntities = stats?.total_entities;
   const isFirstRun = mounted && totalEntities === 0 && taskStats.total === 0;
 
   if (isFirstRun) {
@@ -425,7 +454,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
   const heroMood = pulseMood({
     shipped: shippedThisWeek,
     doing: taskStats.doing,
-    totalEntities,
+    totalEntities: totalEntities ?? 0,
   });
   const moodLines = PULSE_LINES[heroMood];
   const heroSubtitle = mounted ? moodLines[pulseSeed % moodLines.length] : PULSE_LINES.neutral[0];
@@ -433,7 +462,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
   return (
     <div className="space-y-4 sm:space-y-6 animate-fade-in">
       {/* Welcome Banner - Shows for new users with few entities */}
-      <WelcomeBanner totalEntities={stats?.total_entities ?? 0} />
+      {stats && <WelcomeBanner totalEntities={stats.total_entities} />}
 
       {/* Hero Section - System Overview */}
       <div className="bg-gradient-to-br from-sc-bg-base via-sc-bg-elevated to-sc-purple/5 border border-sc-fg-subtle/20 rounded-xl p-4 sm:p-6 shadow-card">
@@ -478,7 +507,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
               <PulseStat
                 icon={Boxes}
                 tone="text-sc-cyan"
-                value={formatNumber(totalEntities)}
+                value={totalEntities === undefined ? '—' : formatNumber(totalEntities)}
                 label="memories"
               />
               <PulseStat
@@ -504,7 +533,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
 
           {/* Right: Entity Ring Chart */}
           <div className="flex items-center gap-4 sm:gap-6 w-full sm:w-auto justify-center sm:justify-end">
-            <EntityRingChart counts={stats?.entity_counts ?? {}} />
+            <EntityRingChart counts={stats?.entity_counts} unavailable={statsUnavailable} />
             <div className="space-y-1.5 sm:space-y-2 hidden xs:block">
               {topEntities.map(([type, count]) => (
                 <div key={type} className="flex items-center gap-2">
@@ -660,12 +689,29 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                   Knowledge Distribution
                 </h2>
                 <p className="text-xs sm:text-sm text-sc-fg-muted">
-                  {stats?.total_entities ?? 0} total entities
+                  {totalEntities === undefined
+                    ? statsUnavailable
+                      ? 'Statistics unavailable'
+                      : 'Loading entity totals'
+                    : `${totalEntities} total entities`}
                 </p>
               </div>
             </div>
 
-            {entityDistribution.length === 0 ? (
+            {stats === undefined ? (
+              <div className="flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-sc-fg-subtle/20 px-4 py-8 text-center">
+                <Database
+                  width={24}
+                  height={24}
+                  className={statsUnavailable ? 'text-sc-yellow' : 'text-sc-fg-subtle'}
+                />
+                <p className="text-sm font-medium text-sc-fg-primary">
+                  {statsUnavailable
+                    ? 'Knowledge statistics unavailable'
+                    : 'Loading knowledge statistics'}
+                </p>
+              </div>
+            ) : entityDistribution.length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-sc-fg-subtle/20 px-4 py-8 text-center">
                 <Layers width={24} height={24} className="text-sc-fg-subtle" />
                 <p className="text-sm font-medium text-sc-fg-primary">No knowledge yet</p>

@@ -16,7 +16,7 @@ vi.mock('./entities-content', () => ({
 import EntitiesPage from './page';
 
 describe('EntitiesPage', () => {
-  it('falls back to empty entities and stats when the server fetches fail', async () => {
+  it('leaves failed server data unknown for client-side recovery', async () => {
     apiServer.fetchEntities.mockRejectedValue(new Error('backend down'));
     apiServer.fetchStats.mockRejectedValue(new Error('backend down'));
 
@@ -29,17 +29,8 @@ describe('EntitiesPage', () => {
     expect(screen.getByTestId('entities-content')).toBeInTheDocument();
     expect(entitiesContent).toHaveBeenCalledWith(
       expect.objectContaining({
-        initialEntities: {
-          entities: [],
-          total: 0,
-          page: 1,
-          page_size: 20,
-          has_more: false,
-        },
-        initialStats: {
-          entity_counts: {},
-          total_entities: 0,
-        },
+        initialEntities: undefined,
+        initialStats: undefined,
         search: '',
         page: 1,
         sortBy: 'updated_at',

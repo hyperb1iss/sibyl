@@ -82,7 +82,7 @@ describe('DashboardContent', () => {
       },
       isLoading: false,
     });
-    hooks.useStats.mockReturnValue({ data: initialStats });
+    hooks.useStats.mockReturnValue({ data: initialStats, isError: false });
     hooks.useMe.mockReturnValue({
       data: {
         user: {
@@ -227,6 +227,19 @@ describe('DashboardContent', () => {
     expect(screen.getByText('shipped this week')).toBeInTheDocument();
     // value binds from stats/orgMetrics; pulse "complete" must not collide with the task bar
     expect(screen.getByText('40% complete')).toBeInTheDocument();
+  });
+
+  it('does not present unavailable stats as an empty graph', () => {
+    hooks.useStats.mockReturnValue({ data: undefined, isError: true });
+
+    render(<DashboardContent initialStats={undefined} />);
+
+    expect(screen.getByText('Stats unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Knowledge statistics unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('Capture to populate')).not.toBeInTheDocument();
+    expect(screen.queryByText('No knowledge yet')).not.toBeInTheDocument();
+    expect(screen.queryByText('0 total entities')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('welcome-banner')).not.toBeInTheDocument();
   });
 
   it('renders runtime performance telemetry on the overview page', () => {

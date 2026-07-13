@@ -104,6 +104,20 @@ function stubLocation(pathname = '/dashboard', search = '') {
   return setHref;
 }
 
+function stubWebLocks() {
+  let tail: Promise<unknown> = Promise.resolve();
+  const request = vi.fn(<T>(_name: string, callback: () => Promise<T>) => {
+    const result = tail.then(callback);
+    tail = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
+  });
+  vi.stubGlobal('navigator', { locks: { request } });
+  return request;
+}
+
 /** Flush the microtask queue so scripted fetches/redirect side effects settle. */
 async function flush() {
   for (let i = 0; i < 10; i += 1) {
@@ -145,7 +159,6 @@ describe('fetchApi auth state machine', () => {
     scriptFetch([
       { match: '/auth/me', response: errorResponse(401) },
       { match: '/auth/refresh', response: errorResponse(401) },
-      { match: '/auth/me', response: errorResponse(401) },
       // redirectToLogin fires a best-effort logout
       { match: '/auth/logout', response: jsonResponse({}, 200) },
     ]);
@@ -198,7 +211,60 @@ describe('fetchApi auth state machine', () => {
     expect(refreshCalls).toHaveLength(1);
   });
 
-  it('honors a Retry-After cooldown and skips refresh on the next 401', async () => {
+  it('serializes refresh rotation across independent browser contexts', async () => {
+    const requestLock = stubWebLocks();
+    let meCalls = 0;
+    let preferenceCalls = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/auth/refresh')) return jsonResponse({}, 200) as unknown as Response;
+      if (url.includes('/auth/me')) {
+        meCalls += 1;
+        return (meCalls <= 2
+          ? errorResponse(401)
+          : jsonResponse({ user: { id: 'u1' } }, 200)) as unknown as Response;
+      }
+      if (url.includes('/users/me/preferences')) {
+        preferenceCalls += 1;
+        return (preferenceCalls === 1
+          ? errorResponse(401)
+          : jsonResponse({ preferences: {} }, 200)) as unknown as Response;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const firstContext = (await import('./api')).api;
+    vi.resetModules();
+    const secondContext = (await import('./api')).api;
+
+    await Promise.all([firstContext.auth.me(), secondContext.preferences.get()]);
+
+    const refreshCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/auth/refresh')
+    );
+    expect(refreshCalls).toHaveLength(1);
+    expect(requestLock).toHaveBeenCalledTimes(2);
+  });
+
+  it('redirects after a terminal refresh failure inside the browser lock', async () => {
+    const requestLock = stubWebLocks();
+    const setHref = stubLocation('/dashboard');
+    scriptFetch([
+      { match: '/admin/stats', response: errorResponse(401) },
+      { match: '/auth/me', response: errorResponse(401) },
+      { match: '/auth/refresh', response: errorResponse(401) },
+      { match: '/auth/logout', response: jsonResponse({}, 200) },
+    ]);
+
+    const { api } = await import('./api');
+    void api.admin.stats();
+    await flush();
+
+    expect(requestLock).toHaveBeenCalledOnce();
+    expect(setHref).toHaveBeenCalledWith('/login?next=%2Fdashboard');
+  });
+
+  it('keeps the session on transient refresh failures and honors Retry-After', async () => {
     const cooldownHeaders = new Headers({ 'Retry-After': '120' });
     scriptFetch([
       { match: '/auth/me', response: errorResponse(401) },
@@ -206,31 +272,25 @@ describe('fetchApi auth state machine', () => {
         match: '/auth/refresh',
         response: { ...errorResponse(429), headers: cooldownHeaders },
       },
-      // retry still 401 → redirect (best-effort logout fires)
-      { match: '/auth/me', response: errorResponse(401) },
-      { match: '/auth/logout', response: jsonResponse({}, 200) },
     ]);
 
     const setHref = stubLocation('/dashboard');
     const { api } = await import('./api');
-    void api.auth.me();
-    await flush();
-    expect(setHref).toHaveBeenCalled();
+    await expect(api.auth.me()).rejects.toThrow('Authentication refresh temporarily unavailable');
+    expect(setHref).not.toHaveBeenCalled();
 
-    // Second 401 within cooldown: refresh must be skipped, so only the
-    // original request fires before redirecting.
     const { fetchMock } = scriptFetch([
       { match: '/users/me/preferences', response: errorResponse(401) },
-      { match: '/users/me/preferences', response: errorResponse(401) },
-      { match: '/auth/logout', response: jsonResponse({}, 200) },
     ]);
-    void api.preferences.get();
-    await flush();
+    await expect(api.preferences.get()).rejects.toThrow(
+      'Authentication refresh temporarily unavailable'
+    );
 
     const refreshCalls = fetchMock.mock.calls.filter(([url]) =>
       String(url).includes('/auth/refresh')
     );
     expect(refreshCalls).toHaveLength(0);
+    expect(setHref).not.toHaveBeenCalled();
   });
 
   it('returns undefined for 204 responses without parsing a body', async () => {

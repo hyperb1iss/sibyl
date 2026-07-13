@@ -27,8 +27,8 @@ import { useProjectContext } from '@/lib/project-context';
 import { readStorage, writeStorage } from '@/lib/storage';
 
 interface EntitiesContentProps {
-  initialEntities: EntityListResponse;
-  initialStats: StatsResponse;
+  initialEntities?: EntityListResponse;
+  initialStats?: StatsResponse;
   typeFilter?: string;
   search: string;
   page: number;
@@ -260,7 +260,7 @@ export function EntitiesContent({
     <div className="space-y-4 animate-fade-in">
       <PageHeader
         description="Browse and manage knowledge entities"
-        meta={`${data?.total ?? 0} total`}
+        meta={data ? `${data.total} total` : error ? 'Unavailable' : 'Loading'}
       />
 
       {/* Filters */}
