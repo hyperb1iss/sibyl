@@ -25,6 +25,8 @@ from benchmarks.git_provenance import git_provenance  # noqa: E402
 
 SCHEMA_VERSION = "sibyl-longmemeval-v2-ablations-v1"
 GATE_SCHEMA_VERSION = "sibyl-longmemeval-v2-ablation-gate-v1"
+TREATMENT_GATE_SCHEMA_VERSION = "sibyl-longmemeval-v2-treatment-gate-v1"
+TREATMENT_SCHEMA_VERSION = "sibyl-longmemeval-v2-treatment-v1"
 READER_PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-reader-plan-v1"
 SLICE_SCHEMA_VERSION = "sibyl-longmemeval-v2-diagnostic-slice-v1"
 DEFAULT_SLICE = ROOT / "benchmarks" / "longmemeval_v2_diagnostic_slice.json"
@@ -120,6 +122,10 @@ QUERY_OVERRIDE_KEYS = (
     "state_part_completion_items",
     "state_part_refinement",
 )
+QUERY_OVERRIDE_DEFAULTS: dict[str, int | bool] = {
+    "state_part_completion_items": 0,
+    "state_part_refinement": False,
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -151,12 +157,29 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(gate, indent=2, sort_keys=True))  # noqa: T201
         return 0
     if args.command == "reader-plan":
+        plan_path = Path(args.plan).expanduser().resolve()
+        gate_path = Path(args.gate).expanduser().resolve()
+        preregister_path = (
+            Path(args.winner_preregister).expanduser().resolve()
+            if args.winner_preregister
+            else None
+        )
         baseline_runs = parse_named_paths(args.baseline_run)
         reader_plan = build_reader_plan(
-            experiment_plan=load_json(Path(args.plan).expanduser().resolve()),
-            gate=load_json(Path(args.gate).expanduser().resolve()),
+            experiment_plan=load_json(plan_path),
+            gate=load_json(gate_path),
             baseline_runs=baseline_runs,
+            winner_preregister=load_json(preregister_path) if preregister_path else None,
         )
+        reader_plan["source_artifacts"] = {
+            "experiment_plan": {"path": str(plan_path), "sha256": sha256_file(plan_path)},
+            "gate": {"path": str(gate_path), "sha256": sha256_file(gate_path)},
+        }
+        if preregister_path:
+            reader_plan["source_artifacts"]["winner_preregister"] = {
+                "path": str(preregister_path),
+                "sha256": sha256_file(preregister_path),
+            }
         write_json(Path(args.output).expanduser().resolve(), reader_plan)
         print(json.dumps(reader_plan, indent=2, sort_keys=True))  # noqa: T201
         return 0
@@ -206,6 +229,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     reader = subparsers.add_parser("reader-plan")
     reader.add_argument("--plan", required=True)
     reader.add_argument("--gate", required=True)
+    reader.add_argument("--winner-preregister")
     reader.add_argument(
         "--baseline-run",
         action="append",
@@ -340,6 +364,7 @@ def build_experiment_plan(
         "slice": {
             "path": str(slice_path),
             "sha256": sha256_file(slice_path),
+            "record_sha256": sha256_json(slice_record),
             "question_ids_by_domain": question_ids,
         },
         "output_root": str(output_root),
@@ -655,17 +680,23 @@ def build_reader_plan(
     experiment_plan: dict[str, Any],
     gate: dict[str, Any],
     baseline_runs: dict[str, Path],
+    winner_preregister: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if experiment_plan.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("Invalid ablation experiment plan")
-    if gate.get("schema_version") != GATE_SCHEMA_VERSION or gate.get("decision") != "GO":
+    if gate.get("decision") != "GO":
         raise ValueError("Reader plan requires a GO ablation gate")
     if set(baseline_runs) != set(DOMAINS):
         raise ValueError("Baseline reader runs must include web and enterprise")
     matched_context_tokens = baseline_context_token_median(baseline_runs)
     arm_by_plan_name = {arm["name"]: arm for arm in experiment_plan["retrieval_arms"]}
-    baseline_arm = arm_by_plan_name[BASELINE_ARM]
-    winner_arm = arm_by_plan_name[str(gate["winner_arm"])]
+    baseline_arm = normalize_reader_arm(arm_by_plan_name[BASELINE_ARM])
+    winner_arm, winner_source = resolve_reader_winner_arm(
+        experiment_plan=experiment_plan,
+        gate=gate,
+        arm_by_plan_name=arm_by_plan_name,
+        winner_preregister=winner_preregister,
+    )
     configs = (
         (READER_CONFIGURATIONS[0], baseline_arm, DEFAULT_STANDARD_CONTEXT_TOKENS),
         (READER_CONFIGURATIONS[1], winner_arm, DEFAULT_STANDARD_CONTEXT_TOKENS),
@@ -692,10 +723,133 @@ def build_reader_plan(
         "created_at": datetime.now(UTC).isoformat(),
         "gate_decision": "GO",
         "winner_arm": winner_arm["name"],
+        "winner_arm_config": winner_arm,
+        "winner_source": winner_source,
         "matched_context_tokens": matched_context_tokens,
         "configurations": list(READER_CONFIGURATIONS),
         "commands": commands,
     }
+
+
+def resolve_reader_winner_arm(
+    *,
+    experiment_plan: dict[str, Any],
+    gate: dict[str, Any],
+    arm_by_plan_name: dict[str, dict[str, Any]],
+    winner_preregister: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    gate_schema = gate.get("schema_version")
+    if gate_schema == GATE_SCHEMA_VERSION:
+        winner_name = str(gate["winner_arm"])
+        if winner_name not in arm_by_plan_name:
+            raise ValueError(f"Unknown reader winner arm: {winner_name}")
+        return normalize_reader_arm(arm_by_plan_name[winner_name]), {
+            "kind": "named_ablation_arm",
+            "gate_schema_version": gate_schema,
+        }
+    if gate_schema != TREATMENT_GATE_SCHEMA_VERSION:
+        raise ValueError("Invalid ablation gate")
+    return resolve_treatment_reader_arm(
+        experiment_plan=experiment_plan,
+        gate=gate,
+        winner_preregister=winner_preregister,
+    )
+
+
+def resolve_treatment_reader_arm(
+    *,
+    experiment_plan: dict[str, Any],
+    gate: dict[str, Any],
+    winner_preregister: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if gate.get("reader_phase_allowed") is not True:
+        raise ValueError("Treatment gate does not allow reader evaluation")
+    if winner_preregister is None:
+        raise ValueError("Treatment gate requires --winner-preregister")
+    if winner_preregister.get("schema_version") != TREATMENT_SCHEMA_VERSION:
+        raise ValueError("Invalid treatment preregistration")
+    treatment = winner_preregister.get("treatment")
+    replay = winner_preregister.get("frozen_replay")
+    if not isinstance(treatment, dict) or not isinstance(replay, dict):
+        raise TypeError("Treatment preregistration is incomplete")
+    treatment_name = str(treatment.get("name") or "")
+    if not treatment_name or gate.get("treatment") != treatment_name:
+        raise ValueError("Treatment gate and preregistration disagree")
+    preregister_record_sha256 = sha256_json(winner_preregister)
+    if gate.get("treatment_preregister_record_sha256") != preregister_record_sha256:
+        raise ValueError("Treatment gate does not bind this preregistration")
+    plan_slice_hashes = experiment_slice_hashes(experiment_plan)
+    replay_slice_sha256 = replay.get("slice_sha256")
+    if replay_slice_sha256 not in plan_slice_hashes:
+        raise ValueError("Treatment and experiment plan use different frozen slices")
+    arm = {
+        "name": treatment_name,
+        "representation": replay.get("memory_representation"),
+        **{key: replay.get(key, QUERY_OVERRIDE_DEFAULTS.get(key)) for key in QUERY_OVERRIDE_KEYS},
+    }
+    normalized = normalize_reader_arm(arm)
+    gate_arm = gate.get("winner_arm_config")
+    if not isinstance(gate_arm, dict):
+        raise TypeError("Treatment gate winner arm is incomplete")
+    if normalize_reader_arm(gate_arm) != normalized:
+        raise ValueError("Treatment gate and preregistration configurations disagree")
+    representations = {item["name"] for item in experiment_plan["representations"]}
+    if normalized["representation"] not in representations:
+        raise ValueError("Treatment uses an unknown memory representation")
+    return normalized, {
+        "kind": "preregistered_treatment",
+        "gate_schema_version": TREATMENT_GATE_SCHEMA_VERSION,
+        "treatment_schema_version": TREATMENT_SCHEMA_VERSION,
+        "treatment_preregister_record_sha256": preregister_record_sha256,
+        "slice_sha256": replay_slice_sha256,
+    }
+
+
+def experiment_slice_hashes(experiment_plan: dict[str, Any]) -> set[str]:
+    slice_plan = experiment_plan.get("slice")
+    if not isinstance(slice_plan, dict):
+        raise TypeError("Experiment plan slice is incomplete")
+    hashes = {
+        value
+        for key in ("sha256", "record_sha256")
+        if isinstance((value := slice_plan.get(key)), str) and value
+    }
+    slice_path_value = slice_plan.get("path")
+    if not isinstance(slice_path_value, str) or not slice_path_value:
+        raise ValueError("Experiment plan slice path is missing")
+    slice_path = Path(slice_path_value)
+    if slice_path.is_file():
+        file_sha256 = sha256_file(slice_path)
+        if slice_plan.get("sha256") != file_sha256:
+            raise ValueError("Experiment plan frozen slice file has changed")
+        record_sha256 = sha256_json(load_json(slice_path))
+        recorded_record_sha256 = slice_plan.get("record_sha256")
+        if recorded_record_sha256 is not None and recorded_record_sha256 != record_sha256:
+            raise ValueError("Experiment plan frozen slice record has changed")
+        hashes.add(record_sha256)
+    return hashes
+
+
+def normalize_reader_arm(raw_arm: dict[str, Any]) -> dict[str, Any]:
+    arm = dict(raw_arm)
+    for key in QUERY_OVERRIDE_KEYS:
+        if key not in arm and key in QUERY_OVERRIDE_DEFAULTS:
+            arm[key] = QUERY_OVERRIDE_DEFAULTS[key]
+        if key not in arm:
+            raise ValueError(f"Reader arm is missing {key}")
+    for key in ("search_limit", "max_context_items", "max_chunks_per_trajectory"):
+        if type(arm[key]) is not int or arm[key] < 1:
+            raise ValueError(f"Reader arm {key} must be a positive integer")
+    for key in ("neighbor_stitch_items", "neighbor_stitch_span", "state_part_completion_items"):
+        if type(arm[key]) is not int or arm[key] < 0:
+            raise ValueError(f"Reader arm {key} must be a non-negative integer")
+    if not isinstance(arm["state_part_refinement"], bool):
+        raise TypeError("Reader arm state_part_refinement must be boolean")
+    if not isinstance(arm.get("name"), str) or not arm["name"]:
+        raise ValueError("Reader arm must have a name")
+    if not isinstance(arm.get("representation"), str) or not arm["representation"]:
+        raise ValueError("Reader arm must have a representation")
+    return arm
 
 
 def memory_build_command(
@@ -827,6 +981,7 @@ def reader_command(
     configuration: str,
     memory_context_max_tokens: int,
 ) -> list[str]:
+    arm = normalize_reader_arm(arm)
     representation = next(
         item for item in experiment_plan["representations"] if item["name"] == arm["representation"]
     )
@@ -1161,6 +1316,11 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
         json.dumps(value, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
         encoding="utf-8",
     )
+
+
+def sha256_json(value: Any) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return f"sha256:{hashlib.sha256(encoded.encode()).hexdigest()}"
 
 
 def sha256_file(path: Path) -> str:

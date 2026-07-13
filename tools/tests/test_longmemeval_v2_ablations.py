@@ -18,6 +18,7 @@ EXPECTED_EMBEDDING_COST_USD = 0.03
 EXPECTED_NEIGHBOR_STITCH_ITEMS = 2
 EXPECTED_NEIGHBOR_STITCH_SPAN = 1
 EXPECTED_STATE_PART_COMPLETION_ITEMS = 2
+EXPECTED_WINNER_CONTEXT_ITEMS = 10
 
 
 def _load_module() -> ModuleType:
@@ -57,10 +58,10 @@ def test_ablation_plan_freezes_five_arms_and_three_reader_configs(tmp_path: Path
         allow_localhost=True,
         query_workers=4,
     )
-
     assert len(plan["representations"]) == EXPECTED_REPRESENTATION_COUNT
     assert len(plan["retrieval_arms"]) == EXPECTED_ARM_COUNT
     assert plan["reader_phase"]["configurations"] == list(module.READER_CONFIGURATIONS)
+    assert plan["slice"]["record_sha256"] == module.sha256_json(module.load_json(slice_path))
     assert len(plan["reader_phase"]["baseline_commands"]) == len(module.DOMAINS)
     assert plan["cost_accounting"]["basis"] == "provider-reported usage and cost only"
     assert plan["integrity_contract"]["retrieval_rows_contain_answers"] is False
@@ -292,6 +293,9 @@ def test_reader_plan_has_exactly_three_configs_with_observed_match(tmp_path: Pat
         allow_localhost=True,
         query_workers=4,
     )
+    for arm in plan["retrieval_arms"]:
+        arm.pop("state_part_completion_items")
+        arm.pop("state_part_refinement")
     gate = {
         "schema_version": module.GATE_SCHEMA_VERSION,
         "decision": "GO",
@@ -322,12 +326,122 @@ def test_reader_plan_has_exactly_three_configs_with_observed_match(tmp_path: Pat
         if item["configuration"] == "winner_matched_context"
     ]
     assert all(str(EXPECTED_MATCHED_CONTEXT_TOKENS) in item["command"] for item in matched)
+    assert reader_plan["winner_arm_config"]["state_part_completion_items"] == 0
+    assert reader_plan["winner_arm_config"]["state_part_refinement"] is False
 
     with pytest.raises(ValueError, match="requires a GO"):
         module.build_reader_plan(
             experiment_plan=plan,
             gate={**gate, "decision": "NO-GO"},
             baseline_runs=baseline_runs,
+        )
+
+
+def test_reader_plan_binds_treatment_gate_to_frozen_preregistration(tmp_path: Path) -> None:
+    module = _load_module()
+    official_runner = _load_official_runner_module()
+    data_root, slice_path = _write_inputs(tmp_path)
+    official_repo = tmp_path / "official"
+    official_repo.mkdir()
+    plan = module.build_experiment_plan(
+        data_root=data_root,
+        official_repo=official_repo,
+        output_root=tmp_path / "output",
+        slice_path=slice_path,
+        api_url="http://127.0.0.1:3434/api",
+        tier="small",
+        allow_localhost=True,
+        query_workers=4,
+    )
+    treatment_name = "state_part_refinement_plus_radius_one_v2"
+    gate = {
+        "schema_version": module.TREATMENT_GATE_SCHEMA_VERSION,
+        "treatment": treatment_name,
+        "decision": "GO",
+        "reader_phase_allowed": True,
+    }
+    preregister = {
+        "schema_version": module.TREATMENT_SCHEMA_VERSION,
+        "treatment": {"name": treatment_name},
+        "frozen_replay": {
+            "slice_sha256": plan["slice"]["record_sha256"],
+            "memory_representation": "trajectory_18k",
+            "search_limit": 12,
+            "max_context_items": EXPECTED_WINNER_CONTEXT_ITEMS,
+            "max_chunks_per_trajectory": 8,
+            "neighbor_stitch_items": EXPECTED_NEIGHBOR_STITCH_ITEMS,
+            "neighbor_stitch_span": EXPECTED_NEIGHBOR_STITCH_SPAN,
+            "state_part_completion_items": 0,
+            "state_part_refinement": True,
+        },
+    }
+    gate["winner_arm_config"] = {
+        "name": treatment_name,
+        "representation": "trajectory_18k",
+        **{key: preregister["frozen_replay"][key] for key in module.QUERY_OVERRIDE_KEYS},
+    }
+    gate["treatment_preregister_record_sha256"] = module.sha256_json(preregister)
+    baseline_runs = {}
+    for domain, values in {"web": (100, 300), "enterprise": (200, 400)}.items():
+        run_dir = tmp_path / "baseline" / domain
+        run_dir.mkdir(parents=True)
+        _write_jsonl(
+            run_dir / "per_question.jsonl",
+            [{"memory_context_token_count": value} for value in values],
+        )
+        baseline_runs[domain] = run_dir
+
+    reader_plan = module.build_reader_plan(
+        experiment_plan=plan,
+        gate=gate,
+        baseline_runs=baseline_runs,
+        winner_preregister=preregister,
+    )
+
+    assert reader_plan["winner_arm"] == treatment_name
+    assert reader_plan["winner_source"]["kind"] == "preregistered_treatment"
+    assert reader_plan["winner_arm_config"]["max_context_items"] == EXPECTED_WINNER_CONTEXT_ITEMS
+    assert reader_plan["winner_arm_config"]["state_part_refinement"] is True
+    winner_commands = [
+        item["command"]
+        for item in reader_plan["commands"]
+        if item["configuration"].startswith("winner_")
+    ]
+    assert winner_commands
+    for command in winner_commands:
+        args = official_runner.parse_args(command[command.index("--") + 1 :])
+        assert args.max_context_items == EXPECTED_WINNER_CONTEXT_ITEMS
+        assert args.state_part_refinement is True
+
+    with pytest.raises(ValueError, match="requires --winner-preregister"):
+        module.build_reader_plan(
+            experiment_plan=plan,
+            gate=gate,
+            baseline_runs=baseline_runs,
+        )
+    modified_preregister = {
+        **preregister,
+        "frozen_replay": {
+            **preregister["frozen_replay"],
+            "slice_sha256": "sha256:different",
+        },
+    }
+    with pytest.raises(ValueError, match="does not bind"):
+        module.build_reader_plan(
+            experiment_plan=plan,
+            gate=gate,
+            baseline_runs=baseline_runs,
+            winner_preregister=modified_preregister,
+        )
+    with pytest.raises(ValueError, match="different frozen slices"):
+        module.build_reader_plan(
+            experiment_plan=plan,
+            gate={
+                **gate,
+                "treatment_preregister_record_sha256": module.sha256_json(modified_preregister),
+            },
+            baseline_runs=baseline_runs,
+            winner_preregister=modified_preregister,
         )
 
 
