@@ -47,6 +47,7 @@ from sibyl_core.retrieval.query_ranking import (
     QueryCoverageCandidate,
     QueryCoverageRankedCandidate,
     QueryCoverageResult,
+    extract_explicit_query_anchors,
     extract_keywords,
     rank_by_query_coverage,
     should_accept_query_coverage_refinement,
@@ -89,6 +90,22 @@ def test_query_coverage_keywords_drop_answer_shape_scaffolding() -> None:
     keywords = extract_keywords("What type of rice is my favorite?")
 
     assert keywords == ["rice", "favorite"]
+
+
+def test_query_coverage_preserves_explicit_anchors_outside_keyword_stopwords() -> None:
+    anchors = extract_explicit_query_anchors(
+        'On a `Report` record, open "Related Links" after clicking "Create Order".'
+    )
+
+    assert anchors == (("report",), ("related", "link"), ("create", "order"))
+
+
+def test_query_coverage_ignores_apostrophes_when_extracting_explicit_anchors() -> None:
+    anchors = extract_explicit_query_anchors(
+        "Which option doesn't appear on the 'Developer Laptop (Mac)' page?"
+    )
+
+    assert anchors == (("developer", "laptop", "mac"),)
 
 
 def test_temporal_boost_uses_citation_stamp_before_age_fallback() -> None:
@@ -338,6 +355,32 @@ def test_query_coverage_promotes_favorite_fact_over_shape_words() -> None:
     )
 
     assert ranked[0] == "5"
+
+
+def test_query_coverage_promotes_exact_explicit_interface_anchor() -> None:
+    ranked = _rank_query_ids(
+        'After clicking "Place Order", what button appears on the new page?',
+        [
+            "Magento admin order page with a blue Save button.",
+            "Shopping cart page with order totals and a Continue button.",
+            "Order history page with a blue Reorder button.",
+            "Checkout address page with a Next button.",
+            "Catalog page with product order information.",
+            "Payment page with a blue Submit button.",
+            "Accessibility tree: button 'Place Order'; next page button 'Continue Shopping'.",
+            "Customer order page with a Back button.",
+            "Inventory page with quantity controls.",
+            "Customer address page with an Edit button.",
+            "Admin dashboard with recent sales totals.",
+            "Product page with an Add to Cart button.",
+            "Shipping page with delivery options.",
+            "Tax settings page with configuration fields.",
+            "Invoice page with a Send Email button.",
+            "Reports page with a date filter.",
+        ],
+    )
+
+    assert ranked[0] == "6"
 
 
 def test_query_coverage_rescues_strong_preference_tail_candidate() -> None:

@@ -170,6 +170,7 @@ _PHRASE_WEIGHT = 0.08
 _PRIMARY_PERSONAL_WEIGHT = 0.04
 _CONCEPT_OVERLAP_WEIGHT = 0.08
 _PRIMARY_CONCEPT_WEIGHT = 0.06
+_EXPLICIT_ANCHOR_WEIGHT = 0.68
 _PREFERENCE_EVIDENCE_WEIGHT = 0.05
 _MEMORY_SPAN_OVERLAP_WEIGHT = 0.16
 _MEMORY_SPAN_SEGMENT_WEIGHT = 0.14
@@ -203,6 +204,11 @@ _CLUSTER_AFFINITY_MAX_ORIGINAL_RANK = 40
 _CLUSTER_ANCHOR_MIN_SIGNAL = 0.5
 _CLUSTER_SIGNAL_WEIGHT = 2.1
 _SIGNAL_DOMINANCE_INSERT_MARGIN = 0.20
+_EXPLICIT_ANCHOR_PATTERN = re.compile(
+    r"`(?P<backtick>[^`\n]{1,160})`"
+    r'|"(?P<double>[^"\n]{1,160})"'
+    r"|(?<!\w)'(?P<single>[^'\n]{2,160})'(?!\w)"
+)
 _CLUSTER_AFFINITY_STOPWORDS = {
     "actually",
     "all",
@@ -751,6 +757,7 @@ class QueryCoverageResult[T]:
 class _QueryCoverageQueryContext:
     keywords: list[str]
     query_terms: set[str]
+    explicit_anchors: tuple[tuple[str, ...], ...]
     query_fact_frames: tuple[FactFrame, ...]
     is_preference_query: bool
     is_personal_memory_query: bool
@@ -775,6 +782,7 @@ def _build_query_coverage_context(
     return _QueryCoverageQueryContext(
         keywords=keywords,
         query_terms=set(keywords),
+        explicit_anchors=extract_explicit_query_anchors(query),
         query_fact_frames=tuple(extract_query_fact_frames(query)),
         is_preference_query=is_preference_query,
         is_personal_memory_query=_is_personal_memory_query(query),
@@ -916,6 +924,19 @@ def extract_keywords(query: str) -> list[str]:
         keywords.append(token)
         seen.add(token)
     return keywords
+
+
+def extract_explicit_query_anchors(query: str) -> tuple[tuple[str, ...], ...]:
+    anchors: list[tuple[str, ...]] = []
+    seen: set[tuple[str, ...]] = set()
+    for match in _EXPLICIT_ANCHOR_PATTERN.finditer(query):
+        value = next(group for group in match.groups() if group is not None)
+        anchor = tuple(keyword_tokens_from_text(value)[:12])
+        if not anchor or anchor in seen:
+            continue
+        anchors.append(anchor)
+        seen.add(anchor)
+    return tuple(anchors)
 
 
 def normalize_keyword_token(token: str) -> str:
@@ -1208,6 +1229,7 @@ def rank_by_query_coverage[T](
         )
 
     query_terms = context.query_terms
+    explicit_anchors = context.explicit_anchors
     query_fact_frames = context.query_fact_frames
     suppress_fact_frame_rank_signal = context.suppress_fact_frame_rank_signal
     token_rows: list[
@@ -1336,6 +1358,12 @@ def rank_by_query_coverage[T](
         phrase_score = _phrase_adjacency_score(tokens, keywords)
         if has_primary_text:
             phrase_score = max(phrase_score, _phrase_adjacency_score(primary_tokens, keywords))
+        explicit_anchor_score = _explicit_anchor_score(tokens, explicit_anchors)
+        if has_primary_text:
+            explicit_anchor_score = max(
+                explicit_anchor_score,
+                _explicit_anchor_score(primary_tokens, explicit_anchors),
+            )
         concept_overlap = _concept_overlap_score(query_terms, token_set)
         primary_concept_overlap = (
             _concept_overlap_score(query_terms, primary_token_set) if has_primary_text else 0.0
@@ -1384,6 +1412,7 @@ def rank_by_query_coverage[T](
             query_frame_score,
             fact_frame_rank_signal,
             preference_signal,
+            explicit_anchor_score,
         )
         memory_multiplier = 0.0 if is_preference_query else 1.0
         score = (
@@ -1400,6 +1429,7 @@ def rank_by_query_coverage[T](
             + (_primary_personal_score(primary_text) if has_primary_text else 0.0)
             + (_CONCEPT_OVERLAP_WEIGHT * concept_overlap)
             + (_PRIMARY_CONCEPT_WEIGHT * primary_concept_overlap)
+            + (_EXPLICIT_ANCHOR_WEIGHT * explicit_anchor_score)
             + (_QUERY_FRAME_WEIGHT * query_frame_score)
             + (_FACT_FRAME_WEIGHT * fact_frame_rank_signal)
             + (
@@ -1450,6 +1480,7 @@ def rank_by_query_coverage[T](
             or query_frame_score > 0.0
             or fact_frame_rank_signal >= _FACT_FRAME_MIN_SIGNAL
             or preference_signal > 0.0
+            or explicit_anchor_score > 0.0
             or (temporal_alignment > 0.0 and coverage_signal > 0.0)
         )
         scored.append(
@@ -1497,7 +1528,7 @@ def rank_by_query_coverage[T](
         ranked = _stabilize_artifact_evidence_ranking(scored)
     elif _is_temporal_instruction_query(query) and temporal_target is not None:
         ranked = _stabilize_temporal_evidence_ranking(scored)
-    elif _is_temporal_instruction_query(query):
+    elif _is_temporal_instruction_query(query) and not explicit_anchors:
         ranked = _rank_preserving_window(scored)
     elif has_strong_fact_frame_signal and not _is_multi_evidence_order_query(query):
         ranked = _stabilize_fact_frame_ranking(scored, fact_frame_scores_by_id)
@@ -1580,6 +1611,28 @@ def _phrase_adjacency_score(tokens: list[str], query_terms: list[str]) -> float:
     query_pairs = list(pairwise(query_terms))
     token_pairs = set(pairwise(tokens))
     return sum(1 for pair in query_pairs if pair in token_pairs) / len(query_pairs)
+
+
+def _explicit_anchor_score(
+    tokens: list[str],
+    anchors: tuple[tuple[str, ...], ...],
+) -> float:
+    if not tokens or not anchors:
+        return 0.0
+
+    token_set = set(tokens)
+    scores: list[float] = []
+    for anchor in anchors:
+        anchor_terms = set(anchor)
+        coverage = len(anchor_terms & token_set) / len(anchor_terms)
+        exact = any(
+            tuple(tokens[start : start + len(anchor)]) == anchor
+            for start in range(len(tokens) - len(anchor) + 1)
+        )
+        scores.append(1.0 if exact else 0.75 if coverage == 1.0 else 0.0)
+
+    strongest = max(scores)
+    return min(1.0, (0.75 * strongest) + (0.25 * (sum(scores) / len(scores))))
 
 
 def _primary_personal_score(primary_text: str) -> float:
