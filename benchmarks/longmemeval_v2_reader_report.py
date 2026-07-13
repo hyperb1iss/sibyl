@@ -11,6 +11,7 @@ from typing import Any
 
 READER_PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-reader-plan-v1"
 READER_REPORT_SCHEMA_VERSION = "sibyl-longmemeval-v2-reader-report-v1"
+READER_CONFIGURATION_COUNT = 3
 DOMAINS = ("web", "enterprise")
 QUERY_OVERRIDE_KEYS = (
     "search_limit",
@@ -115,7 +116,7 @@ def require_reader_plan(reader_plan: dict[str, Any]) -> list[str]:
     if reader_plan.get("schema_version") != READER_PLAN_SCHEMA_VERSION:
         raise ValueError("Invalid reader plan")
     configurations = reader_plan.get("configurations")
-    if not isinstance(configurations, list) or len(configurations) != 3:
+    if not isinstance(configurations, list) or len(configurations) != READER_CONFIGURATION_COUNT:
         raise ValueError("Reader plan must contain exactly three configurations")
     if any(not isinstance(item, str) or not item for item in configurations):
         raise TypeError("Reader plan contains an invalid configuration")
@@ -174,34 +175,72 @@ def load_reader_run(
     expected: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     run_dir = run_dir.resolve()
+    require_reader_run_files(run_dir)
+    receipt = load_json(run_dir / "longmemeval_v2_official_receipt.json")
+    run_args = load_json(run_dir / "run_args.json")
+    metrics = load_json(run_dir / "aggregated_metrics.json")
+    rows = load_jsonl(run_dir / "per_question.jsonl")
+    reader_model, evaluator_model = validate_reader_run_identity(
+        run_dir=run_dir,
+        expected=expected,
+        receipt=receipt,
+        run_args=run_args,
+    )
+    scored_rows = validate_reader_scores(
+        run_dir=run_dir,
+        expected=expected,
+        rows=rows,
+        metrics=metrics,
+    )
+    summary = summarize_reader_run(
+        metrics=metrics,
+        scored_rows=scored_rows,
+        model_cost=reader_model_cost(run_dir=run_dir, receipt=receipt),
+        reader_model=reader_model,
+        evaluator_model=evaluator_model,
+        reader_temperature=float(run_args["temperature"]),
+    )
+    source = {
+        "path": str(run_dir),
+        "artifacts": {
+            name: {"path": str(run_dir / name), "sha256": sha256_file(run_dir / name)}
+            for name in REQUIRED_RUN_FILES
+        },
+    }
+    return summary, source
+
+
+def require_reader_run_files(run_dir: Path) -> None:
     for name in REQUIRED_RUN_FILES:
         if not (run_dir / name).is_file():
             raise FileNotFoundError(f"Reader run is missing {run_dir / name}")
     if (run_dir / "exit_code").read_text(encoding="utf-8").strip() != "0":
         raise ValueError(f"Reader run did not exit cleanly: {run_dir}")
 
-    receipt = load_json(run_dir / "longmemeval_v2_official_receipt.json")
-    run_args = load_json(run_dir / "run_args.json")
-    metrics = load_json(run_dir / "aggregated_metrics.json")
-    rows = load_jsonl(run_dir / "per_question.jsonl")
+
+def validate_reader_run_identity(
+    *,
+    run_dir: Path,
+    expected: dict[str, Any],
+    receipt: dict[str, Any],
+    run_args: dict[str, Any],
+) -> tuple[str, str]:
     domain = str(receipt.get("domain") or "")
     if domain != expected["domain"] or run_args.get("domain") != expected["domain"]:
         raise ValueError(f"Reader run does not match planned domain: {run_dir}")
     if Path(run_args.get("output_dir", "")).resolve() != Path(expected["output_dir"]).resolve():
         raise ValueError(f"Reader run does not match planned output directory: {run_dir}")
-    if Path(run_args.get("load_memory_dir", "")).resolve() != Path(
-        expected["load_memory_dir"]
-    ).resolve():
+    if (
+        Path(run_args.get("load_memory_dir", "")).resolve()
+        != Path(expected["load_memory_dir"]).resolve()
+    ):
         raise ValueError(f"Reader run does not match planned memory build: {run_dir}")
     source_domain = receipt.get("source_runs", {}).get("domains", {}).get(domain, {})
     memory_params = source_domain.get("effective_memory_config", {}).get("memory_params", {})
     if not isinstance(memory_params, dict):
         raise TypeError(f"Reader receipt has no effective memory config: {run_dir}")
 
-    actual_config = {
-        key: memory_params.get(key)
-        for key in QUERY_OVERRIDE_KEYS
-    }
+    actual_config = {key: memory_params.get(key) for key in QUERY_OVERRIDE_KEYS}
     expected_config = {key: expected[key] for key in QUERY_OVERRIDE_KEYS}
     if actual_config != expected_config:
         raise ValueError(f"Reader run does not match planned retrieval config: {run_dir}")
@@ -222,11 +261,25 @@ def load_reader_run(
         "reader_top_k": int(run_args["top_k"]),
     }
     if generation_config != {
-        key: expected[key]
-        for key in ("reader_temperature", "reader_top_p", "reader_top_k")
+        key: expected[key] for key in ("reader_temperature", "reader_top_p", "reader_top_k")
     }:
         raise ValueError(f"Reader run does not match planned generation config: {run_dir}")
+    source_runs = receipt.get("source_runs")
+    if not isinstance(source_runs, dict) or any(
+        source_runs.get(key) is not True
+        for key in ("complete", "integrity_complete", "api_runtime_consistent")
+    ):
+        raise ValueError(f"Reader run has incomplete source integrity: {run_dir}")
+    return actual_reader_model, str(receipt_models.get("evaluator_model") or "")
 
+
+def validate_reader_scores(
+    *,
+    run_dir: Path,
+    expected: dict[str, Any],
+    rows: list[dict[str, Any]],
+    metrics: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
     question_ids = [str(row.get("question_id") or "") for row in rows]
     if len(question_ids) != len(set(question_ids)) or set(question_ids) != set(
         expected["question_ids"]
@@ -234,49 +287,63 @@ def load_reader_run(
         raise ValueError(f"Reader run question set does not match the plan: {run_dir}")
     if not all(isinstance(row.get("score_bool"), bool) for row in rows):
         raise TypeError(f"Reader run is missing official Boolean scores: {run_dir}")
-
-    source_runs = receipt.get("source_runs")
-    if not isinstance(source_runs, dict) or any(
-        source_runs.get(key) is not True
-        for key in ("complete", "integrity_complete", "api_runtime_consistent")
-    ):
-        raise ValueError(f"Reader run has incomplete source integrity: {run_dir}")
-
-    accounting = receipt.get("accounting")
-    if not isinstance(accounting, dict):
-        raise TypeError(f"Reader receipt has no accounting: {run_dir}")
-    model_cost = 0.0
-    for role in ("reader", "judge"):
-        role_accounting = accounting.get(role)
-        if not isinstance(role_accounting, dict) or role_accounting.get(
-            "cost_coverage_complete"
-        ) is not True:
-            raise ValueError(f"Reader run has incomplete {role} cost coverage: {run_dir}")
-        role_cost = role_accounting.get("provider_reported_cost_usd")
-        if isinstance(role_cost, bool) or not isinstance(role_cost, int | float):
-            raise ValueError(f"Reader run has invalid {role} provider cost: {run_dir}")
-        model_cost += float(role_cost)
-
     overall = metrics.get("overall")
-    token_metrics = metrics.get("tokens")
-    memory_context = metrics.get("memory_context")
-    memory_query = metrics.get("memory_query")
-    if not all(isinstance(item, dict) for item in (overall, token_metrics, memory_context, memory_query)):
+    if not isinstance(overall, dict):
         raise TypeError(f"Reader run metrics are incomplete: {run_dir}")
-
     correct_count = sum(row["score_bool"] for row in rows)
     official_accuracy = float(overall["overall_full_set"])
     if not isclose(official_accuracy, correct_count / len(rows), abs_tol=1e-12):
-        raise ValueError(f"Reader run aggregate score disagrees with per-question scores: {run_dir}")
-    scored_rows = {
+        raise ValueError(
+            f"Reader run aggregate score disagrees with per-question scores: {run_dir}"
+        )
+    return {
         str(row["question_id"]): {
             "question_type": str(row.get("question_type") or "unknown"),
             "score_bool": row["score_bool"],
         }
         for row in rows
     }
-    summary = {
-        "question_count": len(rows),
+
+
+def reader_model_cost(*, run_dir: Path, receipt: dict[str, Any]) -> float:
+    accounting = receipt.get("accounting")
+    if not isinstance(accounting, dict):
+        raise TypeError(f"Reader receipt has no accounting: {run_dir}")
+    model_cost = 0.0
+    for role in ("reader", "judge"):
+        role_accounting = accounting.get(role)
+        if (
+            not isinstance(role_accounting, dict)
+            or role_accounting.get("cost_coverage_complete") is not True
+        ):
+            raise ValueError(f"Reader run has incomplete {role} cost coverage: {run_dir}")
+        role_cost = role_accounting.get("provider_reported_cost_usd")
+        if isinstance(role_cost, bool) or not isinstance(role_cost, int | float):
+            raise TypeError(f"Reader run has invalid {role} provider cost: {run_dir}")
+        model_cost += float(role_cost)
+    return model_cost
+
+
+def summarize_reader_run(
+    *,
+    metrics: dict[str, Any],
+    scored_rows: dict[str, dict[str, Any]],
+    model_cost: float,
+    reader_model: str,
+    evaluator_model: str,
+    reader_temperature: float,
+) -> dict[str, Any]:
+    overall = metrics.get("overall")
+    token_metrics = metrics.get("tokens")
+    memory_context = metrics.get("memory_context")
+    memory_query = metrics.get("memory_query")
+    metric_groups = (overall, token_metrics, memory_context, memory_query)
+    if not all(isinstance(item, dict) for item in metric_groups):
+        raise TypeError("Reader run metrics are incomplete")
+    correct_count = sum(row["score_bool"] for row in scored_rows.values())
+    official_accuracy = float(overall["overall_full_set"])
+    return {
+        "question_count": len(scored_rows),
         "correct_count": correct_count,
         "accuracy": official_accuracy,
         "prompt_tokens": int(token_metrics["prompt_tokens"]),
@@ -286,19 +353,11 @@ def load_reader_run(
         "truncated_question_count": int(memory_context["num_truncated_sequences"]),
         "average_memory_query_seconds": float(memory_query["avg_seconds"]),
         "model_cost_usd": model_cost,
-        "reader_model": actual_reader_model,
-        "evaluator_model": str(receipt_models.get("evaluator_model") or ""),
-        "reader_temperature": float(run_args["temperature"]),
+        "reader_model": reader_model,
+        "evaluator_model": evaluator_model,
+        "reader_temperature": reader_temperature,
         "scores": scored_rows,
     }
-    source = {
-        "path": str(run_dir),
-        "artifacts": {
-            name: {"path": str(run_dir / name), "sha256": sha256_file(run_dir / name)}
-            for name in REQUIRED_RUN_FILES
-        },
-    }
-    return summary, source
 
 
 def summarize_configuration(domains: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -309,7 +368,11 @@ def summarize_configuration(domains: dict[str, dict[str, Any]]) -> dict[str, Any
     completion_tokens = sum(item["completion_tokens"] for item in domains.values())
     return {
         "domains": {
-            domain: {key: value for key, value in item.items() if key not in {"scores", "reader_model", "evaluator_model", "reader_temperature"}}
+            domain: {
+                key: value
+                for key, value in item.items()
+                if key not in {"scores", "reader_model", "evaluator_model", "reader_temperature"}
+            }
             for domain, item in domains.items()
         },
         "combined": {

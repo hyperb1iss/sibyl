@@ -449,14 +449,16 @@ tasks:
   inventory-lint:
     script:
       uv run ruff check tools benchmarks/provider_usage.py
-      benchmarks/longmemeval_v2_diagnostics.py benchmarks/longmemeval_v2_ablations.py && uv run
-      ruff format --check tools benchmarks/provider_usage.py benchmarks/longmemeval_v2_diagnostics.py
-      benchmarks/longmemeval_v2_ablations.py
+      benchmarks/longmemeval_v2_diagnostics.py benchmarks/longmemeval_v2_ablations.py
+      benchmarks/longmemeval_v2_reader_report.py && uv run ruff format --check tools
+      benchmarks/provider_usage.py benchmarks/longmemeval_v2_diagnostics.py
+      benchmarks/longmemeval_v2_ablations.py benchmarks/longmemeval_v2_reader_report.py
     inputs:
       - tools/**/*.py
       - benchmarks/provider_usage.py
       - benchmarks/longmemeval_v2_diagnostics.py
       - benchmarks/longmemeval_v2_ablations.py
+      - benchmarks/longmemeval_v2_reader_report.py
       - benchmarks/longmemeval_v2_diagnostic_slice.json
       - pyproject.toml
 
@@ -464,11 +466,13 @@ tasks:
     command:
       uv run ruff format tools benchmarks/provider_usage.py
       benchmarks/longmemeval_v2_diagnostics.py benchmarks/longmemeval_v2_ablations.py
+      benchmarks/longmemeval_v2_reader_report.py
     inputs:
       - tools/**/*.py
       - benchmarks/provider_usage.py
       - benchmarks/longmemeval_v2_diagnostics.py
       - benchmarks/longmemeval_v2_ablations.py
+      - benchmarks/longmemeval_v2_reader_report.py
       - pyproject.toml
     options:
       cache: false
@@ -709,6 +713,7 @@ tasks:
       - benchmarks/longmemeval_v2_official.py
       - benchmarks/longmemeval_v2_diagnostics.py
       - benchmarks/longmemeval_v2_ablations.py
+      - benchmarks/longmemeval_v2_reader_report.py
       - benchmarks/longmemeval_v2_diagnostic_slice.json
       - benchmarks/provider_usage.py
       - benchmarks/longmemeval_v2_memory/**/*.py

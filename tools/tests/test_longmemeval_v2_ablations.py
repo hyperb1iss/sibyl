@@ -516,23 +516,24 @@ def test_reader_report_is_receipt_bound_and_descriptive(
 
 
 @pytest.mark.parametrize(
-    ("tamper", "message"),
+    ("tamper", "exception", "message"),
     [
-        ("accuracy", "aggregate score disagrees"),
-        ("cost", "incomplete reader cost coverage"),
-        ("cost_value", "invalid reader provider cost"),
-        ("domain", "planned domain"),
-        ("evaluator_model", "missing model pins"),
-        ("generation", "planned generation config"),
-        ("memory", "planned memory build"),
-        ("questions", "question set does not match"),
-        ("source_integrity", "incomplete source integrity"),
-        ("exit", "did not exit cleanly"),
+        ("accuracy", ValueError, "aggregate score disagrees"),
+        ("cost", ValueError, "incomplete reader cost coverage"),
+        ("cost_value", TypeError, "invalid reader provider cost"),
+        ("domain", ValueError, "planned domain"),
+        ("evaluator_model", ValueError, "missing model pins"),
+        ("generation", ValueError, "planned generation config"),
+        ("memory", ValueError, "planned memory build"),
+        ("questions", ValueError, "question set does not match"),
+        ("source_integrity", ValueError, "incomplete source integrity"),
+        ("exit", ValueError, "did not exit cleanly"),
     ],
 )
 def test_reader_report_rejects_inconsistent_run_receipts(
     tmp_path: Path,
     tamper: str,
+    exception: type[Exception],
     message: str,
 ) -> None:
     module = _load_module()
@@ -585,7 +586,7 @@ def test_reader_report_rejects_inconsistent_run_receipts(
     else:
         (run_dir / "exit_code").write_text("1\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(exception, match=message):
         module.build_reader_report(reader_plan=plan, run_roots=run_roots)
 
 
