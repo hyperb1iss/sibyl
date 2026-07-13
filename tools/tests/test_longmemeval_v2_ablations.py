@@ -30,6 +30,16 @@ def _load_module() -> ModuleType:
     return module
 
 
+def _load_official_runner_module() -> ModuleType:
+    path = Path(__file__).parents[2] / "benchmarks" / "longmemeval_v2_official.py"
+    spec = importlib.util.spec_from_file_location("longmemeval_v2_official", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_ablation_plan_freezes_five_arms_and_three_reader_configs(tmp_path: Path) -> None:
     module = _load_module()
     data_root, slice_path = _write_inputs(tmp_path)
@@ -165,6 +175,59 @@ def test_retrieve_cli_overrides_context_assembly_without_changing_named_arm() ->
     assert module.arm_by_name("trajectory_18k")["neighbor_stitch_items"] == 0
     assert module.arm_by_name("trajectory_18k")["state_part_completion_items"] == 0
     assert module.arm_by_name("trajectory_18k")["state_part_refinement"] is False
+
+
+def test_reader_command_round_trips_state_part_overrides_through_official_runner(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    official_runner = _load_official_runner_module()
+    data_root, slice_path = _write_inputs(tmp_path)
+    official_repo = tmp_path / "official"
+    official_repo.mkdir()
+    plan = module.build_experiment_plan(
+        data_root=data_root,
+        official_repo=official_repo,
+        output_root=tmp_path / "output",
+        slice_path=slice_path,
+        api_url="http://127.0.0.1:3434/api",
+        tier="small",
+        allow_localhost=True,
+        query_workers=4,
+    )
+    arm = {
+        **module.arm_by_name("trajectory_18k"),
+        "max_context_items": 10,
+        "neighbor_stitch_items": EXPECTED_NEIGHBOR_STITCH_ITEMS,
+        "neighbor_stitch_span": EXPECTED_NEIGHBOR_STITCH_SPAN,
+        "state_part_completion_items": EXPECTED_STATE_PART_COMPLETION_ITEMS,
+        "state_part_refinement": True,
+    }
+
+    command = module.reader_command(
+        experiment_plan=plan,
+        arm=arm,
+        domain="web",
+        configuration="winner_fixed_reader",
+        memory_context_max_tokens=200_000,
+    )
+    runner_args = official_runner.parse_args(command[command.index("--") + 1 :])
+
+    assert "--state-part-refinement" in command
+    assert "True" not in command
+    assert runner_args.state_part_completion_items == EXPECTED_STATE_PART_COMPLETION_ITEMS
+    assert runner_args.state_part_refinement is True
+
+    baseline_command = module.reader_command(
+        experiment_plan=plan,
+        arm=module.arm_by_name("trajectory_18k"),
+        domain="web",
+        configuration="baseline_fixed_reader",
+        memory_context_max_tokens=200_000,
+    )
+    baseline_args = official_runner.parse_args(baseline_command[baseline_command.index("--") + 1 :])
+    assert "--no-state-part-refinement" in baseline_command
+    assert baseline_args.state_part_refinement is False
 
 
 def test_ablation_gate_enforces_go_no_go_and_research_more(tmp_path: Path) -> None:

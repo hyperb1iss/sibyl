@@ -40,6 +40,7 @@ EXPECTED_JUDGE_REQUESTS = 2
 EXPECTED_MAX_CHUNKS_PER_TRAJECTORY = 2
 EXPECTED_NEIGHBOR_STITCH_ITEMS = 2
 EXPECTED_NEIGHBOR_STITCH_SPAN = 1
+EXPECTED_STATE_PART_COMPLETION_ITEMS = 2
 EXPECTED_STATE_PART_REFINEMENT_MIN_SCORE_GAIN = 0.05
 EXPECTED_SEARCH_LIMIT_OVERRIDE = 24
 EXPECTED_SAVED_USAGE_REQUESTS = 2
@@ -184,6 +185,8 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(
     )
     assert memory_config["memory_params"]["neighbor_stitch_items"] == EXPECTED_NEIGHBOR_STITCH_ITEMS
     assert memory_config["memory_params"]["neighbor_stitch_span"] == EXPECTED_NEIGHBOR_STITCH_SPAN
+    assert memory_config["memory_params"]["state_part_completion_items"] == 0
+    assert memory_config["memory_params"]["state_part_refinement"] is False
     assert (
         memory_config["memory_params"]["api_timeout_seconds"] == EXPECTED_MEMORY_API_TIMEOUT_SECONDS
     )
@@ -1161,6 +1164,8 @@ def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
             **saved["memory_params"],
             "api_token": TEST_CREDENTIAL,
             "search_limit": EXPECTED_SEARCH_LIMIT_OVERRIDE,
+            "state_part_completion_items": EXPECTED_STATE_PART_COMPLETION_ITEMS,
+            "state_part_refinement": True,
             "neighbor_stitch_items": 2,
         },
     }
@@ -1172,6 +1177,8 @@ def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
     assert params["run_id"] == "run-saved"
     assert params["api_token"] == TEST_CREDENTIAL
     assert params["search_limit"] == EXPECTED_SEARCH_LIMIT_OVERRIDE
+    assert params["state_part_completion_items"] == EXPECTED_STATE_PART_COMPLETION_ITEMS
+    assert params["state_part_refinement"] is True
     assert params["neighbor_stitch_items"] == EXPECTED_NEIGHBOR_STITCH_ITEMS
 
     requested["memory_params"]["content_max_chars"] = 8_000
@@ -1257,6 +1264,8 @@ def test_official_runner_load_config_preserves_saved_ingest_identity(tmp_path: P
             "content_max_chars": 8_000,
             "api_token": TEST_CREDENTIAL,
             "search_limit": EXPECTED_SEARCH_LIMIT_OVERRIDE,
+            "state_part_completion_items": EXPECTED_STATE_PART_COMPLETION_ITEMS,
+            "state_part_refinement": True,
         },
     }
 
@@ -1269,6 +1278,8 @@ def test_official_runner_load_config_preserves_saved_ingest_identity(tmp_path: P
     assert params["content_max_chars"] == EXPECTED_CONTENT_MAX_CHARS
     assert params["api_token"] == TEST_CREDENTIAL
     assert params["search_limit"] == EXPECTED_SEARCH_LIMIT_OVERRIDE
+    assert params["state_part_completion_items"] == EXPECTED_STATE_PART_COMPLETION_ITEMS
+    assert params["state_part_refinement"] is True
 
 
 def test_official_runner_checkpoint_restart_reuses_saved_project(tmp_path: Path) -> None:

@@ -863,7 +863,12 @@ def reader_command(
         *experiment_plan["slice"]["question_ids_by_domain"][domain],
     ]
     for key in QUERY_OVERRIDE_KEYS:
-        command.extend((f"--{key.replace('_', '-')}", str(arm[key])))
+        flag = f"--{key.replace('_', '-')}"
+        value = arm[key]
+        if isinstance(value, bool):
+            command.append(flag if value else f"--no-{flag.removeprefix('--')}")
+        else:
+            command.extend((flag, str(value)))
     if experiment_plan["api_url"].startswith(("http://127.0.0.1", "http://localhost")):
         command.append("--allow-localhost")
     return command

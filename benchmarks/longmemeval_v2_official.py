@@ -66,6 +66,8 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "max_chunks_per_trajectory",
         "neighbor_stitch_items",
         "neighbor_stitch_span",
+        "state_part_completion_items",
+        "state_part_refinement",
         "checkpoint_dir",
     }
 )
@@ -398,6 +400,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--max-chunks-per-trajectory", type=int, default=2)
     parser.add_argument("--neighbor-stitch-items", type=int, default=2)
     parser.add_argument("--neighbor-stitch-span", type=int, default=1)
+    parser.add_argument("--state-part-completion-items", type=int, default=0)
+    parser.add_argument(
+        "--state-part-refinement",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
     parser.add_argument("--include-screenshot-refs", action="store_true")
     parser.add_argument("--inline-embeddings", action="store_true")
     parser.add_argument("--api-timeout-seconds", type=float, default=600.0)
@@ -466,6 +474,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--neighbor-stitch-items must be non-negative")
     if args.neighbor_stitch_span < 0:
         parser.error("--neighbor-stitch-span must be non-negative")
+    if args.state_part_completion_items < 0:
+        parser.error("--state-part-completion-items must be non-negative")
     return args
 
 
@@ -565,6 +575,8 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "max_chunks_per_trajectory": args.max_chunks_per_trajectory,
         "neighbor_stitch_items": args.neighbor_stitch_items,
         "neighbor_stitch_span": args.neighbor_stitch_span,
+        "state_part_completion_items": args.state_part_completion_items,
+        "state_part_refinement": args.state_part_refinement,
         "include_screenshot_refs": args.include_screenshot_refs,
         "defer_embeddings": not args.inline_embeddings,
         "api_timeout_seconds": args.api_timeout_seconds,
