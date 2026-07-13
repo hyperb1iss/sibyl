@@ -100,3 +100,41 @@ def explicit_query_anchor_score(query: str, text: str) -> float:
         keyword_tokens_from_text(text),
         extract_explicit_query_anchors(query),
     )
+
+
+def explicit_query_anchor_proximity_score(query: str, text: str) -> float:
+    anchors = extract_explicit_query_anchors(query)
+    if len(anchors) < 2:
+        return 0.0
+
+    tokens = keyword_tokens_from_text(text)
+    hits: list[tuple[int, int]] = []
+    for anchor_index, anchor in enumerate(anchors):
+        anchor_hits = [
+            start
+            for start in range(len(tokens) - len(anchor) + 1)
+            if tuple(tokens[start : start + len(anchor)]) == anchor
+        ]
+        if not anchor_hits:
+            return 0.0
+        hits.extend((start, anchor_index) for start in anchor_hits)
+
+    hits.sort()
+    counts = [0] * len(anchors)
+    covered = 0
+    left = 0
+    best_span: int | None = None
+    for right_position, anchor_index in hits:
+        if counts[anchor_index] == 0:
+            covered += 1
+        counts[anchor_index] += 1
+        while covered == len(anchors):
+            left_position, left_anchor_index = hits[left]
+            span = right_position - left_position
+            best_span = span if best_span is None else min(best_span, span)
+            counts[left_anchor_index] -= 1
+            if counts[left_anchor_index] == 0:
+                covered -= 1
+            left += 1
+
+    return 1.0 / (1.0 + best_span) if best_span is not None else 0.0

@@ -446,6 +446,10 @@ class _ExplicitAnchorSearchClient:
                     "The Report form is open, but the requested section is elsewhere.",
                 ),
                 self._row(
+                    "distant-anchor",
+                    "Report " + ("unrelated " * 100) + "Related Links.",
+                ),
+                self._row(
                     "exact-anchor",
                     "On the Report record, Related Links contains Create Order.",
                 ),
@@ -1077,12 +1081,13 @@ async def test_native_entity_manager_rescues_full_explicit_anchor_candidate() ->
         "primary-two",
         "exact-anchor",
     ]
-    anchor_call = next(
-        params
-        for _query, params in client.calls
+    anchor_query, anchor_call = next(
+        (statement, params)
+        for statement, params in client.calls
         if params.get("_query_label") == "entity.search.fulltext_explicit_anchors"
     )
     assert anchor_call["search_query"] == "report related link"
+    assert "AND content @AND@ $search_query" in anchor_query
 
 
 @pytest.mark.asyncio

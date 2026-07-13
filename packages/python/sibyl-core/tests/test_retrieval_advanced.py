@@ -22,6 +22,7 @@ import sibyl_core.retrieval.search as search_module
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.query_anchors import explicit_query_anchor_proximity_score
 from sibyl_core.retrieval.candidates import CandidateKind, RetrievalCandidate
 from sibyl_core.retrieval.dedup import (
     DedupConfig,
@@ -107,6 +108,21 @@ def test_query_coverage_ignores_apostrophes_when_extracting_explicit_anchors() -
     )
 
     assert anchors == (("developer", "laptop", "mac"),)
+
+
+def test_explicit_query_anchor_proximity_favors_coherent_span() -> None:
+    query = 'On a `Report` record, what appears under "Related Links"?'
+
+    nearby = explicit_query_anchor_proximity_score(
+        query,
+        "Open the Report record and inspect its Related Links section.",
+    )
+    distant = explicit_query_anchor_proximity_score(
+        query,
+        "Report " + ("unrelated " * 100) + "Related Links.",
+    )
+
+    assert nearby > distant > 0.0
 
 
 def test_temporal_boost_uses_citation_stamp_before_age_fallback() -> None:

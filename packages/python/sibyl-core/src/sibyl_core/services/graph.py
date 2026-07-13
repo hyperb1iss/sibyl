@@ -46,6 +46,7 @@ from sibyl_core.models.tasks import (
     TaskStatus,
 )
 from sibyl_core.query_anchors import (
+    explicit_query_anchor_proximity_score,
     explicit_query_anchor_score,
     extract_explicit_query_anchors,
 )
@@ -146,7 +147,11 @@ def _build_explicit_anchor_search_query(query: str) -> str:
 
 
 def _entity_explicit_anchor_score(query: str, entity: Entity) -> float:
-    text = " ".join(
+    return explicit_query_anchor_score(query, _entity_anchor_text(entity))
+
+
+def _entity_anchor_text(entity: Entity) -> str:
+    return " ".join(
         part
         for part in (
             entity.name,
@@ -156,7 +161,6 @@ def _entity_explicit_anchor_score(query: str, entity: Entity) -> float:
         )
         if part
     )
-    return explicit_query_anchor_score(query, text)
 
 
 def _rescue_explicit_anchor_candidate(
@@ -170,16 +174,21 @@ def _rescue_explicit_anchor_candidate(
     selected = list(results[:result_limit])
     selected_ids = {entity.id for entity, _score in selected}
     candidates = [
-        (entity, score, rank)
+        (
+            entity,
+            score,
+            rank,
+            explicit_query_anchor_proximity_score(query, _entity_anchor_text(entity)),
+        )
         for rank, (entity, score) in enumerate(anchor_results)
         if entity.id not in selected_ids and _entity_explicit_anchor_score(query, entity) >= 1.0
     ]
     if not candidates:
         return selected
 
-    entity, score, _rank = max(
+    entity, score, _rank, _proximity = max(
         candidates,
-        key=lambda item: (item[1], -item[2]),
+        key=lambda item: (item[3], item[1], -item[2]),
     )
     rescue = (entity, score)
     if len(selected) < result_limit:
@@ -479,12 +488,11 @@ class EntityManager:
         ]
         if anchor_search_query and anchor_search_query != search_query:
             searches.append(
-                self._fulltext_search(
+                self._explicit_anchor_fulltext_search(
                     query=query,
                     search_query=anchor_search_query,
                     entity_types=entity_types,
                     limit=result_limit,
-                    query_label="entity.search.fulltext_explicit_anchors",
                 )
             )
         search_results = await asyncio.gather(*searches)
@@ -519,7 +527,6 @@ class EntityManager:
         search_query: str,
         entity_types: Sequence[EntityType] | None,
         limit: int,
-        query_label: str = "entity.search.fulltext",
     ) -> list[tuple[Entity, float]]:
         type_values = [entity_type.value for entity_type in entity_types or ()]
         type_clause = "AND entity_type IN $entity_types" if type_values else ""
@@ -552,7 +559,7 @@ class EntityManager:
                 search_query=search_query,
                 entity_types=type_values,
                 limit=limit,
-                _query_label=query_label,
+                _query_label="entity.search.fulltext",
             )
         )
         fulltext_results: list[tuple[Entity, float]] = []
@@ -560,6 +567,42 @@ class EntityManager:
             entity = _entity_from_row(row)
             fulltext_results.append((entity, _bounded_similarity_score(query, entity)))
         return fulltext_results
+
+    async def _explicit_anchor_fulltext_search(
+        self,
+        *,
+        query: str,
+        search_query: str,
+        entity_types: Sequence[EntityType] | None,
+        limit: int,
+    ) -> list[tuple[Entity, float]]:
+        type_values = [entity_type.value for entity_type in entity_types or ()]
+        type_clause = "AND entity_type IN $entity_types" if type_values else ""
+        rows = normalize_records(
+            await self._client.execute_query(
+                "SELECT "
+                + _ENTITY_SEARCH_FIELDS
+                + """
+                FROM entity
+                WHERE group_id = $group_id
+                """
+                + type_clause
+                + """
+                  AND content @AND@ $search_query
+                ORDER BY created_at DESC, uuid DESC
+                LIMIT $limit;
+                """,
+                group_id=self._group_id,
+                search_query=search_query,
+                entity_types=type_values,
+                limit=limit,
+                _query_label="entity.search.fulltext_explicit_anchors",
+            )
+        )
+        return [
+            (entity, _bounded_similarity_score(query, entity))
+            for entity in (_entity_from_row(row) for row in rows)
+        ]
 
     async def _vector_search(
         self,
