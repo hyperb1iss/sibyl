@@ -736,6 +736,7 @@ class QueryCoverageCandidate[T]:
     prior_score: float
     original_rank: int
     timestamp: Any = None
+    source_group: str | None = None
 
 
 @dataclass(frozen=True)
@@ -842,6 +843,7 @@ def rank_items_by_query_coverage[T](
     text_fn: Callable[[T], str],
     id_fn: Callable[[T], str],
     timestamp_fn: Callable[[T], Any] = lambda _item: None,
+    source_group_fn: Callable[[T], str | None] | None = None,
     temporal_target: datetime | None = None,
 ) -> tuple[list[tuple[T, float]], bool, bool]:
     """Rank ``(item, prior_score)`` pairs through the query-coverage core.
@@ -856,17 +858,25 @@ def rank_items_by_query_coverage[T](
     applied and whether the refinement pass was accepted.
     """
     query_context = _build_query_coverage_context(query, temporal_target=temporal_target)
-    candidate_rows: list[tuple[T, float, str, str, Any, int]] = [
-        (
-            item,
-            score,
-            id_fn(item),
-            text_fn(item),
-            timestamp_fn(item),
-            index + 1,
+    candidate_rows: list[tuple[T, float, str, str, Any, str | None, int]] = []
+    for index, (item, score) in enumerate(items):
+        stable_id = id_fn(item)
+        source_group = source_group_fn(item) if source_group_fn is not None else None
+        if source_group is not None:
+            source_group = source_group.strip() or None
+        if source_group == stable_id:
+            source_group = None
+        candidate_rows.append(
+            (
+                item,
+                score,
+                stable_id,
+                text_fn(item),
+                timestamp_fn(item),
+                source_group,
+                index + 1,
+            )
         )
-        for index, (item, score) in enumerate(items)
-    ]
     candidates = [
         QueryCoverageCandidate(
             item=item,
@@ -875,8 +885,9 @@ def rank_items_by_query_coverage[T](
             prior_score=score,
             original_rank=original_rank,
             timestamp=timestamp,
+            source_group=source_group,
         )
-        for item, score, stable_id, text, timestamp, original_rank in candidate_rows
+        for item, score, stable_id, text, timestamp, source_group, original_rank in candidate_rows
     ]
     ranking = rank_by_query_coverage(
         query,
@@ -888,8 +899,8 @@ def rank_items_by_query_coverage[T](
         return list(items), False, False
 
     original_values_by_item_id = {
-        id(item): (text, timestamp)
-        for item, _score, _stable_id, text, timestamp, _rank in candidate_rows
+        id(item): (text, timestamp, source_group)
+        for item, _score, _stable_id, text, timestamp, source_group, _rank in candidate_rows
     }
     refined_candidates = [
         QueryCoverageCandidate(
@@ -899,6 +910,7 @@ def rank_items_by_query_coverage[T](
             prior_score=ranked.score,
             original_rank=index + 1,
             timestamp=original_values_by_item_id[id(ranked.item)][1],
+            source_group=original_values_by_item_id[id(ranked.item)][2],
         )
         for index, ranked in enumerate(ranking.ranked)
     ]
@@ -1278,6 +1290,11 @@ def rank_by_query_coverage[T](
         [token_set for _candidate, _tokens, token_set, *_rest in token_rows],
         query_terms,
     )
+    source_groups_by_id = {
+        candidate.stable_id: candidate.source_group
+        for candidate in candidates
+        if candidate.source_group is not None
+    }
     affinity_tokens_by_id = {
         candidate.stable_id: _cluster_affinity_tokens(
             primary_token_set if has_primary_text else token_set
@@ -1540,6 +1557,7 @@ def rank_by_query_coverage[T](
             ranked for ranked, _index in sorted(scored, key=lambda item: (-item[0].score, item[1]))
         ]
     ranked = _stabilize_explicit_anchor_ranking(ranked, explicit_anchor_scores_by_id)
+    ranked = _stabilize_source_group_representatives(ranked, source_groups_by_id)
     changed = any(
         ranked_candidate.stable_id != candidates[index].stable_id
         for index, ranked_candidate in enumerate(ranked)
@@ -1900,6 +1918,33 @@ def _stabilize_explicit_anchor_ranking[T](
     selected.sort(key=lambda candidate: (-candidate.score, candidate.original_rank))
     selected_ids = {candidate.stable_id for candidate in selected}
     return selected + [candidate for candidate in ranked if candidate.stable_id not in selected_ids]
+
+
+def _stabilize_source_group_representatives[T](
+    ranked: list[QueryCoverageRankedCandidate[T]],
+    source_groups_by_id: dict[str, str],
+) -> list[QueryCoverageRankedCandidate[T]]:
+    positions_by_group: dict[str, list[int]] = {}
+    for index, candidate in enumerate(ranked):
+        source_group = source_groups_by_id.get(candidate.stable_id)
+        if source_group is not None:
+            positions_by_group.setdefault(source_group, []).append(index)
+
+    stabilized = list(ranked)
+    for positions in positions_by_group.values():
+        if len(positions) < 2:
+            continue
+        representatives = sorted(
+            (ranked[index] for index in positions),
+            key=lambda candidate: (
+                -candidate.overlap,
+                -candidate.score,
+                candidate.original_rank,
+            ),
+        )
+        for index, representative in zip(positions, representatives, strict=True):
+            stabilized[index] = representative
+    return stabilized
 
 
 def _stabilize_preference_ranking[T](

@@ -2540,6 +2540,7 @@ def _apply_query_coverage_to_fused(
         text_fn=_candidate_query_text,
         id_fn=lambda candidate: candidate.id,
         timestamp_fn=lambda candidate: get_entity_timestamp(candidate) or candidate.created_at,
+        source_group_fn=lambda candidate: candidate.source,
         temporal_target=temporal_target,
     )
     return [(candidate, score, metadata_by_id[id(candidate)]) for candidate, score in reranked]

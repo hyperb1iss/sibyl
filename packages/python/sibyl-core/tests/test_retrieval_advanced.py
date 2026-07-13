@@ -508,6 +508,73 @@ def test_query_coverage_preserves_temporal_top_five_candidates() -> None:
     assert "5" not in ranked[:5]
 
 
+def test_query_coverage_selects_best_representative_without_moving_source_slots() -> None:
+    ranked = [
+        QueryCoverageRankedCandidate(
+            item="source-seed",
+            stable_id="source-seed",
+            score=1.5,
+            original_rank=1,
+            overlap=0.2,
+        ),
+        QueryCoverageRankedCandidate(
+            item="other",
+            stable_id="other",
+            score=1.4,
+            original_rank=2,
+            overlap=0.7,
+        ),
+        QueryCoverageRankedCandidate(
+            item="source-evidence",
+            stable_id="source-evidence",
+            score=1.1,
+            original_rank=3,
+            overlap=0.9,
+        ),
+    ]
+
+    stabilized = query_ranking_module._stabilize_source_group_representatives(
+        ranked,
+        {
+            "source-seed": "source-a",
+            "source-evidence": "source-a",
+        },
+    )
+
+    assert [candidate.stable_id for candidate in stabilized] == [
+        "source-evidence",
+        "other",
+        "source-seed",
+    ]
+    assert sorted(candidate.score for candidate in stabilized) == [1.1, 1.4, 1.5]
+
+
+def test_query_coverage_ignores_unique_source_groups() -> None:
+    ranked = [
+        QueryCoverageRankedCandidate(
+            item="first",
+            stable_id="first",
+            score=1.0,
+            original_rank=1,
+            overlap=0.1,
+        ),
+        QueryCoverageRankedCandidate(
+            item="second",
+            stable_id="second",
+            score=0.9,
+            original_rank=2,
+            overlap=0.9,
+        ),
+    ]
+
+    stabilized = query_ranking_module._stabilize_source_group_representatives(
+        ranked,
+        {"first": "source-a", "second": "source-b"},
+    )
+
+    assert stabilized == ranked
+
+
 def test_query_coverage_uses_temporal_target_with_concept_evidence() -> None:
     target = datetime(2026, 1, 10, tzinfo=UTC)
     result = rank_by_query_coverage(
