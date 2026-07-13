@@ -171,6 +171,7 @@ _PRIMARY_PERSONAL_WEIGHT = 0.04
 _CONCEPT_OVERLAP_WEIGHT = 0.08
 _PRIMARY_CONCEPT_WEIGHT = 0.06
 _EXPLICIT_ANCHOR_WEIGHT = 0.68
+_EXPLICIT_ANCHOR_RESCUE_SIGNAL = 1.0
 _PREFERENCE_EVIDENCE_WEIGHT = 0.05
 _MEMORY_SPAN_OVERLAP_WEIGHT = 0.16
 _MEMORY_SPAN_SEGMENT_WEIGHT = 0.14
@@ -1300,6 +1301,7 @@ def rank_by_query_coverage[T](
     max_prior_score = max((candidate.prior_score for candidate in candidates), default=0.0) or 1.0
     scored: list[tuple[QueryCoverageRankedCandidate[T], int]] = []
     fact_frame_scores_by_id: dict[str, float] = {}
+    explicit_anchor_scores_by_id: dict[str, float] = {}
     has_text_signal = False
     for index, (
         candidate,
@@ -1364,6 +1366,7 @@ def rank_by_query_coverage[T](
                 explicit_anchor_score,
                 _explicit_anchor_score(primary_tokens, explicit_anchors),
             )
+        explicit_anchor_scores_by_id[candidate.stable_id] = explicit_anchor_score
         concept_overlap = _concept_overlap_score(query_terms, token_set)
         primary_concept_overlap = (
             _concept_overlap_score(query_terms, primary_token_set) if has_primary_text else 0.0
@@ -1536,6 +1539,7 @@ def rank_by_query_coverage[T](
         ranked = [
             ranked for ranked, _index in sorted(scored, key=lambda item: (-item[0].score, item[1]))
         ]
+    ranked = _stabilize_explicit_anchor_ranking(ranked, explicit_anchor_scores_by_id)
     changed = any(
         ranked_candidate.stable_id != candidates[index].stable_id
         for index, ranked_candidate in enumerate(ranked)
@@ -1856,6 +1860,46 @@ def _rank_preserving_window[T](
     selected = sorted(scores[:window_size], key=lambda item: (-item[0].score, item[1]))
     tail = sorted(scores[window_size:], key=lambda item: (-item[0].score, item[1]))
     return [ranked for ranked, _index in selected + tail]
+
+
+def _stabilize_explicit_anchor_ranking[T](
+    ranked: list[QueryCoverageRankedCandidate[T]],
+    explicit_anchor_scores_by_id: dict[str, float],
+) -> list[QueryCoverageRankedCandidate[T]]:
+    window_size = min(_EVIDENCE_SET_WINDOW, len(ranked))
+    selected = ranked[:window_size]
+    if any(
+        explicit_anchor_scores_by_id.get(candidate.stable_id, 0.0) >= _EXPLICIT_ANCHOR_RESCUE_SIGNAL
+        for candidate in selected
+    ):
+        return ranked
+
+    rescue_candidates = [
+        candidate
+        for candidate in ranked[window_size:]
+        if explicit_anchor_scores_by_id.get(candidate.stable_id, 0.0)
+        >= _EXPLICIT_ANCHOR_RESCUE_SIGNAL
+    ]
+    if not rescue_candidates:
+        return ranked
+
+    rescue = max(
+        rescue_candidates,
+        key=lambda candidate: (
+            explicit_anchor_scores_by_id[candidate.stable_id],
+            candidate.score,
+            -candidate.original_rank,
+        ),
+    )
+    replace_index = min(
+        range(window_size),
+        key=lambda index: (selected[index].score, -selected[index].original_rank),
+    )
+    selected = list(selected)
+    selected[replace_index] = rescue
+    selected.sort(key=lambda candidate: (-candidate.score, candidate.original_rank))
+    selected_ids = {candidate.stable_id for candidate in selected}
+    return selected + [candidate for candidate in ranked if candidate.stable_id not in selected_ids]
 
 
 def _stabilize_preference_ranking[T](

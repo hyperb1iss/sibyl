@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 import sibyl_core.retrieval.hybrid as hybrid_module
+import sibyl_core.retrieval.query_ranking as query_ranking_module
 import sibyl_core.retrieval.search as search_module
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.models.context import ContextFacet
@@ -381,6 +382,61 @@ def test_query_coverage_promotes_exact_explicit_interface_anchor() -> None:
     )
 
     assert ranked[0] == "6"
+
+
+def test_query_coverage_rescues_full_explicit_anchor_from_deep_rank() -> None:
+    ranked = _rank_query_ids(
+        'Which action is immediately right of "Deployment Ring"?',
+        [
+            *[f"Routine deployment status note {index}." for index in range(53)],
+            "Toolbar: Deployment Ring; Pause Rollout; Archive Deployment.",
+            *[f"Archived release note {index}." for index in range(18)],
+        ],
+    )
+
+    assert ranked.index("53") < 5
+
+
+def test_query_coverage_does_not_rescue_partial_multi_anchor_signal() -> None:
+    ranked = [
+        QueryCoverageRankedCandidate(
+            item=str(index),
+            stable_id=str(index),
+            score=1.0 - (index / 10),
+            original_rank=index + 1,
+            overlap=0.2,
+        )
+        for index in range(7)
+    ]
+
+    stabilized = query_ranking_module._stabilize_explicit_anchor_ranking(
+        ranked,
+        {"6": 0.875},
+    )
+
+    assert stabilized == ranked
+
+
+def test_query_coverage_rescues_at_most_one_full_anchor_match() -> None:
+    ranked = [
+        QueryCoverageRankedCandidate(
+            item=str(index),
+            stable_id=str(index),
+            score=1.0 - (index / 10),
+            original_rank=index + 1,
+            overlap=0.2,
+        )
+        for index in range(7)
+    ]
+
+    stabilized = query_ranking_module._stabilize_explicit_anchor_ranking(
+        ranked,
+        {"5": 1.0, "6": 1.0},
+    )
+
+    rescued = {"5", "6"} & {candidate.stable_id for candidate in stabilized[:5]}
+    assert len(rescued) == 1
+    assert "5" in rescued
 
 
 def test_query_coverage_rescues_strong_preference_tail_candidate() -> None:
