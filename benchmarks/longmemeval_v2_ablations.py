@@ -58,6 +58,8 @@ RETRIEVAL_ARMS: tuple[dict[str, Any], ...] = (
         "max_chunks_per_trajectory": 8,
         "neighbor_stitch_items": 0,
         "neighbor_stitch_span": 0,
+        "source_expansion_items": 0,
+        "source_expansion_sources": 0,
     },
     {
         "name": "state_18k",
@@ -67,6 +69,8 @@ RETRIEVAL_ARMS: tuple[dict[str, Any], ...] = (
         "max_chunks_per_trajectory": 8,
         "neighbor_stitch_items": 0,
         "neighbor_stitch_span": 0,
+        "source_expansion_items": 0,
+        "source_expansion_sources": 0,
     },
     {
         "name": "state_8k",
@@ -76,6 +80,8 @@ RETRIEVAL_ARMS: tuple[dict[str, Any], ...] = (
         "max_chunks_per_trajectory": 8,
         "neighbor_stitch_items": 0,
         "neighbor_stitch_span": 0,
+        "source_expansion_items": 0,
+        "source_expansion_sources": 0,
     },
     {
         "name": "state_8k_diverse",
@@ -85,6 +91,8 @@ RETRIEVAL_ARMS: tuple[dict[str, Any], ...] = (
         "max_chunks_per_trajectory": 2,
         "neighbor_stitch_items": 0,
         "neighbor_stitch_span": 0,
+        "source_expansion_items": 0,
+        "source_expansion_sources": 0,
     },
     {
         "name": "state_8k_diverse_neighbors",
@@ -94,6 +102,8 @@ RETRIEVAL_ARMS: tuple[dict[str, Any], ...] = (
         "max_chunks_per_trajectory": 2,
         "neighbor_stitch_items": 2,
         "neighbor_stitch_span": 1,
+        "source_expansion_items": 0,
+        "source_expansion_sources": 0,
     },
 )
 READER_CONFIGURATIONS = (
@@ -107,6 +117,8 @@ QUERY_OVERRIDE_KEYS = (
     "max_chunks_per_trajectory",
     "neighbor_stitch_items",
     "neighbor_stitch_span",
+    "source_expansion_items",
+    "source_expansion_sources",
 )
 
 
@@ -214,7 +226,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         value = getattr(args, key, None)
         if value is not None and value < 1:
             parser.error(f"--{key.replace('_', '-')} must be positive")
-    for key in ("neighbor_stitch_items", "neighbor_stitch_span"):
+    for key in (
+        "neighbor_stitch_items",
+        "neighbor_stitch_span",
+        "source_expansion_items",
+        "source_expansion_sources",
+    ):
         value = getattr(args, key, None)
         if value is not None and value < 0:
             parser.error(f"--{key.replace('_', '-')} must be non-negative")
@@ -227,6 +244,8 @@ def add_retrieval_override_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-chunks-per-trajectory", type=int)
     parser.add_argument("--neighbor-stitch-items", type=int)
     parser.add_argument("--neighbor-stitch-span", type=int)
+    parser.add_argument("--source-expansion-items", type=int)
+    parser.add_argument("--source-expansion-sources", type=int)
 
 
 def build_experiment_plan(
