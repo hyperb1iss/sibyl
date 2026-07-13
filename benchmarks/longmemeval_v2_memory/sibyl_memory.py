@@ -32,6 +32,10 @@ from sibyl_core.evals.longmemeval_v2 import (  # noqa: E402
     LongMemEvalV2State,
     LongMemEvalV2Trajectory,
 )
+from sibyl_core.retrieval.query_ranking import (  # noqa: E402
+    QueryCoverageCandidate,
+    rank_by_query_coverage,
+)
 
 try:
     from memory_modules.memory import Memory, MemoryContextItem, register_memory
@@ -75,6 +79,7 @@ DEFAULT_EMBEDDING_BACKFILL_MAX_PENDING_JOBS = 8
 DEFAULT_MAX_CHUNKS_PER_TRAJECTORY = 2
 DEFAULT_NEIGHBOR_STITCH_ITEMS = 2
 DEFAULT_NEIGHBOR_STITCH_SPAN = 1
+DEFAULT_STATE_PART_COMPLETION_ITEMS = 0
 DEFAULT_CHUNKING_MODE = "state"
 CHUNKING_MODES = frozenset({"trajectory", "state"})
 JOB_STATUS_BATCH_SIZE = 64
@@ -102,6 +107,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "max_chunks_per_trajectory",
         "neighbor_stitch_items",
         "neighbor_stitch_span",
+        "state_part_completion_items",
         "checkpoint_dir",
     }
 )
@@ -273,6 +279,7 @@ def build_retrieval_trace(
                 "selection_origin": _stripped_str(result.get("_selection_origin"))
                 or "search",
                 "search_rank": result.get("_search_rank"),
+                "state_part_of_search_rank": result.get("_state_part_of_search_rank"),
                 "neighbor_of_search_rank": result.get("_neighbor_of_search_rank"),
                 "neighbor_distance": result.get("_neighbor_distance"),
             }
@@ -288,11 +295,17 @@ def assemble_context_results(
     max_chunks_per_trajectory: int,
     neighbor_stitch_items: int,
     neighbor_stitch_span: int,
+    query: str = "",
+    state_part_completion_items: int = 0,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
     max_items = max(1, max_items)
     max_chunks_per_trajectory = max(1, max_chunks_per_trajectory)
     neighbor_stitch_items = max(0, min(neighbor_stitch_items, max_items - 1))
     neighbor_stitch_span = max(0, neighbor_stitch_span)
+    state_part_completion_items = max(
+        0,
+        min(state_part_completion_items, max_items - neighbor_stitch_items - 1),
+    )
     ranked = []
     for search_rank, result in enumerate(results, start=1):
         candidate = dict(result)
@@ -301,7 +314,8 @@ def assemble_context_results(
         ranked.append(candidate)
 
     neighbor_budget = neighbor_stitch_items if chunk_catalog and neighbor_stitch_span else 0
-    seed_limit = max_items - neighbor_budget
+    state_part_budget = state_part_completion_items if chunk_catalog else 0
+    seed_limit = max_items - neighbor_budget - state_part_budget
     seeds = _select_diverse_results(
         ranked,
         limit=seed_limit,
@@ -309,6 +323,14 @@ def assemble_context_results(
     )
     selected = list(seeds)
     selected_keys = {_result_chunk_key(result) for result in selected}
+    state_parts, state_part_metadata = _state_part_results(
+        query,
+        seeds,
+        chunk_catalog=chunk_catalog,
+        selected_keys=selected_keys,
+        limit=state_part_budget,
+    )
+    selected.extend(state_parts)
     neighbors = _neighbor_results(
         seeds,
         chunk_catalog=chunk_catalog,
@@ -334,12 +356,97 @@ def assemble_context_results(
     return selected, {
         "input_result_count": len(results),
         "selected_search_seed_count": len(seeds),
+        "completed_state_part_count": len(state_parts),
         "stitched_neighbor_count": len(neighbors),
         "output_result_count": len(selected),
         "max_chunks_per_trajectory": max_chunks_per_trajectory,
         "neighbor_stitch_items": neighbor_stitch_items,
         "neighbor_stitch_span": neighbor_stitch_span,
+        "state_part_completion": state_part_metadata,
     }
+
+
+def _state_part_results(
+    query: str,
+    seeds: list[dict[str, object]],
+    *,
+    chunk_catalog: dict[str, dict[int, dict[str, object]]],
+    selected_keys: set[tuple[str, int | str]],
+    limit: int,
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    metadata: dict[str, object] = {
+        "enabled": bool(query and limit and chunk_catalog),
+        "candidate_count": 0,
+        "ranking_applied": False,
+        "admitted_chunk_keys": [],
+    }
+    if not metadata["enabled"]:
+        return [], metadata
+
+    candidates: list[dict[str, object]] = []
+    candidate_keys: set[tuple[str, int | str]] = set()
+    for seed in seeds:
+        seed_metadata = seed.get("metadata") if isinstance(seed.get("metadata"), dict) else {}
+        state_index = seed_metadata.get("longmemeval_v2_state_index")
+        state_part_count = seed_metadata.get("longmemeval_v2_state_part_count")
+        trajectory_id, _chunk_index = _result_chunk_key(seed)
+        if not isinstance(state_index, int) or not isinstance(state_part_count, int):
+            continue
+        if state_part_count < 2:
+            continue
+        for chunk_index, catalog_result in sorted(chunk_catalog.get(trajectory_id, {}).items()):
+            key = (trajectory_id, chunk_index)
+            catalog_metadata = (
+                catalog_result.get("metadata")
+                if isinstance(catalog_result.get("metadata"), dict)
+                else {}
+            )
+            if (
+                key in selected_keys
+                or key in candidate_keys
+                or catalog_metadata.get("longmemeval_v2_state_index") != state_index
+            ):
+                continue
+            candidate = dict(catalog_result)
+            candidate["score"] = seed.get("score")
+            candidate["_selection_origin"] = "state_part"
+            candidate["_state_part_of_search_rank"] = seed.get("_search_rank")
+            candidates.append(candidate)
+            candidate_keys.add(key)
+
+    metadata["candidate_count"] = len(candidates)
+    if not candidates:
+        return [], metadata
+
+    ranking = rank_by_query_coverage(
+        query,
+        [
+            QueryCoverageCandidate(
+                item=candidate,
+                stable_id=f"{_result_chunk_key(candidate)[0]}:{_result_chunk_key(candidate)[1]}",
+                text=_stripped_str(candidate.get("content")),
+                prior_score=_numeric_score(candidate.get("score")),
+                original_rank=index,
+            )
+            for index, candidate in enumerate(candidates, start=1)
+        ],
+    )
+    metadata["ranking_applied"] = ranking.applied
+    ranked_candidates = ranking.ranked
+    admitted: list[dict[str, object]] = []
+    for ranked in ranked_candidates[:limit]:
+        candidate = dict(ranked.item)
+        candidate["score"] = ranked.score
+        admitted.append(candidate)
+        selected_keys.add(_result_chunk_key(candidate))
+    metadata["admitted_chunk_keys"] = [
+        list(_result_chunk_key(candidate)) for candidate in admitted
+    ]
+    return admitted, metadata
+
+
+def _numeric_score(value: object) -> float:
+    return float(value) if isinstance(value, int | float) else 0.0
 
 
 def _select_diverse_results(
@@ -576,6 +683,15 @@ class SibylLiveApiMemory(Memory):
                 minimum=0,
             ),
         )
+        self.state_part_completion_items = max(
+            0,
+            _param_int(
+                memory_params,
+                "state_part_completion_items",
+                DEFAULT_STATE_PART_COMPLETION_ITEMS,
+                minimum=0,
+            ),
+        )
         self.include_screenshot_refs = _param_bool(
             memory_params,
             "include_screenshot_refs",
@@ -780,6 +896,12 @@ class SibylLiveApiMemory(Memory):
                 self,
                 "neighbor_stitch_span",
                 DEFAULT_NEIGHBOR_STITCH_SPAN,
+            ),
+            query=query,
+            state_part_completion_items=getattr(
+                self,
+                "state_part_completion_items",
+                DEFAULT_STATE_PART_COMPLETION_ITEMS,
             ),
         )
         self._query_local.search_metadata["adapter_assembly"] = assembly_metadata

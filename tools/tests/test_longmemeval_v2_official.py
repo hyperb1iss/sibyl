@@ -873,6 +873,7 @@ def test_sibyl_memory_context_formats_retrieved_content() -> None:
             "result_origin": "graph",
             "selection_origin": "search",
             "search_rank": None,
+            "state_part_of_search_rank": None,
             "neighbor_of_search_rank": None,
             "neighbor_distance": None,
         }
@@ -920,6 +921,49 @@ def test_sibyl_memory_assembles_diverse_seeds_with_neighbors() -> None:
     assert assembled[-1]["metadata"]["longmemeval_v2_chunk_index"] == 0
     assert metadata["selected_search_seed_count"] == len(assembled) - 1
     assert metadata["stitched_neighbor_count"] == 1
+
+
+def test_sibyl_memory_query_ranks_sibling_state_parts() -> None:
+    module = _load_memory_module()
+    first_seed = _search_result("t1", chunk_index=1, state_index=0, score=1.0)
+    second_seed = _search_result("t2", chunk_index=1, state_index=0, score=0.9)
+    first_sibling = _search_result("t1", chunk_index=0, state_index=0, score=0.0)
+    second_sibling = _search_result("t2", chunk_index=0, state_index=0, score=0.0)
+    first_sibling["content"] = "Unrelated account and notification settings."
+    second_sibling["content"] = "Deployment Ring: Canary. Pause Rollout is available."
+    for result in (first_seed, second_seed, first_sibling, second_sibling):
+        result["metadata"]["longmemeval_v2_state_part_count"] = 2
+    first_seed["metadata"]["longmemeval_v2_state_part_index"] = 1
+    second_seed["metadata"]["longmemeval_v2_state_part_index"] = 1
+    first_sibling["metadata"]["longmemeval_v2_state_part_index"] = 0
+    second_sibling["metadata"]["longmemeval_v2_state_part_index"] = 0
+
+    assembled, metadata = module.assemble_context_results(
+        [first_seed, second_seed],
+        chunk_catalog={
+            "t1": {0: first_sibling, 1: first_seed},
+            "t2": {0: second_sibling, 1: second_seed},
+        },
+        max_items=3,
+        max_chunks_per_trajectory=2,
+        neighbor_stitch_items=0,
+        neighbor_stitch_span=0,
+        query='Which value is shown for "Deployment Ring"?',
+        state_part_completion_items=1,
+    )
+
+    assert [module._result_chunk_key(result) for result in assembled] == [
+        ("t1", 1),
+        ("t2", 1),
+        ("t2", 0),
+    ]
+    assert metadata["completed_state_part_count"] == 1
+    assert metadata["state_part_completion"] == {
+        "enabled": True,
+        "candidate_count": 2,
+        "ranking_applied": True,
+        "admitted_chunk_keys": [["t2", 0]],
+    }
 
 
 def test_sibyl_memory_chunk_catalog_round_trips(tmp_path: Path) -> None:
@@ -1757,11 +1801,18 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
         "adapter_assembly": {
             "input_result_count": 0,
             "selected_search_seed_count": 0,
+            "completed_state_part_count": 0,
             "stitched_neighbor_count": 0,
             "output_result_count": 0,
             "max_chunks_per_trajectory": EXPECTED_MAX_CHUNKS_PER_TRAJECTORY,
             "neighbor_stitch_items": EXPECTED_NEIGHBOR_STITCH_ITEMS,
             "neighbor_stitch_span": EXPECTED_NEIGHBOR_STITCH_SPAN,
+            "state_part_completion": {
+                "enabled": False,
+                "candidate_count": 0,
+                "ranking_applied": False,
+                "admitted_chunk_keys": [],
+            },
         },
     }
     assert metadata["retrieval_trace"] == []

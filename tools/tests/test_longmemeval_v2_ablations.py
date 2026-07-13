@@ -17,6 +17,7 @@ EXPECTED_MATCHED_CONTEXT_TOKENS = 250
 EXPECTED_EMBEDDING_COST_USD = 0.03
 EXPECTED_NEIGHBOR_STITCH_ITEMS = 2
 EXPECTED_NEIGHBOR_STITCH_SPAN = 1
+EXPECTED_STATE_PART_COMPLETION_ITEMS = 2
 
 
 def _load_module() -> ModuleType:
@@ -148,6 +149,8 @@ def test_retrieve_cli_overrides_context_assembly_without_changing_named_arm() ->
             str(EXPECTED_NEIGHBOR_STITCH_ITEMS),
             "--neighbor-stitch-span",
             str(EXPECTED_NEIGHBOR_STITCH_SPAN),
+            "--state-part-completion-items",
+            str(EXPECTED_STATE_PART_COMPLETION_ITEMS),
         ]
     )
 
@@ -156,7 +159,9 @@ def test_retrieve_cli_overrides_context_assembly_without_changing_named_arm() ->
     assert arm["name"] == "trajectory_18k"
     assert arm["neighbor_stitch_items"] == EXPECTED_NEIGHBOR_STITCH_ITEMS
     assert arm["neighbor_stitch_span"] == EXPECTED_NEIGHBOR_STITCH_SPAN
+    assert arm["state_part_completion_items"] == EXPECTED_STATE_PART_COMPLETION_ITEMS
     assert module.arm_by_name("trajectory_18k")["neighbor_stitch_items"] == 0
+    assert module.arm_by_name("trajectory_18k")["state_part_completion_items"] == 0
 
 
 def test_ablation_gate_enforces_go_no_go_and_research_more(tmp_path: Path) -> None:
