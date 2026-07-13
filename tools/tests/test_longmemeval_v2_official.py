@@ -735,7 +735,6 @@ def test_sibyl_memory_payloads_chunk_trajectory_by_state() -> None:
     assert all(payload["skip_conflicts"] is True for payload in payloads)
     assert all(len(str(payload["content"])) <= TEST_CONTENT_MAX_CHARS for payload in payloads)
     assert payloads[0]["metadata"]["project_id"] == "project_lme"
-    assert all(payload["metadata"]["source_id"] == "t1" for payload in payloads)
     assert payloads[0]["metadata"]["longmemeval_v2_trajectory_id"] == "t1"
     assert all(
         payload["metadata"]["longmemeval_v2_state_indices"]

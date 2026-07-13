@@ -96,18 +96,6 @@ def _entity_text(entity: Any) -> str:
     return " ".join(parts).lower()
 
 
-def _entity_source_group(entity: Any) -> str | None:
-    if isinstance(entity, Mapping):
-        direct_source = entity.get("source_id")
-        metadata = entity.get("metadata") or entity.get("attributes")
-    else:
-        direct_source = getattr(entity, "source_id", None)
-        metadata = getattr(entity, "metadata", None) or getattr(entity, "attributes", None)
-    metadata_source = metadata.get("source_id") if isinstance(metadata, Mapping) else None
-    source = direct_source or metadata_source
-    return source.strip() if isinstance(source, str) and source.strip() else None
-
-
 def _entity_primary_text(entity: Any) -> str:
     primary_text, _has_user_turns = extract_primary_text_from_text(_entity_text(entity))
     return primary_text
@@ -151,7 +139,6 @@ def _apply_query_coverage_rerank(
         text_fn=_entity_text,
         id_fn=_entity_id,
         timestamp_fn=get_entity_timestamp,
-        source_group_fn=_entity_source_group,
         temporal_target=temporal_target,
     )
 

@@ -177,7 +177,6 @@ def build_entity_payloads_for_trajectory(
                 "skip_conflicts": True,
                 "metadata": {
                     "project_id": project_id,
-                    "source_id": trajectory.id,
                     "longmemeval_v2_run_id": run_id,
                     "longmemeval_v2_trajectory_id": trajectory.id,
                     "longmemeval_v2_chunk_index": chunk_index,
