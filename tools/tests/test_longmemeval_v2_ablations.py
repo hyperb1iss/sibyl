@@ -15,6 +15,8 @@ EXPECTED_READER_COMMAND_COUNT = 6
 EXPECTED_PROVENANCE_ATTEMPTS = 2
 EXPECTED_MATCHED_CONTEXT_TOKENS = 250
 EXPECTED_EMBEDDING_COST_USD = 0.03
+EXPECTED_NEIGHBOR_STITCH_ITEMS = 2
+EXPECTED_NEIGHBOR_STITCH_SPAN = 1
 
 
 def _load_module() -> ModuleType:
@@ -123,6 +125,38 @@ def test_retrieval_resume_skips_completed_questions_and_hides_gold(tmp_path: Pat
     assert [record["question_id"] for record in records] == ["q1", "q2"]
     assert "gold one" not in output_path.read_text(encoding="utf-8")
     assert "gold two" not in output_path.read_text(encoding="utf-8")
+
+
+def test_retrieve_cli_overrides_context_assembly_without_changing_named_arm() -> None:
+    module = _load_module()
+    args = module.parse_args(
+        [
+            "retrieve",
+            "--data-root",
+            "data",
+            "--official-repo",
+            "official",
+            "--memory-dir",
+            "memory",
+            "--output-dir",
+            "output",
+            "--domain",
+            "web",
+            "--arm",
+            "trajectory_18k",
+            "--neighbor-stitch-items",
+            str(EXPECTED_NEIGHBOR_STITCH_ITEMS),
+            "--neighbor-stitch-span",
+            str(EXPECTED_NEIGHBOR_STITCH_SPAN),
+        ]
+    )
+
+    arm = module.retrieval_arm_from_args(args)
+
+    assert arm["name"] == "trajectory_18k"
+    assert arm["neighbor_stitch_items"] == EXPECTED_NEIGHBOR_STITCH_ITEMS
+    assert arm["neighbor_stitch_span"] == EXPECTED_NEIGHBOR_STITCH_SPAN
+    assert module.arm_by_name("trajectory_18k")["neighbor_stitch_items"] == 0
 
 
 def test_ablation_gate_enforces_go_no_go_and_research_more(tmp_path: Path) -> None:

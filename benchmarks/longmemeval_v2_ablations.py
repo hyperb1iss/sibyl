@@ -184,6 +184,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     retrieve.add_argument("--query-workers", type=int, default=DEFAULT_QUERY_WORKERS)
     retrieve.add_argument("--api-timeout-seconds", type=float, default=600.0)
     retrieve.add_argument("--allow-localhost", action="store_true")
+    add_retrieval_override_arguments(retrieve)
 
     gate = subparsers.add_parser("gate")
     gate.add_argument("--arm", action="append", required=True, metavar="NAME=REPORT")
@@ -209,7 +210,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--query-workers must be positive")
     if hasattr(args, "api_timeout_seconds") and args.api_timeout_seconds <= 0:
         parser.error("--api-timeout-seconds must be positive")
+    for key in ("search_limit", "max_context_items", "max_chunks_per_trajectory"):
+        value = getattr(args, key, None)
+        if value is not None and value < 1:
+            parser.error(f"--{key.replace('_', '-')} must be positive")
+    for key in ("neighbor_stitch_items", "neighbor_stitch_span"):
+        value = getattr(args, key, None)
+        if value is not None and value < 0:
+            parser.error(f"--{key.replace('_', '-')} must be non-negative")
     return args
+
+
+def add_retrieval_override_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--search-limit", type=int)
+    parser.add_argument("--max-context-items", type=int)
+    parser.add_argument("--max-chunks-per-trajectory", type=int)
+    parser.add_argument("--neighbor-stitch-items", type=int)
+    parser.add_argument("--neighbor-stitch-span", type=int)
 
 
 def build_experiment_plan(
@@ -353,7 +370,7 @@ def run_retrieval_command(args: argparse.Namespace) -> int:
     official_repo = Path(args.official_repo).expanduser().resolve()
     memory_dir = Path(args.memory_dir).expanduser().resolve()
     output_dir = Path(args.output_dir).expanduser().resolve()
-    arm = arm_by_name(args.arm)
+    arm = retrieval_arm_from_args(args)
     questions = load_safe_questions(
         data_root / "questions.jsonl",
         selected_ids=set(question_ids_by_domain(load_json(Path(args.slice)))[args.domain]),
@@ -416,6 +433,15 @@ def run_retrieval_command(args: argparse.Namespace) -> int:
         },
     )
     return 0
+
+
+def retrieval_arm_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    arm = dict(arm_by_name(args.arm))
+    for key in QUERY_OVERRIDE_KEYS:
+        value = getattr(args, key, None)
+        if value is not None:
+            arm[key] = value
+    return arm
 
 
 def execute_retrieval(
