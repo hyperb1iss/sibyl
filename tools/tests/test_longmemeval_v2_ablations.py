@@ -151,6 +151,7 @@ def test_retrieve_cli_overrides_context_assembly_without_changing_named_arm() ->
             str(EXPECTED_NEIGHBOR_STITCH_SPAN),
             "--state-part-completion-items",
             str(EXPECTED_STATE_PART_COMPLETION_ITEMS),
+            "--state-part-refinement",
         ]
     )
 
@@ -160,8 +161,10 @@ def test_retrieve_cli_overrides_context_assembly_without_changing_named_arm() ->
     assert arm["neighbor_stitch_items"] == EXPECTED_NEIGHBOR_STITCH_ITEMS
     assert arm["neighbor_stitch_span"] == EXPECTED_NEIGHBOR_STITCH_SPAN
     assert arm["state_part_completion_items"] == EXPECTED_STATE_PART_COMPLETION_ITEMS
+    assert arm["state_part_refinement"] is True
     assert module.arm_by_name("trajectory_18k")["neighbor_stitch_items"] == 0
     assert module.arm_by_name("trajectory_18k")["state_part_completion_items"] == 0
+    assert module.arm_by_name("trajectory_18k")["state_part_refinement"] is False
 
 
 def test_ablation_gate_enforces_go_no_go_and_research_more(tmp_path: Path) -> None:

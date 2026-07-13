@@ -59,6 +59,7 @@ RETRIEVAL_ARMS: tuple[dict[str, Any], ...] = (
         "neighbor_stitch_items": 0,
         "neighbor_stitch_span": 0,
         "state_part_completion_items": 0,
+        "state_part_refinement": False,
     },
     {
         "name": "state_18k",
@@ -69,6 +70,7 @@ RETRIEVAL_ARMS: tuple[dict[str, Any], ...] = (
         "neighbor_stitch_items": 0,
         "neighbor_stitch_span": 0,
         "state_part_completion_items": 0,
+        "state_part_refinement": False,
     },
     {
         "name": "state_8k",
@@ -79,6 +81,7 @@ RETRIEVAL_ARMS: tuple[dict[str, Any], ...] = (
         "neighbor_stitch_items": 0,
         "neighbor_stitch_span": 0,
         "state_part_completion_items": 0,
+        "state_part_refinement": False,
     },
     {
         "name": "state_8k_diverse",
@@ -89,6 +92,7 @@ RETRIEVAL_ARMS: tuple[dict[str, Any], ...] = (
         "neighbor_stitch_items": 0,
         "neighbor_stitch_span": 0,
         "state_part_completion_items": 0,
+        "state_part_refinement": False,
     },
     {
         "name": "state_8k_diverse_neighbors",
@@ -99,6 +103,7 @@ RETRIEVAL_ARMS: tuple[dict[str, Any], ...] = (
         "neighbor_stitch_items": 2,
         "neighbor_stitch_span": 1,
         "state_part_completion_items": 0,
+        "state_part_refinement": False,
     },
 )
 READER_CONFIGURATIONS = (
@@ -113,6 +118,7 @@ QUERY_OVERRIDE_KEYS = (
     "neighbor_stitch_items",
     "neighbor_stitch_span",
     "state_part_completion_items",
+    "state_part_refinement",
 )
 
 
@@ -238,6 +244,11 @@ def add_retrieval_override_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--neighbor-stitch-items", type=int)
     parser.add_argument("--neighbor-stitch-span", type=int)
     parser.add_argument("--state-part-completion-items", type=int)
+    parser.add_argument(
+        "--state-part-refinement",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
 
 
 def build_experiment_plan(

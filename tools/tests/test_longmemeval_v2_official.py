@@ -40,6 +40,7 @@ EXPECTED_JUDGE_REQUESTS = 2
 EXPECTED_MAX_CHUNKS_PER_TRAJECTORY = 2
 EXPECTED_NEIGHBOR_STITCH_ITEMS = 2
 EXPECTED_NEIGHBOR_STITCH_SPAN = 1
+EXPECTED_STATE_PART_REFINEMENT_MIN_SCORE_GAIN = 0.05
 EXPECTED_SEARCH_LIMIT_OVERRIDE = 24
 EXPECTED_SAVED_USAGE_REQUESTS = 2
 EXPECTED_SAVED_USAGE_COST_USD = 0.25
@@ -874,6 +875,7 @@ def test_sibyl_memory_context_formats_retrieved_content() -> None:
             "selection_origin": "search",
             "search_rank": None,
             "state_part_of_search_rank": None,
+            "state_part_refined_from_chunk": None,
             "neighbor_of_search_rank": None,
             "neighbor_distance": None,
         }
@@ -964,6 +966,40 @@ def test_sibyl_memory_query_ranks_sibling_state_parts() -> None:
         "ranking_applied": True,
         "admitted_chunk_keys": [["t2", 0]],
     }
+
+
+def test_sibyl_memory_refines_split_state_without_spending_context_slot() -> None:
+    module = _load_memory_module()
+    seed = _search_result("t1", chunk_index=0, state_index=4, score=1.0)
+    sibling = _search_result("t1", chunk_index=1, state_index=4, score=0.0)
+    seed["content"] = "Deployment settings overview."
+    sibling["content"] = "Deployment Ring: Canary. Pause Rollout is available."
+    seed["metadata"]["longmemeval_v2_state_part_count"] = 2
+    seed["metadata"]["longmemeval_v2_state_part_index"] = 0
+    sibling["metadata"]["longmemeval_v2_state_part_count"] = 2
+    sibling["metadata"]["longmemeval_v2_state_part_index"] = 1
+
+    assembled, metadata = module.assemble_context_results(
+        [seed],
+        chunk_catalog={"t1": {0: seed, 1: sibling}},
+        max_items=1,
+        max_chunks_per_trajectory=1,
+        neighbor_stitch_items=0,
+        neighbor_stitch_span=0,
+        query='Which value is shown for "Deployment Ring"?',
+        state_part_refinement=True,
+    )
+
+    assert [module._result_chunk_key(result) for result in assembled] == [("t1", 1)]
+    assert assembled[0]["_selection_origin"] == "state_part_refinement"
+    assert metadata["output_result_count"] == 1
+    replacements = metadata["state_part_refinement"]["replacements"]
+    assert len(replacements) == 1
+    assert replacements[0]["search_rank"] == 1
+    assert replacements[0]["from_chunk_key"] == ["t1", 0]
+    assert replacements[0]["to_chunk_key"] == ["t1", 1]
+    assert replacements[0]["score_gain"] >= EXPECTED_STATE_PART_REFINEMENT_MIN_SCORE_GAIN
+    assert replacements[0]["overlap_gain"] > 0.0
 
 
 def test_sibyl_memory_chunk_catalog_round_trips(tmp_path: Path) -> None:
@@ -1812,6 +1848,14 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
                 "candidate_count": 0,
                 "ranking_applied": False,
                 "admitted_chunk_keys": [],
+            },
+            "state_part_refinement": {
+                "enabled": False,
+                "inspected_state_count": 0,
+                "candidate_count": 0,
+                "ranking_applied_count": 0,
+                "replacements": [],
+                "min_score_gain": 0.05,
             },
         },
     }

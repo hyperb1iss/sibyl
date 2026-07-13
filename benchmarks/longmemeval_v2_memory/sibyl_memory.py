@@ -80,6 +80,8 @@ DEFAULT_MAX_CHUNKS_PER_TRAJECTORY = 2
 DEFAULT_NEIGHBOR_STITCH_ITEMS = 2
 DEFAULT_NEIGHBOR_STITCH_SPAN = 1
 DEFAULT_STATE_PART_COMPLETION_ITEMS = 0
+DEFAULT_STATE_PART_REFINEMENT = False
+STATE_PART_REFINEMENT_MIN_SCORE_GAIN = 0.05
 DEFAULT_CHUNKING_MODE = "state"
 CHUNKING_MODES = frozenset({"trajectory", "state"})
 JOB_STATUS_BATCH_SIZE = 64
@@ -108,6 +110,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "neighbor_stitch_items",
         "neighbor_stitch_span",
         "state_part_completion_items",
+        "state_part_refinement",
         "checkpoint_dir",
     }
 )
@@ -280,6 +283,9 @@ def build_retrieval_trace(
                 or "search",
                 "search_rank": result.get("_search_rank"),
                 "state_part_of_search_rank": result.get("_state_part_of_search_rank"),
+                "state_part_refined_from_chunk": result.get(
+                    "_state_part_refined_from_chunk"
+                ),
                 "neighbor_of_search_rank": result.get("_neighbor_of_search_rank"),
                 "neighbor_distance": result.get("_neighbor_distance"),
             }
@@ -297,6 +303,7 @@ def assemble_context_results(
     neighbor_stitch_span: int,
     query: str = "",
     state_part_completion_items: int = 0,
+    state_part_refinement: bool = False,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
     max_items = max(1, max_items)
     max_chunks_per_trajectory = max(1, max_chunks_per_trajectory)
@@ -321,18 +328,25 @@ def assemble_context_results(
         limit=seed_limit,
         max_chunks_per_trajectory=max_chunks_per_trajectory,
     )
-    selected = list(seeds)
-    selected_keys = {_result_chunk_key(result) for result in selected}
-    state_parts, state_part_metadata = _state_part_results(
+    refined_seeds, state_part_refinement_metadata = _refine_state_parts(
         query,
         seeds,
+        chunk_catalog=chunk_catalog,
+        enabled=state_part_refinement,
+    )
+    selected = list(refined_seeds)
+    selected_keys = {_result_chunk_key(result) for result in selected}
+    selected_keys.update(_result_chunk_key(result) for result in seeds)
+    state_parts, state_part_metadata = _state_part_results(
+        query,
+        refined_seeds,
         chunk_catalog=chunk_catalog,
         selected_keys=selected_keys,
         limit=state_part_budget,
     )
     selected.extend(state_parts)
     neighbors = _neighbor_results(
-        seeds,
+        refined_seeds,
         chunk_catalog=chunk_catalog,
         selected_keys=selected_keys,
         limit=neighbor_budget,
@@ -363,7 +377,92 @@ def assemble_context_results(
         "neighbor_stitch_items": neighbor_stitch_items,
         "neighbor_stitch_span": neighbor_stitch_span,
         "state_part_completion": state_part_metadata,
+        "state_part_refinement": state_part_refinement_metadata,
     }
+
+
+def _refine_state_parts(
+    query: str,
+    seeds: list[dict[str, object]],
+    *,
+    chunk_catalog: dict[str, dict[int, dict[str, object]]],
+    enabled: bool,
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    metadata: dict[str, object] = {
+        "enabled": bool(enabled and query and chunk_catalog),
+        "inspected_state_count": 0,
+        "candidate_count": 0,
+        "ranking_applied_count": 0,
+        "replacements": [],
+        "min_score_gain": STATE_PART_REFINEMENT_MIN_SCORE_GAIN,
+    }
+    if not metadata["enabled"]:
+        return seeds, metadata
+
+    selected_keys = {_result_chunk_key(seed) for seed in seeds}
+    refined: list[dict[str, object]] = []
+    replacements: list[dict[str, object]] = []
+    for seed in seeds:
+        siblings = _sibling_state_parts(
+            seed,
+            chunk_catalog=chunk_catalog,
+            excluded_keys=selected_keys,
+        )
+        if not siblings:
+            refined.append(seed)
+            continue
+        metadata["inspected_state_count"] = int(metadata["inspected_state_count"]) + 1
+        metadata["candidate_count"] = int(metadata["candidate_count"]) + len(siblings)
+        candidates = [seed, *siblings]
+        prior_score = _numeric_score(seed.get("score"))
+        ranking = rank_by_query_coverage(
+            query,
+            [
+                QueryCoverageCandidate(
+                    item=candidate,
+                    stable_id=_result_stable_id(candidate),
+                    text=_stripped_str(candidate.get("content")),
+                    prior_score=prior_score,
+                    original_rank=1,
+                )
+                for candidate in candidates
+            ],
+        )
+        if not ranking.applied:
+            refined.append(seed)
+            continue
+        metadata["ranking_applied_count"] = int(metadata["ranking_applied_count"]) + 1
+        seed_key = _result_chunk_key(seed)
+        seed_ranked = next(
+            ranked for ranked in ranking.ranked if _result_chunk_key(ranked.item) == seed_key
+        )
+        best = ranking.ranked[0]
+        best_key = _result_chunk_key(best.item)
+        if (
+            best_key == seed_key
+            or best.overlap <= seed_ranked.overlap
+            or best.score < seed_ranked.score + STATE_PART_REFINEMENT_MIN_SCORE_GAIN
+        ):
+            refined.append(seed)
+            continue
+        replacement = dict(best.item)
+        replacement["score"] = best.score
+        replacement["_selection_origin"] = "state_part_refinement"
+        replacement["_search_rank"] = seed.get("_search_rank")
+        replacement["_state_part_of_search_rank"] = seed.get("_search_rank")
+        replacement["_state_part_refined_from_chunk"] = seed_key[1]
+        refined.append(replacement)
+        replacements.append(
+            {
+                "search_rank": seed.get("_search_rank"),
+                "from_chunk_key": list(seed_key),
+                "to_chunk_key": list(best_key),
+                "score_gain": best.score - seed_ranked.score,
+                "overlap_gain": best.overlap - seed_ranked.overlap,
+            }
+        )
+    metadata["replacements"] = replacements
+    return refined, metadata
 
 
 def _state_part_results(
@@ -386,28 +485,12 @@ def _state_part_results(
     candidates: list[dict[str, object]] = []
     candidate_keys: set[tuple[str, int | str]] = set()
     for seed in seeds:
-        seed_metadata = seed.get("metadata") if isinstance(seed.get("metadata"), dict) else {}
-        state_index = seed_metadata.get("longmemeval_v2_state_index")
-        state_part_count = seed_metadata.get("longmemeval_v2_state_part_count")
-        trajectory_id, _chunk_index = _result_chunk_key(seed)
-        if not isinstance(state_index, int) or not isinstance(state_part_count, int):
-            continue
-        if state_part_count < 2:
-            continue
-        for chunk_index, catalog_result in sorted(chunk_catalog.get(trajectory_id, {}).items()):
-            key = (trajectory_id, chunk_index)
-            catalog_metadata = (
-                catalog_result.get("metadata")
-                if isinstance(catalog_result.get("metadata"), dict)
-                else {}
-            )
-            if (
-                key in selected_keys
-                or key in candidate_keys
-                or catalog_metadata.get("longmemeval_v2_state_index") != state_index
-            ):
-                continue
-            candidate = dict(catalog_result)
+        for candidate in _sibling_state_parts(
+            seed,
+            chunk_catalog=chunk_catalog,
+            excluded_keys=selected_keys | candidate_keys,
+        ):
+            key = _result_chunk_key(candidate)
             candidate["score"] = seed.get("score")
             candidate["_selection_origin"] = "state_part"
             candidate["_state_part_of_search_rank"] = seed.get("_search_rank")
@@ -423,7 +506,7 @@ def _state_part_results(
         [
             QueryCoverageCandidate(
                 item=candidate,
-                stable_id=f"{_result_chunk_key(candidate)[0]}:{_result_chunk_key(candidate)[1]}",
+                stable_id=_result_stable_id(candidate),
                 text=_stripped_str(candidate.get("content")),
                 prior_score=_numeric_score(candidate.get("score")),
                 original_rank=index,
@@ -445,8 +528,47 @@ def _state_part_results(
     return admitted, metadata
 
 
+def _sibling_state_parts(
+    seed: dict[str, object],
+    *,
+    chunk_catalog: dict[str, dict[int, dict[str, object]]],
+    excluded_keys: set[tuple[str, int | str]],
+) -> list[dict[str, object]]:
+    seed_metadata = seed.get("metadata") if isinstance(seed.get("metadata"), dict) else {}
+    state_index = seed_metadata.get("longmemeval_v2_state_index")
+    state_part_count = seed_metadata.get("longmemeval_v2_state_part_count")
+    trajectory_id, _chunk_index = _result_chunk_key(seed)
+    if not isinstance(state_index, int) or not isinstance(state_part_count, int):
+        return []
+    if state_part_count < 2:
+        return []
+    siblings: list[dict[str, object]] = []
+    for chunk_index, catalog_result in sorted(chunk_catalog.get(trajectory_id, {}).items()):
+        key = (trajectory_id, chunk_index)
+        catalog_metadata = (
+            catalog_result.get("metadata")
+            if isinstance(catalog_result.get("metadata"), dict)
+            else {}
+        )
+        if (
+            key in excluded_keys
+            or catalog_metadata.get("longmemeval_v2_state_index") != state_index
+        ):
+            continue
+        siblings.append(dict(catalog_result))
+    return siblings
+
+
 def _numeric_score(value: object) -> float:
     return float(value) if isinstance(value, int | float) else 0.0
+
+
+def _result_stable_id(result: dict[str, object]) -> str:
+    result_id = _stripped_str(result.get("id"))
+    if result_id:
+        return result_id
+    trajectory_id, chunk_index = _result_chunk_key(result)
+    return f"{trajectory_id}:{chunk_index}"
 
 
 def _select_diverse_results(
@@ -692,6 +814,11 @@ class SibylLiveApiMemory(Memory):
                 minimum=0,
             ),
         )
+        self.state_part_refinement = _param_bool(
+            memory_params,
+            "state_part_refinement",
+            DEFAULT_STATE_PART_REFINEMENT,
+        )
         self.include_screenshot_refs = _param_bool(
             memory_params,
             "include_screenshot_refs",
@@ -902,6 +1029,11 @@ class SibylLiveApiMemory(Memory):
                 self,
                 "state_part_completion_items",
                 DEFAULT_STATE_PART_COMPLETION_ITEMS,
+            ),
+            state_part_refinement=getattr(
+                self,
+                "state_part_refinement",
+                DEFAULT_STATE_PART_REFINEMENT,
             ),
         )
         self._query_local.search_metadata["adapter_assembly"] = assembly_metadata
