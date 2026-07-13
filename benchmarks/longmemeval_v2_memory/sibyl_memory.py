@@ -440,7 +440,6 @@ def _refine_state_parts(
         best_key = _result_chunk_key(best.item)
         if (
             best_key == seed_key
-            or best.overlap <= seed_ranked.overlap
             or best.score < seed_ranked.score + STATE_PART_REFINEMENT_MIN_SCORE_GAIN
         ):
             refined.append(seed)
