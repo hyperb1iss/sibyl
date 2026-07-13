@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmarks.git_provenance import git_provenance  # noqa: E402
+from benchmarks.longmemeval_v2_reader_report import build_reader_report  # noqa: E402
 
 SCHEMA_VERSION = "sibyl-longmemeval-v2-ablations-v1"
 GATE_SCHEMA_VERSION = "sibyl-longmemeval-v2-ablation-gate-v1"
@@ -185,6 +186,19 @@ def main(argv: list[str] | None = None) -> int:
         write_json(Path(args.output).expanduser().resolve(), reader_plan)
         print(json.dumps(reader_plan, indent=2, sort_keys=True))  # noqa: T201
         return 0
+    if args.command == "reader-report":
+        plan_path = Path(args.plan).expanduser().resolve()
+        report = build_reader_report(
+            reader_plan=load_json(plan_path),
+            run_roots=parse_named_paths(args.run),
+        )
+        report["source_artifacts"]["reader_plan"] = {
+            "path": str(plan_path),
+            "sha256": sha256_file(plan_path),
+        }
+        write_json(Path(args.output).expanduser().resolve(), report)
+        print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
+        return 0
     if args.command == "doctor":
         result = probe_official_loader(Path(args.official_repo).expanduser().resolve())
         print(json.dumps(result, indent=2, sort_keys=True))  # noqa: T201
@@ -240,6 +254,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     reader.add_argument("--output", required=True)
 
+    add_reader_report_arguments(subparsers)
+
     doctor = subparsers.add_parser("doctor")
     doctor.add_argument("--official-repo", required=True)
 
@@ -261,6 +277,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         if value is not None and value < 0:
             parser.error(f"--{key.replace('_', '-')} must be non-negative")
     return args
+
+
+def add_reader_report_arguments(subparsers: Any) -> None:
+    reader_report = subparsers.add_parser("reader-report")
+    reader_report.add_argument("--plan", required=True)
+    reader_report.add_argument(
+        "--run",
+        action="append",
+        required=True,
+        metavar="CONFIGURATION=OUTPUT_ROOT",
+    )
+    reader_report.add_argument("--output", required=True)
 
 
 def add_retrieval_override_arguments(parser: argparse.ArgumentParser) -> None:

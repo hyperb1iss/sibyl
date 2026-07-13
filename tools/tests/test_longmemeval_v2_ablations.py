@@ -19,6 +19,12 @@ EXPECTED_NEIGHBOR_STITCH_ITEMS = 2
 EXPECTED_NEIGHBOR_STITCH_SPAN = 1
 EXPECTED_STATE_PART_COMPLETION_ITEMS = 2
 EXPECTED_WINNER_CONTEXT_ITEMS = 10
+EXPECTED_READER_REPORT_COST_USD = 0.44
+EXPECTED_READER_REPORT_CORRECT = 3
+EXPECTED_READER_REPORT_ACCURACY = 0.75
+EXPECTED_READER_REPORT_ACCURACY_DELTA = 0.25
+EXPECTED_READER_REPORT_RECOVERIES = 2
+STANDARD_CONTEXT_TOKENS = 200_000
 
 
 def _load_module() -> ModuleType:
@@ -451,6 +457,138 @@ def test_reader_plan_binds_treatment_gate_to_frozen_preregistration(tmp_path: Pa
         )
 
 
+def test_reader_report_is_receipt_bound_and_descriptive(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_module()
+    plan, run_roots = _write_reader_report_inputs(tmp_path)
+
+    report = module.build_reader_report(reader_plan=plan, run_roots=run_roots)
+
+    assert report["status"] == "PASS"
+    assert report["replication"]["promotion_decision"] is None
+    assert report["replication"]["stochastic_reader"] is True
+    fixed = report["configurations"]["winner_fixed_reader"]["combined"]
+    assert fixed["correct_count"] == EXPECTED_READER_REPORT_CORRECT
+    assert fixed["accuracy"] == EXPECTED_READER_REPORT_ACCURACY
+    assert fixed["model_cost_usd"] == pytest.approx(EXPECTED_READER_REPORT_COST_USD)
+    comparison = report["comparisons"]["winner_fixed_reader_vs_baseline_fixed_reader"]
+    assert comparison["correct_count_delta"] == 1
+    assert comparison["accuracy_delta"] == EXPECTED_READER_REPORT_ACCURACY_DELTA
+    assert len(comparison["recoveries"]) == EXPECTED_READER_REPORT_RECOVERIES
+    assert len(comparison["regressions"]) == 1
+    serialized = json.dumps(report)
+    assert "answer_gold" not in serialized
+    assert "gold-sentinel" not in serialized
+
+    plan_path = tmp_path / "reader_plan.json"
+    output_path = tmp_path / "reader_report.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    arguments = ["reader-report", "--plan", str(plan_path)]
+    for configuration, run_root in run_roots.items():
+        arguments.extend(("--run", f"{configuration}={run_root}"))
+    arguments.extend(("--output", str(output_path)))
+    assert module.main(arguments) == 0
+    capsys.readouterr()
+    cli_report = json.loads(output_path.read_text(encoding="utf-8"))
+    assert cli_report["source_artifacts"]["reader_plan"]["sha256"] == module.sha256_file(plan_path)
+
+    receipt_path = run_roots["winner_fixed_reader"] / "web" / "longmemeval_v2_official_receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["source_runs"]["domains"]["web"]["effective_memory_config"]["memory_params"][
+        "max_context_items"
+    ] = 9
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    with pytest.raises(ValueError, match="planned retrieval config"):
+        module.build_reader_report(reader_plan=plan, run_roots=run_roots)
+
+    duplicate_plan = {
+        **plan,
+        "configurations": [
+            "baseline_fixed_reader",
+            "baseline_fixed_reader",
+            "winner_matched_context",
+        ],
+    }
+    with pytest.raises(ValueError, match="must be unique"):
+        module.build_reader_report(reader_plan=duplicate_plan, run_roots=run_roots)
+
+
+@pytest.mark.parametrize(
+    ("tamper", "message"),
+    [
+        ("accuracy", "aggregate score disagrees"),
+        ("cost", "incomplete reader cost coverage"),
+        ("cost_value", "invalid reader provider cost"),
+        ("domain", "planned domain"),
+        ("evaluator_model", "missing model pins"),
+        ("generation", "planned generation config"),
+        ("memory", "planned memory build"),
+        ("questions", "question set does not match"),
+        ("source_integrity", "incomplete source integrity"),
+        ("exit", "did not exit cleanly"),
+    ],
+)
+def test_reader_report_rejects_inconsistent_run_receipts(
+    tmp_path: Path,
+    tamper: str,
+    message: str,
+) -> None:
+    module = _load_module()
+    plan, run_roots = _write_reader_report_inputs(tmp_path)
+    run_dir = run_roots["baseline_fixed_reader"] / "web"
+    receipt_path = run_dir / "longmemeval_v2_official_receipt.json"
+    run_args_path = run_dir / "run_args.json"
+
+    if tamper == "accuracy":
+        path = run_dir / "aggregated_metrics.json"
+        value = json.loads(path.read_text(encoding="utf-8"))
+        value["overall"]["overall_full_set"] = 0.25
+        path.write_text(json.dumps(value), encoding="utf-8")
+    elif tamper in {
+        "cost",
+        "cost_value",
+        "domain",
+        "evaluator_model",
+        "source_integrity",
+    }:
+        value = json.loads(receipt_path.read_text(encoding="utf-8"))
+        if tamper == "cost":
+            value["accounting"]["reader"]["cost_coverage_complete"] = False
+        elif tamper == "cost_value":
+            del value["accounting"]["reader"]["provider_reported_cost_usd"]
+        elif tamper == "domain":
+            value["domain"] = "enterprise"
+        elif tamper == "evaluator_model":
+            value["models"]["evaluator_model"] = ""
+        else:
+            value["source_runs"]["integrity_complete"] = False
+        receipt_path.write_text(json.dumps(value), encoding="utf-8")
+    elif tamper in {"generation", "memory"}:
+        value = json.loads(run_args_path.read_text(encoding="utf-8"))
+        if tamper == "generation":
+            value["top_p"] = 0.5
+        else:
+            value["load_memory_dir"] = str(tmp_path / "other-memory")
+        run_args_path.write_text(json.dumps(value), encoding="utf-8")
+    elif tamper == "questions":
+        rows = json.loads(
+            (run_dir / "per_question.jsonl").read_text(encoding="utf-8").splitlines()[0]
+        )
+        rows["question_id"] = "different-question"
+        remaining = (run_dir / "per_question.jsonl").read_text(encoding="utf-8").splitlines()[1:]
+        (run_dir / "per_question.jsonl").write_text(
+            "\n".join((json.dumps(rows), *remaining)) + "\n",
+            encoding="utf-8",
+        )
+    else:
+        (run_dir / "exit_code").write_text("1\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        module.build_reader_report(reader_plan=plan, run_roots=run_roots)
+
+
 def test_retrieval_accounting_combines_saved_ingest_and_query_cost() -> None:
     module = _load_module()
     usage = {
@@ -632,3 +770,184 @@ def _write_reports(
 
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+
+def _write_reader_report_inputs(
+    tmp_path: Path,
+) -> tuple[dict[str, Any], dict[str, Path]]:
+    configurations = (
+        "baseline_fixed_reader",
+        "winner_fixed_reader",
+        "winner_matched_context",
+    )
+    domains = ("web", "enterprise")
+    plan = {
+        "schema_version": "sibyl-longmemeval-v2-reader-plan-v1",
+        "configurations": list(configurations),
+        "commands": [],
+    }
+    run_roots = {}
+    scores = {
+        "baseline_fixed_reader": {"web": (True, False), "enterprise": (False, True)},
+        "winner_fixed_reader": {"web": (True, True), "enterprise": (True, False)},
+        "winner_matched_context": {"web": (True, False), "enterprise": (False, True)},
+    }
+    for configuration in configurations:
+        run_root = tmp_path / configuration
+        run_roots[configuration] = run_root
+        for domain in domains:
+            is_baseline = configuration == "baseline_fixed_reader"
+            is_matched = configuration == "winner_matched_context"
+            memory_limit = (
+                EXPECTED_MATCHED_CONTEXT_TOKENS if is_matched else STANDARD_CONTEXT_TOKENS
+            )
+            config = {
+                "search_limit": 12,
+                "max_context_items": 8 if is_baseline else EXPECTED_WINNER_CONTEXT_ITEMS,
+                "max_chunks_per_trajectory": 8,
+                "neighbor_stitch_items": 0 if is_baseline else 2,
+                "neighbor_stitch_span": 0 if is_baseline else 1,
+                "state_part_completion_items": 0,
+                "state_part_refinement": not is_baseline,
+            }
+            question_ids = [f"{domain}-1", f"{domain}-2"]
+            run_dir = run_root / domain
+            memory_dir = tmp_path / "memory" / domain
+            command = [
+                "moon",
+                "run",
+                "root:bench-longmemeval-v2-official-full",
+                "--",
+                "--domain",
+                domain,
+                "--output-dir",
+                str(run_dir),
+                "--load-memory-dir",
+                str(memory_dir),
+                "--reader-model",
+                "Qwen/Qwen3.5-9B",
+                "--reader-temperature",
+                "0.6",
+                "--reader-top-p",
+                "0.95",
+                "--reader-top-k",
+                "20",
+                "--memory-context-max-tokens",
+                str(memory_limit),
+                "--question-ids",
+                *question_ids,
+            ]
+            for key, value in config.items():
+                flag = f"--{key.replace('_', '-')}"
+                if isinstance(value, bool):
+                    command.append(flag if value else f"--no-{flag.removeprefix('--')}")
+                else:
+                    command.extend((flag, str(value)))
+            plan["commands"].append(
+                {
+                    "configuration": configuration,
+                    "domain": domain,
+                    "command": command,
+                }
+            )
+            _write_reader_report_run(
+                run_dir,
+                domain=domain,
+                question_ids=question_ids,
+                scores=scores[configuration][domain],
+                config=config,
+                memory_limit=memory_limit,
+                memory_dir=memory_dir,
+                model_cost=0.20 if configuration == "winner_fixed_reader" else 0.10,
+            )
+    return plan, run_roots
+
+
+def _write_reader_report_run(
+    run_dir: Path,
+    *,
+    domain: str,
+    question_ids: list[str],
+    scores: tuple[bool, bool],
+    config: dict[str, Any],
+    memory_limit: int,
+    memory_dir: Path,
+    model_cost: float,
+) -> None:
+    run_dir.mkdir(parents=True)
+    rows = [
+        {
+            "question_id": question_id,
+            "question_type": "dynamic-environment",
+            "score_bool": score,
+            "answer_gold": "gold-sentinel",
+        }
+        for question_id, score in zip(question_ids, scores, strict=True)
+    ]
+    _write_jsonl(run_dir / "per_question.jsonl", rows)
+    (run_dir / "exit_code").write_text("0\n", encoding="utf-8")
+    (run_dir / "run_args.json").write_text(
+        json.dumps(
+            {
+                "memory_context_max_tokens": memory_limit,
+                "domain": domain,
+                "output_dir": str(run_dir),
+                "load_memory_dir": str(memory_dir),
+                "model": "qwen/qwen3.5-9b",
+                "temperature": 0.6,
+                "top_p": 0.95,
+                "top_k": 20,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "aggregated_metrics.json").write_text(
+        json.dumps(
+            {
+                "overall": {"overall_full_set": sum(scores) / len(scores)},
+                "tokens": {"prompt_tokens": 1000, "completion_tokens": 100},
+                "memory_context": {
+                    "avg_original_tokens": 400,
+                    "avg_final_tokens": 250 if memory_limit < STANDARD_CONTEXT_TOKENS else 400,
+                    "num_truncated_sequences": (
+                        EXPECTED_READER_REPORT_RECOVERIES
+                        if memory_limit < STANDARD_CONTEXT_TOKENS
+                        else 0
+                    ),
+                },
+                "memory_query": {"avg_seconds": 2.0},
+            }
+        ),
+        encoding="utf-8",
+    )
+    receipt = {
+        "domain": domain,
+        "models": {
+            "reader_model": "qwen/qwen3.5-9b",
+            "evaluator_model": "openai/gpt-5.2",
+        },
+        "accounting": {
+            "reader": {
+                "cost_coverage_complete": True,
+                "provider_reported_cost_usd": model_cost,
+            },
+            "judge": {
+                "cost_coverage_complete": True,
+                "provider_reported_cost_usd": 0.02,
+            },
+        },
+        "source_runs": {
+            "complete": True,
+            "integrity_complete": True,
+            "api_runtime_consistent": True,
+            "domains": {
+                domain: {
+                    "effective_memory_config": {"memory_params": config},
+                }
+            },
+        },
+    }
+    (run_dir / "longmemeval_v2_official_receipt.json").write_text(
+        json.dumps(receipt),
+        encoding="utf-8",
+    )
