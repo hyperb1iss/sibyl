@@ -93,19 +93,38 @@ _prepared_groups = _graph_client._prepared_groups
 type SurrealRecord = dict[str, object]
 
 
-def _focused_entity_fulltext_query(query: str) -> str:
+def _entity_fulltext_queries(query: str) -> tuple[str, ...]:
     from sibyl_core.retrieval.query_ranking import extract_keywords
 
     search_query = build_fulltext_query(query)
+    if not search_query:
+        return ()
     uncapped_query = build_fulltext_query(
         query,
         max_query_length=max(len(query), DEFAULT_FULLTEXT_QUERY_MAX_LENGTH),
     )
     if len(uncapped_query) <= DEFAULT_FULLTEXT_QUERY_MAX_LENGTH:
-        return search_query
+        return (search_query,)
 
     focused_query = build_fulltext_query(" ".join(extract_keywords(query)))
-    return focused_query or search_query
+    if not focused_query or focused_query == search_query:
+        return (search_query,)
+    return search_query, focused_query
+
+
+def _append_unique_ranked_entity_results(
+    ranked_lists: Sequence[Sequence[tuple[Entity, float]]],
+) -> list[tuple[Entity, float]]:
+    combined: list[tuple[Entity, float]] = []
+    seen: set[str] = set()
+    for results in ranked_lists:
+        for result in results:
+            entity_id = result[0].id
+            if entity_id in seen:
+                continue
+            seen.add(entity_id)
+            combined.append(result)
+    return combined
 
 
 _ENTITY_LIST_FIELDS = "* OMIT content, embedding, name_embedding, attributes.content"
@@ -420,17 +439,22 @@ class EntityManager:
         entity_types: Sequence[EntityType] | None = None,
         limit: int = 10,
     ) -> list[tuple[Entity, float]]:
-        search_query = _focused_entity_fulltext_query(query)
-        if not search_query:
+        search_queries = _entity_fulltext_queries(query)
+        if not search_queries:
             return []
         result_limit = max(int(limit), 1)
 
-        fulltext_results, vector_results = await asyncio.gather(
-            self._fulltext_search(
-                query=query,
-                search_query=search_query,
-                entity_types=entity_types,
-                limit=result_limit,
+        fulltext_result_sets, vector_results = await asyncio.gather(
+            asyncio.gather(
+                *(
+                    self._fulltext_search(
+                        query=query,
+                        search_query=search_query,
+                        entity_types=entity_types,
+                        limit=result_limit,
+                    )
+                    for search_query in search_queries
+                )
             ),
             self._vector_search(
                 query=query,
@@ -438,6 +462,7 @@ class EntityManager:
                 limit=result_limit,
             ),
         )
+        fulltext_results = _append_unique_ranked_entity_results(fulltext_result_sets)
 
         results = _merge_ranked_entity_results(
             [
