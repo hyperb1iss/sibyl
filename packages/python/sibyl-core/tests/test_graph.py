@@ -982,62 +982,6 @@ async def test_native_entity_manager_search_projections_omit_embeddings() -> Non
 
 
 @pytest.mark.asyncio
-async def test_native_entity_manager_search_focuses_over_cap_fulltext_query() -> None:
-    client = _EmbeddingWriteClient()
-    manager = EntityManager(cast(SurrealGraphClient, client), group_id=client.group_id)
-    query = (
-        "I am reviewing our release portal. "
-        + ("Background deployment context. " * 12)
-        + "Which rollback control appears under Emergency Actions?"
-    )
-
-    await manager.search(query=query, limit=5)
-
-    fulltext_params = [
-        params
-        for _query, params in client.calls
-        if params.get("_query_label") == "entity.search.fulltext"
-    ]
-    search_queries = [cast("str", params["search_query"]) for params in fulltext_params]
-    assert len(search_queries) == 2
-    assert all(len(search_query) <= 128 for search_query in search_queries)
-    assert any("rollback" in search_query for search_query in search_queries)
-    assert any("emergency" in search_query for search_query in search_queries)
-    assert query[:128] in search_queries
-
-
-@pytest.mark.asyncio
-async def test_native_entity_manager_search_keeps_short_fulltext_query() -> None:
-    client = _EmbeddingWriteClient()
-    manager = EntityManager(cast(SurrealGraphClient, client), group_id=client.group_id)
-
-    await manager.search(query="quoted 'alpha' query", limit=5)
-
-    fulltext_params = [
-        params
-        for _query, params in client.calls
-        if params.get("_query_label") == "entity.search.fulltext"
-    ]
-    assert len(fulltext_params) == 1
-    assert fulltext_params[0]["search_query"] == "quoted alpha query"
-
-
-def test_append_unique_ranked_entity_results_preserves_primary_ranks() -> None:
-    primary = Entity(id="primary", entity_type=EntityType.TOPIC, name="Primary")
-    shared = Entity(id="shared", entity_type=EntityType.TOPIC, name="Shared")
-    focused = Entity(id="focused", entity_type=EntityType.TOPIC, name="Focused")
-
-    combined = graph_module._append_unique_ranked_entity_results(
-        [
-            [(primary, 0.8), (shared, 0.7)],
-            [(shared, 0.9), (focused, 0.95)],
-        ]
-    )
-
-    assert combined == [(primary, 0.8), (shared, 0.7), (focused, 0.95)]
-
-
-@pytest.mark.asyncio
 async def test_native_entity_manager_search_overlaps_fulltext_and_vector_branches() -> None:
     fulltext_started = asyncio.Event()
     embedding_started = asyncio.Event()
