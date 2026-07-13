@@ -15,7 +15,10 @@ import structlog
 from surrealdb import RecordID
 
 from sibyl_core.backends.surreal.connection import _is_transient_connection_error
-from sibyl_core.backends.surreal.fulltext import build_fulltext_query
+from sibyl_core.backends.surreal.fulltext import (
+    DEFAULT_FULLTEXT_QUERY_MAX_LENGTH,
+    build_fulltext_query,
+)
 from sibyl_core.backends.surreal.records import raise_on_error
 from sibyl_core.backends.surreal.schema import bootstrap_schema
 from sibyl_core.config import settings
@@ -88,6 +91,22 @@ _clients = _graph_client._clients
 _prepared_groups = _graph_client._prepared_groups
 
 type SurrealRecord = dict[str, object]
+
+
+def _focused_entity_fulltext_query(query: str) -> str:
+    from sibyl_core.retrieval.query_ranking import extract_keywords
+
+    search_query = build_fulltext_query(query)
+    uncapped_query = build_fulltext_query(
+        query,
+        max_query_length=max(len(query), DEFAULT_FULLTEXT_QUERY_MAX_LENGTH),
+    )
+    if len(uncapped_query) <= DEFAULT_FULLTEXT_QUERY_MAX_LENGTH:
+        return search_query
+
+    focused_query = build_fulltext_query(" ".join(extract_keywords(query)))
+    return focused_query or search_query
+
 
 _ENTITY_LIST_FIELDS = "* OMIT content, embedding, name_embedding, attributes.content"
 _RELATED_ENTITY_PROJECTION_FIELDS = (
@@ -401,7 +420,7 @@ class EntityManager:
         entity_types: Sequence[EntityType] | None = None,
         limit: int = 10,
     ) -> list[tuple[Entity, float]]:
-        search_query = build_fulltext_query(query)
+        search_query = _focused_entity_fulltext_query(query)
         if not search_query:
             return []
         result_limit = max(int(limit), 1)

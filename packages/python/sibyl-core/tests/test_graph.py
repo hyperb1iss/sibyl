@@ -982,6 +982,44 @@ async def test_native_entity_manager_search_projections_omit_embeddings() -> Non
 
 
 @pytest.mark.asyncio
+async def test_native_entity_manager_search_focuses_over_cap_fulltext_query() -> None:
+    client = _EmbeddingWriteClient()
+    manager = EntityManager(cast(SurrealGraphClient, client), group_id=client.group_id)
+    query = (
+        "I am reviewing our release portal. "
+        + ("Background deployment context. " * 12)
+        + "Which rollback control appears under Emergency Actions?"
+    )
+
+    await manager.search(query=query, limit=5)
+
+    params = next(
+        params
+        for _query, params in client.calls
+        if params.get("_query_label") == "entity.search.fulltext"
+    )
+    search_query = cast("str", params["search_query"])
+    assert len(search_query) <= 128
+    assert "rollback" in search_query
+    assert "emergency" in search_query
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_search_keeps_short_fulltext_query() -> None:
+    client = _EmbeddingWriteClient()
+    manager = EntityManager(cast(SurrealGraphClient, client), group_id=client.group_id)
+
+    await manager.search(query="quoted 'alpha' query", limit=5)
+
+    params = next(
+        params
+        for _query, params in client.calls
+        if params.get("_query_label") == "entity.search.fulltext"
+    )
+    assert params["search_query"] == "quoted alpha query"
+
+
+@pytest.mark.asyncio
 async def test_native_entity_manager_search_overlaps_fulltext_and_vector_branches() -> None:
     fulltext_started = asyncio.Event()
     embedding_started = asyncio.Event()
