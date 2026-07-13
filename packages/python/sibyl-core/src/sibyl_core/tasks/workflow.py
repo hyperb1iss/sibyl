@@ -743,7 +743,7 @@ class TaskWorkflowEngine:
 
         try:
             epic = await self._entity_manager.get(epic_id)
-        except EntityNotFoundError:
+        except (EntityNotFoundError, KeyError):
             log.warning(
                 "Epic referenced by task no longer exists; skipping auto-start",
                 epic_id=epic_id,
@@ -792,7 +792,7 @@ class TaskWorkflowEngine:
 
         try:
             epic = await self._entity_manager.get(epic_id)
-        except EntityNotFoundError:
+        except (EntityNotFoundError, KeyError):
             log.warning(
                 "Epic referenced by task no longer exists; skipping auto-completion",
                 epic_id=epic_id,

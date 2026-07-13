@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError
+from sibyl_core.errors import InvalidTransitionError
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.tasks import (
     Task,
@@ -484,6 +484,27 @@ class TestWorkflowEngine:
         assert "abcd1234" in result.branch_name
         assert "add-user-authentication" in result.branch_name
 
+    @pytest.mark.asyncio
+    async def test_start_task_with_missing_epic_does_not_fail(
+        self,
+        workflow_engine: TaskWorkflowEngine,
+        mock_entity_manager: MockEntityManager,
+    ) -> None:
+        task = make_task(status=TaskStatus.TODO, epic_id="epic_ghost")
+        mock_entity_manager.entities[task.id] = make_entity(
+            entity_id=task.id,
+            name=task.title,
+            metadata={
+                "status": TaskStatus.TODO,
+                "epic_id": "epic_ghost",
+                "assignees": [],
+            },
+        )
+
+        result = await workflow_engine.start_task(task.id, "alice@test.com")
+
+        assert result.status == TaskStatus.DOING
+
     def test_entity_to_task_flattens_nested_json_metadata(
         self, workflow_engine: TaskWorkflowEngine
     ) -> None:
@@ -804,18 +825,12 @@ class TestWorkflowEngine:
     ) -> None:
         """archive_task succeeds when the linked epic was already deleted."""
 
-        class GhostEpicEntityManager(MockEntityManager):
-            async def get(self, entity_id: str) -> Entity:
-                if entity_id == "epic_ghost":
-                    raise EntityNotFoundError("Entity", entity_id)
-                return await super().get(entity_id)
-
         task = make_task(
             status=TaskStatus.TODO,
             project_id="project_abc123",
             epic_id="epic_ghost",
         )
-        entity_manager = GhostEpicEntityManager(entities={}, search_results=[])
+        entity_manager = MockEntityManager(entities={}, search_results=[])
         entity_manager.entities[task.id] = make_entity(
             entity_id=task.id,
             name=task.title,
