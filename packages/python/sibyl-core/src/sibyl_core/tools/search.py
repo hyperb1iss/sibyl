@@ -465,10 +465,12 @@ def _rank_fuse_search_results(
 ) -> list[SearchResult]:
     result_groups = [graph_results, doc_results, raw_memory_results]
     non_empty_groups = [results for results in result_groups if results]
-    if not non_empty_groups:
-        return []
-    if len(non_empty_groups) == 1:
-        return list(non_empty_groups[0])
+    if len(non_empty_groups) < 2:
+        return sorted(
+            [result for results in non_empty_groups for result in results],
+            key=lambda r: r.score,
+            reverse=True,
+        )
 
     ranked_sources = [
         [
