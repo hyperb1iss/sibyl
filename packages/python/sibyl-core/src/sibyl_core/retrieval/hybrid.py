@@ -18,6 +18,10 @@ from typing import Any, TypeVar
 import structlog
 
 from sibyl_core.models.entities import Entity
+from sibyl_core.query_anchors import (
+    explicit_query_anchor_score,
+    extract_explicit_query_anchors,
+)
 from sibyl_core.retrieval.fusion import rrf_merge_with_metadata
 from sibyl_core.retrieval.query_ranking import (
     extract_keywords,
@@ -99,6 +103,21 @@ def _entity_text(entity: Any) -> str:
 def _entity_primary_text(entity: Any) -> str:
     primary_text, _has_user_turns = extract_primary_text_from_text(_entity_text(entity))
     return primary_text
+
+
+def _select_full_explicit_anchor_candidate(
+    query: str,
+    results: list[tuple[Any, float]],
+) -> tuple[Any, float] | None:
+    scored = [
+        (explicit_query_anchor_score(query, _entity_text(entity)), entity, score)
+        for entity, score in results
+    ]
+    full_matches = [row for row in scored if row[0] >= 1.0]
+    if not full_matches:
+        return None
+    _anchor_score, entity, score = max(full_matches, key=lambda row: (row[0], row[2]))
+    return entity, score
 
 
 def _extract_primary_text_from_text(text: str) -> tuple[str, bool]:
@@ -714,6 +733,9 @@ async def hybrid_search(
         k=config.rrf_k,
         weights=weights,
     )
+    base_candidate_ids = {
+        _entity_id(entity) for entity, _score, _metadata in merged_with_meta[: limit * 2]
+    }
     has_vector_source = "vector" in list_names
     merged = []
     source_metadata = {}
@@ -732,11 +754,33 @@ async def hybrid_search(
     stage_timings_ms["fusion"] = _elapsed_ms(stage_started_at)
 
     stage_started_at = time.perf_counter()
+    base_merged = [row for row in merged if _entity_id(row[0]) in base_candidate_ids]
+    tail_merged = [row for row in merged if _entity_id(row[0]) not in base_candidate_ids]
+    has_explicit_anchors = bool(extract_explicit_query_anchors(query))
+    hydration_input = merged if has_explicit_anchors and tail_merged else base_merged
     merged, candidate_hydration = await _hydrate_lightweight_candidates(
-        merged,
+        hydration_input,
         entity_manager,
         source_metadata,
     )
+    admitted_tail = None
+    if has_explicit_anchors and tail_merged:
+        hydrated_base = [row for row in merged if _entity_id(row[0]) in base_candidate_ids]
+        hydrated_tail = [row for row in merged if _entity_id(row[0]) not in base_candidate_ids]
+        admitted_tail = _select_full_explicit_anchor_candidate(query, hydrated_tail)
+        merged = hydrated_base + ([admitted_tail] if admitted_tail is not None else [])
+    merged.sort(key=lambda item: item[1], reverse=True)
+    retained_ids = {_entity_id(entity) for entity, _score in merged}
+    source_metadata = {
+        entity_id: metadata
+        for entity_id, metadata in source_metadata.items()
+        if entity_id in retained_ids
+    }
+    explicit_anchor_tail_admission = {
+        "eligible": has_explicit_anchors,
+        "tail_count": len(tail_merged),
+        "admitted_entity_id": (_entity_id(admitted_tail[0]) if admitted_tail is not None else None),
+    }
     stage_timings_ms["candidate_hydration"] = _elapsed_ms(stage_started_at)
 
     # Phase 4: Apply cross-encoder reranking (optional)
@@ -822,6 +866,7 @@ async def hybrid_search(
         "graph_count": len(graph_results),
         "merged_count": len(merged),
         "candidate_hydration": candidate_hydration,
+        "explicit_anchor_tail_admission": explicit_anchor_tail_admission,
         "reranking_applied": reranking_applied,
         "reranking": reranking_receipt,
         "keyword_boost_applied": keyword_boost_applied,
