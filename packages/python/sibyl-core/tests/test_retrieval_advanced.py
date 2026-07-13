@@ -3485,7 +3485,7 @@ class TestHybridSearch:
         assert source_details["session_distractor"]["graph_expansion_only"] is True
 
     @pytest.mark.asyncio
-    async def test_hybrid_search_applies_graph_penalty_before_truncation(
+    async def test_hybrid_search_defers_truncation_until_after_graph_penalty(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -3529,11 +3529,15 @@ class TestHybridSearch:
             include_metadata=True,
         )
 
+        assert [entity.id for entity, _score in result.results] == ["session_answer"]
         assert [row["entity_id"] for row in result.metadata["ranking_trace"]] == [
             "session_answer",
             "session_tail",
+            "session_distractor",
         ]
-        assert "session_distractor" not in result.metadata["source_details"]
+        assert (
+            result.metadata["source_details"]["session_distractor"]["graph_expansion_only"] is True
+        )
 
     @pytest.mark.asyncio
     async def test_hybrid_search_filters_untyped_link_seeds_before_traversal(
