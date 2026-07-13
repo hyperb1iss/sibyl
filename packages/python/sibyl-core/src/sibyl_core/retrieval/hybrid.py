@@ -713,6 +713,7 @@ async def hybrid_search(
         list_names=list_names,
         k=config.rrf_k,
         weights=weights,
+        limit=limit * 2,
     )
     has_vector_source = "vector" in list_names
     merged = []
@@ -729,13 +730,6 @@ async def hybrid_search(
             "fused_score": score,
         }
     merged.sort(key=lambda item: item[1], reverse=True)
-    merged = merged[: limit * 2]
-    retained_ids = {_entity_id(entity) for entity, _score in merged}
-    source_metadata = {
-        entity_id: metadata
-        for entity_id, metadata in source_metadata.items()
-        if entity_id in retained_ids
-    }
     stage_timings_ms["fusion"] = _elapsed_ms(stage_started_at)
 
     stage_started_at = time.perf_counter()

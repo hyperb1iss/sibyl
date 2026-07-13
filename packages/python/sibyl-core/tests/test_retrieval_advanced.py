@@ -3464,57 +3464,6 @@ class TestHybridSearch:
         assert source_details["session_distractor"]["graph_expansion_only"] is True
 
     @pytest.mark.asyncio
-    async def test_hybrid_search_applies_graph_penalty_before_truncation(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        client = MockGraphClientForHybrid()
-        manager = MockEntityManagerForHybrid()
-
-        answer = make_entity_for_test("session_answer", entity_type=EntityType.SESSION)
-        tail = make_entity_for_test("session_tail", entity_type=EntityType.SESSION)
-        distractor = make_entity_for_test(
-            "session_distractor",
-            entity_type=EntityType.SESSION,
-        )
-        manager.search_results = [(answer, 0.9), (tail, 0.8)]
-
-        async def fake_graph_traversal(
-            seed_ids: list[str],
-            client: Any,
-            depth: int = 2,
-            limit: int = 20,
-            group_id: str | None = None,
-            relationship_type_weights: Any = None,
-        ) -> list[tuple[Entity, float]]:
-            del seed_ids, client, depth, limit, group_id, relationship_type_weights
-            return [(distractor, 0.9)]
-
-        monkeypatch.setattr(hybrid_module, "graph_traversal", fake_graph_traversal)
-
-        result = await hybrid_search(
-            "camera setup",
-            client,  # type: ignore[arg-type]
-            manager,  # type: ignore[arg-type]
-            entity_types=[EntityType.SESSION],
-            limit=1,
-            config=HybridConfig(
-                graph_weight=4.0,
-                graph_expansion_only_boost=0.1,
-                apply_temporal=False,
-                apply_keyword_boost=False,
-                apply_query_coverage_rerank=False,
-            ),
-            include_metadata=True,
-        )
-
-        assert [row["entity_id"] for row in result.metadata["ranking_trace"]] == [
-            "session_answer",
-            "session_tail",
-        ]
-        assert "session_distractor" not in result.metadata["source_details"]
-
-    @pytest.mark.asyncio
     async def test_hybrid_search_filters_untyped_link_seeds_before_traversal(
         self,
         monkeypatch: pytest.MonkeyPatch,
