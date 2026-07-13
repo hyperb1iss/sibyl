@@ -32,10 +32,6 @@ from sibyl_core.evals.longmemeval_v2 import (  # noqa: E402
     LongMemEvalV2State,
     LongMemEvalV2Trajectory,
 )
-from sibyl_core.retrieval.query_ranking import (  # noqa: E402
-    QueryCoverageCandidate,
-    rank_by_query_coverage,
-)
 
 try:
     from memory_modules.memory import Memory, MemoryContextItem, register_memory
@@ -79,8 +75,6 @@ DEFAULT_EMBEDDING_BACKFILL_MAX_PENDING_JOBS = 8
 DEFAULT_MAX_CHUNKS_PER_TRAJECTORY = 2
 DEFAULT_NEIGHBOR_STITCH_ITEMS = 2
 DEFAULT_NEIGHBOR_STITCH_SPAN = 1
-DEFAULT_SOURCE_EXPANSION_ITEMS = 0
-DEFAULT_SOURCE_EXPANSION_SOURCES = 0
 DEFAULT_CHUNKING_MODE = "state"
 CHUNKING_MODES = frozenset({"trajectory", "state"})
 JOB_STATUS_BATCH_SIZE = 64
@@ -108,8 +102,6 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "max_chunks_per_trajectory",
         "neighbor_stitch_items",
         "neighbor_stitch_span",
-        "source_expansion_items",
-        "source_expansion_sources",
         "checkpoint_dir",
     }
 )
@@ -296,9 +288,6 @@ def assemble_context_results(
     max_chunks_per_trajectory: int,
     neighbor_stitch_items: int,
     neighbor_stitch_span: int,
-    query: str = "",
-    source_expansion_items: int = 0,
-    source_expansion_sources: int = 0,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
     max_items = max(1, max_items)
     max_chunks_per_trajectory = max(1, max_chunks_per_trajectory)
@@ -342,15 +331,6 @@ def assemble_context_results(
             selected_keys.add(key)
             if len(selected) >= max_items:
                 break
-    selected, source_expansion = _apply_query_aware_source_expansion(
-        query,
-        ranked,
-        selected,
-        chunk_catalog=chunk_catalog,
-        max_items=max_items,
-        max_expansion_items=source_expansion_items,
-        max_sources=source_expansion_sources,
-    )
     return selected, {
         "input_result_count": len(results),
         "selected_search_seed_count": len(seeds),
@@ -359,149 +339,7 @@ def assemble_context_results(
         "max_chunks_per_trajectory": max_chunks_per_trajectory,
         "neighbor_stitch_items": neighbor_stitch_items,
         "neighbor_stitch_span": neighbor_stitch_span,
-        "source_expansion": source_expansion,
     }
-
-
-def _apply_query_aware_source_expansion(
-    query: str,
-    ranked_results: list[dict[str, object]],
-    selected: list[dict[str, object]],
-    *,
-    chunk_catalog: dict[str, dict[int, dict[str, object]]],
-    max_items: int,
-    max_expansion_items: int,
-    max_sources: int,
-) -> tuple[list[dict[str, object]], dict[str, object]]:
-    max_expansion_items = max(0, min(max_expansion_items, max_items - 1))
-    max_sources = max(0, max_sources)
-    receipt: dict[str, object] = {
-        "enabled": bool(query and max_expansion_items and max_sources and chunk_catalog),
-        "inspected_source_count": 0,
-        "representative_count": 0,
-        "admitted_count": 0,
-        "admitted_chunk_keys": [],
-    }
-    if not receipt["enabled"] or not selected:
-        return selected, receipt
-
-    selected_keys = {_result_chunk_key(result) for result in selected}
-    floor_score = min(_result_score(result) for result in selected)
-    source_seeds: list[tuple[str, dict[str, object]]] = []
-    seen_sources: set[str] = set()
-    for result in ranked_results:
-        trajectory_id, _chunk_index = _result_chunk_key(result)
-        if trajectory_id in seen_sources or trajectory_id not in chunk_catalog:
-            continue
-        source_seeds.append((trajectory_id, result))
-        seen_sources.add(trajectory_id)
-        if len(source_seeds) >= max_sources:
-            break
-    receipt["inspected_source_count"] = len(source_seeds)
-
-    representatives: list[dict[str, object]] = []
-    for trajectory_id, seed in source_seeds:
-        candidates = [
-            candidate
-            for _chunk_index, candidate in sorted(chunk_catalog[trajectory_id].items())
-            if _result_chunk_key(candidate) not in selected_keys
-        ]
-        ranked_source = _rank_source_candidates(
-            query,
-            candidates,
-            prior_score=floor_score,
-        )
-        if ranked_source is None:
-            continue
-        representative = dict(ranked_source)
-        representative["score"] = floor_score
-        representative["_selection_origin"] = "source_expansion"
-        representative["_source_seed_search_rank"] = seed.get("_search_rank")
-        representatives.append(representative)
-    receipt["representative_count"] = len(representatives)
-    if not representatives:
-        return selected, receipt
-
-    combined = [*selected, *representatives]
-    ranking = rank_by_query_coverage(
-        query,
-        [
-            QueryCoverageCandidate(
-                item=result,
-                stable_id=_result_stable_id(result),
-                text=_stripped_str(result.get("content")),
-                prior_score=_result_score(result),
-                original_rank=index,
-            )
-            for index, result in enumerate(combined, start=1)
-        ],
-    )
-    if not ranking.applied:
-        return selected, receipt
-
-    admitted = 0
-    assembled: list[dict[str, object]] = []
-    for ranked in ranking.ranked:
-        result = dict(ranked.item)
-        is_expansion = result.get("_selection_origin") == "source_expansion"
-        if is_expansion and admitted >= max_expansion_items:
-            continue
-        result["score"] = ranked.score
-        assembled.append(result)
-        if is_expansion:
-            admitted += 1
-        if len(assembled) >= max_items:
-            break
-    admitted_keys = [
-        list(_result_chunk_key(result))
-        for result in assembled
-        if result.get("_selection_origin") == "source_expansion"
-    ]
-    receipt["admitted_count"] = len(admitted_keys)
-    receipt["admitted_chunk_keys"] = admitted_keys
-    return assembled, receipt
-
-
-def _rank_source_candidates(
-    query: str,
-    candidates: list[dict[str, object]],
-    *,
-    prior_score: float,
-) -> dict[str, object] | None:
-    if len(candidates) < 2:
-        return None
-    ranking = rank_by_query_coverage(
-        query,
-        [
-            QueryCoverageCandidate(
-                item=candidate,
-                stable_id=_result_stable_id(candidate),
-                text=_stripped_str(candidate.get("content")),
-                prior_score=prior_score,
-                original_rank=index,
-            )
-            for index, candidate in enumerate(candidates, start=1)
-        ],
-    )
-    if not ranking.applied:
-        return None
-    return next(
-        (ranked.item for ranked in ranking.ranked if ranked.overlap > 0.0),
-        None,
-    )
-
-
-def _result_score(result: dict[str, object]) -> float:
-    score = result.get("score")
-    return float(score) if isinstance(score, int | float) else 0.0
-
-
-def _result_stable_id(result: dict[str, object]) -> str:
-    result_id = _stripped_str(result.get("id"))
-    if result_id:
-        return result_id
-    trajectory_id, chunk_index = _result_chunk_key(result)
-    return f"{trajectory_id}:{chunk_index}"
 
 
 def _select_diverse_results(
@@ -738,24 +576,6 @@ class SibylLiveApiMemory(Memory):
                 minimum=0,
             ),
         )
-        self.source_expansion_items = max(
-            0,
-            _param_int(
-                memory_params,
-                "source_expansion_items",
-                DEFAULT_SOURCE_EXPANSION_ITEMS,
-                minimum=0,
-            ),
-        )
-        self.source_expansion_sources = max(
-            0,
-            _param_int(
-                memory_params,
-                "source_expansion_sources",
-                DEFAULT_SOURCE_EXPANSION_SOURCES,
-                minimum=0,
-            ),
-        )
         self.include_screenshot_refs = _param_bool(
             memory_params,
             "include_screenshot_refs",
@@ -960,17 +780,6 @@ class SibylLiveApiMemory(Memory):
                 self,
                 "neighbor_stitch_span",
                 DEFAULT_NEIGHBOR_STITCH_SPAN,
-            ),
-            query=query,
-            source_expansion_items=getattr(
-                self,
-                "source_expansion_items",
-                DEFAULT_SOURCE_EXPANSION_ITEMS,
-            ),
-            source_expansion_sources=getattr(
-                self,
-                "source_expansion_sources",
-                DEFAULT_SOURCE_EXPANSION_SOURCES,
             ),
         )
         self._query_local.search_metadata["adapter_assembly"] = assembly_metadata

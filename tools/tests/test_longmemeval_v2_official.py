@@ -922,42 +922,6 @@ def test_sibyl_memory_assembles_diverse_seeds_with_neighbors() -> None:
     assert metadata["stitched_neighbor_count"] == 1
 
 
-def test_sibyl_memory_admits_query_ranked_source_representative() -> None:
-    module = _load_memory_module()
-    source_seed = _search_result("t1", chunk_index=0, state_index=0, score=1.0)
-    source_seed["content"] = "Deployment overview with no selected rollout ring."
-    weak_result = _search_result("t2", chunk_index=0, state_index=0, score=0.9)
-    weak_result["content"] = "Unrelated account settings and profile details."
-    floor_result = _search_result("t3", chunk_index=0, state_index=0, score=0.8)
-    floor_result["content"] = "Unrelated notification settings."
-    source_candidate = _search_result("t1", chunk_index=1, state_index=1, score=0.0)
-    source_candidate["content"] = "Deployment Ring: Canary. Pause Rollout is available."
-    source_distractor = _search_result("t1", chunk_index=2, state_index=2, score=0.0)
-    source_distractor["content"] = "Build history and artifact retention settings."
-
-    assembled, metadata = module.assemble_context_results(
-        [source_seed, weak_result, floor_result],
-        chunk_catalog={
-            "t1": {
-                0: source_seed,
-                1: source_candidate,
-                2: source_distractor,
-            }
-        },
-        max_items=3,
-        max_chunks_per_trajectory=2,
-        neighbor_stitch_items=0,
-        neighbor_stitch_span=0,
-        query='Which value is shown for "Deployment Ring"?',
-        source_expansion_items=1,
-        source_expansion_sources=1,
-    )
-
-    assert ("t1", 1) in [module._result_chunk_key(result) for result in assembled]
-    assert metadata["source_expansion"]["admitted_count"] == 1
-    assert metadata["source_expansion"]["admitted_chunk_keys"] == [["t1", 1]]
-
-
 def test_sibyl_memory_chunk_catalog_round_trips(tmp_path: Path) -> None:
     module = _load_memory_module()
     catalog = {
@@ -1798,13 +1762,6 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
             "max_chunks_per_trajectory": EXPECTED_MAX_CHUNKS_PER_TRAJECTORY,
             "neighbor_stitch_items": EXPECTED_NEIGHBOR_STITCH_ITEMS,
             "neighbor_stitch_span": EXPECTED_NEIGHBOR_STITCH_SPAN,
-            "source_expansion": {
-                "enabled": False,
-                "inspected_source_count": 0,
-                "representative_count": 0,
-                "admitted_count": 0,
-                "admitted_chunk_keys": [],
-            },
         },
     }
     assert metadata["retrieval_trace"] == []
