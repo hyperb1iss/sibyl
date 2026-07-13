@@ -171,10 +171,12 @@ def main(argv: list[str] | None = None) -> int:
             baseline_runs=baseline_runs,
             winner_preregister=load_json(preregister_path) if preregister_path else None,
         )
-        reader_plan["source_artifacts"] = {
-            "experiment_plan": {"path": str(plan_path), "sha256": sha256_file(plan_path)},
-            "gate": {"path": str(gate_path), "sha256": sha256_file(gate_path)},
-        }
+        reader_plan["source_artifacts"].update(
+            {
+                "experiment_plan": {"path": str(plan_path), "sha256": sha256_file(plan_path)},
+                "gate": {"path": str(gate_path), "sha256": sha256_file(gate_path)},
+            }
+        )
         if preregister_path:
             reader_plan["source_artifacts"]["winner_preregister"] = {
                 "path": str(preregister_path),
@@ -728,6 +730,16 @@ def build_reader_plan(
         "matched_context_tokens": matched_context_tokens,
         "configurations": list(READER_CONFIGURATIONS),
         "commands": commands,
+        "source_artifacts": {
+            "baseline_runs": {
+                domain: {
+                    "path": str(run_dir),
+                    "per_question_path": str(run_dir / "per_question.jsonl"),
+                    "per_question_sha256": sha256_file(run_dir / "per_question.jsonl"),
+                }
+                for domain, run_dir in sorted(baseline_runs.items())
+            }
+        },
     }
 
 

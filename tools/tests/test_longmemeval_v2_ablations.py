@@ -328,6 +328,12 @@ def test_reader_plan_has_exactly_three_configs_with_observed_match(tmp_path: Pat
     assert all(str(EXPECTED_MATCHED_CONTEXT_TOKENS) in item["command"] for item in matched)
     assert reader_plan["winner_arm_config"]["state_part_completion_items"] == 0
     assert reader_plan["winner_arm_config"]["state_part_refinement"] is False
+    for domain, run_dir in baseline_runs.items():
+        baseline_source = reader_plan["source_artifacts"]["baseline_runs"][domain]
+        assert baseline_source["path"] == str(run_dir)
+        assert baseline_source["per_question_sha256"] == module.sha256_file(
+            run_dir / "per_question.jsonl"
+        )
 
     with pytest.raises(ValueError, match="requires a GO"):
         module.build_reader_plan(
