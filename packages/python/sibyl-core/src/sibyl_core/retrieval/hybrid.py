@@ -300,6 +300,56 @@ def _filter_entity_results(
     return [(entity, score) for entity, score in results if result_filter(entity)]
 
 
+async def _hydrate_lightweight_candidates(
+    results: list[tuple[Any, float]],
+    entity_manager: Any,
+    source_metadata: Mapping[str, Mapping[str, Any]],
+) -> tuple[list[tuple[Any, float]], dict[str, Any]]:
+    graph_expansion_only_ids = {
+        entity_id
+        for entity_id, metadata in source_metadata.items()
+        if metadata.get("graph_expansion_only") is True
+    }
+    missing_content_ids = {
+        _entity_id(entity)
+        for entity, _score in results
+        if _entity_id(entity) and not getattr(entity, "content", None)
+    }
+    missing_ids = list(
+        dict.fromkeys(
+            _entity_id(entity)
+            for entity, _score in results
+            if _entity_id(entity) in graph_expansion_only_ids | missing_content_ids
+        )
+    )
+    receipt: dict[str, Any] = {
+        "requested_count": len(missing_ids),
+        "hydrated_count": 0,
+        "graph_expansion_only_count": len(graph_expansion_only_ids),
+        "missing_content_count": len(missing_content_ids),
+    }
+    if not missing_ids:
+        return results, receipt
+
+    get_many = getattr(entity_manager, "get_many", None)
+    if not callable(get_many):
+        receipt["skipped"] = "batch_read_unavailable"
+        return results, receipt
+
+    try:
+        hydrated = await get_many(missing_ids)
+    except Exception as exc:
+        log.warning("candidate_hydration_failed", error_type=type(exc).__name__)
+        receipt["failed"] = type(exc).__name__
+        return results, receipt
+
+    hydrated_by_id = {_entity_id(entity): entity for entity in hydrated}
+    receipt["hydrated_count"] = len(hydrated_by_id)
+    return [
+        (hydrated_by_id.get(_entity_id(entity), entity), score) for entity, score in results
+    ], receipt
+
+
 async def vector_search(
     query: str,
     entity_manager: Any,
@@ -543,6 +593,7 @@ async def hybrid_search(
         "entity_linking": 0.0,
         "graph_traversal": 0.0,
         "fusion": 0.0,
+        "candidate_hydration": 0.0,
         "reranking": 0.0,
         "keyword_boost": 0.0,
         "temporal_boost": 0.0,
@@ -681,6 +732,14 @@ async def hybrid_search(
     merged.sort(key=lambda item: item[1], reverse=True)
     stage_timings_ms["fusion"] = _elapsed_ms(stage_started_at)
 
+    stage_started_at = time.perf_counter()
+    merged, candidate_hydration = await _hydrate_lightweight_candidates(
+        merged,
+        entity_manager,
+        source_metadata,
+    )
+    stage_timings_ms["candidate_hydration"] = _elapsed_ms(stage_started_at)
+
     # Phase 4: Apply cross-encoder reranking (optional)
     stage_started_at = time.perf_counter()
     reranking_applied = False
@@ -763,6 +822,7 @@ async def hybrid_search(
         "link_count": len(link_results),
         "graph_count": len(graph_results),
         "merged_count": len(merged),
+        "candidate_hydration": candidate_hydration,
         "reranking_applied": reranking_applied,
         "reranking": reranking_receipt,
         "keyword_boost_applied": keyword_boost_applied,

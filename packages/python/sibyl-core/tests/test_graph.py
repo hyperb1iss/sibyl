@@ -65,6 +65,28 @@ class _EmbeddingWriteClient:
         return []
 
 
+class _BatchEntityReadClient:
+    group_id = "org-native"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        return [
+            {
+                "uuid": entity_id,
+                "name": entity_id,
+                "entity_type": "session",
+                "description": f"Description for {entity_id}",
+                "content": f"Content for {entity_id}",
+                "group_id": self.group_id,
+                "attributes": {},
+            }
+            for entity_id in ("first", "second")
+        ]
+
+
 class _EntityUpdatePatchClient:
     group_id = "org-native"
 
@@ -692,6 +714,22 @@ async def test_native_entity_manager_generates_embeddings_with_native_provider()
     assert attributes["embedding_metadata"] == provider.metadata.to_dict()
     assert rows[0]["created_by"] == "stef"
     assert rows[0]["modified_by"] == "nova"
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_get_many_preserves_requested_order_and_scope() -> None:
+    client = _BatchEntityReadClient()
+    manager = EntityManager(cast("SurrealGraphClient", client), group_id=client.group_id)
+
+    entities = await manager.get_many(["second", "first", "second", "missing"])
+
+    assert [entity.id for entity in entities] == ["second", "first"]
+    query, params = client.calls[0]
+    assert "uuid IN $uuids" in query
+    assert params == {
+        "group_id": "org-native",
+        "uuids": ["second", "first", "missing"],
+    }
 
 
 @pytest.mark.asyncio

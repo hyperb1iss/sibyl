@@ -302,6 +302,26 @@ class EntityManager:
             raise KeyError(entity_id)
         return _entity_from_row(row)
 
+    async def get_many(self, entity_ids: Sequence[str]) -> list[Entity]:
+        ordered_ids = list(dict.fromkeys(str(entity_id) for entity_id in entity_ids if entity_id))
+        if not ordered_ids:
+            return []
+        rows = normalize_records(
+            await self._client.execute_query(
+                """
+                SELECT *
+                FROM entity
+                WHERE group_id = $group_id AND uuid IN $uuids;
+                """,
+                group_id=self._group_id,
+                uuids=ordered_ids,
+            )
+        )
+        entities_by_id = {entity.id: entity for entity in (_entity_from_row(row) for row in rows)}
+        return [
+            entities_by_id[entity_id] for entity_id in ordered_ids if entity_id in entities_by_id
+        ]
+
     async def get_notes_for_task(self, task_id: str, limit: int = 50) -> list[Entity]:
         rows = normalize_records(
             await self._client.execute_query(

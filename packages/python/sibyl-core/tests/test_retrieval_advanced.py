@@ -1457,6 +1457,8 @@ class MockEntityManagerForHybrid:
 
     search_results: list[tuple[Entity, float]] = field(default_factory=list)
     search_calls: list[dict[str, Any]] = field(default_factory=list)
+    hydrated_entities: dict[str, Entity] = field(default_factory=dict)
+    get_many_calls: list[list[str]] = field(default_factory=list)
     _group_id: str = "org-123"
 
     async def search(
@@ -1471,6 +1473,14 @@ class MockEntityManagerForHybrid:
         if entity_types:
             results = [(e, s) for e, s in results if e.entity_type in entity_types]
         return results[:limit]
+
+    async def get_many(self, entity_ids: list[str]) -> list[Entity]:
+        self.get_many_calls.append(entity_ids)
+        return [
+            self.hydrated_entities[entity_id]
+            for entity_id in entity_ids
+            if entity_id in self.hydrated_entities
+        ]
 
 
 @dataclass
@@ -1527,6 +1537,7 @@ def make_entity_for_test(
     name: str = "Test Entity",
     entity_type: EntityType = EntityType.TOPIC,
     description: str = "",
+    content: str = "",
     created_at: datetime | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> Entity:
@@ -1536,7 +1547,7 @@ def make_entity_for_test(
         name=name,
         entity_type=entity_type,
         description=description,
-        content="",
+        content=content,
         metadata=metadata or {},
         created_at=created_at or datetime.now(UTC),
     )
@@ -2637,6 +2648,7 @@ class TestHybridSearch:
             "entity_linking",
             "graph_traversal",
             "fusion",
+            "candidate_hydration",
             "reranking",
             "keyword_boost",
             "temporal_boost",
@@ -3463,6 +3475,52 @@ class TestHybridSearch:
 
         assert result.entities[0].id == "near"
         assert result.metadata["temporal_target"] == "2026-01-10T00:00:00+00:00"
+
+    @pytest.mark.asyncio
+    async def test_hybrid_search_batch_hydrates_graph_candidates_before_ranking(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        client = MockGraphClientForHybrid()
+        manager = MockEntityManagerForHybrid()
+        seed = make_entity_for_test("seed", content="unrelated seed content")
+        lightweight = make_entity_for_test(
+            "graph_answer",
+            description="Generic trajectory description",
+            content="Generic trajectory description",
+        )
+        hydrated = make_entity_for_test(
+            "graph_answer",
+            description="Generic trajectory description",
+            content="Accessibility tree: button 'Create Order'; button 'Reset Password'.",
+        )
+        manager.search_results = [(seed, 0.9)]
+        manager.hydrated_entities[hydrated.id] = hydrated
+
+        async def fake_graph_traversal(*args: Any, **kwargs: Any) -> list[tuple[Entity, float]]:
+            del args, kwargs
+            return [(lightweight, 0.9)]
+
+        monkeypatch.setattr(hybrid_module, "graph_traversal", fake_graph_traversal)
+
+        result = await hybrid_search(
+            'What action is immediately right of "Create Order"?',
+            client,  # type: ignore[arg-type]
+            manager,  # type: ignore[arg-type]
+            config=HybridConfig(apply_temporal=False),
+            include_metadata=True,
+        )
+
+        assert manager.get_many_calls == [["graph_answer"]]
+        assert next(
+            entity for entity in result.entities if entity.id == "graph_answer"
+        ).content == ("Accessibility tree: button 'Create Order'; button 'Reset Password'.")
+        assert result.metadata["candidate_hydration"] == {
+            "requested_count": 1,
+            "hydrated_count": 1,
+            "graph_expansion_only_count": 1,
+            "missing_content_count": 0,
+        }
 
     @pytest.mark.asyncio
     async def test_hybrid_search_metadata_inclusion(self) -> None:
