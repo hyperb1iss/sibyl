@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from itertools import pairwise
 from typing import Any
@@ -1814,6 +1814,7 @@ def _stabilize_explicit_anchor_ranking[T](
         range(window_size),
         key=lambda index: (selected[index].score, -selected[index].original_rank),
     )
+    rescue = replace(rescue, score=max(rescue.score, selected[replace_index].score))
     selected = list(selected)
     selected[replace_index] = rescue
     selected.sort(key=lambda candidate: (-candidate.score, candidate.original_rank))
