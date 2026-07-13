@@ -45,6 +45,10 @@ from sibyl_core.models.tasks import (
     TaskPriority,
     TaskStatus,
 )
+from sibyl_core.query_anchors import (
+    explicit_query_anchor_score,
+    extract_explicit_query_anchors,
+)
 from sibyl_core.services import graph_client as _graph_client
 from sibyl_core.services.graph_search import (
     bounded_similarity_score as _bounded_similarity_score,
@@ -132,6 +136,59 @@ _ENTITY_SEARCH_FIELDS = ",\n                       ".join(
     f"{field_name} AS {alias}" if field_name != alias else field_name
     for field_name, alias in _ENTITY_SEARCH_PROJECTION_FIELDS
 )
+
+
+def _build_explicit_anchor_search_query(query: str) -> str:
+    anchors = extract_explicit_query_anchors(query)
+    if len(anchors) < 2:
+        return ""
+    return build_fulltext_query(" ".join(token for anchor in anchors for token in anchor))
+
+
+def _entity_explicit_anchor_score(query: str, entity: Entity) -> float:
+    text = " ".join(
+        part
+        for part in (
+            entity.name,
+            entity.description,
+            entity.content,
+            str(entity.metadata.get("summary") or ""),
+        )
+        if part
+    )
+    return explicit_query_anchor_score(query, text)
+
+
+def _rescue_explicit_anchor_candidate(
+    query: str,
+    results: Sequence[tuple[Entity, float]],
+    anchor_results: Sequence[tuple[Entity, float]],
+    *,
+    limit: int,
+) -> list[tuple[Entity, float]]:
+    result_limit = max(int(limit), 1)
+    selected = list(results[:result_limit])
+    selected_ids = {entity.id for entity, _score in selected}
+    candidates = [
+        (entity, score, rank)
+        for rank, (entity, score) in enumerate(anchor_results)
+        if entity.id not in selected_ids and _entity_explicit_anchor_score(query, entity) >= 1.0
+    ]
+    if not candidates:
+        return selected
+
+    entity, score, _rank = max(
+        candidates,
+        key=lambda item: (item[1], -item[2]),
+    )
+    rescue = (entity, score)
+    if len(selected) < result_limit:
+        selected.append(rescue)
+    else:
+        selected[-1] = rescue
+    return selected
+
+
 _ENTITY_BULK_UPSERT_QUERY = """
 INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     uuid = $input.uuid,
@@ -405,8 +462,9 @@ class EntityManager:
         if not search_query:
             return []
         result_limit = max(int(limit), 1)
+        anchor_search_query = _build_explicit_anchor_search_query(query)
 
-        fulltext_results, vector_results = await asyncio.gather(
+        searches = [
             self._fulltext_search(
                 query=query,
                 search_query=search_query,
@@ -418,13 +476,32 @@ class EntityManager:
                 entity_types=entity_types,
                 limit=result_limit,
             ),
-        )
+        ]
+        if anchor_search_query and anchor_search_query != search_query:
+            searches.append(
+                self._fulltext_search(
+                    query=query,
+                    search_query=anchor_search_query,
+                    entity_types=entity_types,
+                    limit=result_limit,
+                    query_label="entity.search.fulltext_explicit_anchors",
+                )
+            )
+        search_results = await asyncio.gather(*searches)
+        fulltext_results, vector_results = search_results[:2]
+        anchor_results = search_results[2] if len(search_results) > 2 else []
 
         results = _merge_ranked_entity_results(
             [
                 (vector_results, 1.2),
                 (fulltext_results, 1.0),
             ],
+            limit=result_limit,
+        )
+        results = _rescue_explicit_anchor_candidate(
+            query,
+            results,
+            anchor_results,
             limit=result_limit,
         )
         if not results:
@@ -442,6 +519,7 @@ class EntityManager:
         search_query: str,
         entity_types: Sequence[EntityType] | None,
         limit: int,
+        query_label: str = "entity.search.fulltext",
     ) -> list[tuple[Entity, float]]:
         type_values = [entity_type.value for entity_type in entity_types or ()]
         type_clause = "AND entity_type IN $entity_types" if type_values else ""
@@ -474,7 +552,7 @@ class EntityManager:
                 search_query=search_query,
                 entity_types=type_values,
                 limit=limit,
-                _query_label="entity.search.fulltext",
+                _query_label=query_label,
             )
         )
         fulltext_results: list[tuple[Entity, float]] = []

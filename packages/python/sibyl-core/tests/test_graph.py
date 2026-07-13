@@ -430,6 +430,52 @@ class _CoordinatedSearchClient:
         return []
 
 
+class _ExplicitAnchorSearchClient:
+    group_id = "org-native"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        search_query = params.get("search_query")
+        if search_query == "report related link":
+            return [
+                self._row(
+                    "partial-anchor",
+                    "The Report form is open, but the requested section is elsewhere.",
+                ),
+                self._row(
+                    "exact-anchor",
+                    "On the Report record, Related Links contains Create Order.",
+                ),
+            ]
+        if params.get("_query_label") == "entity.search.fulltext":
+            return [
+                self._row("primary-one", "Primary result one."),
+                self._row("primary-two", "Primary result two."),
+                self._row("primary-three", "Primary result three."),
+            ]
+        return []
+
+    def _row(self, entity_id: str, content: str) -> dict[str, object]:
+        now = datetime.now(UTC)
+        return {
+            "record_id": f"entity:{entity_id}",
+            "uuid": entity_id,
+            "name": entity_id,
+            "entity_type": "session",
+            "summary": content,
+            "description": content,
+            "content": content,
+            "group_id": self.group_id,
+            "attributes": {},
+            "created_at": now,
+            "updated_at": now,
+            "score": 1.0,
+        }
+
+
 @pytest.mark.asyncio
 async def test_graph_client_cache_evicts_oldest_client(
     monkeypatch: pytest.MonkeyPatch,
@@ -1016,6 +1062,45 @@ async def test_native_entity_manager_search_overlaps_fulltext_and_vector_branche
     assert "SELECT *, (1 - vector::distance::knn()) AS score" not in vector_query
     assert "id AS record_id" in vector_query
     assert "name_embedding," not in vector_query
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_rescues_full_explicit_anchor_candidate() -> None:
+    client = _ExplicitAnchorSearchClient()
+    manager = EntityManager(cast("SurrealGraphClient", client), group_id=client.group_id)
+    query = 'On a `Report` record, what is the only entry under "Related Links"?'
+
+    results = await manager.search(query=query, limit=3)
+
+    assert [entity.id for entity, _score in results] == [
+        "primary-one",
+        "primary-two",
+        "exact-anchor",
+    ]
+    anchor_call = next(
+        params
+        for _query, params in client.calls
+        if params.get("_query_label") == "entity.search.fulltext_explicit_anchors"
+    )
+    assert anchor_call["search_query"] == "report related link"
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_skips_anchor_probe_for_single_anchor() -> None:
+    client = _ExplicitAnchorSearchClient()
+    manager = EntityManager(cast("SurrealGraphClient", client), group_id=client.group_id)
+
+    results = await manager.search(query='What is under "Related Links"?', limit=3)
+
+    assert [entity.id for entity, _score in results] == [
+        "primary-one",
+        "primary-two",
+        "primary-three",
+    ]
+    assert all(
+        params.get("_query_label") != "entity.search.fulltext_explicit_anchors"
+        for _query, params in client.calls
+    )
 
 
 @pytest.mark.asyncio
