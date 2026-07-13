@@ -3470,7 +3470,14 @@ class TestHybridSearch:
         client = MockGraphClientForHybrid()
         manager = MockEntityManagerForHybrid()
 
-        e1 = make_entity_for_test("id1")
+        e1 = make_entity_for_test(
+            "id1",
+            metadata={
+                "sequence_id": "trajectory-1",
+                "sequence_positions": [12, 13],
+                "nested": {"ignored": True},
+            },
+        )
         manager.search_results = [(e1, 0.9)]
 
         config = HybridConfig(graph_weight=0)
@@ -3490,6 +3497,10 @@ class TestHybridSearch:
                 "rank": 1,
                 "score": result.results[0][1],
                 "sources": ["vector"],
+                "metadata": {
+                    "sequence_id": "trajectory-1",
+                    "sequence_positions": [12, 13],
+                },
             }
         ]
 

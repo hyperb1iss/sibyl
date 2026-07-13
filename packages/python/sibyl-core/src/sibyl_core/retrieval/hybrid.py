@@ -265,6 +265,28 @@ def _entity_id(entity: Any) -> str:
     return str(entity.get("id", "") if isinstance(entity, dict) else getattr(entity, "id", ""))
 
 
+def _diagnostic_entity_metadata(entity: Any) -> dict[str, Any]:
+    metadata = (
+        entity.get("metadata", {}) if isinstance(entity, dict) else getattr(entity, "metadata", {})
+    )
+    if not isinstance(metadata, Mapping):
+        return {}
+
+    bounded: dict[str, Any] = {}
+    for key, value in list(metadata.items())[:64]:
+        if isinstance(value, str):
+            bounded[str(key)] = value[:500]
+        elif value is None or isinstance(value, bool | int | float):
+            bounded[str(key)] = value
+        elif (
+            isinstance(value, list | tuple)
+            and len(value) <= 64
+            and all(item is None or isinstance(item, bool | int | float | str) for item in value)
+        ):
+            bounded[str(key)] = [item[:500] if isinstance(item, str) else item for item in value]
+    return bounded
+
+
 def _generic_assistant_marker_count(entity: Any) -> int:
     return generic_assistant_marker_count(_entity_text(entity))
 
@@ -759,6 +781,7 @@ async def hybrid_search(
                 "rank": rank,
                 "score": score,
                 "sources": source_metadata.get(_entity_id(entity), {}).get("sources", []),
+                "metadata": _diagnostic_entity_metadata(entity),
             }
             for rank, (entity, score) in enumerate(merged, start=1)
         ]
