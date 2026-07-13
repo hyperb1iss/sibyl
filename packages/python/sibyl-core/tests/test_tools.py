@@ -885,6 +885,7 @@ class TestSearchTool:
                 organization_id="org_123",
                 include_documents=False,
                 content_max_chars=700,
+                include_retrieval_diagnostics=True,
                 record_exposure=False,
             )
 
@@ -892,6 +893,7 @@ class TestSearchTool:
         assert len(expanded_response.results[0].content) == 700
         assert expanded_response.filters["content_max_chars"] == 700
         assert expanded_response.filters["graph_retrieval"]["stage_timings_ms"] == {"total": 7.5}
+        assert hybrid_search.await_args.kwargs["include_metadata"] is True
         stage_timings = expanded_response.filters["stage_timings_ms"]
         assert set(stage_timings) == {
             "planning",

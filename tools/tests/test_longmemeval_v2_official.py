@@ -1705,6 +1705,8 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
                 }
             }
         if path == "/search":
+            assert json is not None
+            assert json["include_retrieval_diagnostics"] is True
             return {
                 "results": [],
                 "filters": {

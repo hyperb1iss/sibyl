@@ -85,7 +85,11 @@ class TestSearchRoute:
             ),
         ):
             response = await search(
-                request=SearchRequest(query="seam", content_max_chars=18_000),
+                request=SearchRequest(
+                    query="seam",
+                    content_max_chars=18_000,
+                    include_retrieval_diagnostics=True,
+                ),
                 org=org,
                 ctx=ctx,
             )
@@ -97,6 +101,7 @@ class TestSearchRoute:
         assert core_search.await_args.kwargs["accessible_projects"] == {"proj_1"}
         assert core_search.await_args.kwargs["include_raw_memory"] is False
         assert core_search.await_args.kwargs["content_max_chars"] == 18_000
+        assert core_search.await_args.kwargs["include_retrieval_diagnostics"] is True
         assert response.filters["embedding_usage"] == {
             "requests": 1,
             "prompt_tokens": 4,

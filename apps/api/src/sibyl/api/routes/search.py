@@ -202,6 +202,7 @@ async def search(
                     if api_key_memory_scope_keys is not None
                     else None
                 ),
+                include_retrieval_diagnostics=request.include_retrieval_diagnostics,
             )
 
         response = SearchResponse(**asdict(result))

@@ -753,6 +753,15 @@ async def hybrid_search(
 
     if include_metadata:
         metadata["source_details"] = source_metadata
+        metadata["ranking_trace"] = [
+            {
+                "entity_id": _entity_id(entity),
+                "rank": rank,
+                "score": score,
+                "sources": source_metadata.get(_entity_id(entity), {}).get("sources", []),
+            }
+            for rank, (entity, score) in enumerate(merged, start=1)
+        ]
 
     log.info(
         "hybrid_search_complete",

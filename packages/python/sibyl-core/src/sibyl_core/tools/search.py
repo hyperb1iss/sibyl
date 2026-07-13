@@ -681,6 +681,7 @@ async def search(
     principal_id: str | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
     record_exposure: bool = True,
+    include_retrieval_diagnostics: bool = False,
 ) -> SearchResponse:
     """Unified semantic search across knowledge graph AND documentation.
 
@@ -1034,6 +1035,7 @@ async def search(
                             entity_types=entity_types,
                             limit=limit * 3,
                             config=hybrid_config,
+                            include_metadata=include_retrieval_diagnostics,
                             group_id=organization_id,
                             result_filter=graph_result_allowed,
                         ),

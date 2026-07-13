@@ -85,6 +85,10 @@ class SearchRequest(BaseModel):
         default=True, description="Use enhanced hybrid retrieval (vector + graph fusion)"
     )
     boost_recent: bool = Field(default=True, description="Boost recent results in ranking")
+    include_retrieval_diagnostics: bool = Field(
+        default=False,
+        description="Include authorized candidate ranking diagnostics in response filters",
+    )
 
 
 class SearchResult(BaseModel):

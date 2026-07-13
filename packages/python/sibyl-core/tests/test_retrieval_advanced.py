@@ -3484,6 +3484,14 @@ class TestHybridSearch:
         )
 
         assert "source_details" in result.metadata
+        assert result.metadata["ranking_trace"] == [
+            {
+                "entity_id": "id1",
+                "rank": 1,
+                "score": result.results[0][1],
+                "sources": ["vector"],
+            }
+        ]
 
     @pytest.mark.asyncio
     async def test_hybrid_search_respects_limit(self) -> None:
