@@ -2714,6 +2714,32 @@ class TestSearchTool:
         assert mock_entity_manager.search.await_count == 2
 
 
+class TestSearchFusion:
+    """Test final search-source fusion."""
+
+    def test_single_source_preserves_upstream_ranking(self) -> None:
+        from sibyl_core.tools.search import _rank_fuse_search_results
+
+        rescued = SearchResult(
+            id="rescued",
+            type="session",
+            name="Rescued",
+            content="A guarded upstream ranking decision.",
+            score=0.2,
+        )
+        higher_score = SearchResult(
+            id="higher-score",
+            type="session",
+            name="Higher score",
+            content="A higher numeric score ranked second upstream.",
+            score=0.9,
+        )
+
+        ranked = _rank_fuse_search_results([rescued, higher_score], [], [])
+
+        assert [result.id for result in ranked] == ["rescued", "higher-score"]
+
+
 class TestDocumentSearchFusion:
     """Test document-side search fusion helpers."""
 
