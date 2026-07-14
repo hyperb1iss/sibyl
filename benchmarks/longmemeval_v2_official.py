@@ -698,6 +698,9 @@ def build_run_plan(
         "trajectory_path": str(data_root / "trajectories.jsonl"),
         "trajectory_path_exists": (data_root / "trajectories.jsonl").exists(),
         "question_count": len(selected_questions),
+        "selected_question_ids_sha256": sha256_question_ids(
+            [str(row["id"]) for row in selected_questions]
+        ),
         "required_trajectory_count": len(required_trajectories),
         "llm_eval_count": llm_eval_count,
         "reader_model": args.reader_model,
@@ -1657,6 +1660,7 @@ def build_dataset_receipt(
         "trajectories_sha256": sha256_file(trajectories_path),
         "haystack_sha256": sha256_file(haystack),
         "question_count": _coerce_integral_number(recorded_question_count),
+        "selected_question_ids_sha256": plan.get("selected_question_ids_sha256"),
         "required_trajectory_count": _coerce_integral_number(
             recorded_required_trajectory_count
         ),
@@ -1830,6 +1834,11 @@ def sha256_file(path: Path) -> str | None:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return f"sha256:{digest.hexdigest()}"
+
+
+def sha256_question_ids(question_ids: Sequence[str]) -> str:
+    encoded = json.dumps(sorted(question_ids), separators=(",", ":"))
+    return f"sha256:{hashlib.sha256(encoded.encode()).hexdigest()}"
 
 
 def git_commit(path: Path | None) -> str | None:

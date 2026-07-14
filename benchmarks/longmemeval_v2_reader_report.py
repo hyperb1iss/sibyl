@@ -192,6 +192,7 @@ def expected_run_config(command: list[Any]) -> dict[str, Any]:
             result[key] = DEFAULT_CONTEXT_EXPANSION_MAX_RATIO if value is None else value
         else:
             result[key] = int(option_value(values, flag))
+    result["selected_question_ids_sha256"] = sha256_question_ids(result["question_ids"])
     return result
 
 
@@ -304,6 +305,13 @@ def validate_reader_run_identity(
         raise ValueError(f"Reader run does not match planned generation config: {run_dir}")
     if run_args.get("shuffle_questions_seed") != expected["shuffle_questions_seed"]:
         raise ValueError(f"Reader run does not match planned question order: {run_dir}")
+    dataset = receipt.get("dataset")
+    if (
+        isinstance(dataset, dict)
+        and dataset.get("selected_question_ids_sha256") is not None
+        and dataset.get("selected_question_ids_sha256") != expected["selected_question_ids_sha256"]
+    ):
+        raise ValueError(f"Reader run does not match planned question identity: {run_dir}")
     validate_official_inputs(run_dir=run_dir, expected=expected, receipt=receipt)
     validate_optional_runtime_config(run_dir=run_dir, expected=expected, run_args=run_args)
     source_runs = receipt.get("source_runs")
@@ -644,3 +652,8 @@ def sha256_file(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return f"sha256:{digest.hexdigest()}"
+
+
+def sha256_question_ids(question_ids: list[str]) -> str:
+    encoded = json.dumps(sorted(question_ids), separators=(",", ":"))
+    return f"sha256:{hashlib.sha256(encoded.encode()).hexdigest()}"

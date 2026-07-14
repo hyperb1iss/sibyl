@@ -23,6 +23,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmarks.git_provenance import git_provenance  # noqa: E402
+from benchmarks.longmemeval_v2_reader_holdout import (  # noqa: E402
+    build_reader_holdout_plan,
+    run_reader_holdout_plan,
+)
 from benchmarks.longmemeval_v2_reader_replication import (  # noqa: E402
     DEFAULT_MAX_WORKERS,
     build_reader_replication_plan,
@@ -178,6 +182,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def run_reader_cli_command(args: argparse.Namespace) -> int:
+    if args.command.startswith("reader-holdout-"):
+        return run_reader_holdout_cli_command(args)
     if args.command == "reader-plan":
         plan_path = Path(args.plan).expanduser().resolve()
         gate_path = Path(args.gate).expanduser().resolve()
@@ -250,6 +256,30 @@ def run_reader_cli_command(args: argparse.Namespace) -> int:
     raise RuntimeError(f"Unknown command: {args.command}")
 
 
+def run_reader_holdout_cli_command(args: argparse.Namespace) -> int:
+    if args.command == "reader-holdout-plan":
+        replication_plan_path = Path(args.replication_plan).expanduser().resolve()
+        replication_report_path = Path(args.replication_report).expanduser().resolve()
+        plan = build_reader_holdout_plan(
+            replication_plan=load_json(replication_plan_path),
+            replication_plan_path=replication_plan_path,
+            replication_report=load_json(replication_report_path),
+            replication_report_path=replication_report_path,
+            output_root=Path(args.output_root).expanduser().resolve(),
+        )
+        write_json(Path(args.output).expanduser().resolve(), plan)
+        print(json.dumps(plan, indent=2, sort_keys=True))  # noqa: T201
+        return 0
+    if args.command == "reader-holdout-run":
+        result = run_reader_holdout_plan(
+            load_json(Path(args.plan).expanduser().resolve()),
+            max_workers=args.max_workers,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))  # noqa: T201
+        return 0 if result["status"] == "PASS" else 1
+    raise RuntimeError(f"Unknown command: {args.command}")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -300,6 +330,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     add_reader_report_arguments(subparsers)
     add_reader_replication_arguments(subparsers)
+    add_reader_holdout_arguments(subparsers)
 
     doctor = subparsers.add_parser("doctor")
     doctor.add_argument("--official-repo", required=True)
@@ -368,6 +399,18 @@ def add_reader_replication_arguments(subparsers: Any) -> None:
     report = subparsers.add_parser("reader-replication-report")
     report.add_argument("--plan", required=True)
     report.add_argument("--output", required=True)
+
+
+def add_reader_holdout_arguments(subparsers: Any) -> None:
+    plan = subparsers.add_parser("reader-holdout-plan")
+    plan.add_argument("--replication-plan", required=True)
+    plan.add_argument("--replication-report", required=True)
+    plan.add_argument("--output-root", required=True)
+    plan.add_argument("--output", required=True)
+
+    run = subparsers.add_parser("reader-holdout-run")
+    run.add_argument("--plan", required=True)
+    run.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
 
 
 def add_retrieval_override_arguments(parser: argparse.ArgumentParser) -> None:

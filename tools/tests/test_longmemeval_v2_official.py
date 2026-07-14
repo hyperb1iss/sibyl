@@ -233,8 +233,26 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(
         "judge": str(output_dir / "provider_usage" / "judge.jsonl"),
     }
     assert plan["checkpoint_dir"] is None
-    assert "reader_endpoint_reachable" in plan["requirements"]
-    assert "torch_available" in plan["requirements"]
+    assert {"reader_endpoint_reachable", "torch_available"} <= plan["requirements"].keys()
+    _assert_question_id_hash_propagates(module, data_root=data_root, plan=plan)
+
+
+def _assert_question_id_hash_propagates(
+    module: ModuleType,
+    *,
+    data_root: Path,
+    plan: dict[str, object],
+) -> None:
+    expected_question_ids_sha256 = module.sha256_question_ids(["q-enterprise"])
+    assert plan["selected_question_ids_sha256"] == expected_question_ids_sha256
+    dataset_receipt = module.build_dataset_receipt(
+        data_root=data_root,
+        domain="enterprise",
+        tier="small",
+        plan=plan,
+        aggregated_metrics={},
+    )
+    assert dataset_receipt["selected_question_ids_sha256"] == expected_question_ids_sha256
 
 
 def test_official_runner_receipt_only_emits_citable_contract(tmp_path: Path) -> None:

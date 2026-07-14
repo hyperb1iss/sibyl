@@ -29,6 +29,10 @@ EXPECTED_READER_REPORT_RECOVERIES = 2
 EXPECTED_REPLICATION_RUN_COUNT = 20
 EXPECTED_REPLICATION_PASS_COUNT = 5
 EXPECTED_REPLICATION_WAVE_RUNS = 4
+EXPECTED_HOLDOUT_RUN_COUNT = 30
+EXPECTED_HOLDOUT_QUESTIONS_PER_DOMAIN = 48
+EXPECTED_PRIMARY_STRATUM_COUNT = 45
+EXPECTED_SOURCE_QUESTION_COUNT = 62
 EXPECTED_BOOTSTRAP_SAMPLES = 20_000
 STANDARD_CONTEXT_TOKENS = 200_000
 
@@ -66,6 +70,16 @@ def _load_replication_module() -> ModuleType:
 def _load_replication_report_module() -> ModuleType:
     path = Path(__file__).parents[2] / "benchmarks" / "longmemeval_v2_reader_replication_report.py"
     spec = importlib.util.spec_from_file_location("longmemeval_v2_reader_replication_report", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_holdout_module() -> ModuleType:
+    path = Path(__file__).parents[2] / "benchmarks" / "longmemeval_v2_reader_holdout.py"
+    spec = importlib.util.spec_from_file_location("longmemeval_v2_reader_holdout", path)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -1073,6 +1087,284 @@ def test_reader_replication_report_rejects_source_content_drift(tmp_path: Path) 
         module.build_reader_replication_report(plan=plan, plan_path=plan_path)
 
 
+def test_reader_holdout_selection_is_stratified_deterministic_and_fresh(
+    tmp_path: Path,
+) -> None:
+    holdout = _load_holdout_module()
+    questions_path = tmp_path / "questions.jsonl"
+    rows = []
+    excluded = {}
+    for domain in holdout.DOMAINS:
+        excluded[domain] = [f"{domain}-excluded-{index}" for index in range(2)]
+        rows.extend(
+            {
+                "id": question_id,
+                "domain": domain,
+                "question_type": "procedure",
+                "question": "must not influence sampling",
+                "answer": "must not influence sampling",
+            }
+            for question_id in excluded[domain]
+        )
+        rows.extend(
+            {
+                "id": f"{domain}-question-{index:03d}",
+                "domain": domain,
+                "question_type": (
+                    "procedure" if index < EXPECTED_PRIMARY_STRATUM_COUNT else "errors-gotchas"
+                ),
+                "question": f"question sentinel {index}",
+                "answer": f"gold sentinel {index}",
+            }
+            for index in range(60)
+        )
+    _write_jsonl(questions_path, rows)
+
+    first = holdout.select_holdout_questions(questions_path, excluded_ids=excluded)
+    second = holdout.select_holdout_questions(questions_path, excluded_ids=excluded)
+
+    assert first == second
+    assert first["seed"] == holdout.HOLDOUT_SAMPLE_SEED
+    for domain in holdout.DOMAINS:
+        selected = first["question_ids_by_domain"][domain]
+        assert len(selected) == EXPECTED_HOLDOUT_QUESTIONS_PER_DOMAIN
+        assert not set(selected) & set(excluded[domain])
+        assert set(first["selected_question_type_counts_by_domain"][domain]) == {
+            "errors-gotchas",
+            "procedure",
+        }
+    serialized = json.dumps(first)
+    assert "question sentinel" not in serialized
+    assert "gold sentinel" not in serialized
+
+
+def test_reader_holdout_plan_freezes_fresh_three_arm_five_pass_protocol(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holdout = _load_holdout_module()
+    replication_plan, replication_plan_path, report, report_path, source_runs = (
+        _write_holdout_source_inputs(tmp_path, holdout=holdout)
+    )
+    monkeypatch.setattr(
+        holdout,
+        "require_reader_replication_plan",
+        lambda _plan: source_runs,
+    )
+
+    plan = holdout.build_reader_holdout_plan(
+        replication_plan=replication_plan,
+        replication_plan_path=replication_plan_path,
+        replication_report=report,
+        replication_report_path=report_path,
+        output_root=tmp_path / "holdout",
+    )
+
+    assert len(plan["runs"]) == EXPECTED_HOLDOUT_RUN_COUNT
+    assert plan["protocol"]["score_visibility_during_execution"] == "none"
+    assert plan["integrity_contract"]["sampling_uses_answers_or_scores"] is False
+    assert plan["cost_budget"]["estimated_total_model_cost_usd"] == pytest.approx(7.2)
+    for run in plan["runs"]:
+        expected = holdout.expected_run_config(run["command"])
+        assert len(expected["question_ids"]) == EXPECTED_HOLDOUT_QUESTIONS_PER_DOMAIN
+        assert expected["context_expansion_max_ratio"] == (
+            EXPECTED_CONTEXT_EXPANSION_MAX_RATIO
+            if run["configuration"] == "winner_token_bounded_1_2x"
+            else 0.0
+        )
+        assert run.get("existing") is None
+
+    changed = json.loads(json.dumps(plan))
+    changed["runs"][0]["command"][-2:-2] = ["--question-ids", "leaked-question"]
+    with pytest.raises(ValueError, match="repeats options"):
+        holdout.require_reader_holdout_plan(changed)
+
+
+@pytest.mark.parametrize(
+    ("tamper", "message"),
+    [
+        ("selection", "deterministic selection changed"),
+        ("search_limit", "command changed from its bound source"),
+        ("memory", "command changed from its bound source"),
+        ("cost", "cost budget changed"),
+    ],
+)
+def test_reader_holdout_plan_rejects_source_derived_tampering(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tamper: str,
+    message: str,
+) -> None:
+    holdout = _load_holdout_module()
+    replication_plan, replication_plan_path, report, report_path, source_runs = (
+        _write_holdout_source_inputs(tmp_path, holdout=holdout)
+    )
+    monkeypatch.setattr(
+        holdout,
+        "require_reader_replication_plan",
+        lambda _plan: source_runs,
+    )
+    plan = holdout.build_reader_holdout_plan(
+        replication_plan=replication_plan,
+        replication_plan_path=replication_plan_path,
+        replication_report=report,
+        replication_report_path=report_path,
+        output_root=tmp_path / "holdout",
+    )
+
+    if tamper == "selection":
+        domain = "web"
+        question_types = plan["selection"]["question_types_by_domain"][domain]
+        removed = next(
+            question_id
+            for question_id, question_type in question_types.items()
+            if question_type == "errors-gotchas"
+        )
+        selected = plan["selection"]["question_ids_by_domain"][domain]
+        replacement = next(
+            f"web-{index:03d}"
+            for index in range(
+                EXPECTED_HOLDOUT_QUESTIONS_PER_DOMAIN,
+                EXPECTED_SOURCE_QUESTION_COUNT,
+            )
+            if f"web-{index:03d}" not in selected
+        )
+        selected[selected.index(removed)] = replacement
+        selected.sort()
+        del question_types[removed]
+        question_types[replacement] = "errors-gotchas"
+        plan["selection"]["question_types_by_domain"][domain] = dict(sorted(question_types.items()))
+        for run in plan["runs"]:
+            if run["domain"] == domain:
+                run["command"] = holdout.replace_multi_option(
+                    run["command"],
+                    "--question-ids",
+                    selected,
+                )
+    elif tamper == "search_limit":
+        for run in plan["runs"]:
+            if run["configuration"] == "winner_fixed_reader":
+                run["command"] = holdout.replace_option(run["command"], "--search-limit", "40")
+    elif tamper == "memory":
+        for run in plan["runs"]:
+            run["command"] = holdout.replace_option(
+                run["command"], "--load-memory-dir", str(tmp_path / "rogue-memory")
+            )
+    else:
+        plan["cost_budget"]["pilot_cost_per_question_run_usd"] = 999.0
+
+    with pytest.raises(ValueError, match=message):
+        holdout.require_reader_holdout_plan(plan)
+
+
+def test_reader_holdout_resume_requires_score_blind_question_identity(tmp_path: Path) -> None:
+    module = _load_module()
+    holdout = _load_holdout_module()
+    _, _, _, _, source_runs = _write_holdout_source_inputs(tmp_path, holdout=holdout)
+    source = next(
+        run
+        for run in source_runs
+        if run["configuration"] == "baseline_fixed_reader" and run["domain"] == "web"
+    )
+    output_dir = tmp_path / "completed-holdout-run"
+    command = holdout.derive_holdout_command(
+        _without_options(
+            source["command"],
+            "--official-repo",
+            "--data-root",
+            "--tier",
+        ),
+        output_dir=output_dir,
+        question_ids=[f"web-{index:03d}" for index in range(EXPECTED_HOLDOUT_QUESTIONS_PER_DOMAIN)],
+        shuffle_seed=None,
+        context_expansion_max_ratio=0.0,
+    )
+    expected = holdout.expected_run_config(command)
+    _write_reader_report_run(
+        output_dir,
+        domain="web",
+        question_ids=expected["question_ids"],
+        scores=tuple(True for _ in expected["question_ids"]),
+        config={key: expected[key] for key in module.QUERY_OVERRIDE_KEYS},
+        memory_limit=expected["memory_context_max_tokens"],
+        memory_dir=Path(expected["load_memory_dir"]),
+        model_cost=0.10,
+    )
+    receipt_path = output_dir / "longmemeval_v2_official_receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["dataset"]["selected_question_ids_sha256"] = holdout.sha256_question_ids(
+        expected["question_ids"]
+    )
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    run = {"command": command, "output_dir": str(output_dir)}
+
+    assert holdout.completed_run_cost(run) is not None
+
+    receipt["dataset"]["selected_question_ids_sha256"] = "sha256:wrong"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    assert holdout.completed_run_cost(run) is None
+
+
+def test_reader_holdout_runner_enforces_worker_cap_without_reading_scores(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holdout = _load_holdout_module()
+    plan = {
+        "protocol": {"max_workers_cap": holdout.DEFAULT_MAX_WORKERS},
+        "cost_budget": {
+            "max_total_model_cost_usd": holdout.MAX_TOTAL_MODEL_COST_USD,
+            "pilot_cost_per_question_run_usd": 0.01,
+            "max_pilot_cost_multiplier": holdout.MAX_PILOT_COST_MULTIPLIER,
+        },
+    }
+    runs = [
+        {
+            "pass_index": pass_index,
+            "pass_id": holdout.pass_id(pass_index),
+            "configuration": configuration,
+            "domain": domain,
+        }
+        for pass_index in range(1, holdout.PASS_COUNT + 1)
+        for configuration in holdout.HOLDOUT_CONFIGURATIONS
+        for domain in holdout.DOMAINS
+    ]
+    monkeypatch.setattr(holdout, "require_reader_holdout_plan", lambda _plan: runs)
+    monkeypatch.setattr(
+        holdout,
+        "completed_run_cost",
+        lambda _run: {
+            "model_cost_usd": 0.01,
+            "question_count": EXPECTED_HOLDOUT_QUESTIONS_PER_DOMAIN,
+            "cost_per_question_run_usd": 0.01 / EXPECTED_HOLDOUT_QUESTIONS_PER_DOMAIN,
+        },
+    )
+    executed_waves = []
+
+    def record_empty_wave(
+        pending: list[dict[str, Any]],
+        *,
+        max_workers: int,
+    ) -> list[tuple[dict[str, Any], int]]:
+        executed_waves.append((pending, max_workers))
+        return []
+
+    monkeypatch.setattr(holdout, "execute_wave", record_empty_wave)
+
+    with pytest.raises(ValueError, match="predeclared cap"):
+        holdout.run_reader_holdout_plan(plan, max_workers=holdout.DEFAULT_MAX_WORKERS + 1)
+
+    result = holdout.run_reader_holdout_plan(plan)
+
+    assert result["status"] == "PASS"
+    assert result["scores_read"] is False
+    assert len(result["skipped"]) == EXPECTED_HOLDOUT_RUN_COUNT
+    assert result["question_runs"] == (
+        EXPECTED_HOLDOUT_RUN_COUNT * EXPECTED_HOLDOUT_QUESTIONS_PER_DOMAIN
+    )
+    assert executed_waves == [([], holdout.DEFAULT_MAX_WORKERS)] * holdout.PASS_COUNT
+
+
 @pytest.mark.parametrize(
     ("tamper", "exception", "message"),
     [
@@ -1499,12 +1791,133 @@ def _write_replication_report_inputs(
     return plan, plan_path
 
 
+def _without_options(command: list[str], *flags: str) -> list[str]:
+    result = list(command)
+    for flag in flags:
+        index = result.index(flag)
+        del result[index : index + 2]
+    return result
+
+
+def _write_holdout_source_inputs(
+    tmp_path: Path,
+    *,
+    holdout: ModuleType,
+) -> tuple[dict[str, Any], Path, dict[str, Any], Path, list[dict[str, Any]]]:
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    questions = []
+    for domain in holdout.DOMAINS:
+        questions.extend(
+            {
+                "id": f"{domain}-{index:03d}",
+                "domain": domain,
+                "question_type": (
+                    "procedure"
+                    if index < EXPECTED_HOLDOUT_QUESTIONS_PER_DOMAIN
+                    else "errors-gotchas"
+                ),
+                "question": f"question {index}",
+                "answer": f"gold {index}",
+            }
+            for index in range(EXPECTED_SOURCE_QUESTION_COUNT)
+        )
+    _write_jsonl(data_root / "questions.jsonl", questions)
+
+    source_runs = []
+    for configuration in holdout.PRIMARY_CONFIGURATIONS:
+        for domain in holdout.DOMAINS:
+            memory_dir = tmp_path / "memory" / domain
+            memory_dir.mkdir(parents=True, exist_ok=True)
+            for name in holdout.MEMORY_ARTIFACTS:
+                (memory_dir / name).write_bytes(f"{name}:{domain}".encode())
+            is_baseline = configuration == "baseline_fixed_reader"
+            command = [
+                "moon",
+                "run",
+                "root:bench-longmemeval-v2-official-full",
+                "--",
+                "--official-repo",
+                str(tmp_path / "official"),
+                "--data-root",
+                str(data_root),
+                "--domain",
+                domain,
+                "--tier",
+                "small",
+                "--output-dir",
+                str(tmp_path / "pilot" / configuration / domain),
+                "--load-memory-dir",
+                str(memory_dir),
+                "--reader-model",
+                "Qwen/Qwen3.5-9B",
+                "--reader-temperature",
+                "0.6",
+                "--reader-top-p",
+                "0.95",
+                "--reader-top-k",
+                "20",
+                "--memory-context-max-tokens",
+                str(STANDARD_CONTEXT_TOKENS),
+                "--question-ids",
+                f"{domain}-000",
+                f"{domain}-001",
+                "--search-limit",
+                "12",
+                "--max-context-items",
+                "8" if is_baseline else "10",
+                "--max-chunks-per-trajectory",
+                "8",
+                "--neighbor-stitch-items",
+                "0" if is_baseline else "2",
+                "--neighbor-stitch-span",
+                "0" if is_baseline else "1",
+                "--state-part-completion-items",
+                "0",
+                "--no-state-part-refinement" if is_baseline else "--state-part-refinement",
+                "--context-expansion-max-ratio",
+                "0.0",
+                "--allow-localhost",
+            ]
+            source_runs.append(
+                {
+                    "pass_id": "pass_01",
+                    "pass_index": 1,
+                    "configuration": configuration,
+                    "domain": domain,
+                    "command": command,
+                }
+            )
+
+    replication_plan = {"schema_version": "synthetic-replication-plan"}
+    replication_plan_path = tmp_path / "replication_plan.json"
+    replication_plan_path.write_text(json.dumps(replication_plan), encoding="utf-8")
+    report = {
+        "schema_version": holdout.REPLICATION_REPORT_SCHEMA_VERSION,
+        "status": "PASS",
+        "configurations": {
+            configuration: {"aggregate": {"question_count_per_pass": 2}}
+            for configuration in holdout.PRIMARY_CONFIGURATIONS
+        },
+        "costs": {"total_model_cost_usd": 0.1},
+        "source_artifacts": {
+            "replication_plan": {
+                "path": str(replication_plan_path),
+                "sha256": holdout.sha256_file(replication_plan_path),
+            }
+        },
+    }
+    report_path = tmp_path / "replication_report.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    return replication_plan, replication_plan_path, report, report_path, source_runs
+
+
 def _write_reader_report_run(
     run_dir: Path,
     *,
     domain: str,
     question_ids: Sequence[str],
-    scores: tuple[bool, bool],
+    scores: Sequence[bool],
     config: dict[str, Any],
     memory_limit: int,
     memory_dir: Path,
