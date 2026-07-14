@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import signal
 import subprocess
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 from benchmarks.longmemeval_v2_reader_replication import (
@@ -54,6 +57,8 @@ HOLDOUT_SAMPLE_SEED = 20_260_713
 TOKEN_BOUNDED_MAX_RATIO = 1.2
 MAX_TOTAL_MODEL_COST_USD = 8.0
 MAX_PILOT_COST_MULTIPLIER = 5.0
+PROCESS_POLL_SECONDS = 0.25
+PROCESS_TERMINATION_TIMEOUT_SECONDS = 5.0
 MEMORY_ARTIFACTS = (
     "memory_config.json",
     "chunk_catalog.jsonl.gz",
@@ -843,14 +848,25 @@ def execute_wave(
     if not runs:
         return []
     results = []
-    with ThreadPoolExecutor(max_workers=min(max_workers, len(runs))) as executor:
-        futures = {executor.submit(execute_run, run): run for run in runs}
+    cancel_event = Event()
+    executor = ThreadPoolExecutor(max_workers=min(max_workers, len(runs)))
+    futures = {}
+    try:
+        for run in runs:
+            futures[executor.submit(execute_run, run, cancel_event=cancel_event)] = run
         for future in as_completed(futures):
             results.append((futures[future], future.result()))
+    except BaseException:
+        cancel_event.set()
+        for future in futures:
+            future.cancel()
+        executor.shutdown(wait=True, cancel_futures=True)
+        raise
+    executor.shutdown(wait=True)
     return results
 
 
-def execute_run(run: dict[str, Any]) -> int:
+def execute_run(run: dict[str, Any], *, cancel_event: Event | None = None) -> int:
     output_dir = Path(run["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
     log_path = output_dir / "holdout_runner.log"
@@ -859,19 +875,53 @@ def execute_run(run: dict[str, Any]) -> int:
         log.flush()
         (output_dir / "exit_code").unlink(missing_ok=True)
         (output_dir / "exit_code.tmp").unlink(missing_ok=True)
-        result = subprocess.run(  # noqa: S603
+        process = subprocess.Popen(  # noqa: S603
             run["command"],
             cwd=ROOT,
             stdout=log,
             stderr=subprocess.STDOUT,
-            check=False,
+            start_new_session=True,
         )
-        write_exit_code(output_dir, result.returncode)
+        returncode = wait_for_run_process(process, cancel_event=cancel_event)
+        write_exit_code(output_dir, returncode)
+        event = "cancelled" if cancel_event is not None and cancel_event.is_set() else "complete"
         log.write(
-            json.dumps({"event": "complete", "run": run_key(run), "returncode": result.returncode})
-            + "\n"
+            json.dumps({"event": event, "run": run_key(run), "returncode": returncode}) + "\n"
         )
-    return result.returncode
+    return returncode
+
+
+def wait_for_run_process(
+    process: subprocess.Popen[Any],
+    *,
+    cancel_event: Event | None,
+) -> int:
+    while True:
+        try:
+            return process.wait(timeout=PROCESS_POLL_SECONDS)
+        except subprocess.TimeoutExpired:
+            if cancel_event is not None and cancel_event.is_set():
+                terminate_run_process(process)
+                return process.wait()
+
+
+def terminate_run_process(process: subprocess.Popen[Any]) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        process.wait()
+        return
+    try:
+        process.wait(timeout=PROCESS_TERMINATION_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            process.wait()
+            return
+        process.wait()
 
 
 def write_exit_code(output_dir: Path, returncode: int) -> None:

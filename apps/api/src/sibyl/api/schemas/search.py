@@ -89,6 +89,10 @@ class SearchRequest(BaseModel):
         default=False,
         description="Include authorized candidate ranking diagnostics in response filters",
     )
+    record_exposure: bool = Field(
+        default=True,
+        description="Record returned results as memory exposures",
+    )
 
 
 class SearchResult(BaseModel):

@@ -33,6 +33,7 @@ EXPECTED_HOLDOUT_RUN_COUNT = 30
 EXPECTED_HOLDOUT_QUESTIONS_PER_DOMAIN = 48
 EXPECTED_PRIMARY_STRATUM_COUNT = 45
 EXPECTED_SOURCE_QUESTION_COUNT = 62
+EXPECTED_INTERRUPT_WORKERS = 2
 EXPECTED_BOOTSTRAP_SAMPLES = 20_000
 STANDARD_CONTEXT_TOKENS = 200_000
 
@@ -1373,6 +1374,72 @@ def test_reader_holdout_runner_enforces_worker_cap_without_reading_scores(
         EXPECTED_HOLDOUT_RUN_COUNT * EXPECTED_HOLDOUT_QUESTIONS_PER_DOMAIN
     )
     assert executed_waves == [([], holdout.DEFAULT_MAX_WORKERS)] * holdout.PASS_COUNT
+
+
+def test_reader_holdout_executor_terminates_process_group_on_cancellation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holdout = _load_holdout_module()
+    output_dir = tmp_path / "run"
+    process = SimpleNamespace(pid=42, terminated=False)
+
+    def wait(*, timeout: float | None = None) -> int:
+        if timeout is not None and not process.terminated:
+            raise holdout.subprocess.TimeoutExpired("ignored", timeout)
+        return -holdout.signal.SIGTERM
+
+    process.wait = wait
+    process.poll = lambda: -holdout.signal.SIGTERM if process.terminated else None
+    monkeypatch.setattr(holdout.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    def killpg(pid: int, sig: int) -> None:
+        assert pid == process.pid
+        assert sig == holdout.signal.SIGTERM
+        process.terminated = True
+
+    monkeypatch.setattr(holdout.os, "killpg", killpg)
+    cancel_event = threading.Event()
+    cancel_event.set()
+    run = {
+        "command": ["ignored"],
+        "configuration": "baseline_fixed_reader",
+        "domain": "web",
+        "output_dir": str(output_dir),
+        "pass_id": "pass_01",
+    }
+
+    assert holdout.execute_run(run, cancel_event=cancel_event) == -holdout.signal.SIGTERM
+    assert (output_dir / "exit_code").read_text(encoding="utf-8") == (
+        f"{-holdout.signal.SIGTERM}\n"
+    )
+
+
+def test_reader_holdout_wave_cancels_queued_runs_on_interrupt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holdout = _load_holdout_module()
+    started: list[str] = []
+    worker_started = threading.Event()
+
+    def wait_for_cancel(run: dict[str, Any], *, cancel_event: threading.Event) -> int:
+        started.append(run["pass_id"])
+        worker_started.set()
+        assert cancel_event.wait(timeout=1.0)
+        return -holdout.signal.SIGTERM
+
+    def interrupt(_futures: object) -> object:
+        assert worker_started.wait(timeout=1.0)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(holdout, "execute_run", wait_for_cancel)
+    monkeypatch.setattr(holdout, "as_completed", interrupt)
+    runs = [{"pass_id": f"pass_{index:02d}"} for index in range(1, 7)]
+
+    with pytest.raises(KeyboardInterrupt):
+        holdout.execute_wave(runs, max_workers=EXPECTED_INTERRUPT_WORKERS)
+
+    assert 1 <= len(started) <= EXPECTED_INTERRUPT_WORKERS
 
 
 def test_reader_holdout_report_consumes_complete_receipt_bound_evidence(

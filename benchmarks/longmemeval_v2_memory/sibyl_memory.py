@@ -1105,6 +1105,7 @@ class SibylLiveApiMemory(Memory):
             "use_enhanced": True,
             "boost_recent": False,
             "include_retrieval_diagnostics": True,
+            "record_exposure": False,
             "limit": min(max(self.search_limit, self.max_context_items), 50),
         }
         response = self._request_json("POST", "/search", json=payload)

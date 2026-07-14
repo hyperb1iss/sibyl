@@ -44,6 +44,9 @@ def _ctx(
 
 
 class TestSearchRoute:
+    def test_search_records_exposure_by_default(self) -> None:
+        assert SearchRequest(query="seam").record_exposure is True
+
     @pytest.mark.asyncio
     async def test_search_without_project_passes_default_accessible_scope(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
@@ -89,6 +92,7 @@ class TestSearchRoute:
                     query="seam",
                     content_max_chars=18_000,
                     include_retrieval_diagnostics=True,
+                    record_exposure=False,
                 ),
                 org=org,
                 ctx=ctx,
@@ -101,6 +105,7 @@ class TestSearchRoute:
         assert core_search.await_args.kwargs["accessible_projects"] == {"proj_1"}
         assert core_search.await_args.kwargs["include_raw_memory"] is False
         assert core_search.await_args.kwargs["content_max_chars"] == 18_000
+        assert core_search.await_args.kwargs["record_exposure"] is False
         assert core_search.await_args.kwargs["include_retrieval_diagnostics"] is True
         assert response.filters["embedding_usage"] == {
             "requests": 1,
