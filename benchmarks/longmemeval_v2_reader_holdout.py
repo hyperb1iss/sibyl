@@ -823,9 +823,24 @@ def run_reader_holdout_plan(
     *,
     max_workers: int = DEFAULT_MAX_WORKERS,
 ) -> dict[str, Any]:
+    runs = require_reader_holdout_plan(plan)
+    return run_score_blind_reader_plan(
+        plan,
+        runs=runs,
+        pass_count=PASS_COUNT,
+        max_workers=max_workers,
+    )
+
+
+def run_score_blind_reader_plan(
+    plan: dict[str, Any],
+    *,
+    runs: list[dict[str, Any]],
+    pass_count: int,
+    max_workers: int = DEFAULT_MAX_WORKERS,
+) -> dict[str, Any]:
     if max_workers < 1:
         raise ValueError("Reader holdout workers must be positive")
-    runs = require_reader_holdout_plan(plan)
     if max_workers > plan["protocol"]["max_workers_cap"]:
         raise ValueError("Reader holdout workers exceed the predeclared cap")
     completed = []
@@ -834,7 +849,7 @@ def run_reader_holdout_plan(
     model_cost = 0.0
     question_runs = 0
     run_cost_per_question = []
-    for index in range(1, PASS_COUNT + 1):
+    for index in range(1, pass_count + 1):
         wave = [run for run in runs if run["pass_index"] == index]
         pending = []
         for run in wave:

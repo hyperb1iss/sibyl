@@ -23,6 +23,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmarks.git_provenance import git_provenance  # noqa: E402
+from benchmarks.longmemeval_v2_causal_ablation import (  # noqa: E402
+    build_causal_ablation_plan,
+    build_causal_confirmation_plan,
+    run_causal_confirmation_plan,
+    run_causal_development_plan,
+)
+from benchmarks.longmemeval_v2_causal_ablation_report import (  # noqa: E402
+    build_causal_ablation_report,
+    build_causal_confirmation_report,
+)
 from benchmarks.longmemeval_v2_reader_holdout import (  # noqa: E402
     amend_reader_holdout_cost_budget,
     build_reader_holdout_plan,
@@ -185,7 +195,9 @@ def main(argv: list[str] | None = None) -> int:
     raise RuntimeError(f"Unknown command: {args.command}")
 
 
-def run_reader_cli_command(args: argparse.Namespace) -> int:
+def run_reader_cli_command(args: argparse.Namespace) -> int:  # noqa: PLR0911
+    if args.command.startswith("reader-causal-"):
+        return run_reader_causal_cli_command(args)
     if args.command.startswith("reader-holdout-"):
         return run_reader_holdout_cli_command(args)
     if args.command == "reader-plan":
@@ -257,6 +269,67 @@ def run_reader_cli_command(args: argparse.Namespace) -> int:
         write_json(Path(args.output).expanduser().resolve(), report)
         print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
         return 0
+    raise RuntimeError(f"Unknown command: {args.command}")
+
+
+def run_reader_causal_cli_command(args: argparse.Namespace) -> int:
+    if args.command == "reader-causal-plan":
+        holdout_plan_path = Path(args.holdout_plan).expanduser().resolve()
+        holdout_report_path = Path(args.holdout_report).expanduser().resolve()
+        plan = build_causal_ablation_plan(
+            holdout_plan=load_json(holdout_plan_path),
+            holdout_plan_path=holdout_plan_path,
+            holdout_report=load_json(holdout_report_path),
+            holdout_report_path=holdout_report_path,
+            output_root=Path(args.output_root).expanduser().resolve(),
+        )
+        write_json(Path(args.output).expanduser().resolve(), plan)
+        print(json.dumps(plan, indent=2, sort_keys=True))  # noqa: T201
+        return 0
+    if args.command == "reader-causal-run":
+        result = run_causal_development_plan(
+            load_json(Path(args.plan).expanduser().resolve()),
+            max_workers=args.max_workers,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))  # noqa: T201
+        return 0 if result["status"] == "PASS" else 1
+    if args.command == "reader-causal-report":
+        plan_path = Path(args.plan).expanduser().resolve()
+        report = build_causal_ablation_report(
+            plan=load_json(plan_path),
+            plan_path=plan_path,
+        )
+        write_json(Path(args.output).expanduser().resolve(), report)
+        print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
+        return 0 if report["status"] == "PASS" else 1
+    if args.command == "reader-causal-confirm-plan":
+        causal_plan_path = Path(args.causal_plan).expanduser().resolve()
+        causal_report_path = Path(args.causal_report).expanduser().resolve()
+        plan = build_causal_confirmation_plan(
+            causal_plan=load_json(causal_plan_path),
+            causal_plan_path=causal_plan_path,
+            causal_report=load_json(causal_report_path),
+            causal_report_path=causal_report_path,
+        )
+        write_json(Path(args.output).expanduser().resolve(), plan)
+        print(json.dumps(plan, indent=2, sort_keys=True))  # noqa: T201
+        return 0
+    if args.command == "reader-causal-confirm-run":
+        result = run_causal_confirmation_plan(
+            load_json(Path(args.plan).expanduser().resolve()),
+            max_workers=args.max_workers,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))  # noqa: T201
+        return 0 if result["status"] == "PASS" else 1
+    if args.command == "reader-causal-confirm-report":
+        plan_path = Path(args.plan).expanduser().resolve()
+        report = build_causal_confirmation_report(
+            plan=load_json(plan_path),
+            plan_path=plan_path,
+        )
+        write_json(Path(args.output).expanduser().resolve(), report)
+        print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
+        return 0 if report["status"] == "PASS" else 1
     raise RuntimeError(f"Unknown command: {args.command}")
 
 
@@ -358,6 +431,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     add_reader_report_arguments(subparsers)
     add_reader_replication_arguments(subparsers)
     add_reader_holdout_arguments(subparsers)
+    add_reader_causal_arguments(subparsers)
 
     doctor = subparsers.add_parser("doctor")
     doctor.add_argument("--official-repo", required=True)
@@ -448,6 +522,35 @@ def add_reader_holdout_arguments(subparsers: Any) -> None:
     report = subparsers.add_parser("reader-holdout-report")
     report.add_argument("--plan", required=True)
     report.add_argument("--output", required=True)
+
+
+def add_reader_causal_arguments(subparsers: Any) -> None:
+    plan = subparsers.add_parser("reader-causal-plan")
+    plan.add_argument("--holdout-plan", required=True)
+    plan.add_argument("--holdout-report", required=True)
+    plan.add_argument("--output-root", required=True)
+    plan.add_argument("--output", required=True)
+
+    run = subparsers.add_parser("reader-causal-run")
+    run.add_argument("--plan", required=True)
+    run.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
+
+    report = subparsers.add_parser("reader-causal-report")
+    report.add_argument("--plan", required=True)
+    report.add_argument("--output", required=True)
+
+    confirm_plan = subparsers.add_parser("reader-causal-confirm-plan")
+    confirm_plan.add_argument("--causal-plan", required=True)
+    confirm_plan.add_argument("--causal-report", required=True)
+    confirm_plan.add_argument("--output", required=True)
+
+    confirm_run = subparsers.add_parser("reader-causal-confirm-run")
+    confirm_run.add_argument("--plan", required=True)
+    confirm_run.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
+
+    confirm_report = subparsers.add_parser("reader-causal-confirm-report")
+    confirm_report.add_argument("--plan", required=True)
+    confirm_report.add_argument("--output", required=True)
 
 
 def add_retrieval_override_arguments(parser: argparse.ArgumentParser) -> None:

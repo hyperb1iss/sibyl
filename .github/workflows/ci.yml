@@ -122,7 +122,7 @@ jobs:
                 web_changed=true
                 runtime_changed=true
                 ;;
-              apps/api/*|apps/cli/*|apps/e2e/*|packages/python/sibyl-core/*|tools/*|baselines/*|moon.yml|.moon/*|.prototools|pnpm-lock.yaml|compose.e2e.yml|docker-compose*.yml)
+              apps/api/*|apps/cli/*|apps/e2e/*|packages/python/sibyl-core/*|tools/*|benchmarks/*|baselines/*|moon.yml|.moon/*|.prototools|pnpm-lock.yaml|compose.e2e.yml|docker-compose*.yml)
                 runtime_changed=true
                 ;;
             esac
