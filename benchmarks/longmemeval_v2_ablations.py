@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
 
 from benchmarks.git_provenance import git_provenance  # noqa: E402
 from benchmarks.longmemeval_v2_reader_holdout import (  # noqa: E402
+    amend_reader_holdout_cost_budget,
     build_reader_holdout_plan,
     run_reader_holdout_plan,
 )
@@ -273,6 +274,20 @@ def run_reader_holdout_cli_command(args: argparse.Namespace) -> int:
         write_json(Path(args.output).expanduser().resolve(), plan)
         print(json.dumps(plan, indent=2, sort_keys=True))  # noqa: T201
         return 0
+    if args.command == "reader-holdout-amend-cost":
+        plan_path = Path(args.plan).expanduser().resolve()
+        output_path = Path(args.output).expanduser().resolve()
+        if output_path == plan_path:
+            raise ValueError("Reader holdout cost amendment must preserve its parent plan")
+        amended = amend_reader_holdout_cost_budget(
+            plan=load_json(plan_path),
+            plan_path=plan_path,
+            max_total_model_cost_usd=args.max_total_model_cost_usd,
+            reason=args.reason,
+        )
+        write_json(output_path, amended)
+        print(json.dumps(amended, indent=2, sort_keys=True))  # noqa: T201
+        return 0
     if args.command == "reader-holdout-run":
         result = run_reader_holdout_plan(
             load_json(Path(args.plan).expanduser().resolve()),
@@ -419,6 +434,12 @@ def add_reader_holdout_arguments(subparsers: Any) -> None:
     plan.add_argument("--replication-report", required=True)
     plan.add_argument("--output-root", required=True)
     plan.add_argument("--output", required=True)
+
+    amend = subparsers.add_parser("reader-holdout-amend-cost")
+    amend.add_argument("--plan", required=True)
+    amend.add_argument("--output", required=True)
+    amend.add_argument("--max-total-model-cost-usd", required=True, type=float)
+    amend.add_argument("--reason", required=True)
 
     run = subparsers.add_parser("reader-holdout-run")
     run.add_argument("--plan", required=True)

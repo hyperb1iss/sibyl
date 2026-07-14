@@ -1268,6 +1268,84 @@ def test_reader_holdout_plan_rejects_source_derived_tampering(
         holdout.require_reader_holdout_plan(plan)
 
 
+def test_reader_holdout_cost_amendment_preserves_frozen_plan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holdout = _load_holdout_module()
+    replication_plan, replication_plan_path, report, report_path, source_runs = (
+        _write_holdout_source_inputs(tmp_path, holdout=holdout)
+    )
+    monkeypatch.setattr(
+        holdout,
+        "require_reader_replication_plan",
+        lambda _plan: source_runs,
+    )
+    plan = holdout.build_reader_holdout_plan(
+        replication_plan=replication_plan,
+        replication_plan_path=replication_plan_path,
+        replication_report=report,
+        replication_report_path=report_path,
+        output_root=tmp_path / "holdout",
+    )
+    plan_path = tmp_path / "holdout_plan.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+
+    amended = holdout.amend_reader_holdout_cost_budget(
+        plan=plan,
+        plan_path=plan_path,
+        max_total_model_cost_usd=holdout.MAX_AMENDED_TOTAL_MODEL_COST_USD,
+        reason="Provider costs exceeded the pilot estimate before score unblinding.",
+    )
+
+    assert "amendments" not in plan
+    assert amended["cost_budget"]["max_total_model_cost_usd"] == (
+        holdout.MAX_AMENDED_TOTAL_MODEL_COST_USD
+    )
+    assert amended["amendments"][0]["scores_read"] is False
+    assert amended["amendments"][0]["parent_plan"]["sha256"] == holdout.sha256_file(plan_path)
+    holdout.require_reader_holdout_plan(amended)
+
+    tampered = json.loads(json.dumps(amended))
+    tampered["amendments"][0]["scores_read"] = True
+    with pytest.raises(ValueError, match="invalid cost amendment"):
+        holdout.require_reader_holdout_plan(tampered)
+
+    tampered = json.loads(json.dumps(amended))
+    tampered["amendments"][0]["parent_plan"]["sha256"] = "sha256:wrong"
+    with pytest.raises(ValueError, match="changed its parent binding"):
+        holdout.require_reader_holdout_plan(tampered)
+
+    tampered = json.loads(json.dumps(amended))
+    tampered["amendments"][0]["amended_max_total_model_cost_usd"] = 11.0
+    with pytest.raises(ValueError, match="changed its budget evidence"):
+        holdout.require_reader_holdout_plan(tampered)
+
+    tampered = json.loads(json.dumps(amended))
+    tampered["created_at"] = "rewritten"
+    with pytest.raises(ValueError, match="changed the frozen plan"):
+        holdout.require_reader_holdout_plan(tampered)
+
+    amended_path = tmp_path / "amended_holdout_plan.json"
+    amended_path.write_text(json.dumps(amended), encoding="utf-8")
+    with pytest.raises(ValueError, match="already has an amendment"):
+        holdout.amend_reader_holdout_cost_budget(
+            plan=amended,
+            plan_path=amended_path,
+            max_total_model_cost_usd=holdout.MAX_AMENDED_TOTAL_MODEL_COST_USD,
+            reason="No chains.",
+        )
+
+    over_budget = holdout.MAX_AMENDED_TOTAL_MODEL_COST_USD + 0.01
+    with pytest.raises(ValueError, match="outside the allowed range"):
+        holdout.amend_reader_holdout_cost_budget(
+            plan=plan,
+            plan_path=plan_path,
+            max_total_model_cost_usd=over_budget,
+            reason="Too much.",
+        )
+
+
 def test_reader_holdout_resume_requires_score_blind_question_identity(tmp_path: Path) -> None:
     module = _load_module()
     holdout = _load_holdout_module()

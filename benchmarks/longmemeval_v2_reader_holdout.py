@@ -9,6 +9,7 @@ import signal
 import subprocess
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
@@ -41,6 +42,7 @@ from benchmarks.longmemeval_v2_reader_report import (
 
 ROOT = Path(__file__).resolve().parents[1]
 HOLDOUT_PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-reader-holdout-plan-v1"
+HOLDOUT_COST_AMENDMENT_SCHEMA_VERSION = "sibyl-longmemeval-v2-reader-holdout-cost-amendment-v1"
 HOLDOUT_CONFIGURATIONS = (
     "baseline_fixed_reader",
     "winner_fixed_reader",
@@ -56,6 +58,7 @@ TOTAL_QUESTION_COUNT = QUESTIONS_PER_DOMAIN * len(DOMAINS)
 HOLDOUT_SAMPLE_SEED = 20_260_713
 TOKEN_BOUNDED_MAX_RATIO = 1.2
 MAX_TOTAL_MODEL_COST_USD = 8.0
+MAX_AMENDED_TOTAL_MODEL_COST_USD = 12.0
 MAX_PILOT_COST_MULTIPLIER = 5.0
 PROCESS_POLL_SECONDS = 0.25
 PROCESS_TERMINATION_TIMEOUT_SECONDS = 5.0
@@ -194,6 +197,49 @@ def build_reader_holdout_plan(
     }
     require_reader_holdout_plan(plan)
     return plan
+
+
+def amend_reader_holdout_cost_budget(
+    *,
+    plan: dict[str, Any],
+    plan_path: Path,
+    max_total_model_cost_usd: float,
+    reason: str,
+) -> dict[str, Any]:
+    plan_path = plan_path.expanduser().resolve()
+    if load_json(plan_path) != plan:
+        raise ValueError("Reader holdout plan path does not match the loaded plan")
+    require_reader_holdout_plan(plan)
+    if plan.get("amendments") is not None:
+        raise ValueError("Reader holdout plan already has an amendment")
+    previous_max = float(plan["cost_budget"]["max_total_model_cost_usd"])
+    if not previous_max < max_total_model_cost_usd <= MAX_AMENDED_TOTAL_MODEL_COST_USD:
+        raise ValueError("Reader holdout amended cost budget is outside the allowed range")
+    reason = reason.strip()
+    if not reason:
+        raise ValueError("Reader holdout cost amendment requires a reason")
+
+    amended = deepcopy(plan)
+    amended["cost_budget"]["max_total_model_cost_usd"] = max_total_model_cost_usd
+    amended["amendments"] = [
+        {
+            "schema_version": HOLDOUT_COST_AMENDMENT_SCHEMA_VERSION,
+            "created_at": datetime.now(UTC).isoformat(),
+            "type": "cost_budget_only",
+            "parent_plan": {
+                "path": str(plan_path),
+                "sha256": sha256_file(plan_path),
+            },
+            "changed_fields": ["cost_budget.max_total_model_cost_usd"],
+            "previous_max_total_model_cost_usd": previous_max,
+            "amended_max_total_model_cost_usd": max_total_model_cost_usd,
+            "reason": reason,
+            "score_visibility_during_amendment": "none",
+            "scores_read": False,
+        }
+    ]
+    require_reader_holdout_plan(amended)
+    return amended
 
 
 def validate_replication_report_source(
@@ -484,11 +530,15 @@ def require_reader_holdout_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
     require_holdout_analysis(plan.get("analysis"))
     require_holdout_integrity(plan.get("integrity_contract"))
     require_holdout_selection(plan.get("selection"))
-    require_holdout_cost_budget(plan.get("cost_budget"))
+    require_holdout_cost_budget(
+        plan.get("cost_budget"),
+        amended=plan.get("amendments") is not None,
+    )
     runs = plan.get("runs")
     if not isinstance(runs, list):
         raise TypeError("Reader holdout plan has no runs")
     validate_holdout_runs(runs, plan=plan)
+    validate_holdout_amendment(plan)
     validate_holdout_sources(plan)
     return runs
 
@@ -584,18 +634,76 @@ def require_holdout_selection(raw: Any) -> None:
             raise ValueError(f"Reader holdout selection is invalid for {domain}")
 
 
-def require_holdout_cost_budget(raw: Any) -> None:
+def require_holdout_cost_budget(raw: Any, *, amended: bool) -> None:
     if not isinstance(raw, dict):
         raise TypeError("Reader holdout plan has no cost budget")
+    maximum = float(raw.get("max_total_model_cost_usd", -1.0))
+    expected_maximum = MAX_AMENDED_TOTAL_MODEL_COST_USD if amended else MAX_TOTAL_MODEL_COST_USD
     if (
         raw.get("holdout_question_runs")
         != TOTAL_QUESTION_COUNT * len(HOLDOUT_CONFIGURATIONS) * PASS_COUNT
-        or raw.get("max_total_model_cost_usd") != MAX_TOTAL_MODEL_COST_USD
+        or maximum > expected_maximum
+        or (amended and maximum <= MAX_TOTAL_MODEL_COST_USD)
+        or (not amended and maximum != MAX_TOTAL_MODEL_COST_USD)
         or raw.get("max_pilot_cost_multiplier") != MAX_PILOT_COST_MULTIPLIER
-        or float(raw.get("estimated_total_model_cost_usd", -1.0)) > MAX_TOTAL_MODEL_COST_USD
+        or float(raw.get("estimated_total_model_cost_usd", -1.0)) > maximum
         or raw.get("basis") != "provider-reported reader and judge cost from the five-pass pilot"
     ):
         raise ValueError("Reader holdout plan changed its cost budget")
+
+
+def validate_holdout_amendment(plan: dict[str, Any]) -> None:
+    raw = plan.get("amendments")
+    if raw is None:
+        return
+    if not isinstance(raw, list) or len(raw) != 1 or not isinstance(raw[0], dict):
+        raise ValueError("Reader holdout plan has an invalid amendment chain")
+    amendment = raw[0]
+    parent = amendment.get("parent_plan")
+    expected_keys = {
+        "schema_version",
+        "created_at",
+        "type",
+        "parent_plan",
+        "changed_fields",
+        "previous_max_total_model_cost_usd",
+        "amended_max_total_model_cost_usd",
+        "reason",
+        "score_visibility_during_amendment",
+        "scores_read",
+    }
+    if (
+        set(amendment) != expected_keys
+        or amendment.get("schema_version") != HOLDOUT_COST_AMENDMENT_SCHEMA_VERSION
+        or amendment.get("type") != "cost_budget_only"
+        or amendment.get("changed_fields") != ["cost_budget.max_total_model_cost_usd"]
+        or not isinstance(amendment.get("created_at"), str)
+        or not str(amendment.get("reason", "")).strip()
+        or amendment.get("score_visibility_during_amendment") != "none"
+        or amendment.get("scores_read") is not False
+        or not isinstance(parent, dict)
+        or set(parent) != {"path", "sha256"}
+    ):
+        raise ValueError("Reader holdout plan has an invalid cost amendment")
+    parent_path = Path(str(parent["path"])).resolve()
+    if not parent_path.is_file() or parent["sha256"] != sha256_file(parent_path):
+        raise ValueError("Reader holdout cost amendment changed its parent binding")
+    parent_plan = load_json(parent_path)
+    if parent_plan.get("amendments") is not None:
+        raise ValueError("Reader holdout cost amendment parent is not original")
+    require_reader_holdout_plan(parent_plan)
+    previous_max = float(parent_plan["cost_budget"]["max_total_model_cost_usd"])
+    amended_max = float(plan["cost_budget"]["max_total_model_cost_usd"])
+    if (
+        amendment["previous_max_total_model_cost_usd"] != previous_max
+        or amendment["amended_max_total_model_cost_usd"] != amended_max
+    ):
+        raise ValueError("Reader holdout cost amendment changed its budget evidence")
+    expected = deepcopy(parent_plan)
+    expected["cost_budget"]["max_total_model_cost_usd"] = amended_max
+    expected["amendments"] = raw
+    if expected != plan:
+        raise ValueError("Reader holdout cost amendment changed the frozen plan")
 
 
 def validate_holdout_runs(runs: list[Any], *, plan: dict[str, Any]) -> None:
@@ -680,7 +788,10 @@ def validate_holdout_sources(plan: dict[str, Any]) -> None:
         replication_report,
         replication_plan_path=Path(sources["replication_plan"]["path"]),
     )
-    if holdout_cost_budget(replication_report) != plan["cost_budget"]:
+    actual_cost_budget = deepcopy(plan["cost_budget"])
+    if plan.get("amendments") is not None:
+        actual_cost_budget["max_total_model_cost_usd"] = MAX_TOTAL_MODEL_COST_USD
+    if holdout_cost_budget(replication_report) != actual_cost_budget:
         raise ValueError("Reader holdout cost budget changed")
     validate_derived_holdout_commands(plan, source_commands=source_commands)
 
