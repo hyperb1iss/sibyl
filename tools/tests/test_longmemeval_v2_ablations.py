@@ -24,6 +24,10 @@ EXPECTED_READER_REPORT_CORRECT = 3
 EXPECTED_READER_REPORT_ACCURACY = 0.75
 EXPECTED_READER_REPORT_ACCURACY_DELTA = 0.25
 EXPECTED_READER_REPORT_RECOVERIES = 2
+EXPECTED_REPLICATION_RUN_COUNT = 20
+EXPECTED_REPLICATION_PASS_COUNT = 5
+EXPECTED_REPLICATION_WAVE_RUNS = 4
+EXPECTED_BOOTSTRAP_SAMPLES = 20_000
 STANDARD_CONTEXT_TOKENS = 200_000
 
 
@@ -40,6 +44,26 @@ def _load_module() -> ModuleType:
 def _load_official_runner_module() -> ModuleType:
     path = Path(__file__).parents[2] / "benchmarks" / "longmemeval_v2_official.py"
     spec = importlib.util.spec_from_file_location("longmemeval_v2_official", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_replication_module() -> ModuleType:
+    path = Path(__file__).parents[2] / "benchmarks" / "longmemeval_v2_reader_replication.py"
+    spec = importlib.util.spec_from_file_location("longmemeval_v2_reader_replication", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_replication_report_module() -> ModuleType:
+    path = Path(__file__).parents[2] / "benchmarks" / "longmemeval_v2_reader_replication_report.py"
+    spec = importlib.util.spec_from_file_location("longmemeval_v2_reader_replication_report", path)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -515,6 +539,402 @@ def test_reader_report_is_receipt_bound_and_descriptive(
         module.build_reader_report(reader_plan=duplicate_plan, run_roots=run_roots)
 
 
+def test_reader_replication_plan_is_fixed_receipt_bound_and_score_blind(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_module()
+    replication = _load_replication_module()
+    reader_plan, run_roots = _write_reader_report_inputs(tmp_path, replication_costs=True)
+    output_root = tmp_path / "replication"
+
+    plan = replication.build_reader_replication_plan(
+        reader_plan=reader_plan,
+        reader_plan_path=tmp_path / "reader_plan.json",
+        source_run_roots={name: run_roots[name] for name in replication.PRIMARY_CONFIGURATIONS},
+        output_root=output_root,
+    )
+
+    assert plan["protocol"]["passes_per_configuration"] == EXPECTED_REPLICATION_PASS_COUNT
+    assert plan["protocol"]["fixed_sample_no_sequential_stopping"] is True
+    assert len(plan["runs"]) == EXPECTED_REPLICATION_RUN_COUNT
+    assert sum(run["existing"] for run in plan["runs"]) == EXPECTED_REPLICATION_WAVE_RUNS
+    assert plan["integrity_contract"]["configuration_selection_uses_reader_scores"] is False
+    assert plan["integrity_contract"]["planning_uses_official_scoring_outputs"] is False
+    assert "answer_gold" not in json.dumps(plan)
+    replication.require_reader_replication_plan(plan)
+    second_pass_id = replication.pass_id(2)
+    second_pass = next(run for run in plan["runs"] if run["pass_id"] == second_pass_id)
+    assert second_pass["shuffle_questions_seed"] == replication.PASS_SEEDS[1]
+    assert "--shuffle-questions-seed" in second_pass["command"]
+
+    reader_plan_path = tmp_path / "reader_plan.json"
+    replication_plan_path = tmp_path / "replication_plan.json"
+    reader_plan_path.write_text(json.dumps(reader_plan), encoding="utf-8")
+    arguments = [
+        "reader-replication-plan",
+        "--reader-plan",
+        str(reader_plan_path),
+    ]
+    for name in replication.PRIMARY_CONFIGURATIONS:
+        arguments.extend(("--source-run", f"{name}={run_roots[name]}"))
+    arguments.extend(
+        (
+            "--output-root",
+            str(output_root),
+            "--output",
+            str(replication_plan_path),
+        )
+    )
+    assert module.main(arguments) == 0
+    capsys.readouterr()
+    cli_plan = json.loads(replication_plan_path.read_text(encoding="utf-8"))
+    assert cli_plan["source_artifacts"]["reader_plan"]["sha256"] == module.sha256_file(
+        reader_plan_path
+    )
+
+
+def test_reader_replication_plan_rejects_tampering(tmp_path: Path) -> None:
+    replication = _load_replication_module()
+    reader_plan, run_roots = _write_reader_report_inputs(tmp_path, replication_costs=True)
+    plan = replication.build_reader_replication_plan(
+        reader_plan=reader_plan,
+        reader_plan_path=tmp_path / "reader_plan.json",
+        source_run_roots={name: run_roots[name] for name in replication.PRIMARY_CONFIGURATIONS},
+        output_root=tmp_path / "replication",
+    )
+    second_pass_id = replication.pass_id(2)
+
+    tampered = json.loads(json.dumps(plan))
+    tampered_run = next(run for run in tampered["runs"] if run["pass_id"] == second_pass_id)
+    seed_index = tampered_run["command"].index("--shuffle-questions-seed") + 1
+    tampered_run["command"][seed_index] = "999"
+    with pytest.raises(ValueError, match="question order"):
+        replication.require_reader_replication_plan(tampered)
+
+    tampered = json.loads(json.dumps(plan))
+    tampered["runs"][0]["command"][0] = "python"
+    with pytest.raises(ValueError, match="executable"):
+        replication.require_reader_replication_plan(tampered)
+
+    tampered = json.loads(json.dumps(plan))
+    tampered_run = next(run for run in tampered["runs"] if run["pass_id"] == second_pass_id)
+    tampered_run["command"].extend(("--limit", "1"))
+    with pytest.raises(ValueError, match="derived command"):
+        replication.require_reader_replication_plan(tampered)
+
+    tampered = json.loads(json.dumps(plan))
+    tampered_run = next(run for run in tampered["runs"] if run["pass_id"] == second_pass_id)
+    tampered_run["command"].extend(("--reader-model", "other-model"))
+    with pytest.raises(ValueError, match="repeats options"):
+        replication.require_reader_replication_plan(tampered)
+
+    tampered = json.loads(json.dumps(plan))
+    tampered_run = next(run for run in tampered["runs"] if run["pass_id"] == second_pass_id)
+    output_index = tampered_run["command"].index("--output-dir") + 1
+    tampered_run["command"][output_index] = str(tmp_path / "escaped")
+    tampered_run["output_dir"] = str(tmp_path / "escaped")
+    with pytest.raises(ValueError, match="escaped its output root"):
+        replication.require_reader_replication_plan(tampered)
+
+
+def test_reader_replication_plan_rejects_contract_tampering(tmp_path: Path) -> None:
+    replication = _load_replication_module()
+    reader_plan, run_roots = _write_reader_report_inputs(tmp_path, replication_costs=True)
+    plan = replication.build_reader_replication_plan(
+        reader_plan=reader_plan,
+        reader_plan_path=tmp_path / "reader_plan.json",
+        source_run_roots={name: run_roots[name] for name in replication.PRIMARY_CONFIGURATIONS},
+        output_root=tmp_path / "replication",
+    )
+
+    tampered = json.loads(json.dumps(plan))
+    tampered["analysis"]["cluster_bootstrap_samples"] = 1
+    with pytest.raises(ValueError, match="analysis contract"):
+        replication.require_reader_replication_plan(tampered)
+
+    tampered = json.loads(json.dumps(plan))
+    del tampered["source_artifacts"]["reader_plan"]
+    with pytest.raises(TypeError, match="reader plan binding"):
+        replication.require_reader_replication_plan(tampered)
+
+    tampered = json.loads(json.dumps(plan))
+    tampered["cost_budget"]["estimated_incremental_model_cost_usd"] = 0.01
+    with pytest.raises(ValueError, match="cost budget"):
+        replication.require_reader_replication_plan(tampered)
+
+
+def test_reader_replication_planning_does_not_parse_official_scores(tmp_path: Path) -> None:
+    replication = _load_replication_module()
+    reader_plan, run_roots = _write_reader_report_inputs(tmp_path, replication_costs=True)
+    score_path = run_roots["baseline_fixed_reader"] / "web" / "per_question.jsonl"
+    rows = [json.loads(line) for line in score_path.read_text(encoding="utf-8").splitlines()]
+    rows[0]["score_bool"] = "not-a-score"
+    _write_jsonl(score_path, rows)
+
+    plan = replication.build_reader_replication_plan(
+        reader_plan=reader_plan,
+        reader_plan_path=tmp_path / "reader_plan.json",
+        source_run_roots={name: run_roots[name] for name in replication.PRIMARY_CONFIGURATIONS},
+        output_root=tmp_path / "replication",
+    )
+
+    assert plan["integrity_contract"]["planning_uses_official_scoring_outputs"] is False
+
+
+def test_reader_replication_planning_accepts_default_evaluator_endpoint(tmp_path: Path) -> None:
+    replication = _load_replication_module()
+    reader_plan, run_roots = _write_reader_report_inputs(tmp_path, replication_costs=True)
+    for configuration in replication.PRIMARY_CONFIGURATIONS:
+        for domain in ("web", "enterprise"):
+            run_args_path = run_roots[configuration] / domain / "run_args.json"
+            run_args = json.loads(run_args_path.read_text(encoding="utf-8"))
+            run_args["evaluator_base_url"] = ""
+            run_args_path.write_text(json.dumps(run_args), encoding="utf-8")
+
+    plan = replication.build_reader_replication_plan(
+        reader_plan=reader_plan,
+        reader_plan_path=tmp_path / "reader_plan.json",
+        source_run_roots={name: run_roots[name] for name in replication.PRIMARY_CONFIGURATIONS},
+        output_root=tmp_path / "replication",
+    )
+
+    assert all("--evaluator-base-url" in run["command"] for run in plan["runs"])
+
+
+def test_reader_replication_runner_rejects_changed_source_artifact(tmp_path: Path) -> None:
+    replication = _load_replication_module()
+    reader_plan, run_roots = _write_reader_report_inputs(tmp_path, replication_costs=True)
+    plan = replication.build_reader_replication_plan(
+        reader_plan=reader_plan,
+        reader_plan_path=tmp_path / "reader_plan.json",
+        source_run_roots={name: run_roots[name] for name in replication.PRIMARY_CONFIGURATIONS},
+        output_root=tmp_path / "replication",
+    )
+    score_path = run_roots["baseline_fixed_reader"] / "web" / "per_question.jsonl"
+    rows = [json.loads(line) for line in score_path.read_text(encoding="utf-8").splitlines()]
+    rows[0]["question_type"] = "changed-after-planning"
+    _write_jsonl(score_path, rows)
+
+    with pytest.raises(ValueError, match="changed after planning"):
+        replication.run_reader_replication_plan(plan)
+
+
+def test_reader_replication_runner_resumes_valid_receipts(tmp_path: Path) -> None:
+    module = _load_module()
+    replication = _load_replication_module()
+    reader_plan, run_roots = _write_reader_report_inputs(tmp_path, replication_costs=True)
+    plan = replication.build_reader_replication_plan(
+        reader_plan=reader_plan,
+        reader_plan_path=tmp_path / "reader_plan.json",
+        source_run_roots={name: run_roots[name] for name in replication.PRIMARY_CONFIGURATIONS},
+        output_root=tmp_path / "replication",
+    )
+    for run in plan["runs"]:
+        if run["existing"]:
+            continue
+        expected = replication.expected_run_config(run["command"])
+        config = {key: expected[key] for key in module.QUERY_OVERRIDE_KEYS}
+        _write_reader_report_run(
+            Path(run["output_dir"]),
+            domain=run["domain"],
+            question_ids=expected["question_ids"],
+            scores=(True, False),
+            config=config,
+            memory_limit=expected["memory_context_max_tokens"],
+            memory_dir=Path(expected["load_memory_dir"]),
+            model_cost=0.10,
+            shuffle_questions_seed=run["shuffle_questions_seed"],
+        )
+
+    result = replication.run_reader_replication_plan(plan)
+
+    assert result["status"] == "PASS"
+    assert result["completed"] == []
+    assert len(result["skipped"]) == EXPECTED_REPLICATION_RUN_COUNT - EXPECTED_REPLICATION_WAVE_RUNS
+    assert result["failures"] == []
+
+
+def test_reader_replication_runner_stops_after_failed_wave(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    replication = _load_replication_module()
+    reader_plan, run_roots = _write_reader_report_inputs(tmp_path, replication_costs=True)
+    plan = replication.build_reader_replication_plan(
+        reader_plan=reader_plan,
+        reader_plan_path=tmp_path / "reader_plan.json",
+        source_run_roots={name: run_roots[name] for name in replication.PRIMARY_CONFIGURATIONS},
+        output_root=tmp_path / "replication",
+    )
+    waves = []
+
+    def fail_wave(
+        runs: list[dict[str, Any]],
+        *,
+        max_workers: int,
+    ) -> list[tuple[dict[str, Any], int]]:
+        waves.append((runs, max_workers))
+        return [(run, 1) for run in runs]
+
+    monkeypatch.setattr(replication, "execute_wave", fail_wave)
+
+    result = replication.run_reader_replication_plan(plan)
+
+    assert result["status"] == "FAIL"
+    assert len(waves) == 1
+    assert len(result["failures"]) == EXPECTED_REPLICATION_WAVE_RUNS
+
+
+def test_reader_replication_runner_enforces_worker_and_actual_cost_caps(tmp_path: Path) -> None:
+    module = _load_module()
+    replication = _load_replication_module()
+    reader_plan, run_roots = _write_reader_report_inputs(tmp_path, replication_costs=True)
+    plan = replication.build_reader_replication_plan(
+        reader_plan=reader_plan,
+        reader_plan_path=tmp_path / "reader_plan.json",
+        source_run_roots={name: run_roots[name] for name in replication.PRIMARY_CONFIGURATIONS},
+        output_root=tmp_path / "replication",
+    )
+    with pytest.raises(ValueError, match="predeclared cap"):
+        replication.run_reader_replication_plan(plan, max_workers=5)
+
+    for run in plan["runs"]:
+        if run["existing"]:
+            continue
+        expected = replication.expected_run_config(run["command"])
+        _write_reader_report_run(
+            Path(run["output_dir"]),
+            domain=run["domain"],
+            question_ids=expected["question_ids"],
+            scores=(True, False),
+            config={key: expected[key] for key in module.QUERY_OVERRIDE_KEYS},
+            memory_limit=expected["memory_context_max_tokens"],
+            memory_dir=Path(expected["load_memory_dir"]),
+            model_cost=0.20,
+            shuffle_questions_seed=run["shuffle_questions_seed"],
+        )
+
+    result = replication.run_reader_replication_plan(plan)
+
+    assert result["status"] == "FAIL"
+    assert result["failures"] == [
+        {
+            "cost_budget_exceeded": True,
+            "incremental_model_cost_usd": pytest.approx(2.64),
+        }
+    ]
+    assert len(result["skipped"]) == 3 * EXPECTED_REPLICATION_WAVE_RUNS
+
+    plan_path = tmp_path / "replication_plan.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    report = _load_replication_report_module().build_reader_replication_report(
+        plan=plan,
+        plan_path=plan_path,
+    )
+    assert report["status"] == "FAIL"
+    assert report["promotion_eligible"] is False
+
+
+def test_reader_replication_bootstrap_is_deterministic_and_nontrivial() -> None:
+    replication_report = _load_replication_report_module()
+    effects = [-1.0, 0.0, 0.5, 1.0]
+
+    first = replication_report.cluster_bootstrap(effects)
+    second = replication_report.cluster_bootstrap(effects)
+
+    assert first == second
+    assert first["confidence_interval"]["lower"] < first["mean_accuracy_delta"]
+    assert first["confidence_interval"]["upper"] > first["mean_accuracy_delta"]
+    assert 0.0 < first["probability_positive"] < 1.0
+
+
+@pytest.mark.parametrize(
+    ("baseline_scores", "candidate_scores", "expected_outcome"),
+    [
+        ((False, False), (True, True), "GO"),
+        ((True, True), (False, False), "NO-GO"),
+        ((True, False), (True, False), "RESEARCH-MORE"),
+    ],
+)
+def test_reader_replication_report_applies_frozen_decision_rule(
+    tmp_path: Path,
+    baseline_scores: tuple[bool, bool],
+    candidate_scores: tuple[bool, bool],
+    expected_outcome: str,
+) -> None:
+    replication_report = _load_replication_report_module()
+    plan, plan_path = _write_replication_report_inputs(
+        tmp_path,
+        baseline_scores=baseline_scores,
+        candidate_scores=candidate_scores,
+    )
+
+    report = replication_report.build_reader_replication_report(
+        plan=plan,
+        plan_path=plan_path,
+    )
+
+    assert report["status"] == "PASS"
+    assert report["comparison"]["decision"]["outcome"] == expected_outcome
+    assert report["comparison"]["cluster_bootstrap"]["samples"] == EXPECTED_BOOTSTRAP_SAMPLES
+    assert len(report["comparison"]["per_pass"]) == EXPECTED_REPLICATION_PASS_COUNT
+    assert report["costs"]["within_incremental_budget"] is True
+    assert "answer_gold" not in json.dumps(report)
+    assert "gold-sentinel" not in json.dumps(report)
+
+
+def test_reader_replication_report_cli_and_incomplete_receipt(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_module()
+    plan, plan_path = _write_replication_report_inputs(
+        tmp_path,
+        baseline_scores=(False, False),
+        candidate_scores=(True, True),
+    )
+    output_path = tmp_path / "replication_report.json"
+
+    assert (
+        module.main(
+            [
+                "reader-replication-report",
+                "--plan",
+                str(plan_path),
+                "--output",
+                str(output_path),
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    report = json.loads(output_path.read_text(encoding="utf-8"))
+    assert report["source_artifacts"]["replication_plan"]["sha256"] == module.sha256_file(plan_path)
+
+    incomplete = next(run for run in plan["runs"] if not run["existing"])
+    (Path(incomplete["output_dir"]) / "exit_code").unlink()
+    with pytest.raises(FileNotFoundError, match="exit_code"):
+        module.build_reader_replication_report(plan=plan, plan_path=plan_path)
+
+
+def test_reader_replication_report_rejects_source_content_drift(tmp_path: Path) -> None:
+    module = _load_module()
+    plan, plan_path = _write_replication_report_inputs(
+        tmp_path,
+        baseline_scores=(False, False),
+        candidate_scores=(True, True),
+    )
+    run = next(item for item in plan["runs"] if not item["existing"])
+    receipt_path = Path(run["output_dir"]) / "longmemeval_v2_official_receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["dataset"]["questions_sha256"] = "sha256:changed"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="source content identity"):
+        module.build_reader_replication_report(plan=plan, plan_path=plan_path)
+
+
 @pytest.mark.parametrize(
     ("tamper", "exception", "message"),
     [
@@ -525,6 +945,8 @@ def test_reader_report_is_receipt_bound_and_descriptive(
         ("evaluator_model", ValueError, "missing model pins"),
         ("generation", ValueError, "planned generation config"),
         ("memory", ValueError, "planned memory build"),
+        ("runtime", ValueError, "planned runtime config"),
+        ("shuffle", ValueError, "planned question order"),
         ("questions", ValueError, "question set does not match"),
         ("source_integrity", ValueError, "incomplete source integrity"),
         ("exit", ValueError, "did not exit cleanly"),
@@ -539,55 +961,68 @@ def test_reader_report_rejects_inconsistent_run_receipts(
     module = _load_module()
     plan, run_roots = _write_reader_report_inputs(tmp_path)
     run_dir = run_roots["baseline_fixed_reader"] / "web"
-    receipt_path = run_dir / "longmemeval_v2_official_receipt.json"
-    run_args_path = run_dir / "run_args.json"
-
-    if tamper == "accuracy":
-        path = run_dir / "aggregated_metrics.json"
-        value = json.loads(path.read_text(encoding="utf-8"))
-        value["overall"]["overall_full_set"] = 0.25
-        path.write_text(json.dumps(value), encoding="utf-8")
-    elif tamper in {
-        "cost",
-        "cost_value",
-        "domain",
-        "evaluator_model",
-        "source_integrity",
-    }:
-        value = json.loads(receipt_path.read_text(encoding="utf-8"))
-        if tamper == "cost":
-            value["accounting"]["reader"]["cost_coverage_complete"] = False
-        elif tamper == "cost_value":
-            del value["accounting"]["reader"]["provider_reported_cost_usd"]
-        elif tamper == "domain":
-            value["domain"] = "enterprise"
-        elif tamper == "evaluator_model":
-            value["models"]["evaluator_model"] = ""
-        else:
-            value["source_runs"]["integrity_complete"] = False
-        receipt_path.write_text(json.dumps(value), encoding="utf-8")
-    elif tamper in {"generation", "memory"}:
-        value = json.loads(run_args_path.read_text(encoding="utf-8"))
-        if tamper == "generation":
-            value["top_p"] = 0.5
-        else:
-            value["load_memory_dir"] = str(tmp_path / "other-memory")
-        run_args_path.write_text(json.dumps(value), encoding="utf-8")
-    elif tamper == "questions":
-        rows = json.loads(
-            (run_dir / "per_question.jsonl").read_text(encoding="utf-8").splitlines()[0]
-        )
-        rows["question_id"] = "different-question"
-        remaining = (run_dir / "per_question.jsonl").read_text(encoding="utf-8").splitlines()[1:]
-        (run_dir / "per_question.jsonl").write_text(
-            "\n".join((json.dumps(rows), *remaining)) + "\n",
-            encoding="utf-8",
-        )
-    else:
-        (run_dir / "exit_code").write_text("1\n", encoding="utf-8")
+    _tamper_reader_run(tamper, run_dir=run_dir, tmp_path=tmp_path)
 
     with pytest.raises(exception, match=message):
         module.build_reader_report(reader_plan=plan, run_roots=run_roots)
+
+
+def _tamper_reader_run(tamper: str, *, run_dir: Path, tmp_path: Path) -> None:
+    if tamper == "accuracy":
+        _tamper_reader_accuracy(run_dir)
+    elif tamper in {"cost", "cost_value", "domain", "evaluator_model", "source_integrity"}:
+        _tamper_reader_receipt(tamper, run_dir)
+    elif tamper in {"generation", "memory", "runtime", "shuffle"}:
+        _tamper_reader_args(tamper, run_dir=run_dir, tmp_path=tmp_path)
+    elif tamper == "questions":
+        _tamper_reader_questions(run_dir)
+    else:
+        (run_dir / "exit_code").write_text("1\n", encoding="utf-8")
+
+
+def _tamper_reader_accuracy(run_dir: Path) -> None:
+    path = run_dir / "aggregated_metrics.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["overall"]["overall_full_set"] = 0.25
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+
+def _tamper_reader_receipt(tamper: str, run_dir: Path) -> None:
+    path = run_dir / "longmemeval_v2_official_receipt.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if tamper == "cost":
+        value["accounting"]["reader"]["cost_coverage_complete"] = False
+    elif tamper == "cost_value":
+        del value["accounting"]["reader"]["provider_reported_cost_usd"]
+    elif tamper == "domain":
+        value["domain"] = "enterprise"
+    elif tamper == "evaluator_model":
+        value["models"]["evaluator_model"] = ""
+    else:
+        value["source_runs"]["integrity_complete"] = False
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+
+def _tamper_reader_args(tamper: str, *, run_dir: Path, tmp_path: Path) -> None:
+    path = run_dir / "run_args.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if tamper == "generation":
+        value["top_p"] = 0.5
+    elif tamper == "memory":
+        value["load_memory_dir"] = str(tmp_path / "other-memory")
+    elif tamper == "runtime":
+        value["reader_max_concurrent_requests"] = 4
+    else:
+        value["shuffle_questions_seed"] = 123
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+
+def _tamper_reader_questions(run_dir: Path) -> None:
+    path = run_dir / "per_question.jsonl"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    row = json.loads(lines[0])
+    row["question_id"] = "different-question"
+    path.write_text("\n".join((json.dumps(row), *lines[1:])) + "\n", encoding="utf-8")
 
 
 def test_retrieval_accounting_combines_saved_ingest_and_query_cost() -> None:
@@ -775,6 +1210,8 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def _write_reader_report_inputs(
     tmp_path: Path,
+    *,
+    replication_costs: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Path]]:
     configurations = (
         "baseline_fixed_reader",
@@ -833,6 +1270,8 @@ def _write_reader_report_inputs(
                 "0.95",
                 "--reader-top-k",
                 "20",
+                "--reader-max-concurrent-requests",
+                "16",
                 "--memory-context-max-tokens",
                 str(memory_limit),
                 "--question-ids",
@@ -844,6 +1283,7 @@ def _write_reader_report_inputs(
                     command.append(flag if value else f"--no-{flag.removeprefix('--')}")
                 else:
                     command.extend((flag, str(value)))
+            command.append("--allow-localhost")
             plan["commands"].append(
                 {
                     "configuration": configuration,
@@ -859,9 +1299,65 @@ def _write_reader_report_inputs(
                 config=config,
                 memory_limit=memory_limit,
                 memory_dir=memory_dir,
-                model_cost=0.20 if configuration == "winner_fixed_reader" else 0.10,
+                model_cost=(
+                    0.10 if replication_costs or configuration != "winner_fixed_reader" else 0.20
+                ),
             )
+    (tmp_path / "reader_plan.json").write_text(json.dumps(plan), encoding="utf-8")
     return plan, run_roots
+
+
+def _write_replication_report_inputs(
+    tmp_path: Path,
+    *,
+    baseline_scores: tuple[bool, bool],
+    candidate_scores: tuple[bool, bool],
+) -> tuple[dict[str, Any], Path]:
+    module = _load_module()
+    replication = _load_replication_module()
+    reader_plan, run_roots = _write_reader_report_inputs(tmp_path)
+    scores_by_configuration = {
+        "baseline_fixed_reader": baseline_scores,
+        "winner_fixed_reader": candidate_scores,
+    }
+    commands = replication.reader_command_map(reader_plan)
+    for configuration in replication.PRIMARY_CONFIGURATIONS:
+        for domain in module.DOMAINS:
+            expected = replication.expected_run_config(commands[(configuration, domain)])
+            _write_reader_report_run(
+                run_roots[configuration] / domain,
+                domain=domain,
+                question_ids=expected["question_ids"],
+                scores=scores_by_configuration[configuration],
+                config={key: expected[key] for key in module.QUERY_OVERRIDE_KEYS},
+                memory_limit=expected["memory_context_max_tokens"],
+                memory_dir=Path(expected["load_memory_dir"]),
+                model_cost=0.10,
+            )
+    plan = replication.build_reader_replication_plan(
+        reader_plan=reader_plan,
+        reader_plan_path=tmp_path / "reader_plan.json",
+        source_run_roots={name: run_roots[name] for name in replication.PRIMARY_CONFIGURATIONS},
+        output_root=tmp_path / "replication",
+    )
+    for run in plan["runs"]:
+        if run["existing"]:
+            continue
+        expected = replication.expected_run_config(run["command"])
+        _write_reader_report_run(
+            Path(run["output_dir"]),
+            domain=run["domain"],
+            question_ids=expected["question_ids"],
+            scores=scores_by_configuration[run["configuration"]],
+            config={key: expected[key] for key in module.QUERY_OVERRIDE_KEYS},
+            memory_limit=expected["memory_context_max_tokens"],
+            memory_dir=Path(expected["load_memory_dir"]),
+            model_cost=0.10,
+            shuffle_questions_seed=run["shuffle_questions_seed"],
+        )
+    plan_path = tmp_path / "replication_plan.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    return plan, plan_path
 
 
 def _write_reader_report_run(
@@ -874,8 +1370,9 @@ def _write_reader_report_run(
     memory_limit: int,
     memory_dir: Path,
     model_cost: float,
+    shuffle_questions_seed: int | None = None,
 ) -> None:
-    run_dir.mkdir(parents=True)
+    run_dir.mkdir(parents=True, exist_ok=True)
     rows = [
         {
             "question_id": question_id,
@@ -895,9 +1392,22 @@ def _write_reader_report_run(
                 "output_dir": str(run_dir),
                 "load_memory_dir": str(memory_dir),
                 "model": "qwen/qwen3.5-9b",
+                "base_url": "https://openrouter.ai/api/v1",
+                "api_key_env": "OPENROUTER_API_KEY",
                 "temperature": 0.6,
                 "top_p": 0.95,
                 "top_k": 20,
+                "shuffle_questions_seed": shuffle_questions_seed,
+                "reader_max_concurrent_requests": 16,
+                "max_completion_tokens": 20_000,
+                "timeout_seconds": 43_200.0,
+                "evaluator_model": "openai/gpt-5.2",
+                "evaluator_base_url": "https://openrouter.ai/api/v1",
+                "evaluator_api_key_env": "OPENROUTER_API_KEY",
+                "evaluator_reasoning_effort": "medium",
+                "evaluator_max_completion_tokens": 4096,
+                "evaluator_timeout_seconds": 43_200.0,
+                "prompt_build_max_workers": 1,
             }
         ),
         encoding="utf-8",
@@ -923,6 +1433,12 @@ def _write_reader_report_run(
     )
     receipt = {
         "domain": domain,
+        "official_repo": {"commit": "official-commit"},
+        "dataset": {
+            "questions_sha256": "sha256:questions",
+            "trajectories_sha256": "sha256:trajectories",
+            "haystack_sha256": f"sha256:{domain}-haystack",
+        },
         "models": {
             "reader_model": "qwen/qwen3.5-9b",
             "evaluator_model": "openai/gpt-5.2",

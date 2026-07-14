@@ -149,7 +149,11 @@ def planned_runs(reader_plan: dict[str, Any]) -> dict[tuple[str, str], dict[str,
 
 def expected_run_config(command: list[Any]) -> dict[str, Any]:
     values = [str(item) for item in command]
+    ensure_unique_options(values)
     result: dict[str, Any] = {
+        "official_repo": optional_option(values, "--official-repo"),
+        "data_root": optional_option(values, "--data-root"),
+        "tier": optional_option(values, "--tier"),
         "domain": option_value(values, "--domain"),
         "output_dir": option_value(values, "--output-dir"),
         "load_memory_dir": option_value(values, "--load-memory-dir"),
@@ -159,6 +163,23 @@ def expected_run_config(command: list[Any]) -> dict[str, Any]:
         "reader_top_k": int(option_value(values, "--reader-top-k")),
         "question_ids": option_values(values, "--question-ids"),
         "memory_context_max_tokens": int(option_value(values, "--memory-context-max-tokens")),
+        "shuffle_questions_seed": optional_int_option(values, "--shuffle-questions-seed"),
+        "reader_base_url": optional_option(values, "--reader-base-url"),
+        "reader_api_key_env": optional_option(values, "--reader-api-key-env"),
+        "reader_max_concurrent_requests": optional_int_option(
+            values, "--reader-max-concurrent-requests"
+        ),
+        "max_completion_tokens": optional_int_option(values, "--max-completion-tokens"),
+        "timeout_seconds": optional_float_option(values, "--timeout-seconds"),
+        "evaluator_model": optional_option(values, "--evaluator-model"),
+        "evaluator_base_url": optional_option(values, "--evaluator-base-url"),
+        "evaluator_api_key_env": optional_option(values, "--evaluator-api-key-env"),
+        "evaluator_reasoning_effort": optional_option(values, "--evaluator-reasoning-effort"),
+        "evaluator_max_completion_tokens": optional_int_option(
+            values, "--evaluator-max-completion-tokens"
+        ),
+        "evaluator_timeout_seconds": optional_float_option(values, "--evaluator-timeout-seconds"),
+        "prompt_build_max_workers": optional_int_option(values, "--prompt-build-max-workers"),
     }
     for key in QUERY_OVERRIDE_KEYS:
         flag = f"--{key.replace('_', '-')}"
@@ -202,6 +223,11 @@ def load_reader_run(
     )
     source = {
         "path": str(run_dir),
+        "input_identity": reader_input_identity(
+            receipt=receipt,
+            expected=expected,
+            run_dir=run_dir,
+        ),
         "artifacts": {
             name: {"path": str(run_dir / name), "sha256": sha256_file(run_dir / name)}
             for name in REQUIRED_RUN_FILES
@@ -264,6 +290,10 @@ def validate_reader_run_identity(
         key: expected[key] for key in ("reader_temperature", "reader_top_p", "reader_top_k")
     }:
         raise ValueError(f"Reader run does not match planned generation config: {run_dir}")
+    if run_args.get("shuffle_questions_seed") != expected["shuffle_questions_seed"]:
+        raise ValueError(f"Reader run does not match planned question order: {run_dir}")
+    validate_official_inputs(run_dir=run_dir, expected=expected, receipt=receipt)
+    validate_optional_runtime_config(run_dir=run_dir, expected=expected, run_args=run_args)
     source_runs = receipt.get("source_runs")
     if not isinstance(source_runs, dict) or any(
         source_runs.get(key) is not True
@@ -271,6 +301,62 @@ def validate_reader_run_identity(
     ):
         raise ValueError(f"Reader run has incomplete source integrity: {run_dir}")
     return actual_reader_model, str(receipt_models.get("evaluator_model") or "")
+
+
+def validate_official_inputs(
+    *,
+    run_dir: Path,
+    expected: dict[str, Any],
+    receipt: dict[str, Any],
+) -> None:
+    if expected["official_repo"] is not None:
+        official_repo = receipt.get("official_repo")
+        if (
+            not isinstance(official_repo, dict)
+            or Path(str(official_repo.get("path") or "")).resolve()
+            != Path(expected["official_repo"]).resolve()
+        ):
+            raise ValueError(f"Reader run does not match planned official repository: {run_dir}")
+    if expected["data_root"] is not None:
+        dataset = receipt.get("dataset")
+        if (
+            not isinstance(dataset, dict)
+            or Path(str(dataset.get("data_root") or "")).resolve()
+            != Path(expected["data_root"]).resolve()
+            or str(dataset.get("tier") or "") != expected["tier"]
+        ):
+            raise ValueError(f"Reader run does not match planned dataset: {run_dir}")
+
+
+def reader_input_identity(
+    *,
+    receipt: dict[str, Any],
+    expected: dict[str, Any],
+    run_dir: Path,
+) -> dict[str, str]:
+    official_repo = receipt.get("official_repo")
+    dataset = receipt.get("dataset")
+    identity = {
+        "official_repo_commit": (
+            str(official_repo.get("commit") or "") if isinstance(official_repo, dict) else ""
+        ),
+        "questions_sha256": (
+            str(dataset.get("questions_sha256") or "") if isinstance(dataset, dict) else ""
+        ),
+        "trajectories_sha256": (
+            str(dataset.get("trajectories_sha256") or "") if isinstance(dataset, dict) else ""
+        ),
+        "haystack_sha256": (
+            str(dataset.get("haystack_sha256") or "") if isinstance(dataset, dict) else ""
+        ),
+    }
+    if expected["official_repo"] is not None and not identity["official_repo_commit"]:
+        raise ValueError(f"Reader run has no official repository commit: {run_dir}")
+    if expected["data_root"] is not None and any(
+        not identity[key] for key in ("questions_sha256", "trajectories_sha256", "haystack_sha256")
+    ):
+        raise ValueError(f"Reader run has incomplete dataset hashes: {run_dir}")
+    return identity
 
 
 def validate_reader_scores(
@@ -303,6 +389,35 @@ def validate_reader_scores(
         }
         for row in rows
     }
+
+
+def validate_optional_runtime_config(
+    *,
+    run_dir: Path,
+    expected: dict[str, Any],
+    run_args: dict[str, Any],
+) -> None:
+    actual = {
+        "reader_base_url": run_args.get("base_url"),
+        "reader_api_key_env": run_args.get("api_key_env"),
+        "reader_max_concurrent_requests": run_args.get("reader_max_concurrent_requests"),
+        "max_completion_tokens": run_args.get("max_completion_tokens"),
+        "timeout_seconds": run_args.get("timeout_seconds"),
+        "evaluator_model": run_args.get("evaluator_model"),
+        "evaluator_base_url": run_args.get("evaluator_base_url"),
+        "evaluator_api_key_env": run_args.get("evaluator_api_key_env"),
+        "evaluator_reasoning_effort": run_args.get("evaluator_reasoning_effort"),
+        "evaluator_max_completion_tokens": run_args.get("evaluator_max_completion_tokens"),
+        "evaluator_timeout_seconds": run_args.get("evaluator_timeout_seconds"),
+        "prompt_build_max_workers": run_args.get("prompt_build_max_workers"),
+    }
+    mismatches = {
+        key: (expected[key], actual[key])
+        for key in actual
+        if expected[key] is not None and expected[key] != actual[key]
+    }
+    if mismatches:
+        raise ValueError(f"Reader run does not match planned runtime config: {run_dir}")
 
 
 def reader_model_cost(*, run_dir: Path, receipt: dict[str, Any]) -> float:
@@ -450,6 +565,13 @@ def option_value(command: list[str], flag: str) -> str:
     return value
 
 
+def ensure_unique_options(command: list[str]) -> None:
+    options = [value for value in command if value.startswith("--") and value != "--"]
+    duplicates = sorted({value for value in options if options.count(value) > 1})
+    if duplicates:
+        raise ValueError(f"Reader command repeats options: {duplicates}")
+
+
 def option_values(command: list[str], flag: str) -> list[str]:
     try:
         index = command.index(flag) + 1
@@ -462,6 +584,26 @@ def option_values(command: list[str], flag: str) -> list[str]:
     if not values:
         raise ValueError(f"Reader command has no values for {flag}")
     return values
+
+
+def optional_int_option(command: list[str], flag: str) -> int | None:
+    value = optional_option(command, flag)
+    if value is None:
+        return None
+    return int(value)
+
+
+def optional_float_option(command: list[str], flag: str) -> float | None:
+    value = optional_option(command, flag)
+    if value is None:
+        return None
+    return float(value)
+
+
+def optional_option(command: list[str], flag: str) -> str | None:
+    if flag not in command:
+        return None
+    return option_value(command, flag)
 
 
 def load_json(path: Path) -> dict[str, Any]:

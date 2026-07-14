@@ -22,6 +22,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmarks.git_provenance import git_provenance  # noqa: E402
+from benchmarks.longmemeval_v2_reader_replication import (  # noqa: E402
+    DEFAULT_MAX_WORKERS,
+    build_reader_replication_plan,
+    run_reader_replication_plan,
+)
+from benchmarks.longmemeval_v2_reader_replication_report import (  # noqa: E402
+    build_reader_replication_report,
+)
 from benchmarks.longmemeval_v2_reader_report import build_reader_report  # noqa: E402
 
 SCHEMA_VERSION = "sibyl-longmemeval-v2-ablations-v1"
@@ -157,6 +165,16 @@ def main(argv: list[str] | None = None) -> int:
         write_json(Path(args.output).expanduser().resolve(), gate)
         print(json.dumps(gate, indent=2, sort_keys=True))  # noqa: T201
         return 0
+    if args.command.startswith("reader-"):
+        return run_reader_cli_command(args)
+    if args.command == "doctor":
+        result = probe_official_loader(Path(args.official_repo).expanduser().resolve())
+        print(json.dumps(result, indent=2, sort_keys=True))  # noqa: T201
+        return 0
+    raise RuntimeError(f"Unknown command: {args.command}")
+
+
+def run_reader_cli_command(args: argparse.Namespace) -> int:
     if args.command == "reader-plan":
         plan_path = Path(args.plan).expanduser().resolve()
         gate_path = Path(args.gate).expanduser().resolve()
@@ -199,9 +217,32 @@ def main(argv: list[str] | None = None) -> int:
         write_json(Path(args.output).expanduser().resolve(), report)
         print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
         return 0
-    if args.command == "doctor":
-        result = probe_official_loader(Path(args.official_repo).expanduser().resolve())
+    if args.command == "reader-replication-plan":
+        reader_plan_path = Path(args.reader_plan).expanduser().resolve()
+        replication_plan = build_reader_replication_plan(
+            reader_plan=load_json(reader_plan_path),
+            reader_plan_path=reader_plan_path,
+            source_run_roots=parse_named_paths(args.source_run),
+            output_root=Path(args.output_root).expanduser().resolve(),
+        )
+        write_json(Path(args.output).expanduser().resolve(), replication_plan)
+        print(json.dumps(replication_plan, indent=2, sort_keys=True))  # noqa: T201
+        return 0
+    if args.command == "reader-replication-run":
+        result = run_reader_replication_plan(
+            load_json(Path(args.plan).expanduser().resolve()),
+            max_workers=args.max_workers,
+        )
         print(json.dumps(result, indent=2, sort_keys=True))  # noqa: T201
+        return 0 if result["status"] == "PASS" else 1
+    if args.command == "reader-replication-report":
+        plan_path = Path(args.plan).expanduser().resolve()
+        report = build_reader_replication_report(
+            plan=load_json(plan_path),
+            plan_path=plan_path,
+        )
+        write_json(Path(args.output).expanduser().resolve(), report)
+        print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
         return 0
     raise RuntimeError(f"Unknown command: {args.command}")
 
@@ -255,15 +296,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     reader.add_argument("--output", required=True)
 
     add_reader_report_arguments(subparsers)
+    add_reader_replication_arguments(subparsers)
 
     doctor = subparsers.add_parser("doctor")
     doctor.add_argument("--official-repo", required=True)
 
     args = parser.parse_args(argv)
+    validate_args(parser, args)
+    return args
+
+
+def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     if hasattr(args, "query_workers") and args.query_workers < 1:
         parser.error("--query-workers must be positive")
     if hasattr(args, "api_timeout_seconds") and args.api_timeout_seconds <= 0:
         parser.error("--api-timeout-seconds must be positive")
+    if hasattr(args, "max_workers") and args.max_workers < 1:
+        parser.error("--max-workers must be positive")
     for key in ("search_limit", "max_context_items", "max_chunks_per_trajectory"):
         value = getattr(args, key, None)
         if value is not None and value < 1:
@@ -276,7 +325,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         value = getattr(args, key, None)
         if value is not None and value < 0:
             parser.error(f"--{key.replace('_', '-')} must be non-negative")
-    return args
 
 
 def add_reader_report_arguments(subparsers: Any) -> None:
@@ -289,6 +337,27 @@ def add_reader_report_arguments(subparsers: Any) -> None:
         metavar="CONFIGURATION=OUTPUT_ROOT",
     )
     reader_report.add_argument("--output", required=True)
+
+
+def add_reader_replication_arguments(subparsers: Any) -> None:
+    plan = subparsers.add_parser("reader-replication-plan")
+    plan.add_argument("--reader-plan", required=True)
+    plan.add_argument(
+        "--source-run",
+        action="append",
+        required=True,
+        metavar="CONFIGURATION=OUTPUT_ROOT",
+    )
+    plan.add_argument("--output-root", required=True)
+    plan.add_argument("--output", required=True)
+
+    run = subparsers.add_parser("reader-replication-run")
+    run.add_argument("--plan", required=True)
+    run.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
+
+    report = subparsers.add_parser("reader-replication-report")
+    report.add_argument("--plan", required=True)
+    report.add_argument("--output", required=True)
 
 
 def add_retrieval_override_arguments(parser: argparse.ArgumentParser) -> None:

@@ -100,7 +100,7 @@ Materialize the complete experiment plan without model calls or service changes:
 moon run bench-longmemeval-v2-ablations -- plan \
   --official-repo .moon/cache/longmemeval-v2-official \
   --data-root .moon/cache/benchmarks/longmemeval-v2-full \
-  --output-root .moon/cache/evals/lme-v2-phase0 \
+  --output-root .moon/cache/evals/lme-v2-phase0/runs \
   --output .moon/cache/evals/lme-v2-phase0/ablation_plan.json \
   --api-url http://127.0.0.1:3434/api \
   --allow-localhost
@@ -135,11 +135,11 @@ After all five diagnostic reports exist, evaluate the frozen promotion gate:
 ```bash
 moon run bench-longmemeval-v2-ablations -- gate \
   --slice benchmarks/longmemeval_v2_diagnostic_slice.json \
-  --arm trajectory_18k=.moon/cache/evals/lme-v2-phase0/diagnostics/trajectory_18k/diagnostic_report.json \
-  --arm state_18k=.moon/cache/evals/lme-v2-phase0/diagnostics/state_18k/diagnostic_report.json \
-  --arm state_8k=.moon/cache/evals/lme-v2-phase0/diagnostics/state_8k/diagnostic_report.json \
-  --arm state_8k_diverse=.moon/cache/evals/lme-v2-phase0/diagnostics/state_8k_diverse/diagnostic_report.json \
-  --arm state_8k_diverse_neighbors=.moon/cache/evals/lme-v2-phase0/diagnostics/state_8k_diverse_neighbors/diagnostic_report.json \
+  --arm trajectory_18k=.moon/cache/evals/lme-v2-phase0/runs/diagnostics/trajectory_18k/diagnostic_report.json \
+  --arm state_18k=.moon/cache/evals/lme-v2-phase0/runs/diagnostics/state_18k/diagnostic_report.json \
+  --arm state_8k=.moon/cache/evals/lme-v2-phase0/runs/diagnostics/state_8k/diagnostic_report.json \
+  --arm state_8k_diverse=.moon/cache/evals/lme-v2-phase0/runs/diagnostics/state_8k_diverse/diagnostic_report.json \
+  --arm state_8k_diverse_neighbors=.moon/cache/evals/lme-v2-phase0/runs/diagnostics/state_8k_diverse_neighbors/diagnostic_report.json \
   --output .moon/cache/evals/lme-v2-phase0/ablation_gate.json
 ```
 
@@ -153,9 +153,45 @@ tokens.
 moon run bench-longmemeval-v2-ablations -- reader-plan \
   --plan .moon/cache/evals/lme-v2-phase0/ablation_plan.json \
   --gate .moon/cache/evals/lme-v2-phase0/ablation_gate.json \
-  --baseline-run web=.moon/cache/evals/lme-v2-phase0/reader/baseline_fixed_reader/web \
-  --baseline-run enterprise=.moon/cache/evals/lme-v2-phase0/reader/baseline_fixed_reader/enterprise \
-  --output .moon/cache/evals/lme-v2-phase0/reader_plan.json
+  --baseline-run web=.moon/cache/evals/lme-v2-phase0/runs/reader/baseline_fixed_reader/web \
+  --baseline-run enterprise=.moon/cache/evals/lme-v2-phase0/runs/reader/baseline_fixed_reader/enterprise \
+  --output .moon/cache/evals/lme-v2-phase1/reader_plan.json
+```
+
+Replicate the primary baseline-versus-winner contrast with five fixed reader passes. Pass one reuses
+the completed reader artifacts. Passes two through five use predeclared question-order seeds and
+load the saved memory states, so they do not rebuild memory or regenerate stored embeddings. The
+plan freezes the source runtime configuration and requires every pass; there is no sequential
+stopping based on intermediate scores.
+
+```bash
+moon run bench-longmemeval-v2-ablations -- reader-replication-plan \
+  --reader-plan .moon/cache/evals/lme-v2-phase1/reader_plan.json \
+  --source-run baseline_fixed_reader=.moon/cache/evals/lme-v2-phase0/runs/reader/baseline_fixed_reader \
+  --source-run winner_fixed_reader=.moon/cache/evals/lme-v2-phase0/runs/reader/winner_fixed_reader \
+  --output-root .moon/cache/evals/lme-v2-phase2/reader_replication \
+  --output .moon/cache/evals/lme-v2-phase2/reader_replication_plan.json
+```
+
+The runner validates completed receipts before skipping them, executes one pass wave at a time, and
+writes a log beside each run. Restarting the same command resumes from the first incomplete or
+invalid receipt.
+
+```bash
+OPENROUTER_API_KEY="$(tr -d '\r\n' < openrouter.key)" \
+  moon run bench-longmemeval-v2-ablations -- reader-replication-run \
+  --plan .moon/cache/evals/lme-v2-phase2/reader_replication_plan.json \
+  --max-workers 4
+```
+
+After all five passes validate, build the receipt-bound replication report. It summarizes per-pass
+and majority-vote accuracy, question-level stability, a predeclared question-cluster bootstrap,
+domain deltas, provider-reported cost, and the frozen `GO`, `NO-GO`, or `RESEARCH-MORE` decision.
+
+```bash
+moon run bench-longmemeval-v2-ablations -- reader-replication-report \
+  --plan .moon/cache/evals/lme-v2-phase2/reader_replication_plan.json \
+  --output .moon/cache/evals/lme-v2-phase2/reader_replication_report.json
 ```
 
 A leaderboard-valid operating point needs both domains at the same tier and method:
