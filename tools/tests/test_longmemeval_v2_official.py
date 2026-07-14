@@ -2370,7 +2370,7 @@ def _search_result(
     chunk_index: int,
     state_index: int,
     score: float,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     return {
         "id": f"entity:{trajectory_id}:{chunk_index}",
         "type": "session",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -1364,7 +1365,7 @@ def _write_reader_report_run(
     run_dir: Path,
     *,
     domain: str,
-    question_ids: list[str],
+    question_ids: Sequence[str],
     scores: tuple[bool, bool],
     config: dict[str, Any],
     memory_limit: int,
