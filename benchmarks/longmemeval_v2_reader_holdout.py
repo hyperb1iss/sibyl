@@ -137,6 +137,7 @@ def build_reader_holdout_plan(
             "score_visibility_during_execution": "none",
         },
         "analysis": {
+            "decision_rule_version": "three-arm-question-bootstrap-v1",
             "unit": "question",
             "passes_required": PASS_COUNT,
             "primary_contrast": "winner_token_bounded_1_2x_vs_baseline_fixed_reader",
@@ -151,6 +152,11 @@ def build_reader_holdout_plan(
             "candidate_selection_min_delta_over_bounded": 0.03,
             "minimum_bounded_binding_rate": 0.15,
             "no_go_max_probability_positive": 0.5,
+            "no_go_rule": ("each treatment has mean delta <= 0 or probability positive <= cutoff"),
+            "go_preference_order": [
+                "winner_fixed_reader_if_eligible_and_3pp_above_bounded",
+                "winner_token_bounded_1_2x_if_eligible",
+            ],
             "otherwise": "RESEARCH-MORE",
         },
         "cost_budget": cost_budget,
@@ -500,6 +506,7 @@ def require_holdout_protocol(raw: Any) -> None:
 
 def require_holdout_analysis(raw: Any) -> None:
     expected = {
+        "decision_rule_version": "three-arm-question-bootstrap-v1",
         "unit": "question",
         "passes_required": PASS_COUNT,
         "primary_contrast": "winner_token_bounded_1_2x_vs_baseline_fixed_reader",
@@ -514,6 +521,11 @@ def require_holdout_analysis(raw: Any) -> None:
         "candidate_selection_min_delta_over_bounded": 0.03,
         "minimum_bounded_binding_rate": 0.15,
         "no_go_max_probability_positive": 0.5,
+        "no_go_rule": "each treatment has mean delta <= 0 or probability positive <= cutoff",
+        "go_preference_order": [
+            "winner_fixed_reader_if_eligible_and_3pp_above_bounded",
+            "winner_token_bounded_1_2x_if_eligible",
+        ],
         "otherwise": "RESEARCH-MORE",
     }
     if raw != expected:

@@ -27,6 +27,9 @@ from benchmarks.longmemeval_v2_reader_holdout import (  # noqa: E402
     build_reader_holdout_plan,
     run_reader_holdout_plan,
 )
+from benchmarks.longmemeval_v2_reader_holdout_report import (  # noqa: E402
+    build_reader_holdout_report,
+)
 from benchmarks.longmemeval_v2_reader_replication import (  # noqa: E402
     DEFAULT_MAX_WORKERS,
     build_reader_replication_plan,
@@ -277,6 +280,15 @@ def run_reader_holdout_cli_command(args: argparse.Namespace) -> int:
         )
         print(json.dumps(result, indent=2, sort_keys=True))  # noqa: T201
         return 0 if result["status"] == "PASS" else 1
+    if args.command == "reader-holdout-report":
+        plan_path = Path(args.plan).expanduser().resolve()
+        report = build_reader_holdout_report(
+            plan=load_json(plan_path),
+            plan_path=plan_path,
+        )
+        write_json(Path(args.output).expanduser().resolve(), report)
+        print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
+        return 0 if report["status"] == "PASS" else 1
     raise RuntimeError(f"Unknown command: {args.command}")
 
 
@@ -411,6 +423,10 @@ def add_reader_holdout_arguments(subparsers: Any) -> None:
     run = subparsers.add_parser("reader-holdout-run")
     run.add_argument("--plan", required=True)
     run.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
+
+    report = subparsers.add_parser("reader-holdout-report")
+    report.add_argument("--plan", required=True)
+    report.add_argument("--output", required=True)
 
 
 def add_retrieval_override_arguments(parser: argparse.ArgumentParser) -> None:

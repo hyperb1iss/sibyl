@@ -87,6 +87,16 @@ def _load_holdout_module() -> ModuleType:
     return module
 
 
+def _load_holdout_report_module() -> ModuleType:
+    path = Path(__file__).parents[2] / "benchmarks" / "longmemeval_v2_reader_holdout_report.py"
+    spec = importlib.util.spec_from_file_location("longmemeval_v2_reader_holdout_report", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_ablation_plan_freezes_five_arms_and_three_reader_configs(tmp_path: Path) -> None:
     module = _load_module()
     data_root, slice_path = _write_inputs(tmp_path)
@@ -1365,6 +1375,199 @@ def test_reader_holdout_runner_enforces_worker_cap_without_reading_scores(
     assert executed_waves == [([], holdout.DEFAULT_MAX_WORKERS)] * holdout.PASS_COUNT
 
 
+def test_reader_holdout_report_consumes_complete_receipt_bound_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_module = _load_holdout_report_module()
+    plan, plan_path = _write_holdout_report_inputs(tmp_path, report_module=report_module)
+    monkeypatch.setattr(
+        report_module,
+        "require_reader_holdout_plan",
+        lambda current: current["runs"],
+    )
+
+    report = report_module.build_reader_holdout_report(plan=plan, plan_path=plan_path)
+
+    primary = report["comparisons"]["winner_token_bounded_1_2x_vs_baseline_fixed_reader"]
+    assert report["status"] == "PASS"
+    assert report["decision"]["outcome"] == "GO"
+    assert report["decision"]["selected_configuration"] == ("winner_token_bounded_1_2x")
+    assert primary["cluster_bootstrap"]["samples"] == EXPECTED_BOOTSTRAP_SAMPLES
+    assert primary["memory_context_tokens"]["inflation"] == pytest.approx(0.2)
+    assert report["bounded_context_budget"]["binding_rate"] == 1.0
+    assert report["costs"]["within_budget"] is True
+    assert len(report["configurations"]["baseline_fixed_reader"]["passes"]) == (
+        EXPECTED_REPLICATION_PASS_COUNT
+    )
+    serialized = json.dumps(report)
+    assert "answer_gold" not in serialized
+    assert "gold-sentinel" not in serialized
+
+
+def test_reader_holdout_report_accepts_real_validated_plan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holdout = importlib.import_module("benchmarks.longmemeval_v2_reader_holdout")
+    report_module = _load_holdout_report_module()
+    replication_plan, replication_plan_path, report, report_path, source_runs = (
+        _write_holdout_source_inputs(tmp_path, holdout=holdout)
+    )
+    monkeypatch.setattr(
+        holdout,
+        "require_reader_replication_plan",
+        lambda _plan: source_runs,
+    )
+    plan = holdout.build_reader_holdout_plan(
+        replication_plan=replication_plan,
+        replication_plan_path=replication_plan_path,
+        replication_report=report,
+        replication_report_path=report_path,
+        output_root=tmp_path / "validated-holdout",
+    )
+    _write_holdout_plan_run_artifacts(plan, report_module=report_module)
+    plan_path = tmp_path / "validated_holdout_plan.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+
+    result = report_module.build_reader_holdout_report(plan=plan, plan_path=plan_path)
+
+    assert result["status"] == "PASS"
+    assert result["decision"]["outcome"] == "GO"
+    assert result["source_artifacts"]["holdout_plan"]["sha256"] == (
+        report_module.sha256_file(plan_path)
+    )
+
+
+def test_reader_holdout_report_refuses_incomplete_or_invalid_budget_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_module = _load_holdout_report_module()
+    plan, plan_path = _write_holdout_report_inputs(tmp_path, report_module=report_module)
+    monkeypatch.setattr(
+        report_module,
+        "require_reader_holdout_plan",
+        lambda current: current["runs"],
+    )
+    bounded = next(
+        run for run in plan["runs"] if run["configuration"] == "winner_token_bounded_1_2x"
+    )
+    prompt_path = Path(bounded["output_dir"]) / "prompt_rows.jsonl"
+    prompt_rows = report_module.load_jsonl(prompt_path)
+    budget = prompt_rows[0]["memory_post_query_metadata"]["search_metadata"]["adapter_assembly"][
+        "context_expansion_budget"
+    ]
+    budget["final_token_count"] = budget["max_token_count"] + 1
+    _write_jsonl(prompt_path, prompt_rows)
+
+    with pytest.raises(ValueError, match="inconsistent budget telemetry"):
+        report_module.build_reader_holdout_report(plan=plan, plan_path=plan_path)
+
+    _write_jsonl(prompt_path, prompt_rows[1:])
+    with pytest.raises(ValueError, match="prompt rows do not match"):
+        report_module.build_reader_holdout_report(plan=plan, plan_path=plan_path)
+
+
+@pytest.mark.parametrize(
+    (
+        "bounded",
+        "candidate",
+        "candidate_vs_bounded_delta",
+        "binding_rate",
+        "expected_outcome",
+        "expected_configuration",
+        "expected_valid",
+    ),
+    [
+        (
+            (0.05, 0.90, -0.01, 0.10),
+            (0.04, 0.90, -0.01, 0.10),
+            -0.01,
+            0.5,
+            "GO",
+            "winner_token_bounded_1_2x",
+            True,
+        ),
+        (
+            (0.04, 0.90, -0.01, 0.10),
+            (0.08, 0.95, 0.01, 0.10),
+            0.04,
+            0.5,
+            "GO",
+            "winner_fixed_reader",
+            True,
+        ),
+        ((0.00, 0.50, -0.04, 0.00), (-0.01, 0.40, -0.05, 0.00), -0.01, 0.5, "NO-GO", None, True),
+        (
+            (0.02, 0.70, -0.03, 0.10),
+            (0.01, 0.60, -0.04, 0.10),
+            -0.01,
+            0.5,
+            "RESEARCH-MORE",
+            None,
+            True,
+        ),
+        (
+            (0.05, 0.90, -0.01, 0.10),
+            (0.04, 0.90, -0.01, 0.10),
+            -0.01,
+            0.1,
+            "RESEARCH-MORE",
+            None,
+            False,
+        ),
+    ],
+)
+def test_reader_holdout_report_applies_frozen_decision_rule(
+    bounded: tuple[float, float, float, float],
+    candidate: tuple[float, float, float, float],
+    candidate_vs_bounded_delta: float,
+    binding_rate: float,
+    expected_outcome: str,
+    expected_configuration: str | None,
+    expected_valid: bool,
+) -> None:
+    report_module = _load_holdout_report_module()
+    decision = report_module.holdout_decision(
+        analysis=_holdout_analysis_contract(),
+        bounded_vs_baseline=_holdout_comparison(*bounded),
+        candidate_vs_baseline=_holdout_comparison(*candidate),
+        candidate_vs_bounded=_holdout_comparison(
+            candidate_vs_bounded_delta,
+            0.5,
+            -0.05,
+            0.0,
+        ),
+        bounded_binding_rate=binding_rate,
+        costs_within_budget=True,
+    )
+
+    assert decision["outcome"] == expected_outcome
+    assert decision["selected_configuration"] == expected_configuration
+    assert decision["valid_experiment"] is expected_valid
+
+
+def test_reader_holdout_report_accepts_every_exact_promotion_boundary() -> None:
+    report_module = _load_holdout_report_module()
+    analysis = _holdout_analysis_contract()
+    exact_gate = _holdout_comparison(0.03, 0.85, -0.02, 0.25)
+    rejected_candidate = _holdout_comparison(0.0, 0.5, -0.05, 0.0)
+
+    decision = report_module.holdout_decision(
+        analysis=analysis,
+        bounded_vs_baseline=exact_gate,
+        candidate_vs_baseline=rejected_candidate,
+        candidate_vs_bounded=_holdout_comparison(-0.03, 0.2, -0.1, 0.0),
+        bounded_binding_rate=0.15,
+        costs_within_budget=True,
+    )
+
+    assert decision["outcome"] == "GO"
+    assert decision["selected_configuration"] == "winner_token_bounded_1_2x"
+    assert all(decision["treatment_gates"]["winner_token_bounded_1_2x"]["checks"].values())
+
+
 @pytest.mark.parametrize(
     ("tamper", "exception", "message"),
     [
@@ -1912,6 +2115,239 @@ def _write_holdout_source_inputs(
     return replication_plan, replication_plan_path, report, report_path, source_runs
 
 
+def _write_holdout_report_inputs(
+    tmp_path: Path,
+    *,
+    report_module: ModuleType,
+) -> tuple[dict[str, Any], Path]:
+    holdout = _load_holdout_module()
+    plan = {
+        "schema_version": holdout.HOLDOUT_PLAN_SCHEMA_VERSION,
+        "protocol": {"passes_per_configuration": holdout.PASS_COUNT},
+        "analysis": _holdout_analysis_contract(),
+        "cost_budget": {
+            "estimated_total_model_cost_usd": 0.9,
+            "max_total_model_cost_usd": holdout.MAX_TOTAL_MODEL_COST_USD,
+            "pilot_cost_per_question_run_usd": 0.01,
+            "max_pilot_cost_multiplier": holdout.MAX_PILOT_COST_MULTIPLIER,
+        },
+        "runs": [],
+    }
+    scores = {
+        "baseline_fixed_reader": (False, False),
+        "winner_fixed_reader": (True, False),
+        "winner_token_bounded_1_2x": (True, True),
+    }
+    for pass_index, seed in enumerate(holdout.PASS_SEEDS, start=1):
+        for configuration in report_module.HOLDOUT_CONFIGURATIONS:
+            for domain in report_module.DOMAINS:
+                question_ids = [f"{domain}-1", f"{domain}-2"]
+                run_dir = tmp_path / "holdout" / f"pass_{pass_index:02d}" / configuration / domain
+                memory_dir = tmp_path / "memory" / domain
+                bounded = configuration == "winner_token_bounded_1_2x"
+                is_baseline = configuration == "baseline_fixed_reader"
+                config = {
+                    "search_limit": 12,
+                    "max_context_items": 8 if is_baseline else 10,
+                    "max_chunks_per_trajectory": 8,
+                    "neighbor_stitch_items": 0 if is_baseline else 2,
+                    "neighbor_stitch_span": 0 if is_baseline else 1,
+                    "state_part_completion_items": 0,
+                    "state_part_refinement": not is_baseline,
+                    "context_expansion_max_ratio": (
+                        holdout.TOKEN_BOUNDED_MAX_RATIO if bounded else 0.0
+                    ),
+                }
+                command = _holdout_reader_command(
+                    run_dir=run_dir,
+                    memory_dir=memory_dir,
+                    domain=domain,
+                    question_ids=question_ids,
+                    config=config,
+                    shuffle_seed=seed,
+                )
+                plan["runs"].append(
+                    {
+                        "pass_id": f"pass_{pass_index:02d}",
+                        "pass_index": pass_index,
+                        "configuration": configuration,
+                        "domain": domain,
+                        "output_dir": str(run_dir),
+                        "command": command,
+                    }
+                )
+                memory_tokens = 120 if bounded else 100
+                _write_reader_report_run(
+                    run_dir,
+                    domain=domain,
+                    question_ids=question_ids,
+                    scores=scores[configuration],
+                    config=config,
+                    memory_limit=STANDARD_CONTEXT_TOKENS,
+                    memory_dir=memory_dir,
+                    model_cost=0.01,
+                    shuffle_questions_seed=seed,
+                    selected_question_ids_sha256=holdout.sha256_question_ids(question_ids),
+                    memory_context_tokens=memory_tokens,
+                    context_budget=(
+                        _holdout_context_budget(binding=True)
+                        if bounded
+                        else _holdout_context_budget(binding=False)
+                    ),
+                )
+    plan_path = tmp_path / "holdout_plan.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    return plan, plan_path
+
+
+def _write_holdout_plan_run_artifacts(
+    plan: dict[str, Any],
+    *,
+    report_module: ModuleType,
+) -> None:
+    reader_report = importlib.import_module("benchmarks.longmemeval_v2_reader_report")
+    holdout = importlib.import_module("benchmarks.longmemeval_v2_reader_holdout")
+    for run in plan["runs"]:
+        configuration = run["configuration"]
+        expected = report_module.expected_run_config(run["command"])
+        question_ids = expected["question_ids"]
+        if configuration == "baseline_fixed_reader":
+            scores = [False] * len(question_ids)
+        elif configuration == "winner_fixed_reader":
+            scores = [index % 2 == 0 for index in range(len(question_ids))]
+        else:
+            scores = [True] * len(question_ids)
+        bounded = configuration == "winner_token_bounded_1_2x"
+        _write_reader_report_run(
+            Path(run["output_dir"]),
+            domain=run["domain"],
+            question_ids=question_ids,
+            scores=scores,
+            config={key: expected[key] for key in reader_report.QUERY_OVERRIDE_KEYS},
+            memory_limit=expected["memory_context_max_tokens"],
+            memory_dir=Path(expected["load_memory_dir"]),
+            model_cost=0.01,
+            shuffle_questions_seed=run["shuffle_questions_seed"],
+            selected_question_ids_sha256=holdout.sha256_question_ids(question_ids),
+            memory_context_tokens=120 if bounded else 100,
+            context_budget=_holdout_context_budget(binding=bounded),
+        )
+        receipt_path = Path(run["output_dir"]) / "longmemeval_v2_official_receipt.json"
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        if expected["official_repo"] is not None:
+            receipt["official_repo"]["path"] = expected["official_repo"]
+        if expected["data_root"] is not None:
+            receipt["dataset"]["data_root"] = expected["data_root"]
+            receipt["dataset"]["tier"] = expected["tier"]
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+
+def _holdout_reader_command(
+    *,
+    run_dir: Path,
+    memory_dir: Path,
+    domain: str,
+    question_ids: list[str],
+    config: dict[str, Any],
+    shuffle_seed: int | None,
+) -> list[str]:
+    command = [
+        "moon",
+        "run",
+        "root:bench-longmemeval-v2-official-full",
+        "--",
+        "--domain",
+        domain,
+        "--output-dir",
+        str(run_dir),
+        "--load-memory-dir",
+        str(memory_dir),
+        "--reader-model",
+        "Qwen/Qwen3.5-9B",
+        "--reader-temperature",
+        "0.6",
+        "--reader-top-p",
+        "0.95",
+        "--reader-top-k",
+        "20",
+        "--reader-max-concurrent-requests",
+        "16",
+        "--memory-context-max-tokens",
+        str(STANDARD_CONTEXT_TOKENS),
+        "--question-ids",
+        *question_ids,
+    ]
+    if shuffle_seed is not None:
+        command.extend(("--shuffle-questions-seed", str(shuffle_seed)))
+    for key, value in config.items():
+        flag = f"--{key.replace('_', '-')}"
+        if isinstance(value, bool):
+            command.append(flag if value else f"--no-{flag.removeprefix('--')}")
+        else:
+            command.extend((flag, str(value)))
+    command.append("--allow-localhost")
+    return command
+
+
+def _holdout_context_budget(*, binding: bool) -> dict[str, Any]:
+    if not binding:
+        return {
+            "enabled": False,
+            "max_ratio": None,
+            "binding": False,
+            "dropped_item_count": 0,
+        }
+    return {
+        "enabled": True,
+        "max_ratio": EXPECTED_CONTEXT_EXPANSION_MAX_RATIO,
+        "base_item_count": 2,
+        "unbounded_item_count": 3,
+        "final_item_count": 2,
+        "base_token_count": 100,
+        "max_token_count": 120,
+        "unbounded_token_count": 140,
+        "final_token_count": 120,
+        "dropped_item_count": 1,
+        "dropped_chunk_keys": [["trajectory", 1]],
+        "binding": True,
+    }
+
+
+def _holdout_analysis_contract() -> dict[str, Any]:
+    return {
+        "decision_rule_version": "three-arm-question-bootstrap-v1",
+        "go_min_mean_accuracy_delta": 0.03,
+        "go_min_probability_positive": 0.85,
+        "go_min_confidence_interval_lower": -0.02,
+        "go_max_memory_token_inflation": 0.25,
+        "candidate_selection_min_delta_over_bounded": 0.03,
+        "minimum_bounded_binding_rate": 0.15,
+        "no_go_max_probability_positive": 0.5,
+        "no_go_rule": "each treatment has mean delta <= 0 or probability positive <= cutoff",
+        "go_preference_order": [
+            "winner_fixed_reader_if_eligible_and_3pp_above_bounded",
+            "winner_token_bounded_1_2x_if_eligible",
+        ],
+        "otherwise": "RESEARCH-MORE",
+    }
+
+
+def _holdout_comparison(
+    mean_delta: float,
+    probability_positive: float,
+    confidence_lower: float,
+    token_inflation: float,
+) -> dict[str, Any]:
+    return {
+        "cluster_bootstrap": {
+            "mean_accuracy_delta": mean_delta,
+            "probability_positive": probability_positive,
+            "confidence_interval": {"lower": confidence_lower, "upper": 0.1},
+        },
+        "memory_context_tokens": {"inflation": token_inflation},
+    }
+
+
 def _write_reader_report_run(
     run_dir: Path,
     *,
@@ -1923,6 +2359,9 @@ def _write_reader_report_run(
     memory_dir: Path,
     model_cost: float,
     shuffle_questions_seed: int | None = None,
+    selected_question_ids_sha256: str | None = None,
+    memory_context_tokens: int | None = None,
+    context_budget: dict[str, Any] | None = None,
 ) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     rows = [
@@ -1935,6 +2374,29 @@ def _write_reader_report_run(
         for question_id, score in zip(question_ids, scores, strict=True)
     ]
     _write_jsonl(run_dir / "per_question.jsonl", rows)
+    final_memory_tokens = (
+        memory_context_tokens
+        if memory_context_tokens is not None
+        else (250 if memory_limit < STANDARD_CONTEXT_TOKENS else 400)
+    )
+    prompt_budget = context_budget or _holdout_context_budget(binding=False)
+    _write_jsonl(
+        run_dir / "prompt_rows.jsonl",
+        [
+            {
+                "question_id": question_id,
+                "memory_context_token_count": final_memory_tokens,
+                "memory_post_query_metadata": {
+                    "search_metadata": {
+                        "adapter_assembly": {
+                            "context_expansion_budget": prompt_budget,
+                        }
+                    }
+                },
+            }
+            for question_id in question_ids
+        ],
+    )
     (run_dir / "exit_code").write_text("0\n", encoding="utf-8")
     (run_dir / "run_args.json").write_text(
         json.dumps(
@@ -1971,7 +2433,7 @@ def _write_reader_report_run(
                 "tokens": {"prompt_tokens": 1000, "completion_tokens": 100},
                 "memory_context": {
                     "avg_original_tokens": 400,
-                    "avg_final_tokens": 250 if memory_limit < STANDARD_CONTEXT_TOKENS else 400,
+                    "avg_final_tokens": final_memory_tokens,
                     "num_truncated_sequences": (
                         EXPECTED_READER_REPORT_RECOVERIES
                         if memory_limit < STANDARD_CONTEXT_TOKENS
@@ -2016,6 +2478,8 @@ def _write_reader_report_run(
             },
         },
     }
+    if selected_question_ids_sha256 is not None:
+        receipt["dataset"]["selected_question_ids_sha256"] = selected_question_ids_sha256
     (run_dir / "longmemeval_v2_official_receipt.json").write_text(
         json.dumps(receipt),
         encoding="utf-8",

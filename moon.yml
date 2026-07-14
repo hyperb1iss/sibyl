@@ -453,12 +453,13 @@ tasks:
       benchmarks/longmemeval_v2_reader_report.py
       benchmarks/longmemeval_v2_reader_replication.py
       benchmarks/longmemeval_v2_reader_replication_report.py
-      benchmarks/longmemeval_v2_reader_holdout.py && uv run ruff format --check tools
+      benchmarks/longmemeval_v2_reader_holdout.py
+      benchmarks/longmemeval_v2_reader_holdout_report.py && uv run ruff format --check tools
       benchmarks/provider_usage.py benchmarks/longmemeval_v2_diagnostics.py
       benchmarks/longmemeval_v2_ablations.py benchmarks/longmemeval_v2_reader_report.py
       benchmarks/longmemeval_v2_reader_replication.py
       benchmarks/longmemeval_v2_reader_replication_report.py
-      benchmarks/longmemeval_v2_reader_holdout.py
+      benchmarks/longmemeval_v2_reader_holdout.py benchmarks/longmemeval_v2_reader_holdout_report.py
     inputs:
       - tools/**/*.py
       - benchmarks/provider_usage.py
@@ -468,6 +469,7 @@ tasks:
       - benchmarks/longmemeval_v2_reader_replication.py
       - benchmarks/longmemeval_v2_reader_replication_report.py
       - benchmarks/longmemeval_v2_reader_holdout.py
+      - benchmarks/longmemeval_v2_reader_holdout_report.py
       - benchmarks/longmemeval_v2_diagnostic_slice.json
       - pyproject.toml
 
@@ -477,7 +479,7 @@ tasks:
       benchmarks/longmemeval_v2_diagnostics.py benchmarks/longmemeval_v2_ablations.py
       benchmarks/longmemeval_v2_reader_report.py benchmarks/longmemeval_v2_reader_replication.py
       benchmarks/longmemeval_v2_reader_replication_report.py
-      benchmarks/longmemeval_v2_reader_holdout.py
+      benchmarks/longmemeval_v2_reader_holdout.py benchmarks/longmemeval_v2_reader_holdout_report.py
     inputs:
       - tools/**/*.py
       - benchmarks/provider_usage.py
@@ -487,15 +489,19 @@ tasks:
       - benchmarks/longmemeval_v2_reader_replication.py
       - benchmarks/longmemeval_v2_reader_replication_report.py
       - benchmarks/longmemeval_v2_reader_holdout.py
+      - benchmarks/longmemeval_v2_reader_holdout_report.py
       - pyproject.toml
     options:
       cache: false
 
   inventory-typecheck:
-    command: uv run ty check tools benchmarks/longmemeval_v2_reader_holdout.py
+    command:
+      uv run ty check tools benchmarks/longmemeval_v2_reader_holdout.py
+      benchmarks/longmemeval_v2_reader_holdout_report.py
     inputs:
       - tools/**/*.py
       - benchmarks/longmemeval_v2_reader_holdout.py
+      - benchmarks/longmemeval_v2_reader_holdout_report.py
       - pyproject.toml
 
   inventory-test:
@@ -732,6 +738,7 @@ tasks:
       - benchmarks/longmemeval_v2_reader_replication.py
       - benchmarks/longmemeval_v2_reader_replication_report.py
       - benchmarks/longmemeval_v2_reader_holdout.py
+      - benchmarks/longmemeval_v2_reader_holdout_report.py
       - benchmarks/longmemeval_v2_diagnostic_slice.json
       - benchmarks/provider_usage.py
       - benchmarks/longmemeval_v2_memory/**/*.py
