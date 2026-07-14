@@ -572,6 +572,8 @@ def execute_run(run: dict[str, Any]) -> int:
     with log_path.open("a", encoding="utf-8") as log:
         log.write(json.dumps({"event": "start", "run": run_key(run)}) + "\n")
         log.flush()
+        (output_dir / "exit_code").unlink(missing_ok=True)
+        (output_dir / "exit_code.tmp").unlink(missing_ok=True)
         result = subprocess.run(  # noqa: S603
             run["command"],
             cwd=ROOT,
@@ -579,11 +581,18 @@ def execute_run(run: dict[str, Any]) -> int:
             stderr=subprocess.STDOUT,
             check=False,
         )
+        write_exit_code(output_dir, result.returncode)
         log.write(
             json.dumps({"event": "complete", "run": run_key(run), "returncode": result.returncode})
             + "\n"
         )
     return result.returncode
+
+
+def write_exit_code(output_dir: Path, returncode: int) -> None:
+    pending_path = output_dir / "exit_code.tmp"
+    pending_path.write_text(f"{returncode}\n", encoding="utf-8")
+    pending_path.replace(output_dir / "exit_code")
 
 
 def run_key(run: dict[str, Any]) -> str:

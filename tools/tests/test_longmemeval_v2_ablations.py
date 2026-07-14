@@ -5,7 +5,7 @@ import json
 import threading
 from collections.abc import Sequence
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -754,6 +754,77 @@ def test_reader_replication_runner_resumes_valid_receipts(tmp_path: Path) -> Non
     assert result["completed"] == []
     assert len(result["skipped"]) == EXPECTED_REPLICATION_RUN_COUNT - EXPECTED_REPLICATION_WAVE_RUNS
     assert result["failures"] == []
+
+
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_reader_replication_executor_finalizes_exit_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int,
+) -> None:
+    replication = _load_replication_module()
+    output_dir = tmp_path / "run"
+    output_dir.mkdir()
+    (output_dir / "exit_code").write_text("9\n", encoding="utf-8")
+    run = {
+        "command": ["ignored"],
+        "configuration": "baseline_fixed_reader",
+        "domain": "web",
+        "output_dir": str(output_dir),
+        "pass_id": "pass_02",
+    }
+    monkeypatch.setattr(
+        replication.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=returncode),
+    )
+
+    assert replication.execute_run(run) == returncode
+    assert (output_dir / "exit_code").read_text(encoding="utf-8") == f"{returncode}\n"
+    assert not (output_dir / "exit_code.tmp").exists()
+    events = [
+        json.loads(line)
+        for line in (output_dir / "replication_runner.log").read_text(encoding="utf-8").splitlines()
+    ]
+    assert events == [
+        {"event": "start", "run": replication.run_key(run)},
+        {
+            "event": "complete",
+            "returncode": returncode,
+            "run": replication.run_key(run),
+        },
+    ]
+
+
+def test_reader_replication_executor_clears_stale_receipt_before_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    replication = _load_replication_module()
+    output_dir = tmp_path / "run"
+    output_dir.mkdir()
+    (output_dir / "exit_code").write_text("0\n", encoding="utf-8")
+    run = {
+        "command": ["ignored"],
+        "configuration": "winner_fixed_reader",
+        "domain": "enterprise",
+        "output_dir": str(output_dir),
+        "pass_id": "pass_03",
+    }
+
+    def fail_to_start(*_args: object, **_kwargs: object) -> None:
+        raise OSError("could not start")
+
+    monkeypatch.setattr(replication.subprocess, "run", fail_to_start)
+
+    with pytest.raises(OSError, match="could not start"):
+        replication.execute_run(run)
+
+    assert not (output_dir / "exit_code").exists()
+    assert json.loads((output_dir / "replication_runner.log").read_text(encoding="utf-8")) == {
+        "event": "start",
+        "run": replication.run_key(run),
+    }
 
 
 def test_reader_replication_runner_stops_after_failed_wave(
