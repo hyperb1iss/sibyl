@@ -13,6 +13,7 @@ READER_PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-reader-plan-v1"
 READER_REPORT_SCHEMA_VERSION = "sibyl-longmemeval-v2-reader-report-v1"
 READER_CONFIGURATION_COUNT = 3
 DOMAINS = ("web", "enterprise")
+DEFAULT_CONTEXT_EXPANSION_MAX_RATIO = 0.0
 QUERY_OVERRIDE_KEYS = (
     "search_limit",
     "max_context_items",
@@ -21,6 +22,7 @@ QUERY_OVERRIDE_KEYS = (
     "neighbor_stitch_span",
     "state_part_completion_items",
     "state_part_refinement",
+    "context_expansion_max_ratio",
 )
 REQUIRED_RUN_FILES = (
     "aggregated_metrics.json",
@@ -185,6 +187,9 @@ def expected_run_config(command: list[Any]) -> dict[str, Any]:
         flag = f"--{key.replace('_', '-')}"
         if key == "state_part_refinement":
             result[key] = flag in values
+        elif key == "context_expansion_max_ratio":
+            value = optional_float_option(values, flag)
+            result[key] = DEFAULT_CONTEXT_EXPANSION_MAX_RATIO if value is None else value
         else:
             result[key] = int(option_value(values, flag))
     return result
@@ -266,7 +271,14 @@ def validate_reader_run_identity(
     if not isinstance(memory_params, dict):
         raise TypeError(f"Reader receipt has no effective memory config: {run_dir}")
 
-    actual_config = {key: memory_params.get(key) for key in QUERY_OVERRIDE_KEYS}
+    actual_config = {
+        key: (
+            memory_params.get(key, DEFAULT_CONTEXT_EXPANSION_MAX_RATIO)
+            if key == "context_expansion_max_ratio"
+            else memory_params.get(key)
+        )
+        for key in QUERY_OVERRIDE_KEYS
+    }
     expected_config = {key: expected[key] for key in QUERY_OVERRIDE_KEYS}
     if actual_config != expected_config:
         raise ValueError(f"Reader run does not match planned retrieval config: {run_dir}")

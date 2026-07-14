@@ -7,6 +7,7 @@ import hashlib
 import io
 import itertools
 import json as json_module
+import math
 import os
 import re
 import sys
@@ -14,7 +15,7 @@ import threading
 import time
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -81,6 +82,8 @@ DEFAULT_NEIGHBOR_STITCH_ITEMS = 2
 DEFAULT_NEIGHBOR_STITCH_SPAN = 1
 DEFAULT_STATE_PART_COMPLETION_ITEMS = 0
 DEFAULT_STATE_PART_REFINEMENT = False
+DEFAULT_CONTEXT_EXPANSION_MAX_RATIO = 0.0
+CONTEXT_TOKENIZER_MODEL = "Qwen/Qwen3.5-9B"
 STATE_PART_REFINEMENT_MIN_SCORE_GAIN = 0.05
 DEFAULT_CHUNKING_MODE = "state"
 CHUNKING_MODES = frozenset({"trajectory", "state"})
@@ -111,6 +114,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "neighbor_stitch_span",
         "state_part_completion_items",
         "state_part_refinement",
+        "context_expansion_max_ratio",
         "checkpoint_dir",
     }
 )
@@ -129,6 +133,7 @@ SAVED_MEMORY_IDENTITY_KEYS = frozenset(
 _AUTH_CACHE: dict[tuple[str, str, str], dict[str, str]] = {}
 _AUTH_LOCK = threading.Lock()
 _INSTANCE_COUNTER = itertools.count(1)
+_CONTEXT_PROCESSOR_LOCAL = threading.local()
 
 
 class TrajectoryTextChunk:
@@ -244,6 +249,29 @@ def search_results_to_memory_context(
     return context
 
 
+def count_memory_context_tokens(memory_context: list[MemoryContextItem]) -> int:
+    if not memory_context:
+        return 0
+    from transformers import AutoProcessor
+
+    processor = getattr(_CONTEXT_PROCESSOR_LOCAL, "processor", None)
+    if processor is None:
+        processor = AutoProcessor.from_pretrained(CONTEXT_TOKENIZER_MODEL)
+        _CONTEXT_PROCESSOR_LOCAL.processor = processor
+    content_parts = []
+    for item in memory_context:
+        if item["type"] != "text":
+            raise ValueError("Sibyl LongMemEval context token counting only supports text items")
+        content_parts.append({"type": "text", "text": item["value"]})
+    prompt_text = processor.apply_chat_template(
+        [{"role": "user", "content": content_parts}],
+        tokenize=False,
+        add_generation_prompt=False,
+    )
+    encoded = processor(text=prompt_text, images=None, return_tensors="pt")
+    return int(encoded["input_ids"].shape[-1])
+
+
 def build_retrieval_trace(
     results: list[dict[str, object]],
     *,
@@ -304,6 +332,8 @@ def assemble_context_results(
     query: str = "",
     state_part_completion_items: int = 0,
     state_part_refinement: bool = False,
+    context_expansion_max_ratio: float = DEFAULT_CONTEXT_EXPANSION_MAX_RATIO,
+    context_token_counter: Callable[[list[dict[str, object]]], int] | None = None,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
     max_items = max(1, max_items)
     max_chunks_per_trajectory = max(1, max_chunks_per_trajectory)
@@ -313,6 +343,15 @@ def assemble_context_results(
         0,
         min(state_part_completion_items, max_items - neighbor_stitch_items - 1),
     )
+    invalid_expansion_ratio = (
+        not math.isfinite(context_expansion_max_ratio)
+        or context_expansion_max_ratio < 0.0
+        or 0.0 < context_expansion_max_ratio < 1.0
+    )
+    if invalid_expansion_ratio:
+        raise ValueError("context_expansion_max_ratio must be zero or at least 1.0")
+    if context_expansion_max_ratio > 0.0 and context_token_counter is None:
+        raise ValueError("context_token_counter is required when expansion budgeting is enabled")
     ranked = []
     for search_rank, result in enumerate(results, start=1):
         candidate = dict(result)
@@ -367,18 +406,84 @@ def assemble_context_results(
             selected_keys.add(key)
             if len(selected) >= max_items:
                 break
+    selected, expansion_budget = _apply_context_expansion_budget(
+        selected,
+        base_item_count=len(refined_seeds),
+        max_ratio=context_expansion_max_ratio,
+        token_counter=context_token_counter,
+    )
+    retained_state_parts = sum(
+        _stripped_str(result.get("_selection_origin")) == "state_part"
+        for result in selected
+    )
+    retained_neighbors = sum(
+        _stripped_str(result.get("_selection_origin")) == "neighbor" for result in selected
+    )
     return selected, {
         "input_result_count": len(results),
         "selected_search_seed_count": len(seeds),
-        "completed_state_part_count": len(state_parts),
-        "stitched_neighbor_count": len(neighbors),
+        "completed_state_part_count": retained_state_parts,
+        "stitched_neighbor_count": retained_neighbors,
         "output_result_count": len(selected),
         "max_chunks_per_trajectory": max_chunks_per_trajectory,
         "neighbor_stitch_items": neighbor_stitch_items,
         "neighbor_stitch_span": neighbor_stitch_span,
         "state_part_completion": state_part_metadata,
         "state_part_refinement": state_part_refinement_metadata,
+        "context_expansion_budget": expansion_budget,
     }
+
+
+def _apply_context_expansion_budget(
+    selected: list[dict[str, object]],
+    *,
+    base_item_count: int,
+    max_ratio: float,
+    token_counter: Callable[[list[dict[str, object]]], int] | None,
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    metadata: dict[str, object] = {
+        "enabled": max_ratio > 0.0,
+        "max_ratio": max_ratio if max_ratio > 0.0 else None,
+        "base_item_count": base_item_count,
+        "unbounded_item_count": len(selected),
+        "final_item_count": len(selected),
+        "base_token_count": None,
+        "max_token_count": None,
+        "unbounded_token_count": None,
+        "final_token_count": None,
+        "dropped_item_count": 0,
+        "dropped_chunk_keys": [],
+        "binding": False,
+    }
+    if max_ratio <= 0.0:
+        return selected, metadata
+    if token_counter is None:
+        raise ValueError("context_token_counter is required when expansion budgeting is enabled")
+
+    base = selected[:base_item_count]
+    bounded = list(selected)
+    base_tokens = token_counter(base)
+    max_tokens = int(base_tokens * max_ratio)
+    unbounded_tokens = token_counter(bounded)
+    dropped_keys: list[list[object]] = []
+    final_tokens = unbounded_tokens
+    while len(bounded) > base_item_count and final_tokens > max_tokens:
+        dropped = bounded.pop()
+        dropped_keys.append(list(_result_chunk_key(dropped)))
+        final_tokens = token_counter(bounded)
+    metadata.update(
+        {
+            "base_token_count": base_tokens,
+            "max_token_count": max_tokens,
+            "unbounded_token_count": unbounded_tokens,
+            "final_token_count": final_tokens,
+            "dropped_item_count": len(dropped_keys),
+            "dropped_chunk_keys": dropped_keys,
+            "binding": bool(dropped_keys),
+            "final_item_count": len(bounded),
+        }
+    )
+    return bounded, metadata
 
 
 def _refine_state_parts(
@@ -818,6 +923,11 @@ class SibylLiveApiMemory(Memory):
             "state_part_refinement",
             DEFAULT_STATE_PART_REFINEMENT,
         )
+        self.context_expansion_max_ratio = _param_context_expansion_ratio(
+            memory_params,
+            "context_expansion_max_ratio",
+            DEFAULT_CONTEXT_EXPANSION_MAX_RATIO,
+        )
         self.include_screenshot_refs = _param_bool(
             memory_params,
             "include_screenshot_refs",
@@ -1034,6 +1144,12 @@ class SibylLiveApiMemory(Memory):
                 "state_part_refinement",
                 DEFAULT_STATE_PART_REFINEMENT,
             ),
+            context_expansion_max_ratio=getattr(
+                self,
+                "context_expansion_max_ratio",
+                DEFAULT_CONTEXT_EXPANSION_MAX_RATIO,
+            ),
+            context_token_counter=self._count_context_result_tokens,
         )
         self._query_local.search_metadata["adapter_assembly"] = assembly_metadata
         self._query_local.retrieval_trace = build_retrieval_trace(
@@ -1045,6 +1161,15 @@ class SibylLiveApiMemory(Memory):
             assembled_results,
             max_items=self.max_context_items,
             max_chars_per_item=self.max_context_chars_per_item,
+        )
+
+    def _count_context_result_tokens(self, results: list[dict[str, object]]) -> int:
+        return count_memory_context_tokens(
+            search_results_to_memory_context(
+                results,
+                max_items=self.max_context_items,
+                max_chars_per_item=self.max_context_chars_per_item,
+            )
         )
 
     def _save_backend(self, output_dir: Path) -> None:
@@ -2226,6 +2351,23 @@ def _param_float(params: dict[str, object], key: str, default: float) -> float:
         except ValueError:
             return default
     return default
+
+
+def _param_context_expansion_ratio(
+    params: dict[str, object], key: str, default: float
+) -> float:
+    value = params.get(key, default)
+    if isinstance(value, bool):
+        raise TypeError(f"{key} must be numeric")
+    if not isinstance(value, int | float | str):
+        raise TypeError(f"{key} must be numeric")
+    try:
+        ratio = float(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{key} must be numeric") from exc
+    if not math.isfinite(ratio) or ratio < 0.0 or 0.0 < ratio < 1.0:
+        raise ValueError(f"{key} must be zero or at least 1.0")
+    return ratio
 
 
 def _stripped_str(value: object) -> str:

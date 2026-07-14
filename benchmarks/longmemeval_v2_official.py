@@ -68,6 +68,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "neighbor_stitch_span",
         "state_part_completion_items",
         "state_part_refinement",
+        "context_expansion_max_ratio",
         "checkpoint_dir",
     }
 )
@@ -406,6 +407,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         action=argparse.BooleanOptionalAction,
         default=False,
     )
+    parser.add_argument("--context-expansion-max-ratio", type=float, default=0.0)
     parser.add_argument("--include-screenshot-refs", action="store_true")
     parser.add_argument("--inline-embeddings", action="store_true")
     parser.add_argument("--api-timeout-seconds", type=float, default=600.0)
@@ -464,6 +466,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--api-timeout-seconds must be positive")
     if args.api_retry_attempts < 1:
         parser.error("--api-retry-attempts must be positive")
+    invalid_expansion_ratio = (
+        not math.isfinite(args.context_expansion_max_ratio)
+        or args.context_expansion_max_ratio < 0.0
+        or 0.0 < args.context_expansion_max_ratio < 1.0
+    )
+    if invalid_expansion_ratio:
+        parser.error("--context-expansion-max-ratio must be zero or at least 1.0")
     if args.api_retry_base_delay_seconds < 0:
         parser.error("--api-retry-base-delay-seconds must be non-negative")
     if args.api_retry_max_delay_seconds < 0:
@@ -577,6 +586,7 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "neighbor_stitch_span": args.neighbor_stitch_span,
         "state_part_completion_items": args.state_part_completion_items,
         "state_part_refinement": args.state_part_refinement,
+        "context_expansion_max_ratio": args.context_expansion_max_ratio,
         "include_screenshot_refs": args.include_screenshot_refs,
         "defer_embeddings": not args.inline_embeddings,
         "api_timeout_seconds": args.api_timeout_seconds,
@@ -704,6 +714,7 @@ def build_run_plan(
         "max_chunks_per_trajectory": args.max_chunks_per_trajectory,
         "neighbor_stitch_items": args.neighbor_stitch_items,
         "neighbor_stitch_span": args.neighbor_stitch_span,
+        "context_expansion_max_ratio": args.context_expansion_max_ratio,
         "evaluator_model": args.evaluator_model,
         "evaluator_retry_attempts": args.evaluator_retry_attempts,
         "provider_usage": {

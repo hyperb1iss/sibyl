@@ -19,6 +19,7 @@ EXPECTED_EMBEDDING_COST_USD = 0.03
 EXPECTED_NEIGHBOR_STITCH_ITEMS = 2
 EXPECTED_NEIGHBOR_STITCH_SPAN = 1
 EXPECTED_STATE_PART_COMPLETION_ITEMS = 2
+EXPECTED_CONTEXT_EXPANSION_MAX_RATIO = 1.2
 EXPECTED_WINNER_CONTEXT_ITEMS = 10
 EXPECTED_READER_REPORT_COST_USD = 0.44
 EXPECTED_READER_REPORT_CORRECT = 3
@@ -194,6 +195,8 @@ def test_retrieve_cli_overrides_context_assembly_without_changing_named_arm() ->
             "--state-part-completion-items",
             str(EXPECTED_STATE_PART_COMPLETION_ITEMS),
             "--state-part-refinement",
+            "--context-expansion-max-ratio",
+            str(EXPECTED_CONTEXT_EXPANSION_MAX_RATIO),
         ]
     )
 
@@ -204,9 +207,35 @@ def test_retrieve_cli_overrides_context_assembly_without_changing_named_arm() ->
     assert arm["neighbor_stitch_span"] == EXPECTED_NEIGHBOR_STITCH_SPAN
     assert arm["state_part_completion_items"] == EXPECTED_STATE_PART_COMPLETION_ITEMS
     assert arm["state_part_refinement"] is True
+    assert arm["context_expansion_max_ratio"] == EXPECTED_CONTEXT_EXPANSION_MAX_RATIO
     assert module.arm_by_name("trajectory_18k")["neighbor_stitch_items"] == 0
     assert module.arm_by_name("trajectory_18k")["state_part_completion_items"] == 0
     assert module.arm_by_name("trajectory_18k")["state_part_refinement"] is False
+
+
+def test_retrieve_cli_defaults_context_expansion_budget_to_disabled() -> None:
+    module = _load_module()
+    args = module.parse_args(
+        [
+            "retrieve",
+            "--data-root",
+            "data",
+            "--official-repo",
+            "official",
+            "--memory-dir",
+            "memory",
+            "--output-dir",
+            "output",
+            "--domain",
+            "web",
+            "--arm",
+            "trajectory_18k",
+        ]
+    )
+
+    arm = module.retrieval_arm_from_args(args)
+
+    assert arm["context_expansion_max_ratio"] == 0.0
 
 
 def test_reader_command_round_trips_state_part_overrides_through_official_runner(
@@ -234,6 +263,7 @@ def test_reader_command_round_trips_state_part_overrides_through_official_runner
         "neighbor_stitch_span": EXPECTED_NEIGHBOR_STITCH_SPAN,
         "state_part_completion_items": EXPECTED_STATE_PART_COMPLETION_ITEMS,
         "state_part_refinement": True,
+        "context_expansion_max_ratio": EXPECTED_CONTEXT_EXPANSION_MAX_RATIO,
     }
 
     command = module.reader_command(
@@ -249,6 +279,7 @@ def test_reader_command_round_trips_state_part_overrides_through_official_runner
     assert "True" not in command
     assert runner_args.state_part_completion_items == EXPECTED_STATE_PART_COMPLETION_ITEMS
     assert runner_args.state_part_refinement is True
+    assert runner_args.context_expansion_max_ratio == EXPECTED_CONTEXT_EXPANSION_MAX_RATIO
 
     baseline_command = module.reader_command(
         experiment_plan=plan,
@@ -260,6 +291,7 @@ def test_reader_command_round_trips_state_part_overrides_through_official_runner
     baseline_args = official_runner.parse_args(baseline_command[baseline_command.index("--") + 1 :])
     assert "--no-state-part-refinement" in baseline_command
     assert baseline_args.state_part_refinement is False
+    assert baseline_args.context_expansion_max_ratio == 0.0
 
 
 def test_ablation_gate_enforces_go_no_go_and_research_more(tmp_path: Path) -> None:
@@ -410,6 +442,7 @@ def test_reader_plan_binds_treatment_gate_to_frozen_preregistration(tmp_path: Pa
             "neighbor_stitch_span": EXPECTED_NEIGHBOR_STITCH_SPAN,
             "state_part_completion_items": 0,
             "state_part_refinement": True,
+            "context_expansion_max_ratio": 0.0,
         },
     }
     gate["winner_arm_config"] = {
@@ -538,6 +571,39 @@ def test_reader_report_is_receipt_bound_and_descriptive(
     }
     with pytest.raises(ValueError, match="must be unique"):
         module.build_reader_report(reader_plan=duplicate_plan, run_roots=run_roots)
+
+
+@pytest.mark.parametrize(
+    ("plan_has_ratio", "receipt_has_ratio"),
+    [(False, False), (False, True), (True, False)],
+)
+def test_reader_report_normalizes_disabled_expansion_budget_for_old_artifacts(
+    tmp_path: Path,
+    *,
+    plan_has_ratio: bool,
+    receipt_has_ratio: bool,
+) -> None:
+    module = _load_module()
+    plan, run_roots = _write_reader_report_inputs(tmp_path)
+    if not plan_has_ratio:
+        for item in plan["commands"]:
+            command = item["command"]
+            index = command.index("--context-expansion-max-ratio")
+            del command[index : index + 2]
+    if not receipt_has_ratio:
+        for run_root in run_roots.values():
+            for domain in module.DOMAINS:
+                receipt_path = run_root / domain / "longmemeval_v2_official_receipt.json"
+                receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+                memory_params = receipt["source_runs"]["domains"][domain][
+                    "effective_memory_config"
+                ]["memory_params"]
+                memory_params.pop("context_expansion_max_ratio")
+                receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    report = module.build_reader_report(reader_plan=plan, run_roots=run_roots)
+
+    assert report["status"] == "PASS"
 
 
 def test_reader_replication_plan_is_fixed_receipt_bound_and_score_blind(
@@ -1319,6 +1385,7 @@ def _write_reader_report_inputs(
                 "neighbor_stitch_span": 0 if is_baseline else 1,
                 "state_part_completion_items": 0,
                 "state_part_refinement": not is_baseline,
+                "context_expansion_max_ratio": 0.0,
             }
             question_ids = [f"{domain}-1", f"{domain}-2"]
             run_dir = run_root / domain

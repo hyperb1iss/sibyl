@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import importlib
 import json
+import math
 import os
 import statistics
 import sys
@@ -130,10 +131,12 @@ QUERY_OVERRIDE_KEYS = (
     "neighbor_stitch_span",
     "state_part_completion_items",
     "state_part_refinement",
+    "context_expansion_max_ratio",
 )
-QUERY_OVERRIDE_DEFAULTS: dict[str, int | bool] = {
+QUERY_OVERRIDE_DEFAULTS: dict[str, int | float | bool] = {
     "state_part_completion_items": 0,
     "state_part_refinement": False,
+    "context_expansion_max_ratio": 0.0,
 }
 
 
@@ -325,6 +328,13 @@ def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> 
         value = getattr(args, key, None)
         if value is not None and value < 0:
             parser.error(f"--{key.replace('_', '-')} must be non-negative")
+    context_expansion_max_ratio = getattr(args, "context_expansion_max_ratio", None)
+    if context_expansion_max_ratio is not None and (
+        not math.isfinite(context_expansion_max_ratio)
+        or context_expansion_max_ratio < 0.0
+        or 0.0 < context_expansion_max_ratio < 1.0
+    ):
+        parser.error("--context-expansion-max-ratio must be zero or at least 1.0")
 
 
 def add_reader_report_arguments(subparsers: Any) -> None:
@@ -372,6 +382,7 @@ def add_retrieval_override_arguments(parser: argparse.ArgumentParser) -> None:
         action=argparse.BooleanOptionalAction,
         default=None,
     )
+    parser.add_argument("--context-expansion-max-ratio", type=float)
 
 
 def build_experiment_plan(
@@ -587,7 +598,7 @@ def retrieval_arm_from_args(args: argparse.Namespace) -> dict[str, Any]:
         value = getattr(args, key, None)
         if value is not None:
             arm[key] = value
-    return arm
+    return normalize_reader_arm(arm)
 
 
 def execute_retrieval(
@@ -954,6 +965,19 @@ def normalize_reader_arm(raw_arm: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"Reader arm {key} must be a non-negative integer")
     if not isinstance(arm["state_part_refinement"], bool):
         raise TypeError("Reader arm state_part_refinement must be boolean")
+    context_expansion_max_ratio = arm["context_expansion_max_ratio"]
+    if isinstance(context_expansion_max_ratio, bool) or not isinstance(
+        context_expansion_max_ratio, int | float
+    ):
+        raise TypeError("Reader arm context_expansion_max_ratio must be numeric")
+    normalized_expansion_ratio = float(context_expansion_max_ratio)
+    if (
+        not math.isfinite(normalized_expansion_ratio)
+        or normalized_expansion_ratio < 0.0
+        or 0.0 < normalized_expansion_ratio < 1.0
+    ):
+        raise ValueError("Reader arm context_expansion_max_ratio must be zero or at least 1.0")
+    arm["context_expansion_max_ratio"] = normalized_expansion_ratio
     if not isinstance(arm.get("name"), str) or not arm["name"]:
         raise ValueError("Reader arm must have a name")
     if not isinstance(arm.get("representation"), str) or not arm["representation"]:

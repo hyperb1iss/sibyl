@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import threading
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -42,6 +43,8 @@ EXPECTED_NEIGHBOR_STITCH_ITEMS = 2
 EXPECTED_NEIGHBOR_STITCH_SPAN = 1
 EXPECTED_STATE_PART_COMPLETION_ITEMS = 2
 EXPECTED_STATE_PART_REFINEMENT_MIN_SCORE_GAIN = 0.05
+EXPECTED_CONTEXT_EXPANSION_MAX_RATIO = 1.2
+EXPECTED_CONTEXT_TOKEN_COUNT = 37
 EXPECTED_SEARCH_LIMIT_OVERRIDE = 24
 EXPECTED_SAVED_USAGE_REQUESTS = 2
 EXPECTED_SAVED_USAGE_COST_USD = 0.25
@@ -153,6 +156,8 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(
                 TEST_EMAIL,
                 "--password",
                 TEST_CREDENTIAL,
+                "--context-expansion-max-ratio",
+                str(EXPECTED_CONTEXT_EXPANSION_MAX_RATIO),
             ]
         )
         == 0
@@ -188,6 +193,10 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(
     assert memory_config["memory_params"]["state_part_completion_items"] == 0
     assert memory_config["memory_params"]["state_part_refinement"] is False
     assert (
+        memory_config["memory_params"]["context_expansion_max_ratio"]
+        == EXPECTED_CONTEXT_EXPANSION_MAX_RATIO
+    )
+    assert (
         memory_config["memory_params"]["api_timeout_seconds"] == EXPECTED_MEMORY_API_TIMEOUT_SECONDS
     )
     assert (
@@ -214,6 +223,7 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(
     assert plan["max_chunks_per_trajectory"] == EXPECTED_MAX_CHUNKS_PER_TRAJECTORY
     assert plan["neighbor_stitch_items"] == EXPECTED_NEIGHBOR_STITCH_ITEMS
     assert plan["neighbor_stitch_span"] == EXPECTED_NEIGHBOR_STITCH_SPAN
+    assert plan["context_expansion_max_ratio"] == EXPECTED_CONTEXT_EXPANSION_MAX_RATIO
     assert plan["honesty_contract"]["answer_gold_visible_to_memory"] is False
     assert plan["required_trajectory_count"] == EXPECTED_REQUIRED_TRAJECTORIES
     assert plan["requirements"]["trajectories_jsonl_exists"] is True
@@ -885,6 +895,64 @@ def test_sibyl_memory_context_formats_retrieved_content() -> None:
     ]
 
 
+def test_sibyl_memory_context_token_count_matches_official_processor_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_memory_module()
+    calls: dict[str, object] = {}
+
+    class FakeProcessor:
+        def apply_chat_template(
+            self,
+            messages: list[dict[str, object]],
+            *,
+            tokenize: bool,
+            add_generation_prompt: bool,
+        ) -> str:
+            calls["messages"] = messages
+            calls["template"] = (tokenize, add_generation_prompt)
+            return "rendered-context"
+
+        def __call__(self, **kwargs: object) -> dict[str, object]:
+            calls["processor"] = kwargs
+            return {"input_ids": SimpleNamespace(shape=(1, EXPECTED_CONTEXT_TOKEN_COUNT))}
+
+    processor = FakeProcessor()
+
+    class FakeAutoProcessor:
+        @staticmethod
+        def from_pretrained(model: str) -> FakeProcessor:
+            calls["model"] = model
+            return processor
+
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        SimpleNamespace(AutoProcessor=FakeAutoProcessor),
+    )
+
+    token_count = module.count_memory_context_tokens(
+        [{"type": "text", "value": "Retrieved evidence"}]
+    )
+
+    assert token_count == EXPECTED_CONTEXT_TOKEN_COUNT
+    assert calls == {
+        "model": "Qwen/Qwen3.5-9B",
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": "Retrieved evidence"}],
+            }
+        ],
+        "template": (False, False),
+        "processor": {
+            "text": "rendered-context",
+            "images": None,
+            "return_tensors": "pt",
+        },
+    }
+
+
 def test_sibyl_memory_assembles_diverse_seeds_with_neighbors() -> None:
     module = _load_memory_module()
     t1_seed = _search_result("t1", chunk_index=1, state_index=1, score=1.0)
@@ -926,6 +994,66 @@ def test_sibyl_memory_assembles_diverse_seeds_with_neighbors() -> None:
     assert assembled[-1]["metadata"]["longmemeval_v2_chunk_index"] == 0
     assert metadata["selected_search_seed_count"] == len(assembled) - 1
     assert metadata["stitched_neighbor_count"] == 1
+
+
+def test_sibyl_memory_expansion_budget_drops_whole_tail_items() -> None:
+    module = _load_memory_module()
+    seed = _search_result("t1", chunk_index=1, state_index=1, score=1.0)
+    second = _search_result("t2", chunk_index=0, state_index=0, score=0.9)
+    third = _search_result("t3", chunk_index=0, state_index=0, score=0.8)
+    neighbor = _search_result("t1", chunk_index=0, state_index=0, score=0.0)
+    seed["_test_tokens"] = 30
+    second["_test_tokens"] = 30
+    third["_test_tokens"] = 30
+    neighbor["_test_tokens"] = 50
+
+    assembled, metadata = module.assemble_context_results(
+        [seed, second, third],
+        chunk_catalog={"t1": {0: neighbor, 1: seed}},
+        max_items=4,
+        max_chunks_per_trajectory=2,
+        neighbor_stitch_items=1,
+        neighbor_stitch_span=1,
+        context_expansion_max_ratio=EXPECTED_CONTEXT_EXPANSION_MAX_RATIO,
+        context_token_counter=lambda items: sum(int(item["_test_tokens"]) for item in items),
+    )
+
+    assert [module._result_chunk_key(result) for result in assembled] == [
+        ("t1", 1),
+        ("t2", 0),
+        ("t3", 0),
+    ]
+    assert metadata["context_expansion_budget"] == {
+        "enabled": True,
+        "max_ratio": EXPECTED_CONTEXT_EXPANSION_MAX_RATIO,
+        "base_item_count": 3,
+        "unbounded_item_count": 4,
+        "final_item_count": 3,
+        "base_token_count": 90,
+        "max_token_count": 108,
+        "unbounded_token_count": 140,
+        "final_token_count": 90,
+        "dropped_item_count": 1,
+        "dropped_chunk_keys": [["t1", 0]],
+        "binding": True,
+    }
+    assert metadata["stitched_neighbor_count"] == 0
+
+
+def test_sibyl_memory_expansion_budget_rejects_sub_seed_ratio() -> None:
+    module = _load_memory_module()
+
+    with pytest.raises(ValueError, match=r"zero or at least 1.0"):
+        module.assemble_context_results(
+            [],
+            chunk_catalog={},
+            max_items=1,
+            max_chunks_per_trajectory=1,
+            neighbor_stitch_items=0,
+            neighbor_stitch_span=0,
+            context_expansion_max_ratio=0.9,
+            context_token_counter=lambda _items: 0,
+        )
 
 
 def test_sibyl_memory_query_ranks_sibling_state_parts() -> None:
@@ -1167,6 +1295,7 @@ def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
             "state_part_completion_items": EXPECTED_STATE_PART_COMPLETION_ITEMS,
             "state_part_refinement": True,
             "neighbor_stitch_items": 2,
+            "context_expansion_max_ratio": EXPECTED_CONTEXT_EXPANSION_MAX_RATIO,
         },
     }
 
@@ -1180,6 +1309,7 @@ def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
     assert params["state_part_completion_items"] == EXPECTED_STATE_PART_COMPLETION_ITEMS
     assert params["state_part_refinement"] is True
     assert params["neighbor_stitch_items"] == EXPECTED_NEIGHBOR_STITCH_ITEMS
+    assert params["context_expansion_max_ratio"] == EXPECTED_CONTEXT_EXPANSION_MAX_RATIO
 
     requested["memory_params"]["content_max_chars"] = 8_000
     with pytest.raises(RuntimeError, match="content_max_chars"):
@@ -1867,6 +1997,20 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
                 "ranking_applied_count": 0,
                 "replacements": [],
                 "min_score_gain": 0.05,
+            },
+            "context_expansion_budget": {
+                "enabled": False,
+                "max_ratio": None,
+                "base_item_count": 0,
+                "unbounded_item_count": 0,
+                "final_item_count": 0,
+                "base_token_count": None,
+                "max_token_count": None,
+                "unbounded_token_count": None,
+                "final_token_count": None,
+                "dropped_item_count": 0,
+                "dropped_chunk_keys": [],
+                "binding": False,
             },
         },
     }
