@@ -48,6 +48,7 @@ class ContextRelatedItem:
     relationship: str
     direction: str
     distance: int = 1
+    content: str | None = None
 
 
 @dataclass(frozen=True)

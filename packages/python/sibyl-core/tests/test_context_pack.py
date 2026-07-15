@@ -702,12 +702,13 @@ async def test_compile_context_batches_default_related_items(
         id="task-1",
         entity_type=SimpleNamespace(value="task"),
         name="Related task",
+        content="source evidence",
         metadata={},
     )
     relationship = SimpleNamespace(
         source_id="decision-1",
         target_id="task-1",
-        relationship_type=SimpleNamespace(value="RELATED_TO"),
+        relationship_type=SimpleNamespace(value="DERIVED_FROM"),
     )
     relationship_manager = SimpleNamespace(
         get_related_entities=AsyncMock(return_value=[]),
@@ -732,6 +733,7 @@ async def test_compile_context_batches_default_related_items(
     )
     relationship_manager.get_related_entities.assert_not_awaited()
     assert pack.items[0].related[0].id == "task-1"
+    assert pack.items[0].related[0].content == "source evidence"
 
 
 @pytest.mark.asyncio

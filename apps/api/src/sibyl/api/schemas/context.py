@@ -47,6 +47,7 @@ class ContextPackRelatedItem(BaseModel):
     relationship: str
     direction: str
     distance: int = 1
+    content: str | None = None
 
 
 class ContextPackItemQuality(BaseModel):

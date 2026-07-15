@@ -43,6 +43,7 @@ RelatedFn = Callable[..., Awaitable[list[ContextRelatedItem]]]
 RelatedBatchFn = Callable[..., Awaitable[dict[str, list[ContextRelatedItem]]]]
 RawMemoryRecallFn = Callable[..., Awaitable[list[RawMemory]]]
 ActiveWorkFn = Callable[..., Awaitable[list["ContextItem"]]]
+MAX_RELATED_SUPPORT_CHARS = 18_000
 
 log = structlog.get_logger()
 
@@ -349,6 +350,15 @@ def _is_synthetic_relationship_result(result: SearchResult) -> bool:
     )
 
 
+def _related_source_content(entity: Any, relationship: Any, *, seed_id: str) -> str | None:
+    relationship_type = _relationship_value(relationship.relationship_type)
+    source_id = str(getattr(relationship, "source_id", ""))
+    if relationship_type != "DERIVED_FROM" or source_id != seed_id:
+        return None
+    content = str(getattr(entity, "content", "") or "").strip()
+    return content[:MAX_RELATED_SUPPORT_CHARS] or None
+
+
 async def _default_related_items(
     *,
     entity_id: str,
@@ -377,6 +387,11 @@ async def _default_related_items(
                 name=str(entity.name),
                 relationship=str(relationship.relationship_type.value),
                 direction="outgoing" if relationship.source_id == entity_id else "incoming",
+                content=_related_source_content(
+                    entity,
+                    relationship,
+                    seed_id=entity_id,
+                ),
             )
         )
         if len(related) >= limit:
@@ -425,6 +440,11 @@ async def _default_related_items_batch(
                     continue
 
             source_id = str(getattr(relationship, "source_id", ""))
+            support_content = _related_source_content(
+                entity,
+                relationship,
+                seed_id=str(seed_id),
+            )
             related.append(
                 ContextRelatedItem(
                     id=str(entity.id),
@@ -432,6 +452,7 @@ async def _default_related_items_batch(
                     name=str(entity.name),
                     relationship=_relationship_value(relationship.relationship_type),
                     direction="outgoing" if source_id == seed_id else "incoming",
+                    content=support_content,
                 )
             )
             if len(related) >= limit:
