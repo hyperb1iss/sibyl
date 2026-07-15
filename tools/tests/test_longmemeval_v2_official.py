@@ -1648,8 +1648,15 @@ def test_context_pack_conversion_keeps_only_typed_operational_memory() -> None:
                             "id": "procedure-1",
                             "type": "procedure",
                             "content": "1. click Priority",
-                            "score": 0.8,
+                            "score": 0.2,
                             "metadata": {"longmemeval_v2_trajectory_id": "t1"},
+                        },
+                        {
+                            "id": "event-1",
+                            "type": "event",
+                            "content": "Priority changed to Critical",
+                            "score": 0.8,
+                            "metadata": {"longmemeval_v2_trajectory_id": "t2"},
                         },
                         {
                             "id": "tool-1",
@@ -1663,31 +1670,177 @@ def test_context_pack_conversion_keeps_only_typed_operational_memory() -> None:
         }
     )
 
-    assert [result["id"] for result in results] == ["procedure-1"]
-    assert results[0]["_selection_origin"] == "context_pack:procedures"
+    assert [result["id"] for result in results] == ["procedure-1", "event-1"]
+    assert all(result["_selection_origin"] == "context_pack:procedures" for result in results)
 
 
-def test_operational_evidence_set_reserves_capacity_for_raw_support() -> None:
+def test_context_pack_conversion_bundles_query_ranked_source_evidence() -> None:
+    module = _load_memory_module()
+
+    results = module.context_pack_to_search_results(
+        {
+            "sections": [
+                {
+                    "facet": "recent_memory",
+                    "items": [
+                        {
+                            "id": "event-1",
+                            "type": "event",
+                            "content": "Action: open the attribute editor",
+                            "score": 0.8,
+                            "metadata": {"longmemeval_v2_trajectory_id": "t1"},
+                            "related": [
+                                {
+                                    "id": "session-unrelated",
+                                    "relationship": "DERIVED_FROM",
+                                    "direction": "outgoing",
+                                    "content": "Account settings and profile controls",
+                                },
+                                {
+                                    "id": "session-source",
+                                    "relationship": "DERIVED_FROM",
+                                    "direction": "outgoing",
+                                    "content": "Catalog Input Type: Text Swatch",
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+        query="Which Catalog Input Type is selected?",
+    )
+
+    assert len(results) == 1
+    assert "Typed projection:\nAction: open the attribute editor" in results[0]["content"]
+    assert "Source evidence:\nCatalog Input Type: Text Swatch" in results[0]["content"]
+    assert results[0]["metadata"]["source_support_entity_id"] == "session-source"
+
+
+def test_operational_evidence_set_ranks_typed_and_raw_on_shared_relevance() -> None:
     module = _load_memory_module()
     typed = [
         {
             "id": f"procedure-{index}",
             "type": "procedure",
+            "content": "Unrelated account settings",
+            "score": 0.1,
+            "_selection_origin": "context_pack:procedures",
             "metadata": {"longmemeval_v2_trajectory_id": f"t{index}"},
         }
         for index in range(8)
     ]
-    raw = [{"id": f"session-{index}", "type": "session"} for index in range(8)]
+    raw = [
+        {
+            "id": f"session-{index}",
+            "type": "session",
+            "content": f"Deployment Ring value {index}",
+            "score": 1.0 - (index / 100),
+            "_selection_origin": "search",
+        }
+        for index in range(8)
+    ]
 
-    selected = module.compile_operational_evidence_set(
+    selected, metadata = module.compile_operational_evidence_set(
+        query='Which value is shown for "Deployment Ring"?',
+        typed_results=typed,
+        raw_results=raw,
+        max_items=8,
+        mode="shared_relevance",
+    )
+
+    assert len(selected) == EXPECTED_OPERATIONAL_EVIDENCE_ITEMS
+    assert all(item["type"] == "session" for item in selected)
+    assert metadata == {
+        "mode": "shared_relevance",
+        "candidate_count": 16,
+        "typed_candidate_count": 8,
+        "raw_candidate_count": 8,
+        "ranking_applied": True,
+        "ranking_changed": False,
+        "selected_typed_count": 0,
+        "selected_raw_count": 8,
+    }
+
+
+def test_operational_evidence_set_preserves_reserved_support_by_default() -> None:
+    module = _load_memory_module()
+    typed = [
+        {
+            "id": f"procedure-{index}",
+            "type": "procedure",
+            "content": "Typed projection",
+            "_selection_origin": "context_pack:procedures",
+            "metadata": {"longmemeval_v2_trajectory_id": f"t{index}"},
+        }
+        for index in range(4)
+    ]
+    raw = [
+        {
+            "id": f"session-{index}",
+            "type": "session",
+            "content": "Raw support",
+            "_selection_origin": "search",
+        }
+        for index in range(8)
+    ]
+
+    selected, metadata = module.compile_operational_evidence_set(
+        query="anything",
         typed_results=typed,
         raw_results=raw,
         max_items=8,
     )
 
-    assert len(selected) == EXPECTED_OPERATIONAL_EVIDENCE_ITEMS
-    assert sum(item["type"] == "procedure" for item in selected) == EXPECTED_OPERATIONAL_TYPED_ITEMS
-    assert sum(item["type"] == "session" for item in selected) == EXPECTED_OPERATIONAL_RAW_ITEMS
+    assert [item["id"] for item in selected] == [
+        "procedure-0",
+        "procedure-1",
+        "session-0",
+        "session-1",
+        "session-2",
+        "session-3",
+        "session-4",
+        "session-5",
+    ]
+    assert metadata["mode"] == "reserved_support"
+    assert metadata["selected_typed_count"] == EXPECTED_OPERATIONAL_TYPED_ITEMS
+    assert metadata["selected_raw_count"] == EXPECTED_OPERATIONAL_RAW_ITEMS
+
+
+def test_operational_evidence_set_admits_relevant_typed_memory() -> None:
+    module = _load_memory_module()
+    typed = [
+        {
+            "id": "procedure-priority",
+            "type": "procedure",
+            "content": "Open the Priority menu and select Critical",
+            "score": 1.2,
+            "_selection_origin": "context_pack:procedures",
+            "metadata": {"longmemeval_v2_trajectory_id": "t1"},
+        }
+    ]
+    raw = [
+        {
+            "id": f"session-{index}",
+            "type": "session",
+            "content": "General settings overview",
+            "score": 1.0 - (index / 10),
+            "_selection_origin": "search",
+        }
+        for index in range(3)
+    ]
+
+    selected, metadata = module.compile_operational_evidence_set(
+        query="How do I change the Priority to Critical?",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=2,
+        mode="shared_relevance",
+    )
+
+    assert selected[0]["id"] == "procedure-priority"
+    assert metadata["selected_typed_count"] == 1
+    assert metadata["selected_raw_count"] == 1
 
 
 def test_sibyl_memory_insert_tracks_deferred_background_jobs() -> None:
@@ -2203,6 +2356,16 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
             },
             "typed_context_candidate_count": 0,
             "typed_context_selected_count": 0,
+            "evidence_composition": {
+                "mode": "reserved_support",
+                "candidate_count": 0,
+                "typed_candidate_count": 0,
+                "raw_candidate_count": 0,
+                "ranking_applied": False,
+                "ranking_changed": False,
+                "selected_typed_count": 0,
+                "selected_raw_count": 0,
+            },
         },
     }
     assert metadata["retrieval_trace"] == []

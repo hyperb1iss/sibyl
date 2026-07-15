@@ -68,6 +68,9 @@ DEFAULT_CONTENT_MAX_CHARS = 18_000
 DEFAULT_SEARCH_LIMIT = 12
 DEFAULT_CONTEXT_ITEMS = 8
 DEFAULT_CONTEXT_CHARS_PER_ITEM = 18_000
+MAX_BUNDLED_SOURCE_CHARS = 12_000
+DEFAULT_EVIDENCE_COMPOSITION_MODE = "reserved_support"
+EVIDENCE_COMPOSITION_MODES = frozenset({"reserved_support", "shared_relevance"})
 DEFAULT_API_TIMEOUT_SECONDS = 600.0
 DEFAULT_API_RETRY_ATTEMPTS = 3
 DEFAULT_API_RETRY_BASE_DELAY_SECONDS = 2.0
@@ -115,6 +118,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "state_part_completion_items",
         "state_part_refinement",
         "context_expansion_max_ratio",
+        "evidence_composition_mode",
         "checkpoint_dir",
     }
 )
@@ -293,6 +297,8 @@ def build_operational_experience_payload(
 
 def context_pack_to_search_results(
     response: dict[str, object],
+    *,
+    query: str = "",
 ) -> list[dict[str, object]]:
     candidates: list[dict[str, object]] = []
     sections = response.get("sections")
@@ -312,6 +318,20 @@ def context_pack_to_search_results(
             if item_type not in {"procedure", "error_pattern", "event"}:
                 continue
             candidate = _string_key_dict(item)
+            support = _best_source_support(item, query=query)
+            if support is not None:
+                source_content = _stripped_str(support.get("content"))
+                typed_content = _stripped_str(candidate.get("content"))
+                candidate["content"] = _clean_evidence_bundle(
+                    typed_content=typed_content,
+                    source_content=source_content,
+                )
+                metadata = _string_key_dict(candidate.get("metadata"))
+                metadata["source_support_entity_id"] = _stripped_str(support.get("id"))
+                metadata["source_support_relationship"] = _stripped_str(
+                    support.get("relationship")
+                )
+                candidate["metadata"] = metadata
             candidate["_selection_origin"] = f"context_pack:{facet}"
             candidates.append(candidate)
     type_order = {"procedure": 0, "error_pattern": 1, "event": 2}
@@ -319,11 +339,61 @@ def context_pack_to_search_results(
         candidates,
         key=lambda item: (
             type_order.get(_stripped_str(item.get("type")), 3),
-            -float(item.get("score", 0.0))
-            if isinstance(item.get("score"), int | float)
-            else 0.0,
+            -_numeric_score(item.get("score")),
+            _stripped_str(item.get("id")),
         ),
     )
+
+
+def _best_source_support(
+    item: dict[str, object],
+    *,
+    query: str,
+) -> dict[str, object] | None:
+    related = item.get("related")
+    if not isinstance(related, list):
+        return None
+    supports = [
+        _string_key_dict(candidate)
+        for candidate in related
+        if isinstance(candidate, dict)
+        and _stripped_str(candidate.get("relationship")) == "DERIVED_FROM"
+        and _stripped_str(candidate.get("direction")) == "outgoing"
+        and _stripped_str(candidate.get("content"))
+    ]
+    if not supports:
+        return None
+    ranking = rank_by_query_coverage(
+        query,
+        [
+            QueryCoverageCandidate(
+                item=support,
+                stable_id=_stripped_str(support.get("id")) or str(index),
+                text=_stripped_str(support.get("content")),
+                prior_score=0.0,
+                original_rank=index,
+            )
+            for index, support in enumerate(supports, start=1)
+        ],
+    )
+    best = max(
+        ranking.ranked,
+        key=lambda candidate: (
+            candidate.overlap,
+            candidate.score,
+            -candidate.original_rank,
+        ),
+    )
+    return dict(best.item)
+
+
+def _clean_evidence_bundle(*, typed_content: str, source_content: str) -> str:
+    parts = []
+    if typed_content:
+        parts.append(f"Typed projection:\n{typed_content}")
+    if source_content:
+        parts.append(f"Source evidence:\n{source_content[:MAX_BUNDLED_SOURCE_CHARS].rstrip()}")
+    return "\n\n".join(parts)
 
 
 def _flatten_operational_result_metadata(
@@ -346,14 +416,19 @@ def _flatten_operational_result_metadata(
 
 def compile_operational_evidence_set(
     *,
+    query: str,
     typed_results: list[dict[str, object]],
     raw_results: list[dict[str, object]],
     max_items: int,
-) -> list[dict[str, object]]:
+    mode: str = DEFAULT_EVIDENCE_COMPOSITION_MODE,
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    if mode not in EVIDENCE_COMPOSITION_MODES:
+        msg = f"Unknown evidence composition mode {mode!r}; expected {sorted(EVIDENCE_COMPOSITION_MODES)}"
+        raise ValueError(msg)
     max_items = max(1, max_items)
-    typed_budget = min(3, max(1, max_items // 3))
-    selected: list[dict[str, object]] = []
+    candidates: list[dict[str, object]] = []
     seen_typed: set[tuple[str, str]] = set()
+    seen_ids: set[str] = set()
     for result in typed_results:
         metadata = _string_key_dict(result.get("metadata"))
         key = (
@@ -362,20 +437,82 @@ def compile_operational_evidence_set(
         )
         if key in seen_typed:
             continue
-        selected.append(result)
+        result_id = _stripped_str(result.get("id"))
+        if result_id and result_id in seen_ids:
+            continue
+        candidates.append(dict(result))
         seen_typed.add(key)
-        if len(selected) >= typed_budget:
-            break
-    selected_ids = {_stripped_str(result.get("id")) for result in selected}
+        if result_id:
+            seen_ids.add(result_id)
     for result in raw_results:
         result_id = _stripped_str(result.get("id"))
-        if result_id and result_id in selected_ids:
+        if result_id and result_id in seen_ids:
             continue
-        selected.append(result)
-        selected_ids.add(result_id)
-        if len(selected) >= max_items:
-            break
-    return selected
+        candidates.append(dict(result))
+        if result_id:
+            seen_ids.add(result_id)
+
+    if mode == "reserved_support":
+        typed_budget = min(3, max(1, max_items // 3))
+        selected = candidates[:typed_budget]
+        selected.extend(candidates[len(seen_typed) :])
+        selected = selected[:max_items]
+        selected_typed = sum(
+            _stripped_str(item.get("_selection_origin")).startswith("context_pack:")
+            for item in selected
+        )
+        return selected, {
+            "mode": mode,
+            "candidate_count": len(candidates),
+            "typed_candidate_count": len(seen_typed),
+            "raw_candidate_count": len(candidates) - len(seen_typed),
+            "ranking_applied": False,
+            "ranking_changed": False,
+            "selected_typed_count": selected_typed,
+            "selected_raw_count": len(selected) - selected_typed,
+        }
+
+    candidates.sort(
+        key=lambda item: (
+            -_numeric_score(item.get("score")),
+            _result_stable_id(item),
+        )
+    )
+    ranking = rank_by_query_coverage(
+        query,
+        [
+            QueryCoverageCandidate(
+                item=candidate,
+                stable_id=_result_stable_id(candidate),
+                text=_stripped_str(candidate.get("content")),
+                prior_score=_numeric_score(candidate.get("score")),
+                original_rank=index,
+            )
+            for index, candidate in enumerate(candidates, start=1)
+        ],
+    )
+    selected: list[dict[str, object]] = []
+    for selection_rank, ranked in enumerate(ranking.ranked[:max_items], start=1):
+        candidate = dict(ranked.item)
+        candidate["_evidence_selection_rank"] = selection_rank
+        candidate["_evidence_selection_score"] = ranked.score
+        candidate["_evidence_selection_overlap"] = ranked.overlap
+        selected.append(candidate)
+
+    selected_typed = sum(
+        _stripped_str(item.get("_selection_origin")).startswith("context_pack:")
+        for item in selected
+    )
+    return selected, {
+        "mode": mode,
+        "candidate_count": len(candidates),
+        "typed_candidate_count": len(seen_typed),
+        "raw_candidate_count": len(candidates) - len(seen_typed),
+        "ranking_applied": ranking.applied,
+        "ranking_changed": ranking.changed,
+        "selected_typed_count": selected_typed,
+        "selected_raw_count": len(selected) - selected_typed,
+    }
 
 
 def search_results_to_memory_context(
@@ -1089,6 +1226,17 @@ class SibylLiveApiMemory(Memory):
             "state_part_refinement",
             DEFAULT_STATE_PART_REFINEMENT,
         )
+        self.evidence_composition_mode = _param_str(
+            memory_params,
+            "evidence_composition_mode",
+            DEFAULT_EVIDENCE_COMPOSITION_MODE,
+        )
+        if self.evidence_composition_mode not in EVIDENCE_COMPOSITION_MODES:
+            msg = (
+                f"Unknown evidence_composition_mode {self.evidence_composition_mode!r}; "
+                f"expected one of {sorted(EVIDENCE_COMPOSITION_MODES)}"
+            )
+            raise ValueError(msg)
         self.context_expansion_max_ratio = _param_context_expansion_ratio(
             memory_params,
             "context_expansion_max_ratio",
@@ -1288,7 +1436,7 @@ class SibylLiveApiMemory(Memory):
                 "record_exposure": False,
             },
         )
-        typed_results = context_pack_to_search_results(context_response)
+        typed_results = context_pack_to_search_results(context_response, query=query)
         payload = {
             "query": query,
             "types": ["session"],
@@ -1352,16 +1500,23 @@ class SibylLiveApiMemory(Memory):
             ),
             context_token_counter=self._count_context_result_tokens,
         )
-        evidence_set = compile_operational_evidence_set(
+        evidence_set, evidence_composition = compile_operational_evidence_set(
+            query=query,
             typed_results=typed_results,
             raw_results=assembled_results,
             max_items=self.max_context_items,
+            mode=getattr(
+                self,
+                "evidence_composition_mode",
+                DEFAULT_EVIDENCE_COMPOSITION_MODE,
+            ),
         )
         assembly_metadata["typed_context_candidate_count"] = len(typed_results)
         assembly_metadata["typed_context_selected_count"] = sum(
             _stripped_str(item.get("_selection_origin")).startswith("context_pack:")
             for item in evidence_set
         )
+        assembly_metadata["evidence_composition"] = evidence_composition
         self._query_local.search_metadata["adapter_assembly"] = assembly_metadata
         self._query_local.retrieval_trace = build_retrieval_trace(
             evidence_set,
