@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 from types import ModuleType
+
+EXPECTED_MIN_EVIDENCE_PARTS = 2
+EXPECTED_MAX_EVIDENCE_PART_CHARS = 220
+EXPECTED_MAX_WRITE_AMPLIFICATION = 2.0
 
 
 def _load_module() -> ModuleType:
@@ -12,6 +17,7 @@ def _load_module() -> ModuleType:
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -25,11 +31,11 @@ def test_projection_audit_proves_source_support_and_replay(tmp_path: Path) -> No
 
     assert report["passed"] is True, report["issues"]
     assert report["counts"]["trajectories"] == 1
-    assert report["counts"]["evidence_parts"] > 2
+    assert report["counts"]["evidence_parts"] > EXPECTED_MIN_EVIDENCE_PARTS
     assert report["counts"]["actions"] == 1
     assert report["relationship_types"]["DERIVED_FROM"] > 0
-    assert report["bounds"]["max_evidence_part_chars"] <= 220
-    assert report["bounds"]["max_total_write_amplification"] <= 2.0
+    assert report["bounds"]["max_evidence_part_chars"] <= EXPECTED_MAX_EVIDENCE_PART_CHARS
+    assert report["bounds"]["max_total_write_amplification"] <= EXPECTED_MAX_WRITE_AMPLIFICATION
 
 
 def _trajectory() -> dict[str, object]:

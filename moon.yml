@@ -456,7 +456,9 @@ tasks:
       benchmarks/longmemeval_v2_reader_holdout.py
       benchmarks/longmemeval_v2_reader_holdout_report.py
       benchmarks/longmemeval_v2_causal_ablation.py
-      benchmarks/longmemeval_v2_causal_ablation_report.py && uv run ruff format --check tools
+      benchmarks/longmemeval_v2_causal_ablation_report.py
+      benchmarks/longmemeval_v2_live_smoke.py
+      benchmarks/longmemeval_v2_projection_audit.py && uv run ruff format --check tools
       benchmarks/provider_usage.py benchmarks/longmemeval_v2_diagnostics.py
       benchmarks/longmemeval_v2_ablations.py benchmarks/longmemeval_v2_reader_report.py
       benchmarks/longmemeval_v2_reader_replication.py
@@ -464,6 +466,7 @@ tasks:
       benchmarks/longmemeval_v2_reader_holdout.py benchmarks/longmemeval_v2_reader_holdout_report.py
       benchmarks/longmemeval_v2_causal_ablation.py
       benchmarks/longmemeval_v2_causal_ablation_report.py
+      benchmarks/longmemeval_v2_live_smoke.py benchmarks/longmemeval_v2_projection_audit.py
     inputs:
       - tools/**/*.py
       - benchmarks/provider_usage.py
@@ -476,6 +479,8 @@ tasks:
       - benchmarks/longmemeval_v2_reader_holdout_report.py
       - benchmarks/longmemeval_v2_causal_ablation.py
       - benchmarks/longmemeval_v2_causal_ablation_report.py
+      - benchmarks/longmemeval_v2_live_smoke.py
+      - benchmarks/longmemeval_v2_projection_audit.py
       - benchmarks/longmemeval_v2_diagnostic_slice.json
       - pyproject.toml
 
@@ -488,6 +493,7 @@ tasks:
       benchmarks/longmemeval_v2_reader_holdout.py benchmarks/longmemeval_v2_reader_holdout_report.py
       benchmarks/longmemeval_v2_causal_ablation.py
       benchmarks/longmemeval_v2_causal_ablation_report.py
+      benchmarks/longmemeval_v2_live_smoke.py benchmarks/longmemeval_v2_projection_audit.py
     inputs:
       - tools/**/*.py
       - benchmarks/provider_usage.py
@@ -500,6 +506,8 @@ tasks:
       - benchmarks/longmemeval_v2_reader_holdout_report.py
       - benchmarks/longmemeval_v2_causal_ablation.py
       - benchmarks/longmemeval_v2_causal_ablation_report.py
+      - benchmarks/longmemeval_v2_live_smoke.py
+      - benchmarks/longmemeval_v2_projection_audit.py
       - pyproject.toml
     options:
       cache: false
@@ -734,6 +742,7 @@ tasks:
       tools/tests/test_longmemeval_replay.py
       tools/tests/test_longmemeval_v2_probe.py tools/tests/test_longmemeval_v2_official.py
       tools/tests/test_longmemeval_v2_diagnostics.py
+      tools/tests/test_longmemeval_v2_live_smoke.py
       tools/tests/test_longmemeval_v2_projection_audit.py
       tools/tests/test_longmemeval_v2_ablations.py
       tools/tests/test_longmemeval_v2_causal_ablation.py -v
@@ -750,6 +759,7 @@ tasks:
       - benchmarks/longmemeval_v2_probe.py
       - benchmarks/longmemeval_v2_official.py
       - benchmarks/longmemeval_v2_diagnostics.py
+      - benchmarks/longmemeval_v2_live_smoke.py
       - benchmarks/longmemeval_v2_projection_audit.py
       - benchmarks/longmemeval_v2_ablations.py
       - benchmarks/longmemeval_v2_reader_report.py
@@ -1339,6 +1349,11 @@ tasks:
 
   bench-longmemeval-v2-projection-audit:
     command: uv run python benchmarks/longmemeval_v2_projection_audit.py
+    options:
+      cache: false
+
+  bench-longmemeval-v2-live-smoke:
+    command: uv run python benchmarks/longmemeval_v2_live_smoke.py
     options:
       cache: false
 

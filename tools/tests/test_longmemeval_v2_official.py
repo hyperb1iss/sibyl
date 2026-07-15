@@ -49,6 +49,11 @@ EXPECTED_SEARCH_LIMIT_OVERRIDE = 24
 EXPECTED_SAVED_USAGE_REQUESTS = 2
 EXPECTED_SAVED_USAGE_COST_USD = 0.25
 EXPECTED_USAGE_ATTEMPTS = 2
+EXPECTED_OPERATIONAL_CREATED_ENTITIES = 4
+EXPECTED_OPERATIONAL_EVIDENCE_ITEMS = 8
+EXPECTED_OPERATIONAL_RAW_ITEMS = 6
+EXPECTED_OPERATIONAL_TYPED_ITEMS = 2
+OPERATIONAL_EVIDENCE_MAX_CHARS = 4_000
 TEST_CONTENT_MAX_CHARS = 420
 TEST_CONTEXT_MAX_CHARS = 800
 TEST_CREDENTIAL = "fresh-credential"
@@ -88,6 +93,68 @@ def _load_runner_module() -> ModuleType:
         Path(__file__).parents[2] / "benchmarks" / "longmemeval_v2_official.py",
         "longmemeval_v2_official",
     )
+
+
+def _finalize_request_handler(
+    calls: list[str],
+) -> Callable[..., dict[str, object]]:
+    def fake_request(
+        method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        del method, params
+        calls.append(path)
+        if path == "/jobs/status":
+            assert isinstance(json, dict)
+            job_ids = json["job_ids"]
+            assert isinstance(job_ids, list)
+            assert len(job_ids) == 1
+            result = None
+            if str(job_ids[0]).startswith("embed-"):
+                result = {
+                    "embedding_usage": {
+                        "provider": "openai",
+                        "model": "text-embedding-3-small",
+                        "requests": 1,
+                        "inputs": EXPECTED_OPERATIONAL_CREATED_ENTITIES,
+                        "prompt_tokens": 100,
+                        "total_tokens": 100,
+                        "cost_reported_requests": 0,
+                        "cost_usd": 0.0,
+                    }
+                }
+            return {
+                "jobs": {
+                    str(job_ids[0]): {
+                        "status": "complete",
+                        "error": None,
+                        "result": result,
+                    }
+                }
+            }
+        if path == "/search":
+            assert json is not None
+            assert json["include_retrieval_diagnostics"] is True
+            assert json["record_exposure"] is False
+            return {
+                "results": [],
+                "filters": {
+                    "retrieval_mode": "native",
+                    "stage_timings_ms": {"total": 12.5},
+                },
+            }
+        if path == "/context/pack":
+            assert json is not None
+            assert json["record_exposure"] is False
+            assert json["audit"] is True
+            assert json["project"] == "project_lme"
+            return {"sections": []}
+        raise AssertionError(f"unexpected path: {path}")
+
+    return fake_request
 
 
 def _load_provider_usage_module() -> ModuleType:
@@ -1551,20 +1618,18 @@ def test_operational_experience_payload_preserves_oversized_state_evidence() -> 
         trajectory,
         project_id="project_lme",
         run_id="run_lme",
-        content_max_chars=4_000,
+        content_max_chars=OPERATIONAL_EVIDENCE_MAX_CHARS,
     )
 
     experience = payload["experience"]
     observations = experience["observations"]
     parts = observations[0]["evidence"]
     assert len(parts) > 1
-    assert all(len(part["content"]) <= 4_000 for part in parts)
+    assert all(len(part["content"]) <= OPERATIONAL_EVIDENCE_MAX_CHARS for part in parts)
     assert [part["metadata"]["longmemeval_v2_chunk_index"] for part in parts] == list(
         range(len(parts))
     )
-    reconstructed = "".join(
-        part["content"].split("\n\n", maxsplit=2)[-1] for part in parts
-    )
+    reconstructed = "".join(part["content"].split("\n\n", maxsplit=2)[-1] for part in parts)
     states = cast(list[dict[str, object]], trajectory["states"])
     tree = cast(str, states[0]["accessibility_tree"])
     assert tree in reconstructed
@@ -1620,9 +1685,9 @@ def test_operational_evidence_set_reserves_capacity_for_raw_support() -> None:
         max_items=8,
     )
 
-    assert len(selected) == 8
-    assert sum(item["type"] == "procedure" for item in selected) == 2
-    assert sum(item["type"] == "session" for item in selected) == 6
+    assert len(selected) == EXPECTED_OPERATIONAL_EVIDENCE_ITEMS
+    assert sum(item["type"] == "procedure" for item in selected) == EXPECTED_OPERATIONAL_TYPED_ITEMS
+    assert sum(item["type"] == "session" for item in selected) == EXPECTED_OPERATIONAL_RAW_ITEMS
 
 
 def test_sibyl_memory_insert_tracks_deferred_background_jobs() -> None:
@@ -1675,7 +1740,7 @@ def test_sibyl_memory_insert_tracks_deferred_background_jobs() -> None:
     observations = cast(list[dict[str, object]], experience["observations"])
     assert observations
     assert observations[0]["evidence"]
-    assert memory.created_entities == 4
+    assert memory.created_entities == EXPECTED_OPERATIONAL_CREATED_ENTITIES
     assert memory.inserted_trajectories == 1
     assert memory._pending_embedding_job_ids == {"embed-lme-v2-1"}
     assert memory._pending_projection_job_ids == set()
@@ -2033,62 +2098,6 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
     module.Memory.__init__(memory, {})
     calls: list[str] = []
 
-    def fake_request(
-        method: str,
-        path: str,
-        *,
-        json: dict[str, object] | None = None,
-        params: dict[str, object] | None = None,
-    ) -> dict[str, object]:
-        del method, params
-        calls.append(path)
-        if path == "/jobs/status":
-            assert isinstance(json, dict)
-            job_ids = json["job_ids"]
-            assert isinstance(job_ids, list)
-            assert len(job_ids) == 1
-            result = None
-            if str(job_ids[0]).startswith("embed-"):
-                result = {
-                    "embedding_usage": {
-                        "provider": "openai",
-                        "model": "text-embedding-3-small",
-                        "requests": 1,
-                        "inputs": 4,
-                        "prompt_tokens": 100,
-                        "total_tokens": 100,
-                        "cost_reported_requests": 0,
-                        "cost_usd": 0.0,
-                    }
-                }
-            return {
-                "jobs": {
-                    str(job_ids[0]): {
-                        "status": "complete",
-                        "error": None,
-                        "result": result,
-                    }
-                }
-            }
-        if path == "/search":
-            assert json is not None
-            assert json["include_retrieval_diagnostics"] is True
-            assert json["record_exposure"] is False
-            return {
-                "results": [],
-                "filters": {
-                    "retrieval_mode": "native",
-                    "stage_timings_ms": {"total": 12.5},
-                },
-            }
-        if path == "/context/pack":
-            assert json is not None
-            assert json["record_exposure"] is False
-            assert json["audit"] is True
-            assert json["project"] == "project_lme"
-            return {"sections": []}
-        raise AssertionError(f"unexpected path: {path}")
-
     memory.project_id = "project_lme"
     memory.api_url = "http://localhost:3434/api"
     memory.api_runtime = {
@@ -2101,7 +2110,7 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
     memory.max_context_items = 8
     memory.max_context_chars_per_item = TEST_CONTEXT_MAX_CHARS
     memory.inserted_trajectories = 2
-    memory.created_entities = 4
+    memory.created_entities = EXPECTED_OPERATIONAL_CREATED_ENTITIES
     memory.defer_embeddings = True
     memory.ingest_embedding_usage = {}
     memory.embedding_job_wait_timeout_seconds = 5.0
@@ -2111,7 +2120,7 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
     memory._finalize_lock = threading.Lock()
     memory._query_local = threading.local()
     memory._ingest_finalized = False
-    memory._request_json = fake_request
+    memory._request_json = _finalize_request_handler(calls)
 
     memory.finalize_ingest()
     assert memory.query("Which filter was selected?") == []
