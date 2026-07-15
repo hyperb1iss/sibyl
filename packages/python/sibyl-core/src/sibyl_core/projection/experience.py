@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import unicodedata
 from collections.abc import Iterable
 from itertools import pairwise
 from typing import Any, Literal, Protocol
@@ -17,8 +19,10 @@ from sibyl_core.models.experience import (
     OperationalObservation,
 )
 
-OPERATIONAL_EXPERIENCE_SCHEMA_VERSION = 3
+OPERATIONAL_EXPERIENCE_SCHEMA_VERSION = 4
 MAX_TYPED_ENTITY_CONTENT_CHARS = 18_000
+MAX_UI_INVENTORY_CHARS = 6_000
+MAX_UI_INVENTORY_ITEMS = 160
 MANIFEST_STATE_PENDING = "pending"
 MANIFEST_STATE_EMBEDDING_PENDING = "embedding_pending"
 MANIFEST_STATE_COMPLETE = "complete"
@@ -138,6 +142,93 @@ def _support_span(observation: OperationalObservation) -> dict[str, Any]:
         "image_refs": list(observation.image_refs),
         "evidence_part_ids": [part.id for part in observation.evidence],
     }
+
+
+_ACCESSIBILITY_NODE_PATTERN = re.compile(
+    r"^(?:\[[^\]]+\]\s+)?(?P<role>[A-Za-z][\w-]*)\s+"
+    r"(?P<quote>['\"])(?P<name>.*)(?P=quote)(?P<attributes>,.*)?$"
+)
+_UI_STATE_ATTRIBUTES = frozenset(
+    {
+        "autocomplete",
+        "checked",
+        "disabled",
+        "expanded",
+        "haspopup",
+        "multiselectable",
+        "orientation",
+        "pressed",
+        "required",
+        "selected",
+        "value",
+    }
+)
+_UI_ROLE_NAMES = {
+    "LabelText": "label",
+    "RootWebArea": "page",
+    "StaticText": "text",
+}
+
+
+def _clean_accessibility_name(value: str) -> str:
+    return " ".join(
+        "".join(character for character in value if unicodedata.category(character) != "Co")
+        .replace("\\'", "'")
+        .replace('\\"', '"')
+        .split()
+    )
+
+
+def _ui_state_attributes(raw_attributes: str) -> str:
+    selected: list[str] = []
+    for raw_attribute in raw_attributes.removeprefix(",").split(","):
+        attribute = raw_attribute.strip()
+        key, separator, value = attribute.partition("=")
+        if separator and key.casefold() in _UI_STATE_ATTRIBUTES:
+            selected.append(f"{key}={value}")
+        elif not separator and key.casefold() == "disabled":
+            selected.append(key)
+    return ", ".join(selected)
+
+
+def _accessibility_inventory(
+    observation: OperationalObservation,
+) -> tuple[str | None, int, bool]:
+    inventory: list[str] = []
+    seen: set[tuple[str, str, str]] = set()
+    truncated = False
+    used_chars = 0
+    for evidence in observation.evidence:
+        if "profile=accessibility-tree" not in evidence.content_type.casefold():
+            continue
+        for raw_line in evidence.content.splitlines():
+            match = _ACCESSIBILITY_NODE_PATTERN.fullmatch(raw_line.strip())
+            if match is None:
+                continue
+            name = _clean_accessibility_name(match.group("name"))
+            if not name:
+                continue
+            role = _UI_ROLE_NAMES.get(match.group("role"), match.group("role").casefold())
+            attributes = _ui_state_attributes(match.group("attributes") or "")
+            key = (role, name, attributes)
+            if key in seen:
+                continue
+            entry = f"- {role}: {name}"
+            if attributes:
+                entry += f" [{attributes}]"
+            if len(inventory) >= MAX_UI_INVENTORY_ITEMS or (
+                inventory and used_chars + len(entry) + 1 > MAX_UI_INVENTORY_CHARS
+            ):
+                truncated = True
+                break
+            inventory.append(entry)
+            seen.add(key)
+            used_chars += len(entry) + 1
+        if truncated:
+            break
+    if not inventory:
+        return None, 0, truncated
+    return "Observed UI inventory:\n" + "\n".join(inventory), len(inventory), truncated
 
 
 def _relationship(
@@ -280,6 +371,9 @@ def project_operational_experience(
     for previous, current in pairwise(observations):
         if not current.action:
             continue
+        ui_inventory, ui_inventory_item_count, ui_inventory_truncated = _accessibility_inventory(
+            current
+        )
         event_id = _stable_id("event", "operational-transition", experience.source_id, current.id)
         entities.append(
             Entity(
@@ -293,6 +387,7 @@ def project_operational_experience(
                         f"Before URI: {previous.uri}" if previous.uri else None,
                         f"After URI: {current.uri}" if current.uri else None,
                         f"Observed reasoning: {current.reasoning}" if current.reasoning else None,
+                        ui_inventory,
                     )
                 ),
                 organization_id=organization_id,
@@ -303,6 +398,8 @@ def project_operational_experience(
                     "projection_kind": "transition",
                     "source_observation_ids": [previous.id, current.id],
                     "support_spans": [_support_span(previous), _support_span(current)],
+                    "ui_inventory_item_count": ui_inventory_item_count,
+                    "ui_inventory_truncated": ui_inventory_truncated,
                 },
             )
         )

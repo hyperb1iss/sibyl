@@ -132,6 +132,51 @@ def test_projection_preserves_evidence_bytes_including_surrounding_whitespace() 
     assert raw.content.endswith("Evidence:\n  exact source bytes\n\n")
 
 
+def test_projection_adds_bounded_source_derived_ui_inventory_to_events() -> None:
+    experience = _experience()
+    evidence = OperationalEvidencePart(
+        id="tree-0",
+        content="""Accessibility tree:
+RootWebArea 'Inventory Workspace', focused
+\t[10] tab 'Attributes', clickable, visible, selected=True
+\t[11] tab 'Advanced Inventory', clickable, visible, selected=False
+\t[12] tab 'Websites', clickable, visible, selected=False
+\t[13] textbox 'Search', clickable, visible, required=True
+\t[14] generic '', visible
+\t\tStaticText 'Text Swatch'
+""",
+        content_type="text/plain; profile=accessibility-tree",
+    )
+    current = experience.observations[1].model_copy(update={"evidence": (evidence,)})
+    projection = project_operational_experience(
+        experience.model_copy(
+            update={
+                "observations": (
+                    experience.observations[0],
+                    current,
+                    experience.observations[2],
+                )
+            }
+        )
+    )
+    event = next(
+        entity
+        for entity in projection.entities
+        if entity.entity_type is EntityType.EVENT
+        and entity.metadata["source_observation_ids"][-1] == current.id
+    )
+
+    assert "Observed UI inventory:" in event.content
+    assert "- tab: Attributes [selected=True]" in event.content
+    assert "- tab: Advanced Inventory [selected=False]" in event.content
+    assert "- tab: Websites [selected=False]" in event.content
+    assert "- textbox: Search [required=True]" in event.content
+    assert "- text: Text Swatch" in event.content
+    assert "generic:" not in event.content
+    assert event.metadata["ui_inventory_item_count"] == 6
+    assert event.metadata["ui_inventory_truncated"] is False
+
+
 def test_projection_is_deterministic_and_manifest_is_self_describing() -> None:
     first = project_operational_experience(_experience())
     second = project_operational_experience(_experience())
