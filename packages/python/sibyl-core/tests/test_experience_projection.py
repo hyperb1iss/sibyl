@@ -177,6 +177,68 @@ RootWebArea 'Inventory Workspace', focused
     assert event.metadata["ui_inventory_truncated"] is False
 
 
+def test_projection_clamps_long_first_ui_inventory_entry() -> None:
+    experience = _experience()
+    evidence = OperationalEvidencePart(
+        id="tree-long",
+        content=f"StaticText '{'x' * 30_000}'",
+        content_type="text/plain; profile=accessibility-tree",
+    )
+    current = experience.observations[1].model_copy(update={"evidence": (evidence,)})
+    projection = project_operational_experience(
+        experience.model_copy(
+            update={
+                "observations": (
+                    experience.observations[0],
+                    current,
+                    experience.observations[2],
+                )
+            }
+        )
+    )
+    event = next(
+        entity
+        for entity in projection.entities
+        if entity.entity_type is EntityType.EVENT
+        and entity.metadata["source_observation_ids"][-1] == current.id
+    )
+
+    inventory = event.content[event.content.index("Observed UI inventory:") :]
+    assert len(inventory) <= 6_000
+    assert inventory.endswith("...")
+    assert event.metadata["ui_inventory_item_count"] == 1
+    assert event.metadata["ui_inventory_truncated"] is True
+
+
+def test_projection_parses_quoted_ui_attribute_values() -> None:
+    experience = _experience()
+    evidence = OperationalEvidencePart(
+        id="tree-value",
+        content="[13] textbox 'Email', clickable, value='john@doe.com'",
+        content_type="text/plain; profile=accessibility-tree",
+    )
+    current = experience.observations[1].model_copy(update={"evidence": (evidence,)})
+    projection = project_operational_experience(
+        experience.model_copy(
+            update={
+                "observations": (
+                    experience.observations[0],
+                    current,
+                    experience.observations[2],
+                )
+            }
+        )
+    )
+    event = next(
+        entity
+        for entity in projection.entities
+        if entity.entity_type is EntityType.EVENT
+        and entity.metadata["source_observation_ids"][-1] == current.id
+    )
+
+    assert "- textbox: Email [value='john@doe.com']" in event.content
+
+
 def test_projection_is_deterministic_and_manifest_is_self_describing() -> None:
     first = project_operational_experience(_experience())
     second = project_operational_experience(_experience())

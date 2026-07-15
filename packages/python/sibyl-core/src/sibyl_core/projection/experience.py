@@ -146,7 +146,7 @@ def _support_span(observation: OperationalObservation) -> dict[str, Any]:
 
 _ACCESSIBILITY_NODE_PATTERN = re.compile(
     r"^(?:\[[^\]]+\]\s+)?(?P<role>[A-Za-z][\w-]*)\s+"
-    r"(?P<quote>['\"])(?P<name>.*)(?P=quote)(?P<attributes>,.*)?$"
+    r"(?P<quote>['\"])(?P<name>.*?)(?P=quote)(?P<attributes>,.*)?$"
 )
 _UI_STATE_ATTRIBUTES = frozenset(
     {
@@ -194,6 +194,8 @@ def _ui_state_attributes(raw_attributes: str) -> str:
 def _accessibility_inventory(
     observation: OperationalObservation,
 ) -> tuple[str | None, int, bool]:
+    prefix = "Observed UI inventory:"
+    available_chars = MAX_UI_INVENTORY_CHARS - len(prefix) - 1
     inventory: list[str] = []
     seen: set[tuple[str, str, str]] = set()
     truncated = False
@@ -216,19 +218,26 @@ def _accessibility_inventory(
             entry = f"- {role}: {name}"
             if attributes:
                 entry += f" [{attributes}]"
-            if len(inventory) >= MAX_UI_INVENTORY_ITEMS or (
-                inventory and used_chars + len(entry) + 1 > MAX_UI_INVENTORY_CHARS
-            ):
+            entry_budget = available_chars - used_chars - 1
+            if len(inventory) >= MAX_UI_INVENTORY_ITEMS or entry_budget <= 0:
                 truncated = True
                 break
+            if len(entry) > entry_budget:
+                if entry_budget <= 3:
+                    entry = "." * entry_budget
+                else:
+                    entry = entry[: entry_budget - 3].rstrip() + "..."
+                truncated = True
             inventory.append(entry)
             seen.add(key)
             used_chars += len(entry) + 1
+            if truncated:
+                break
         if truncated:
             break
     if not inventory:
         return None, 0, truncated
-    return "Observed UI inventory:\n" + "\n".join(inventory), len(inventory), truncated
+    return prefix + "\n" + "\n".join(inventory), len(inventory), truncated
 
 
 def _relationship(
