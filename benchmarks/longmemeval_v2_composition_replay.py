@@ -36,11 +36,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     runs = parse_specs(args.run)
     catalogs = parse_specs(args.chunk_catalog)
-    if runs.keys() != catalogs.keys():
-        raise ValueError("--run and --chunk-catalog domains must match")
+    manifests = parse_specs(args.memory_manifest)
+    if runs.keys() != catalogs.keys() or runs.keys() != manifests.keys():
+        raise ValueError("--run, --chunk-catalog, and --memory-manifest domains must match")
     report = replay_composition(
         runs=runs,
         catalogs=catalogs,
+        manifests=manifests,
         max_items=args.max_items,
         max_chunks_per_trajectory=args.max_chunks_per_trajectory,
         neighbor_stitch_items=args.neighbor_stitch_items,
@@ -77,6 +79,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="append",
         required=True,
         metavar="DOMAIN=CHUNK_CATALOG",
+    )
+    parser.add_argument(
+        "--memory-manifest",
+        action="append",
+        required=True,
+        metavar="DOMAIN=MEMORY_MANIFEST",
     )
     parser.add_argument("--output", required=True)
     parser.add_argument("--max-items", type=int, default=8)
@@ -117,6 +125,7 @@ def replay_composition(
     *,
     runs: dict[str, Path],
     catalogs: dict[str, Path],
+    manifests: dict[str, Path],
     max_items: int,
     max_chunks_per_trajectory: int,
     neighbor_stitch_items: int,
@@ -129,11 +138,19 @@ def replay_composition(
     for domain in sorted(runs):
         run_path = runs[domain]
         catalog_path = catalogs[domain]
+        manifest_path = manifests[domain]
         catalog = load_chunk_catalog(catalog_path)
         domain_rows = load_jsonl(run_path)
+        manifest = load_memory_manifest(manifest_path)
+        validate_memory_binding(
+            manifest=manifest,
+            catalog_path=catalog_path,
+            rows=domain_rows,
+        )
         sources[domain] = {
             "per_question_sha256": sha256_file(run_path),
             "chunk_catalog_sha256": sha256_file(catalog_path),
+            "memory_manifest_sha256": sha256_file(manifest_path),
             "question_count": len(domain_rows),
         }
         for row in domain_rows:
@@ -215,6 +232,9 @@ def replay_composition(
             "legacy_context_header_question_count": sum(
                 row["artifact_trace_mode"] == "legacy_context_headers" for row in rows
             ),
+            "typed_entity_type_fallback_count": sum(
+                int(row["typed_entity_type_fallback_count"]) for row in rows
+            ),
         },
         "gate": {
             "minimum_exposure_gain_pp": 3.0,
@@ -248,6 +268,7 @@ def replay_question(
 ) -> dict[str, Any]:
     query = str(row.get("question_text") or "")
     baseline = result_candidates(row)
+    validate_seed_catalog_content(baseline, chunk_catalog=chunk_catalog)
     typed = [
         candidate
         for candidate in baseline
@@ -309,6 +330,9 @@ def replay_question(
             assembled_keys[: len(baseline_raw_keys)] == baseline_raw_keys
         ),
         "baseline_typed_count": len(typed),
+        "typed_entity_type_fallback_count": sum(
+            bool(item.get("_entity_type_fallback")) for item in typed
+        ),
         "candidate_typed_count": composition["selected_typed_count"],
         "candidate_neighbor_count": sum(
             item.get("_selection_origin") == "neighbor" for item in candidate
@@ -348,9 +372,7 @@ def result_candidates(row: dict[str, Any]) -> list[dict[str, object]]:
         candidates.append(
             {
                 "id": str(trace_item.get("entity_id") or ""),
-                "type": "session"
-                if not str(trace_item.get("selection_origin") or "").startswith("context_pack:")
-                else "procedure",
+                "type": _trace_entity_type(trace_item),
                 "content": content if separator else value,
                 "score": trace_item.get("score"),
                 "metadata": {
@@ -371,9 +393,21 @@ def result_candidates(row: dict[str, Any]) -> list[dict[str, object]]:
                 ),
                 "_neighbor_of_search_rank": trace_item.get("neighbor_of_search_rank"),
                 "_neighbor_distance": trace_item.get("neighbor_distance"),
+                "_entity_type_fallback": (
+                    str(trace_item.get("selection_origin") or "").startswith("context_pack:")
+                    and not str(trace_item.get("entity_type") or "").strip()
+                ),
             }
         )
     return candidates
+
+
+def _trace_entity_type(trace_item: dict[str, object]) -> str:
+    if entity_type := str(trace_item.get("entity_type") or "").strip():
+        return entity_type
+    if str(trace_item.get("selection_origin") or "").startswith("context_pack:"):
+        return "procedure"
+    return "session"
 
 
 def artifact_trace_mode(row: dict[str, Any]) -> str:
@@ -429,6 +463,62 @@ def load_chunk_catalog(path: Path) -> dict[str, dict[int, dict[str, object]]]:
             if isinstance(trajectory_id, str) and isinstance(chunk_index, int):
                 catalog.setdefault(trajectory_id, {})[chunk_index] = item
     return catalog
+
+
+def load_memory_manifest(path: Path) -> dict[str, object]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise TypeError(f"Memory manifest is not an object: {path}")
+    return payload
+
+
+def validate_memory_binding(
+    *,
+    manifest: dict[str, object],
+    catalog_path: Path,
+    rows: list[dict[str, Any]],
+) -> None:
+    catalog_sha256 = sha256_file(catalog_path)
+    if manifest.get("chunk_catalog_sha256") != catalog_sha256:
+        raise ValueError("Memory manifest does not bind the supplied chunk catalog")
+    expected_run_id = str(manifest.get("run_id") or "")
+    expected_project_id = str(manifest.get("project_id") or "")
+    if not expected_run_id or not expected_project_id:
+        raise ValueError("Memory manifest is missing run or project identity")
+    for row in rows:
+        metadata = row.get("memory_post_query_metadata")
+        if not isinstance(metadata, dict):
+            raise TypeError("Run row is missing memory post-query metadata")
+        if str(metadata.get("run_id") or "") != expected_run_id:
+            raise ValueError("Run row does not match the memory manifest run identity")
+        if str(metadata.get("project_id") or "") != expected_project_id:
+            raise ValueError("Run row does not match the memory manifest project identity")
+
+
+def validate_seed_catalog_content(
+    candidates: list[dict[str, object]],
+    *,
+    chunk_catalog: dict[str, dict[int, dict[str, object]]],
+) -> None:
+    for candidate in candidates:
+        if str(candidate.get("_selection_origin") or "") != "search":
+            continue
+        metadata = candidate.get("metadata")
+        if not isinstance(metadata, dict):
+            raise TypeError("Search seed is missing replay metadata")
+        trajectory_id = str(metadata.get("longmemeval_v2_trajectory_id") or "")
+        chunk_index = metadata.get("longmemeval_v2_chunk_index")
+        catalog_item = (
+            chunk_catalog.get(trajectory_id, {}).get(chunk_index)
+            if isinstance(chunk_index, int)
+            else None
+        )
+        if catalog_item is None:
+            raise ValueError("Search seed is absent from the bound chunk catalog")
+        sealed_content = " ".join(str(candidate.get("content") or "").split())
+        catalog_content = " ".join(str(catalog_item.get("content") or "").split())
+        if sealed_content != catalog_content:
+            raise ValueError("Search seed content disagrees with the bound chunk catalog")
 
 
 def answer_phrases(row: dict[str, Any]) -> list[str]:

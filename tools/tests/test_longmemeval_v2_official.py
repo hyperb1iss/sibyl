@@ -946,6 +946,7 @@ def test_sibyl_memory_context_formats_retrieved_content() -> None:
         [
             {
                 "id": "entity:t1-0",
+                "type": "session",
                 "content": trace_content,
                 "score": 0.875,
                 "result_origin": "graph",
@@ -962,6 +963,7 @@ def test_sibyl_memory_context_formats_retrieved_content() -> None:
         {
             "rank": 1,
             "entity_id": "entity:t1-0",
+            "entity_type": "session",
             "trajectory_id": "t1",
             "chunk_index": 0,
             "chunk_count": 2,
@@ -1585,6 +1587,7 @@ def test_official_runner_checkpoint_restart_reuses_saved_project(tmp_path: Path)
     assert params["project_id"] == "project_checkpoint"
     assert params["run_id"] == "run-checkpoint"
     assert params["checkpoint_dir"] == str(checkpoint_dir)
+    assert params["source_evidence_bundling"] is False
 
 
 def test_sibyl_memory_query_context_exposes_only_question_and_image() -> None:
@@ -1650,6 +1653,14 @@ def test_context_pack_conversion_keeps_only_typed_operational_memory() -> None:
                             "content": "1. click Priority",
                             "score": 0.2,
                             "metadata": {"longmemeval_v2_trajectory_id": "t1"},
+                            "related": [
+                                {
+                                    "id": "session-source",
+                                    "relationship": "DERIVED_FROM",
+                                    "direction": "outgoing",
+                                    "content": "hidden unless explicitly enabled",
+                                }
+                            ],
                         },
                         {
                             "id": "event-1",
@@ -1672,6 +1683,7 @@ def test_context_pack_conversion_keeps_only_typed_operational_memory() -> None:
 
     assert [result["id"] for result in results] == ["procedure-1", "event-1"]
     assert all(result["_selection_origin"] == "context_pack:procedures" for result in results)
+    assert results[0]["content"] == "1. click Priority"
 
 
 def test_context_pack_conversion_bundles_query_ranked_source_evidence() -> None:
@@ -1709,6 +1721,7 @@ def test_context_pack_conversion_bundles_query_ranked_source_evidence() -> None:
             ]
         },
         query="Which Catalog Input Type is selected?",
+        include_source_support=True,
     )
 
     assert len(results) == 1
@@ -1805,6 +1818,43 @@ def test_operational_evidence_set_preserves_reserved_support_by_default() -> Non
     assert metadata["mode"] == "reserved_support"
     assert metadata["selected_typed_count"] == EXPECTED_OPERATIONAL_TYPED_ITEMS
     assert metadata["selected_raw_count"] == EXPECTED_OPERATIONAL_RAW_ITEMS
+
+
+@pytest.mark.parametrize("typed_count", [0, 1])
+def test_reserved_support_does_not_duplicate_raw_when_typed_is_sparse(
+    typed_count: int,
+) -> None:
+    module = _load_memory_module()
+    typed = [
+        {
+            "id": "event-0",
+            "type": "event",
+            "content": "Typed projection",
+            "_selection_origin": "context_pack:recent_memory",
+            "metadata": {"longmemeval_v2_trajectory_id": "t0"},
+        }
+    ][:typed_count]
+    raw = [
+        {
+            "id": f"session-{index}",
+            "type": "session",
+            "content": "Raw support",
+            "_selection_origin": "search",
+        }
+        for index in range(8)
+    ]
+
+    selected, metadata = module.compile_operational_evidence_set(
+        query="anything",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=8,
+    )
+
+    assert len(selected) == EXPECTED_OPERATIONAL_EVIDENCE_ITEMS
+    assert len({item["id"] for item in selected}) == len(selected)
+    assert metadata["selected_typed_count"] == typed_count
+    assert metadata["selected_raw_count"] == 8 - typed_count
 
 
 def test_operational_evidence_set_admits_relevant_typed_memory() -> None:

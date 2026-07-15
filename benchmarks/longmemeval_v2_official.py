@@ -70,6 +70,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "state_part_refinement",
         "context_expansion_max_ratio",
         "evidence_composition_mode",
+        "source_evidence_bundling",
         "checkpoint_dir",
     }
 )
@@ -414,6 +415,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         choices=["reserved_support", "shared_relevance"],
         default="reserved_support",
     )
+    parser.add_argument("--source-evidence-bundling", action="store_true")
     parser.add_argument("--include-screenshot-refs", action="store_true")
     parser.add_argument("--inline-embeddings", action="store_true")
     parser.add_argument("--api-timeout-seconds", type=float, default=600.0)
@@ -594,6 +596,7 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "state_part_refinement": args.state_part_refinement,
         "context_expansion_max_ratio": args.context_expansion_max_ratio,
         "evidence_composition_mode": args.evidence_composition_mode,
+        "source_evidence_bundling": args.source_evidence_bundling,
         "include_screenshot_refs": args.include_screenshot_refs,
         "defer_embeddings": not args.inline_embeddings,
         "api_timeout_seconds": args.api_timeout_seconds,

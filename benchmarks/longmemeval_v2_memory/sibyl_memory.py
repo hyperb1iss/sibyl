@@ -71,6 +71,7 @@ DEFAULT_CONTEXT_CHARS_PER_ITEM = 18_000
 MAX_BUNDLED_SOURCE_CHARS = 12_000
 DEFAULT_EVIDENCE_COMPOSITION_MODE = "reserved_support"
 EVIDENCE_COMPOSITION_MODES = frozenset({"reserved_support", "shared_relevance"})
+DEFAULT_SOURCE_EVIDENCE_BUNDLING = False
 DEFAULT_API_TIMEOUT_SECONDS = 600.0
 DEFAULT_API_RETRY_ATTEMPTS = 3
 DEFAULT_API_RETRY_BASE_DELAY_SECONDS = 2.0
@@ -119,6 +120,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "state_part_refinement",
         "context_expansion_max_ratio",
         "evidence_composition_mode",
+        "source_evidence_bundling",
         "checkpoint_dir",
     }
 )
@@ -299,6 +301,7 @@ def context_pack_to_search_results(
     response: dict[str, object],
     *,
     query: str = "",
+    include_source_support: bool = DEFAULT_SOURCE_EVIDENCE_BUNDLING,
 ) -> list[dict[str, object]]:
     candidates: list[dict[str, object]] = []
     sections = response.get("sections")
@@ -318,7 +321,7 @@ def context_pack_to_search_results(
             if item_type not in {"procedure", "error_pattern", "event"}:
                 continue
             candidate = _string_key_dict(item)
-            support = _best_source_support(item, query=query)
+            support = _best_source_support(item, query=query) if include_source_support else None
             if support is not None:
                 source_content = _stripped_str(support.get("content"))
                 typed_content = _stripped_str(candidate.get("content"))
@@ -454,7 +457,7 @@ def compile_operational_evidence_set(
 
     if mode == "reserved_support":
         typed_budget = min(3, max(1, max_items // 3))
-        selected = candidates[:typed_budget]
+        selected = candidates[: min(typed_budget, len(seen_typed))]
         selected.extend(candidates[len(seen_typed) :])
         selected = selected[:max_items]
         selected_typed = sum(
@@ -595,6 +598,7 @@ def build_retrieval_trace(
             {
                 "rank": rank,
                 "entity_id": _stripped_str(result.get("id")),
+                "entity_type": _stripped_str(result.get("type")),
                 "trajectory_id": _stripped_str(
                     metadata.get("longmemeval_v2_trajectory_id")
                 ),
@@ -1237,6 +1241,11 @@ class SibylLiveApiMemory(Memory):
                 f"expected one of {sorted(EVIDENCE_COMPOSITION_MODES)}"
             )
             raise ValueError(msg)
+        self.source_evidence_bundling = _param_bool(
+            memory_params,
+            "source_evidence_bundling",
+            DEFAULT_SOURCE_EVIDENCE_BUNDLING,
+        )
         self.context_expansion_max_ratio = _param_context_expansion_ratio(
             memory_params,
             "context_expansion_max_ratio",
@@ -1436,7 +1445,15 @@ class SibylLiveApiMemory(Memory):
                 "record_exposure": False,
             },
         )
-        typed_results = context_pack_to_search_results(context_response, query=query)
+        typed_results = context_pack_to_search_results(
+            context_response,
+            query=query,
+            include_source_support=getattr(
+                self,
+                "source_evidence_bundling",
+                DEFAULT_SOURCE_EVIDENCE_BUNDLING,
+            ),
+        )
         payload = {
             "query": query,
             "types": ["session"],
