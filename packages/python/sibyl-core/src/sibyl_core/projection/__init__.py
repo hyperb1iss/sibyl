@@ -1,5 +1,9 @@
 """Projection helpers for native memory graph enrichment."""
 
+from sibyl_core.projection.experience import (
+    OPERATIONAL_EXPERIENCE_SCHEMA_VERSION,
+    project_operational_experience,
+)
 from sibyl_core.projection.memory import (
     MemoryProjectionBatchResult,
     MemoryProjectionResult,
@@ -14,6 +18,7 @@ from sibyl_core.projection.memory import (
 )
 
 __all__ = [
+    "OPERATIONAL_EXPERIENCE_SCHEMA_VERSION",
     "MemoryProjectionBatchResult",
     "MemoryProjectionResult",
     "ProjectedEntitySourceLink",
@@ -24,4 +29,5 @@ __all__ = [
     "project_extracted_memory_entities",
     "project_memory_entities",
     "project_memory_entity",
+    "project_operational_experience",
 ]

@@ -27,6 +27,12 @@ from sibyl_core.models.entities import (
     Tool,
     Topic,
 )
+from sibyl_core.models.experience import (
+    OperationalExperience,
+    OperationalExperienceManifest,
+    OperationalExperienceProjection,
+    OperationalObservation,
+)
 from sibyl_core.models.memory_extraction import (
     ExtractedMemoryEntity,
     MemoryEntityExtractionResult,
@@ -153,6 +159,10 @@ __all__ = [
     "Milestone",
     "MutationResponse",
     "Note",
+    "OperationalExperience",
+    "OperationalExperienceManifest",
+    "OperationalExperienceProjection",
+    "OperationalObservation",
     "Pattern",
     "Procedure",
     "ProcedureStep",
