@@ -743,6 +743,9 @@ def build_run_plan(
         "neighbor_stitch_items": args.neighbor_stitch_items,
         "neighbor_stitch_span": args.neighbor_stitch_span,
         "context_expansion_max_ratio": args.context_expansion_max_ratio,
+        "evidence_composition_mode": args.evidence_composition_mode,
+        "source_evidence_bundling": args.source_evidence_bundling,
+        "include_screenshot_refs": args.include_screenshot_refs,
         "evaluator_model": args.evaluator_model,
         "evaluator_retry_attempts": args.evaluator_retry_attempts,
         "provider_usage": {

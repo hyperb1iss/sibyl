@@ -6,6 +6,7 @@ from pathlib import Path
 from types import ModuleType
 
 EXPECTED_SELECTED_TRAJECTORIES = 2
+EXPECTED_WORKFLOW_OCCURRENCES = 2
 
 
 def _load_probe_module() -> ModuleType:
@@ -131,12 +132,33 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     assert '--reader-api-key-env "$READER_API_KEY_ENV"' in workflow
     assert "official_reader_max_concurrent_requests:" in workflow
     assert "official_reader_retry_attempts:" in workflow
+    assert "official_validation_slice:" in workflow
+    assert "composition-v1" in workflow
     assert "official_evidence_composition_mode:" in workflow
     assert "official_source_evidence_bundling:" in workflow
     assert '--reader-max-concurrent-requests "$READER_MAX_CONCURRENT_REQUESTS"' in workflow
     assert '--reader-retry-attempts "$READER_RETRY_ATTEMPTS"' in workflow
     assert '--evidence-composition-mode "$EVIDENCE_COMPOSITION_MODE"' in workflow
     assert "args+=(--source-evidence-bundling)" in workflow
+    assert "Verify frozen validation slice" in workflow
+    assert "Evaluate frozen validation slice" in workflow
+    assert "official_limit cannot be combined with a frozen validation slice." in workflow
+    assert "Screenshots are disabled by the frozen validation slice." in workflow
+    assert "official_reader_base_url must exactly match the frozen validation slice." in workflow
+    assert "jq -e -r '.question_ids_by_domain.web" in workflow
+    assert "Frozen validation slice produced no question IDs" in workflow
+    assert "Upload frozen validation report" in workflow
+    assert (
+        workflow.count("ref: be15ea6e995462f3391c1a610892df3f67dfa7bd")
+        == EXPECTED_WORKFLOW_OCCURRENCES
+    )
+    assert (
+        workflow.count("if: inputs.official_validation_slice == 'none'")
+        == EXPECTED_WORKFLOW_OCCURRENCES
+    )
+    assert "benchmarks/longmemeval_v2_composition_validation.json" in workflow
+    assert "moon run bench-longmemeval-v2-validation-slice" in workflow
+    assert 'args+=(--question-ids "$official_question_ids")' in workflow
     assert 'rm -rf "$domain_output"' in workflow
     assert '--output-dir "$domain_output"' in workflow
     assert workflow.index('rm -rf "$domain_output"') < workflow.index(

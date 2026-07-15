@@ -292,15 +292,29 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(
     assert plan["neighbor_stitch_items"] == EXPECTED_NEIGHBOR_STITCH_ITEMS
     assert plan["neighbor_stitch_span"] == EXPECTED_NEIGHBOR_STITCH_SPAN
     assert plan["context_expansion_max_ratio"] == EXPECTED_CONTEXT_EXPANSION_MAX_RATIO
+    assert {
+        key: plan[key]
+        for key in (
+            "evidence_composition_mode",
+            "source_evidence_bundling",
+            "include_screenshot_refs",
+        )
+    } == {
+        "evidence_composition_mode": "reserved_support",
+        "source_evidence_bundling": False,
+        "include_screenshot_refs": False,
+    }
     assert plan["honesty_contract"]["answer_gold_visible_to_memory"] is False
     assert plan["required_trajectory_count"] == EXPECTED_REQUIRED_TRAJECTORIES
     assert plan["requirements"]["trajectories_jsonl_exists"] is True
-    assert plan["requirements"]["official_repo_configured"] is False
+    assert (plan["requirements"]["official_repo_configured"], plan["checkpoint_dir"]) == (
+        False,
+        None,
+    )
     assert plan["provider_usage"] == {
         "reader": str(output_dir / "provider_usage" / "reader.jsonl"),
         "judge": str(output_dir / "provider_usage" / "judge.jsonl"),
     }
-    assert plan["checkpoint_dir"] is None
     assert {"reader_endpoint_reachable", "torch_available"} <= plan["requirements"].keys()
     _assert_question_id_hash_propagates(module, data_root=data_root, plan=plan)
 

@@ -457,6 +457,7 @@ tasks:
       benchmarks/longmemeval_v2_reader_holdout_report.py
       benchmarks/longmemeval_v2_causal_ablation.py
       benchmarks/longmemeval_v2_causal_ablation_report.py
+      benchmarks/longmemeval_v2_validation_slice.py
       benchmarks/longmemeval_v2_live_smoke.py
       benchmarks/longmemeval_v2_projection_audit.py && uv run ruff format --check tools
       benchmarks/provider_usage.py benchmarks/longmemeval_v2_diagnostics.py
@@ -466,6 +467,7 @@ tasks:
       benchmarks/longmemeval_v2_reader_holdout.py benchmarks/longmemeval_v2_reader_holdout_report.py
       benchmarks/longmemeval_v2_causal_ablation.py
       benchmarks/longmemeval_v2_causal_ablation_report.py
+      benchmarks/longmemeval_v2_validation_slice.py
       benchmarks/longmemeval_v2_live_smoke.py benchmarks/longmemeval_v2_projection_audit.py
     inputs:
       - tools/**/*.py
@@ -479,6 +481,8 @@ tasks:
       - benchmarks/longmemeval_v2_reader_holdout_report.py
       - benchmarks/longmemeval_v2_causal_ablation.py
       - benchmarks/longmemeval_v2_causal_ablation_report.py
+      - benchmarks/longmemeval_v2_validation_slice.py
+      - benchmarks/longmemeval_v2_composition_validation.json
       - benchmarks/longmemeval_v2_live_smoke.py
       - benchmarks/longmemeval_v2_projection_audit.py
       - benchmarks/longmemeval_v2_diagnostic_slice.json
@@ -493,6 +497,7 @@ tasks:
       benchmarks/longmemeval_v2_reader_holdout.py benchmarks/longmemeval_v2_reader_holdout_report.py
       benchmarks/longmemeval_v2_causal_ablation.py
       benchmarks/longmemeval_v2_causal_ablation_report.py
+      benchmarks/longmemeval_v2_validation_slice.py
       benchmarks/longmemeval_v2_live_smoke.py benchmarks/longmemeval_v2_projection_audit.py
     inputs:
       - tools/**/*.py
@@ -506,6 +511,8 @@ tasks:
       - benchmarks/longmemeval_v2_reader_holdout_report.py
       - benchmarks/longmemeval_v2_causal_ablation.py
       - benchmarks/longmemeval_v2_causal_ablation_report.py
+      - benchmarks/longmemeval_v2_validation_slice.py
+      - benchmarks/longmemeval_v2_composition_validation.json
       - benchmarks/longmemeval_v2_live_smoke.py
       - benchmarks/longmemeval_v2_projection_audit.py
       - pyproject.toml
@@ -518,12 +525,15 @@ tasks:
       benchmarks/longmemeval_v2_reader_holdout_report.py
       benchmarks/longmemeval_v2_causal_ablation.py
       benchmarks/longmemeval_v2_causal_ablation_report.py
+      benchmarks/longmemeval_v2_validation_slice.py
     inputs:
       - tools/**/*.py
       - benchmarks/longmemeval_v2_reader_holdout.py
       - benchmarks/longmemeval_v2_reader_holdout_report.py
       - benchmarks/longmemeval_v2_causal_ablation.py
       - benchmarks/longmemeval_v2_causal_ablation_report.py
+      - benchmarks/longmemeval_v2_validation_slice.py
+      - benchmarks/longmemeval_v2_composition_validation.json
       - pyproject.toml
 
   inventory-test:
@@ -746,7 +756,8 @@ tasks:
       tools/tests/test_longmemeval_v2_live_smoke.py
       tools/tests/test_longmemeval_v2_projection_audit.py
       tools/tests/test_longmemeval_v2_ablations.py
-      tools/tests/test_longmemeval_v2_causal_ablation.py -v
+      tools/tests/test_longmemeval_v2_causal_ablation.py
+      tools/tests/test_longmemeval_v2_validation_slice.py -v
     inputs:
       - tools/**/*.py
       - .github/workflows/eval.yml
@@ -771,6 +782,8 @@ tasks:
       - benchmarks/longmemeval_v2_reader_holdout_report.py
       - benchmarks/longmemeval_v2_causal_ablation.py
       - benchmarks/longmemeval_v2_causal_ablation_report.py
+      - benchmarks/longmemeval_v2_validation_slice.py
+      - benchmarks/longmemeval_v2_composition_validation.json
       - benchmarks/longmemeval_v2_diagnostic_slice.json
       - benchmarks/provider_usage.py
       - benchmarks/longmemeval_v2_memory/**/*.py
@@ -1375,6 +1388,11 @@ tasks:
     command:
       uv run --with numpy --with openai --with openai-agents --with pillow --with tqdm
       --with transformers python benchmarks/longmemeval_v2_ablations.py
+    options:
+      cache: false
+
+  bench-longmemeval-v2-validation-slice:
+    command: uv run python benchmarks/longmemeval_v2_validation_slice.py
     options:
       cache: false
 

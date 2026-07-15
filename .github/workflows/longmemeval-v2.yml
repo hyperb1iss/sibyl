@@ -16,6 +16,8 @@ on:
       - "benchmarks/longmemeval_v2_reader_holdout_report.py"
       - "benchmarks/longmemeval_v2_causal_ablation.py"
       - "benchmarks/longmemeval_v2_causal_ablation_report.py"
+      - "benchmarks/longmemeval_v2_validation_slice.py"
+      - "benchmarks/longmemeval_v2_composition_validation.json"
       - "benchmarks/longmemeval_v2_diagnostics.py"
       - "benchmarks/longmemeval_v2_diagnostic_slice.json"
       - "benchmarks/longmemeval_v2_probe.py"
@@ -24,6 +26,7 @@ on:
       - "tools/tests/test_longmemeval_v2_official.py"
       - "tools/tests/test_longmemeval_v2_ablations.py"
       - "tools/tests/test_longmemeval_v2_causal_ablation.py"
+      - "tools/tests/test_longmemeval_v2_validation_slice.py"
       - "tools/tests/test_longmemeval_v2_diagnostics.py"
       - "packages/python/sibyl-core/tests/test_longmemeval_v2.py"
       - "tools/tests/test_longmemeval_v2_probe.py"
@@ -45,6 +48,8 @@ on:
       - "benchmarks/longmemeval_v2_reader_holdout_report.py"
       - "benchmarks/longmemeval_v2_causal_ablation.py"
       - "benchmarks/longmemeval_v2_causal_ablation_report.py"
+      - "benchmarks/longmemeval_v2_validation_slice.py"
+      - "benchmarks/longmemeval_v2_composition_validation.json"
       - "benchmarks/longmemeval_v2_diagnostics.py"
       - "benchmarks/longmemeval_v2_diagnostic_slice.json"
       - "benchmarks/longmemeval_v2_probe.py"
@@ -53,6 +58,7 @@ on:
       - "tools/tests/test_longmemeval_v2_official.py"
       - "tools/tests/test_longmemeval_v2_ablations.py"
       - "tools/tests/test_longmemeval_v2_causal_ablation.py"
+      - "tools/tests/test_longmemeval_v2_validation_slice.py"
       - "tools/tests/test_longmemeval_v2_diagnostics.py"
       - "packages/python/sibyl-core/tests/test_longmemeval_v2.py"
       - "tools/tests/test_longmemeval_v2_probe.py"
@@ -76,6 +82,13 @@ on:
         description: "Optional question limit per domain; blank means full domain"
         type: string
         default: ""
+      official_validation_slice:
+        description: "Optional tracked validation preregistration"
+        type: choice
+        options:
+          - none
+          - composition-v1
+        default: none
       official_dataset_revision:
         description: "Optional Hugging Face dataset revision"
         type: string
@@ -232,6 +245,8 @@ jobs:
       OUTPUT_ROOT: .moon/cache/evals/longmemeval-v2-official
       OFFICIAL_TIER: ${{ inputs.official_tier || 'small' }}
       OFFICIAL_LIMIT: ${{ inputs.official_limit || '' }}
+      OFFICIAL_VALIDATION_SLICE: ${{ inputs.official_validation_slice || 'none' }}
+      VALIDATION_MANIFEST: benchmarks/longmemeval_v2_composition_validation.json
       OFFICIAL_DATASET_REVISION: ${{ inputs.official_dataset_revision || '' }}
       OFFICIAL_INCLUDE_SCREENSHOTS: ${{ inputs.official_include_screenshots || false }}
       READER_BASE_URL: ${{ inputs.official_reader_base_url || 'https://openrouter.ai/api/v1' }}
@@ -265,12 +280,25 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: xiaowu0162/LongMemEval-V2
+          ref: be15ea6e995462f3391c1a610892df3f67dfa7bd
           path: .moon/cache/longmemeval-v2-official
           persist-credentials: false
 
       - name: Guard paid-run dependencies
         run: |
           set -euo pipefail
+          if [[ "$OFFICIAL_VALIDATION_SLICE" != "none" && -n "$OFFICIAL_LIMIT" ]]; then
+            echo "::error::official_limit cannot be combined with a frozen validation slice."
+            exit 1
+          fi
+          if [[ "$OFFICIAL_VALIDATION_SLICE" != "none" && "$OFFICIAL_INCLUDE_SCREENSHOTS" == "true" ]]; then
+            echo "::error::Screenshots are disabled by the frozen validation slice."
+            exit 1
+          fi
+          if [[ "$OFFICIAL_VALIDATION_SLICE" != "none" && "$READER_BASE_URL" != "https://openrouter.ai/api/v1" ]]; then
+            echo "::error::official_reader_base_url must exactly match the frozen validation slice."
+            exit 1
+          fi
           if [[ -z "${OPENAI_API_KEY}" ]]; then
             echo "::error::OPENAI_API_KEY repo secret is required for evaluator and Sibyl embeddings."
             exit 1
@@ -360,6 +388,35 @@ jobs:
           fi
           moon run bench-longmemeval-v2-download -- "${args[@]}"
 
+      - name: Verify frozen validation slice
+        if: inputs.official_validation_slice == 'composition-v1'
+        run: |
+          set -euo pipefail
+          args=(
+            verify
+            --manifest "$VALIDATION_MANIFEST"
+            --questions "$DATA_ROOT/questions.jsonl"
+            --tier "$OFFICIAL_TIER"
+            --reader-base-url "$READER_BASE_URL"
+            --reader-model "$READER_MODEL"
+            --reader-max-concurrent-requests "$READER_MAX_CONCURRENT_REQUESTS"
+            --reader-retry-attempts "$READER_RETRY_ATTEMPTS"
+            --evaluator-model "$EVALUATOR_MODEL"
+            --evidence-composition-mode "$EVIDENCE_COMPOSITION_MODE"
+            --output /tmp/longmemeval-v2-validation-runtime.json
+          )
+          if [[ "$SOURCE_EVIDENCE_BUNDLING" == "true" ]]; then
+            args+=(--source-evidence-bundling)
+          fi
+          if [[ "$OFFICIAL_INCLUDE_SCREENSHOTS" == "true" ]]; then
+            args+=(--include-screenshot-refs)
+          fi
+          moon run bench-longmemeval-v2-validation-slice -- "${args[@]}"
+          web_question_ids="$(jq -e -r '.question_ids_by_domain.web | select(type == "array" and length > 0) | join(",")' /tmp/longmemeval-v2-validation-runtime.json)"
+          enterprise_question_ids="$(jq -e -r '.question_ids_by_domain.enterprise | select(type == "array" and length > 0) | join(",")' /tmp/longmemeval-v2-validation-runtime.json)"
+          printf 'OFFICIAL_WEB_QUESTION_IDS=%s\n' "$web_question_ids" >> "$GITHUB_ENV"
+          printf 'OFFICIAL_ENTERPRISE_QUESTION_IDS=%s\n' "$enterprise_question_ids" >> "$GITHUB_ENV"
+
       - name: Run official LongMemEval-V2 domain
         run: |
           set -euo pipefail
@@ -369,6 +426,18 @@ jobs:
           args=()
           if [[ -n "$OFFICIAL_LIMIT" ]]; then
             args+=(--limit "$OFFICIAL_LIMIT")
+          fi
+          if [[ "${{ matrix.domain }}" == "web" ]]; then
+            official_question_ids="${OFFICIAL_WEB_QUESTION_IDS:-}"
+          else
+            official_question_ids="${OFFICIAL_ENTERPRISE_QUESTION_IDS:-}"
+          fi
+          if [[ "$OFFICIAL_VALIDATION_SLICE" != "none" && -z "$official_question_ids" ]]; then
+            echo "::error::Frozen validation slice produced no question IDs for ${{ matrix.domain }}."
+            exit 1
+          fi
+          if [[ -n "$official_question_ids" ]]; then
+            args+=(--question-ids "$official_question_ids")
           fi
           if [[ "$OFFICIAL_INCLUDE_SCREENSHOTS" == "true" ]]; then
             args+=(--include-screenshot-refs)
@@ -420,6 +489,8 @@ jobs:
       SUBMISSION_NAME: sibyl_live_api
       OPERATING_POINT_NAME: official
       OFFICIAL_TIER: ${{ inputs.official_tier || 'small' }}
+      OFFICIAL_VALIDATION_SLICE: ${{ inputs.official_validation_slice || 'none' }}
+      VALIDATION_MANIFEST: benchmarks/longmemeval_v2_composition_validation.json
       OFFICIAL_DATASET_REVISION: ${{ inputs.official_dataset_revision || '' }}
       OFFICIAL_INCLUDE_SCREENSHOTS: ${{ inputs.official_include_screenshots || false }}
     steps:
@@ -431,6 +502,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: xiaowu0162/LongMemEval-V2
+          ref: be15ea6e995462f3391c1a610892df3f67dfa7bd
           path: .moon/cache/longmemeval-v2-official
           persist-credentials: false
 
@@ -475,7 +547,26 @@ jobs:
           fi
           moon run bench-longmemeval-v2-download -- "${args[@]}"
 
+      - name: Evaluate frozen validation slice
+        if: inputs.official_validation_slice == 'composition-v1'
+        run: |
+          moon run bench-longmemeval-v2-validation-slice -- \
+            evaluate \
+            --manifest "$VALIDATION_MANIFEST" \
+            --run "web=$OUTPUT_ROOT/web_${OFFICIAL_TIER}" \
+            --run "enterprise=$OUTPUT_ROOT/enterprise_${OFFICIAL_TIER}" \
+            --output "$OUTPUT_ROOT/composition_validation_report.json"
+
+      - name: Upload frozen validation report
+        if: always() && inputs.official_validation_slice == 'composition-v1'
+        uses: actions/upload-artifact@v7
+        with:
+          name: longmemeval-v2-composition-validation-${{ github.sha }}
+          path: .moon/cache/evals/longmemeval-v2-official/composition_validation_report.json
+          if-no-files-found: error
+
       - name: Build official submission package and receipt
+        if: inputs.official_validation_slice == 'none'
         run: |
           set -euo pipefail
           mkdir -p "$OUTPUT_ROOT"
@@ -529,12 +620,14 @@ jobs:
             --profile longmemeval-v2
 
       - name: Upload official combined receipt
+        if: inputs.official_validation_slice == 'none'
         uses: actions/upload-artifact@v7
         with:
           name: longmemeval-v2-combined-${{ inputs.official_tier || 'small' }}-${{ github.sha }}
           path: |
             .moon/cache/evals/longmemeval-v2-official/longmemeval_v2_${{ inputs.official_tier || 'small' }}_receipt.json
             .moon/cache/evals/longmemeval-v2-official/combined_${{ inputs.official_tier || 'small' }}/aggregated_metrics.json
+            .moon/cache/evals/longmemeval-v2-official/composition_validation_report.json
             .moon/cache/evals/longmemeval-v2-submissions/sibyl_live_api.tar.gz
             .moon/cache/evals/longmemeval-v2-submissions/sibyl_live_api/submission_overview.json
             .moon/cache/evals/longmemeval-v2-submissions/sibyl_live_api/operating_points/official/metric_overview.json
