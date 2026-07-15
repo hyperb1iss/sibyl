@@ -363,6 +363,9 @@ jobs:
       - name: Run official LongMemEval-V2 domain
         run: |
           set -euo pipefail
+          domain_output="$OUTPUT_ROOT/${{ matrix.domain }}_${OFFICIAL_TIER}"
+          rm -rf "$domain_output"
+          mkdir -p "$domain_output"
           args=()
           if [[ -n "$OFFICIAL_LIMIT" ]]; then
             args+=(--limit "$OFFICIAL_LIMIT")
@@ -379,7 +382,7 @@ jobs:
             --data-root "$DATA_ROOT" \
             --domain "${{ matrix.domain }}" \
             --tier "$OFFICIAL_TIER" \
-            --output-dir "$OUTPUT_ROOT/${{ matrix.domain }}_${OFFICIAL_TIER}" \
+            --output-dir "$domain_output" \
             --api-url http://127.0.0.1:3334/api \
             --allow-localhost \
             --reader-base-url "$READER_BASE_URL" \

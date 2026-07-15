@@ -37,6 +37,7 @@ EXPECTED_LATENCY_P50_MS = 2_000.0
 EXPECTED_LATENCY_P95_MS = 4_000.0
 EXPECTED_EMBEDDING_REQUESTS = 10
 EXPECTED_READER_REQUESTS = 6
+EXPECTED_DOMAIN_READER_REQUESTS = 3
 EXPECTED_JUDGE_REQUESTS = 2
 EXPECTED_MAX_CHUNKS_PER_TRAJECTORY = 2
 EXPECTED_NEIGHBOR_STITCH_ITEMS = 2
@@ -304,12 +305,37 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(
     _assert_question_id_hash_propagates(module, data_root=data_root, plan=plan)
 
 
+def test_official_runner_refuses_existing_provider_usage_before_work(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    output_dir = tmp_path / "output"
+    usage_dir = output_dir / "provider_usage"
+    usage_dir.mkdir(parents=True)
+    (usage_dir / "reader.jsonl").write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="Use a fresh --output-dir"):
+        module.main(
+            [
+                "--data-root",
+                str(tmp_path / "data"),
+                "--domain",
+                "web",
+                "--output-dir",
+                str(output_dir),
+                "--plan-only",
+            ]
+        )
+
+    assert not (output_dir / "runtime_inputs").exists()
+
+
 def _assert_question_id_hash_propagates(
     module: ModuleType,
     *,
     data_root: Path,
     plan: dict[str, object],
 ) -> None:
+    assert str(plan["provider_usage_run_id"]).startswith("lme-v2-usage-")
+    assert plan["provider_usage_run_id"] != plan["run_id"]
     expected_question_ids_sha256 = module.sha256_question_ids(["q-enterprise"])
     assert plan["selected_question_ids_sha256"] == expected_question_ids_sha256
     dataset_receipt = module.build_dataset_receipt(
@@ -331,7 +357,7 @@ def test_official_runner_receipt_only_emits_citable_contract(tmp_path: Path) -> 
     combined_dir = tmp_path / "combined"
     official_repo = _write_official_repo(tmp_path / "official")
     _write_dataset(data_root)
-    _write_official_outputs(web_output_dir, domain="web")
+    _write_official_outputs(web_output_dir, domain="web", legacy_usage_identity=True)
     _write_official_outputs(enterprise_output_dir, domain="enterprise")
     _write_combined_outputs(combined_dir)
 
@@ -500,6 +526,199 @@ def test_longmemeval_v2_receipt_rejects_corrupt_provider_usage(tmp_path: Path) -
     )
     source_check = next(check for check in receipt["checks"] if check["name"] == "source runs")
     assert source_check["status"] == "FAIL"
+
+
+def test_longmemeval_v2_receipt_rejects_foreign_provider_usage(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    data_root = tmp_path / "data"
+    web_output_dir = tmp_path / "runs" / "web"
+    enterprise_output_dir = tmp_path / "runs" / "enterprise"
+    combined_dir = tmp_path / "combined"
+    official_repo = _write_official_repo(tmp_path / "official")
+    _write_dataset(data_root)
+    _write_official_outputs(web_output_dir, domain="web")
+    _write_official_outputs(enterprise_output_dir, domain="enterprise")
+    _write_combined_outputs(combined_dir)
+    with (enterprise_output_dir / "provider_usage" / "reader.jsonl").open(
+        "a", encoding="utf-8"
+    ) as handle:
+        handle.write(
+            "\n"
+            + json.dumps(
+                {
+                    "run_id": "cached-foreign-run",
+                    "role": "reader",
+                    "usage": {"total_tokens": 10, "cost_usd": 99.0},
+                }
+            )
+            + "\n"
+        )
+
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(data_root),
+            "--domain",
+            "combined",
+            "--output-dir",
+            str(tmp_path / "receipt"),
+            "--official-repo",
+            str(official_repo),
+            "--receipt-only",
+            "--metric-overview",
+            str(combined_dir / "metric_overview.json"),
+            "--combined-metrics",
+            str(combined_dir / "aggregated_metrics.json"),
+            "--submission-overview",
+            str(combined_dir / "submission_overview.json"),
+            "--web-output-dir",
+            str(web_output_dir),
+            "--enterprise-output-dir",
+            str(enterprise_output_dir),
+        ]
+    )
+    args.command_args = []
+    receipt = module.build_receipt_from_artifacts(
+        args=args,
+        data_root=data_root,
+        output_dir=tmp_path / "receipt",
+    )
+
+    usage = receipt["source_runs"]["domains"]["enterprise"]["provider_usage"]["reader"]
+    assert receipt["source_runs"]["integrity_complete"] is False
+    assert usage["event_count"] == EXPECTED_DOMAIN_READER_REQUESTS
+    assert usage["foreign_event_count"] == 1
+    assert usage["run_ids"] == ["cached-foreign-run", "usage-enterprise"]
+    assert receipt["accounting"]["reader"]["provider_reported_cost_usd"] == pytest.approx(0.06)
+    assert receipt["accounting"]["reader"]["tracking_complete"] is False
+    source_check = next(check for check in receipt["checks"] if check["name"] == "source runs")
+    assert source_check["status"] == "FAIL"
+
+
+def test_longmemeval_v2_receipt_marks_usage_unattributable_without_plan_run_id(
+    tmp_path: Path,
+) -> None:
+    module = _load_runner_module()
+    data_root = tmp_path / "data"
+    web_output_dir = tmp_path / "runs" / "web"
+    enterprise_output_dir = tmp_path / "runs" / "enterprise"
+    combined_dir = tmp_path / "combined"
+    official_repo = _write_official_repo(tmp_path / "official")
+    _write_dataset(data_root)
+    _write_official_outputs(web_output_dir, domain="web")
+    _write_official_outputs(enterprise_output_dir, domain="enterprise")
+    _write_combined_outputs(combined_dir)
+    (enterprise_output_dir / "longmemeval_v2_official_plan.json").write_text(
+        json.dumps({"domain": "enterprise"}),
+        encoding="utf-8",
+    )
+
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(data_root),
+            "--domain",
+            "combined",
+            "--output-dir",
+            str(tmp_path / "receipt"),
+            "--official-repo",
+            str(official_repo),
+            "--receipt-only",
+            "--metric-overview",
+            str(combined_dir / "metric_overview.json"),
+            "--combined-metrics",
+            str(combined_dir / "aggregated_metrics.json"),
+            "--submission-overview",
+            str(combined_dir / "submission_overview.json"),
+            "--web-output-dir",
+            str(web_output_dir),
+            "--enterprise-output-dir",
+            str(enterprise_output_dir),
+        ]
+    )
+    args.command_args = []
+    receipt = module.build_receipt_from_artifacts(
+        args=args,
+        data_root=data_root,
+        output_dir=tmp_path / "receipt",
+    )
+
+    usage = receipt["source_runs"]["domains"]["enterprise"]["provider_usage"]["reader"]
+    assert receipt["source_runs"]["integrity_complete"] is False
+    assert usage["event_count"] == 0
+    assert usage["foreign_event_count"] == EXPECTED_DOMAIN_READER_REQUESTS
+    assert usage["expected_run_id"] is None
+    assert receipt["accounting"]["reader"]["requests"] == EXPECTED_DOMAIN_READER_REQUESTS
+    assert receipt["accounting"]["reader"]["provider_reported_cost_usd"] == pytest.approx(0.03)
+    assert receipt["accounting"]["reader"]["tracking_complete"] is False
+
+    unstamped_usage_path = enterprise_output_dir / "provider_usage" / "reader.jsonl"
+    unstamped_usage_path.write_text(
+        json.dumps({"role": "reader", "usage": {"cost_usd": 42.0}}) + "\n",
+        encoding="utf-8",
+    )
+    unattributable = module._load_usage_log(
+        unstamped_usage_path,
+        role="reader",
+        expected_run_id=None,
+        filter_to_expected_run=True,
+    )
+    assert unattributable["events"] == []
+    assert unattributable["foreign_event_count"] == 1
+
+
+def test_provider_usage_run_id_is_unique_per_invocation(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    data_root = str(tmp_path / "data")
+
+    first = module.parse_args(
+        [
+            "--data-root",
+            data_root,
+            "--domain",
+            "web",
+            "--output-dir",
+            str(tmp_path / "one"),
+        ]
+    )
+    second = module.parse_args(
+        [
+            "--data-root",
+            data_root,
+            "--domain",
+            "web",
+            "--output-dir",
+            str(tmp_path / "two"),
+        ]
+    )
+
+    assert first.provider_usage_run_id.startswith("lme-v2-usage-")
+    assert second.provider_usage_run_id.startswith("lme-v2-usage-")
+    assert first.provider_usage_run_id != second.provider_usage_run_id
+
+
+def test_provider_accounting_rejects_empty_usage_log(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    usage_path = tmp_path / "reader.jsonl"
+    usage_path.touch()
+
+    accounting = module._provider_accounting(
+        [
+            {
+                "reader_usage_path": usage_path,
+                "reader_usage_invalid_lines": 0,
+                "reader_usage_foreign_event_count": 0,
+                "reader_usage_events": [],
+                "expected_usage_run_id": "usage-current",
+            }
+        ],
+        role="reader",
+        fallback_input_tokens=0.0,
+        fallback_output_tokens=0.0,
+    )
+
+    assert accounting["tracking_complete"] is False
+    assert accounting["cost_coverage_complete"] is False
 
 
 def test_usage_log_accounts_for_all_output_attempts(tmp_path: Path) -> None:
@@ -2720,13 +2939,22 @@ def _write_official_repo(root: Path) -> Path:
     return root
 
 
-def _write_official_outputs(output_dir: Path, *, domain: str = "enterprise") -> None:
+def _write_official_outputs(
+    output_dir: Path,
+    *,
+    domain: str = "enterprise",
+    legacy_usage_identity: bool = False,
+) -> None:
     output_dir.mkdir(parents=True)
     run_id = f"run-{domain}"
+    usage_run_id = run_id if legacy_usage_identity else f"usage-{domain}"
     runtime_dir = output_dir / "runtime_inputs"
     runtime_dir.mkdir()
+    plan = {"run_id": run_id, "domain": domain}
+    if not legacy_usage_identity:
+        plan["provider_usage_run_id"] = usage_run_id
     (output_dir / "longmemeval_v2_official_plan.json").write_text(
-        json.dumps({"run_id": run_id, "domain": domain}),
+        json.dumps(plan),
         encoding="utf-8",
     )
     (runtime_dir / "questions.json").write_text(
@@ -2851,7 +3079,7 @@ def _write_official_outputs(output_dir: Path, *, domain: str = "enterprise") -> 
         "\n".join(
             json.dumps(
                 {
-                    "run_id": run_id,
+                    "run_id": usage_run_id,
                     "role": "reader",
                     "requested_model": "Qwen/Qwen3.5-9B",
                     "provider_model": "qwen/qwen3.5-9b",
@@ -2871,7 +3099,7 @@ def _write_official_outputs(output_dir: Path, *, domain: str = "enterprise") -> 
     (usage_dir / "judge.jsonl").write_text(
         json.dumps(
             {
-                "run_id": run_id,
+                "run_id": usage_run_id,
                 "role": "judge",
                 "requested_model": "gpt-5.2",
                 "provider_model": "gpt-5.2-2026-06-01",

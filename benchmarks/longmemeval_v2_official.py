@@ -113,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(receipt, indent=2, sort_keys=True))  # noqa: T201
         return 0
 
+    ensure_fresh_provider_usage_output(output_dir)
     runtime_dir = output_dir / "runtime_inputs"
     runtime_dir.mkdir(parents=True, exist_ok=True)
 
@@ -208,6 +209,18 @@ def _redacted_command_args(command_args: Sequence[str]) -> list[str]:
     return redacted
 
 
+def ensure_fresh_provider_usage_output(output_dir: Path) -> None:
+    usage_dir = output_dir / "provider_usage"
+    existing_logs = sorted(path.name for path in usage_dir.glob("*.jsonl") if path.is_file())
+    if existing_logs:
+        logs = ", ".join(existing_logs)
+        msg = (
+            f"Output directory already contains provider usage logs ({logs}): {output_dir}. "
+            "Use a fresh --output-dir; checkpoint state may be reused separately."
+        )
+        raise RuntimeError(msg)
+
+
 def install_reader_retry(official_harness: Any, *, args: argparse.Namespace) -> None:
     attempts = int(args.reader_retry_attempts)
     if attempts <= 1:
@@ -249,12 +262,12 @@ def install_provider_usage_tracking(
     usage_dir = output_dir / "provider_usage"
     reader_recorder = ProviderUsageRecorder(
         usage_dir / "reader.jsonl",
-        run_id=args.run_id,
+        run_id=args.provider_usage_run_id,
         role="reader",
     )
     judge_recorder = ProviderUsageRecorder(
         usage_dir / "judge.jsonl",
-        run_id=args.run_id,
+        run_id=args.provider_usage_run_id,
         role="judge",
     )
 
@@ -493,6 +506,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--neighbor-stitch-span must be non-negative")
     if args.state_part_completion_items < 0:
         parser.error("--state-part-completion-items must be non-negative")
+    args.provider_usage_run_id = f"lme-v2-usage-{uuid4().hex[:12]}"
     return args
 
 
@@ -691,6 +705,7 @@ def build_run_plan(
     return {
         "schema_version": PLAN_SCHEMA_VERSION,
         "run_id": args.run_id,
+        "provider_usage_run_id": args.provider_usage_run_id,
         "runner_provenance": git_provenance(ROOT),
         "domain": args.domain,
         "tier": args.tier,
@@ -1050,14 +1065,21 @@ def load_receipt_source_runs(
         reader_usage_path = source_dir / "provider_usage" / "reader.jsonl"
         judge_usage_path = source_dir / "provider_usage" / "judge.jsonl"
         plan = _load_json_if_exists(plan_path)
+        expected_run_id = plan.get("provider_usage_run_id") or plan.get("run_id")
+        if not isinstance(expected_run_id, str) or not expected_run_id:
+            expected_run_id = None
         memory_config = _load_json_if_exists(memory_config_path)
         reader_usage_log = _load_usage_log(
             reader_usage_path,
             role="reader",
+            expected_run_id=expected_run_id,
+            filter_to_expected_run=True,
         )
         judge_usage_log = _load_usage_log(
             judge_usage_path,
             role="judge",
+            expected_run_id=expected_run_id,
+            filter_to_expected_run=True,
         )
         source_runs.append(
             {
@@ -1080,9 +1102,16 @@ def load_receipt_source_runs(
                 "reader_usage_events": reader_usage_log["events"],
                 "reader_usage_invalid_lines": reader_usage_log["invalid_lines"],
                 "reader_usage_run_ids": reader_usage_log["run_ids"],
+                "reader_usage_foreign_event_count": reader_usage_log[
+                    "foreign_event_count"
+                ],
                 "judge_usage_events": judge_usage_log["events"],
                 "judge_usage_invalid_lines": judge_usage_log["invalid_lines"],
                 "judge_usage_run_ids": judge_usage_log["run_ids"],
+                "judge_usage_foreign_event_count": judge_usage_log[
+                    "foreign_event_count"
+                ],
+                "expected_usage_run_id": expected_run_id,
             }
         )
     return source_runs
@@ -1118,6 +1147,10 @@ def build_source_runs_receipt(
                     "event_count": len(source_run["reader_usage_events"]),
                     "invalid_line_count": source_run["reader_usage_invalid_lines"],
                     "run_ids": source_run["reader_usage_run_ids"],
+                    "expected_run_id": source_run["expected_usage_run_id"],
+                    "foreign_event_count": source_run[
+                        "reader_usage_foreign_event_count"
+                    ],
                     "attempt_count": len(source_run["reader_usage_run_ids"]),
                 },
                 "judge": {
@@ -1125,6 +1158,10 @@ def build_source_runs_receipt(
                     "event_count": len(source_run["judge_usage_events"]),
                     "invalid_line_count": source_run["judge_usage_invalid_lines"],
                     "run_ids": source_run["judge_usage_run_ids"],
+                    "expected_run_id": source_run["expected_usage_run_id"],
+                    "foreign_event_count": source_run[
+                        "judge_usage_foreign_event_count"
+                    ],
                     "attempt_count": len(source_run["judge_usage_run_ids"]),
                 },
             },
@@ -1157,6 +1194,8 @@ def build_source_runs_receipt(
             record["exists"]
             and record["event_count"] > 0
             and record["invalid_line_count"] == 0
+            and record["foreign_event_count"] == 0
+            and record["run_ids"] == [record["expected_run_id"]]
             for record in domains[domain]["provider_usage"].values()
         )
         for domain in expected_domains
@@ -1572,6 +1611,9 @@ def _provider_accounting(
     tracking_complete = bool(source_runs) and all(
         source_run[path_key].is_file()
         and source_run[f"{role}_usage_invalid_lines"] == 0
+        and source_run["expected_usage_run_id"] is not None
+        and source_run[f"{role}_usage_foreign_event_count"] == 0
+        and bool(source_run[event_key])
         for source_run in source_runs
     )
     input_tokens = sum(
@@ -1895,10 +1937,21 @@ def _load_jsonl_if_exists(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def _load_usage_log(path: Path, *, role: str) -> dict[str, Any]:
+def _load_usage_log(
+    path: Path,
+    *,
+    role: str,
+    expected_run_id: str | None = None,
+    filter_to_expected_run: bool = False,
+) -> dict[str, Any]:
     if not path.is_file():
-        return {"events": [], "invalid_lines": 0, "run_ids": []}
-    events: list[dict[str, Any]] = []
+        return {
+            "events": [],
+            "invalid_lines": 0,
+            "run_ids": [],
+            "foreign_event_count": 0,
+        }
+    valid_events: list[dict[str, Any]] = []
     invalid_lines = 0
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
@@ -1914,17 +1967,24 @@ def _load_usage_log(path: Path, *, role: str) -> dict[str, Any]:
         if loaded.get("role") != role or not isinstance(loaded.get("usage"), dict):
             invalid_lines += 1
             continue
-        events.append(loaded)
+        valid_events.append(loaded)
+    events = [
+        event
+        for event in valid_events
+        if not filter_to_expected_run
+        or (expected_run_id is not None and event.get("run_id") == expected_run_id)
+    ]
     return {
         "events": events,
         "invalid_lines": invalid_lines,
         "run_ids": sorted(
             {
                 run_id
-                for event in events
+                for event in valid_events
                 if isinstance(run_id := event.get("run_id"), str) and run_id
             }
         ),
+        "foreign_event_count": len(valid_events) - len(events),
     }
 
 
