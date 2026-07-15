@@ -733,7 +733,9 @@ tasks:
       tools/tests/test_longmemeval_bench.py tools/tests/test_longmemeval_live.py
       tools/tests/test_longmemeval_replay.py
       tools/tests/test_longmemeval_v2_probe.py tools/tests/test_longmemeval_v2_official.py
-      tools/tests/test_longmemeval_v2_diagnostics.py tools/tests/test_longmemeval_v2_ablations.py
+      tools/tests/test_longmemeval_v2_diagnostics.py
+      tools/tests/test_longmemeval_v2_projection_audit.py
+      tools/tests/test_longmemeval_v2_ablations.py
       tools/tests/test_longmemeval_v2_causal_ablation.py -v
     inputs:
       - tools/**/*.py
@@ -748,6 +750,7 @@ tasks:
       - benchmarks/longmemeval_v2_probe.py
       - benchmarks/longmemeval_v2_official.py
       - benchmarks/longmemeval_v2_diagnostics.py
+      - benchmarks/longmemeval_v2_projection_audit.py
       - benchmarks/longmemeval_v2_ablations.py
       - benchmarks/longmemeval_v2_reader_report.py
       - benchmarks/longmemeval_v2_reader_replication.py
@@ -1331,6 +1334,11 @@ tasks:
 
   bench-longmemeval-v2-diagnostics:
     command: uv run python benchmarks/longmemeval_v2_diagnostics.py
+    options:
+      cache: false
+
+  bench-longmemeval-v2-projection-audit:
+    command: uv run python benchmarks/longmemeval_v2_projection_audit.py
     options:
       cache: false
 
