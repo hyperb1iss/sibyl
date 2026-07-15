@@ -214,7 +214,10 @@ def test_projection_parses_quoted_ui_attribute_values() -> None:
     experience = _experience()
     evidence = OperationalEvidencePart(
         id="tree-value",
-        content="[13] textbox 'Email', clickable, value='john@doe.com'",
+        content=(
+            "[13] textbox 'Email', clickable, value='john@doe.com'\n"
+            "[14] textbox 'Location', value='New York, NY', required=True"
+        ),
         content_type="text/plain; profile=accessibility-tree",
     )
     current = experience.observations[1].model_copy(update={"evidence": (evidence,)})
@@ -237,6 +240,38 @@ def test_projection_parses_quoted_ui_attribute_values() -> None:
     )
 
     assert "- textbox: Email [value='john@doe.com']" in event.content
+    assert "- textbox: Location [value='New York, NY', required=True]" in event.content
+
+
+def test_projection_clamps_ui_inventory_to_event_content_headroom() -> None:
+    experience = _experience().model_copy(update={"goal": "g" * 12_500})
+    evidence = OperationalEvidencePart(
+        id="tree-headroom",
+        content=f"StaticText '{'x' * 30_000}'",
+        content_type="text/plain; profile=accessibility-tree",
+    )
+    current = experience.observations[1].model_copy(update={"evidence": (evidence,)})
+    projection = project_operational_experience(
+        experience.model_copy(
+            update={
+                "observations": (
+                    experience.observations[0],
+                    current,
+                    experience.observations[2],
+                )
+            }
+        )
+    )
+    event = next(
+        entity
+        for entity in projection.entities
+        if entity.entity_type is EntityType.EVENT
+        and entity.metadata["source_observation_ids"][-1] == current.id
+    )
+
+    assert len(event.content) <= 18_000
+    assert event.metadata["ui_inventory_item_count"] == 1
+    assert event.metadata["ui_inventory_truncated"] is True
 
 
 def test_projection_is_deterministic_and_manifest_is_self_describing() -> None:

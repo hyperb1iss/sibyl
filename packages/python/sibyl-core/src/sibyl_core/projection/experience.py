@@ -181,7 +181,7 @@ def _clean_accessibility_name(value: str) -> str:
 
 def _ui_state_attributes(raw_attributes: str) -> str:
     selected: list[str] = []
-    for raw_attribute in raw_attributes.removeprefix(",").split(","):
+    for raw_attribute in _split_accessibility_attributes(raw_attributes.removeprefix(",")):
         attribute = raw_attribute.strip()
         key, separator, value = attribute.partition("=")
         if separator and key.casefold() in _UI_STATE_ATTRIBUTES:
@@ -191,11 +191,45 @@ def _ui_state_attributes(raw_attributes: str) -> str:
     return ", ".join(selected)
 
 
+def _split_accessibility_attributes(value: str) -> list[str]:
+    attributes: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for character in value:
+        if escaped:
+            current.append(character)
+            escaped = False
+            continue
+        if character == "\\" and quote is not None:
+            current.append(character)
+            escaped = True
+            continue
+        if character in {"'", '"'}:
+            quote = None if quote == character else character if quote is None else quote
+        if character == "," and quote is None:
+            attributes.append("".join(current))
+            current = []
+            continue
+        current.append(character)
+    attributes.append("".join(current))
+    return attributes
+
+
 def _accessibility_inventory(
     observation: OperationalObservation,
+    *,
+    max_chars: int = MAX_UI_INVENTORY_CHARS,
 ) -> tuple[str | None, int, bool]:
     prefix = "Observed UI inventory:"
-    available_chars = MAX_UI_INVENTORY_CHARS - len(prefix) - 1
+    effective_max_chars = min(max_chars, MAX_UI_INVENTORY_CHARS)
+    if effective_max_chars <= len(prefix) + 1:
+        has_accessibility_evidence = any(
+            "profile=accessibility-tree" in evidence.content_type.casefold()
+            for evidence in observation.evidence
+        )
+        return None, 0, has_accessibility_evidence
+    available_chars = effective_max_chars - len(prefix) - 1
     inventory: list[str] = []
     seen: set[tuple[str, str, str]] = set()
     truncated = False
@@ -380,8 +414,18 @@ def project_operational_experience(
     for previous, current in pairwise(observations):
         if not current.action:
             continue
+        event_base_content = _clean_lines(
+            (
+                f"Goal: {experience.goal}",
+                f"Action: {current.action}",
+                f"Before URI: {previous.uri}" if previous.uri else None,
+                f"After URI: {current.uri}" if current.uri else None,
+                f"Observed reasoning: {current.reasoning}" if current.reasoning else None,
+            )
+        )
         ui_inventory, ui_inventory_item_count, ui_inventory_truncated = _accessibility_inventory(
-            current
+            current,
+            max_chars=MAX_TYPED_ENTITY_CONTENT_CHARS - len(event_base_content) - 1,
         )
         event_id = _stable_id("event", "operational-transition", experience.source_id, current.id)
         entities.append(
@@ -389,16 +433,7 @@ def project_operational_experience(
                 id=event_id,
                 entity_type=EntityType.EVENT,
                 name=f"Action at observation {current.ordinal}",
-                content=_clean_lines(
-                    (
-                        f"Goal: {experience.goal}",
-                        f"Action: {current.action}",
-                        f"Before URI: {previous.uri}" if previous.uri else None,
-                        f"After URI: {current.uri}" if current.uri else None,
-                        f"Observed reasoning: {current.reasoning}" if current.reasoning else None,
-                        ui_inventory,
-                    )
-                ),
+                content=_clean_lines((event_base_content, ui_inventory)),
                 organization_id=organization_id,
                 created_by=created_by,
                 modified_by=created_by,
