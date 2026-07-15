@@ -1556,6 +1556,7 @@ def test_sibyl_memory_ingest_checkpoint_resumes_completed_trajectory(tmp_path: P
         "embed-1": ["session-one"],
         "project-1": ["session-one"],
     }
+    memory._pending_job_manifest_ids = {"embed-1": "artifact-manifest-one"}
     memory.ingest_embedding_usage = {"requests": EXPECTED_SAVED_USAGE_REQUESTS}
     memory.ingest_api_runtime = {"version": "test"}
 
@@ -1571,6 +1572,7 @@ def test_sibyl_memory_ingest_checkpoint_resumes_completed_trajectory(tmp_path: P
     assert restored._pending_embedding_job_ids == {"embed-1"}
     assert restored._pending_projection_job_ids == {"project-1"}
     assert restored._pending_job_entity_ids == memory._pending_job_entity_ids
+    assert restored._pending_job_manifest_ids == memory._pending_job_manifest_ids
     assert restored._chunk_catalog == memory._chunk_catalog
     assert restored.ingest_embedding_usage == {"requests": EXPECTED_SAVED_USAGE_REQUESTS}
 
@@ -2142,6 +2144,7 @@ def test_sibyl_memory_insert_tracks_deferred_background_jobs() -> None:
         calls.append({"method": method, "path": path, "json": json or {}, "params": params or {}})
         return {
             "written_entities": 4,
+            "manifest_id": "artifact-lme-v2-1",
             "entity_ids": ["session-lme-v2-1", "event-lme-v2-1"],
             "background_jobs": {
                 "embedding_backfill": {
@@ -2182,6 +2185,9 @@ def test_sibyl_memory_insert_tracks_deferred_background_jobs() -> None:
     assert memory._pending_projection_job_ids == set()
     assert memory._pending_job_entity_ids == {
         "embed-lme-v2-1": ["session-lme-v2-1", "event-lme-v2-1"],
+    }
+    assert memory._pending_job_manifest_ids == {
+        "embed-lme-v2-1": "artifact-lme-v2-1",
     }
 
 
@@ -2826,6 +2832,204 @@ def test_sibyl_memory_requeues_failed_job_once() -> None:
     ]
     assert memory._pending_embedding_job_ids == set()
     assert memory._pending_job_entity_ids == {}
+
+
+def test_sibyl_memory_requeues_large_operational_job_by_manifest() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    manifest_id = "artifact-operational-manifest"
+    entity_ids = [*(f"event-{index}" for index in range(129)), manifest_id]
+    requests: list[dict[str, object]] = []
+
+    def fake_request(
+        method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        del params
+        assert method == "POST"
+        assert path == "/entities/bulk/requeue-background-jobs"
+        assert isinstance(json, dict)
+        requests.append(json)
+        return {
+            "manifest_id": manifest_id,
+            "entity_ids": entity_ids,
+            "background_jobs": {
+                "embedding_backfill": {
+                    "status": "queued",
+                    "job_ids": ["embed-replacement"],
+                }
+            },
+        }
+
+    memory.defer_embeddings = True
+    memory.checkpoint_dir = None
+    memory._pending_embedding_job_ids = {"embed-lost"}
+    memory._pending_projection_job_ids = set()
+    memory._pending_job_entity_ids = {"embed-lost": entity_ids}
+    memory._pending_job_manifest_ids = {"embed-lost": manifest_id}
+    memory._request_json = fake_request
+
+    replacements = memory._recover_background_job(
+        "embed-lost",
+        job_kind="embedding_backfill",
+    )
+
+    assert requests == [{"manifest_id": manifest_id, "jobs": ["embedding_backfill"]}]
+    assert replacements == {"embed-replacement"}
+    assert memory._pending_embedding_job_ids == {"embed-replacement"}
+    assert memory._pending_job_manifest_ids == {
+        "embed-replacement": manifest_id,
+    }
+
+
+def test_sibyl_memory_treats_completed_manifest_recovery_as_done() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    manifest_id = "artifact-complete-manifest"
+    paths: list[str] = []
+
+    def fake_request(
+        method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        del params
+        assert method == "POST"
+        paths.append(path)
+        if path == "/jobs/status":
+            return {"jobs": {"embed-lost": {"status": "not_found"}}}
+        assert path == "/entities/bulk/requeue-background-jobs"
+        assert json == {"manifest_id": manifest_id, "jobs": ["embedding_backfill"]}
+        return {
+            "manifest_id": manifest_id,
+            "entity_ids": [manifest_id],
+            "background_jobs": {
+                "embedding_backfill": {
+                    "status": "skipped",
+                    "job_ids": [],
+                    "reason": "manifest_complete",
+                }
+            },
+        }
+
+    memory.defer_embeddings = True
+    memory.checkpoint_dir = None
+    memory.embedding_job_wait_timeout_seconds = 1.0
+    memory.embedding_job_poll_seconds = 0.0
+    memory._pending_embedding_job_ids = {"embed-lost"}
+    memory._pending_projection_job_ids = set()
+    memory._pending_job_entity_ids = {"embed-lost": ["event-0", manifest_id]}
+    memory._pending_job_manifest_ids = {"embed-lost": manifest_id}
+    memory._request_json = fake_request
+
+    memory._drain_embedding_backfills()
+
+    assert paths == ["/jobs/status", "/entities/bulk/requeue-background-jobs"]
+    assert memory._pending_embedding_job_ids == set()
+    assert memory._pending_job_entity_ids == {}
+    assert memory._pending_job_manifest_ids == {}
+
+
+def test_sibyl_memory_projection_recovery_ignores_manifest_mapping() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    requests: list[dict[str, object]] = []
+
+    def fake_request(
+        method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        del params
+        assert method == "POST"
+        assert path == "/entities/bulk/requeue-background-jobs"
+        assert isinstance(json, dict)
+        requests.append(json)
+        return {
+            "entity_ids": ["session-one"],
+            "background_jobs": {
+                "memory_projection": {
+                    "status": "queued",
+                    "job_ids": ["projection-replacement"],
+                }
+            },
+        }
+
+    memory.defer_embeddings = True
+    memory.checkpoint_dir = None
+    memory._pending_embedding_job_ids = set()
+    memory._pending_projection_job_ids = {"projection-lost"}
+    memory._pending_job_entity_ids = {"projection-lost": ["session-one"]}
+    memory._pending_job_manifest_ids = {"projection-lost": "artifact-unrelated"}
+    memory._request_json = fake_request
+
+    replacements = memory._recover_background_job(
+        "projection-lost",
+        job_kind="memory_projection",
+    )
+
+    assert requests == [{"entity_ids": ["session-one"], "jobs": ["memory_projection"]}]
+    assert replacements == {"projection-replacement"}
+    assert memory._pending_job_manifest_ids == {}
+
+
+def test_sibyl_memory_recovers_large_job_from_legacy_checkpoint_inventory() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    manifest_id = "artifact-legacy-manifest"
+    requests: list[dict[str, object]] = []
+
+    def fake_request(
+        method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        del params
+        assert method == "POST"
+        assert path == "/entities/bulk/requeue-background-jobs"
+        assert isinstance(json, dict)
+        requests.append(json)
+        return {
+            "manifest_id": manifest_id,
+            "entity_ids": ["event-0", manifest_id],
+            "background_jobs": {
+                "embedding_backfill": {
+                    "status": "queued",
+                    "job_ids": ["embed-replacement"],
+                }
+            },
+        }
+
+    memory.defer_embeddings = True
+    memory.checkpoint_dir = None
+    memory._pending_embedding_job_ids = {"embed-lost"}
+    memory._pending_projection_job_ids = set()
+    memory._pending_job_entity_ids = {
+        "embed-lost": [*(f"event-{index}" for index in range(129)), manifest_id]
+    }
+    memory._pending_job_manifest_ids = {}
+    memory._request_json = fake_request
+
+    replacements = memory._recover_background_job(
+        "embed-lost",
+        job_kind="embedding_backfill",
+    )
+
+    assert requests == [{"manifest_id": manifest_id, "jobs": ["embedding_backfill"]}]
+    assert replacements == {"embed-replacement"}
 
 
 def test_sibyl_memory_chunks_large_job_status_batches() -> None:

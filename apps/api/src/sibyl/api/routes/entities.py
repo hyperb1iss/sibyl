@@ -1567,25 +1567,15 @@ async def create_entities_bulk(
     )
 
 
-@router.post(
-    "/bulk/requeue-background-jobs",
-    response_model=EntityBackgroundJobsRequeueResponse,
-    dependencies=[Depends(require_org_role(*_WRITE_ROLES))],
-)
-async def requeue_entity_background_jobs(
+async def _resolve_background_job_recovery_entities(
+    runtime: Any,
     request: EntityBackgroundJobsRequeueRequest,
-    org: AuthOrganization = Depends(get_current_organization),
-    ctx: AuthContext = Depends(get_auth_context),
-    content_session: Any = Depends(get_content_read_session_dependency),
-) -> EntityBackgroundJobsRequeueResponse:
-    group_id = str(org.id)
-    runtime = await get_entity_graph_runtime(group_id)
-    entities: list[Entity] = []
+    ctx: AuthContext,
+    content_session: Any,
+) -> tuple[list[Entity], bool]:
     verified_project_ids: set[str] = set()
-    for entity_id in dict.fromkeys(request.entity_ids):
-        entity = await runtime.entity_manager.get(entity_id)
-        if entity is None:
-            raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
+
+    async def require_access(entity: Entity) -> None:
         await _require_entity_read_access(ctx, entity)
         project_id = (
             entity.id
@@ -1601,9 +1591,83 @@ async def requeue_entity_background_jobs(
                 require_existing_project=True,
             )
             verified_project_ids.add(project_id)
-        entities.append(entity)
 
+    if request.manifest_id:
+        try:
+            manifest = await runtime.entity_manager.get(request.manifest_id)
+        except KeyError:
+            manifest = None
+        if manifest is None:
+            raise HTTPException(status_code=404, detail="Entity not found")
+        await require_access(manifest)
+        expected_ids = manifest.metadata.get("expected_entity_ids")
+        manifest_state = manifest.metadata.get("operational_projection_state")
+        if (
+            manifest.entity_type is not EntityType.ARTIFACT
+            or manifest.metadata.get("projection_kind") != "manifest"
+            or manifest_state not in {"embedding_pending", MANIFEST_STATE_COMPLETE}
+            or not isinstance(expected_ids, list)
+            or not expected_ids
+            or any(not isinstance(entity_id, str) or not entity_id for entity_id in expected_ids)
+            or request.manifest_id not in expected_ids
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Entity is not a recoverable operational embedding manifest",
+            )
+        if manifest_state == MANIFEST_STATE_COMPLETE:
+            return [manifest], True
+        entities = await runtime.entity_manager.get_many(expected_ids)
+        for entity in entities:
+            if entity.id != manifest.id:
+                await require_access(entity)
+        return entities, False
+
+    entities: list[Entity] = []
+    for entity_id in dict.fromkeys(request.entity_ids):
+        try:
+            entity = await runtime.entity_manager.get(entity_id)
+        except KeyError:
+            entity = None
+        if entity is None:
+            raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
+        await require_access(entity)
+        entities.append(entity)
+    return entities, False
+
+
+@router.post(
+    "/bulk/requeue-background-jobs",
+    response_model=EntityBackgroundJobsRequeueResponse,
+    dependencies=[Depends(require_org_role(*_WRITE_ROLES))],
+)
+async def requeue_entity_background_jobs(
+    request: EntityBackgroundJobsRequeueRequest,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+    content_session: Any = Depends(get_content_read_session_dependency),
+) -> EntityBackgroundJobsRequeueResponse:
+    group_id = str(org.id)
+    runtime = await get_entity_graph_runtime(group_id)
     requested_jobs = set(request.jobs)
+    entities, manifest_already_complete = await _resolve_background_job_recovery_entities(
+        runtime,
+        request,
+        ctx,
+        content_session,
+    )
+    if manifest_already_complete:
+        return EntityBackgroundJobsRequeueResponse(
+            entity_ids=[entity.id for entity in entities],
+            manifest_id=request.manifest_id,
+            background_jobs={
+                "embedding_backfill": {
+                    "status": "skipped",
+                    "job_ids": [],
+                    "reason": "manifest_complete",
+                }
+            },
+        )
     background_jobs: dict[str, Any] = {}
     if "embedding_backfill" in requested_jobs:
         from sibyl.jobs.queue import enqueue_entity_embedding_backfill
@@ -1713,6 +1777,7 @@ async def requeue_entity_background_jobs(
             }
     return EntityBackgroundJobsRequeueResponse(
         entity_ids=[entity.id for entity in entities],
+        manifest_id=request.manifest_id,
         background_jobs=background_jobs,
     )
 

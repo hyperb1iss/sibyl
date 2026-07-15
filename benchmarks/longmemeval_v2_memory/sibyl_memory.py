@@ -1322,6 +1322,7 @@ class SibylLiveApiMemory(Memory):
         self._pending_embedding_job_ids: set[str] = set()
         self._pending_projection_job_ids: set[str] = set()
         self._pending_job_entity_ids: dict[str, list[str]] = {}
+        self._pending_job_manifest_ids: dict[str, str] = {}
         self.ingest_embedding_usage: dict[str, object] = {}
         self._finalize_lock = threading.Lock()
         self._ingest_finalized = False
@@ -1751,6 +1752,14 @@ class SibylLiveApiMemory(Memory):
                 if job_id
                 in self._pending_embedding_job_ids | self._pending_projection_job_ids
             },
+            "pending_job_manifest_ids": {
+                job_id: manifest_id
+                for job_id, manifest_id in sorted(
+                    getattr(self, "_pending_job_manifest_ids", {}).items()
+                )
+                if job_id
+                in self._pending_embedding_job_ids | self._pending_projection_job_ids
+            },
             "ingest_embedding_usage": dict(self.ingest_embedding_usage),
             "ingest_api_runtime": dict(self.ingest_api_runtime),
             "ingest_finalized": finalized,
@@ -1844,6 +1853,18 @@ class SibylLiveApiMemory(Memory):
             if isinstance(pending_job_entity_ids, dict)
             else {}
         )
+        pending_job_manifest_ids = manifest.get("pending_job_manifest_ids")
+        self._pending_job_manifest_ids = (
+            {
+                str(job_id): str(manifest_id)
+                for job_id, manifest_id in pending_job_manifest_ids.items()
+                if isinstance(job_id, str)
+                and isinstance(manifest_id, str)
+                and manifest_id
+            }
+            if isinstance(pending_job_manifest_ids, dict)
+            else {}
+        )
         self.ingest_embedding_usage = (
             dict(manifest["ingest_embedding_usage"])
             if isinstance(manifest.get("ingest_embedding_usage"), dict)
@@ -1925,6 +1946,14 @@ class SibylLiveApiMemory(Memory):
             self._pending_job_entity_ids = pending_job_entity_ids
         for job_id in job_ids:
             pending_job_entity_ids[job_id] = entity_ids
+        manifest_id = _stripped_str(response.get("manifest_id"))
+        if manifest_id:
+            pending_job_manifest_ids = getattr(self, "_pending_job_manifest_ids", None)
+            if pending_job_manifest_ids is None:
+                pending_job_manifest_ids = {}
+                self._pending_job_manifest_ids = pending_job_manifest_ids
+            for job_id in job_ids:
+                pending_job_manifest_ids[job_id] = manifest_id
 
     def _drain_embedding_backfills(self) -> None:
         self._drain_background_jobs(
@@ -1954,6 +1983,8 @@ class SibylLiveApiMemory(Memory):
             return
         if getattr(self, "_pending_job_entity_ids", None) is None:
             self._pending_job_entity_ids = {}
+        if getattr(self, "_pending_job_manifest_ids", None) is None:
+            self._pending_job_manifest_ids = {}
 
         pending = set(job_ids)
         total = len(pending)
@@ -2020,6 +2051,7 @@ class SibylLiveApiMemory(Memory):
                         )
                     pending.remove(job_id)
                     self._pending_job_entity_ids.pop(job_id, None)
+                    self._pending_job_manifest_ids.pop(job_id, None)
                     made_progress = True
                 elif status_value == "cancelled":
                     msg = f"{job_name} job {job_id} ended as {status_value}"
@@ -2051,21 +2083,43 @@ class SibylLiveApiMemory(Memory):
 
     def _recover_background_job(self, job_id: str, *, job_kind: str) -> set[str]:
         entity_ids = self._pending_job_entity_ids.get(job_id, [])
-        if not entity_ids:
+        pending_job_manifest_ids = getattr(self, "_pending_job_manifest_ids", {})
+        manifest_id = (
+            pending_job_manifest_ids.get(job_id)
+            if job_kind == "embedding_backfill"
+            else None
+        )
+        if (
+            not manifest_id
+            and job_kind == "embedding_backfill"
+            and len(entity_ids) > MAX_BULK_CREATE
+        ):
+            # Legacy checkpoints stored operational inventories in manifest-last order.
+            manifest_id = entity_ids[-1]
+        if not entity_ids and not manifest_id:
             msg = f"cannot recover lost {job_kind} job {job_id}: checkpoint has no entity ids"
             raise RuntimeError(msg)
+        recovery_target = (
+            {"manifest_id": manifest_id} if manifest_id else {"entity_ids": entity_ids}
+        )
         response = self._request_json(
             "POST",
             "/entities/bulk/requeue-background-jobs",
-            json={"entity_ids": entity_ids, "jobs": [job_kind]},
+            json={**recovery_target, "jobs": [job_kind]},
         )
         replacements = set(_background_job_ids(response, job_kind))
-        if not replacements:
+        background_jobs = response.get("background_jobs")
+        job_info = background_jobs.get(job_kind) if isinstance(background_jobs, dict) else None
+        recovery_status = (
+            _stripped_str(job_info.get("status")) if isinstance(job_info, dict) else ""
+        )
+        if not replacements and recovery_status != "skipped":
             msg = f"requeue returned no replacement {job_kind} job for {job_id}"
             raise RuntimeError(msg)
         self._pending_embedding_job_ids.discard(job_id)
         self._pending_projection_job_ids.discard(job_id)
         self._pending_job_entity_ids.pop(job_id, None)
+        pending_job_manifest_ids.pop(job_id, None)
         self._remember_embedding_backfill_jobs(response)
         self._remember_memory_projection_jobs(response)
         self._write_checkpoint_manifest(finalized=False)

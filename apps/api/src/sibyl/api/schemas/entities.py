@@ -1,9 +1,9 @@
 """Entity and raw-capture request/response models."""
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from sibyl_core.models.entities import EntityType
 
@@ -113,18 +113,28 @@ class EntityBulkCreateResponse(BaseModel):
 class EntityBackgroundJobsRequeueRequest(BaseModel):
     """Requeue derived entity work after a broker state loss."""
 
-    entity_ids: list[str] = Field(..., min_length=1, max_length=128)
+    entity_ids: list[str] = Field(default_factory=list, max_length=128)
+    manifest_id: str | None = Field(default=None, min_length=1, max_length=2048)
     jobs: list[Literal["embedding_backfill", "memory_projection"]] = Field(
         ...,
         min_length=1,
         max_length=2,
     )
 
+    @model_validator(mode="after")
+    def validate_recovery_target(self) -> Self:
+        if bool(self.entity_ids) == bool(self.manifest_id):
+            raise ValueError("provide exactly one of entity_ids or manifest_id")
+        if self.manifest_id and set(self.jobs) != {"embedding_backfill"}:
+            raise ValueError("manifest recovery only supports embedding_backfill")
+        return self
+
 
 class EntityBackgroundJobsRequeueResponse(BaseModel):
     """Background jobs recreated from persisted graph entities."""
 
     entity_ids: list[str]
+    manifest_id: str | None = None
     background_jobs: dict[str, Any] = Field(default_factory=dict)
 
 

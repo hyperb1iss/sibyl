@@ -7,6 +7,7 @@ from uuid import UUID
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from sibyl.api.routes.entities import (
     create_entities_bulk,
@@ -411,6 +412,25 @@ async def test_requeue_entity_background_jobs_uses_persisted_entities() -> None:
     assert response.background_jobs["memory_projection"]["job_ids"] == ["projection-restored"]
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"jobs": ["embedding_backfill"]},
+        {
+            "entity_ids": ["event-one"],
+            "manifest_id": "artifact-one",
+            "jobs": ["embedding_backfill"],
+        },
+        {"manifest_id": "artifact-one", "jobs": ["memory_projection"]},
+    ],
+)
+def test_requeue_background_jobs_requires_one_compatible_target(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        EntityBackgroundJobsRequeueRequest.model_validate(payload)
+
+
 @pytest.mark.asyncio
 async def test_requeue_operational_embedding_job_restores_manifest_completion() -> None:
     org = _org()
@@ -446,7 +466,12 @@ async def test_requeue_operational_embedding_job_restores_manifest_completion() 
     relationship_manager = SimpleNamespace(get_for_entity=AsyncMock())
     runtime = SimpleNamespace(
         entity_manager=SimpleNamespace(
-            get=AsyncMock(side_effect=lambda entity_id: persisted[entity_id])
+            get=AsyncMock(side_effect=lambda entity_id: persisted[entity_id]),
+            get_many=AsyncMock(
+                side_effect=lambda entity_ids: [
+                    persisted[entity_id] for entity_id in entity_ids if entity_id in persisted
+                ]
+            ),
         ),
         relationship_manager=relationship_manager,
     )
@@ -493,6 +518,235 @@ async def test_requeue_operational_embedding_job_restores_manifest_completion() 
     assert "updated_at" not in completion_manifest["metadata"]
     relationship_manager.get_for_entity.assert_not_awaited()
     assert response.background_jobs["embedding_backfill"]["queued_entities"] == 1
+    assert response.manifest_id is None
+    assert runtime.entity_manager.get.await_count == 2
+    runtime.entity_manager.get_many.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_requeue_completed_operational_manifest_is_idempotent() -> None:
+    org = _org()
+    ctx = _ctx()
+    manifest = Entity(
+        id="artifact_capture-complete",
+        entity_type=EntityType.ARTIFACT,
+        name="Operational experience manifest",
+        content="capture-complete",
+        organization_id=str(org.id),
+        metadata={
+            "project_id": "project_shared",
+            "projection_kind": "manifest",
+            "operational_projection_state": "complete",
+            "expected_entity_ids": ["event_pruned", "artifact_capture-complete"],
+        },
+    )
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=manifest),
+            get_many=AsyncMock(),
+        )
+    )
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "sibyl.api.routes.entities.verify_entity_project_access",
+            AsyncMock(),
+        ),
+        patch(
+            "sibyl.api.routes.entities._require_entity_read_access",
+            AsyncMock(return_value={"project_shared"}),
+        ),
+        patch(
+            "sibyl.jobs.queue.enqueue_entity_embedding_backfill",
+            AsyncMock(),
+        ) as enqueue_embeddings,
+    ):
+        response = await requeue_entity_background_jobs(
+            request=EntityBackgroundJobsRequeueRequest(
+                manifest_id=manifest.id,
+                jobs=["embedding_backfill"],
+            ),
+            org=org,
+            ctx=ctx,
+            content_session="session",
+        )
+
+    assert response.entity_ids == [manifest.id]
+    assert response.background_jobs["embedding_backfill"] == {
+        "status": "skipped",
+        "job_ids": [],
+        "reason": "manifest_complete",
+    }
+    runtime.entity_manager.get_many.assert_not_awaited()
+    enqueue_embeddings.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_requeue_operational_manifest_requires_itself_in_inventory() -> None:
+    manifest = Entity(
+        id="artifact_capture-malformed",
+        entity_type=EntityType.ARTIFACT,
+        name="Operational experience manifest",
+        content="capture-malformed",
+        organization_id=str(_org().id),
+        metadata={
+            "projection_kind": "manifest",
+            "operational_projection_state": "embedding_pending",
+            "expected_entity_ids": ["event_capture-1"],
+        },
+    )
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=manifest),
+            get_many=AsyncMock(),
+        )
+    )
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "sibyl.api.routes.entities._require_entity_read_access",
+            AsyncMock(return_value=set()),
+        ),
+        pytest.raises(
+            HTTPException, match="recoverable operational embedding manifest"
+        ) as exc_info,
+    ):
+        await requeue_entity_background_jobs(
+            request=EntityBackgroundJobsRequeueRequest(
+                manifest_id=manifest.id,
+                jobs=["embedding_backfill"],
+            ),
+            org=_org(),
+            ctx=_ctx(),
+            content_session="session",
+        )
+
+    assert exc_info.value.status_code == 409
+    runtime.entity_manager.get_many.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_requeue_operational_manifest_hides_unreadable_metadata() -> None:
+    manifest = Entity(
+        id="artifact_capture-private",
+        entity_type=EntityType.ARTIFACT,
+        name="Operational experience manifest",
+        content="capture-private",
+        organization_id=str(_org().id),
+        metadata={"projection_kind": "invalid"},
+    )
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=manifest),
+            get_many=AsyncMock(),
+        )
+    )
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "sibyl.api.routes.entities._require_entity_read_access",
+            AsyncMock(side_effect=HTTPException(status_code=404, detail="Entity not found")),
+        ),
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await requeue_entity_background_jobs(
+            request=EntityBackgroundJobsRequeueRequest(
+                manifest_id=manifest.id,
+                jobs=["embedding_backfill"],
+            ),
+            org=_org(),
+            ctx=_ctx(),
+            content_session="session",
+        )
+
+    assert exc_info.value.status_code == 404
+    runtime.entity_manager.get_many.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_requeue_operational_embedding_job_resolves_large_manifest_inventory() -> None:
+    org = _org()
+    ctx = _ctx()
+    events = [
+        Entity(
+            id=f"event_capture-{index}",
+            entity_type=EntityType.EVENT,
+            name=f"Incident state {index}",
+            content="Incident INC001 is closed.",
+            organization_id=str(org.id),
+            metadata={"project_id": "project_shared"},
+        )
+        for index in range(129)
+    ]
+    manifest = Entity(
+        id="artifact_capture-large",
+        entity_type=EntityType.ARTIFACT,
+        name="Operational experience manifest",
+        content="capture-large",
+        organization_id=str(org.id),
+        metadata={
+            "project_id": "project_shared",
+            "projection_kind": "manifest",
+            "operational_projection_state": "embedding_pending",
+            "expected_entity_ids": [*[event.id for event in events], "artifact_capture-large"],
+            "expected_relationship_ids": [],
+        },
+    )
+    persisted = {entity.id: entity for entity in [*events, manifest]}
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=manifest),
+            get_many=AsyncMock(
+                side_effect=lambda entity_ids: [persisted[entity_id] for entity_id in entity_ids]
+            ),
+        ),
+        relationship_manager=SimpleNamespace(get_for_entity=AsyncMock()),
+    )
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "sibyl.api.routes.entities.verify_entity_project_access",
+            AsyncMock(),
+        ),
+        patch(
+            "sibyl.api.routes.entities._require_entity_read_access",
+            AsyncMock(return_value={"project_shared"}),
+        ),
+        patch(
+            "sibyl.jobs.queue.enqueue_entity_embedding_backfill",
+            AsyncMock(return_value="embed-restored"),
+        ) as enqueue_embeddings,
+    ):
+        response = await requeue_entity_background_jobs(
+            request=EntityBackgroundJobsRequeueRequest(
+                manifest_id=manifest.id,
+                jobs=["embedding_backfill"],
+            ),
+            org=org,
+            ctx=ctx,
+            content_session="session",
+        )
+
+    assert response.manifest_id == manifest.id
+    assert response.background_jobs["embedding_backfill"]["queued_entities"] == len(events)
+    assert len(enqueue_embeddings.await_args.args[0]) == len(events)
+    runtime.relationship_manager.get_for_entity.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -524,7 +778,12 @@ async def test_requeue_operational_embedding_job_requires_exact_inventory() -> N
     relationship_manager = SimpleNamespace(get_for_entity=AsyncMock())
     runtime = SimpleNamespace(
         entity_manager=SimpleNamespace(
-            get=AsyncMock(side_effect=lambda entity_id: persisted[entity_id])
+            get=AsyncMock(side_effect=lambda entity_id: persisted[entity_id]),
+            get_many=AsyncMock(
+                side_effect=lambda entity_ids: [
+                    persisted[entity_id] for entity_id in entity_ids if entity_id in persisted
+                ]
+            ),
         ),
         relationship_manager=relationship_manager,
     )
@@ -550,7 +809,7 @@ async def test_requeue_operational_embedding_job_requires_exact_inventory() -> N
     ):
         await requeue_entity_background_jobs(
             request=EntityBackgroundJobsRequeueRequest(
-                entity_ids=[event.id, manifest.id],
+                manifest_id=manifest.id,
                 jobs=["embedding_backfill"],
             ),
             org=org,
@@ -602,6 +861,32 @@ async def test_requeue_entity_background_jobs_hides_unreadable_entities() -> Non
 
     assert exc_info.value.status_code == 404
     enqueue_embeddings.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_requeue_entity_background_jobs_returns_not_found_for_deleted_entity() -> None:
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(get=AsyncMock(side_effect=KeyError("session_deleted")))
+    )
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        pytest.raises(HTTPException, match="Entity not found: session_deleted") as exc_info,
+    ):
+        await requeue_entity_background_jobs(
+            request=EntityBackgroundJobsRequeueRequest(
+                entity_ids=["session_deleted"],
+                jobs=["embedding_backfill"],
+            ),
+            org=_org(),
+            ctx=_ctx(),
+            content_session="session",
+        )
+
+    assert exc_info.value.status_code == 404
 
 
 @pytest.mark.asyncio
