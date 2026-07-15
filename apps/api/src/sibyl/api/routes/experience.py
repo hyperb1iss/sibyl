@@ -3,7 +3,7 @@
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from sibyl.api.schemas import (
     OperationalExperienceCaptureRequest,
@@ -12,9 +12,13 @@ from sibyl.api.schemas import (
 from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
+from sibyl.locks import LockAcquisitionError, entity_lock
 from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 from sibyl_core.models.entities import EntityType
-from sibyl_core.projection import persist_operational_experience
+from sibyl_core.projection import (
+    operational_experience_manifest_id,
+    persist_operational_experience,
+)
 
 log = structlog.get_logger()
 _WRITE_ROLES = (
@@ -48,54 +52,105 @@ async def capture_operational_experience(
 ) -> OperationalExperienceCaptureResponse:
     """Persist source evidence and its deterministic typed projections."""
     experience = payload.experience
-    if experience.project_id:
-        await verify_entity_project_access(
-            None,
-            ctx,
-            experience.project_id,
-            required_role=ProjectRole.CONTRIBUTOR,
-            require_existing_project=True,
+    if not experience.project_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Operational experience requires a project_id",
         )
-
-    group_id = str(org.id)
-    runtime = await get_experience_graph_runtime(group_id)
-    result = await persist_operational_experience(
-        entity_manager=runtime.entity_manager,
-        relationship_manager=runtime.relationship_manager,
-        experience=experience,
-        organization_id=group_id,
-        created_by=ctx.user_id,
-        generate_embeddings=not payload.defer_embeddings,
+    await verify_entity_project_access(
+        None,
+        ctx,
+        experience.project_id,
+        required_role=ProjectRole.CONTRIBUTOR,
+        require_existing_project=True,
     )
 
-    background_jobs: dict[str, Any] = {}
-    if payload.defer_embeddings:
-        embeddable = [
-            entity
-            for entity in result.projection.entities
-            if entity.id != result.projection.manifest.manifest_entity_id
-            and entity.entity_type is not EntityType.ARTIFACT
-        ]
-        try:
-            from sibyl.jobs.queue import enqueue_entity_embedding_backfill
+    group_id = str(org.id)
+    manifest_id = operational_experience_manifest_id(experience.source_id)
+    try:
+        async with entity_lock(group_id, manifest_id, blocking=True) as lock_token:
+            if not lock_token:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Operational experience is being modified; retry the request",
+                )
+            runtime = await get_experience_graph_runtime(group_id)
+            try:
+                existing_manifest = await runtime.entity_manager.get(manifest_id)
+            except KeyError:
+                existing_manifest = None
+            if existing_manifest is not None:
+                existing_project = existing_manifest.metadata.get("project_id")
+                if existing_project != experience.project_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Operational source_id is already bound to another project",
+                    )
+                if existing_manifest.created_by != ctx.user_id:
+                    await verify_entity_project_access(
+                        None,
+                        ctx,
+                        experience.project_id,
+                        required_role=ProjectRole.MAINTAINER,
+                        require_existing_project=True,
+                    )
+            try:
+                result = await persist_operational_experience(
+                    entity_manager=runtime.entity_manager,
+                    relationship_manager=runtime.relationship_manager,
+                    experience=experience,
+                    organization_id=group_id,
+                    created_by=ctx.user_id,
+                    generate_embeddings=not payload.defer_embeddings,
+                )
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=str(exc),
+                ) from exc
 
-            job_id = await enqueue_entity_embedding_backfill(
-                [entity.model_dump(mode="json") for entity in embeddable],
-                group_id,
-            )
-            background_jobs["embedding_backfill"] = {
-                "status": "queued",
-                "job_ids": [job_id],
-                "queued_entities": len(embeddable),
-                "queued_relationships": 0,
-            }
-        except Exception as exc:
-            log.warning(
-                "operational_experience_embedding_backfill_enqueue_failed",
-                source_id=experience.source_id,
-                entities=len(embeddable),
-                error=str(exc),
-            )
+            background_jobs: dict[str, Any] = {}
+            if payload.defer_embeddings and result.written_entity_ids:
+                written_ids = set(result.written_entity_ids)
+                embeddable = [
+                    entity
+                    for entity in result.projection.entities
+                    if entity.id in written_ids
+                    if entity.id != result.projection.manifest.manifest_entity_id
+                    and entity.entity_type is not EntityType.ARTIFACT
+                ]
+                try:
+                    from sibyl.jobs.queue import enqueue_entity_embedding_backfill
+
+                    job_id = await enqueue_entity_embedding_backfill(
+                        [entity.model_dump(mode="json") for entity in embeddable],
+                        group_id,
+                    )
+                    background_jobs["embedding_backfill"] = {
+                        "status": "queued",
+                        "job_ids": [job_id],
+                        "queued_entities": len(embeddable),
+                        "queued_relationships": 0,
+                    }
+                except Exception as exc:
+                    background_jobs["embedding_backfill"] = {
+                        "status": "degraded",
+                        "job_ids": [],
+                        "queued_entities": 0,
+                        "queued_relationships": 0,
+                        "error": "enqueue_failed",
+                    }
+                    log.warning(
+                        "operational_experience_embedding_backfill_enqueue_failed",
+                        source_id=experience.source_id,
+                        entities=len(embeddable),
+                        error=str(exc),
+                    )
+    except LockAcquisitionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Operational experience is locked; retry the request",
+        ) from exc
 
     return OperationalExperienceCaptureResponse(
         source_id=experience.source_id,
@@ -105,6 +160,6 @@ async def capture_operational_experience(
         written_relationships=len(result.written_relationship_ids),
         deleted_entities=len(result.deleted_entity_ids),
         deleted_relationships=len(result.deleted_relationship_ids),
-        entity_ids=list(result.written_entity_ids),
+        entity_ids=list(result.projection.manifest.entity_ids),
         background_jobs=background_jobs,
     )

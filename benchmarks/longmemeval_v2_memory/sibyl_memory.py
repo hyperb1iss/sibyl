@@ -1033,6 +1033,11 @@ class SibylLiveApiMemory(Memory):
                 f"expected one of {sorted(CHUNKING_MODES)}"
             )
             raise ValueError(msg)
+        if self.chunking_mode != DEFAULT_CHUNKING_MODE:
+            raise ValueError(
+                "trajectory chunking is incompatible with operational experience; "
+                "use chunking_mode='state'"
+            )
         self.search_limit = _param_int(memory_params, "search_limit", DEFAULT_SEARCH_LIMIT)
         self.max_context_items = _param_int(
             memory_params,
@@ -1479,6 +1484,11 @@ class SibylLiveApiMemory(Memory):
             if isinstance(operational_ids, list)
             else set()
         )
+        if self._operational_trajectory_ids != set(catalog):
+            raise RuntimeError(
+                "Legacy saved memory cannot be upgraded in place to operational experience; "
+                "start a fresh project and memory directory"
+            )
         self.ingest_api_runtime = (
             dict(manifest["ingest_api_runtime"])
             if isinstance(manifest.get("ingest_api_runtime"), dict)
@@ -1631,6 +1641,11 @@ class SibylLiveApiMemory(Memory):
             if isinstance(operational_ids, list)
             else set()
         )
+        if self._operational_trajectory_ids != completed:
+            raise RuntimeError(
+                "Legacy ingest checkpoint cannot be upgraded in place to operational "
+                "experience; start a fresh project and checkpoint directory"
+            )
         self.inserted_trajectories = len(completed)
         self.created_entities = sum(len(chunks) for chunks in catalog.values())
         self._pending_embedding_job_ids = {

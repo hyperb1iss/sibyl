@@ -17,7 +17,8 @@ from sibyl_core.models.experience import (
     OperationalObservation,
 )
 
-OPERATIONAL_EXPERIENCE_SCHEMA_VERSION = 1
+OPERATIONAL_EXPERIENCE_SCHEMA_VERSION = 2
+MAX_TYPED_ENTITY_CONTENT_CHARS = 18_000
 
 
 class OperationalEntityManager(Protocol):
@@ -81,7 +82,7 @@ def _observation_content(
     evidence_index: int,
 ) -> str:
     evidence = observation.evidence[evidence_index]
-    return _clean_lines(
+    header = _clean_lines(
         (
             f"Goal: {experience.goal}",
             f"Reported outcome: {experience.outcome}" if experience.outcome else None,
@@ -93,9 +94,9 @@ def _observation_content(
             f"Reasoning: {observation.reasoning}" if observation.reasoning else None,
             f"Evidence part: {evidence_index + 1}/{len(observation.evidence)}",
             f"Evidence content type: {evidence.content_type}",
-            f"Evidence:\n{evidence.content}" if evidence.content else None,
         )
     )
+    return f"{header}\nEvidence:\n{evidence.content}"
 
 
 def _common_metadata(
@@ -104,11 +105,11 @@ def _common_metadata(
     content_hash: str,
 ) -> dict[str, Any]:
     metadata: dict[str, Any] = {
+        **experience.metadata,
         "category": "operational_experience",
         "operational_source_id": experience.source_id,
         "operational_schema_version": OPERATIONAL_EXPERIENCE_SCHEMA_VERSION,
         "operational_content_hash": content_hash,
-        **experience.metadata,
     }
     if experience.project_id:
         metadata["project_id"] = experience.project_id
@@ -159,17 +160,40 @@ def _relationship(
     )
 
 
-def _procedure_content(experience: OperationalExperience) -> str:
-    actions = [
-        (observation.ordinal, observation.action)
-        for observation in experience.observations
-        if observation.action
-    ]
-    lines = [f"Goal: {experience.goal}"]
-    lines.extend(f"{ordinal}. {action}" for ordinal, action in actions)
-    if experience.outcome:
-        lines.append(f"Reported outcome: {experience.outcome}")
-    return "\n".join(lines)
+def _procedure_segments(
+    experience: OperationalExperience,
+    observations: list[OperationalObservation],
+) -> list[tuple[str, list[OperationalObservation]]]:
+    header = f"Goal: {experience.goal}"
+    footer = f"Reported outcome: {experience.outcome}" if experience.outcome else None
+    action_observations = [observation for observation in observations if observation.action]
+    groups: list[list[OperationalObservation]] = []
+    current: list[OperationalObservation] = []
+    reserved_chars = len(header) + (len(footer) if footer else 0) + 2
+    for observation in action_observations:
+        candidate_chars = reserved_chars + sum(
+            len(f"{item.ordinal}. {item.action}") + 1 for item in [*current, observation]
+        )
+        if current and candidate_chars > MAX_TYPED_ENTITY_CONTENT_CHARS:
+            groups.append(current)
+            current = []
+        current.append(observation)
+    if current or not groups:
+        groups.append(current)
+
+    segments: list[tuple[str, list[OperationalObservation]]] = []
+    for index, group in enumerate(groups):
+        lines = [header]
+        lines.extend(f"{item.ordinal}. {item.action}" for item in group)
+        if index == len(groups) - 1 and footer:
+            lines.append(footer)
+        support = list(group)
+        if index == 0 and observations[0] not in support:
+            support.insert(0, observations[0])
+        if index == len(groups) - 1 and observations[-1] not in support:
+            support.append(observations[-1])
+        segments.append(("\n".join(lines), support))
+    return segments
 
 
 def project_operational_experience(
@@ -277,36 +301,48 @@ def project_operational_experience(
                     )
                 )
 
-    procedure_id = _stable_id("procedure", "operational", experience.source_id)
-    entities.append(
-        Entity(
-            id=procedure_id,
-            entity_type=EntityType.PROCEDURE,
-            name=f"Procedure for {experience.goal[:120]}",
-            content=_procedure_content(experience),
-            organization_id=organization_id,
-            created_by=created_by,
-            modified_by=created_by,
-            metadata={
-                **common,
-                "projection_kind": "procedure",
-                "reported_outcome": experience.outcome,
-                "source_observation_ids": [item.id for item in observations],
-                "support_spans": [_support_span(item) for item in observations],
-            },
+    procedure_segments = _procedure_segments(experience, observations)
+    for segment_index, (content, support) in enumerate(procedure_segments):
+        procedure_id = _stable_id(
+            "procedure",
+            "operational",
+            experience.source_id,
+            segment_index,
         )
-    )
-    for observation in observations:
-        for raw_id in raw_ids[observation.id]:
-            relationships.append(
-                _relationship(
-                    relationship_type=RelationshipType.DERIVED_FROM,
-                    source_id=procedure_id,
-                    target_id=raw_id,
-                    source_key=experience.source_id,
-                    metadata={**common, "source_observation_id": observation.id},
-                )
+        entities.append(
+            Entity(
+                id=procedure_id,
+                entity_type=EntityType.PROCEDURE,
+                name=(
+                    f"Procedure for {experience.goal[:100]} "
+                    f"part {segment_index + 1}/{len(procedure_segments)}"
+                ),
+                content=content,
+                organization_id=organization_id,
+                created_by=created_by,
+                modified_by=created_by,
+                metadata={
+                    **common,
+                    "projection_kind": "procedure",
+                    "procedure_part_index": segment_index,
+                    "procedure_part_count": len(procedure_segments),
+                    "reported_outcome": experience.outcome,
+                    "source_observation_ids": [item.id for item in support],
+                    "support_spans": [_support_span(item) for item in support],
+                },
             )
+        )
+        for observation in support:
+            for raw_id in raw_ids[observation.id]:
+                relationships.append(
+                    _relationship(
+                        relationship_type=RelationshipType.DERIVED_FROM,
+                        source_id=procedure_id,
+                        target_id=raw_id,
+                        source_key=experience.source_id,
+                        metadata={**common, "source_observation_id": observation.id},
+                    )
+                )
 
     if experience.outcome and experience.outcome.casefold() in {"failure", "failed", "error"}:
         final = observations[-1]
@@ -348,7 +384,7 @@ def project_operational_experience(
             )
 
     projected_ids = [entity.id for entity in entities]
-    manifest_id = _stable_id("artifact", "operational-manifest", experience.source_id)
+    manifest_id = operational_experience_manifest_id(experience.source_id)
     for entity_id in projected_ids:
         relationships.append(
             _relationship(
@@ -402,6 +438,26 @@ def _manifest_inventory(entity: Entity | None, key: str) -> set[str]:
     return {str(value) for value in values if value}
 
 
+def operational_experience_manifest_id(source_id: str) -> str:
+    """Return the lock and ownership anchor for an operational source."""
+    return _stable_id("artifact", "operational-manifest", source_id)
+
+
+def _is_current_manifest(
+    entity: Entity | None,
+    manifest: OperationalExperienceManifest,
+) -> bool:
+    if entity is None or entity.entity_type is not EntityType.ARTIFACT:
+        return False
+    return (
+        entity.metadata.get("operational_schema_version") == manifest.schema_version
+        and entity.metadata.get("operational_content_hash") == manifest.content_hash
+        and _manifest_inventory(entity, "expected_entity_ids") == set(manifest.entity_ids)
+        and _manifest_inventory(entity, "expected_relationship_ids")
+        == set(manifest.relationship_ids)
+    )
+
+
 async def persist_operational_experience(
     *,
     entity_manager: OperationalEntityManager,
@@ -422,6 +478,15 @@ async def persist_operational_experience(
     except KeyError:
         previous_manifest = None
 
+    if _is_current_manifest(previous_manifest, projection.manifest):
+        return OperationalExperienceWriteResult(
+            projection=projection,
+            written_entity_ids=(),
+            written_relationship_ids=(),
+            deleted_entity_ids=(),
+            deleted_relationship_ids=(),
+        )
+
     current_entity_ids = set(projection.manifest.entity_ids)
     current_relationship_ids = set(projection.manifest.relationship_ids)
     stale_entity_ids = tuple(
@@ -434,8 +499,16 @@ async def persist_operational_experience(
         )
     )
 
+    manifest_entity = next(
+        entity
+        for entity in projection.entities
+        if entity.id == projection.manifest.manifest_entity_id
+    )
+    projected_entities = tuple(
+        entity for entity in projection.entities if entity.id != manifest_entity.id
+    )
     written_entity_ids = await entity_manager.create_direct_bulk(
-        projection.entities,
+        projected_entities,
         generate_embeddings=generate_embeddings,
     )
     written_relationship_ids = await relationship_manager.create_direct_bulk(
@@ -449,10 +522,14 @@ async def persist_operational_experience(
     for entity_id in stale_entity_ids:
         if await entity_manager.delete(entity_id):
             deleted_entity_ids.append(entity_id)
+    written_manifest_ids = await entity_manager.create_direct_bulk(
+        (manifest_entity,),
+        generate_embeddings=False,
+    )
 
     return OperationalExperienceWriteResult(
         projection=projection,
-        written_entity_ids=tuple(written_entity_ids),
+        written_entity_ids=tuple([*written_entity_ids, *written_manifest_ids]),
         written_relationship_ids=tuple(written_relationship_ids),
         deleted_entity_ids=tuple(deleted_entity_ids),
         deleted_relationship_ids=stale_relationship_ids,

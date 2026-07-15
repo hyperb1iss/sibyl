@@ -1,10 +1,16 @@
 """Contracts for source-backed operational experience."""
 
-from typing import Any
+from typing import Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from sibyl_core.models.entities import Entity, Relationship
+
+MAX_OPERATIONAL_OBSERVATIONS = 1_024
+MAX_EVIDENCE_PARTS_PER_OBSERVATION = 256
+MAX_OPERATIONAL_EVIDENCE_PARTS = 4_096
+MAX_OPERATIONAL_EVIDENCE_PART_CHARS = 1_000_000
+MAX_OPERATIONAL_EVIDENCE_TOTAL_CHARS = 64 * 1024 * 1024
 
 
 class OperationalEvidencePart(BaseModel):
@@ -13,7 +19,7 @@ class OperationalEvidencePart(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     id: str = Field(min_length=1)
-    content: str
+    content: str = Field(max_length=MAX_OPERATIONAL_EVIDENCE_PART_CHARS)
     content_type: str = "text/plain"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -28,7 +34,10 @@ class OperationalObservation(BaseModel):
     uri: str | None = None
     action: str | None = None
     reasoning: str | None = None
-    evidence: tuple[OperationalEvidencePart, ...] = Field(min_length=1)
+    evidence: tuple[OperationalEvidencePart, ...] = Field(
+        min_length=1,
+        max_length=MAX_EVIDENCE_PARTS_PER_OBSERVATION,
+    )
     image_refs: tuple[str, ...] = ()
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -42,10 +51,27 @@ class OperationalExperience(BaseModel):
     goal: str = Field(min_length=1)
     outcome: str | None = None
     start_uri: str | None = None
-    observations: tuple[OperationalObservation, ...] = Field(min_length=1)
+    observations: tuple[OperationalObservation, ...] = Field(
+        min_length=1,
+        max_length=MAX_OPERATIONAL_OBSERVATIONS,
+    )
     project_id: str | None = None
     scope_key: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_evidence_budget(self) -> Self:
+        evidence_parts = [
+            evidence for observation in self.observations for evidence in observation.evidence
+        ]
+        if len(evidence_parts) > MAX_OPERATIONAL_EVIDENCE_PARTS:
+            raise ValueError("operational experience exceeds the total evidence part limit")
+        if (
+            sum(len(evidence.content) for evidence in evidence_parts)
+            > MAX_OPERATIONAL_EVIDENCE_TOTAL_CHARS
+        ):
+            raise ValueError("operational experience exceeds the total evidence content limit")
+        return self
 
 
 class OperationalExperienceManifest(BaseModel):

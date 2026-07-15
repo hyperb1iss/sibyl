@@ -1284,6 +1284,7 @@ def test_sibyl_memory_ingest_checkpoint_resumes_completed_trajectory(tmp_path: P
     )
     restored.checkpoint_dir = checkpoint_dir
     restored._completed_trajectory_ids.add("t2")
+    restored._operational_trajectory_ids.add("t2")
     restored._chunk_catalog.update(module._catalog_results(second_payloads))
     restored._append_checkpoint(second_payloads)
 
@@ -1293,7 +1294,7 @@ def test_sibyl_memory_ingest_checkpoint_resumes_completed_trajectory(tmp_path: P
     assert set(reloaded._chunk_catalog) == {"t1", "t2"}
 
 
-def test_sibyl_memory_upgrades_old_checkpoint_once_without_reappending_catalog(
+def test_sibyl_memory_rejects_legacy_checkpoint_in_place_upgrade(
     tmp_path: Path,
 ) -> None:
     module = _load_memory_module()
@@ -1325,42 +1326,15 @@ def test_sibyl_memory_upgrades_old_checkpoint_once_without_reappending_catalog(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest.pop("operational_trajectory_ids")
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    original_catalog = (checkpoint_dir / module.CHECKPOINT_CATALOG_FILENAME).read_bytes()
+    with pytest.raises(RuntimeError, match="cannot be upgraded in place"):
+        _reload_checkpoint(module, source, checkpoint_dir)
 
-    restored = _reload_checkpoint(module, source, checkpoint_dir)
-    restored.defer_embeddings = True
-    restored.include_screenshot_refs = False
-    restored.embedding_backfill_max_pending_jobs = 8
-    restored.created_entities = 0
-    requests: list[dict[str, object]] = []
 
-    def fake_request(
-        _method: str,
-        path: str,
-        *,
-        json: dict[str, object] | None = None,
-        params: dict[str, object] | None = None,
-    ) -> dict[str, object]:
-        del params
-        assert path == "/memory/experience"
-        requests.append(json or {})
-        return {
-            "written_entities": 3,
-            "entity_ids": ["session-1", "procedure-1"],
-            "background_jobs": {
-                "embedding_backfill": {"job_ids": ["embed-upgrade-1"]}
-            },
-        }
+def test_sibyl_memory_rejects_trajectory_chunking_for_operational_ingest() -> None:
+    module = _load_memory_module()
 
-    restored._request_json = fake_request
-    restored.insert(_trajectory("t1"))
-    restored.insert(_trajectory("t1"))
-
-    assert len(requests) == 1
-    assert restored._operational_trajectory_ids == {"t1"}
-    assert (
-        checkpoint_dir / module.CHECKPOINT_CATALOG_FILENAME
-    ).read_bytes() == original_catalog
+    with pytest.raises(ValueError, match="incompatible with operational experience"):
+        module.SibylLiveApiMemory({"chunking_mode": "trajectory"})
 
 
 def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:

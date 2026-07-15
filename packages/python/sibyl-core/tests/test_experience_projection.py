@@ -5,9 +5,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import ValidationError
 
 from sibyl_core.models import EntityType, RelationshipType
 from sibyl_core.models.experience import (
+    MAX_OPERATIONAL_EVIDENCE_PART_CHARS,
     OperationalEvidencePart,
     OperationalExperience,
     OperationalObservation,
@@ -99,6 +101,26 @@ def test_projection_preserves_raw_evidence_and_action_boundaries() -> None:
     assert derived_targets == {raw[0].id, raw[1].id, raw[2].id}
 
 
+def test_projection_preserves_evidence_bytes_including_surrounding_whitespace() -> None:
+    experience = _experience()
+    evidence = (
+        experience.observations[0]
+        .evidence[0]
+        .model_copy(update={"content": "  exact source bytes\n\n"})
+    )
+    observation = experience.observations[0].model_copy(update={"evidence": (evidence,)})
+    projection = project_operational_experience(
+        experience.model_copy(update={"observations": (observation, *experience.observations[1:])})
+    )
+    raw = next(
+        entity
+        for entity in projection.entities
+        if entity.metadata.get("source_observation_id") == observation.id
+    )
+
+    assert raw.content.endswith("Evidence:\n  exact source bytes\n\n")
+
+
 def test_projection_is_deterministic_and_manifest_is_self_describing() -> None:
     first = project_operational_experience(_experience())
     second = project_operational_experience(_experience())
@@ -118,6 +140,45 @@ def test_projection_is_deterministic_and_manifest_is_self_describing() -> None:
     assert set(payload["relationship_ids"]) == {
         relationship.id for relationship in first.relationships
     }
+
+
+def test_projection_provenance_cannot_be_overridden_by_caller_metadata() -> None:
+    experience = _experience().model_copy(
+        update={
+            "metadata": {
+                "category": "spoofed",
+                "operational_source_id": "spoofed",
+                "operational_schema_version": -1,
+                "operational_content_hash": "spoofed",
+            }
+        }
+    )
+
+    projection = project_operational_experience(experience)
+
+    assert all(
+        entity.metadata["category"] == "operational_experience" for entity in projection.entities
+    )
+    assert all(
+        entity.metadata["operational_source_id"] == experience.source_id
+        for entity in projection.entities
+    )
+    assert all(
+        entity.metadata["operational_schema_version"] == projection.manifest.schema_version
+        for entity in projection.entities
+    )
+    assert all(
+        entity.metadata["operational_content_hash"] == projection.manifest.content_hash
+        for entity in projection.entities
+    )
+
+
+def test_operational_evidence_rejects_unbounded_content() -> None:
+    with pytest.raises(ValidationError, match="String should have at most"):
+        OperationalEvidencePart(
+            id="oversized",
+            content="x" * (MAX_OPERATIONAL_EVIDENCE_PART_CHARS + 1),
+        )
 
 
 def test_failure_projection_reports_failure_without_inventing_cause_or_resolution() -> None:
@@ -187,9 +248,48 @@ async def test_persistence_replays_writes_without_duplicate_ids() -> None:
     assert result.written_relationship_ids == result.projection.manifest.relationship_ids
     assert result.deleted_entity_ids == ()
     assert result.deleted_relationship_ids == ()
-    written = entity_manager.create_direct_bulk.await_args.args[0]
+    assert entity_manager.create_direct_bulk.await_count == 2
+    written = entity_manager.create_direct_bulk.await_args_list[0].args[0]
     assert all(entity.organization_id == "org-1" for entity in written)
     assert all(entity.created_by == "user-1" for entity in written)
+    manifest_write = entity_manager.create_direct_bulk.await_args_list[1].args[0]
+    assert [entity.id for entity in manifest_write] == [
+        result.projection.manifest.manifest_entity_id
+    ]
+    entity_manager.delete.assert_not_awaited()
+    relationship_manager.delete_bulk.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persistence_skips_unchanged_committed_manifest() -> None:
+    experience = _experience()
+    projection = project_operational_experience(experience)
+    committed_manifest = next(
+        entity
+        for entity in projection.entities
+        if entity.id == projection.manifest.manifest_entity_id
+    )
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(return_value=committed_manifest),
+        create_direct_bulk=AsyncMock(),
+        delete=AsyncMock(),
+    )
+    relationship_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(),
+        delete_bulk=AsyncMock(),
+    )
+
+    result = await persist_operational_experience(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        experience=experience,
+        organization_id="org-1",
+    )
+
+    assert result.written_entity_ids == ()
+    assert result.written_relationship_ids == ()
+    entity_manager.create_direct_bulk.assert_not_awaited()
+    relationship_manager.create_direct_bulk.assert_not_awaited()
     entity_manager.delete.assert_not_awaited()
     relationship_manager.delete_bulk.assert_not_awaited()
 
@@ -238,3 +338,5 @@ async def test_persistence_deletes_only_stale_manifest_owned_records() -> None:
     assert result.deleted_relationship_ids == ("rel_stale",)
     relationship_manager.delete_bulk.assert_awaited_once_with(("rel_stale",))
     entity_manager.delete.assert_awaited_once_with("session_stale")
+    manifest_write = entity_manager.create_direct_bulk.await_args_list[-1].args[0]
+    assert [entity.id for entity in manifest_write] == [projection.manifest.manifest_entity_id]
