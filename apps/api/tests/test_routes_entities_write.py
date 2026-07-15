@@ -435,6 +435,11 @@ async def test_requeue_operational_embedding_job_restores_manifest_completion() 
             "operational_projection_state": "embedding_pending",
             "expected_entity_ids": [event.id, "artifact_capture-1"],
             "expected_relationship_ids": ["rel-event-manifest"],
+            "_direct_insert": True,
+            "description": "hydrated storage field",
+            "entity_type": "artifact",
+            "source_file": "",
+            "updated_at": "2026-07-14T00:00:00+00:00",
         },
     )
     persisted = {event.id: event, manifest.id: manifest}
@@ -481,8 +486,81 @@ async def test_requeue_operational_embedding_job_restores_manifest_completion() 
     completion_manifest = enqueue_embeddings.await_args.kwargs["completion_manifest"]
     assert completion_manifest["id"] == manifest.id
     assert completion_manifest["metadata"]["operational_projection_state"] == "complete"
+    assert "_direct_insert" not in completion_manifest["metadata"]
+    assert "description" not in completion_manifest["metadata"]
+    assert "entity_type" not in completion_manifest["metadata"]
+    assert "source_file" not in completion_manifest["metadata"]
+    assert "updated_at" not in completion_manifest["metadata"]
     relationship_manager.get_for_entity.assert_not_awaited()
     assert response.background_jobs["embedding_backfill"]["queued_entities"] == 1
+
+
+@pytest.mark.asyncio
+async def test_requeue_operational_embedding_job_requires_exact_inventory() -> None:
+    org = _org()
+    ctx = _ctx()
+    event = Entity(
+        id="event_capture-1",
+        entity_type=EntityType.EVENT,
+        name="Incident state",
+        content="Incident INC001 is closed.",
+        organization_id=str(org.id),
+        metadata={"project_id": "project_shared"},
+    )
+    manifest = Entity(
+        id="artifact_capture-1",
+        entity_type=EntityType.ARTIFACT,
+        name="Operational experience manifest",
+        content="capture-1",
+        organization_id=str(org.id),
+        metadata={
+            "project_id": "project_shared",
+            "projection_kind": "manifest",
+            "operational_projection_state": "embedding_pending",
+            "expected_entity_ids": [event.id, "event_missing", "artifact_capture-1"],
+        },
+    )
+    persisted = {event.id: event, manifest.id: manifest}
+    relationship_manager = SimpleNamespace(get_for_entity=AsyncMock())
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(side_effect=lambda entity_id: persisted[entity_id])
+        ),
+        relationship_manager=relationship_manager,
+    )
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "sibyl.api.routes.entities.verify_entity_project_access",
+            AsyncMock(),
+        ),
+        patch(
+            "sibyl.api.routes.entities._require_entity_read_access",
+            AsyncMock(return_value={"project_shared"}),
+        ),
+        patch(
+            "sibyl.jobs.queue.enqueue_entity_embedding_backfill",
+            AsyncMock(),
+        ) as enqueue_embeddings,
+        pytest.raises(HTTPException, match="exact manifest inventory") as exc_info,
+    ):
+        await requeue_entity_background_jobs(
+            request=EntityBackgroundJobsRequeueRequest(
+                entity_ids=[event.id, manifest.id],
+                jobs=["embedding_backfill"],
+            ),
+            org=org,
+            ctx=ctx,
+            content_session="session",
+        )
+
+    assert exc_info.value.status_code == 409
+    enqueue_embeddings.assert_not_awaited()
+    relationship_manager.get_for_entity.assert_not_awaited()
 
 
 @pytest.mark.asyncio

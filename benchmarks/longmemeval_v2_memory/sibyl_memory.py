@@ -1717,6 +1717,16 @@ class SibylLiveApiMemory(Memory):
     def _remember_embedding_backfill_jobs(self, response: dict[str, object]) -> None:
         if not self.defer_embeddings:
             return
+        background_jobs = response.get("background_jobs")
+        embedding_job = (
+            background_jobs.get("embedding_backfill")
+            if isinstance(background_jobs, dict)
+            else None
+        )
+        if isinstance(embedding_job, dict) and embedding_job.get("status") == "degraded":
+            error = _stripped_str(embedding_job.get("error")) or "unknown error"
+            msg = f"deferred embedding backfill enqueue degraded: {error}"
+            raise RuntimeError(msg)
         job_ids = _background_job_ids(response, "embedding_backfill")
         if not job_ids and _created_count(response) > 0:
             msg = "/entities/bulk deferred embeddings but returned no backfill job ids"

@@ -1953,6 +1953,29 @@ def test_sibyl_memory_insert_rejects_missing_deferred_embedding_job() -> None:
         memory._remember_embedding_backfill_jobs({"created": 1, "background_jobs": {}})
 
 
+def test_sibyl_memory_insert_rejects_degraded_embedding_reenqueue() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+
+    memory.defer_embeddings = True
+    memory._pending_embedding_job_ids = set()
+
+    with pytest.raises(RuntimeError, match="enqueue degraded: enqueue_failed"):
+        memory._remember_embedding_backfill_jobs(
+            {
+                "written_entities": 0,
+                "background_jobs": {
+                    "embedding_backfill": {
+                        "status": "degraded",
+                        "job_ids": [],
+                        "error": "enqueue_failed",
+                    }
+                },
+            }
+        )
+
+
 def test_sibyl_memory_embedding_wait_timeout_resets_on_progress(monkeypatch, capsys) -> None:
     module = _load_memory_module()
     memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)

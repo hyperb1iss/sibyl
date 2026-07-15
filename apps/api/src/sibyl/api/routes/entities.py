@@ -1617,27 +1617,45 @@ async def requeue_entity_background_jobs(
             and entity.metadata.get("projection_kind") == "manifest"
             and entity.metadata.get("operational_projection_state") == "embedding_pending"
         ]
-        if len(pending_manifests) == 1:
+        if pending_manifests:
+            if len(pending_manifests) != 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Requeue each operational embedding manifest separately",
+                )
             pending_manifest = pending_manifests[0]
             expected_ids = {
                 str(entity_id)
                 for entity_id in pending_manifest.metadata.get("expected_entity_ids") or ()
             }
-            if expected_ids == {entity.id for entity in entities}:
-                embedding_entities = [
-                    entity
-                    for entity in entities
-                    if entity.id != pending_manifest.id
-                    and entity.entity_type is not EntityType.ARTIFACT
-                ]
-                completion_manifest = pending_manifest.model_copy(
-                    update={
-                        "metadata": {
-                            **pending_manifest.metadata,
-                            "operational_projection_state": MANIFEST_STATE_COMPLETE,
-                        }
+            if expected_ids != {entity.id for entity in entities}:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Operational embedding recovery requires the exact manifest inventory",
+                )
+            embedding_entities = [
+                entity
+                for entity in entities
+                if entity.id != pending_manifest.id
+                and entity.entity_type is not EntityType.ARTIFACT
+            ]
+            storage_metadata_keys = {
+                "_direct_insert",
+                "description",
+                "entity_type",
+                "source_file",
+                "updated_at",
+            }
+            completion_manifest = pending_manifest.model_copy(
+                update={
+                    "metadata": {
+                        key: value
+                        for key, value in pending_manifest.metadata.items()
+                        if key not in storage_metadata_keys
                     }
-                ).model_dump(mode="json")
+                    | {"operational_projection_state": MANIFEST_STATE_COMPLETE}
+                }
+            ).model_dump(mode="json")
 
         serialized_relationships: list[dict[str, Any]] = []
         if completion_manifest is None:
