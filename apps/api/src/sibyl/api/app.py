@@ -37,6 +37,7 @@ from sibyl.api.routes import (
     crawler_router,
     entities_router,
     epics_router,
+    experience_router,
     graph_router,
     ingestion_router,
     invitations_router,
@@ -269,6 +270,7 @@ def create_api_app() -> FastAPI:  # noqa: PLR0915
     app.include_router(tasks_router)
     app.include_router(session_router)
     app.include_router(epics_router)
+    app.include_router(experience_router)
     app.include_router(search_router)
     app.include_router(context_router)
     app.include_router(graph_router)

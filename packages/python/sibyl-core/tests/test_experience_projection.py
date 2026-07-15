@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from sibyl_core.models import EntityType, RelationshipType
 from sibyl_core.models.experience import OperationalExperience, OperationalObservation
-from sibyl_core.projection import project_operational_experience
+from sibyl_core.projection import persist_operational_experience, project_operational_experience
 
 
 def _experience(*, outcome: str = "success") -> OperationalExperience:
@@ -129,3 +131,85 @@ def test_projection_rejects_ambiguous_observation_identity(
 
     with pytest.raises(ValueError, match="must be unique"):
         project_operational_experience(experience.model_copy(update={"observations": observations}))
+
+
+@pytest.mark.asyncio
+async def test_persistence_replays_writes_without_duplicate_ids() -> None:
+    experience = _experience()
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(side_effect=KeyError("missing")),
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda entities, **_: [entity.id for entity in entities]
+        ),
+        delete=AsyncMock(return_value=True),
+    )
+    relationship_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda relationships, **_: [item.id for item in relationships]
+        ),
+        delete_bulk=AsyncMock(return_value=0),
+    )
+
+    result = await persist_operational_experience(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        experience=experience,
+        organization_id="org-1",
+        created_by="user-1",
+    )
+
+    assert result.written_entity_ids == result.projection.manifest.entity_ids
+    assert result.written_relationship_ids == result.projection.manifest.relationship_ids
+    assert result.deleted_entity_ids == ()
+    assert result.deleted_relationship_ids == ()
+    written = entity_manager.create_direct_bulk.await_args.args[0]
+    assert all(entity.organization_id == "org-1" for entity in written)
+    assert all(entity.created_by == "user-1" for entity in written)
+    entity_manager.delete.assert_not_awaited()
+    relationship_manager.delete_bulk.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persistence_deletes_only_stale_manifest_owned_records() -> None:
+    experience = _experience()
+    projection = project_operational_experience(experience)
+    old_manifest = next(
+        entity
+        for entity in projection.entities
+        if entity.id == projection.manifest.manifest_entity_id
+    ).model_copy(
+        update={
+            "metadata": {
+                "expected_entity_ids": [*projection.manifest.entity_ids, "session_stale"],
+                "expected_relationship_ids": [
+                    *projection.manifest.relationship_ids,
+                    "rel_stale",
+                ],
+            }
+        }
+    )
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(return_value=old_manifest),
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda entities, **_: [entity.id for entity in entities]
+        ),
+        delete=AsyncMock(return_value=True),
+    )
+    relationship_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda relationships, **_: [item.id for item in relationships]
+        ),
+        delete_bulk=AsyncMock(return_value=1),
+    )
+
+    result = await persist_operational_experience(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        experience=experience,
+        organization_id="org-1",
+    )
+
+    assert result.deleted_entity_ids == ("session_stale",)
+    assert result.deleted_relationship_ids == ("rel_stale",)
+    relationship_manager.delete_bulk.assert_awaited_once_with(("rel_stale",))
+    entity_manager.delete.assert_awaited_once_with("session_stale")

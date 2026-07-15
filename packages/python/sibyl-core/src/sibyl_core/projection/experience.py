@@ -6,17 +6,42 @@ import hashlib
 import json
 from collections.abc import Iterable
 from itertools import pairwise
-from typing import Any
+from typing import Any, Protocol
 
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.experience import (
     OperationalExperience,
     OperationalExperienceManifest,
     OperationalExperienceProjection,
+    OperationalExperienceWriteResult,
     OperationalObservation,
 )
 
 OPERATIONAL_EXPERIENCE_SCHEMA_VERSION = 1
+
+
+class OperationalEntityManager(Protocol):
+    async def get(self, entity_id: str) -> Entity: ...
+
+    async def create_direct_bulk(
+        self,
+        entities: Iterable[Entity],
+        *,
+        generate_embeddings: bool = False,
+    ) -> list[str]: ...
+
+    async def delete(self, entity_id: str) -> bool: ...
+
+
+class OperationalRelationshipManager(Protocol):
+    async def create_direct_bulk(
+        self,
+        relationships: Iterable[Relationship],
+        *,
+        generate_embeddings: bool = False,
+    ) -> list[str]: ...
+
+    async def delete_bulk(self, relationship_ids: Iterable[str]) -> int: ...
 
 
 def _stable_id(prefix: str, *parts: object) -> str:
@@ -134,6 +159,9 @@ def _procedure_content(experience: OperationalExperience) -> str:
 
 def project_operational_experience(
     experience: OperationalExperience,
+    *,
+    organization_id: str | None = None,
+    created_by: str | None = None,
 ) -> OperationalExperienceProjection:
     """Build raw evidence and typed projections without inventing facts."""
     ordinals = [observation.ordinal for observation in experience.observations]
@@ -159,6 +187,9 @@ def project_operational_experience(
                 entity_type=EntityType.SESSION,
                 name=f"Operational observation {observation.ordinal}",
                 content=_observation_content(experience, observation),
+                organization_id=organization_id,
+                created_by=created_by,
+                modified_by=created_by,
                 metadata={
                     **common,
                     "projection_kind": "raw_observation",
@@ -190,6 +221,9 @@ def project_operational_experience(
                         f"Observed reasoning: {current.reasoning}" if current.reasoning else None,
                     )
                 ),
+                organization_id=organization_id,
+                created_by=created_by,
+                modified_by=created_by,
                 metadata={
                     **common,
                     "projection_kind": "transition",
@@ -216,6 +250,9 @@ def project_operational_experience(
             entity_type=EntityType.PROCEDURE,
             name=f"Procedure for {experience.goal[:120]}",
             content=_procedure_content(experience),
+            organization_id=organization_id,
+            created_by=created_by,
+            modified_by=created_by,
             metadata={
                 **common,
                 "projection_kind": "procedure",
@@ -252,6 +289,9 @@ def project_operational_experience(
                         f"Final reasoning: {final.reasoning}" if final.reasoning else None,
                     )
                 ),
+                organization_id=organization_id,
+                created_by=created_by,
+                modified_by=created_by,
                 metadata={
                     **common,
                     "projection_kind": "reported_failure",
@@ -299,6 +339,9 @@ def project_operational_experience(
             entity_type=EntityType.ARTIFACT,
             name=f"Operational experience manifest {experience.source_id}",
             content=json.dumps(manifest.model_dump(mode="json"), sort_keys=True),
+            organization_id=organization_id,
+            created_by=created_by,
+            modified_by=created_by,
             metadata={
                 **common,
                 "projection_kind": "manifest",
@@ -311,4 +354,70 @@ def project_operational_experience(
         entities=tuple(entities),
         relationships=tuple(relationships),
         manifest=manifest,
+    )
+
+
+def _manifest_inventory(entity: Entity | None, key: str) -> set[str]:
+    if entity is None or entity.entity_type is not EntityType.ARTIFACT:
+        return set()
+    values = entity.metadata.get(key)
+    if not isinstance(values, list):
+        return set()
+    return {str(value) for value in values if value}
+
+
+async def persist_operational_experience(
+    *,
+    entity_manager: OperationalEntityManager,
+    relationship_manager: OperationalRelationshipManager,
+    experience: OperationalExperience,
+    organization_id: str,
+    created_by: str | None = None,
+    generate_embeddings: bool = False,
+) -> OperationalExperienceWriteResult:
+    """Replay a projection and remove only records owned by its prior manifest."""
+    projection = project_operational_experience(
+        experience,
+        organization_id=organization_id,
+        created_by=created_by,
+    )
+    try:
+        previous_manifest = await entity_manager.get(projection.manifest.manifest_entity_id)
+    except KeyError:
+        previous_manifest = None
+
+    current_entity_ids = set(projection.manifest.entity_ids)
+    current_relationship_ids = set(projection.manifest.relationship_ids)
+    stale_entity_ids = tuple(
+        sorted(_manifest_inventory(previous_manifest, "expected_entity_ids") - current_entity_ids)
+    )
+    stale_relationship_ids = tuple(
+        sorted(
+            _manifest_inventory(previous_manifest, "expected_relationship_ids")
+            - current_relationship_ids
+        )
+    )
+
+    written_entity_ids = await entity_manager.create_direct_bulk(
+        projection.entities,
+        generate_embeddings=generate_embeddings,
+    )
+    written_relationship_ids = await relationship_manager.create_direct_bulk(
+        projection.relationships,
+        generate_embeddings=generate_embeddings,
+    )
+
+    if stale_relationship_ids:
+        await relationship_manager.delete_bulk(stale_relationship_ids)
+    deleted_entity_ids: list[str] = []
+    for entity_id in stale_entity_ids:
+        if await entity_manager.delete(entity_id):
+            deleted_entity_ids.append(entity_id)
+
+    return OperationalExperienceWriteResult(
+        projection=projection,
+        written_entity_ids=tuple(written_entity_ids),
+        written_relationship_ids=tuple(written_relationship_ids),
+        deleted_entity_ids=tuple(deleted_entity_ids),
+        deleted_relationship_ids=stale_relationship_ids,
     )

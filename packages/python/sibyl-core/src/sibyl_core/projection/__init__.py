@@ -2,6 +2,7 @@
 
 from sibyl_core.projection.experience import (
     OPERATIONAL_EXPERIENCE_SCHEMA_VERSION,
+    persist_operational_experience,
     project_operational_experience,
 )
 from sibyl_core.projection.memory import (
@@ -26,6 +27,7 @@ __all__ = [
     "ProjectedMemoryFact",
     "extract_projected_memory_entities",
     "extract_projected_memory_facts",
+    "persist_operational_experience",
     "project_extracted_memory_entities",
     "project_memory_entities",
     "project_memory_entity",

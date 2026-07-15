@@ -58,3 +58,15 @@ class OperationalExperienceProjection(BaseModel):
     entities: tuple[Entity, ...]
     relationships: tuple[Relationship, ...]
     manifest: OperationalExperienceManifest
+
+
+class OperationalExperienceWriteResult(BaseModel):
+    """Result of replaying an operational experience into the graph."""
+
+    model_config = ConfigDict(frozen=True)
+
+    projection: OperationalExperienceProjection
+    written_entity_ids: tuple[str, ...]
+    written_relationship_ids: tuple[str, ...]
+    deleted_entity_ids: tuple[str, ...]
+    deleted_relationship_ids: tuple[str, ...]

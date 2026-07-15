@@ -76,6 +76,10 @@ from .entities import (
     RawCaptureSummary,
     RelatedEntitySummary,
 )
+from .experience import (
+    OperationalExperienceCaptureRequest,
+    OperationalExperienceCaptureResponse,
+)
 from .explore import (
     ExploreRequest,
     ExploreResponse,
@@ -279,6 +283,8 @@ __all__ = [
     "MemorySpaceUpdateRequest",
     "MutationReceipt",
     "OrgMetricsResponse",
+    "OperationalExperienceCaptureRequest",
+    "OperationalExperienceCaptureResponse",
     "ProjectMetrics",
     "ProjectMetricsResponse",
     "ProjectRecordBackfillItem",

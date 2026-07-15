@@ -31,6 +31,7 @@ from sibyl_core.models.experience import (
     OperationalExperience,
     OperationalExperienceManifest,
     OperationalExperienceProjection,
+    OperationalExperienceWriteResult,
     OperationalObservation,
 )
 from sibyl_core.models.memory_extraction import (
@@ -162,6 +163,7 @@ __all__ = [
     "OperationalExperience",
     "OperationalExperienceManifest",
     "OperationalExperienceProjection",
+    "OperationalExperienceWriteResult",
     "OperationalObservation",
     "Pattern",
     "Procedure",
