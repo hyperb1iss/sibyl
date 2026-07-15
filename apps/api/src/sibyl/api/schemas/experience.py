@@ -27,4 +27,5 @@ class OperationalExperienceCaptureResponse(BaseModel):
     written_relationships: int
     deleted_entities: int
     deleted_relationships: int
+    entity_ids: list[str] = Field(default_factory=list)
     background_jobs: dict[str, Any] = Field(default_factory=dict)

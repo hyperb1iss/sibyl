@@ -162,6 +162,30 @@ class TestContextPackRoute:
         assert compile_context.await_args.kwargs["project"] is None
         assert compile_context.await_args.kwargs["include_related"] is True
         assert compile_context.await_args.kwargs["related_limit"] == 3
+        assert compile_context.await_args.kwargs["record_exposure"] is True
+
+    @pytest.mark.asyncio
+    async def test_context_pack_can_disable_exposure_recording(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        ctx = _ctx()
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch(
+                "sibyl_core.tools.context.compile_context",
+                AsyncMock(return_value=_pack()),
+            ) as compile_context,
+        ):
+            await context_pack(
+                request=ContextPackRequest(goal="ship faster", record_exposure=False),
+                org=org,
+                ctx=ctx,
+            )
+
+        assert compile_context.await_args.kwargs["record_exposure"] is False
 
     @pytest.mark.asyncio
     async def test_context_pack_forwards_api_key_memory_scope_keys(self) -> None:

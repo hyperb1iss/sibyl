@@ -28,6 +28,7 @@ from sibyl_core.models.entities import (
     Topic,
 )
 from sibyl_core.models.experience import (
+    OperationalEvidencePart,
     OperationalExperience,
     OperationalExperienceManifest,
     OperationalExperienceProjection,
@@ -160,6 +161,7 @@ __all__ = [
     "Milestone",
     "MutationResponse",
     "Note",
+    "OperationalEvidencePart",
     "OperationalExperience",
     "OperationalExperienceManifest",
     "OperationalExperienceProjection",

@@ -105,5 +105,6 @@ async def capture_operational_experience(
         written_relationships=len(result.written_relationship_ids),
         deleted_entities=len(result.deleted_entity_ids),
         deleted_relationships=len(result.deleted_relationship_ids),
+        entity_ids=list(result.written_entity_ids),
         background_jobs=background_jobs,
     )

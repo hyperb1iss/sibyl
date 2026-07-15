@@ -60,14 +60,27 @@ def _clean_lines(parts: Iterable[str | None]) -> str:
     return "\n".join(part.strip() for part in parts if part and part.strip())
 
 
-def _observation_entity_id(source_id: str, observation_id: str) -> str:
-    return _stable_id("session", "operational-observation", source_id, observation_id)
+def _observation_entity_id(
+    source_id: str,
+    observation_id: str,
+    evidence_id: str,
+) -> str:
+    return _stable_id(
+        "session",
+        "operational-observation",
+        source_id,
+        observation_id,
+        evidence_id,
+    )
 
 
 def _observation_content(
     experience: OperationalExperience,
     observation: OperationalObservation,
+    *,
+    evidence_index: int,
 ) -> str:
+    evidence = observation.evidence[evidence_index]
     return _clean_lines(
         (
             f"Goal: {experience.goal}",
@@ -78,7 +91,9 @@ def _observation_content(
             if observation.action
             else "Initial observation before any recorded action.",
             f"Reasoning: {observation.reasoning}" if observation.reasoning else None,
-            f"Evidence:\n{observation.evidence}" if observation.evidence else None,
+            f"Evidence part: {evidence_index + 1}/{len(observation.evidence)}",
+            f"Evidence content type: {evidence.content_type}",
+            f"Evidence:\n{evidence.content}" if evidence.content else None,
         )
     )
 
@@ -108,7 +123,6 @@ def _support_span(observation: OperationalObservation) -> dict[str, Any]:
         for field, value in (
             ("action", observation.action),
             ("reasoning", observation.reasoning),
-            ("evidence", observation.evidence),
         )
         if value
     ]
@@ -117,6 +131,7 @@ def _support_span(observation: OperationalObservation) -> dict[str, Any]:
         "ordinal": observation.ordinal,
         "fields": fields,
         "image_refs": list(observation.image_refs),
+        "evidence_part_ids": [part.id for part in observation.evidence],
     }
 
 
@@ -176,32 +191,50 @@ def project_operational_experience(
     common = _common_metadata(experience, content_hash=content_hash)
     entities: list[Entity] = []
     relationships: list[Relationship] = []
-    raw_ids: dict[str, str] = {}
+    raw_ids: dict[str, list[str]] = {}
 
     for observation in observations:
-        entity_id = _observation_entity_id(experience.source_id, observation.id)
-        raw_ids[observation.id] = entity_id
-        entities.append(
-            Entity(
-                id=entity_id,
-                entity_type=EntityType.SESSION,
-                name=f"Operational observation {observation.ordinal}",
-                content=_observation_content(experience, observation),
-                organization_id=organization_id,
-                created_by=created_by,
-                modified_by=created_by,
-                metadata={
-                    **common,
-                    "projection_kind": "raw_observation",
-                    "source_observation_id": observation.id,
-                    "observation_ordinal": observation.ordinal,
-                    "uri": observation.uri,
-                    "action": observation.action,
-                    "image_refs": list(observation.image_refs),
-                    "source_metadata": observation.metadata,
-                },
+        raw_ids[observation.id] = []
+        for evidence_index, evidence in enumerate(observation.evidence):
+            entity_id = _observation_entity_id(
+                experience.source_id,
+                observation.id,
+                evidence.id,
             )
-        )
+            raw_ids[observation.id].append(entity_id)
+            entities.append(
+                Entity(
+                    id=entity_id,
+                    entity_type=EntityType.SESSION,
+                    name=(
+                        f"Operational observation {observation.ordinal} "
+                        f"part {evidence_index + 1}/{len(observation.evidence)}"
+                    ),
+                    content=_observation_content(
+                        experience,
+                        observation,
+                        evidence_index=evidence_index,
+                    ),
+                    organization_id=organization_id,
+                    created_by=created_by,
+                    modified_by=created_by,
+                    metadata={
+                        **common,
+                        "projection_kind": "raw_observation",
+                        "source_observation_id": observation.id,
+                        "observation_ordinal": observation.ordinal,
+                        "evidence_part_id": evidence.id,
+                        "evidence_part_index": evidence_index,
+                        "evidence_part_count": len(observation.evidence),
+                        "evidence_content_type": evidence.content_type,
+                        "uri": observation.uri,
+                        "action": observation.action,
+                        "image_refs": list(observation.image_refs),
+                        "source_metadata": observation.metadata,
+                        "evidence_metadata": evidence.metadata,
+                    },
+                )
+            )
 
     for previous, current in pairwise(observations):
         if not current.action:
@@ -233,15 +266,16 @@ def project_operational_experience(
             )
         )
         for observation in (previous, current):
-            relationships.append(
-                _relationship(
-                    relationship_type=RelationshipType.DERIVED_FROM,
-                    source_id=event_id,
-                    target_id=raw_ids[observation.id],
-                    source_key=experience.source_id,
-                    metadata={**common, "source_observation_id": observation.id},
+            for raw_id in raw_ids[observation.id]:
+                relationships.append(
+                    _relationship(
+                        relationship_type=RelationshipType.DERIVED_FROM,
+                        source_id=event_id,
+                        target_id=raw_id,
+                        source_key=experience.source_id,
+                        metadata={**common, "source_observation_id": observation.id},
+                    )
                 )
-            )
 
     procedure_id = _stable_id("procedure", "operational", experience.source_id)
     entities.append(
@@ -263,15 +297,16 @@ def project_operational_experience(
         )
     )
     for observation in observations:
-        relationships.append(
-            _relationship(
-                relationship_type=RelationshipType.DERIVED_FROM,
-                source_id=procedure_id,
-                target_id=raw_ids[observation.id],
-                source_key=experience.source_id,
-                metadata={**common, "source_observation_id": observation.id},
+        for raw_id in raw_ids[observation.id]:
+            relationships.append(
+                _relationship(
+                    relationship_type=RelationshipType.DERIVED_FROM,
+                    source_id=procedure_id,
+                    target_id=raw_id,
+                    source_key=experience.source_id,
+                    metadata={**common, "source_observation_id": observation.id},
+                )
             )
-        )
 
     if experience.outcome and experience.outcome.casefold() in {"failure", "failed", "error"}:
         final = observations[-1]
@@ -301,15 +336,16 @@ def project_operational_experience(
                 },
             )
         )
-        relationships.append(
-            _relationship(
-                relationship_type=RelationshipType.DERIVED_FROM,
-                source_id=error_id,
-                target_id=raw_ids[final.id],
-                source_key=experience.source_id,
-                metadata={**common, "source_observation_id": final.id},
+        for raw_id in raw_ids[final.id]:
+            relationships.append(
+                _relationship(
+                    relationship_type=RelationshipType.DERIVED_FROM,
+                    source_id=error_id,
+                    target_id=raw_id,
+                    source_key=experience.source_id,
+                    metadata={**common, "source_observation_id": final.id},
+                )
             )
-        )
 
     projected_ids = [entity.id for entity in entities]
     manifest_id = _stable_id("artifact", "operational-manifest", experience.source_id)

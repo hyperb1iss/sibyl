@@ -1247,6 +1247,7 @@ def test_sibyl_memory_ingest_checkpoint_resumes_completed_trajectory(tmp_path: P
     memory.checkpoint_dir = checkpoint_dir
     memory._chunk_catalog = module._catalog_results(payloads)
     memory._completed_trajectory_ids = {"t1"}
+    memory._operational_trajectory_ids = {"t1"}
     memory._pending_embedding_job_ids = {"embed-1"}
     memory._pending_projection_job_ids = {"project-1"}
     memory._pending_job_entity_ids = {
@@ -1264,6 +1265,7 @@ def test_sibyl_memory_ingest_checkpoint_resumes_completed_trajectory(tmp_path: P
     restored = _reload_checkpoint(module, memory, checkpoint_dir)
 
     assert restored._completed_trajectory_ids == {"t1"}
+    assert restored._operational_trajectory_ids == {"t1"}
     assert restored._pending_embedding_job_ids == {"embed-1"}
     assert restored._pending_projection_job_ids == {"project-1"}
     assert restored._pending_job_entity_ids == memory._pending_job_entity_ids
@@ -1289,6 +1291,76 @@ def test_sibyl_memory_ingest_checkpoint_resumes_completed_trajectory(tmp_path: P
 
     assert reloaded._completed_trajectory_ids == {"t1", "t2"}
     assert set(reloaded._chunk_catalog) == {"t1", "t2"}
+
+
+def test_sibyl_memory_upgrades_old_checkpoint_once_without_reappending_catalog(
+    tmp_path: Path,
+) -> None:
+    module = _load_memory_module()
+    checkpoint_dir = tmp_path / "checkpoint"
+    payloads = module.build_entity_payloads_for_trajectory(
+        _trajectory("t1"),
+        project_id="project_saved",
+        run_id="run-saved",
+    )
+    source = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(source, {})
+    source.api_url = "http://127.0.0.1:3434/api"
+    source.project_id = "project_saved"
+    source.run_id = "run-saved"
+    source.chunking_mode = "state"
+    source.content_max_chars = EXPECTED_CONTENT_MAX_CHARS
+    source.checkpoint_dir = checkpoint_dir
+    source._chunk_catalog = module._catalog_results(payloads)
+    source._completed_trajectory_ids = {"t1"}
+    source._operational_trajectory_ids = {"t1"}
+    source._pending_embedding_job_ids = set()
+    source._pending_projection_job_ids = set()
+    source._pending_job_entity_ids = {}
+    source.ingest_embedding_usage = {}
+    source.ingest_api_runtime = {"version": "test"}
+    source._append_checkpoint(payloads)
+
+    manifest_path = checkpoint_dir / module.CHECKPOINT_MANIFEST_FILENAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("operational_trajectory_ids")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    original_catalog = (checkpoint_dir / module.CHECKPOINT_CATALOG_FILENAME).read_bytes()
+
+    restored = _reload_checkpoint(module, source, checkpoint_dir)
+    restored.defer_embeddings = True
+    restored.include_screenshot_refs = False
+    restored.embedding_backfill_max_pending_jobs = 8
+    restored.created_entities = 0
+    requests: list[dict[str, object]] = []
+
+    def fake_request(
+        _method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        del params
+        assert path == "/memory/experience"
+        requests.append(json or {})
+        return {
+            "written_entities": 3,
+            "entity_ids": ["session-1", "procedure-1"],
+            "background_jobs": {
+                "embedding_backfill": {"job_ids": ["embed-upgrade-1"]}
+            },
+        }
+
+    restored._request_json = fake_request
+    restored.insert(_trajectory("t1"))
+    restored.insert(_trajectory("t1"))
+
+    assert len(requests) == 1
+    assert restored._operational_trajectory_ids == {"t1"}
+    assert (
+        checkpoint_dir / module.CHECKPOINT_CATALOG_FILENAME
+    ).read_bytes() == original_catalog
 
 
 def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
@@ -1497,6 +1569,88 @@ def test_sibyl_memory_query_context_exposes_only_question_and_image() -> None:
     }
 
 
+def test_operational_experience_payload_preserves_oversized_state_evidence() -> None:
+    module = _load_memory_module()
+    trajectory = _trajectory("t1", tree="Priority field\n" * 2_000)
+
+    payload = module.build_operational_experience_payload(
+        trajectory,
+        project_id="project_lme",
+        run_id="run_lme",
+        content_max_chars=4_000,
+    )
+
+    experience = payload["experience"]
+    observations = experience["observations"]
+    parts = observations[0]["evidence"]
+    assert len(parts) > 1
+    assert all(len(part["content"]) <= 4_000 for part in parts)
+    assert [part["metadata"]["longmemeval_v2_chunk_index"] for part in parts] == list(
+        range(len(parts))
+    )
+    reconstructed = "".join(
+        part["content"].split("\n\n", maxsplit=2)[-1] for part in parts
+    )
+    states = cast(list[dict[str, object]], trajectory["states"])
+    tree = cast(str, states[0]["accessibility_tree"])
+    assert tree in reconstructed
+
+
+def test_context_pack_conversion_keeps_only_typed_operational_memory() -> None:
+    module = _load_memory_module()
+
+    results = module.context_pack_to_search_results(
+        {
+            "sections": [
+                {
+                    "facet": "procedures",
+                    "items": [
+                        {
+                            "id": "procedure-1",
+                            "type": "procedure",
+                            "content": "1. click Priority",
+                            "score": 0.8,
+                            "metadata": {"longmemeval_v2_trajectory_id": "t1"},
+                        },
+                        {
+                            "id": "tool-1",
+                            "type": "tool",
+                            "content": "browser",
+                            "score": 0.9,
+                        },
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert [result["id"] for result in results] == ["procedure-1"]
+    assert results[0]["_selection_origin"] == "context_pack:procedures"
+
+
+def test_operational_evidence_set_reserves_capacity_for_raw_support() -> None:
+    module = _load_memory_module()
+    typed = [
+        {
+            "id": f"procedure-{index}",
+            "type": "procedure",
+            "metadata": {"longmemeval_v2_trajectory_id": f"t{index}"},
+        }
+        for index in range(8)
+    ]
+    raw = [{"id": f"session-{index}", "type": "session"} for index in range(8)]
+
+    selected = module.compile_operational_evidence_set(
+        typed_results=typed,
+        raw_results=raw,
+        max_items=8,
+    )
+
+    assert len(selected) == 8
+    assert sum(item["type"] == "procedure" for item in selected) == 2
+    assert sum(item["type"] == "session" for item in selected) == 6
+
+
 def test_sibyl_memory_insert_tracks_deferred_background_jobs() -> None:
     module = _load_memory_module()
     memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
@@ -1512,16 +1666,12 @@ def test_sibyl_memory_insert_tracks_deferred_background_jobs() -> None:
     ) -> dict[str, object]:
         calls.append({"method": method, "path": path, "json": json or {}, "params": params or {}})
         return {
-            "created": 1,
-            "entities": [{"id": "session-lme-v2-1"}],
+            "written_entities": 4,
+            "entity_ids": ["session-lme-v2-1", "event-lme-v2-1"],
             "background_jobs": {
                 "embedding_backfill": {
                     "status": "queued",
                     "job_ids": ["embed-lme-v2-1"],
-                },
-                "memory_projection": {
-                    "status": "queued",
-                    "job_ids": ["project-lme-v2-1"],
                 },
             },
         }
@@ -1544,15 +1694,19 @@ def test_sibyl_memory_insert_tracks_deferred_background_jobs() -> None:
 
     request_json = calls[0]["json"]
     assert isinstance(request_json, dict)
-    assert calls[0]["path"] == "/entities/bulk"
+    assert calls[0]["path"] == "/memory/experience"
     assert request_json["defer_embeddings"] is True
-    assert memory.created_entities == 1
+    experience = cast(dict[str, object], request_json["experience"])
+    assert experience["source_id"] == "longmemeval-v2:run_lme:t1"
+    observations = cast(list[dict[str, object]], experience["observations"])
+    assert observations
+    assert observations[0]["evidence"]
+    assert memory.created_entities == 4
     assert memory.inserted_trajectories == 1
     assert memory._pending_embedding_job_ids == {"embed-lme-v2-1"}
-    assert memory._pending_projection_job_ids == {"project-lme-v2-1"}
+    assert memory._pending_projection_job_ids == set()
     assert memory._pending_job_entity_ids == {
-        "embed-lme-v2-1": ["session-lme-v2-1"],
-        "project-lme-v2-1": ["session-lme-v2-1"],
+        "embed-lme-v2-1": ["session-lme-v2-1", "event-lme-v2-1"],
     }
 
 
@@ -1571,11 +1725,10 @@ def test_sibyl_memory_retries_write_after_pre_checkpoint_crash(tmp_path: Path) -
         del params
         requests.append(json or {})
         return {
-            "created": 1,
-            "entities": [{"id": "session-deterministic"}],
+            "written_entities": 2,
+            "entity_ids": ["session-deterministic"],
             "background_jobs": {
                 "embedding_backfill": {"job_ids": ["embed-deterministic"]},
-                "memory_projection": {"job_ids": ["projection-deterministic"]},
             },
         }
 
@@ -1742,9 +1895,9 @@ def test_sibyl_memory_drains_backfills_when_pending_threshold_is_reached() -> No
 
     memory.insert(_trajectory("t1", tree="button Priority " * 20))
 
-    assert calls > 1
-    assert embedding_drain_calls == calls
-    assert projection_drain_calls == calls
+    assert calls == 1
+    assert embedding_drain_calls == 1
+    assert projection_drain_calls == 0
     assert memory._pending_embedding_job_ids == set()
     assert memory._pending_projection_job_ids == set()
 
@@ -1954,6 +2107,12 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
                     "stage_timings_ms": {"total": 12.5},
                 },
             }
+        if path == "/context/pack":
+            assert json is not None
+            assert json["record_exposure"] is False
+            assert json["audit"] is True
+            assert json["project"] == "project_lme"
+            return {"sections": []}
         raise AssertionError(f"unexpected path: {path}")
 
     memory.project_id = "project_lme"
@@ -1989,7 +2148,12 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
     )
     memory.finalize_ingest()
 
-    assert calls == ["/jobs/status", "/jobs/status", "/search"]
+    assert calls == [
+        "/jobs/status",
+        "/jobs/status",
+        "/context/pack",
+        "/search",
+    ]
     assert metadata is not None
     assert metadata["search_metadata"] == {
         "retrieval_mode": "native",
@@ -2031,6 +2195,8 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
                 "dropped_chunk_keys": [],
                 "binding": False,
             },
+            "typed_context_candidate_count": 0,
+            "typed_context_selected_count": 0,
         },
     }
     assert metadata["retrieval_trace"] == []

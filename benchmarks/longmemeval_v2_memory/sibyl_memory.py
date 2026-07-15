@@ -161,6 +161,12 @@ class TrajectoryTextChunk:
         self.state_part_count = state_part_count
 
 
+def _string_key_dict(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): item for key, item in value.items()}
+
+
 def build_entity_payloads_for_trajectory(
     trajectory_raw: dict[str, object],
     *,
@@ -215,6 +221,161 @@ def build_entity_payloads_for_trajectory(
             }
         )
     return payloads
+
+
+def build_operational_experience_payload(
+    trajectory_raw: dict[str, object],
+    *,
+    project_id: str,
+    run_id: str,
+    content_max_chars: int = DEFAULT_CONTENT_MAX_CHARS,
+    include_screenshot_refs: bool = False,
+) -> dict[str, object]:
+    trajectory = LongMemEvalV2Trajectory.from_mapping(trajectory_raw)
+    header = _trajectory_header(trajectory)
+    observations: list[dict[str, object]] = []
+    chunk_index = 0
+    for state in trajectory.states:
+        chunks = _state_chunks(
+            header,
+            state,
+            max_chars=content_max_chars,
+            include_screenshot_refs=include_screenshot_refs,
+        )
+        evidence: list[dict[str, object]] = []
+        for chunk in chunks:
+            evidence.append(
+                {
+                    "id": f"chunk-{chunk_index}",
+                    "content": chunk.content,
+                    "content_type": "text/plain; profile=accessibility-tree",
+                    "metadata": {
+                        "longmemeval_v2_chunk_index": chunk_index,
+                        "longmemeval_v2_state_index": state.state_index,
+                        "longmemeval_v2_state_part_index": chunk.state_part_index,
+                        "longmemeval_v2_state_part_count": chunk.state_part_count,
+                    },
+                }
+            )
+            chunk_index += 1
+        observations.append(
+            {
+                "id": f"state-{state.state_index}",
+                "ordinal": state.state_index,
+                "uri": state.url,
+                "action": state.action,
+                "reasoning": state.thought,
+                "evidence": evidence,
+                "image_refs": [state.screenshot]
+                if include_screenshot_refs and state.screenshot
+                else [],
+                "metadata": {"longmemeval_v2_state_index": state.state_index},
+            }
+        )
+    return {
+        "experience": {
+            "source_id": f"longmemeval-v2:{run_id}:{trajectory.id}",
+            "goal": trajectory.goal,
+            "outcome": trajectory.outcome,
+            "start_uri": trajectory.start_url,
+            "observations": observations,
+            "project_id": project_id,
+            "metadata": {
+                "longmemeval_v2_run_id": run_id,
+                "longmemeval_v2_trajectory_id": trajectory.id,
+                "longmemeval_v2_domain": trajectory.domain,
+                "longmemeval_v2_environment": trajectory.environment,
+                "capture_surface": "longmemeval-v2-official",
+            },
+        }
+    }
+
+
+def context_pack_to_search_results(
+    response: dict[str, object],
+) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    sections = response.get("sections")
+    if not isinstance(sections, list):
+        return candidates
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        facet = _stripped_str(section.get("facet")) or "context"
+        items = section.get("items")
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_type = _stripped_str(item.get("type"))
+            if item_type not in {"procedure", "error_pattern", "event"}:
+                continue
+            candidate = _string_key_dict(item)
+            candidate["_selection_origin"] = f"context_pack:{facet}"
+            candidates.append(candidate)
+    type_order = {"procedure": 0, "error_pattern": 1, "event": 2}
+    return sorted(
+        candidates,
+        key=lambda item: (
+            type_order.get(_stripped_str(item.get("type")), 3),
+            -float(item.get("score", 0.0))
+            if isinstance(item.get("score"), int | float)
+            else 0.0,
+        ),
+    )
+
+
+def _flatten_operational_result_metadata(
+    results: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    flattened: list[dict[str, object]] = []
+    for result in results:
+        candidate = dict(result)
+        metadata = _string_key_dict(candidate.get("metadata"))
+        for nested_key in ("source_metadata", "evidence_metadata"):
+            nested = metadata.get(nested_key)
+            if not isinstance(nested, dict):
+                continue
+            for key, value in nested.items():
+                metadata.setdefault(str(key), value)
+        candidate["metadata"] = metadata
+        flattened.append(candidate)
+    return flattened
+
+
+def compile_operational_evidence_set(
+    *,
+    typed_results: list[dict[str, object]],
+    raw_results: list[dict[str, object]],
+    max_items: int,
+) -> list[dict[str, object]]:
+    max_items = max(1, max_items)
+    typed_budget = min(3, max(1, max_items // 3))
+    selected: list[dict[str, object]] = []
+    seen_typed: set[tuple[str, str]] = set()
+    for result in typed_results:
+        metadata = _string_key_dict(result.get("metadata"))
+        key = (
+            _stripped_str(result.get("type")),
+            _stripped_str(metadata.get("longmemeval_v2_trajectory_id")),
+        )
+        if key in seen_typed:
+            continue
+        selected.append(result)
+        seen_typed.add(key)
+        if len(selected) >= typed_budget:
+            break
+    selected_ids = {_stripped_str(result.get("id")) for result in selected}
+    for result in raw_results:
+        result_id = _stripped_str(result.get("id"))
+        if result_id and result_id in selected_ids:
+            continue
+        selected.append(result)
+        selected_ids.add(result_id)
+        if len(selected) >= max_items:
+            break
+    return selected
 
 
 def search_results_to_memory_context(
@@ -1004,6 +1165,7 @@ class SibylLiveApiMemory(Memory):
         self._query_local = threading.local()
         self._chunk_catalog: dict[str, dict[int, dict[str, object]]] = {}
         self._completed_trajectory_ids: set[str] = set()
+        self._operational_trajectory_ids: set[str] = set()
         self._client = _new_http_client(
             self.api_url,
             timeout_seconds=self.api_timeout_seconds,
@@ -1038,8 +1200,13 @@ class SibylLiveApiMemory(Memory):
         if completed_trajectory_ids is None:
             completed_trajectory_ids = set()
             self._completed_trajectory_ids = completed_trajectory_ids
-        if trajectory_id and trajectory_id in completed_trajectory_ids:
+        operational_trajectory_ids = getattr(self, "_operational_trajectory_ids", None)
+        if operational_trajectory_ids is None:
+            operational_trajectory_ids = set()
+            self._operational_trajectory_ids = operational_trajectory_ids
+        if trajectory_id and trajectory_id in operational_trajectory_ids:
             return
+        already_cataloged = bool(trajectory_id and trajectory_id in completed_trajectory_ids)
         self._ingest_finalized = False
         payloads = build_entity_payloads_for_trajectory(
             trajectory,
@@ -1053,29 +1220,34 @@ class SibylLiveApiMemory(Memory):
         if chunk_catalog is None:
             chunk_catalog = {}
             self._chunk_catalog = chunk_catalog
-        chunk_catalog.update(_catalog_results(payloads))
-        for batch in _payload_batches(
-            payloads,
-            max_entities=self.bulk_max_entities,
-            max_content_chars=self.bulk_max_content_chars,
-        ):
-            created = self._request_json(
-                "POST",
-                "/entities/bulk",
-                json={"entities": batch, "defer_embeddings": self.defer_embeddings},
-            )
-            self.created_entities += _created_count(created)
-            self._remember_embedding_backfill_jobs(created)
-            self._remember_memory_projection_jobs(created)
-            if len(self._pending_embedding_job_ids) >= self.embedding_backfill_max_pending_jobs:
-                self._drain_embedding_backfills()
-            if len(self._pending_projection_job_ids) >= self.embedding_backfill_max_pending_jobs:
-                self._drain_memory_projections()
+        if not already_cataloged:
+            chunk_catalog.update(_catalog_results(payloads))
+        experience_payload = build_operational_experience_payload(
+            trajectory,
+            project_id=self.project_id,
+            run_id=self.run_id,
+            content_max_chars=self.content_max_chars,
+            include_screenshot_refs=self.include_screenshot_refs,
+        )
+        experience_payload["defer_embeddings"] = self.defer_embeddings
+        created = self._request_json(
+            "POST",
+            "/memory/experience",
+            json=experience_payload,
+        )
+        self.created_entities += _created_count(created)
+        self._remember_embedding_backfill_jobs(created)
+        if len(self._pending_embedding_job_ids) >= self.embedding_backfill_max_pending_jobs:
+            self._drain_embedding_backfills()
         if trajectory_id:
             completed_trajectory_ids.add(trajectory_id)
+            operational_trajectory_ids.add(trajectory_id)
         self.inserted_trajectories = len(completed_trajectory_ids)
         if getattr(self, "checkpoint_dir", None) is not None:
-            self._append_checkpoint(payloads)
+            if already_cataloged:
+                self._write_checkpoint_manifest(finalized=False)
+            else:
+                self._append_checkpoint(payloads)
 
     def finalize_ingest(self) -> None:
         with self._finalize_lock:
@@ -1094,6 +1266,22 @@ class SibylLiveApiMemory(Memory):
         if pending_jobs or not self._ingest_finalized:
             msg = f"memory ingestion has {pending_jobs} pending jobs; call finalize_ingest first"
             raise RuntimeError(msg)
+        context_response = self._request_json(
+            "POST",
+            "/context/pack",
+            json={
+                "goal": query,
+                "intent": "learn",
+                "layer": "deep_search",
+                "project": self.project_id,
+                "limit": min(max(self.search_limit, self.max_context_items), 50),
+                "include_related": True,
+                "related_limit": 3,
+                "audit": True,
+                "record_exposure": False,
+            },
+        )
+        typed_results = context_pack_to_search_results(context_response)
         payload = {
             "query": query,
             "types": ["session"],
@@ -1114,7 +1302,12 @@ class SibylLiveApiMemory(Memory):
             dict(filters) if isinstance(filters, dict) else {}
         )
         raw_results = response.get("results")
-        results = [item for item in raw_results if isinstance(item, dict)] if isinstance(raw_results, list) else []
+        results = (
+            [_string_key_dict(item) for item in raw_results if isinstance(item, dict)]
+            if isinstance(raw_results, list)
+            else []
+        )
+        results = _flatten_operational_result_metadata(results)
         assembled_results, assembly_metadata = assemble_context_results(
             results,
             chunk_catalog=getattr(self, "_chunk_catalog", {}),
@@ -1152,14 +1345,24 @@ class SibylLiveApiMemory(Memory):
             ),
             context_token_counter=self._count_context_result_tokens,
         )
+        evidence_set = compile_operational_evidence_set(
+            typed_results=typed_results,
+            raw_results=assembled_results,
+            max_items=self.max_context_items,
+        )
+        assembly_metadata["typed_context_candidate_count"] = len(typed_results)
+        assembly_metadata["typed_context_selected_count"] = sum(
+            _stripped_str(item.get("_selection_origin")).startswith("context_pack:")
+            for item in evidence_set
+        )
         self._query_local.search_metadata["adapter_assembly"] = assembly_metadata
         self._query_local.retrieval_trace = build_retrieval_trace(
-            assembled_results,
+            evidence_set,
             max_items=self.max_context_items,
             max_chars_per_item=self.max_context_chars_per_item,
         )
         return search_results_to_memory_context(
-            assembled_results,
+            evidence_set,
             max_items=self.max_context_items,
             max_chars_per_item=self.max_context_chars_per_item,
         )
@@ -1210,6 +1413,9 @@ class SibylLiveApiMemory(Memory):
             "ingest_embedding_usage": dict(getattr(self, "ingest_embedding_usage", {})),
             "completed_trajectory_ids": sorted(
                 getattr(self, "_completed_trajectory_ids", self._chunk_catalog)
+            ),
+            "operational_trajectory_ids": sorted(
+                getattr(self, "_operational_trajectory_ids", self._chunk_catalog)
             ),
             "pending_embedding_job_ids": sorted(self._pending_embedding_job_ids),
             "pending_projection_job_ids": sorted(self._pending_projection_job_ids),
@@ -1263,6 +1469,16 @@ class SibylLiveApiMemory(Memory):
         self.created_entities = sum(len(chunks) for chunks in catalog.values())
         self.inserted_trajectories = len(catalog)
         self._completed_trajectory_ids = set(catalog)
+        operational_ids = manifest.get("operational_trajectory_ids")
+        self._operational_trajectory_ids = (
+            {
+                str(value)
+                for value in operational_ids
+                if isinstance(value, str) and value in catalog
+            }
+            if isinstance(operational_ids, list)
+            else set()
+        )
         self.ingest_api_runtime = (
             dict(manifest["ingest_api_runtime"])
             if isinstance(manifest.get("ingest_api_runtime"), dict)
@@ -1340,6 +1556,9 @@ class SibylLiveApiMemory(Memory):
             "chunking_mode": self.chunking_mode,
             "content_max_chars": self.content_max_chars,
             "completed_trajectory_ids": sorted(self._completed_trajectory_ids),
+            "operational_trajectory_ids": sorted(
+                getattr(self, "_operational_trajectory_ids", set())
+            ),
             "pending_embedding_job_ids": sorted(self._pending_embedding_job_ids),
             "pending_projection_job_ids": sorted(self._pending_projection_job_ids),
             "pending_job_entity_ids": {
@@ -1402,6 +1621,16 @@ class SibylLiveApiMemory(Memory):
                 catalog.setdefault(trajectory_id, {})[chunk_index] = loaded
         self._chunk_catalog = catalog
         self._completed_trajectory_ids = completed
+        operational_ids = manifest.get("operational_trajectory_ids")
+        self._operational_trajectory_ids = (
+            {
+                str(value)
+                for value in operational_ids
+                if isinstance(value, str) and value in completed
+            }
+            if isinstance(operational_ids, list)
+            else set()
+        )
         self.inserted_trajectories = len(completed)
         self.created_entities = sum(len(chunks) for chunks in catalog.values())
         self._pending_embedding_job_ids = {
@@ -2170,7 +2399,7 @@ def _report_background_job_progress(
 
 
 def _created_count(response: dict[str, object]) -> int:
-    value = response.get("created")
+    value = response.get("written_entities", response.get("created"))
     if isinstance(value, bool):
         return 0
     if isinstance(value, int):

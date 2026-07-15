@@ -26,6 +26,10 @@ class ContextPackRequest(BaseModel):
         default=False,
         description="Include full retrieval metadata per item for pack auditing",
     )
+    record_exposure: bool = Field(
+        default=True,
+        description="Record returned items as memory exposure signals",
+    )
     markdown_token_budget: int | None = Field(
         default=None,
         ge=100,

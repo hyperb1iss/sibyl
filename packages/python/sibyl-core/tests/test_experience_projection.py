@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from sibyl_core.models import EntityType, RelationshipType
-from sibyl_core.models.experience import OperationalExperience, OperationalObservation
+from sibyl_core.models.experience import (
+    OperationalEvidencePart,
+    OperationalExperience,
+    OperationalObservation,
+)
 from sibyl_core.projection import persist_operational_experience, project_operational_experience
 
 
@@ -24,7 +28,12 @@ def _experience(*, outcome: str = "success") -> OperationalExperience:
                 ordinal=0,
                 uri="https://example.test/incidents",
                 reasoning="The incident list is visible.",
-                evidence="Heading: Incidents\nRow: INC001 Open",
+                evidence=(
+                    OperationalEvidencePart(
+                        id="tree-0",
+                        content="Heading: Incidents\nRow: INC001 Open",
+                    ),
+                ),
                 image_refs=("screens/0.png",),
             ),
             OperationalObservation(
@@ -33,7 +42,16 @@ def _experience(*, outcome: str = "success") -> OperationalExperience:
                 uri="https://example.test/incidents/INC001",
                 action="click('INC001')",
                 reasoning="The incident form is open.",
-                evidence="Incident INC001\nState: Open",
+                evidence=(
+                    OperationalEvidencePart(
+                        id="tree-0",
+                        content="Incident INC001\nState: Open",
+                    ),
+                    OperationalEvidencePart(
+                        id="tree-1",
+                        content="Activity: incident opened",
+                    ),
+                ),
                 image_refs=("screens/1.png",),
             ),
             OperationalObservation(
@@ -42,7 +60,12 @@ def _experience(*, outcome: str = "success") -> OperationalExperience:
                 uri="https://example.test/incidents/INC001",
                 action="select('state', 'Closed')",
                 reasoning="The state field now reads Closed.",
-                evidence="Incident INC001\nState: Closed",
+                evidence=(
+                    OperationalEvidencePart(
+                        id="tree-0",
+                        content="Incident INC001\nState: Closed",
+                    ),
+                ),
                 image_refs=("screens/2.png",),
             ),
         ),
@@ -55,10 +78,12 @@ def test_projection_preserves_raw_evidence_and_action_boundaries() -> None:
     raw = [entity for entity in projection.entities if entity.entity_type is EntityType.SESSION]
     events = [entity for entity in projection.entities if entity.entity_type is EntityType.EVENT]
 
-    assert len(raw) == 3
+    assert len(raw) == 4
     assert "Heading: Incidents\nRow: INC001 Open" in raw[0].content
     assert "Initial observation before any recorded action." in raw[0].content
     assert "Action producing this observation: click('INC001')" in raw[1].content
+    assert "Evidence part: 1/2" in raw[1].content
+    assert "Evidence part: 2/2" in raw[2].content
     assert raw[1].metadata["image_refs"] == ["screens/1.png"]
 
     assert len(events) == 2
@@ -71,7 +96,7 @@ def test_projection_preserves_raw_evidence_and_action_boundaries() -> None:
         if relationship.source_id == click_event.id
         and relationship.relationship_type is RelationshipType.DERIVED_FROM
     }
-    assert derived_targets == {raw[0].id, raw[1].id}
+    assert derived_targets == {raw[0].id, raw[1].id, raw[2].id}
 
 
 def test_projection_is_deterministic_and_manifest_is_self_describing() -> None:

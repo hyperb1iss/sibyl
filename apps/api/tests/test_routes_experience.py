@@ -10,7 +10,11 @@ from sibyl.api.routes.experience import capture_operational_experience
 from sibyl.api.schemas import OperationalExperienceCaptureRequest
 from sibyl_core.auth import ProjectRole
 from sibyl_core.models.entities import EntityType
-from sibyl_core.models.experience import OperationalExperience, OperationalObservation
+from sibyl_core.models.experience import (
+    OperationalEvidencePart,
+    OperationalExperience,
+    OperationalObservation,
+)
 from sibyl_core.projection import project_operational_experience
 
 
@@ -25,13 +29,23 @@ def _request(*, project_id: str | None = "project-1") -> OperationalExperienceCa
                 OperationalObservation(
                     id="state-0",
                     ordinal=0,
-                    evidence="Incident INC001 is open",
+                    evidence=(
+                        OperationalEvidencePart(
+                            id="tree-0",
+                            content="Incident INC001 is open",
+                        ),
+                    ),
                 ),
                 OperationalObservation(
                     id="state-1",
                     ordinal=1,
                     action="select('state', 'Closed')",
-                    evidence="Incident INC001 is closed",
+                    evidence=(
+                        OperationalEvidencePart(
+                            id="tree-0",
+                            content="Incident INC001 is closed",
+                        ),
+                    ),
                 ),
             ),
         )
@@ -95,6 +109,7 @@ async def test_capture_persists_authorized_experience_and_queues_embeddings() ->
     assert all(item["entity_type"] != EntityType.ARTIFACT for item in queued_entities)
     assert response.written_entities == len(projection.entities)
     assert response.deleted_entities == 1
+    assert response.entity_ids == list(projection.manifest.entity_ids)
     assert response.background_jobs["embedding_backfill"]["job_ids"] == ["embed-1"]
 
 

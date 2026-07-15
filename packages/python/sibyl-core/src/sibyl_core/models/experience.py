@@ -7,6 +7,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from sibyl_core.models.entities import Entity, Relationship
 
 
+class OperationalEvidencePart(BaseModel):
+    """One bounded, ordered part of an observation's source evidence."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str = Field(min_length=1)
+    content: str
+    content_type: str = "text/plain"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class OperationalObservation(BaseModel):
     """An immutable observation captured before or after an action."""
 
@@ -17,7 +28,7 @@ class OperationalObservation(BaseModel):
     uri: str | None = None
     action: str | None = None
     reasoning: str | None = None
-    evidence: str = ""
+    evidence: tuple[OperationalEvidencePart, ...] = Field(min_length=1)
     image_refs: tuple[str, ...] = ()
     metadata: dict[str, Any] = Field(default_factory=dict)
 
