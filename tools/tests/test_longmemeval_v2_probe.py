@@ -131,8 +131,12 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     assert '--reader-api-key-env "$READER_API_KEY_ENV"' in workflow
     assert "official_reader_max_concurrent_requests:" in workflow
     assert "official_reader_retry_attempts:" in workflow
+    assert "official_evidence_composition_mode:" in workflow
+    assert "official_source_evidence_bundling:" in workflow
     assert '--reader-max-concurrent-requests "$READER_MAX_CONCURRENT_REQUESTS"' in workflow
     assert '--reader-retry-attempts "$READER_RETRY_ATTEMPTS"' in workflow
+    assert '--evidence-composition-mode "$EVIDENCE_COMPOSITION_MODE"' in workflow
+    assert 'args+=(--source-evidence-bundling)' in workflow
     assert "https://openrouter.ai/api/v1" in workflow
     assert "build_submission_step_1_single_operating_point.py" in workflow
     assert "build_submission_step_2_build_package.py" in workflow
