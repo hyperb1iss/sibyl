@@ -3,7 +3,7 @@
 Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 
 ## Summary
-- REST routers: 30
+- REST routers: 31
 - Top-level HTTP routes: 3
 - WebSocket routes: 1
 - MCP tools: 11
@@ -12,7 +12,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - Raw SQL query usage files: 0
 - Session-backed storage access files: 0
 - Graphiti import files: 0
-- Retained legacy term files: 89
+- Retained legacy term files: 88
 - Dependency records: 4
 
 ## API Surface
@@ -23,6 +23,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - `tasks_router`
 - `session_router`
 - `epics_router`
+- `experience_router`
 - `search_router`
 - `context_router`
 - `graph_router`
@@ -131,14 +132,13 @@ must carry an owner and reason here.
 | `docs/architecture/SIBYL_NORTHSTAR.md` | `falkor`, `graphiti`, `postgres`, `redis` | 46 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/SIBYL_POST_1_0_ROADMAP.md` | `falkor`, `graphiti`, `postgres`, `redis` | 4 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/retrieval-system.md` | `graphiti` | 1 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
-| `docs/cli/add.md` | `postgres`, `redis` | 3 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
+| `docs/cli/add.md` | `redis` | 2 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/cli/docker.md` | `valkey` | 2 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/cli/entity.md` | `postgres`, `redis` | 3 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/cli/index.md` | `redis` | 1 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/cli/project.md` | `postgres` | 2 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/cli/reflect.md` | `postgres` | 1 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/cli/remember.md` | `postgres`, `redis` | 2 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
-| `docs/cli/search.md` | `postgres` | 1 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/cli/task-create.md` | `redis` | 2 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/cli/task-lifecycle.md` | `postgres`, `redis` | 7 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/deployment/docker-compose.md` | `postgres`, `redis`, `valkey` | 39 | v0.8 deployment docs | Deployment docs retain optional Redis/Valkey coordination and historical restore notes. |
