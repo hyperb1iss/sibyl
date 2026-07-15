@@ -30,6 +30,7 @@ class QueuePort(Protocol):
         entities_data: Sequence[Mapping[str, Any]],
         group_id: str,
         relationships: Sequence[Mapping[str, Any]] | None,
+        completion_manifest: Mapping[str, Any] | None = None,
     ) -> str: ...
 
     async def enqueue_update_task(

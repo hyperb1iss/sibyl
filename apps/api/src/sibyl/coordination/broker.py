@@ -103,7 +103,13 @@ def entity_embedding_job_id(
     group_id: str,
     *,
     relationships: list[dict[str, Any]] | None = None,
+    completion_manifest: dict[str, Any] | None = None,
 ) -> str:
+    manifest_metadata: dict[str, Any] = {}
+    if isinstance(completion_manifest, dict):
+        candidate_metadata = completion_manifest.get("metadata")
+        if isinstance(candidate_metadata, dict):
+            manifest_metadata = dict(candidate_metadata)
     entity_inputs = [
         {
             "id": str(entity.get("id") or ""),
@@ -140,6 +146,12 @@ def entity_embedding_job_id(
             "group_id": group_id,
             "entities": sorted(entity_inputs, key=lambda item: item["id"]),
             "relationships": sorted(relationship_inputs, key=lambda item: item["id"]),
+            "completion_manifest": {
+                "id": str(completion_manifest.get("id") or ""),
+                "content_hash": str(manifest_metadata.get("operational_content_hash") or ""),
+            }
+            if completion_manifest
+            else None,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -242,6 +254,7 @@ class QueueBroker(Protocol):
         group_id: str,
         *,
         relationships: list[dict[str, Any]] | None = None,
+        completion_manifest: dict[str, Any] | None = None,
     ) -> str: ...
 
     async def enqueue_create_learning_episode(

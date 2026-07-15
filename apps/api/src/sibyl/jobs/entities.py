@@ -29,6 +29,63 @@ _EMBEDDING_BACKFILL_MAX_ATTEMPTS = 4
 _EMBEDDING_BACKFILL_RETRY_BASE_SECONDS = 0.25
 
 
+def _operational_manifest_state(current: Any, expected: Any) -> str:
+    if current is None:
+        return "missing"
+    current_metadata = current.metadata
+    expected_metadata = expected.metadata
+    identity_keys = (
+        "operational_source_id",
+        "operational_schema_version",
+        "operational_content_hash",
+        "project_id",
+    )
+    if current.id != expected.id or any(
+        current_metadata.get(key) != expected_metadata.get(key) for key in identity_keys
+    ):
+        return "stale"
+    for inventory_key in ("expected_entity_ids", "expected_relationship_ids"):
+        if set(current_metadata.get(inventory_key) or ()) != set(
+            expected_metadata.get(inventory_key) or ()
+        ):
+            return "stale"
+    state = str(current_metadata.get("operational_projection_state") or "")
+    if state == "complete":
+        return "complete"
+    if state == "embedding_pending":
+        return "pending"
+    return "stale"
+
+
+async def _load_operational_manifest_state(entity_manager: Any, expected: Any) -> str:
+    try:
+        current = await entity_manager.get(expected.id)
+    except KeyError:
+        current = None
+    return _operational_manifest_state(current, expected)
+
+
+async def _complete_operational_manifest(
+    entity_manager: Any,
+    expected: Any,
+    *,
+    group_id: str,
+) -> str:
+    from sibyl.locks import entity_lock
+
+    async with entity_lock(group_id, expected.id, blocking=True):
+        state = await _load_operational_manifest_state(entity_manager, expected)
+        if state != "pending":
+            return state
+        written = await entity_manager.create_direct_bulk(
+            (expected,),
+            generate_embeddings=False,
+        )
+        if expected.id not in written:
+            raise RuntimeError("failed to complete operational embedding manifest")
+        return "completed"
+
+
 def serialize_memory_policy_context(
     policy_context: MemoryPolicyContext | None,
 ) -> dict[str, Any] | None:
@@ -748,6 +805,7 @@ async def backfill_entity_embeddings(
     group_id: str,
     *,
     relationships: list[dict[str, Any]] | None = None,
+    completion_manifest: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Generate native graph embeddings after a lexical-first write."""
     from sibyl_core.models.entities import Entity, Relationship
@@ -758,11 +816,51 @@ async def backfill_entity_embeddings(
             group_id,
             embedding_provider=embedding_provider,
         )
+        expected_manifest = (
+            Entity.model_validate(completion_manifest) if completion_manifest else None
+        )
+        if expected_manifest is not None:
+            manifest_state = await _load_operational_manifest_state(
+                runtime.entity_manager,
+                expected_manifest,
+            )
+            if manifest_state == "missing":
+                raise RuntimeError("operational embedding manifest is missing")
+            if manifest_state in {"complete", "stale"}:
+                return {
+                    "entities": 0,
+                    "relationships": 0,
+                    "entity_ids": [],
+                    "relationship_ids": [],
+                    "embedding_usage": embedding_usage,
+                    "manifest_state": manifest_state,
+                }
         entities = [Entity.model_validate(entity_data) for entity_data in entities_data]
         created_ids = await _retry_surreal_write_conflict(
             "entity_embedding_backfill_entities",
             lambda: runtime.entity_manager.backfill_embeddings_if_current(entities),
         )
+        expected_entity_ids = {entity.id for entity in entities}
+        if set(created_ids) != expected_entity_ids:
+            if expected_manifest is not None:
+                manifest_state = await _load_operational_manifest_state(
+                    runtime.entity_manager,
+                    expected_manifest,
+                )
+                if manifest_state in {"complete", "stale"}:
+                    return {
+                        "entities": len(created_ids),
+                        "relationships": 0,
+                        "entity_ids": list(created_ids),
+                        "relationship_ids": [],
+                        "embedding_usage": embedding_usage,
+                        "manifest_state": manifest_state,
+                    }
+            missing_ids = sorted(expected_entity_ids - set(created_ids))
+            raise RuntimeError(
+                "partial entity embedding backfill; "
+                f"missing current entities: {', '.join(missing_ids)}"
+            )
 
         relationship_ids: list[str] = []
         if relationships:
@@ -786,6 +884,23 @@ async def backfill_entity_embeddings(
                     await runtime.relationship_manager.create(relationship)
                     for relationship in relationship_models
                 ]
+            expected_relationship_ids = {relationship.id for relationship in relationship_models}
+            if set(relationship_ids) != expected_relationship_ids:
+                missing_ids = sorted(expected_relationship_ids - set(relationship_ids))
+                raise RuntimeError(
+                    "partial relationship embedding backfill; "
+                    f"missing current relationships: {', '.join(missing_ids)}"
+                )
+
+        manifest_state = None
+        if expected_manifest is not None:
+            manifest_state = await _complete_operational_manifest(
+                runtime.entity_manager,
+                expected_manifest,
+                group_id=group_id,
+            )
+            if manifest_state == "missing":
+                raise RuntimeError("operational embedding manifest disappeared")
 
     result = {
         "entities": len(created_ids),
@@ -794,6 +909,8 @@ async def backfill_entity_embeddings(
         "relationship_ids": relationship_ids,
         "embedding_usage": embedding_usage,
     }
+    if manifest_state is not None:
+        result["manifest_state"] = manifest_state
     log.info("entity_embedding_backfill_complete", **result)
     return result
 

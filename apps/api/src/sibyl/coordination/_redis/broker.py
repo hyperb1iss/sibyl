@@ -328,19 +328,25 @@ class RedisQueueBroker:
         group_id: str,
         *,
         relationships: list[dict[str, Any]] | None = None,
+        completion_manifest: dict[str, Any] | None = None,
     ) -> str:
         """Enqueue embedding backfill for lexically-created graph records."""
         job_id = entity_embedding_job_id(
             entities_data,
             group_id,
             relationships=relationships,
+            completion_manifest=completion_manifest,
         )
+        job_kwargs: dict[str, Any] = {"relationships": relationships}
+        if completion_manifest is not None:
+            job_kwargs["completion_manifest"] = completion_manifest
         result = await self._enqueue_unique(
             "backfill_entity_embeddings",
             entities_data,
             group_id,
             job_id=job_id,
-            relationships=relationships,
+            clear_result=True,
+            **job_kwargs,
         )
 
         if not result.created:

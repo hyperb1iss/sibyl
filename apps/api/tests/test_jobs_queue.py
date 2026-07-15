@@ -357,6 +357,26 @@ async def test_enqueue_source_import_drain_indexes_run_scoped_job() -> None:
 
 
 @pytest.mark.asyncio
+async def test_enqueue_embedding_backfill_clears_retained_result_and_passes_manifest() -> None:
+    pool = RecordingEnqueuePool()
+    broker = make_broker(pool)
+    manifest = {
+        "id": "manifest-1",
+        "metadata": {"operational_content_hash": "hash-1"},
+    }
+
+    job_id = await broker.enqueue_entity_embedding_backfill(
+        [{"id": "session-1", "content": "evidence"}],
+        "org-123",
+        completion_manifest=manifest,
+    )
+
+    assert pool.calls[0][0] == "backfill_entity_embeddings"
+    assert pool.calls[0][2]["completion_manifest"] == manifest
+    pool.delete.assert_awaited_once_with(f"arq:result:{job_id}")
+
+
+@pytest.mark.asyncio
 async def test_enqueue_raw_promotion_indexes_org_scoped_job() -> None:
     pool = RecordingEnqueuePool()
     broker = make_broker(pool)

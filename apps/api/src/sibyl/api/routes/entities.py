@@ -64,7 +64,7 @@ from sibyl.persistence.content_runtime import (
 from sibyl_core.auth import AuthOrganization, MemoryPolicyContext, OrganizationRole, ProjectRole
 from sibyl_core.auth.memory_policy import authorize_memory_read
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
-from sibyl_core.projection import extract_projected_memory_entities
+from sibyl_core.projection import MANIFEST_STATE_COMPLETE, extract_projected_memory_entities
 from sibyl_core.services import KnowledgeReadService
 from sibyl_core.tools.helpers import _generate_id
 
@@ -1604,29 +1604,68 @@ async def requeue_entity_background_jobs(
         entities.append(entity)
 
     requested_jobs = set(request.jobs)
-    serialized = [entity.model_dump(mode="json") for entity in entities]
     background_jobs: dict[str, Any] = {}
     if "embedding_backfill" in requested_jobs:
         from sibyl.jobs.queue import enqueue_entity_embedding_backfill
 
-        relationship_groups = await asyncio.gather(
-            *(runtime.relationship_manager.get_for_entity(entity.id) for entity in entities)
-        )
-        relationships = {
-            relationship.id: relationship for group in relationship_groups for relationship in group
-        }
-        serialized_relationships = [
-            relationship.model_dump(mode="json") for relationship in relationships.values()
+        completion_manifest: dict[str, Any] | None = None
+        embedding_entities = entities
+        pending_manifests = [
+            entity
+            for entity in entities
+            if entity.entity_type is EntityType.ARTIFACT
+            and entity.metadata.get("projection_kind") == "manifest"
+            and entity.metadata.get("operational_projection_state") == "embedding_pending"
         ]
+        if len(pending_manifests) == 1:
+            pending_manifest = pending_manifests[0]
+            expected_ids = {
+                str(entity_id)
+                for entity_id in pending_manifest.metadata.get("expected_entity_ids") or ()
+            }
+            if expected_ids == {entity.id for entity in entities}:
+                embedding_entities = [
+                    entity
+                    for entity in entities
+                    if entity.id != pending_manifest.id
+                    and entity.entity_type is not EntityType.ARTIFACT
+                ]
+                completion_manifest = pending_manifest.model_copy(
+                    update={
+                        "metadata": {
+                            **pending_manifest.metadata,
+                            "operational_projection_state": MANIFEST_STATE_COMPLETE,
+                        }
+                    }
+                ).model_dump(mode="json")
+
+        serialized_relationships: list[dict[str, Any]] = []
+        if completion_manifest is None:
+            relationship_groups = await asyncio.gather(
+                *(runtime.relationship_manager.get_for_entity(entity.id) for entity in entities)
+            )
+            relationships = {
+                relationship.id: relationship
+                for group in relationship_groups
+                for relationship in group
+            }
+            serialized_relationships = [
+                relationship.model_dump(mode="json") for relationship in relationships.values()
+            ]
+        embedding_job_kwargs: dict[str, Any] = {
+            "relationships": serialized_relationships,
+        }
+        if completion_manifest is not None:
+            embedding_job_kwargs["completion_manifest"] = completion_manifest
         job_id = await enqueue_entity_embedding_backfill(
-            serialized,
+            [entity.model_dump(mode="json") for entity in embedding_entities],
             group_id,
-            relationships=serialized_relationships,
+            **embedding_job_kwargs,
         )
         background_jobs["embedding_backfill"] = {
             "status": "queued",
             "job_ids": [job_id],
-            "queued_entities": len(entities),
+            "queued_entities": len(embedding_entities),
             "queued_relationships": len(serialized_relationships),
         }
     if "memory_projection" in requested_jobs:

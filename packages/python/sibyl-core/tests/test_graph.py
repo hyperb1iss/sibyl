@@ -1222,6 +1222,54 @@ async def test_native_embedding_backfill_cannot_overwrite_or_resurrect_stale_ent
 
 
 @pytest.mark.asyncio
+async def test_native_embedding_backfill_accepts_hydrated_storage_defaults() -> None:
+    client = SurrealGraphClient(group_id="org-native-hydrated-embedding", url="memory://")
+    provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider="deterministic",
+            model="unit-test",
+            dimensions=1024,
+            cache_namespace="native-hydrated-embedding-test",
+            tokenizer_estimate_method="utf8-byte-length",
+        )
+    )
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(
+            client,
+            group_id=client.group_id,
+            embedding_provider=provider,
+        )
+        embed_texts = AsyncMock(wraps=provider.embed_texts)
+        provider.embed_texts = embed_texts  # type: ignore[method-assign]
+        raw = Entity(
+            id="session_hydrated",
+            entity_type=EntityType.SESSION,
+            name="  Captured state\n",
+            content="  exact evidence bytes\n",
+            organization_id=client.group_id,
+        )
+        await manager.create_direct(raw)
+        hydrated = await manager.get(raw.id)
+
+        hydrated_ids = await manager.backfill_embeddings_if_current((hydrated,))
+        first_call_count = embed_texts.await_count
+        stored = await manager.get(raw.id)
+        repeated_ids = await manager.backfill_embeddings_if_current((hydrated,))
+    finally:
+        await client.close()
+
+    assert hydrated.name == "Captured state"
+    assert hydrated.description == "Captured state"
+    assert hydrated.content == "exact evidence bytes"
+    assert hydrated_ids == [raw.id]
+    assert repeated_ids == [raw.id]
+    assert stored.embedding
+    assert first_call_count == 1
+    assert embed_texts.await_count == first_call_count
+
+
+@pytest.mark.asyncio
 async def test_native_relationship_bulk_persists_edges_readable_after_write() -> None:
     # Regression guard for the bulk relates_to upsert path: it must execute and
     # persist edges that are then readable (the prior unit test used a fake client

@@ -56,6 +56,7 @@ class ApiQueuePort:
         entities_data: Sequence[Mapping[str, Any]],
         group_id: str,
         relationships: Sequence[Mapping[str, Any]] | None,
+        completion_manifest: Mapping[str, Any] | None = None,
     ) -> str:
         from sibyl.jobs.queue import enqueue_entity_embedding_backfill
 
@@ -63,6 +64,7 @@ class ApiQueuePort:
             [dict(entity_data) for entity_data in entities_data],
             group_id,
             relationships=[dict(relationship) for relationship in relationships or ()] or None,
+            completion_manifest=dict(completion_manifest) if completion_manifest else None,
         )
 
     async def enqueue_update_task(

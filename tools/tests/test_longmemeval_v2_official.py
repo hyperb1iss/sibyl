@@ -2298,6 +2298,67 @@ def test_sibyl_memory_requeues_job_lost_after_broker_restart() -> None:
     assert memory._pending_job_entity_ids == {}
 
 
+def test_sibyl_memory_requeues_failed_job_once() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    paths: list[str] = []
+    status_calls = 0
+
+    def fake_request(
+        method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        nonlocal status_calls
+        del params
+        paths.append(path)
+        if path == "/jobs/status":
+            assert method == "POST"
+            status_calls += 1
+            return {
+                "jobs": {
+                    "embed-failed": {
+                        "status": "complete",
+                        "error": "provider unavailable" if status_calls == 1 else None,
+                        "result": {},
+                    }
+                }
+            }
+        assert path == "/entities/bulk/requeue-background-jobs"
+        return {
+            "entity_ids": ["session-one"],
+            "background_jobs": {
+                "embedding_backfill": {
+                    "status": "queued",
+                    "job_ids": ["embed-failed"],
+                }
+            },
+        }
+
+    memory.defer_embeddings = True
+    memory.checkpoint_dir = None
+    memory.embedding_job_wait_timeout_seconds = 1.0
+    memory.embedding_job_poll_seconds = 0.0
+    memory.ingest_embedding_usage = {}
+    memory._pending_embedding_job_ids = {"embed-failed"}
+    memory._pending_projection_job_ids = set()
+    memory._pending_job_entity_ids = {"embed-failed": ["session-one"]}
+    memory._request_json = fake_request
+
+    memory._drain_embedding_backfills()
+
+    assert paths == [
+        "/jobs/status",
+        "/entities/bulk/requeue-background-jobs",
+        "/jobs/status",
+    ]
+    assert memory._pending_embedding_job_ids == set()
+    assert memory._pending_job_entity_ids == {}
+
+
 def test_sibyl_memory_chunks_large_job_status_batches() -> None:
     module = _load_memory_module()
     memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)

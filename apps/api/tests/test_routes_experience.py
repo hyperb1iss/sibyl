@@ -145,8 +145,9 @@ async def test_capture_persists_authorized_experience_and_queues_embeddings() ->
     assert response.entity_ids == list(projection.manifest.entity_ids)
     assert response.relationship_ids == list(projection.manifest.relationship_ids)
     assert response.background_jobs["embedding_backfill"]["job_ids"] == ["embed-1"]
-    manifest_write = runtime.entity_manager.create_direct_bulk.await_args.args[0]
-    assert manifest_write[0].metadata["operational_projection_state"] == "complete"
+    completion_manifest = enqueue.await_args.kwargs["completion_manifest"]
+    assert completion_manifest["metadata"]["operational_projection_state"] == "complete"
+    runtime.entity_manager.create_direct_bulk.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -280,7 +281,7 @@ async def test_capture_reuses_pending_projection_and_resumes_embedding_job() -> 
     assert response.written_entities == 0
     assert response.background_jobs["embedding_backfill"]["job_ids"] == ["embed-existing"]
     assert len(enqueue.await_args.args[0]) == len(projection.entities) - 1
-    runtime.entity_manager.create_direct_bulk.assert_awaited_once()
+    runtime.entity_manager.create_direct_bulk.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -415,7 +416,7 @@ async def test_capture_reports_degraded_embedding_enqueue() -> None:
 
 
 @pytest.mark.asyncio
-async def test_capture_reports_degraded_manifest_commit_after_enqueue() -> None:
+async def test_capture_delegates_manifest_completion_to_embedding_job() -> None:
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     ctx = SimpleNamespace(user_id="user-1")
     projection = project_operational_experience(_request().experience)
@@ -456,10 +457,10 @@ async def test_capture_reports_degraded_manifest_commit_after_enqueue() -> None:
         )
 
     job = response.background_jobs["embedding_backfill"]
-    assert job["status"] == "degraded"
-    assert job["error"] == "manifest_commit_failed"
+    assert job["status"] == "queued"
     assert job["job_ids"] == ["embed-1"]
     assert job["queued_entities"] > 0
+    runtime.entity_manager.create_direct_bulk.assert_not_awaited()
 
 
 @pytest.mark.asyncio

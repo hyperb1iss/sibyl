@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -25,6 +26,33 @@ from sibyl_core.models.entities import (
     RelationshipType,
 )
 from sibyl_core.models.tasks import Task, TaskStatus
+
+
+@asynccontextmanager
+async def _acquired_lock(*_args: object, **_kwargs: object):
+    yield "lock-token"
+
+
+def _embedding_manifest(
+    *,
+    state: str,
+    content_hash: str = "hash-1",
+) -> Entity:
+    return Entity(
+        id="artifact_operational_capture-1",
+        entity_type=EntityType.ARTIFACT,
+        name="Operational experience manifest",
+        content="capture-1",
+        metadata={
+            "operational_source_id": "capture-1",
+            "operational_schema_version": 1,
+            "operational_content_hash": content_hash,
+            "operational_projection_state": state,
+            "project_id": "project-1",
+            "expected_entity_ids": ["session-123"],
+            "expected_relationship_ids": [],
+        },
+    )
 
 
 def _policy_payload(project_id: str = "proj-1", org_id: str = "org-1") -> dict[str, object]:
@@ -266,6 +294,116 @@ class TestBackfillEntityEmbeddingsJob:
             relationship_manager=MagicMock(),
         )
 
+        with (
+            patch(
+                "sibyl.jobs.entities.get_surreal_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            pytest.raises(RuntimeError, match="partial entity embedding backfill"),
+        ):
+            await backfill_entity_embeddings(
+                {},
+                [entity.model_dump(mode="json")],
+                "org-1",
+            )
+
+        entity_manager.backfill_embeddings_if_current.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_completes_manifest_only_after_every_entity_is_ready(self) -> None:
+        entity = Entity(
+            id="session-123",
+            entity_type=EntityType.SESSION,
+            name="Operational session",
+            content="Persisted before embeddings were available.",
+        )
+        pending_manifest = _embedding_manifest(state="embedding_pending")
+        complete_manifest = _embedding_manifest(state="complete")
+        entity_manager = MagicMock()
+        entity_manager.get = AsyncMock(side_effect=[pending_manifest, pending_manifest])
+        entity_manager.backfill_embeddings_if_current = AsyncMock(return_value=[entity.id])
+        entity_manager.create_direct_bulk = AsyncMock(return_value=[complete_manifest.id])
+        runtime = SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=MagicMock(),
+        )
+
+        with (
+            patch(
+                "sibyl.jobs.entities.get_surreal_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch("sibyl.locks.entity_lock", _acquired_lock),
+        ):
+            result = await backfill_entity_embeddings(
+                {},
+                [entity.model_dump(mode="json")],
+                "org-1",
+                completion_manifest=complete_manifest.model_dump(mode="json"),
+            )
+
+        assert result["manifest_state"] == "completed"
+        entity_manager.create_direct_bulk.assert_awaited_once()
+        written = entity_manager.create_direct_bulk.await_args.args[0]
+        assert written[0].metadata["operational_projection_state"] == "complete"
+
+    @pytest.mark.asyncio
+    async def test_partial_backfill_leaves_current_manifest_pending(self) -> None:
+        entity = Entity(
+            id="session-123",
+            entity_type=EntityType.SESSION,
+            name="Operational session",
+            content="Persisted before embeddings were available.",
+        )
+        pending_manifest = _embedding_manifest(state="embedding_pending")
+        complete_manifest = _embedding_manifest(state="complete")
+        entity_manager = MagicMock()
+        entity_manager.get = AsyncMock(side_effect=[pending_manifest, pending_manifest])
+        entity_manager.backfill_embeddings_if_current = AsyncMock(return_value=[])
+        entity_manager.create_direct_bulk = AsyncMock()
+        runtime = SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=MagicMock(),
+        )
+
+        with (
+            patch(
+                "sibyl.jobs.entities.get_surreal_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            pytest.raises(RuntimeError, match="partial entity embedding backfill"),
+        ):
+            await backfill_entity_embeddings(
+                {},
+                [entity.model_dump(mode="json")],
+                "org-1",
+                completion_manifest=complete_manifest.model_dump(mode="json"),
+            )
+
+        entity_manager.create_direct_bulk.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_stale_manifest_makes_partial_old_job_a_noop(self) -> None:
+        entity = Entity(
+            id="session-123",
+            entity_type=EntityType.SESSION,
+            name="Operational session",
+            content="Persisted before embeddings were available.",
+        )
+        pending_manifest = _embedding_manifest(state="embedding_pending")
+        stale_manifest = _embedding_manifest(
+            state="embedding_pending",
+            content_hash="hash-2",
+        )
+        complete_manifest = _embedding_manifest(state="complete")
+        entity_manager = MagicMock()
+        entity_manager.get = AsyncMock(side_effect=[pending_manifest, stale_manifest])
+        entity_manager.backfill_embeddings_if_current = AsyncMock(return_value=[])
+        runtime = SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=MagicMock(),
+        )
+
         with patch(
             "sibyl.jobs.entities.get_surreal_graph_runtime",
             AsyncMock(return_value=runtime),
@@ -274,10 +412,42 @@ class TestBackfillEntityEmbeddingsJob:
                 {},
                 [entity.model_dump(mode="json")],
                 "org-1",
+                completion_manifest=complete_manifest.model_dump(mode="json"),
             )
 
+        assert result["manifest_state"] == "stale"
         assert result["entities"] == 0
-        entity_manager.backfill_embeddings_if_current.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_completed_manifest_makes_duplicate_job_a_noop(self) -> None:
+        entity = Entity(
+            id="session-123",
+            entity_type=EntityType.SESSION,
+            name="Operational session",
+            content="Persisted before embeddings were available.",
+        )
+        complete_manifest = _embedding_manifest(state="complete")
+        entity_manager = MagicMock()
+        entity_manager.get = AsyncMock(return_value=complete_manifest)
+        entity_manager.backfill_embeddings_if_current = AsyncMock()
+        runtime = SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=MagicMock(),
+        )
+
+        with patch(
+            "sibyl.jobs.entities.get_surreal_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ):
+            result = await backfill_entity_embeddings(
+                {},
+                [entity.model_dump(mode="json")],
+                "org-1",
+                completion_manifest=complete_manifest.model_dump(mode="json"),
+            )
+
+        assert result["manifest_state"] == "complete"
+        entity_manager.backfill_embeddings_if_current.assert_not_awaited()
 
 
 class TestCreateLearningEpisodeJob:

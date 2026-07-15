@@ -127,17 +127,11 @@ async def capture_operational_experience(
                     job_id = await enqueue_entity_embedding_backfill(
                         [entity.model_dump(mode="json") for entity in embeddable],
                         group_id,
+                        completion_manifest=operational_experience_manifest_with_state(
+                            result.projection,
+                            MANIFEST_STATE_COMPLETE,
+                        ).model_dump(mode="json"),
                     )
-                    complete_manifest = operational_experience_manifest_with_state(
-                        result.projection,
-                        MANIFEST_STATE_COMPLETE,
-                    )
-                    committed = await runtime.entity_manager.create_direct_bulk(
-                        (complete_manifest,),
-                        generate_embeddings=False,
-                    )
-                    if complete_manifest.id not in committed:
-                        raise RuntimeError("failed to commit operational experience manifest")
                     background_jobs["embedding_backfill"] = {
                         "status": "queued",
                         "job_ids": [job_id],
@@ -145,7 +139,7 @@ async def capture_operational_experience(
                         "queued_relationships": 0,
                     }
                 except Exception as exc:
-                    error_code = "manifest_commit_failed" if job_id else "enqueue_failed"
+                    error_code = "enqueue_failed"
                     background_jobs["embedding_backfill"] = {
                         "status": "degraded",
                         "job_ids": [job_id] if job_id else [],

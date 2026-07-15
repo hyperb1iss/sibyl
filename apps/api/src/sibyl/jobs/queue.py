@@ -168,12 +168,14 @@ async def enqueue_entity_embedding_backfill(
     group_id: str,
     *,
     relationships: list[dict[str, Any]] | None = None,
+    completion_manifest: dict[str, Any] | None = None,
 ) -> str:
     """Enqueue embedding backfill for lexically-created graph records."""
     return await get_queue().enqueue_entity_embedding_backfill(
         entities_data,
         group_id,
         relationships=relationships,
+        completion_manifest=completion_manifest,
     )
 
 

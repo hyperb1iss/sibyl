@@ -1803,10 +1803,25 @@ class SibylLiveApiMemory(Memory):
                 if last_statuses.get(job_id) != status_value:
                     made_progress = True
                 last_statuses[job_id] = status_value
-                if status_value == "complete":
-                    if status.get("error"):
-                        msg = f"{job_name} job {job_id} failed: {status['error']}"
+                recoverable_failure = status_value == "complete" and bool(status.get("error"))
+                if status_value == "not_found" or recoverable_failure:
+                    if job_id in recovered_job_ids:
+                        if recoverable_failure:
+                            msg = f"requeued {job_name} job {job_id} failed: {status['error']}"
+                        else:
+                            msg = f"requeued {job_name} job {job_id} is still not found"
                         raise RuntimeError(msg)
+                    replacements = self._recover_background_job(
+                        job_id,
+                        job_kind=job_kind,
+                    )
+                    pending.remove(job_id)
+                    pending.update(replacements)
+                    recovered_job_ids.update(replacements)
+                    last_statuses.pop(job_id, None)
+                    made_progress = True
+                    continue
+                if status_value == "complete":
                     result = status.get("result")
                     if isinstance(result, dict):
                         result_errors = result.get("errors")
@@ -1823,19 +1838,6 @@ class SibylLiveApiMemory(Memory):
                         )
                     pending.remove(job_id)
                     self._pending_job_entity_ids.pop(job_id, None)
-                    made_progress = True
-                elif status_value == "not_found":
-                    if job_id in recovered_job_ids:
-                        msg = f"requeued {job_name} job {job_id} is still not found"
-                        raise RuntimeError(msg)
-                    replacements = self._recover_background_job(
-                        job_id,
-                        job_kind=job_kind,
-                    )
-                    pending.remove(job_id)
-                    pending.update(replacements)
-                    recovered_job_ids.update(replacements)
-                    last_statuses.pop(job_id, None)
                     made_progress = True
                 elif status_value == "cancelled":
                     msg = f"{job_name} job {job_id} ended as {status_value}"

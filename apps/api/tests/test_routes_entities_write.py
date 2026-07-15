@@ -412,6 +412,80 @@ async def test_requeue_entity_background_jobs_uses_persisted_entities() -> None:
 
 
 @pytest.mark.asyncio
+async def test_requeue_operational_embedding_job_restores_manifest_completion() -> None:
+    org = _org()
+    ctx = _ctx()
+    event = Entity(
+        id="event_capture-1",
+        entity_type=EntityType.EVENT,
+        name="Incident state",
+        content="Incident INC001 is closed.",
+        organization_id=str(org.id),
+        metadata={"project_id": "project_shared"},
+    )
+    manifest = Entity(
+        id="artifact_capture-1",
+        entity_type=EntityType.ARTIFACT,
+        name="Operational experience manifest",
+        content="capture-1",
+        organization_id=str(org.id),
+        metadata={
+            "project_id": "project_shared",
+            "projection_kind": "manifest",
+            "operational_projection_state": "embedding_pending",
+            "expected_entity_ids": [event.id, "artifact_capture-1"],
+            "expected_relationship_ids": ["rel-event-manifest"],
+        },
+    )
+    persisted = {event.id: event, manifest.id: manifest}
+    relationship_manager = SimpleNamespace(get_for_entity=AsyncMock())
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(side_effect=lambda entity_id: persisted[entity_id])
+        ),
+        relationship_manager=relationship_manager,
+    )
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "sibyl.api.routes.entities.verify_entity_project_access",
+            AsyncMock(),
+        ),
+        patch(
+            "sibyl.api.routes.entities._require_entity_read_access",
+            AsyncMock(return_value={"project_shared"}),
+        ),
+        patch(
+            "sibyl.jobs.queue.enqueue_entity_embedding_backfill",
+            AsyncMock(return_value="embed-restored"),
+        ) as enqueue_embeddings,
+    ):
+        response = await requeue_entity_background_jobs(
+            request=EntityBackgroundJobsRequeueRequest(
+                entity_ids=[event.id, manifest.id],
+                jobs=["embedding_backfill"],
+            ),
+            org=org,
+            ctx=ctx,
+            content_session="session",
+        )
+
+    embedding_payload, embedding_group = enqueue_embeddings.await_args.args
+    assert embedding_group == str(org.id)
+    assert [entity["id"] for entity in embedding_payload] == [event.id]
+    assert enqueue_embeddings.await_args.kwargs["relationships"] == []
+    completion_manifest = enqueue_embeddings.await_args.kwargs["completion_manifest"]
+    assert completion_manifest["id"] == manifest.id
+    assert completion_manifest["metadata"]["operational_projection_state"] == "complete"
+    relationship_manager.get_for_entity.assert_not_awaited()
+    assert response.background_jobs["embedding_backfill"]["queued_entities"] == 1
+
+
+@pytest.mark.asyncio
 async def test_requeue_entity_background_jobs_hides_unreadable_entities() -> None:
     entity = Entity(
         id="session_private",

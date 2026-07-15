@@ -333,18 +333,54 @@ class EntityManager:
         embedding_batch_size: int = 64,
     ) -> list[str]:
         async def load_matching_entity(expected: Entity) -> Entity | None:
-            try:
-                current = await self.get(expected.id)
-            except KeyError:
+            row = await _select_one(
+                self._client,
+                """
+                SELECT * FROM entity
+                WHERE group_id = $group_id AND uuid = $uuid
+                LIMIT 1;
+                """,
+                group_id=self._group_id,
+                uuid=expected.id,
+            )
+            if row is None:
                 return None
-            if entity_embedding_text(current) != _persisted_entity_embedding_text(expected):
+            hydrated = entity_from_surreal_row(row)
+            hydrated_text = entity_embedding_text(hydrated)
+            if hydrated_text not in {
+                entity_embedding_text(expected),
+                _persisted_entity_embedding_text(expected),
+            }:
                 return None
-            return expected
+            return hydrated.model_copy(
+                update={
+                    "name": str(row.get("name") or ""),
+                    "description": str(row.get("description") or ""),
+                    "content": str(row.get("content") or ""),
+                }
+            )
 
         loaded = await asyncio.gather(*(load_matching_entity(entity) for entity in entities))
         current_entities = [entity for entity in loaded if entity is not None]
+        provider_metadata = (
+            self._embedding_provider.metadata.to_dict() if self._embedding_provider else None
+        )
+        ready_ids = {
+            entity.id
+            for entity in current_entities
+            if entity.embedding
+            and (
+                provider_metadata is None
+                or entity.metadata.get("embedding_metadata") == provider_metadata
+            )
+        }
+        pending_entities = [
+            entity.model_copy(update={"embedding": None})
+            for entity in current_entities
+            if entity.id not in ready_ids
+        ]
         prepared = await self.prepare_entities_for_write(
-            current_entities,
+            pending_entities,
             generate_embeddings=True,
             embedding_batch_size=embedding_batch_size,
         )
@@ -358,7 +394,10 @@ class EntityManager:
                 for entity in prepared
             )
         )
-        return [entity.id for entity, persisted in zip(prepared, written, strict=True) if persisted]
+        ready_ids.update(
+            entity.id for entity, persisted in zip(prepared, written, strict=True) if persisted
+        )
+        return [entity.id for entity in current_entities if entity.id in ready_ids]
 
     async def create(self, entity: Entity) -> str:
         return await self.create_direct(entity, generate_embedding=True)
@@ -2660,6 +2699,7 @@ def _persisted_entity_embedding_text(entity: Entity) -> str:
     summary = entity.description[:500] if entity.description else entity.name
     persisted = entity.model_copy(
         update={
+            "name": entity.name.strip(),
             "description": (entity.description or summary).strip(),
             "content": (entity.content or summary).strip(),
         }

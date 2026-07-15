@@ -25,9 +25,18 @@ def test_embedding_job_identity_tracks_content_and_ignores_input_order() -> None
         [{**first, "content": "changed"}, second],
         "org-1",
     )
+    changed_manifest = entity_embedding_job_id(
+        [first, second],
+        "org-1",
+        completion_manifest={
+            "id": "manifest-1",
+            "metadata": {"operational_content_hash": "hash-2"},
+        },
+    )
 
     assert reordered == original
     assert changed != original
+    assert changed_manifest != original
 
 
 @pytest.mark.asyncio
@@ -694,6 +703,45 @@ async def test_local_queue_broker_force_reruns_completed_job() -> None:
     assert same_info.result == {"source_id": "source_123", "calls": 1}
     assert forced_info.result == {"source_id": "source_123", "calls": 2}
     assert calls == ["source_123", "source_123"]
+
+    await broker.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_local_queue_broker_retries_failed_embedding_job() -> None:
+    calls = 0
+
+    async def backfill_entity_embeddings(
+        _ctx: dict[str, object],
+        entities_data: list[dict[str, object]],
+        group_id: str,
+        *,
+        relationships: list[dict[str, object]] | None = None,
+    ) -> dict[str, object]:
+        nonlocal calls
+        del entities_data, group_id, relationships
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("provider unavailable")
+        return {"embedded": True}
+
+    broker = LocalQueueBroker(
+        functions={"backfill_entity_embeddings": backfill_entity_embeddings},
+        max_concurrency=1,
+        result_ttl_seconds=60,
+    )
+
+    await broker.startup()
+    entities = [{"id": "session-1", "content": "evidence"}]
+    first_job_id = await broker.enqueue_entity_embedding_backfill(entities, "org-123")
+    first_info = await _wait_for_job_status(broker, first_job_id, JobStatus.COMPLETE)
+    retry_job_id = await broker.enqueue_entity_embedding_backfill(entities, "org-123")
+    retry_info = await _wait_for_job_status(broker, retry_job_id, JobStatus.COMPLETE)
+
+    assert first_info.error == "provider unavailable"
+    assert retry_job_id == first_job_id
+    assert retry_info.result == {"embedded": True}
+    assert calls == 2
 
     await broker.shutdown()
 
