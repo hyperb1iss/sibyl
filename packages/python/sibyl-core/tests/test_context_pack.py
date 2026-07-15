@@ -703,12 +703,13 @@ async def test_compile_context_batches_default_related_items(
         entity_type=SimpleNamespace(value="task"),
         name="Related task",
         content="source evidence",
-        metadata={},
+        metadata={"operational_source_id": "experience-1", "project_id": "project-1"},
     )
     relationship = SimpleNamespace(
         source_id="decision-1",
         target_id="task-1",
         relationship_type=SimpleNamespace(value="DERIVED_FROM"),
+        metadata={"operational_source_id": "experience-1", "project_id": "project-1"},
     )
     relationship_manager = SimpleNamespace(
         get_related_entities=AsyncMock(return_value=[]),
@@ -734,6 +735,29 @@ async def test_compile_context_batches_default_related_items(
     relationship_manager.get_related_entities.assert_not_awaited()
     assert pack.items[0].related[0].id == "task-1"
     assert pack.items[0].related[0].content == "source evidence"
+
+
+def test_related_source_content_rejects_non_operational_lineage() -> None:
+    from types import SimpleNamespace
+
+    related_entity = SimpleNamespace(
+        content="must remain hidden",
+        metadata={"memory_scope": "private", "principal_id": "other-user"},
+    )
+    relationship = SimpleNamespace(
+        source_id="decision-1",
+        relationship_type=SimpleNamespace(value="DERIVED_FROM"),
+        metadata={},
+    )
+
+    assert (
+        context_module._related_source_content(
+            related_entity,
+            relationship,
+            seed_id="decision-1",
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio

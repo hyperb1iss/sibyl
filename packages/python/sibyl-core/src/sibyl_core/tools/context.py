@@ -355,6 +355,20 @@ def _related_source_content(entity: Any, relationship: Any, *, seed_id: str) -> 
     source_id = str(getattr(relationship, "source_id", ""))
     if relationship_type != "DERIVED_FROM" or source_id != seed_id:
         return None
+    entity_metadata = getattr(entity, "metadata", None)
+    relationship_metadata = getattr(relationship, "metadata", None)
+    if not isinstance(entity_metadata, dict) or not isinstance(relationship_metadata, dict):
+        return None
+    operational_source_id = str(entity_metadata.get("operational_source_id") or "")
+    if not operational_source_id or operational_source_id != str(
+        relationship_metadata.get("operational_source_id") or ""
+    ):
+        return None
+    if any(
+        entity_metadata.get(key) != relationship_metadata.get(key)
+        for key in ("project_id", "scope_key")
+    ):
+        return None
     content = str(getattr(entity, "content", "") or "").strip()
     return content[:MAX_RELATED_SUPPORT_CHARS] or None
 
