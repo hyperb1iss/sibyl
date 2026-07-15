@@ -1172,6 +1172,56 @@ async def test_native_entity_manager_bulk_writes_entities_in_one_surreal_batch()
 
 
 @pytest.mark.asyncio
+async def test_native_embedding_backfill_cannot_overwrite_or_resurrect_stale_entity() -> None:
+    client = SurrealGraphClient(group_id="org-native-fenced-embedding", url="memory://")
+    provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider="deterministic",
+            model="unit-test",
+            dimensions=1024,
+            cache_namespace="native-fenced-embedding-test",
+            tokenizer_estimate_method="utf8-byte-length",
+        )
+    )
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(
+            client,
+            group_id=client.group_id,
+            embedding_provider=provider,
+        )
+        stale = Entity(
+            id="session_fenced",
+            entity_type=EntityType.SESSION,
+            name="Captured state",
+            content="  version one\n",
+            organization_id=client.group_id,
+        )
+        current = stale.model_copy(update={"content": "  version two\n"})
+        await manager.create_direct_bulk((stale,))
+        await manager.create_direct_bulk((current,))
+
+        stale_ids = await manager.backfill_embeddings_if_current((stale,))
+        prepared = await manager.prepare_entities_for_write(
+            (await manager.get(current.id),),
+            generate_embeddings=True,
+        )
+        current_ids = await manager.backfill_embeddings_if_current((current,))
+        stored = await manager.get(current.id)
+        await manager.delete(current.id)
+        deleted_ids = await manager.backfill_embeddings_if_current((stale,))
+    finally:
+        await client.close()
+
+    assert stale_ids == []
+    assert prepared[0].embedding
+    assert current_ids == [current.id]
+    assert stored.content == "version two"
+    assert stored.embedding
+    assert deleted_ids == []
+
+
+@pytest.mark.asyncio
 async def test_native_relationship_bulk_persists_edges_readable_after_write() -> None:
     # Regression guard for the bulk relates_to upsert path: it must execute and
     # persist edges that are then readable (the prior unit test used a fake client

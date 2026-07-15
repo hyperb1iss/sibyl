@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -103,9 +104,47 @@ def entity_embedding_job_id(
     *,
     relationships: list[dict[str, Any]] | None = None,
 ) -> str:
-    entity_ids = [str(entity.get("id") or "") for entity in entities_data]
-    relationship_ids = [str(relationship.get("id") or "") for relationship in relationships or ()]
-    digest = sha256("|".join([group_id, *entity_ids, *relationship_ids]).encode()).hexdigest()[:16]
+    entity_inputs = [
+        {
+            "id": str(entity.get("id") or ""),
+            "entity_type": str(entity.get("entity_type") or ""),
+            "name": str(entity.get("name") or entity.get("title") or ""),
+            "description": str(entity.get("description") or ""),
+            "content": str(entity.get("content") or ""),
+            "summary": str(
+                (entity.get("metadata") or {}).get("summary") or ""
+                if isinstance(entity.get("metadata"), dict)
+                else ""
+            ),
+        }
+        for entity in entities_data
+    ]
+    relationship_inputs = [
+        {
+            "id": str(relationship.get("id") or ""),
+            "source_id": str(relationship.get("source_id") or ""),
+            "target_id": str(relationship.get("target_id") or ""),
+            "relationship_type": str(
+                relationship.get("relationship_type") or relationship.get("type") or ""
+            ),
+            "fact": str(
+                (relationship.get("metadata") or {}).get("fact")
+                if isinstance(relationship.get("metadata"), dict)
+                else ""
+            ),
+        }
+        for relationship in relationships or ()
+    ]
+    payload = json.dumps(
+        {
+            "group_id": group_id,
+            "entities": sorted(entity_inputs, key=lambda item: item["id"]),
+            "relationships": sorted(relationship_inputs, key=lambda item: item["id"]),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = sha256(payload.encode()).hexdigest()[:16]
     return f"embed_entities:{digest}"
 
 

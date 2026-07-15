@@ -761,10 +761,7 @@ async def backfill_entity_embeddings(
         entities = [Entity.model_validate(entity_data) for entity_data in entities_data]
         created_ids = await _retry_surreal_write_conflict(
             "entity_embedding_backfill_entities",
-            lambda: runtime.entity_manager.create_direct_bulk(
-                entities,
-                generate_embeddings=True,
-            ),
+            lambda: runtime.entity_manager.backfill_embeddings_if_current(entities),
         )
 
         relationship_ids: list[str] = []

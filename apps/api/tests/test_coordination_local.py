@@ -12,7 +12,22 @@ from sibyl.coordination._local.broker import LOCAL_BROKER_ERROR, LocalQueueBroke
 from sibyl.coordination._local.events import LocalEventBus
 from sibyl.coordination._local.locks import LocalLockManager
 from sibyl.coordination._local.pending import LocalPendingRegistry
-from sibyl.coordination.broker import JobInfo, JobStatus
+from sibyl.coordination.broker import JobInfo, JobStatus, entity_embedding_job_id
+
+
+def test_embedding_job_identity_tracks_content_and_ignores_input_order() -> None:
+    first = {"id": "entity-1", "entity_type": "session", "content": "first"}
+    second = {"id": "entity-2", "entity_type": "session", "content": "second"}
+
+    original = entity_embedding_job_id([first, second], "org-1")
+    reordered = entity_embedding_job_id([second, first], "org-1")
+    changed = entity_embedding_job_id(
+        [{**first, "content": "changed"}, second],
+        "org-1",
+    )
+
+    assert reordered == original
+    assert changed != original
 
 
 @pytest.mark.asyncio

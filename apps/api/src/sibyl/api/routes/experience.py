@@ -113,12 +113,10 @@ async def capture_operational_experience(
                 ) from exc
 
             background_jobs: dict[str, Any] = {}
-            if payload.defer_embeddings and result.written_entity_ids:
-                written_ids = set(result.written_entity_ids)
+            if payload.defer_embeddings and result.embedding_backfill_required:
                 embeddable = [
                     entity
                     for entity in result.projection.entities
-                    if entity.id in written_ids
                     if entity.id != result.projection.manifest.manifest_entity_id
                     and entity.entity_type is not EntityType.ARTIFACT
                 ]

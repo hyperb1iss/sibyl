@@ -326,6 +326,40 @@ class EntityManager:
             )
         return prepared_entities
 
+    async def backfill_embeddings_if_current(
+        self,
+        entities: Sequence[Entity],
+        *,
+        embedding_batch_size: int = 64,
+    ) -> list[str]:
+        async def load_matching_entity(expected: Entity) -> Entity | None:
+            try:
+                current = await self.get(expected.id)
+            except KeyError:
+                return None
+            if entity_embedding_text(current) != _persisted_entity_embedding_text(expected):
+                return None
+            return expected
+
+        loaded = await asyncio.gather(*(load_matching_entity(entity) for entity in entities))
+        current_entities = [entity for entity in loaded if entity is not None]
+        prepared = await self.prepare_entities_for_write(
+            current_entities,
+            generate_embeddings=True,
+            embedding_batch_size=embedding_batch_size,
+        )
+        written = await asyncio.gather(
+            *(
+                _update_entity_embedding_if_current(
+                    self._client,
+                    entity,
+                    group_id=self._group_id,
+                )
+                for entity in prepared
+            )
+        )
+        return [entity.id for entity, persisted in zip(prepared, written, strict=True) if persisted]
+
     async def create(self, entity: Entity) -> str:
         return await self.create_direct(entity, generate_embedding=True)
 
@@ -2579,6 +2613,58 @@ async def _replace_entities_bulk(
         await prepare_graph_schema(client)
         result = await _execute_replace_entities_with_schema_retry(client, records)
     return normalize_records(result)
+
+
+async def _update_entity_embedding_if_current(
+    client: SurrealGraphClient,
+    entity: Entity,
+    *,
+    group_id: str,
+) -> bool:
+    if not entity.embedding:
+        return False
+    rows = normalize_records(
+        await client.execute_query(
+            """
+            UPDATE entity SET
+                name_embedding = $name_embedding,
+                attributes.embedding_metadata = $embedding_metadata,
+                attributes.updated_at = $updated_at,
+                updated_at = $updated_at,
+                revision = (revision ?? 0) + 1
+            WHERE group_id = $group_id
+              AND uuid = $uuid
+              AND entity_type = $entity_type
+              AND name = $name
+              AND description = $description
+              AND content = $content
+              AND (attributes.summary ?? '') = $summary
+            RETURN AFTER;
+            """,
+            group_id=group_id,
+            uuid=entity.id,
+            entity_type=entity.entity_type.value,
+            name=entity.name,
+            description=entity.description or "",
+            content=entity.content or "",
+            summary=str(entity.metadata.get("summary") or ""),
+            name_embedding=entity.embedding,
+            embedding_metadata=entity.metadata.get("embedding_metadata"),
+            updated_at=datetime.now(UTC),
+        )
+    )
+    return any(str(row.get("uuid") or "") == entity.id for row in rows)
+
+
+def _persisted_entity_embedding_text(entity: Entity) -> str:
+    summary = entity.description[:500] if entity.description else entity.name
+    persisted = entity.model_copy(
+        update={
+            "description": (entity.description or summary).strip(),
+            "content": (entity.content or summary).strip(),
+        }
+    )
+    return entity_embedding_text(persisted)
 
 
 async def _execute_replace_entity_query(

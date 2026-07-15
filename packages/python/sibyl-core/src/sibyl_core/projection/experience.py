@@ -462,14 +462,15 @@ def operational_experience_manifest_id(source_id: str) -> str:
     return _stable_id("artifact", "operational-manifest", source_id)
 
 
-def _is_current_manifest(
+def _manifest_matches_state(
     entity: Entity | None,
     manifest: OperationalExperienceManifest,
+    state: OperationalManifestState,
 ) -> bool:
     if entity is None or entity.entity_type is not EntityType.ARTIFACT:
         return False
     return (
-        entity.metadata.get("operational_projection_state") == MANIFEST_STATE_COMPLETE
+        entity.metadata.get("operational_projection_state") == state
         and entity.metadata.get("operational_schema_version") == manifest.schema_version
         and entity.metadata.get("operational_content_hash") == manifest.content_hash
         and _manifest_inventory(entity, "expected_entity_ids") == set(manifest.entity_ids)
@@ -500,10 +501,12 @@ def operational_experience_manifest_with_state(
     }
     if retained_manifest is not None:
         metadata["expected_entity_ids"] = sorted(
-            _manifest_inventory(retained_manifest, "expected_entity_ids")
+            set(projection.manifest.entity_ids)
+            | _manifest_inventory(retained_manifest, "expected_entity_ids")
         )
         metadata["expected_relationship_ids"] = sorted(
-            _manifest_inventory(retained_manifest, "expected_relationship_ids")
+            set(projection.manifest.relationship_ids)
+            | _manifest_inventory(retained_manifest, "expected_relationship_ids")
         )
     elif state == MANIFEST_STATE_PENDING:
         metadata["expected_entity_ids"] = []
@@ -548,13 +551,30 @@ async def persist_operational_experience(
     except KeyError:
         previous_manifest = None
 
-    if _is_current_manifest(previous_manifest, projection.manifest):
+    if _manifest_matches_state(
+        previous_manifest,
+        projection.manifest,
+        MANIFEST_STATE_COMPLETE,
+    ):
         return OperationalExperienceWriteResult(
             projection=projection,
             written_entity_ids=(),
             written_relationship_ids=(),
             deleted_entity_ids=(),
             deleted_relationship_ids=(),
+        )
+    if _manifest_matches_state(
+        previous_manifest,
+        projection.manifest,
+        MANIFEST_STATE_EMBEDDING_PENDING,
+    ):
+        return OperationalExperienceWriteResult(
+            projection=projection,
+            written_entity_ids=(),
+            written_relationship_ids=(),
+            deleted_entity_ids=(),
+            deleted_relationship_ids=(),
+            embedding_backfill_required=True,
         )
 
     current_entity_ids = set(projection.manifest.entity_ids)
@@ -573,14 +593,6 @@ async def persist_operational_experience(
     projected_entities = tuple(
         entity for entity in projection.entities if entity.id != manifest_entity.id
     )
-    written_entity_ids = _require_complete_write(
-        expected_ids=(entity.id for entity in projected_entities),
-        written_ids=await entity_manager.create_direct_bulk(
-            projected_entities,
-            generate_embeddings=generate_embeddings,
-        ),
-        record_kind="entities",
-    )
     pending_manifest = operational_experience_manifest_with_state(
         projection,
         MANIFEST_STATE_PENDING,
@@ -593,6 +605,14 @@ async def persist_operational_experience(
             generate_embeddings=False,
         ),
         record_kind="pending manifest",
+    )
+    written_entity_ids = _require_complete_write(
+        expected_ids=(entity.id for entity in projected_entities),
+        written_ids=await entity_manager.create_direct_bulk(
+            projected_entities,
+            generate_embeddings=generate_embeddings,
+        ),
+        record_kind="entities",
     )
     written_relationship_ids = _require_complete_write(
         expected_ids=projection.manifest.relationship_ids,
@@ -632,4 +652,5 @@ async def persist_operational_experience(
         written_relationship_ids=tuple(written_relationship_ids),
         deleted_entity_ids=tuple(deleted_entity_ids),
         deleted_relationship_ids=stale_relationship_ids,
+        embedding_backfill_required=not generate_embeddings and not commit_manifest,
     )

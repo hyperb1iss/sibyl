@@ -170,7 +170,7 @@ class TestBackfillEntityEmbeddingsJob:
             relationship_type=RelationshipType.RELATED_TO,
         )
         entity_manager = MagicMock()
-        entity_manager.create_direct_bulk = AsyncMock(return_value=["session-123"])
+        entity_manager.backfill_embeddings_if_current = AsyncMock(return_value=["session-123"])
         relationship_manager = MagicMock()
         relationship_manager.create_direct_bulk = AsyncMock(return_value=["rel-session-project"])
         runtime = SimpleNamespace(
@@ -191,7 +191,7 @@ class TestBackfillEntityEmbeddingsJob:
 
         assert result["entities"] == 1
         assert result["relationships"] == 1
-        assert entity_manager.create_direct_bulk.await_args.kwargs["generate_embeddings"] is True
+        entity_manager.backfill_embeddings_if_current.assert_awaited_once()
         assert (
             relationship_manager.create_direct_bulk.await_args.kwargs["generate_embeddings"] is True
         )
@@ -219,7 +219,7 @@ class TestBackfillEntityEmbeddingsJob:
             content="Persisted before embeddings were available.",
         )
         entity_manager = MagicMock()
-        entity_manager.create_direct_bulk = AsyncMock(
+        entity_manager.backfill_embeddings_if_current = AsyncMock(
             side_effect=[
                 RuntimeError(conflict_message),
                 ["session-123"],
@@ -248,8 +248,36 @@ class TestBackfillEntityEmbeddingsJob:
             )
 
         assert result["entities"] == 1
-        assert entity_manager.create_direct_bulk.await_count == 2
+        assert entity_manager.backfill_embeddings_if_current.await_count == 2
         assert sleep_calls == [0.25]
+
+    @pytest.mark.asyncio
+    async def test_stale_entity_payload_cannot_recreate_or_overwrite_rows(self) -> None:
+        entity = Entity(
+            id="session-123",
+            entity_type="session",
+            name="Stale session",
+            content="Old content",
+        )
+        entity_manager = MagicMock()
+        entity_manager.backfill_embeddings_if_current = AsyncMock(return_value=[])
+        runtime = SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=MagicMock(),
+        )
+
+        with patch(
+            "sibyl.jobs.entities.get_surreal_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ):
+            result = await backfill_entity_embeddings(
+                {},
+                [entity.model_dump(mode="json")],
+                "org-1",
+            )
+
+        assert result["entities"] == 0
+        entity_manager.backfill_embeddings_if_current.assert_awaited_once()
 
 
 class TestCreateLearningEpisodeJob:

@@ -98,6 +98,7 @@ async def test_capture_persists_authorized_experience_and_queues_embeddings() ->
         written_relationship_ids=projection.manifest.relationship_ids,
         deleted_entity_ids=("session-old",),
         deleted_relationship_ids=("rel-old",),
+        embedding_backfill_required=True,
     )
     runtime = _runtime()
 
@@ -160,6 +161,7 @@ async def test_capture_can_embed_synchronously_without_background_job() -> None:
         written_relationship_ids=projection.manifest.relationship_ids,
         deleted_entity_ids=(),
         deleted_relationship_ids=(),
+        embedding_backfill_required=False,
     )
 
     with (
@@ -203,6 +205,7 @@ async def test_capture_unchanged_replay_does_not_requeue_embeddings() -> None:
         written_relationship_ids=(),
         deleted_entity_ids=(),
         deleted_relationship_ids=(),
+        embedding_backfill_required=False,
     )
 
     with (
@@ -236,6 +239,51 @@ async def test_capture_unchanged_replay_does_not_requeue_embeddings() -> None:
 
 
 @pytest.mark.asyncio
+async def test_capture_reuses_pending_projection_and_resumes_embedding_job() -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    ctx = SimpleNamespace(user_id="user-1")
+    projection = project_operational_experience(_request().experience)
+    write_result = SimpleNamespace(
+        projection=projection,
+        written_entity_ids=(),
+        written_relationship_ids=(),
+        deleted_entity_ids=(),
+        deleted_relationship_ids=(),
+        embedding_backfill_required=True,
+    )
+    runtime = _runtime()
+
+    with (
+        patch(
+            "sibyl.api.routes.experience.verify_entity_project_access",
+            AsyncMock(),
+        ),
+        patch(
+            "sibyl.api.routes.experience.get_experience_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "sibyl.api.routes.experience.persist_operational_experience",
+            AsyncMock(return_value=write_result),
+        ),
+        patch(
+            "sibyl.jobs.queue.enqueue_entity_embedding_backfill",
+            AsyncMock(return_value="embed-existing"),
+        ) as enqueue,
+    ):
+        response = await capture_operational_experience(
+            payload=_request(),
+            org=org,
+            ctx=ctx,
+        )
+
+    assert response.written_entities == 0
+    assert response.background_jobs["embedding_backfill"]["job_ids"] == ["embed-existing"]
+    assert len(enqueue.await_args.args[0]) == len(projection.entities) - 1
+    runtime.entity_manager.create_direct_bulk.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_capture_requires_project_scope() -> None:
     with pytest.raises(HTTPException) as exc_info:
         await capture_operational_experience(
@@ -265,6 +313,7 @@ async def test_capture_requires_maintainer_to_replace_another_authors_source() -
         written_relationship_ids=(),
         deleted_entity_ids=(),
         deleted_relationship_ids=(),
+        embedding_backfill_required=False,
     )
 
     with (
@@ -332,6 +381,7 @@ async def test_capture_reports_degraded_embedding_enqueue() -> None:
         written_relationship_ids=projection.manifest.relationship_ids,
         deleted_entity_ids=(),
         deleted_relationship_ids=(),
+        embedding_backfill_required=True,
     )
 
     runtime = _runtime()
@@ -375,6 +425,7 @@ async def test_capture_reports_degraded_manifest_commit_after_enqueue() -> None:
         written_relationship_ids=projection.manifest.relationship_ids,
         deleted_entity_ids=(),
         deleted_relationship_ids=(),
+        embedding_backfill_required=True,
     )
     runtime = _runtime()
     runtime.entity_manager.create_direct_bulk.side_effect = None
