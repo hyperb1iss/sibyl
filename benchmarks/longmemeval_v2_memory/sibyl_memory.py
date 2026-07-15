@@ -1161,6 +1161,7 @@ class SibylLiveApiMemory(Memory):
         self.project_id = _param_str(memory_params, "project_id", "")
         self.inserted_trajectories = 0
         self.created_entities = 0
+        self.last_experience_write_receipt: dict[str, object] = {}
         self._pending_embedding_job_ids: set[str] = set()
         self._pending_projection_job_ids: set[str] = set()
         self._pending_job_entity_ids: dict[str, list[str]] = {}
@@ -1240,6 +1241,7 @@ class SibylLiveApiMemory(Memory):
             "/memory/experience",
             json=experience_payload,
         )
+        self.last_experience_write_receipt = dict(created)
         self.created_entities += _created_count(created)
         self._remember_embedding_backfill_jobs(created)
         if len(self._pending_embedding_job_ids) >= self.embedding_backfill_max_pending_jobs:

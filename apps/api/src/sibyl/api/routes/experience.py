@@ -16,7 +16,9 @@ from sibyl.locks import LockAcquisitionError, entity_lock
 from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 from sibyl_core.models.entities import EntityType
 from sibyl_core.projection import (
+    MANIFEST_STATE_COMPLETE,
     operational_experience_manifest_id,
+    operational_experience_manifest_with_state,
     persist_operational_experience,
 )
 
@@ -102,6 +104,7 @@ async def capture_operational_experience(
                     organization_id=group_id,
                     created_by=ctx.user_id,
                     generate_embeddings=not payload.defer_embeddings,
+                    commit_manifest=not payload.defer_embeddings,
                 )
             except ValueError as exc:
                 raise HTTPException(
@@ -119,6 +122,7 @@ async def capture_operational_experience(
                     if entity.id != result.projection.manifest.manifest_entity_id
                     and entity.entity_type is not EntityType.ARTIFACT
                 ]
+                job_id: str | None = None
                 try:
                     from sibyl.jobs.queue import enqueue_entity_embedding_backfill
 
@@ -126,6 +130,16 @@ async def capture_operational_experience(
                         [entity.model_dump(mode="json") for entity in embeddable],
                         group_id,
                     )
+                    complete_manifest = operational_experience_manifest_with_state(
+                        result.projection,
+                        MANIFEST_STATE_COMPLETE,
+                    )
+                    committed = await runtime.entity_manager.create_direct_bulk(
+                        (complete_manifest,),
+                        generate_embeddings=False,
+                    )
+                    if complete_manifest.id not in committed:
+                        raise RuntimeError("failed to commit operational experience manifest")
                     background_jobs["embedding_backfill"] = {
                         "status": "queued",
                         "job_ids": [job_id],
@@ -133,17 +147,19 @@ async def capture_operational_experience(
                         "queued_relationships": 0,
                     }
                 except Exception as exc:
+                    error_code = "manifest_commit_failed" if job_id else "enqueue_failed"
                     background_jobs["embedding_backfill"] = {
                         "status": "degraded",
-                        "job_ids": [],
-                        "queued_entities": 0,
+                        "job_ids": [job_id] if job_id else [],
+                        "queued_entities": len(embeddable) if job_id else 0,
                         "queued_relationships": 0,
-                        "error": "enqueue_failed",
+                        "error": error_code,
                     }
                     log.warning(
-                        "operational_experience_embedding_backfill_enqueue_failed",
+                        "operational_experience_embedding_backfill_finalize_failed",
                         source_id=experience.source_id,
                         entities=len(embeddable),
+                        error_code=error_code,
                         error=str(exc),
                     )
     except LockAcquisitionError as exc:
@@ -161,5 +177,6 @@ async def capture_operational_experience(
         deleted_entities=len(result.deleted_entity_ids),
         deleted_relationships=len(result.deleted_relationship_ids),
         entity_ids=list(result.projection.manifest.entity_ids),
+        relationship_ids=list(result.projection.manifest.relationship_ids),
         background_jobs=background_jobs,
     )

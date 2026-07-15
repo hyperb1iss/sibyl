@@ -5,12 +5,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from longmemeval_v2_memory.sibyl_memory import (
+BENCHMARKS_ROOT = Path(__file__).resolve().parent
+if str(BENCHMARKS_ROOT) not in sys.path:
+    sys.path.insert(0, str(BENCHMARKS_ROOT))
+
+from longmemeval_v2_memory.sibyl_memory import (  # noqa: E402
     SibylLiveApiMemory,
     build_operational_experience_payload,
 )
@@ -133,6 +138,7 @@ def run_live_smoke(
             "ingest": {
                 "seconds": ingest_seconds,
                 "written_entities": memory.created_entities,
+                "write_receipt": memory.last_experience_write_receipt,
                 "embedding_usage": memory.ingest_embedding_usage,
                 "pending_embedding_jobs": len(memory._pending_embedding_job_ids),
                 "pending_projection_jobs": len(memory._pending_projection_job_ids),
@@ -158,6 +164,10 @@ def evaluate_smoke_report(report: dict[str, Any]) -> dict[str, bool]:
     query = report.get("query")
     replay = report.get("replay")
     origins = query.get("selection_origins") if isinstance(query, dict) else []
+    write_receipt = ingest.get("write_receipt") if isinstance(ingest, dict) else None
+    relationship_ids = (
+        write_receipt.get("relationship_ids") if isinstance(write_receipt, dict) else None
+    )
     return {
         "api_healthy": isinstance(runtime, dict) and runtime.get("status") == "healthy",
         "fresh_write_created_entities": (
@@ -167,6 +177,12 @@ def evaluate_smoke_report(report: dict[str, Any]) -> dict[str, bool]:
             isinstance(ingest, dict)
             and ingest.get("pending_embedding_jobs") == 0
             and ingest.get("pending_projection_jobs") == 0
+        ),
+        "relationship_inventory_persisted": (
+            isinstance(write_receipt, dict)
+            and isinstance(relationship_ids, list)
+            and len(relationship_ids) > 0
+            and write_receipt.get("written_relationships") == len(relationship_ids)
         ),
         "query_returned_context": (
             isinstance(query, dict) and int(query.get("context_items") or 0) > 0

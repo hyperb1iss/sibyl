@@ -9,12 +9,23 @@ from pydantic import ValidationError
 
 from sibyl_core.models import EntityType, RelationshipType
 from sibyl_core.models.experience import (
+    MAX_OPERATIONAL_AUXILIARY_JSON_CHARS,
     MAX_OPERATIONAL_EVIDENCE_PART_CHARS,
+    MAX_OPERATIONAL_FIELD_CHARS,
     OperationalEvidencePart,
     OperationalExperience,
     OperationalObservation,
 )
-from sibyl_core.projection import persist_operational_experience, project_operational_experience
+from sibyl_core.projection import (
+    MANIFEST_STATE_COMPLETE,
+    operational_experience_manifest_with_state,
+    persist_operational_experience,
+    project_operational_experience,
+)
+from sibyl_core.projection.experience import (
+    MANIFEST_STATE_EMBEDDING_PENDING,
+    MANIFEST_STATE_PENDING,
+)
 
 
 def _experience(*, outcome: str = "success") -> OperationalExperience:
@@ -181,6 +192,40 @@ def test_operational_evidence_rejects_unbounded_content() -> None:
         )
 
 
+def test_operational_experience_rejects_unbounded_fields() -> None:
+    with pytest.raises(ValidationError, match="String should have at most"):
+        OperationalExperience.model_validate(
+            {
+                **_experience().model_dump(mode="json"),
+                "goal": "x" * (MAX_OPERATIONAL_FIELD_CHARS + 1),
+            }
+        )
+
+
+def test_projection_rejects_typed_content_overflow() -> None:
+    experience = _experience()
+    observations = list(experience.observations)
+    observations[1] = observations[1].model_copy(update={"action": "x" * 10_000})
+
+    with pytest.raises(ValueError, match="typed entity content limit"):
+        project_operational_experience(
+            experience.model_copy(
+                update={
+                    "goal": "g" * 10_000,
+                    "observations": tuple(observations),
+                }
+            )
+        )
+
+
+def test_operational_experience_rejects_unbounded_metadata() -> None:
+    payload = _experience().model_dump(mode="json")
+    payload["metadata"] = {"oversized": "x" * MAX_OPERATIONAL_AUXILIARY_JSON_CHARS}
+
+    with pytest.raises(ValidationError, match="auxiliary payload limit"):
+        OperationalExperience.model_validate(payload)
+
+
 def test_failure_projection_reports_failure_without_inventing_cause_or_resolution() -> None:
     projection = project_operational_experience(_experience(outcome="failure"))
     errors = [
@@ -248,16 +293,117 @@ async def test_persistence_replays_writes_without_duplicate_ids() -> None:
     assert result.written_relationship_ids == result.projection.manifest.relationship_ids
     assert result.deleted_entity_ids == ()
     assert result.deleted_relationship_ids == ()
-    assert entity_manager.create_direct_bulk.await_count == 2
+    assert entity_manager.create_direct_bulk.await_count == 3
     written = entity_manager.create_direct_bulk.await_args_list[0].args[0]
     assert all(entity.organization_id == "org-1" for entity in written)
     assert all(entity.created_by == "user-1" for entity in written)
-    manifest_write = entity_manager.create_direct_bulk.await_args_list[1].args[0]
+    pending_write = entity_manager.create_direct_bulk.await_args_list[1].args[0]
+    assert pending_write[0].metadata["operational_projection_state"] == MANIFEST_STATE_PENDING
+    manifest_write = entity_manager.create_direct_bulk.await_args_list[2].args[0]
     assert [entity.id for entity in manifest_write] == [
         result.projection.manifest.manifest_entity_id
     ]
+    assert manifest_write[0].metadata["operational_projection_state"] == MANIFEST_STATE_COMPLETE
     entity_manager.delete.assert_not_awaited()
     relationship_manager.delete_bulk.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persistence_resolves_manifest_relationship_endpoints_before_commit() -> None:
+    written_entities: set[str] = set()
+
+    async def create_entities(entities: object, **_kwargs: object) -> list[str]:
+        entity_ids = [entity.id for entity in entities]
+        written_entities.update(entity_ids)
+        return entity_ids
+
+    async def create_relationships(relationships: object, **_kwargs: object) -> list[str]:
+        return [
+            relationship.id
+            for relationship in relationships
+            if relationship.source_id in written_entities
+            and relationship.target_id in written_entities
+        ]
+
+    result = await persist_operational_experience(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(side_effect=KeyError("missing")),
+            create_direct_bulk=create_entities,
+            delete=AsyncMock(return_value=True),
+        ),
+        relationship_manager=SimpleNamespace(
+            create_direct_bulk=create_relationships,
+            delete_bulk=AsyncMock(return_value=0),
+        ),
+        experience=_experience(),
+        organization_id="org-1",
+    )
+
+    assert result.written_relationship_ids == result.projection.manifest.relationship_ids
+
+
+@pytest.mark.asyncio
+async def test_persistence_refuses_partial_relationship_writes() -> None:
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(side_effect=KeyError("missing")),
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda entities, **_: [entity.id for entity in entities]
+        ),
+        delete=AsyncMock(return_value=True),
+    )
+    relationship_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda relationships, **_: [
+                relationship.id
+                for relationship in relationships
+                if relationship.relationship_type is not RelationshipType.PART_OF
+            ]
+        ),
+        delete_bulk=AsyncMock(return_value=0),
+    )
+
+    with pytest.raises(RuntimeError, match="failed to persist relationships"):
+        await persist_operational_experience(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+            experience=_experience(),
+            organization_id="org-1",
+        )
+
+    assert entity_manager.create_direct_bulk.await_count == 2
+    pending_write = entity_manager.create_direct_bulk.await_args_list[-1].args[0]
+    assert pending_write[0].metadata["operational_projection_state"] == MANIFEST_STATE_PENDING
+
+
+@pytest.mark.asyncio
+async def test_deferred_persistence_leaves_manifest_uncommitted() -> None:
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(side_effect=KeyError("missing")),
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda entities, **_: [entity.id for entity in entities]
+        ),
+        delete=AsyncMock(return_value=True),
+    )
+    relationship_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda relationships, **_: [item.id for item in relationships]
+        ),
+        delete_bulk=AsyncMock(return_value=0),
+    )
+
+    await persist_operational_experience(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        experience=_experience(),
+        organization_id="org-1",
+        commit_manifest=False,
+    )
+
+    manifest_write = entity_manager.create_direct_bulk.await_args_list[-1].args[0]
+    assert (
+        manifest_write[0].metadata["operational_projection_state"]
+        == MANIFEST_STATE_EMBEDDING_PENDING
+    )
 
 
 @pytest.mark.asyncio
@@ -292,6 +438,40 @@ async def test_persistence_skips_unchanged_committed_manifest() -> None:
     relationship_manager.create_direct_bulk.assert_not_awaited()
     entity_manager.delete.assert_not_awaited()
     relationship_manager.delete_bulk.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persistence_rebuilds_uncommitted_manifest() -> None:
+    experience = _experience()
+    projection = project_operational_experience(experience)
+    pending_manifest = operational_experience_manifest_with_state(
+        projection,
+        MANIFEST_STATE_EMBEDDING_PENDING,
+    )
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(return_value=pending_manifest),
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda entities, **_: [entity.id for entity in entities]
+        ),
+        delete=AsyncMock(return_value=True),
+    )
+    relationship_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda relationships, **_: [item.id for item in relationships]
+        ),
+        delete_bulk=AsyncMock(return_value=0),
+    )
+
+    result = await persist_operational_experience(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        experience=experience,
+        organization_id="org-1",
+    )
+
+    assert result.written_entity_ids
+    assert result.written_relationship_ids
+    relationship_manager.create_direct_bulk.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 """Contracts for source-backed operational experience."""
 
-from typing import Any, Self
+import json
+from typing import Annotated, Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -11,6 +12,12 @@ MAX_EVIDENCE_PARTS_PER_OBSERVATION = 256
 MAX_OPERATIONAL_EVIDENCE_PARTS = 4_096
 MAX_OPERATIONAL_EVIDENCE_PART_CHARS = 1_000_000
 MAX_OPERATIONAL_EVIDENCE_TOTAL_CHARS = 64 * 1024 * 1024
+MAX_OPERATIONAL_FIELD_CHARS = 18_000
+MAX_OPERATIONAL_URI_CHARS = 8_192
+MAX_OPERATIONAL_IDENTIFIER_CHARS = 2_048
+MAX_OPERATIONAL_IMAGE_REFS = 256
+MAX_OPERATIONAL_AUXILIARY_JSON_CHARS = 8 * 1024 * 1024
+OperationalImageRef = Annotated[str, Field(max_length=MAX_OPERATIONAL_URI_CHARS)]
 
 
 class OperationalEvidencePart(BaseModel):
@@ -18,9 +25,9 @@ class OperationalEvidencePart(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    id: str = Field(min_length=1)
+    id: str = Field(min_length=1, max_length=MAX_OPERATIONAL_IDENTIFIER_CHARS)
     content: str = Field(max_length=MAX_OPERATIONAL_EVIDENCE_PART_CHARS)
-    content_type: str = "text/plain"
+    content_type: str = Field(default="text/plain", max_length=256)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -29,16 +36,19 @@ class OperationalObservation(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    id: str = Field(min_length=1)
+    id: str = Field(min_length=1, max_length=MAX_OPERATIONAL_IDENTIFIER_CHARS)
     ordinal: int = Field(ge=0)
-    uri: str | None = None
-    action: str | None = None
-    reasoning: str | None = None
+    uri: str | None = Field(default=None, max_length=MAX_OPERATIONAL_URI_CHARS)
+    action: str | None = Field(default=None, max_length=MAX_OPERATIONAL_FIELD_CHARS)
+    reasoning: str | None = Field(default=None, max_length=MAX_OPERATIONAL_FIELD_CHARS)
     evidence: tuple[OperationalEvidencePart, ...] = Field(
         min_length=1,
         max_length=MAX_EVIDENCE_PARTS_PER_OBSERVATION,
     )
-    image_refs: tuple[str, ...] = ()
+    image_refs: tuple[OperationalImageRef, ...] = Field(
+        default=(),
+        max_length=MAX_OPERATIONAL_IMAGE_REFS,
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -47,16 +57,16 @@ class OperationalExperience(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    source_id: str = Field(min_length=1)
-    goal: str = Field(min_length=1)
-    outcome: str | None = None
-    start_uri: str | None = None
+    source_id: str = Field(min_length=1, max_length=MAX_OPERATIONAL_IDENTIFIER_CHARS)
+    goal: str = Field(min_length=1, max_length=MAX_OPERATIONAL_FIELD_CHARS)
+    outcome: str | None = Field(default=None, max_length=MAX_OPERATIONAL_FIELD_CHARS)
+    start_uri: str | None = Field(default=None, max_length=MAX_OPERATIONAL_URI_CHARS)
     observations: tuple[OperationalObservation, ...] = Field(
         min_length=1,
         max_length=MAX_OPERATIONAL_OBSERVATIONS,
     )
-    project_id: str | None = None
-    scope_key: str | None = None
+    project_id: str | None = Field(default=None, max_length=MAX_OPERATIONAL_IDENTIFIER_CHARS)
+    scope_key: str | None = Field(default=None, max_length=MAX_OPERATIONAL_IDENTIFIER_CHARS)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -71,6 +81,13 @@ class OperationalExperience(BaseModel):
             > MAX_OPERATIONAL_EVIDENCE_TOTAL_CHARS
         ):
             raise ValueError("operational experience exceeds the total evidence content limit")
+        auxiliary_payload = self.model_dump(mode="json")
+        for observation in auxiliary_payload["observations"]:
+            for evidence in observation["evidence"]:
+                evidence["content"] = ""
+        auxiliary_chars = len(json.dumps(auxiliary_payload, sort_keys=True, separators=(",", ":")))
+        if auxiliary_chars > MAX_OPERATIONAL_AUXILIARY_JSON_CHARS:
+            raise ValueError("operational experience exceeds the auxiliary payload limit")
         return self
 
 

@@ -6,22 +6,29 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from longmemeval_v2_memory.sibyl_memory import build_operational_experience_payload
+BENCHMARKS_ROOT = Path(__file__).resolve().parent
+if str(BENCHMARKS_ROOT) not in sys.path:
+    sys.path.insert(0, str(BENCHMARKS_ROOT))
 
-from sibyl_core.models import (
+from longmemeval_v2_memory.sibyl_memory import (  # noqa: E402
+    build_operational_experience_payload,
+)
+
+from sibyl_core.models import (  # noqa: E402
     Entity,
     EntityType,
     OperationalExperience,
     OperationalExperienceProjection,
     RelationshipType,
 )
-from sibyl_core.projection import project_operational_experience
+from sibyl_core.projection import project_operational_experience  # noqa: E402
 
 AUDIT_SCHEMA_VERSION = "sibyl-longmemeval-v2-projection-audit-v1"
 MAX_WRITE_AMPLIFICATION = 2.0

@@ -6,7 +6,7 @@ import hashlib
 import json
 from collections.abc import Iterable
 from itertools import pairwise
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.experience import (
@@ -17,8 +17,12 @@ from sibyl_core.models.experience import (
     OperationalObservation,
 )
 
-OPERATIONAL_EXPERIENCE_SCHEMA_VERSION = 2
+OPERATIONAL_EXPERIENCE_SCHEMA_VERSION = 3
 MAX_TYPED_ENTITY_CONTENT_CHARS = 18_000
+MANIFEST_STATE_PENDING = "pending"
+MANIFEST_STATE_EMBEDDING_PENDING = "embedding_pending"
+MANIFEST_STATE_COMPLETE = "complete"
+type OperationalManifestState = Literal["pending", "embedding_pending", "complete"]
 
 
 class OperationalEntityManager(Protocol):
@@ -194,6 +198,19 @@ def _procedure_segments(
             support.append(observations[-1])
         segments.append(("\n".join(lines), support))
     return segments
+
+
+def _validate_typed_entity_sizes(entities: Iterable[Entity]) -> None:
+    oversized = [
+        entity.id
+        for entity in entities
+        if entity.entity_type in {EntityType.EVENT, EntityType.PROCEDURE, EntityType.ERROR_PATTERN}
+        and len(entity.content or "") > MAX_TYPED_ENTITY_CONTENT_CHARS
+    ]
+    if oversized:
+        raise ValueError(
+            "operational projection exceeds the typed entity content limit: " + ", ".join(oversized)
+        )
 
 
 def project_operational_experience(
@@ -383,6 +400,7 @@ def project_operational_experience(
                 )
             )
 
+    _validate_typed_entity_sizes(entities)
     projected_ids = [entity.id for entity in entities]
     manifest_id = operational_experience_manifest_id(experience.source_id)
     for entity_id in projected_ids:
@@ -417,6 +435,7 @@ def project_operational_experience(
             metadata={
                 **common,
                 "projection_kind": "manifest",
+                "operational_projection_state": MANIFEST_STATE_COMPLETE,
                 "expected_entity_ids": list(manifest.entity_ids),
                 "expected_relationship_ids": list(manifest.relationship_ids),
             },
@@ -450,12 +469,62 @@ def _is_current_manifest(
     if entity is None or entity.entity_type is not EntityType.ARTIFACT:
         return False
     return (
-        entity.metadata.get("operational_schema_version") == manifest.schema_version
+        entity.metadata.get("operational_projection_state") == MANIFEST_STATE_COMPLETE
+        and entity.metadata.get("operational_schema_version") == manifest.schema_version
         and entity.metadata.get("operational_content_hash") == manifest.content_hash
         and _manifest_inventory(entity, "expected_entity_ids") == set(manifest.entity_ids)
         and _manifest_inventory(entity, "expected_relationship_ids")
         == set(manifest.relationship_ids)
     )
+
+
+def _manifest_entity(projection: OperationalExperienceProjection) -> Entity:
+    return next(
+        entity
+        for entity in projection.entities
+        if entity.id == projection.manifest.manifest_entity_id
+    )
+
+
+def operational_experience_manifest_with_state(
+    projection: OperationalExperienceProjection,
+    state: OperationalManifestState,
+    *,
+    retained_manifest: Entity | None = None,
+) -> Entity:
+    """Build a non-authoritative or complete manifest publication."""
+    manifest_entity = _manifest_entity(projection)
+    metadata = {
+        **manifest_entity.metadata,
+        "operational_projection_state": state,
+    }
+    if retained_manifest is not None:
+        metadata["expected_entity_ids"] = sorted(
+            _manifest_inventory(retained_manifest, "expected_entity_ids")
+        )
+        metadata["expected_relationship_ids"] = sorted(
+            _manifest_inventory(retained_manifest, "expected_relationship_ids")
+        )
+    elif state == MANIFEST_STATE_PENDING:
+        metadata["expected_entity_ids"] = []
+        metadata["expected_relationship_ids"] = []
+    return manifest_entity.model_copy(update={"metadata": metadata})
+
+
+def _require_complete_write(
+    *,
+    expected_ids: Iterable[str],
+    written_ids: Iterable[str],
+    record_kind: str,
+) -> tuple[str, ...]:
+    expected = tuple(expected_ids)
+    written = tuple(written_ids)
+    missing = sorted(set(expected) - set(written))
+    if missing:
+        raise RuntimeError(
+            f"operational experience failed to persist {record_kind}: {', '.join(missing)}"
+        )
+    return written
 
 
 async def persist_operational_experience(
@@ -466,6 +535,7 @@ async def persist_operational_experience(
     organization_id: str,
     created_by: str | None = None,
     generate_embeddings: bool = False,
+    commit_manifest: bool = True,
 ) -> OperationalExperienceWriteResult:
     """Replay a projection and remove only records owned by its prior manifest."""
     projection = project_operational_experience(
@@ -499,21 +569,38 @@ async def persist_operational_experience(
         )
     )
 
-    manifest_entity = next(
-        entity
-        for entity in projection.entities
-        if entity.id == projection.manifest.manifest_entity_id
-    )
+    manifest_entity = _manifest_entity(projection)
     projected_entities = tuple(
         entity for entity in projection.entities if entity.id != manifest_entity.id
     )
-    written_entity_ids = await entity_manager.create_direct_bulk(
-        projected_entities,
-        generate_embeddings=generate_embeddings,
+    written_entity_ids = _require_complete_write(
+        expected_ids=(entity.id for entity in projected_entities),
+        written_ids=await entity_manager.create_direct_bulk(
+            projected_entities,
+            generate_embeddings=generate_embeddings,
+        ),
+        record_kind="entities",
     )
-    written_relationship_ids = await relationship_manager.create_direct_bulk(
-        projection.relationships,
-        generate_embeddings=generate_embeddings,
+    pending_manifest = operational_experience_manifest_with_state(
+        projection,
+        MANIFEST_STATE_PENDING,
+        retained_manifest=previous_manifest,
+    )
+    _require_complete_write(
+        expected_ids=(pending_manifest.id,),
+        written_ids=await entity_manager.create_direct_bulk(
+            (pending_manifest,),
+            generate_embeddings=False,
+        ),
+        record_kind="pending manifest",
+    )
+    written_relationship_ids = _require_complete_write(
+        expected_ids=projection.manifest.relationship_ids,
+        written_ids=await relationship_manager.create_direct_bulk(
+            projection.relationships,
+            generate_embeddings=generate_embeddings,
+        ),
+        record_kind="relationships",
     )
 
     if stale_relationship_ids:
@@ -522,14 +609,26 @@ async def persist_operational_experience(
     for entity_id in stale_entity_ids:
         if await entity_manager.delete(entity_id):
             deleted_entity_ids.append(entity_id)
-    written_manifest_ids = await entity_manager.create_direct_bulk(
-        (manifest_entity,),
-        generate_embeddings=False,
+    final_manifest = (
+        manifest_entity
+        if commit_manifest
+        else operational_experience_manifest_with_state(
+            projection,
+            MANIFEST_STATE_EMBEDDING_PENDING,
+        )
+    )
+    written_manifest_ids = _require_complete_write(
+        expected_ids=(final_manifest.id,),
+        written_ids=await entity_manager.create_direct_bulk(
+            (final_manifest,),
+            generate_embeddings=False,
+        ),
+        record_kind="manifest",
     )
 
     return OperationalExperienceWriteResult(
         projection=projection,
-        written_entity_ids=tuple([*written_entity_ids, *written_manifest_ids]),
+        written_entity_ids=tuple(dict.fromkeys([*written_entity_ids, *written_manifest_ids])),
         written_relationship_ids=tuple(written_relationship_ids),
         deleted_entity_ids=tuple(deleted_entity_ids),
         deleted_relationship_ids=stale_relationship_ids,

@@ -1,8 +1,10 @@
 """Projection helpers for native memory graph enrichment."""
 
 from sibyl_core.projection.experience import (
+    MANIFEST_STATE_COMPLETE,
     OPERATIONAL_EXPERIENCE_SCHEMA_VERSION,
     operational_experience_manifest_id,
+    operational_experience_manifest_with_state,
     persist_operational_experience,
     project_operational_experience,
 )
@@ -20,6 +22,7 @@ from sibyl_core.projection.memory import (
 )
 
 __all__ = [
+    "MANIFEST_STATE_COMPLETE",
     "OPERATIONAL_EXPERIENCE_SCHEMA_VERSION",
     "MemoryProjectionBatchResult",
     "MemoryProjectionResult",
@@ -29,6 +32,7 @@ __all__ = [
     "extract_projected_memory_entities",
     "extract_projected_memory_facts",
     "operational_experience_manifest_id",
+    "operational_experience_manifest_with_state",
     "persist_operational_experience",
     "project_extracted_memory_entities",
     "project_memory_entities",

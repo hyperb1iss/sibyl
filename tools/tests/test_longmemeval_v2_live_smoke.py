@@ -52,6 +52,10 @@ def test_evaluate_smoke_report_requires_live_write_retrieval_and_replay() -> Non
             "written_entities": 6,
             "pending_embedding_jobs": 0,
             "pending_projection_jobs": 0,
+            "write_receipt": {
+                "written_relationships": 4,
+                "relationship_ids": ["r1", "r2", "r3", "r4"],
+            },
         },
         "query": {
             "context_items": 3,
@@ -77,6 +81,10 @@ def test_evaluate_smoke_report_rejects_missing_typed_evidence() -> None:
             "written_entities": 6,
             "pending_embedding_jobs": 0,
             "pending_projection_jobs": 0,
+            "write_receipt": {
+                "written_relationships": 4,
+                "relationship_ids": ["r1", "r2", "r3", "r4"],
+            },
         },
         "query": {"context_items": 1, "selection_origins": ["search"]},
         "replay": {
@@ -92,3 +100,32 @@ def test_evaluate_smoke_report_rejects_missing_typed_evidence() -> None:
 
     assert checks["typed_evidence_selected"] is False
     assert checks["raw_evidence_selected"] is True
+
+
+def test_evaluate_smoke_report_rejects_partial_relationship_inventory() -> None:
+    module = _load_module()
+    report = {
+        "api_runtime": {"status": "healthy"},
+        "ingest": {
+            "written_entities": 6,
+            "pending_embedding_jobs": 0,
+            "pending_projection_jobs": 0,
+            "write_receipt": {
+                "written_relationships": 2,
+                "relationship_ids": ["r1", "r2", "r3", "r4"],
+            },
+        },
+        "query": {
+            "context_items": 2,
+            "selection_origins": ["context_pack:procedures", "search"],
+        },
+        "replay": {
+            "written_entities": 0,
+            "written_relationships": 0,
+            "deleted_entities": 0,
+            "deleted_relationships": 0,
+            "background_jobs": {},
+        },
+    }
+
+    assert module.evaluate_smoke_report(report)["relationship_inventory_persisted"] is False

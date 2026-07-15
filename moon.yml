@@ -1357,6 +1357,13 @@ tasks:
     options:
       cache: false
 
+  bench-longmemeval-v2-operational-test:
+    command:
+      uv run pytest tools/tests/test_longmemeval_v2_live_smoke.py
+      tools/tests/test_longmemeval_v2_projection_audit.py -v
+    options:
+      cache: false
+
   bench-longmemeval-v2-ablations:
     command:
       uv run --with numpy --with openai --with openai-agents --with pillow --with tqdm
