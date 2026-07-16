@@ -163,7 +163,8 @@ backend:
     NUMEXPR_NUM_THREADS: "1"
 
   # -- Reference to existing secret for sensitive env vars
-  # Must contain: SIBYL_JWT_SECRET, SIBYL_OPENAI_API_KEY, SIBYL_ANTHROPIC_API_KEY
+  # Must contain: SIBYL_JWT_SECRET and SIBYL_SETTINGS_KEY.
+  # Add provider and LLM API keys as needed. Production and read-only containers require this.
   existingSecret: ""
 
   # -- SurrealDB connection settings

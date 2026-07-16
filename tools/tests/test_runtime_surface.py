@@ -128,6 +128,18 @@ def test_install_surfaces_default_to_local_first_auth() -> None:
     assert "extra_providers_enabled: false" in helm_values
 
 
+def test_helm_runtime_secret_requires_stable_settings_key() -> None:
+    backend = (
+        REPO_ROOT / "charts/sibyl/templates/backend-deployment.yaml"
+    ).read_text(encoding="utf-8")
+    worker = (
+        REPO_ROOT / "charts/sibyl/templates/worker-deployment.yaml"
+    ).read_text(encoding="utf-8")
+
+    assert "key: SIBYL_SETTINGS_KEY" in backend
+    assert "key: SIBYL_SETTINGS_KEY" in worker
+
+
 CORE_LEGACY_GRAPH_CONTRACT_MARKED_TESTS = (
     "tests/test_models.py",
     "tests/test_retrieval_advanced.py",

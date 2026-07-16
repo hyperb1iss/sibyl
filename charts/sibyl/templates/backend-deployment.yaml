@@ -74,6 +74,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.backend.existingSecret }}
                   key: SIBYL_JWT_SECRET
+            - name: SIBYL_SETTINGS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backend.existingSecret }}
+                  key: SIBYL_SETTINGS_KEY
             - name: SIBYL_OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:

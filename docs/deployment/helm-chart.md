@@ -226,9 +226,15 @@ backend:
 ```yaml
 backend:
   # Reference to existing secret for sensitive env vars
-  # Must contain: SIBYL_JWT_SECRET, SIBYL_OPENAI_API_KEY, SIBYL_ANTHROPIC_API_KEY
+  # Must contain: SIBYL_JWT_SECRET and SIBYL_SETTINGS_KEY.
+  # Add provider and LLM API keys as needed.
   existingSecret: ""
 ```
+
+Production and read-only containers must set `existingSecret`. Both required keys are non-optional
+pod references, so a missing key fails before Sibyl starts instead of silently generating an
+ephemeral replacement. Keep `SIBYL_SETTINGS_KEY` stable across upgrades and pod replacements;
+changing it makes encrypted settings unreadable.
 
 ### Storage Mode
 

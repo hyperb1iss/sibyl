@@ -45,6 +45,7 @@ kubectl create namespace sibyl
 # Create secrets (Surreal default)
 kubectl create secret generic sibyl-secrets -n sibyl \
   --from-literal=SIBYL_JWT_SECRET=$(openssl rand -hex 32) \
+  --from-literal=SIBYL_SETTINGS_KEY=$(openssl rand -base64 32 | tr '+/' '-_') \
   --from-literal=SIBYL_OPENAI_API_KEY=sk-... \
   --from-literal=SIBYL_ANTHROPIC_API_KEY=sk-ant-...
 
