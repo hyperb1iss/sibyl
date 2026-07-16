@@ -40,10 +40,11 @@ class OIDCProviderSettings(BaseModel):
     issuer: str
     client_id: str
     client_secret_env: str
+    organization_slug: str
     scopes: list[str] = Field(default_factory=lambda: ["openid", "profile", "email"])
     role_claim_override: str | None = None
 
-    @field_validator("name", "issuer", "client_id", "client_secret_env")
+    @field_validator("name", "issuer", "client_id", "client_secret_env", "organization_slug")
     @classmethod
     def strip_required_string(cls, value: str) -> str:
         stripped = value.strip()
@@ -88,6 +89,13 @@ class OIDCSettings(BaseModel):
     @classmethod
     def strip_string(cls, value: str) -> str:
         return value.strip()
+
+    @model_validator(mode="after")
+    def validate_provider_names(self) -> "OIDCSettings":
+        names = [provider.name.lower() for provider in self.providers]
+        if len(names) != len(set(names)):
+            raise ValueError("OIDC provider names must be unique")
+        return self
 
 
 def _get_or_create_jwt_secret() -> str:

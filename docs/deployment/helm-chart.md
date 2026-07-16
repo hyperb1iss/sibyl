@@ -67,6 +67,21 @@ For enterprise SSO deployments, configure a corporate OIDC provider and set
 `auth.localAuthEnabled=false` only after an owner has successfully signed in through OIDC.
 Break-glass access remains a separate, bounded opt-in.
 
+Each configured provider requires an exact organization binding:
+
+```yaml
+oidc:
+  providers:
+    - name: entra
+      issuer: "https://login.microsoftonline.com/<tenant-id>/v2.0"
+      client_id: "<app-client-id>"
+      client_secret_env: "SIBYL_OIDC_ENTRA_CLIENT_SECRET"
+      organization_slug: "acme"
+```
+
+The organization must already exist and must not be personal. Helm rejects providers without this
+binding, and Sibyl fails closed if the bound organization cannot be resolved.
+
 ## Backend Configuration
 
 ### Basic Settings

@@ -77,6 +77,7 @@ oidc:
       issuer: "https://login.microsoftonline.com/<tenant-id>/v2.0"
       client_id: "<app-client-id>"
       client_secret_env: "SIBYL_OIDC_ENTRA_CLIENT_SECRET"
+      organization_slug: "acme"
       scopes: ["openid", "profile", "email"]
   role_claim: "roles"
   session_minutes: 60
@@ -120,6 +121,10 @@ networkPolicy:
 podSecurity:
   enforceRestricted: true
 ```
+
+`organization_slug` is required for every OIDC provider and must exactly match a bootstrapped
+non-personal Sibyl organization. A verified role claim creates or updates membership only in that
+bound organization.
 
 Keep cloud-specific annotations, certificate issuers, secret references, object storage mounts, and
 SIEM wiring in a deployment overlay.

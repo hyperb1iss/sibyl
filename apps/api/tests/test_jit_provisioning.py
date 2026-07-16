@@ -18,6 +18,7 @@ def _provider() -> OIDCProviderSettings:
         issuer="https://example.okta.com/oauth2/default",
         client_id="sibyl-client",
         client_secret_env="SIBYL_OIDC_OKTA_CLIENT_SECRET",
+        organization_slug="acme",
     )
 
 
@@ -64,6 +65,7 @@ async def test_jit_provisions_member_role_without_email_matching(
     assert call["subject_key"] == "oidc:https://example.okta.com/oauth2/default:subject"
     assert call["email"] == "shared@example.com"
     assert call["role"] is OrganizationRole.MEMBER
+    assert call["organization_slug"] == "acme"
 
 
 def test_jit_rejects_user_after_sibyl_role_removed(

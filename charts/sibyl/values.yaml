@@ -32,6 +32,7 @@ oidc:
   #     issuer: "https://login.microsoftonline.com/<tenant-id>/v2.0"
   #     client_id: ""
   #     client_secret_env: "SIBYL_OIDC_ENTRA_CLIENT_SECRET"
+  #     organization_slug: "acme"
   #     scopes: ["openid", "profile", "email"]
   #     role_claim_override: ""
   # -- Global role claim, supports dotted paths such as "resource_access.sibyl.roles".

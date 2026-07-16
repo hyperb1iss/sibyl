@@ -103,6 +103,7 @@ an owner can sign in through it, and only then set `SIBYL_LOCAL_AUTH_ENABLED=fal
       "issuer": "https://login.microsoftonline.com/<tenant-id>/v2.0",
       "client_id": "<app-client-id>",
       "client_secret_env": "SIBYL_OIDC_ENTRA_CLIENT_SECRET",
+      "organization_slug": "acme",
       "scopes": ["openid", "profile", "email"]
     }
   ],
@@ -113,6 +114,9 @@ an owner can sign in through it, and only then set `SIBYL_LOCAL_AUTH_ENABLED=fal
   "extra_providers_enabled": false
 }
 ```
+
+Every provider requires `organization_slug`. It binds that provider to one exact non-personal
+organization; OIDC login never chooses an organization from the user's other memberships.
 
 Non-corporate providers such as GitHub or Google require `"extra_providers_enabled": true`; leave it
 false for enterprise SSO.

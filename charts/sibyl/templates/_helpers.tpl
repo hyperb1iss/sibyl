@@ -127,6 +127,11 @@ app.kubernetes.io/component: worker
 Fail fast when a non-corporate extra provider is configured without the explicit opt-in.
 */}}
 {{- define "sibyl.validateOidcProviders" -}}
+{{- range $provider := .Values.oidc.providers }}
+{{- if not (default "" $provider.organization_slug) -}}
+{{- fail "every OIDC provider requires organization_slug for an exact non-personal organization binding" -}}
+{{- end -}}
+{{- end -}}
 {{- if not .Values.oidc.extra_providers_enabled -}}
 {{- range $provider := .Values.oidc.providers }}
 {{- $name := lower (default "" $provider.name) -}}
