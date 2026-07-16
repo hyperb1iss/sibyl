@@ -510,12 +510,16 @@ def compile_operational_evidence_set(
         raw_candidates,
         pool="raw",
     )
-    typed_budget = min(len(ranked_typed), max(1, math.ceil(max_items * 3 / 8)))
-    raw_budget = min(len(ranked_raw), max_items - typed_budget)
+    typed_reservation = min(len(ranked_typed), max(1, max_items // 3))
+    raw_budget = min(len(ranked_raw), max_items - typed_reservation)
     selected_raw = _select_role_complete_raw_evidence(ranked_raw, budget=raw_budget)
-    selected = [*ranked_typed[:typed_budget], *selected_raw]
+    selected = [*ranked_typed[:typed_reservation], *selected_raw]
     if len(selected) < max_items:
-        selected.extend(ranked_typed[typed_budget : typed_budget + max_items - len(selected)])
+        selected.extend(
+            ranked_typed[
+                typed_reservation : typed_reservation + max_items - len(selected)
+            ]
+        )
     for selection_rank, candidate in enumerate(selected, start=1):
         candidate["_evidence_selection_rank"] = selection_rank
 
@@ -531,7 +535,8 @@ def compile_operational_evidence_set(
         "ranking_applied": typed_ranking.applied or raw_ranking.applied,
         "ranking_changed": typed_ranking.changed or raw_ranking.changed,
         "pool_calibration": "independent_query_coverage",
-        "typed_floor": min(max_items, math.ceil(max_items * 3 / 8)),
+        "typed_reservation": typed_reservation,
+        "selected_typed_overflow_count": max(0, selected_typed - typed_reservation),
         "selected_raw_support_count": sum(
             _stripped_str(item.get("_selection_origin")) in {"neighbor", "state_part"}
             for item in selected

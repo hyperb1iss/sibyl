@@ -2182,7 +2182,7 @@ def test_operational_evidence_set_calibrates_typed_and_raw_score_pools() -> None
     assert [item["type"] for item in selected] == [
         "procedure",
         "procedure",
-        "procedure",
+        "session",
         "session",
         "session",
         "session",
@@ -2197,11 +2197,64 @@ def test_operational_evidence_set_calibrates_typed_and_raw_score_pools() -> None
         "ranking_applied": True,
         "ranking_changed": False,
         "pool_calibration": "independent_query_coverage",
-        "typed_floor": 3,
+        "typed_reservation": 2,
+        "selected_typed_overflow_count": 0,
         "selected_raw_support_count": 0,
-        "selected_typed_count": 3,
-        "selected_raw_count": 5,
+        "selected_typed_count": 2,
+        "selected_raw_count": 6,
     }
+
+
+@pytest.mark.parametrize(
+    ("max_items", "raw_count", "typed_count", "selected_raw", "typed_overflow"),
+    [
+        (1, 8, 1, 0, 0),
+        (2, 8, 1, 1, 0),
+        (3, 8, 1, 2, 0),
+        (8, 8, 2, 6, 0),
+        (8, 1, 7, 1, 5),
+    ],
+)
+def test_shared_relevance_reserves_typed_slots_then_fills_raw(
+    max_items: int,
+    raw_count: int,
+    typed_count: int,
+    selected_raw: int,
+    typed_overflow: int,
+) -> None:
+    module = _load_memory_module()
+    typed = [
+        {
+            "id": f"procedure-{index}",
+            "type": "procedure",
+            "content": "Typed projection",
+            "_selection_origin": "context_pack:procedures",
+            "metadata": {"longmemeval_v2_trajectory_id": f"typed-{index}"},
+        }
+        for index in range(8)
+    ]
+    raw = [
+        {
+            "id": f"session-{index}",
+            "type": "session",
+            "content": "Raw support",
+            "_selection_origin": "search",
+        }
+        for index in range(raw_count)
+    ]
+
+    selected, metadata = module.compile_operational_evidence_set(
+        query="anything",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=max_items,
+        mode="shared_relevance",
+    )
+
+    assert len(selected) == max_items
+    assert metadata["selected_typed_count"] == typed_count
+    assert metadata["selected_raw_count"] == selected_raw
+    assert metadata["selected_typed_overflow_count"] == typed_overflow
 
 
 def test_operational_evidence_set_preserves_reserved_support_by_default() -> None:
