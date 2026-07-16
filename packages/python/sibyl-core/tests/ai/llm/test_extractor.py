@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import pytest
 from pydantic import BaseModel
 from pydantic_ai import Agent
@@ -8,6 +12,7 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, Text
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.settings import ModelSettings
+from pydantic_ai.usage import RequestUsage
 
 from sibyl_core.ai.errors import LLMProviderError, LLMRateLimitError, LLMValidationError
 from sibyl_core.ai.llm import Extractor
@@ -48,6 +53,36 @@ async def test_extractor_returns_parsed_model() -> None:
     result = await extractor.extract("extract")
 
     assert result == Payload(name="Sibyl", score=0.9)
+
+
+@pytest.mark.asyncio
+async def test_extractor_returns_provider_usage_and_complete_cost() -> None:
+    async def respond(_: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        output_tool = info.output_tools[0]
+        return ModelResponse(
+            parts=[ToolCallPart(output_tool.name, {"name": "Sibyl", "score": 0.9})],
+            usage=RequestUsage(input_tokens=12, output_tokens=4),
+            model_name="gpt-test",
+            provider_name="openai",
+        )
+
+    extractor = Extractor(Payload, agent=Agent(FunctionModel(respond), output_type=Payload))
+    price = SimpleNamespace(total_price=Decimal("0.0012"))
+
+    with patch.object(ModelResponse, "cost", return_value=price):
+        result = await extractor.extract_with_usage("extract")
+
+    assert result.output == Payload(name="Sibyl", score=0.9)
+    assert result.usage.model_dump() == {
+        "provider": "openai",
+        "model": "function:respond:",
+        "requests": 1,
+        "input_tokens": 12,
+        "output_tokens": 4,
+        "total_tokens": 16,
+        "cost_usd": 0.0012,
+        "cost_complete": True,
+    }
 
 
 @pytest.mark.asyncio

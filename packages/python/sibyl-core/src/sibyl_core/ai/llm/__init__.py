@@ -6,6 +6,8 @@ from typing import Any
 _EXPORTS = {
     "ConfigField": ("sibyl_core.ai.llm.config", "ConfigField"),
     "EnvConfigSource": ("sibyl_core.ai.llm.config", "EnvConfigSource"),
+    "ExtractionResult": ("sibyl_core.ai.llm.extractor", "ExtractionResult"),
+    "ExtractionUsage": ("sibyl_core.ai.llm.extractor", "ExtractionUsage"),
     "Extractor": ("sibyl_core.ai.llm.extractor", "Extractor"),
     "Generator": ("sibyl_core.ai.llm.generator", "Generator"),
     "LLMBudgetContext": ("sibyl_core.ai.llm.budget", "LLMBudgetContext"),
