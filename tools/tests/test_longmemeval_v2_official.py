@@ -46,6 +46,8 @@ EXPECTED_STATE_PART_COMPLETION_ITEMS = 2
 EXPECTED_STATE_PART_REFINEMENT_MIN_SCORE_GAIN = 0.05
 EXPECTED_CONTEXT_EXPANSION_MAX_RATIO = 1.2
 EXPECTED_CONTEXT_TOKEN_COUNT = 37
+EXPECTED_CONTEXT_TOTAL_CHARS = 60_000
+EXPECTED_CONTEXT_BUDGET_ITEMS = 3
 EXPECTED_SEARCH_LIMIT_OVERRIDE = 24
 EXPECTED_SAVED_USAGE_REQUESTS = 2
 EXPECTED_SAVED_USAGE_COST_USD = 0.25
@@ -54,9 +56,12 @@ EXPECTED_OPERATIONAL_CREATED_ENTITIES = 4
 EXPECTED_OPERATIONAL_EVIDENCE_ITEMS = 8
 EXPECTED_OPERATIONAL_RAW_ITEMS = 6
 EXPECTED_OPERATIONAL_TYPED_ITEMS = 2
+EXPECTED_OPERATIONAL_SUPPORT_ITEMS = 3
+EXPECTED_WHITESPACE_EXPOSURE_CHARS = 2
 OPERATIONAL_EVIDENCE_MAX_CHARS = 4_000
 TEST_CONTENT_MAX_CHARS = 420
 TEST_CONTEXT_MAX_CHARS = 800
+TEST_CONTEXT_TOTAL_CHARS = 700
 TEST_CREDENTIAL = "fresh-credential"
 TEST_EMAIL = "eval@example.test"
 
@@ -254,7 +259,15 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(
     _assert_credentials_stay_process_local(memory_config)
     assert memory_config["memory_params"]["allow_localhost"] is True
     assert memory_config["memory_params"]["defer_embeddings"] is True
-    assert memory_config["memory_params"]["content_max_chars"] == EXPECTED_CONTENT_MAX_CHARS
+    assert (
+        memory_config["memory_params"]["content_max_chars"],
+        memory_config["memory_params"]["max_context_total_chars"],
+        plan["max_context_total_chars"],
+    ) == (
+        EXPECTED_CONTENT_MAX_CHARS,
+        EXPECTED_CONTEXT_TOTAL_CHARS,
+        EXPECTED_CONTEXT_TOTAL_CHARS,
+    )
     assert memory_config["memory_params"]["chunking_mode"] == "state"
     assert (
         memory_config["memory_params"]["max_chunks_per_trajectory"]
@@ -1173,9 +1186,8 @@ def test_sibyl_memory_context_formats_retrieved_content() -> None:
                 "Retrieved evidence rank 1\n"
                 "Retrieval: search\n"
                 "Trajectory: t1\n"
-                "Chunk: 0\n"
-                "Score: 0.875\n\n"
-                "The priority filter was"
+                "Chunk: 0\n\n"
+                "The priority filter was "
             ),
         }
     ]
@@ -1206,6 +1218,10 @@ def test_sibyl_memory_context_formats_retrieved_content() -> None:
             "chunk_count": 2,
             "state_indices": [3],
             "score": 0.875,
+            "selection_pool": None,
+            "selection_pool_rank": None,
+            "selection_score": None,
+            "selection_overlap": None,
             "content_chars": len(trace_content),
             "exposed_chars": 24,
             "result_origin": "graph",
@@ -1217,6 +1233,149 @@ def test_sibyl_memory_context_formats_retrieved_content() -> None:
             "neighbor_distance": None,
         }
     ]
+
+
+def test_sibyl_memory_context_budget_fairly_preserves_selected_evidence() -> None:
+    module = _load_memory_module()
+    results = [
+        {
+            "id": f"entity-{index}",
+            "content": f"evidence-{index} " + ("x" * 1_000),
+            "metadata": {"longmemeval_v2_trajectory_id": f"t{index}"},
+        }
+        for index in range(EXPECTED_CONTEXT_BUDGET_ITEMS)
+    ]
+
+    context, metadata = module.render_memory_context(
+        results,
+        max_items=EXPECTED_CONTEXT_BUDGET_ITEMS,
+        max_chars_per_item=1_000,
+        max_total_chars=TEST_CONTEXT_TOTAL_CHARS,
+    )
+
+    assert len(context) == EXPECTED_CONTEXT_BUDGET_ITEMS
+    assert sum(len(item["value"]) for item in context) <= TEST_CONTEXT_TOTAL_CHARS
+    assert all(
+        f"evidence-{index}" in context[index]["value"]
+        for index in range(EXPECTED_CONTEXT_BUDGET_ITEMS)
+    )
+    assert metadata["rendered_item_count"] == EXPECTED_CONTEXT_BUDGET_ITEMS
+    assert metadata["dropped_item_count"] == 0
+    assert metadata["truncated_item_count"] == EXPECTED_CONTEXT_BUDGET_ITEMS
+    assert metadata["binding"] is True
+    assert all("Score:" not in item["value"] for item in context)
+    trace = module.build_retrieval_trace(
+        results,
+        max_items=EXPECTED_CONTEXT_BUDGET_ITEMS,
+        max_chars_per_item=1_000,
+        context_budget=metadata,
+    )
+    assert [item["exposed_chars"] for item in trace] == [
+        item["exposed_content_chars"] for item in metadata["items"]
+    ]
+
+
+def test_sibyl_memory_context_budget_reports_fully_dropped_rows() -> None:
+    module = _load_memory_module()
+    results = [
+        {
+            "id": f"entity-{index}",
+            "content": f"evidence-{index}",
+            "metadata": {"longmemeval_v2_trajectory_id": f"t{index}"},
+        }
+        for index in range(EXPECTED_CONTEXT_BUDGET_ITEMS)
+    ]
+    one_item_budget = (
+        len(module._memory_context_header(1, results[0])) + 2 + len(str(results[0]["content"]))
+    )
+
+    context, metadata = module.render_memory_context(
+        results,
+        max_items=EXPECTED_CONTEXT_BUDGET_ITEMS,
+        max_total_chars=one_item_budget,
+    )
+    trace = module.build_retrieval_trace(
+        results,
+        max_items=EXPECTED_CONTEXT_BUDGET_ITEMS,
+        context_budget=metadata,
+    )
+
+    assert len(context) == 1
+    assert [item["dropped"] for item in metadata["items"]] == [False, True, True]
+    assert [item["exposed_content_chars"] for item in metadata["items"]] == [
+        len("evidence-0"),
+        0,
+        0,
+    ]
+    assert metadata["dropped_entity_ids"] == ["entity-1", "entity-2"]
+    assert [item["entity_id"] for item in trace] == ["entity-0"]
+
+
+def test_sibyl_memory_context_budget_redistributes_unused_fair_share() -> None:
+    module = _load_memory_module()
+    max_total_chars = 600
+    long = {
+        "id": "long",
+        "type": "event",
+        "content": "x" * 1_000,
+        "_selection_origin": "search",
+        "metadata": {},
+    }
+    short = [
+        {
+            "id": f"short-{index}",
+            "type": "event",
+            "content": "x",
+            "_selection_origin": "search",
+            "metadata": {},
+        }
+        for index in range(2)
+    ]
+
+    _context, metadata = module.render_memory_context(
+        [long, *short],
+        max_items=3,
+        max_chars_per_item=1_000,
+        max_total_chars=max_total_chars,
+    )
+    _reordered_context, reordered_metadata = module.render_memory_context(
+        [*short, long],
+        max_items=3,
+        max_chars_per_item=1_000,
+        max_total_chars=max_total_chars,
+    )
+
+    exposed = {item["entity_id"]: item["exposed_content_chars"] for item in metadata["items"]}
+    reordered_exposed = {
+        item["entity_id"]: item["exposed_content_chars"] for item in reordered_metadata["items"]
+    }
+    assert metadata["rendered_context_chars"] == max_total_chars
+    assert reordered_metadata["rendered_context_chars"] == max_total_chars
+    assert exposed["long"] == reordered_exposed["long"]
+    assert exposed["short-0"] == exposed["short-1"] == 1
+
+
+def test_sibyl_memory_context_budget_preserves_allocated_whitespace() -> None:
+    module = _load_memory_module()
+    result = {
+        "id": "whitespace",
+        "type": "event",
+        "content": "a b",
+        "_selection_origin": "search",
+        "metadata": {},
+    }
+    max_total_chars = len(module._memory_context_header(1, result)) + 2 + 2
+
+    context, metadata = module.render_memory_context(
+        [result],
+        max_items=1,
+        max_chars_per_item=2,
+        max_total_chars=max_total_chars,
+    )
+
+    assert context[0]["value"].endswith("a ")
+    assert metadata["rendered_context_chars"] == max_total_chars
+    assert metadata["items"][0]["exposed_content_chars"] == EXPECTED_WHITESPACE_EXPOSURE_CHARS
 
 
 def test_sibyl_memory_context_token_count_matches_official_processor_contract(
@@ -1987,7 +2146,7 @@ def test_context_pack_evidence_contract_fails_closed(
         module._required_context_evidence(response)
 
 
-def test_operational_evidence_set_ranks_typed_and_raw_on_shared_relevance() -> None:
+def test_operational_evidence_set_calibrates_typed_and_raw_score_pools() -> None:
     module = _load_memory_module()
     typed = [
         {
@@ -2020,7 +2179,16 @@ def test_operational_evidence_set_ranks_typed_and_raw_on_shared_relevance() -> N
     )
 
     assert len(selected) == EXPECTED_OPERATIONAL_EVIDENCE_ITEMS
-    assert all(item["type"] == "session" for item in selected)
+    assert [item["type"] for item in selected] == [
+        "procedure",
+        "procedure",
+        "procedure",
+        "session",
+        "session",
+        "session",
+        "session",
+        "session",
+    ]
     assert metadata == {
         "mode": "shared_relevance",
         "candidate_count": 16,
@@ -2028,8 +2196,11 @@ def test_operational_evidence_set_ranks_typed_and_raw_on_shared_relevance() -> N
         "raw_candidate_count": 8,
         "ranking_applied": True,
         "ranking_changed": False,
-        "selected_typed_count": 0,
-        "selected_raw_count": 8,
+        "pool_calibration": "independent_query_coverage",
+        "typed_floor": 3,
+        "selected_raw_support_count": 0,
+        "selected_typed_count": 3,
+        "selected_raw_count": 5,
     }
 
 
@@ -2077,6 +2248,58 @@ def test_operational_evidence_set_preserves_reserved_support_by_default() -> Non
     assert metadata["selected_raw_count"] == EXPECTED_OPERATIONAL_RAW_ITEMS
 
 
+@pytest.mark.parametrize(
+    ("support_origin", "parent_key"),
+    [("neighbor", "_neighbor_of_search_rank"), ("state_part", "_state_part_of_search_rank")],
+)
+def test_shared_relevance_preserves_linked_raw_support(
+    support_origin: str,
+    parent_key: str,
+) -> None:
+    module = _load_memory_module()
+    typed = [
+        {
+            "id": f"event-{index}",
+            "type": "event",
+            "content": "Typed projection",
+            "_selection_origin": "context_pack:recent_memory",
+            "metadata": {"longmemeval_v2_trajectory_id": f"typed-{index}"},
+        }
+        for index in range(2)
+    ]
+    raw = [
+        {
+            "id": f"session-{index}",
+            "type": "session",
+            "content": f"Raw seed {index}",
+            "_selection_origin": "search",
+            "_search_rank": index + 1,
+        }
+        for index in range(8)
+    ]
+    raw.append(
+        {
+            "id": "linked-support",
+            "type": "session",
+            "content": "Linked raw support",
+            "_selection_origin": support_origin,
+            parent_key: 1,
+        }
+    )
+
+    selected, metadata = module.compile_operational_evidence_set(
+        query="anything",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=8,
+        mode="shared_relevance",
+    )
+
+    selected_ids = {item["id"] for item in selected}
+    assert {"session-0", "linked-support"} <= selected_ids
+    assert metadata["selected_raw_support_count"] == 1
+
+
 @pytest.mark.parametrize("typed_count", [0, 1])
 def test_reserved_support_does_not_duplicate_raw_when_typed_is_sparse(
     typed_count: int,
@@ -2106,6 +2329,42 @@ def test_reserved_support_does_not_duplicate_raw_when_typed_is_sparse(
         typed_results=typed,
         raw_results=raw,
         max_items=8,
+    )
+
+    assert len(selected) == EXPECTED_OPERATIONAL_EVIDENCE_ITEMS
+    assert len({item["id"] for item in selected}) == len(selected)
+    assert metadata["selected_typed_count"] == typed_count
+    assert metadata["selected_raw_count"] == 8 - typed_count
+
+
+@pytest.mark.parametrize("typed_count", [0, 1])
+def test_shared_relevance_falls_back_to_raw_when_typed_is_sparse(typed_count: int) -> None:
+    module = _load_memory_module()
+    typed = [
+        {
+            "id": "event-0",
+            "type": "event",
+            "content": "Typed projection",
+            "_selection_origin": "context_pack:recent_memory",
+            "metadata": {"longmemeval_v2_trajectory_id": "t0"},
+        }
+    ][:typed_count]
+    raw = [
+        {
+            "id": f"session-{index}",
+            "type": "session",
+            "content": "Raw support",
+            "_selection_origin": "search",
+        }
+        for index in range(8)
+    ]
+
+    selected, metadata = module.compile_operational_evidence_set(
+        query="anything",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=8,
+        mode="shared_relevance",
     )
 
     assert len(selected) == EXPECTED_OPERATIONAL_EVIDENCE_ITEMS
@@ -2148,6 +2407,258 @@ def test_operational_evidence_set_admits_relevant_typed_memory() -> None:
     assert selected[0]["id"] == "procedure-priority"
     assert metadata["selected_typed_count"] == 1
     assert metadata["selected_raw_count"] == 1
+
+
+def test_shared_relevance_selects_support_with_its_parent_seed() -> None:
+    module = _load_memory_module()
+    typed = [
+        {
+            "id": "event-0",
+            "type": "event",
+            "content": "Typed projection",
+            "_selection_origin": "context_pack:recent_memory",
+            "metadata": {"longmemeval_v2_trajectory_id": "typed-0"},
+        }
+    ]
+    raw = [
+        {
+            "id": "parent-1",
+            "type": "session",
+            "content": "Deployment settings overview",
+            "_selection_origin": "search",
+            "_search_rank": 1,
+        },
+        {
+            "id": "parent-2",
+            "type": "session",
+            "content": "Deployment Ring overview",
+            "_selection_origin": "search",
+            "_search_rank": 2,
+        },
+        {
+            "id": "support-1",
+            "type": "session",
+            "content": "Deployment Ring: Critical",
+            "_selection_origin": "neighbor",
+            "_neighbor_of_search_rank": 1,
+        },
+    ]
+
+    selected, metadata = module.compile_operational_evidence_set(
+        query="Which value is shown for the Deployment Ring?",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=3,
+        mode="shared_relevance",
+    )
+
+    assert [item["id"] for item in selected[1:]] == ["parent-1", "support-1"]
+    assert metadata["selected_raw_support_count"] == 1
+
+
+def test_shared_relevance_preserves_multiple_support_pairs() -> None:
+    module = _load_memory_module()
+    raw = [
+        {
+            "id": f"parent-{index}",
+            "type": "session",
+            "content": "Deployment settings",
+            "_selection_origin": "search",
+            "_search_rank": index,
+        }
+        for index in range(1, 4)
+    ]
+    raw.extend(
+        {
+            "id": f"support-{index}",
+            "type": "session",
+            "content": "Deployment settings",
+            "_selection_origin": "neighbor",
+            "_neighbor_of_search_rank": index,
+        }
+        for index in range(1, 4)
+    )
+
+    selected, metadata = module.compile_operational_evidence_set(
+        query="Which deployment settings are shown?",
+        typed_results=[],
+        raw_results=raw,
+        max_items=6,
+        mode="shared_relevance",
+    )
+
+    assert {item["id"] for item in selected} == {
+        "parent-1",
+        "parent-2",
+        "parent-3",
+        "support-1",
+        "support-2",
+        "support-3",
+    }
+    assert metadata["selected_raw_support_count"] == EXPECTED_OPERATIONAL_SUPPORT_ITEMS
+
+
+def test_shared_relevance_diversifies_grouped_support() -> None:
+    module = _load_memory_module()
+    raw = [
+        {
+            "id": f"parent-{index}",
+            "type": "session",
+            "content": "Deployment settings",
+            "_selection_origin": "search",
+            "_search_rank": index,
+        }
+        for index in range(1, 4)
+    ]
+    raw.extend(
+        [
+            {
+                "id": "support-1a",
+                "type": "session",
+                "content": "Deployment settings",
+                "_selection_origin": "neighbor",
+                "_neighbor_of_search_rank": 1,
+            },
+            {
+                "id": "support-1b",
+                "type": "session",
+                "content": "Deployment settings",
+                "_selection_origin": "state_part",
+                "_state_part_of_search_rank": 1,
+            },
+            {
+                "id": "support-2",
+                "type": "session",
+                "content": "Deployment settings",
+                "_selection_origin": "neighbor",
+                "_neighbor_of_search_rank": 2,
+            },
+            {
+                "id": "support-3",
+                "type": "session",
+                "content": "Deployment settings",
+                "_selection_origin": "neighbor",
+                "_neighbor_of_search_rank": 3,
+            },
+        ]
+    )
+
+    selected, metadata = module.compile_operational_evidence_set(
+        query="Which deployment settings are shown?",
+        typed_results=[],
+        raw_results=raw,
+        max_items=6,
+        mode="shared_relevance",
+    )
+
+    assert {item["id"] for item in selected} == {
+        "parent-1",
+        "parent-2",
+        "parent-3",
+        "support-1a",
+        "support-2",
+        "support-3",
+    }
+    assert metadata["selected_raw_support_count"] == EXPECTED_OPERATIONAL_SUPPORT_ITEMS
+
+
+def test_shared_relevance_rejects_orphan_support() -> None:
+    module = _load_memory_module()
+    raw = [
+        {
+            "id": f"parent-{index}",
+            "type": "session",
+            "content": "Deployment settings",
+            "_selection_origin": "search",
+            "_search_rank": index,
+        }
+        for index in range(1, 3)
+    ]
+    raw.append(
+        {
+            "id": "orphan-support",
+            "type": "session",
+            "content": "Deployment settings",
+            "_selection_origin": "state_part",
+            "_state_part_of_search_rank": 99,
+        }
+    )
+
+    selected, metadata = module.compile_operational_evidence_set(
+        query="Which deployment settings are shown?",
+        typed_results=[],
+        raw_results=raw,
+        max_items=3,
+        mode="shared_relevance",
+    )
+
+    assert [item["id"] for item in selected] == ["parent-1", "parent-2"]
+    assert metadata["selected_raw_support_count"] == 0
+
+
+@pytest.mark.parametrize("mode", ["reserved_support", "shared_relevance"])
+def test_operational_evidence_set_one_slot_excludes_support(mode: str) -> None:
+    module = _load_memory_module()
+    raw = [
+        {
+            "id": "parent",
+            "type": "session",
+            "content": "Deployment settings",
+            "_selection_origin": "search",
+            "_search_rank": 1,
+        },
+        {
+            "id": "support",
+            "type": "session",
+            "content": "Deployment settings",
+            "_selection_origin": "neighbor",
+            "_neighbor_of_search_rank": 1,
+        },
+    ]
+
+    selected, metadata = module.compile_operational_evidence_set(
+        query="Which deployment settings are shown?",
+        typed_results=[],
+        raw_results=raw,
+        max_items=1,
+        mode=mode,
+    )
+
+    assert [item["id"] for item in selected] == ["parent"]
+    assert metadata["selected_raw_support_count"] == 0
+
+
+@pytest.mark.parametrize("mode", ["reserved_support", "shared_relevance"])
+def test_operational_evidence_set_does_not_duplicate_malformed_support(mode: str) -> None:
+    module = _load_memory_module()
+    raw = [
+        {
+            "id": "parent",
+            "type": "session",
+            "content": "Deployment settings",
+            "_selection_origin": "search",
+            "_search_rank": 1,
+        },
+        {
+            "id": "malformed-primary",
+            "type": "session",
+            "content": "Deployment settings",
+            "_selection_origin": "search",
+            "_search_rank": 2,
+            "_neighbor_of_search_rank": 1,
+        },
+    ]
+
+    selected, metadata = module.compile_operational_evidence_set(
+        query="Which deployment settings are shown?",
+        typed_results=[],
+        raw_results=raw,
+        max_items=3,
+        mode=mode,
+    )
+
+    assert [item["id"] for item in selected] == ["parent", "malformed-primary"]
+    assert metadata["selected_raw_support_count"] == 0
 
 
 def test_sibyl_memory_insert_tracks_deferred_background_jobs() -> None:
@@ -2673,8 +3184,23 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
                 "raw_candidate_count": 0,
                 "ranking_applied": False,
                 "ranking_changed": False,
+                "selected_raw_support_count": 0,
                 "selected_typed_count": 0,
                 "selected_raw_count": 0,
+            },
+            "context_budget": {
+                "enabled": True,
+                "max_total_chars": EXPECTED_CONTEXT_TOTAL_CHARS,
+                "max_chars_per_item": TEST_CONTEXT_MAX_CHARS,
+                "candidate_item_count": 0,
+                "rendered_item_count": 0,
+                "dropped_item_count": 0,
+                "dropped_entity_ids": [],
+                "per_item_limited_chars": 0,
+                "rendered_context_chars": 0,
+                "truncated_item_count": 0,
+                "binding": False,
+                "items": [],
             },
         },
     }

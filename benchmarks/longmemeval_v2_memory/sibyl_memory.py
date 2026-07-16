@@ -35,6 +35,7 @@ from sibyl_core.evals.longmemeval_v2 import (  # noqa: E402
 )
 from sibyl_core.retrieval.query_ranking import (  # noqa: E402
     QueryCoverageCandidate,
+    QueryCoverageResult,
     rank_by_query_coverage,
 )
 
@@ -68,6 +69,7 @@ DEFAULT_CONTENT_MAX_CHARS = 18_000
 DEFAULT_SEARCH_LIMIT = 12
 DEFAULT_CONTEXT_ITEMS = 8
 DEFAULT_CONTEXT_CHARS_PER_ITEM = 18_000
+DEFAULT_CONTEXT_TOTAL_CHARS = 60_000
 MAX_BUNDLED_SOURCE_CHARS = 12_000
 DEFAULT_EVIDENCE_COMPOSITION_MODE = "reserved_support"
 EVIDENCE_COMPOSITION_MODES = frozenset({"reserved_support", "shared_relevance"})
@@ -113,6 +115,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "search_limit",
         "max_context_items",
         "max_context_chars_per_item",
+        "max_context_total_chars",
         "max_chunks_per_trajectory",
         "neighbor_stitch_items",
         "neighbor_stitch_span",
@@ -447,7 +450,8 @@ def compile_operational_evidence_set(
         msg = f"Unknown evidence composition mode {mode!r}; expected {sorted(EVIDENCE_COMPOSITION_MODES)}"
         raise ValueError(msg)
     max_items = max(1, max_items)
-    candidates: list[dict[str, object]] = []
+    typed_candidates: list[dict[str, object]] = []
+    raw_candidates: list[dict[str, object]] = []
     seen_typed: set[tuple[str, str]] = set()
     seen_ids: set[str] = set()
     for result in typed_results:
@@ -461,7 +465,7 @@ def compile_operational_evidence_set(
         result_id = _stripped_str(result.get("id"))
         if result_id and result_id in seen_ids:
             continue
-        candidates.append(dict(result))
+        typed_candidates.append(dict(result))
         seen_typed.add(key)
         if result_id:
             seen_ids.add(result_id)
@@ -469,15 +473,14 @@ def compile_operational_evidence_set(
         result_id = _stripped_str(result.get("id"))
         if result_id and result_id in seen_ids:
             continue
-        candidates.append(dict(result))
+        raw_candidates.append(dict(result))
         if result_id:
             seen_ids.add(result_id)
 
+    candidates = [*typed_candidates, *raw_candidates]
     if mode == "reserved_support":
         typed_budget = min(3, max(1, max_items // 3))
-        selected = candidates[: min(typed_budget, len(seen_typed))]
-        selected.extend(candidates[len(seen_typed) :])
-        selected = selected[:max_items]
+        selected = [*typed_candidates[:typed_budget], *raw_candidates][:max_items]
         selected_typed = sum(
             _stripped_str(item.get("_selection_origin")).startswith("context_pack:")
             for item in selected
@@ -489,16 +492,61 @@ def compile_operational_evidence_set(
             "raw_candidate_count": len(candidates) - len(seen_typed),
             "ranking_applied": False,
             "ranking_changed": False,
+            "selected_raw_support_count": sum(
+                _stripped_str(item.get("_selection_origin")) in {"neighbor", "state_part"}
+                for item in selected
+            ),
             "selected_typed_count": selected_typed,
             "selected_raw_count": len(selected) - selected_typed,
         }
 
-    candidates.sort(
-        key=lambda item: (
-            -_numeric_score(item.get("score")),
-            _result_stable_id(item),
-        )
+    ranked_typed, typed_ranking = _rank_operational_evidence_pool(
+        query,
+        typed_candidates,
+        pool="typed",
     )
+    ranked_raw, raw_ranking = _rank_operational_evidence_pool(
+        query,
+        raw_candidates,
+        pool="raw",
+    )
+    typed_budget = min(len(ranked_typed), max(1, math.ceil(max_items * 3 / 8)))
+    raw_budget = min(len(ranked_raw), max_items - typed_budget)
+    selected_raw = _select_role_complete_raw_evidence(ranked_raw, budget=raw_budget)
+    selected = [*ranked_typed[:typed_budget], *selected_raw]
+    if len(selected) < max_items:
+        selected.extend(ranked_typed[typed_budget : typed_budget + max_items - len(selected)])
+    for selection_rank, candidate in enumerate(selected, start=1):
+        candidate["_evidence_selection_rank"] = selection_rank
+
+    selected_typed = sum(
+        _stripped_str(item.get("_selection_origin")).startswith("context_pack:")
+        for item in selected
+    )
+    return selected, {
+        "mode": mode,
+        "candidate_count": len(candidates),
+        "typed_candidate_count": len(seen_typed),
+        "raw_candidate_count": len(candidates) - len(seen_typed),
+        "ranking_applied": typed_ranking.applied or raw_ranking.applied,
+        "ranking_changed": typed_ranking.changed or raw_ranking.changed,
+        "pool_calibration": "independent_query_coverage",
+        "typed_floor": min(max_items, math.ceil(max_items * 3 / 8)),
+        "selected_raw_support_count": sum(
+            _stripped_str(item.get("_selection_origin")) in {"neighbor", "state_part"}
+            for item in selected
+        ),
+        "selected_typed_count": selected_typed,
+        "selected_raw_count": len(selected) - selected_typed,
+    }
+
+
+def _rank_operational_evidence_pool(
+    query: str,
+    candidates: list[dict[str, object]],
+    *,
+    pool: str,
+) -> tuple[list[dict[str, object]], QueryCoverageResult[dict[str, object]]]:
     ranking = rank_by_query_coverage(
         query,
         [
@@ -512,28 +560,118 @@ def compile_operational_evidence_set(
             for index, candidate in enumerate(candidates, start=1)
         ],
     )
-    selected: list[dict[str, object]] = []
-    for selection_rank, ranked in enumerate(ranking.ranked[:max_items], start=1):
+    ranked_candidates: list[dict[str, object]] = []
+    for pool_rank, ranked in enumerate(ranking.ranked, start=1):
         candidate = dict(ranked.item)
-        candidate["_evidence_selection_rank"] = selection_rank
+        candidate["_evidence_selection_pool"] = pool
+        candidate["_evidence_pool_rank"] = pool_rank
         candidate["_evidence_selection_score"] = ranked.score
         candidate["_evidence_selection_overlap"] = ranked.overlap
-        selected.append(candidate)
+        ranked_candidates.append(candidate)
+    return ranked_candidates, ranking
 
-    selected_typed = sum(
-        _stripped_str(item.get("_selection_origin")).startswith("context_pack:")
-        for item in selected
-    )
-    return selected, {
-        "mode": mode,
-        "candidate_count": len(candidates),
-        "typed_candidate_count": len(seen_typed),
-        "raw_candidate_count": len(candidates) - len(seen_typed),
-        "ranking_applied": ranking.applied,
-        "ranking_changed": ranking.changed,
-        "selected_typed_count": selected_typed,
-        "selected_raw_count": len(selected) - selected_typed,
-    }
+
+def _select_role_complete_raw_evidence(
+    candidates: list[dict[str, object]],
+    *,
+    budget: int,
+) -> list[dict[str, object]]:
+    if budget <= 0:
+        return []
+    primary = [
+        candidate
+        for candidate in candidates
+        if not _is_support_candidate(candidate)
+    ]
+    primary_by_search_rank: dict[int, dict[str, object]] = {}
+    for candidate in primary:
+        search_rank = _optional_positive_int(candidate.get("_search_rank"))
+        if search_rank is not None:
+            primary_by_search_rank.setdefault(search_rank, candidate)
+    linked_support = [
+        (candidate, primary_by_search_rank[parent_rank])
+        for candidate in candidates
+        if _is_support_candidate(candidate)
+        and (parent_rank := _support_parent_search_rank(candidate)) in primary_by_search_rank
+    ]
+    selected_links = _select_diverse_support_links(linked_support, limit=budget // 2)
+    selected_support = [support for support, _parent in selected_links]
+    selected_primary: list[dict[str, object]] = []
+    selected_primary_ids: set[int] = set()
+    for _support, parent in selected_links:
+        if id(parent) not in selected_primary_ids:
+            selected_primary.append(parent)
+            selected_primary_ids.add(id(parent))
+    primary_budget = budget - len(selected_support)
+    for candidate in primary:
+        if id(candidate) not in selected_primary_ids and len(selected_primary) < primary_budget:
+            selected_primary.append(candidate)
+            selected_primary_ids.add(id(candidate))
+    candidate_order = {id(candidate): index for index, candidate in enumerate(candidates)}
+    selected_primary.sort(key=lambda candidate: candidate_order[id(candidate)])
+    selected_support_ids = {id(candidate) for candidate in selected_support}
+    for support, parent in linked_support:
+        if (
+            id(support) not in selected_support_ids
+            and id(parent) in selected_primary_ids
+            and len(selected_primary) + len(selected_support) < budget
+        ):
+            selected_support.append(support)
+            selected_support_ids.add(id(support))
+    support_by_parent_id: dict[int, list[dict[str, object]]] = {}
+    for support, parent in linked_support:
+        if id(support) in selected_support_ids:
+            support_by_parent_id.setdefault(id(parent), []).append(support)
+    selected: list[dict[str, object]] = []
+    for candidate in selected_primary:
+        selected.append(candidate)
+        selected.extend(support_by_parent_id.get(id(candidate), []))
+    return selected
+
+
+def _select_diverse_support_links(
+    linked_support: list[tuple[dict[str, object], dict[str, object]]],
+    *,
+    limit: int,
+) -> list[tuple[dict[str, object], dict[str, object]]]:
+    if limit <= 0:
+        return []
+    selected: list[tuple[dict[str, object], dict[str, object]]] = []
+    selected_support_ids: set[int] = set()
+    selected_parent_ids: set[int] = set()
+    selected_parent_roles: set[tuple[int, str]] = set()
+    for diversity in ("parent", "role", "rank"):
+        for support, parent in linked_support:
+            if id(support) in selected_support_ids:
+                continue
+            parent_id = id(parent)
+            role = _stripped_str(support.get("_selection_origin"))
+            if diversity == "parent" and parent_id in selected_parent_ids:
+                continue
+            if diversity == "role" and (parent_id, role) in selected_parent_roles:
+                continue
+            selected.append((support, parent))
+            selected_support_ids.add(id(support))
+            selected_parent_ids.add(parent_id)
+            selected_parent_roles.add((parent_id, role))
+            if len(selected) >= limit:
+                return selected
+    return selected
+
+
+def _support_parent_search_rank(candidate: dict[str, object]) -> int | None:
+    for key in ("_neighbor_of_search_rank", "_state_part_of_search_rank"):
+        if (rank := _optional_positive_int(candidate.get(key))) is not None:
+            return rank
+    return None
+
+
+def _is_support_candidate(candidate: dict[str, object]) -> bool:
+    return _stripped_str(candidate.get("_selection_origin")) in {"neighbor", "state_part"}
+
+
+def _optional_positive_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
 def search_results_to_memory_context(
@@ -541,31 +679,139 @@ def search_results_to_memory_context(
     *,
     max_items: int = DEFAULT_CONTEXT_ITEMS,
     max_chars_per_item: int = DEFAULT_CONTEXT_CHARS_PER_ITEM,
+    max_total_chars: int = DEFAULT_CONTEXT_TOTAL_CHARS,
 ) -> list[MemoryContextItem]:
-    context: list[MemoryContextItem] = []
+    context, _metadata = render_memory_context(
+        results,
+        max_items=max_items,
+        max_chars_per_item=max_chars_per_item,
+        max_total_chars=max_total_chars,
+    )
+    return context
+
+
+def render_memory_context(
+    results: list[dict[str, object]],
+    *,
+    max_items: int = DEFAULT_CONTEXT_ITEMS,
+    max_chars_per_item: int = DEFAULT_CONTEXT_CHARS_PER_ITEM,
+    max_total_chars: int = DEFAULT_CONTEXT_TOTAL_CHARS,
+) -> tuple[list[MemoryContextItem], dict[str, object]]:
+    max_items = max(1, max_items)
+    max_chars_per_item = max(1, max_chars_per_item)
+    max_total_chars = max(1, max_total_chars)
+    rows: list[tuple[int, dict[str, object], str, str]] = []
     for rank, result in enumerate(results[:max_items], start=1):
         content = _stripped_str(result.get("content"))
         if not content:
             continue
-        metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
-        trajectory_id = _stripped_str(metadata.get("longmemeval_v2_trajectory_id"))
-        chunk_index = metadata.get("longmemeval_v2_chunk_index")
-        score = result.get("score")
-        selection_origin = _stripped_str(result.get("_selection_origin")) or "search"
-        header = [
+        rows.append((rank, result, _memory_context_header(rank, result), content))
+
+    candidate_rows = list(rows)
+    per_item_limited_chars = sum(
+        len(header) + 2 + min(len(content), max_chars_per_item)
+        for _rank, _result, header, content in candidate_rows
+    )
+    dropped: list[tuple[int, dict[str, object], str, str]] = []
+    while rows and sum(len(header) + 3 for _rank, _result, header, _content in rows) > max_total_chars:
+        dropped.append(rows.pop())
+
+    context: list[MemoryContextItem] = []
+    budget_items: list[dict[str, object]] = []
+    remaining_content_chars = max_total_chars - sum(
+        len(header) + 2 for _rank, _result, header, _content in rows
+    )
+    content_allocations = _allocate_context_chars(
+        [min(len(content), max_chars_per_item) for _rank, _result, _header, content in rows],
+        budget=remaining_content_chars,
+    )
+    for (rank, result, header, content), allocation in zip(
+        rows,
+        content_allocations,
+        strict=True,
+    ):
+        exposed_content = content[:allocation]
+        context.append(
+            {
+                "type": "text",
+                "value": header + "\n\n" + exposed_content,
+            }
+        )
+        budget_items.append(
+            {
+                "rank": rank,
+                "entity_id": _stripped_str(result.get("id")),
+                "content_chars": len(content),
+                "exposed_content_chars": len(exposed_content),
+                "truncated": len(exposed_content) < len(content),
+                "dropped": False,
+            }
+        )
+    budget_items.extend(
+        {
+            "rank": rank,
+            "entity_id": _stripped_str(result.get("id")),
+            "content_chars": len(content),
+            "exposed_content_chars": 0,
+            "truncated": True,
+            "dropped": True,
+        }
+        for rank, result, _header, content in dropped
+    )
+    budget_items.sort(key=lambda item: int(item["rank"]))
+    rendered_chars = sum(len(item["value"]) for item in context)
+    return context, {
+        "enabled": True,
+        "max_total_chars": max_total_chars,
+        "max_chars_per_item": max_chars_per_item,
+        "candidate_item_count": len(rows) + len(dropped),
+        "rendered_item_count": len(context),
+        "dropped_item_count": len(dropped),
+        "dropped_entity_ids": [
+            _stripped_str(result.get("id"))
+            for _rank, result, _header, _content in reversed(dropped)
+        ],
+        "per_item_limited_chars": per_item_limited_chars,
+        "rendered_context_chars": rendered_chars,
+        "truncated_item_count": sum(bool(item["truncated"]) for item in budget_items),
+        "binding": bool(dropped) or rendered_chars < per_item_limited_chars,
+        "items": budget_items,
+    }
+
+
+def _allocate_context_chars(capacities: list[int], *, budget: int) -> list[int]:
+    allocations = [0] * len(capacities)
+    active = list(range(len(capacities)))
+    remaining = max(0, budget)
+    while active and remaining > 0:
+        fair_share, remainder = divmod(remaining, len(active))
+        saturated = [index for index in active if capacities[index] <= fair_share]
+        if saturated:
+            for index in saturated:
+                allocations[index] = capacities[index]
+                remaining -= capacities[index]
+            saturated_set = set(saturated)
+            active = [index for index in active if index not in saturated_set]
+            continue
+        for position, index in enumerate(active):
+            allocations[index] = fair_share + int(position < remainder)
+        break
+    return allocations
+
+
+def _memory_context_header(rank: int, result: dict[str, object]) -> str:
+    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    trajectory_id = _stripped_str(metadata.get("longmemeval_v2_trajectory_id"))
+    chunk_index = metadata.get("longmemeval_v2_chunk_index")
+    selection_origin = _stripped_str(result.get("_selection_origin")) or "search"
+    return "\n".join(
+        [
             f"Retrieved evidence rank {rank}",
             f"Retrieval: {selection_origin}",
             f"Trajectory: {trajectory_id or 'unknown'}",
             f"Chunk: {chunk_index if isinstance(chunk_index, int) else 'unknown'}",
-            f"Score: {score if isinstance(score, int | float) else 'unknown'}",
         ]
-        context.append(
-            {
-                "type": "text",
-                "value": "\n".join(header) + "\n\n" + content[:max_chars_per_item].rstrip(),
-            }
-        )
-    return context
+    )
 
 
 def count_memory_context_tokens(memory_context: list[MemoryContextItem]) -> int:
@@ -596,9 +842,27 @@ def build_retrieval_trace(
     *,
     max_items: int = DEFAULT_CONTEXT_ITEMS,
     max_chars_per_item: int = DEFAULT_CONTEXT_CHARS_PER_ITEM,
+    context_budget: dict[str, object] | None = None,
 ) -> list[dict[str, object]]:
+    budget_items = context_budget.get("items") if isinstance(context_budget, dict) else None
+    exposed_chars_by_rank = {
+        item["rank"]: item["exposed_content_chars"]
+        for item in budget_items
+        if isinstance(item, dict)
+        and isinstance(item.get("rank"), int)
+        and isinstance(item.get("exposed_content_chars"), int)
+    } if isinstance(budget_items, list) else {}
+    dropped_ranks = {
+        item["rank"]
+        for item in budget_items
+        if isinstance(item, dict)
+        and item.get("dropped") is True
+        and isinstance(item.get("rank"), int)
+    } if isinstance(budget_items, list) else set()
     trace: list[dict[str, object]] = []
     for rank, result in enumerate(results[:max_items], start=1):
+        if rank in dropped_ranks:
+            continue
         content = _stripped_str(result.get("content"))
         if not content:
             continue
@@ -624,8 +888,15 @@ def build_retrieval_trace(
                 "chunk_count": metadata.get("longmemeval_v2_chunk_count"),
                 "state_indices": state_indices,
                 "score": result.get("score"),
+                "selection_pool": result.get("_evidence_selection_pool"),
+                "selection_pool_rank": result.get("_evidence_pool_rank"),
+                "selection_score": result.get("_evidence_selection_score"),
+                "selection_overlap": result.get("_evidence_selection_overlap"),
                 "content_chars": len(content),
-                "exposed_chars": min(len(content), max_chars_per_item),
+                "exposed_chars": exposed_chars_by_rank.get(
+                    rank,
+                    min(len(content), max_chars_per_item),
+                ),
                 "result_origin": _stripped_str(result.get("result_origin")),
                 "selection_origin": _stripped_str(result.get("_selection_origin"))
                 or "search",
@@ -1264,6 +1535,14 @@ class SibylLiveApiMemory(Memory):
             "source_evidence_bundling",
             DEFAULT_SOURCE_EVIDENCE_BUNDLING,
         )
+        self.max_context_total_chars = max(
+            1,
+            _param_int(
+                memory_params,
+                "max_context_total_chars",
+                DEFAULT_CONTEXT_TOTAL_CHARS,
+            ),
+        )
         self.context_expansion_max_ratio = _param_context_expansion_ratio(
             memory_params,
             "context_expansion_max_ratio",
@@ -1537,16 +1816,24 @@ class SibylLiveApiMemory(Memory):
         )
         assembly_metadata["evidence_composition"] = evidence_composition
         self._query_local.search_metadata["adapter_assembly"] = assembly_metadata
+        memory_context, context_budget = render_memory_context(
+            evidence_set,
+            max_items=self.max_context_items,
+            max_chars_per_item=self.max_context_chars_per_item,
+            max_total_chars=getattr(
+                self,
+                "max_context_total_chars",
+                DEFAULT_CONTEXT_TOTAL_CHARS,
+            ),
+        )
+        assembly_metadata["context_budget"] = context_budget
         self._query_local.retrieval_trace = build_retrieval_trace(
             evidence_set,
             max_items=self.max_context_items,
             max_chars_per_item=self.max_context_chars_per_item,
+            context_budget=context_budget,
         )
-        return search_results_to_memory_context(
-            evidence_set,
-            max_items=self.max_context_items,
-            max_chars_per_item=self.max_context_chars_per_item,
-        )
+        return memory_context
 
     def _count_context_result_tokens(self, results: list[dict[str, object]]) -> int:
         return count_memory_context_tokens(
@@ -1554,6 +1841,11 @@ class SibylLiveApiMemory(Memory):
                 results,
                 max_items=self.max_context_items,
                 max_chars_per_item=self.max_context_chars_per_item,
+                max_total_chars=getattr(
+                    self,
+                    "max_context_total_chars",
+                    DEFAULT_CONTEXT_TOTAL_CHARS,
+                ),
             )
         )
 

@@ -413,6 +413,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--search-limit", type=int, default=12)
     parser.add_argument("--max-context-items", type=int, default=8)
     parser.add_argument("--max-context-chars-per-item", type=int, default=18_000)
+    parser.add_argument("--max-context-total-chars", type=int, default=60_000)
     parser.add_argument("--max-chunks-per-trajectory", type=int, default=2)
     parser.add_argument("--neighbor-stitch-items", type=int, default=2)
     parser.add_argument("--neighbor-stitch-span", type=int, default=1)
@@ -506,6 +507,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--neighbor-stitch-span must be non-negative")
     if args.state_part_completion_items < 0:
         parser.error("--state-part-completion-items must be non-negative")
+    if args.max_context_total_chars < 1:
+        parser.error("--max-context-total-chars must be positive")
     args.provider_usage_run_id = f"lme-v2-usage-{uuid4().hex[:12]}"
     return args
 
@@ -603,6 +606,7 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "search_limit": args.search_limit,
         "max_context_items": args.max_context_items,
         "max_context_chars_per_item": args.max_context_chars_per_item,
+        "max_context_total_chars": args.max_context_total_chars,
         "max_chunks_per_trajectory": args.max_chunks_per_trajectory,
         "neighbor_stitch_items": args.neighbor_stitch_items,
         "neighbor_stitch_span": args.neighbor_stitch_span,
@@ -743,6 +747,7 @@ def build_run_plan(
         "neighbor_stitch_items": args.neighbor_stitch_items,
         "neighbor_stitch_span": args.neighbor_stitch_span,
         "context_expansion_max_ratio": args.context_expansion_max_ratio,
+        "max_context_total_chars": args.max_context_total_chars,
         "evidence_composition_mode": args.evidence_composition_mode,
         "source_evidence_bundling": args.source_evidence_bundling,
         "include_screenshot_refs": args.include_screenshot_refs,
