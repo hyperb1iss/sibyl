@@ -1,6 +1,6 @@
 """Context pack (structured agent context) request/response models."""
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -26,6 +26,16 @@ class ContextEvidenceRequest(BaseModel):
     include_retrieval_diagnostics: bool = Field(
         default=False,
         description="Include authorized evidence ranking diagnostics",
+    )
+    retrieval_mode: Literal["fast", "accurate"] = Field(
+        default="fast",
+        description="Use one search or planned multi-query evidence retrieval",
+    )
+    max_planned_queries: int = Field(
+        default=3,
+        ge=1,
+        le=4,
+        description="Maximum supplemental searches in accurate mode",
     )
 
 

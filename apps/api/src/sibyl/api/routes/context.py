@@ -19,6 +19,7 @@ from sibyl.api.schemas import (
     ReflectionResponse,
     SearchRequest,
     SearchResponse,
+    SearchResult,
 )
 from sibyl.auth.authorization import ProjectAuthorizationError, verify_entity_project_access
 from sibyl.auth.context import AuthContext
@@ -29,6 +30,8 @@ from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 from sibyl_core.embeddings.providers import capture_embedding_usage, configured_embedding_provider
 from sibyl_core.models.context import ContextPack
 from sibyl_core.observability import elapsed_ms, telemetry_registry
+from sibyl_core.retrieval.fusion import rrf_merge_with_metadata
+from sibyl_core.retrieval.query_planning import plan_evidence_queries
 
 log = structlog.get_logger()
 _READ_ROLES = (
@@ -66,6 +69,205 @@ async def _execute_context_evidence_search(
         raise
     except Exception as exc:
         raise RuntimeError("context evidence retrieval failed") from exc
+
+
+def _context_evidence_request(
+    request: ContextPackRequest,
+    *,
+    query: str,
+) -> SearchRequest:
+    assert request.evidence is not None
+    return SearchRequest(
+        query=query,
+        types=request.evidence.types,
+        project=request.project,
+        limit=request.evidence.limit,
+        include_content=True,
+        content_max_chars=request.evidence.content_max_chars,
+        include_documents=False,
+        include_graph=True,
+        include_raw_memory=True,
+        use_enhanced=True,
+        boost_recent=False,
+        include_retrieval_diagnostics=request.evidence.include_retrieval_diagnostics,
+        record_exposure=request.record_exposure,
+    )
+
+
+def _result_key(result: SearchResult) -> str:
+    return f"{result.result_origin}:{result.id}"
+
+
+def _fuse_context_evidence(
+    *,
+    question: str,
+    query_specs: list[dict[str, str]],
+    planned_queries: list[dict[str, str]],
+    responses: list[SearchResponse],
+    limit: int,
+    failures: list[dict[str, str | int]],
+) -> SearchResponse:
+    result_lists = [
+        [(result, result.score) for result in response.results] for response in responses
+    ]
+    fused = rrf_merge_with_metadata(
+        result_lists,
+        list_names=[spec["name"] for spec in query_specs],
+        dedup_key=_result_key,
+    )
+    fused_by_key = {
+        _result_key(result): (result, score, metadata) for result, score, metadata in fused
+    }
+
+    ordered_keys: list[str] = []
+    seen: set[str] = set()
+    for response in responses:
+        for result in response.results:
+            key = _result_key(result)
+            if key not in seen:
+                ordered_keys.append(key)
+                seen.add(key)
+                break
+    for result, _score, _metadata in fused:
+        key = _result_key(result)
+        if key not in seen:
+            ordered_keys.append(key)
+            seen.add(key)
+
+    selected: list[SearchResult] = []
+    for key in ordered_keys[:limit]:
+        result, score, fusion_metadata = fused_by_key[key]
+        selected.append(
+            result.model_copy(
+                update={
+                    "score": score,
+                    "metadata": {
+                        **result.metadata,
+                        "retrieval_fusion": fusion_metadata,
+                    },
+                }
+            )
+        )
+
+    unique_count = len(fused)
+    return SearchResponse(
+        results=selected,
+        total=unique_count,
+        query=question,
+        filters={
+            "retrieval_mode": "accurate",
+            "planner_status": "success",
+            "planned_queries": planned_queries,
+            "query_count": 1 + len(planned_queries),
+            "successful_query_count": len(responses),
+            "query_failures": failures,
+            "query_filters": {
+                spec["name"]: response.filters
+                for spec, response in zip(query_specs, responses, strict=True)
+            },
+        },
+        graph_count=sum(result.result_origin == "graph" for result in selected),
+        document_count=sum(result.result_origin == "document" for result in selected),
+        raw_memory_count=sum(result.result_origin == "raw_memory" for result in selected),
+        limit=limit,
+        has_more=unique_count > limit,
+    )
+
+
+async def _execute_accurate_context_evidence_search(
+    request: ContextPackRequest,
+    *,
+    org: AuthOrganization,
+    ctx: AuthContext,
+    embedding_usage: dict[str, str | int | float],
+) -> SearchResponse:
+    assert request.evidence is not None
+    original_task = asyncio.create_task(
+        _execute_context_evidence_search(
+            _context_evidence_request(request, query=request.goal),
+            org=org,
+            ctx=ctx,
+            embedding_usage=embedding_usage,
+        )
+    )
+    try:
+        try:
+            plan = await plan_evidence_queries(
+                request.goal,
+                max_queries=request.evidence.max_planned_queries,
+            )
+        except Exception as exc:
+            response = await original_task
+            response.filters.update(
+                {
+                    "retrieval_mode": "accurate",
+                    "planner_status": "fallback",
+                    "planner_error_type": type(exc).__name__,
+                    "planned_queries": [],
+                    "query_count": 1,
+                }
+            )
+            return response
+
+        supplemental_tasks = [
+            asyncio.create_task(
+                _execute_context_evidence_search(
+                    _context_evidence_request(request, query=item.query),
+                    org=org,
+                    ctx=ctx,
+                    embedding_usage=embedding_usage,
+                )
+            )
+            for item in plan.queries
+        ]
+        outcomes = await asyncio.gather(
+            original_task,
+            *supplemental_tasks,
+            return_exceptions=True,
+        )
+        if isinstance(outcomes[0], BaseException):
+            raise outcomes[0]
+
+        responses = [outcomes[0]]
+        query_specs = [{"name": "original", "query": request.goal, "facet": "original"}]
+        planned_queries = [
+            {
+                "name": f"supplemental_{index}",
+                "query": item.query,
+                "facet": item.facet.value,
+            }
+            for index, item in enumerate(plan.queries, start=1)
+        ]
+        failures: list[dict[str, str | int]] = []
+        for spec, outcome in zip(planned_queries, outcomes[1:], strict=True):
+            if isinstance(outcome, Exception):
+                failures.append(
+                    {
+                        "query_index": int(spec["name"].removeprefix("supplemental_")),
+                        "query": spec["query"],
+                        "facet": spec["facet"],
+                        "error_type": type(outcome).__name__,
+                    }
+                )
+                continue
+            if isinstance(outcome, BaseException):
+                raise outcome
+            responses.append(outcome)
+            query_specs.append(spec)
+
+        return _fuse_context_evidence(
+            question=request.goal,
+            query_specs=query_specs,
+            planned_queries=planned_queries,
+            responses=responses,
+            limit=request.evidence.limit,
+            failures=failures,
+        )
+    except BaseException:
+        if not original_task.done():
+            original_task.cancel()
+            await asyncio.gather(original_task, return_exceptions=True)
+        raise
 
 
 def _append_unique_ids(existing: list[str] | None, additions: list[str] | None) -> list[str] | None:
@@ -180,35 +382,30 @@ async def context_pack(
         if request.evidence is None:
             pack = await compile_pack()
         else:
-            evidence_request = SearchRequest(
-                query=request.goal,
-                types=request.evidence.types,
-                project=request.project,
-                limit=request.evidence.limit,
-                include_content=True,
-                content_max_chars=request.evidence.content_max_chars,
-                include_documents=False,
-                include_graph=True,
-                include_raw_memory=True,
-                use_enhanced=True,
-                boost_recent=False,
-                include_retrieval_diagnostics=request.evidence.include_retrieval_diagnostics,
-                record_exposure=request.record_exposure,
-            )
             try:
                 embedding_provider = configured_embedding_provider()
             except ValueError as exc:
                 raise RuntimeError("context evidence embedding configuration failed") from exc
             with capture_embedding_usage(embedding_provider) as embedding_usage:
                 pack_task = asyncio.create_task(compile_pack())
-                evidence_task = asyncio.create_task(
-                    _execute_context_evidence_search(
-                        evidence_request,
-                        org=org,
-                        ctx=ctx,
-                        embedding_usage=embedding_usage,
+                if request.evidence.retrieval_mode == "accurate":
+                    evidence_task = asyncio.create_task(
+                        _execute_accurate_context_evidence_search(
+                            request,
+                            org=org,
+                            ctx=ctx,
+                            embedding_usage=embedding_usage,
+                        )
                     )
-                )
+                else:
+                    evidence_task = asyncio.create_task(
+                        _execute_context_evidence_search(
+                            _context_evidence_request(request, query=request.goal),
+                            org=org,
+                            ctx=ctx,
+                            embedding_usage=embedding_usage,
+                        )
+                    )
                 try:
                     pack, evidence_response = await asyncio.gather(pack_task, evidence_task)
                 except BaseException:
@@ -216,6 +413,15 @@ async def context_pack(
                     evidence_task.cancel()
                     await asyncio.gather(pack_task, evidence_task, return_exceptions=True)
                     raise
+            if request.evidence.retrieval_mode == "fast":
+                evidence_response.filters.update(
+                    {
+                        "retrieval_mode": "fast",
+                        "planner_status": "not_requested",
+                        "planned_queries": [],
+                        "query_count": 1,
+                    }
+                )
             evidence_response.filters["embedding_usage"] = dict(embedding_usage)
         payload = context_pack_to_dict(pack)
         payload["markdown"] = context_pack_to_markdown(
