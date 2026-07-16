@@ -187,15 +187,23 @@ def rrf_merge_with_metadata[T](
     if not result_lists:
         return []
 
-    result_lists = [r for r in result_lists if r]
+    original_list_count = len(result_lists)
+    nonempty_indices = [index for index, result_list in enumerate(result_lists) if result_list]
+    result_lists = [result_lists[index] for index in nonempty_indices]
     if not result_lists:
         return []
 
     if list_names is None:
-        list_names = [f"list_{i}" for i in range(len(result_lists))]
+        list_names = [f"list_{index}" for index in nonempty_indices]
+    else:
+        list_names = [
+            list_names[index] if index < len(list_names) else f"list_{index}"
+            for index in nonempty_indices
+        ]
 
     if weights is None:
-        weights = [1.0] * len(result_lists)
+        weights = [1.0] * original_list_count
+    weights = [weights[index] for index in nonempty_indices]
 
     if dedup_key is None:
         dedup_key = default_dedup_key

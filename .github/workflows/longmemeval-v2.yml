@@ -132,7 +132,7 @@ on:
         type: boolean
         default: false
       official_retrieval_mode:
-        description: "Evidence retrieval controller"
+        description: "Evidence retrieval controller; frozen validation slices require fast"
         type: choice
         options:
           - fast

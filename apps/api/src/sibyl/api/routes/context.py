@@ -164,7 +164,11 @@ def _fuse_context_evidence(
             "successful_query_count": len(responses),
             "query_failures": failures,
             "query_filters": {
-                spec["name"]: response.filters
+                spec["name"]: {
+                    key: value
+                    for key, value in response.filters.items()
+                    if key != "embedding_usage"
+                }
                 for spec, response in zip(query_specs, responses, strict=True)
             },
         },

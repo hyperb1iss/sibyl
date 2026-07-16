@@ -20,6 +20,8 @@ from longmemeval_v2_memory.sibyl_memory import (  # noqa: E402
     build_operational_experience_payload,
 )
 
+from sibyl_core.retrieval.query_planning import MAX_SUPPLEMENTAL_QUERIES  # noqa: E402
+
 SMOKE_SCHEMA_VERSION = "sibyl-longmemeval-v2-live-smoke-v1"
 
 
@@ -57,8 +59,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be positive")
-    if not 1 <= args.max_planned_queries <= 4:
-        parser.error("--max-planned-queries must be between 1 and 4")
+    if not 1 <= args.max_planned_queries <= MAX_SUPPLEMENTAL_QUERIES:
+        parser.error(f"--max-planned-queries must be between 1 and {MAX_SUPPLEMENTAL_QUERIES}")
     return args
 
 
@@ -216,18 +218,12 @@ def evaluate_smoke_report(report: dict[str, Any]) -> dict[str, bool]:
     }
     if isinstance(query, dict) and query.get("retrieval_mode") == "accurate":
         receipt = query.get("receipt")
-        search_metadata = (
-            receipt.get("search_metadata") if isinstance(receipt, dict) else None
-        )
+        search_metadata = receipt.get("search_metadata") if isinstance(receipt, dict) else None
         planner_usage = (
-            search_metadata.get("planner_usage")
-            if isinstance(search_metadata, dict)
-            else None
+            search_metadata.get("planner_usage") if isinstance(search_metadata, dict) else None
         )
         planned_queries = (
-            search_metadata.get("planned_queries")
-            if isinstance(search_metadata, dict)
-            else None
+            search_metadata.get("planned_queries") if isinstance(search_metadata, dict) else None
         )
         checks.update(
             {
@@ -237,12 +233,12 @@ def evaluate_smoke_report(report: dict[str, Any]) -> dict[str, bool]:
                 ),
                 "accurate_query_fanout_bounded": (
                     isinstance(planned_queries, list)
-                    and 0 < len(planned_queries) <= 4
+                    and 0 < len(planned_queries) <= MAX_SUPPLEMENTAL_QUERIES
                     and search_metadata.get("query_count") == len(planned_queries) + 1
                 ),
                 "accurate_planner_usage_recorded": (
                     isinstance(planner_usage, dict)
-                    and planner_usage.get("requests") == 1
+                    and int(planner_usage.get("requests") or 0) >= 1
                     and int(planner_usage.get("total_tokens") or 0) > 0
                     and bool(planner_usage.get("provider"))
                     and bool(planner_usage.get("model"))

@@ -470,6 +470,58 @@ class TestContextPackRoute:
         ]
 
     @pytest.mark.asyncio
+    async def test_context_pack_accurate_evidence_preserves_provenance_after_empty_query(
+        self,
+    ) -> None:
+        plan = EvidenceQueryPlan(
+            queries=[
+                EvidenceQuery(
+                    query="deployment final outcome",
+                    facet=EvidenceQueryFacet.OUTCOME,
+                )
+            ]
+        )
+        responses = {
+            "ship faster": _search_response("ship faster"),
+            "deployment final outcome": _search_response(
+                "deployment final outcome",
+                ("outcome", 0.92),
+            ),
+        }
+
+        async def retrieve(request: SearchRequest, **_kwargs: object) -> SearchResponse:
+            return responses[request.query]
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+            patch(
+                "sibyl.api.routes.context.plan_evidence_queries_with_usage",
+                AsyncMock(return_value=EvidencePlanningReceipt(plan=plan)),
+            ),
+            patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    evidence={"retrieval_mode": "accurate", "limit": 4},
+                ),
+                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
+                ctx=_ctx(),
+            )
+
+        assert response.evidence is not None
+        assert response.evidence.results[0].metadata["retrieval_fusion"] == {
+            "sources": ["supplemental_1"],
+            "ranks": {"supplemental_1": 1},
+            "original_scores": {"supplemental_1": 0.92},
+        }
+
+    @pytest.mark.asyncio
     async def test_context_pack_accurate_evidence_falls_back_when_planner_fails(self) -> None:
         search = AsyncMock(return_value=_search_response("ship faster", ("original", 0.9)))
 

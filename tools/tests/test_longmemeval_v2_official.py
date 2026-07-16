@@ -838,6 +838,48 @@ def test_planner_accounting_reports_missing_accurate_query_usage() -> None:
     assert accounting["cost_coverage_complete"] is False
 
 
+def test_planner_accounting_uses_per_question_mode_after_runtime_change() -> None:
+    module = _load_runner_module()
+    accounting = module._planner_accounting(
+        [
+            {
+                "memory_config": {"memory_params": {"retrieval_mode": "fast"}},
+                "per_question_rows": [
+                    {
+                        "memory_post_query_metadata": {
+                            "retrieval_mode": "accurate",
+                            "search_metadata": {
+                                "planner_status": "success",
+                                "planner_usage": {
+                                    "provider": "openai",
+                                    "model": "gpt-5.4-nano",
+                                    "requests": 1,
+                                    "input_tokens": 40,
+                                    "output_tokens": 10,
+                                    "total_tokens": 50,
+                                    "cost_usd": 0.00001,
+                                    "cost_complete": True,
+                                },
+                            },
+                        }
+                    },
+                    {
+                        "memory_post_query_metadata": {
+                            "retrieval_mode": "fast",
+                            "search_metadata": {"planner_status": "not_requested"},
+                        }
+                    },
+                ],
+            }
+        ]
+    )
+
+    assert accounting["expected_question_count"] == 1
+    assert accounting["recorded_question_count"] == 1
+    assert accounting["requests"] == 1
+    assert accounting["tracking_complete"] is True
+
+
 def test_usage_log_accounts_for_all_output_attempts(tmp_path: Path) -> None:
     module = _load_runner_module()
     path = tmp_path / "reader.jsonl"

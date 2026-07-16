@@ -344,6 +344,26 @@ class TestRRFMergeWithMetadata:
         assert meta["original_scores"]["vector"] == 0.9
         assert meta["original_scores"]["graph"] == 0.85
 
+    def test_rrf_with_metadata_preserves_names_and_weights_across_empty_lists(
+        self,
+    ) -> None:
+        list2 = [({"id": "a"}, 0.85)]
+
+        merged = rrf_merge_with_metadata(
+            [[], list2],
+            list_names=["empty", "graph"],
+            weights=[10.0, 2.0],
+        )
+
+        entity, score, meta = merged[0]
+        assert entity["id"] == "a"
+        assert score == pytest.approx(2 / 61)
+        assert meta == {
+            "sources": ["graph"],
+            "ranks": {"graph": 1},
+            "original_scores": {"graph": 0.85},
+        }
+
 
 class TestWeightedScoreMerge:
     """Test weighted score merge (alternative to RRF)."""

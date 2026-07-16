@@ -1594,16 +1594,18 @@ def _planner_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
     expected_rows = 0
     tracking_complete = bool(source_runs)
     for source_run in source_runs:
-        mode = _nested_value(
+        source_mode = _nested_value(
             source_run.get("memory_config", {}),
             "memory_params",
             "retrieval_mode",
         )
-        if mode != "accurate":
-            continue
         rows = source_run["per_question_rows"]
-        expected_rows += len(rows)
         for row in rows:
+            row_mode = _nested_value(
+                row,
+                "memory_post_query_metadata",
+                "retrieval_mode",
+            )
             status = _nested_value(
                 row,
                 "memory_post_query_metadata",
@@ -1616,6 +1618,16 @@ def _planner_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
                 "search_metadata",
                 "planner_usage",
             )
+            if row_mode is None:
+                if status in {"success", "fallback"} or isinstance(usage, dict):
+                    row_mode = "accurate"
+                elif status == "not_requested":
+                    row_mode = "fast"
+                else:
+                    row_mode = source_mode
+            if row_mode != "accurate":
+                continue
+            expected_rows += 1
             if status == "success" and isinstance(usage, dict) and usage:
                 records.append(usage)
             else:

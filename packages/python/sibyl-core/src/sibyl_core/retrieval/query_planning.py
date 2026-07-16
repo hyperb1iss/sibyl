@@ -79,7 +79,7 @@ async def plan_evidence_queries_with_usage(
         raise ValueError(f"max_queries must be between 1 and {MAX_SUPPLEMENTAL_QUERIES}")
 
     prompt = (
-        "Plan supplemental evidence searches for this question JSON:\n"
+        f"Plan at most {max_queries} supplemental evidence searches for this question JSON:\n"
         f"{json.dumps(question, ensure_ascii=True)}"
     )
     usage = None
