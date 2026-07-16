@@ -336,6 +336,7 @@ export SIBYL_LOG_LEVEL=DEBUG
 ```bash
 SIBYL_ENVIRONMENT=production
 SIBYL_JWT_SECRET=<generate with: openssl rand -hex 32>
+SIBYL_SETTINGS_KEY=<generate with: openssl rand -base64 32 | tr '+/' '-_'>
 
 # Public URL (Kong/ingress domain)
 SIBYL_PUBLIC_URL=https://sibyl.example.com
@@ -370,6 +371,7 @@ payload. New production deployments should use the fully Surreal example above.
 ```bash
 SIBYL_ENVIRONMENT=production
 SIBYL_JWT_SECRET=<generate with: openssl rand -hex 32>
+SIBYL_SETTINGS_KEY=<generate with: openssl rand -base64 32 | tr '+/' '-_'>
 SIBYL_PUBLIC_URL=https://sibyl.example.com
 
 # Surreal target
