@@ -57,6 +57,10 @@ EXPECTED_OPERATIONAL_EVIDENCE_ITEMS = 8
 EXPECTED_OPERATIONAL_RAW_ITEMS = 6
 EXPECTED_OPERATIONAL_TYPED_ITEMS = 2
 EXPECTED_OPERATIONAL_SUPPORT_ITEMS = 3
+EXPECTED_PLANNER_REQUESTS = 2
+EXPECTED_PLANNER_INPUT_TOKENS = 84
+EXPECTED_PLANNER_OUTPUT_TOKENS = 22
+EXPECTED_RETRIEVAL_MAX_PLANNED_QUERIES = 4
 EXPECTED_WHITESPACE_EXPOSURE_CHARS = 2
 OPERATIONAL_EVIDENCE_MAX_CHARS = 4_000
 TEST_CONTENT_MAX_CHARS = 420
@@ -151,6 +155,8 @@ def _finalize_request_handler(
                 "limit": 12,
                 "content_max_chars": TEST_CONTEXT_MAX_CHARS,
                 "include_retrieval_diagnostics": True,
+                "retrieval_mode": "fast",
+                "max_planned_queries": 3,
             }
             return {
                 "sections": [],
@@ -748,6 +754,86 @@ def test_provider_accounting_rejects_empty_usage_log(tmp_path: Path) -> None:
         fallback_output_tokens=0.0,
     )
 
+    assert accounting["tracking_complete"] is False
+    assert accounting["cost_coverage_complete"] is False
+
+
+def test_planner_accounting_requires_complete_accurate_query_usage() -> None:
+    module = _load_runner_module()
+    source_run = {
+        "memory_config": {
+            "memory_params": {
+                "retrieval_mode": "accurate",
+            }
+        },
+        "per_question_rows": [
+            {
+                "memory_post_query_metadata": {
+                    "search_metadata": {
+                        "planner_status": "success",
+                        "planner_usage": {
+                            "provider": "openai",
+                            "model": "gpt-5.4-nano",
+                            "requests": 1,
+                            "input_tokens": 40,
+                            "output_tokens": 10,
+                            "total_tokens": 50,
+                            "cost_usd": 0.00001,
+                            "cost_complete": True,
+                        },
+                    }
+                }
+            },
+            {
+                "memory_post_query_metadata": {
+                    "search_metadata": {
+                        "planner_status": "success",
+                        "planner_usage": {
+                            "provider": "openai",
+                            "model": "gpt-5.4-nano",
+                            "requests": 1,
+                            "input_tokens": 44,
+                            "output_tokens": 12,
+                            "total_tokens": 56,
+                            "cost_usd": 0.00002,
+                            "cost_complete": True,
+                        },
+                    }
+                }
+            },
+        ],
+    }
+
+    accounting = module._planner_accounting([source_run])
+
+    assert accounting["requests"] == EXPECTED_PLANNER_REQUESTS
+    assert accounting["estimated_input_tokens"] == EXPECTED_PLANNER_INPUT_TOKENS
+    assert accounting["estimated_output_tokens"] == EXPECTED_PLANNER_OUTPUT_TOKENS
+    assert accounting["provider_reported_cost_usd"] == pytest.approx(0.00003)
+    assert accounting["recorded_question_count"] == EXPECTED_PLANNER_REQUESTS
+    assert accounting["tracking_complete"] is True
+    assert accounting["cost_coverage_complete"] is True
+
+
+def test_planner_accounting_reports_missing_accurate_query_usage() -> None:
+    module = _load_runner_module()
+    accounting = module._planner_accounting(
+        [
+            {
+                "memory_config": {"memory_params": {"retrieval_mode": "accurate"}},
+                "per_question_rows": [
+                    {
+                        "memory_post_query_metadata": {
+                            "search_metadata": {"planner_status": "fallback"}
+                        }
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert accounting["expected_question_count"] == 1
+    assert accounting["recorded_question_count"] == 0
     assert accounting["tracking_complete"] is False
     assert accounting["cost_coverage_complete"] is False
 
@@ -1827,6 +1913,8 @@ def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
             "state_part_refinement": True,
             "neighbor_stitch_items": 2,
             "context_expansion_max_ratio": EXPECTED_CONTEXT_EXPANSION_MAX_RATIO,
+            "retrieval_mode": "accurate",
+            "retrieval_max_planned_queries": 4,
         },
     }
 
@@ -1841,6 +1929,8 @@ def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
     assert params["state_part_refinement"] is True
     assert params["neighbor_stitch_items"] == EXPECTED_NEIGHBOR_STITCH_ITEMS
     assert params["context_expansion_max_ratio"] == EXPECTED_CONTEXT_EXPANSION_MAX_RATIO
+    assert params["retrieval_mode"] == "accurate"
+    assert params["retrieval_max_planned_queries"] == EXPECTED_RETRIEVAL_MAX_PLANNED_QUERIES
 
     requested["memory_params"]["content_max_chars"] = 8_000
     with pytest.raises(RuntimeError, match="content_max_chars"):
@@ -1975,6 +2065,10 @@ def test_official_runner_checkpoint_restart_reuses_saved_project(tmp_path: Path)
             "--checkpoint-dir",
             str(checkpoint_dir),
             "--plan-only",
+            "--retrieval-mode",
+            "accurate",
+            "--retrieval-max-planned-queries",
+            "4",
         ]
     )
 
@@ -1986,6 +2080,8 @@ def test_official_runner_checkpoint_restart_reuses_saved_project(tmp_path: Path)
     assert params["run_id"] == "run-checkpoint"
     assert params["checkpoint_dir"] == str(checkpoint_dir)
     assert params["source_evidence_bundling"] is False
+    assert params["retrieval_mode"] == "accurate"
+    assert params["retrieval_max_planned_queries"] == EXPECTED_RETRIEVAL_MAX_PLANNED_QUERIES
 
 
 def test_sibyl_memory_query_context_exposes_only_question_and_image() -> None:
@@ -2008,6 +2104,57 @@ def test_sibyl_memory_query_context_exposes_only_question_and_image() -> None:
     assert memory.get_query_context() == {
         "question": "Which filter was selected?",
         "image": "question.png",
+    }
+
+
+def test_sibyl_memory_accurate_query_rejects_planner_fallback() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    request_payloads: list[dict[str, object]] = []
+
+    def fake_request(
+        _method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        assert path == "/context/pack"
+        assert json is not None
+        request_payloads.append(json)
+        return {
+            "sections": [],
+            "evidence": {
+                "results": [],
+                "filters": {
+                    "retrieval_mode": "accurate",
+                    "planner_status": "fallback",
+                },
+            },
+        }
+
+    memory.project_id = "project_lme"
+    memory.search_limit = 12
+    memory.max_context_items = 8
+    memory.max_context_chars_per_item = TEST_CONTEXT_MAX_CHARS
+    memory.retrieval_mode = "accurate"
+    memory.retrieval_max_planned_queries = 4
+    memory._pending_embedding_job_ids = set()
+    memory._pending_projection_job_ids = set()
+    memory._ingest_finalized = True
+    memory._request_json = fake_request
+
+    with pytest.raises(RuntimeError, match="requires a successful query planner"):
+        memory.query("Which filter was selected?")
+
+    assert request_payloads[0]["evidence"] == {
+        "types": ["session"],
+        "limit": 12,
+        "content_max_chars": TEST_CONTEXT_MAX_CHARS,
+        "include_retrieval_diagnostics": True,
+        "retrieval_mode": "accurate",
+        "max_planned_queries": 4,
     }
 
 

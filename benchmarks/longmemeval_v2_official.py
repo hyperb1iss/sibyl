@@ -63,6 +63,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "search_limit",
         "max_context_items",
         "max_context_chars_per_item",
+        "max_context_total_chars",
         "max_chunks_per_trajectory",
         "neighbor_stitch_items",
         "neighbor_stitch_span",
@@ -71,6 +72,8 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "context_expansion_max_ratio",
         "evidence_composition_mode",
         "source_evidence_bundling",
+        "retrieval_mode",
+        "retrieval_max_planned_queries",
         "checkpoint_dir",
     }
 )
@@ -430,6 +433,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         default="reserved_support",
     )
     parser.add_argument("--source-evidence-bundling", action="store_true")
+    parser.add_argument(
+        "--retrieval-mode",
+        choices=["fast", "accurate"],
+        default="fast",
+    )
+    parser.add_argument("--retrieval-max-planned-queries", type=int, default=3)
     parser.add_argument("--include-screenshot-refs", action="store_true")
     parser.add_argument("--inline-embeddings", action="store_true")
     parser.add_argument("--api-timeout-seconds", type=float, default=600.0)
@@ -509,6 +518,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--state-part-completion-items must be non-negative")
     if args.max_context_total_chars < 1:
         parser.error("--max-context-total-chars must be positive")
+    if not 1 <= args.retrieval_max_planned_queries <= 4:
+        parser.error("--retrieval-max-planned-queries must be between 1 and 4")
     args.provider_usage_run_id = f"lme-v2-usage-{uuid4().hex[:12]}"
     return args
 
@@ -615,6 +626,8 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "context_expansion_max_ratio": args.context_expansion_max_ratio,
         "evidence_composition_mode": args.evidence_composition_mode,
         "source_evidence_bundling": args.source_evidence_bundling,
+        "retrieval_mode": args.retrieval_mode,
+        "retrieval_max_planned_queries": args.retrieval_max_planned_queries,
         "include_screenshot_refs": args.include_screenshot_refs,
         "defer_embeddings": not args.inline_embeddings,
         "api_timeout_seconds": args.api_timeout_seconds,
@@ -750,6 +763,8 @@ def build_run_plan(
         "max_context_total_chars": args.max_context_total_chars,
         "evidence_composition_mode": args.evidence_composition_mode,
         "source_evidence_bundling": args.source_evidence_bundling,
+        "retrieval_mode": args.retrieval_mode,
+        "retrieval_max_planned_queries": args.retrieval_max_planned_queries,
         "include_screenshot_refs": args.include_screenshot_refs,
         "evaluator_model": args.evaluator_model,
         "evaluator_retry_attempts": args.evaluator_retry_attempts,
@@ -1453,6 +1468,7 @@ def build_receipt_accounting(
     completion_tokens = _as_number(tokens.get("completion_tokens")) or 0.0
     total_tokens = _as_number(tokens.get("total_tokens")) or (prompt_tokens + completion_tokens)
     embedding = _embedding_accounting(source_runs)
+    planner = _planner_accounting(source_runs)
     reader = _provider_accounting(
         source_runs,
         role="reader",
@@ -1467,11 +1483,11 @@ def build_receipt_accounting(
     )
     provider_reported_total_usd = sum(
         float(section["provider_reported_cost_usd"])
-        for section in (embedding, reader, judge)
+        for section in (embedding, planner, reader, judge)
     )
     cost_coverage_complete = all(
         bool(section["cost_coverage_complete"])
-        for section in (embedding, reader, judge)
+        for section in (embedding, planner, reader, judge)
     )
 
     return {
@@ -1491,6 +1507,7 @@ def build_receipt_accounting(
             "source": "official aggregated token counters",
         },
         "embedding": embedding,
+        "planner": planner,
         "reader": reader,
         "judge": judge,
         "cost": {
@@ -1569,6 +1586,92 @@ def _embedding_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
         "ingest": ingest,
         "query": query,
         "cost_basis": "Sibyl embedding provider response usage",
+    }
+
+
+def _planner_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
+    records: list[dict[str, Any]] = []
+    expected_rows = 0
+    tracking_complete = bool(source_runs)
+    for source_run in source_runs:
+        mode = _nested_value(
+            source_run.get("memory_config", {}),
+            "memory_params",
+            "retrieval_mode",
+        )
+        if mode != "accurate":
+            continue
+        rows = source_run["per_question_rows"]
+        expected_rows += len(rows)
+        for row in rows:
+            status = _nested_value(
+                row,
+                "memory_post_query_metadata",
+                "search_metadata",
+                "planner_status",
+            )
+            usage = _nested_value(
+                row,
+                "memory_post_query_metadata",
+                "search_metadata",
+                "planner_usage",
+            )
+            if status == "success" and isinstance(usage, dict) and usage:
+                records.append(usage)
+            else:
+                tracking_complete = False
+
+    requests = int(sum(_number_from(record, ("requests",)) or 0 for record in records))
+    input_tokens = sum(
+        _number_from(record, ("input_tokens",)) or 0.0 for record in records
+    )
+    output_tokens = sum(
+        _number_from(record, ("output_tokens",)) or 0.0 for record in records
+    )
+    priced_requests = int(
+        sum(
+            (_number_from(record, ("requests",)) or 0)
+            if record.get("cost_complete") is True
+            and _number_from(record, ("cost_usd",)) is not None
+            else 0
+            for record in records
+        )
+    )
+    provider_reported_cost_usd = sum(
+        _number_from(record, ("cost_usd",)) or 0.0 for record in records
+    )
+    providers = sorted(
+        {
+            provider
+            for record in records
+            if isinstance(provider := record.get("provider"), str) and provider
+        }
+    )
+    models = sorted(
+        {
+            model
+            for record in records
+            if isinstance(model := record.get("model"), str) and model
+        }
+    )
+    coverage_complete = tracking_complete and len(records) == expected_rows
+    return {
+        "calls": requests,
+        "requests": requests,
+        "priced_requests": priced_requests,
+        "provider": ",".join(providers) or "not_requested",
+        "model": ",".join(models) or "not_requested",
+        "providers": providers,
+        "models": models,
+        "estimated_input_tokens": input_tokens,
+        "estimated_output_tokens": output_tokens,
+        "provider_reported_cost_usd": provider_reported_cost_usd,
+        "estimated_cost_usd": provider_reported_cost_usd,
+        "cost_coverage_complete": coverage_complete and priced_requests == requests,
+        "tracking_complete": coverage_complete,
+        "expected_question_count": expected_rows,
+        "recorded_question_count": len(records),
+        "cost_basis": "Sibyl structured query planner provider response usage",
     }
 
 
@@ -1836,7 +1939,7 @@ def build_receipt_checks(receipt: dict[str, Any]) -> list[dict[str, Any]]:
         check(
             "accounting",
             _receipt_accounting_complete(receipt.get("accounting")),
-            "latency, token, embedding, reader, judge, and cost sections are recorded",
+            "latency, token, embedding, planner, reader, judge, and cost sections are recorded",
             ["accounting"],
         ),
         check(
@@ -1860,7 +1963,15 @@ def check(name: str, passed: bool, detail: str, surfaces: list[str]) -> dict[str
 def _receipt_accounting_complete(accounting: Any) -> bool:
     if not isinstance(accounting, dict):
         return False
-    required_sections = ("latency", "tokens", "embedding", "reader", "judge", "cost")
+    required_sections = (
+        "latency",
+        "tokens",
+        "embedding",
+        "planner",
+        "reader",
+        "judge",
+        "cost",
+    )
     if not all(isinstance(accounting.get(section), dict) for section in required_sections):
         return False
     latency = accounting["latency"]

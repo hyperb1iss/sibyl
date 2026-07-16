@@ -74,6 +74,9 @@ MAX_BUNDLED_SOURCE_CHARS = 12_000
 DEFAULT_EVIDENCE_COMPOSITION_MODE = "reserved_support"
 EVIDENCE_COMPOSITION_MODES = frozenset({"reserved_support", "shared_relevance"})
 DEFAULT_SOURCE_EVIDENCE_BUNDLING = False
+DEFAULT_RETRIEVAL_MODE = "fast"
+RETRIEVAL_MODES = frozenset({"accurate", "fast"})
+DEFAULT_RETRIEVAL_MAX_PLANNED_QUERIES = 3
 DEFAULT_API_TIMEOUT_SECONDS = 600.0
 DEFAULT_API_RETRY_ATTEMPTS = 3
 DEFAULT_API_RETRY_BASE_DELAY_SECONDS = 2.0
@@ -124,6 +127,8 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "context_expansion_max_ratio",
         "evidence_composition_mode",
         "source_evidence_bundling",
+        "retrieval_mode",
+        "retrieval_max_planned_queries",
         "checkpoint_dir",
     }
 )
@@ -1540,6 +1545,25 @@ class SibylLiveApiMemory(Memory):
             "source_evidence_bundling",
             DEFAULT_SOURCE_EVIDENCE_BUNDLING,
         )
+        self.retrieval_mode = _param_str(
+            memory_params,
+            "retrieval_mode",
+            DEFAULT_RETRIEVAL_MODE,
+        )
+        if self.retrieval_mode not in RETRIEVAL_MODES:
+            msg = (
+                f"Unknown retrieval_mode {self.retrieval_mode!r}; "
+                f"expected one of {sorted(RETRIEVAL_MODES)}"
+            )
+            raise ValueError(msg)
+        self.retrieval_max_planned_queries = _param_int(
+            memory_params,
+            "retrieval_max_planned_queries",
+            DEFAULT_RETRIEVAL_MAX_PLANNED_QUERIES,
+            minimum=1,
+        )
+        if self.retrieval_max_planned_queries > 4:
+            raise ValueError("retrieval_max_planned_queries must be at most 4")
         self.max_context_total_chars = max(
             1,
             _param_int(
@@ -1751,6 +1775,16 @@ class SibylLiveApiMemory(Memory):
                     "limit": min(max(self.search_limit, self.max_context_items), 50),
                     "content_max_chars": self.max_context_chars_per_item,
                     "include_retrieval_diagnostics": True,
+                    "retrieval_mode": getattr(
+                        self,
+                        "retrieval_mode",
+                        DEFAULT_RETRIEVAL_MODE,
+                    ),
+                    "max_planned_queries": getattr(
+                        self,
+                        "retrieval_max_planned_queries",
+                        DEFAULT_RETRIEVAL_MAX_PLANNED_QUERIES,
+                    ),
                 },
             },
         )
@@ -1764,6 +1798,15 @@ class SibylLiveApiMemory(Memory):
             ),
         )
         results, search_metadata = _required_context_evidence(context_response)
+        if (
+            getattr(self, "retrieval_mode", DEFAULT_RETRIEVAL_MODE) == "accurate"
+            and search_metadata.get("planner_status") != "success"
+        ):
+            planner_status = search_metadata.get("planner_status", "missing")
+            raise RuntimeError(
+                "accurate retrieval requires a successful query planner; "
+                f"received planner_status={planner_status!r}"
+            )
         self._query_local.search_metadata = search_metadata
         results = _flatten_operational_result_metadata(results)
         assembled_results, assembly_metadata = assemble_context_results(
@@ -2197,6 +2240,16 @@ class SibylLiveApiMemory(Memory):
             "ingest_embedding_usage": dict(self.ingest_embedding_usage),
             "returned_context_items": len(memory_context),
             "search_content_max_chars": self.max_context_chars_per_item,
+            "retrieval_mode": getattr(
+                self,
+                "retrieval_mode",
+                DEFAULT_RETRIEVAL_MODE,
+            ),
+            "retrieval_max_planned_queries": getattr(
+                self,
+                "retrieval_max_planned_queries",
+                DEFAULT_RETRIEVAL_MAX_PLANNED_QUERIES,
+            ),
             "search_metadata": dict(
                 getattr(self._query_local, "search_metadata", {})
             ),

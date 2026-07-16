@@ -131,6 +131,22 @@ on:
         description: "Bundle policy-safe operational source evidence into typed items"
         type: boolean
         default: false
+      official_retrieval_mode:
+        description: "Evidence retrieval controller"
+        type: choice
+        options:
+          - fast
+          - accurate
+        default: accurate
+      official_retrieval_max_planned_queries:
+        description: "Maximum supplemental evidence queries in accurate mode"
+        type: choice
+        options:
+          - "1"
+          - "2"
+          - "3"
+          - "4"
+        default: "3"
       official_evaluator_model:
         description: "Official evaluator model"
         type: string
@@ -272,6 +288,9 @@ jobs:
       EVIDENCE_COMPOSITION_MODE:
         ${{ inputs.official_evidence_composition_mode || 'reserved_support' }}
       SOURCE_EVIDENCE_BUNDLING: ${{ inputs.official_source_evidence_bundling || false }}
+      RETRIEVAL_MODE: ${{ inputs.official_retrieval_mode || 'accurate' }}
+      RETRIEVAL_MAX_PLANNED_QUERIES:
+        ${{ inputs.official_retrieval_max_planned_queries || '3' }}
       EVALUATOR_MODEL: ${{ inputs.official_evaluator_model || 'gpt-5.2' }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -286,6 +305,10 @@ jobs:
       SIBYL_SURREAL_USERNAME: sibyl_ci
       SIBYL_SURREAL_PASSWORD: sibyl_ci_password
       SIBYL_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SIBYL_LLM_MEMORY_PROVIDER: openai
+      SIBYL_LLM_MEMORY_MODEL: gpt-5.4-nano
+      SIBYL_LLM_MEMORY_MAX_TOKENS: "800"
+      SIBYL_LLM_MEMORY_TIMEOUT_SECONDS: "120"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -308,6 +331,10 @@ jobs:
           fi
           if [[ "$OFFICIAL_VALIDATION_SLICE" != "none" && "$OFFICIAL_INCLUDE_SCREENSHOTS" == "true" ]]; then
             echo "::error::Screenshots are disabled by the frozen validation slice."
+            exit 1
+          fi
+          if [[ "$OFFICIAL_VALIDATION_SLICE" != "none" && "$RETRIEVAL_MODE" != "fast" ]]; then
+            echo "::error::Existing frozen validation slices require retrieval_mode=fast."
             exit 1
           fi
           if [[ "$OFFICIAL_VALIDATION_SLICE" != "none" && "$READER_BASE_URL" != "https://openrouter.ai/api/v1" ]]; then
@@ -461,6 +488,8 @@ jobs:
             args+=(--include-screenshot-refs)
           fi
           args+=(--evidence-composition-mode "$EVIDENCE_COMPOSITION_MODE")
+          args+=(--retrieval-mode "$RETRIEVAL_MODE")
+          args+=(--retrieval-max-planned-queries "$RETRIEVAL_MAX_PLANNED_QUERIES")
           if [[ "$SOURCE_EVIDENCE_BUNDLING" == "true" ]]; then
             args+=(--source-evidence-bundling)
           fi
