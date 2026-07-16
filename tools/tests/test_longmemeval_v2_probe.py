@@ -134,6 +134,7 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     assert "official_reader_retry_attempts:" in workflow
     assert "official_validation_slice:" in workflow
     assert "composition-v1" in workflow
+    assert "composition-v2" in workflow
     assert "official_evidence_composition_mode:" in workflow
     assert "official_source_evidence_bundling:" in workflow
     assert '--reader-max-concurrent-requests "$READER_MAX_CONCURRENT_REQUESTS"' in workflow
@@ -157,7 +158,12 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
         == EXPECTED_WORKFLOW_OCCURRENCES
     )
     assert "benchmarks/longmemeval_v2_composition_validation.json" in workflow
-    assert "moon run bench-longmemeval-v2-validation-slice" in workflow
+    assert "benchmarks/longmemeval_v2_composition_validation_v2.json" in workflow
+    assert 'moon run "$VALIDATION_TASK" -- "${args[@]}"' in workflow
+    assert "bench-longmemeval-v2-validation-slice-v2" in workflow
+    assert 'args+=(--max-context-total-chars "$MAX_CONTEXT_TOTAL_CHARS")' in workflow
+    assert 'if [[ "$OFFICIAL_VALIDATION_SLICE" == "composition-v2" ]]; then' in workflow
+    assert 'args+=(--questions "$DATA_ROOT/questions.jsonl")' in workflow
     assert 'args+=(--question-ids "$official_question_ids")' in workflow
     assert 'rm -rf "$domain_output"' in workflow
     assert '--output-dir "$domain_output"' in workflow

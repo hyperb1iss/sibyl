@@ -17,7 +17,9 @@ on:
       - "benchmarks/longmemeval_v2_causal_ablation.py"
       - "benchmarks/longmemeval_v2_causal_ablation_report.py"
       - "benchmarks/longmemeval_v2_validation_slice.py"
+      - "benchmarks/longmemeval_v2_validation_slice_v2.py"
       - "benchmarks/longmemeval_v2_composition_validation.json"
+      - "benchmarks/longmemeval_v2_composition_validation_v2.json"
       - "benchmarks/longmemeval_v2_diagnostics.py"
       - "benchmarks/longmemeval_v2_diagnostic_slice.json"
       - "benchmarks/longmemeval_v2_probe.py"
@@ -27,6 +29,7 @@ on:
       - "tools/tests/test_longmemeval_v2_ablations.py"
       - "tools/tests/test_longmemeval_v2_causal_ablation.py"
       - "tools/tests/test_longmemeval_v2_validation_slice.py"
+      - "tools/tests/test_longmemeval_v2_validation_slice_v2.py"
       - "tools/tests/test_longmemeval_v2_diagnostics.py"
       - "packages/python/sibyl-core/tests/test_longmemeval_v2.py"
       - "tools/tests/test_longmemeval_v2_probe.py"
@@ -49,7 +52,9 @@ on:
       - "benchmarks/longmemeval_v2_causal_ablation.py"
       - "benchmarks/longmemeval_v2_causal_ablation_report.py"
       - "benchmarks/longmemeval_v2_validation_slice.py"
+      - "benchmarks/longmemeval_v2_validation_slice_v2.py"
       - "benchmarks/longmemeval_v2_composition_validation.json"
+      - "benchmarks/longmemeval_v2_composition_validation_v2.json"
       - "benchmarks/longmemeval_v2_diagnostics.py"
       - "benchmarks/longmemeval_v2_diagnostic_slice.json"
       - "benchmarks/longmemeval_v2_probe.py"
@@ -59,6 +64,7 @@ on:
       - "tools/tests/test_longmemeval_v2_ablations.py"
       - "tools/tests/test_longmemeval_v2_causal_ablation.py"
       - "tools/tests/test_longmemeval_v2_validation_slice.py"
+      - "tools/tests/test_longmemeval_v2_validation_slice_v2.py"
       - "tools/tests/test_longmemeval_v2_diagnostics.py"
       - "packages/python/sibyl-core/tests/test_longmemeval_v2.py"
       - "tools/tests/test_longmemeval_v2_probe.py"
@@ -88,6 +94,7 @@ on:
         options:
           - none
           - composition-v1
+          - composition-v2
         default: none
       official_dataset_revision:
         description: "Optional Hugging Face dataset revision"
@@ -246,7 +253,15 @@ jobs:
       OFFICIAL_TIER: ${{ inputs.official_tier || 'small' }}
       OFFICIAL_LIMIT: ${{ inputs.official_limit || '' }}
       OFFICIAL_VALIDATION_SLICE: ${{ inputs.official_validation_slice || 'none' }}
-      VALIDATION_MANIFEST: benchmarks/longmemeval_v2_composition_validation.json
+      VALIDATION_MANIFEST:
+        ${{ inputs.official_validation_slice == 'composition-v2' &&
+        'benchmarks/longmemeval_v2_composition_validation_v2.json' ||
+        'benchmarks/longmemeval_v2_composition_validation.json' }}
+      VALIDATION_TASK:
+        ${{ inputs.official_validation_slice == 'composition-v2' &&
+        'bench-longmemeval-v2-validation-slice-v2' ||
+        'bench-longmemeval-v2-validation-slice' }}
+      MAX_CONTEXT_TOTAL_CHARS: "60000"
       OFFICIAL_DATASET_REVISION: ${{ inputs.official_dataset_revision || '' }}
       OFFICIAL_INCLUDE_SCREENSHOTS: ${{ inputs.official_include_screenshots || false }}
       READER_BASE_URL: ${{ inputs.official_reader_base_url || 'https://openrouter.ai/api/v1' }}
@@ -389,7 +404,7 @@ jobs:
           moon run bench-longmemeval-v2-download -- "${args[@]}"
 
       - name: Verify frozen validation slice
-        if: inputs.official_validation_slice == 'composition-v1'
+        if: inputs.official_validation_slice != 'none'
         run: |
           set -euo pipefail
           args=(
@@ -411,7 +426,10 @@ jobs:
           if [[ "$OFFICIAL_INCLUDE_SCREENSHOTS" == "true" ]]; then
             args+=(--include-screenshot-refs)
           fi
-          moon run bench-longmemeval-v2-validation-slice -- "${args[@]}"
+          if [[ "$OFFICIAL_VALIDATION_SLICE" == "composition-v2" ]]; then
+            args+=(--max-context-total-chars "$MAX_CONTEXT_TOTAL_CHARS")
+          fi
+          moon run "$VALIDATION_TASK" -- "${args[@]}"
           web_question_ids="$(jq -e -r '.question_ids_by_domain.web | select(type == "array" and length > 0) | join(",")' /tmp/longmemeval-v2-validation-runtime.json)"
           enterprise_question_ids="$(jq -e -r '.question_ids_by_domain.enterprise | select(type == "array" and length > 0) | join(",")' /tmp/longmemeval-v2-validation-runtime.json)"
           printf 'OFFICIAL_WEB_QUESTION_IDS=%s\n' "$web_question_ids" >> "$GITHUB_ENV"
@@ -445,6 +463,9 @@ jobs:
           args+=(--evidence-composition-mode "$EVIDENCE_COMPOSITION_MODE")
           if [[ "$SOURCE_EVIDENCE_BUNDLING" == "true" ]]; then
             args+=(--source-evidence-bundling)
+          fi
+          if [[ "$OFFICIAL_VALIDATION_SLICE" == "composition-v2" ]]; then
+            args+=(--max-context-total-chars "$MAX_CONTEXT_TOTAL_CHARS")
           fi
           moon run bench-longmemeval-v2-official-full -- \
             --official-repo "$OFFICIAL_REPO_DIR" \
@@ -493,7 +514,14 @@ jobs:
       OPERATING_POINT_NAME: official
       OFFICIAL_TIER: ${{ inputs.official_tier || 'small' }}
       OFFICIAL_VALIDATION_SLICE: ${{ inputs.official_validation_slice || 'none' }}
-      VALIDATION_MANIFEST: benchmarks/longmemeval_v2_composition_validation.json
+      VALIDATION_MANIFEST:
+        ${{ inputs.official_validation_slice == 'composition-v2' &&
+        'benchmarks/longmemeval_v2_composition_validation_v2.json' ||
+        'benchmarks/longmemeval_v2_composition_validation.json' }}
+      VALIDATION_TASK:
+        ${{ inputs.official_validation_slice == 'composition-v2' &&
+        'bench-longmemeval-v2-validation-slice-v2' ||
+        'bench-longmemeval-v2-validation-slice' }}
       OFFICIAL_DATASET_REVISION: ${{ inputs.official_dataset_revision || '' }}
       OFFICIAL_INCLUDE_SCREENSHOTS: ${{ inputs.official_include_screenshots || false }}
     steps:
@@ -551,17 +579,22 @@ jobs:
           moon run bench-longmemeval-v2-download -- "${args[@]}"
 
       - name: Evaluate frozen validation slice
-        if: inputs.official_validation_slice == 'composition-v1'
+        if: inputs.official_validation_slice != 'none'
         run: |
-          moon run bench-longmemeval-v2-validation-slice -- \
+          args=(
             evaluate \
             --manifest "$VALIDATION_MANIFEST" \
             --run "web=$OUTPUT_ROOT/web_${OFFICIAL_TIER}" \
             --run "enterprise=$OUTPUT_ROOT/enterprise_${OFFICIAL_TIER}" \
             --output "$OUTPUT_ROOT/composition_validation_report.json"
+          )
+          if [[ "$OFFICIAL_VALIDATION_SLICE" == "composition-v2" ]]; then
+            args+=(--questions "$DATA_ROOT/questions.jsonl")
+          fi
+          moon run "$VALIDATION_TASK" -- "${args[@]}"
 
       - name: Upload frozen validation report
-        if: always() && inputs.official_validation_slice == 'composition-v1'
+        if: always() && inputs.official_validation_slice != 'none'
         uses: actions/upload-artifact@v7
         with:
           name: longmemeval-v2-composition-validation-${{ github.sha }}

@@ -532,11 +532,13 @@ def evaluate_candidate(
     manifest: dict[str, Any],
     *,
     run_dirs: dict[str, Path],
+    require_pinned_baseline: bool = True,
 ) -> dict[str, Any]:
     require_domain_paths(run_dirs)
     validate_frozen_baseline(
         manifest.get("frozen_baseline"),
         selection=manifest["selection"],
+        require_pinned_sources=require_pinned_baseline,
     )
     baseline = manifest["frozen_baseline"]
     candidate_domains = {}
