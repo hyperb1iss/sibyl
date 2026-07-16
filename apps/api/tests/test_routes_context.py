@@ -9,7 +9,7 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException
 
-from sibyl.api.routes.context import context_pack
+from sibyl.api.routes.context import _fuse_context_evidence, context_pack
 from sibyl.api.schemas import (
     ContextPackRequest,
     ReflectionRequest,
@@ -171,6 +171,64 @@ def _search_response(
         graph_count=len(results),
         limit=12,
     )
+
+
+def test_accurate_evidence_reservation_receipts_respect_limit() -> None:
+    response = _fuse_context_evidence(
+        question="ship faster",
+        query_specs=[
+            {"name": "original", "query": "ship faster", "facet": "original"},
+            {
+                "name": "supplemental_1",
+                "query": "deployment workflow state",
+                "facet": "state",
+            },
+        ],
+        planned_queries=[
+            {
+                "name": "supplemental_1",
+                "query": "deployment workflow state",
+                "facet": "state",
+            }
+        ],
+        responses=[
+            _search_response("ship faster", ("original", 0.9)),
+            _search_response("deployment workflow state", ("supplemental", 0.95)),
+        ],
+        limit=1,
+        failures=[],
+        planner_usage={},
+    )
+
+    assert [result.id for result in response.results] == ["original"]
+    assert response.filters["original_reservation_target"] == 1
+    assert response.filters["original_reserved_count"] == 1
+    assert response.filters["supplemental_reserved_count"] == 0
+
+
+def test_accurate_evidence_reservation_receipts_report_original_underfill() -> None:
+    response = _fuse_context_evidence(
+        question="ship faster",
+        query_specs=[
+            {"name": "original", "query": "ship faster", "facet": "original"},
+            {"name": "supplemental_1", "query": "workflow state", "facet": "state"},
+            {"name": "supplemental_2", "query": "final outcome", "facet": "outcome"},
+        ],
+        planned_queries=[],
+        responses=[
+            _search_response("ship faster", ("original", 0.9)),
+            _search_response("workflow state", ("state", 0.95), ("detail", 0.8)),
+            _search_response("final outcome", ("outcome", 0.92)),
+        ],
+        limit=4,
+        failures=[],
+        planner_usage={},
+    )
+
+    assert len(response.results) == 4
+    assert response.filters["original_reservation_target"] == 2
+    assert response.filters["original_reserved_count"] == 1
+    assert response.filters["supplemental_reserved_count"] == 2
 
 
 class TestContextPackRoute:
@@ -441,9 +499,9 @@ class TestContextPackRoute:
         assert response.evidence is not None
         assert [result.id for result in response.evidence.results] == [
             "shared",
+            "original-only",
             "state",
             "outcome",
-            "original-only",
         ]
         assert response.evidence.filters["planner_status"] == "success"
         assert response.evidence.filters["planner_usage"] == {
@@ -459,6 +517,9 @@ class TestContextPackRoute:
         assert response.evidence.filters["query_count"] == 3
         assert response.evidence.filters["successful_query_count"] == 3
         assert response.evidence.filters["query_failures"] == []
+        assert response.evidence.filters["original_reservation_target"] == 2
+        assert response.evidence.filters["original_reserved_count"] == 2
+        assert response.evidence.filters["supplemental_reserved_count"] == 2
         assert response.evidence.filters["query_filters"] == {
             "original": {"source_query": "ship faster"},
             "supplemental_1": {"source_query": "deployment workflow state"},

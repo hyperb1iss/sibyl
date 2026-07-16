@@ -122,13 +122,26 @@ def _fuse_context_evidence(
 
     ordered_keys: list[str] = []
     seen: set[str] = set()
-    for response in responses:
+
+    def reserve_unique(response: SearchResponse, count: int) -> int:
+        reserved = 0
         for result in response.results:
             key = _result_key(result)
             if key not in seen:
                 ordered_keys.append(key)
                 seen.add(key)
-                break
+                reserved += 1
+                if reserved >= count:
+                    break
+        return reserved
+
+    original_reservation_target = max(1, (limit + 1) // 2)
+    original_reserved_count = reserve_unique(responses[0], original_reservation_target)
+    supplemental_reserved_count = 0
+    for response in responses[1:]:
+        if len(ordered_keys) >= limit:
+            break
+        supplemental_reserved_count += reserve_unique(response, 1)
     for result, _score, _metadata in fused:
         key = _result_key(result)
         if key not in seen:
@@ -163,6 +176,9 @@ def _fuse_context_evidence(
             "query_count": 1 + len(planned_queries),
             "successful_query_count": len(responses),
             "query_failures": failures,
+            "original_reservation_target": original_reservation_target,
+            "original_reserved_count": original_reserved_count,
+            "supplemental_reserved_count": supplemental_reserved_count,
             "query_filters": {
                 spec["name"]: {
                     key: value
