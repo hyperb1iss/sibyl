@@ -222,6 +222,122 @@ def test_successor_evaluation_is_manifest_and_artifact_bound(tmp_path: Path) -> 
         )
     memory_path.write_text(original_memory, encoding="utf-8")
 
+    accurate_run_dirs = _write_candidate_runs(
+        tmp_path / "accurate",
+        manifest=manifest,
+        retrieval_mode="accurate",
+    )
+    with pytest.raises(ValueError, match="frozen retrieval mode changed"):
+        validation.evaluate_candidate(
+            manifest,
+            run_dirs=accurate_run_dirs,
+            questions_path=questions_path,
+            require_pinned_sources=False,
+        )
+
+
+def test_developmental_replay_is_descriptive_and_non_promotable(tmp_path: Path) -> None:
+    questions_path, manifest = _write_synthetic_manifest(tmp_path)
+    run_dirs = _write_candidate_runs(
+        tmp_path,
+        manifest=manifest,
+        retrieval_mode="accurate",
+    )
+
+    report = validation.evaluate_candidate(
+        manifest,
+        run_dirs=run_dirs,
+        questions_path=questions_path,
+        require_pinned_sources=False,
+        developmental_replay=True,
+    )
+
+    assert report["status"] == "PASS"
+    assert report["evaluation_context"] == {
+        "claim_level": "adaptive developmental replay on a previously scored sample",
+        "candidate_scores_previously_observed": True,
+        "promotion_decision_allowed": False,
+        "question_selection_changed": False,
+        "treatment": validation.DEVELOPMENTAL_REPLAY_TREATMENT,
+    }
+    assert report["decision"] == {
+        "outcome": "DEVELOPMENTAL",
+        "full_run_allowed": False,
+        "promotion_decision": False,
+        "would_pass_frozen_rule": False,
+        "informational_checks": {
+            "combined_accuracy_delta": False,
+            "minimum_domain_delta": True,
+        },
+    }
+
+    memory_path = run_dirs["web"] / "runtime_inputs" / "memory_config.json"
+    changed_memory = json.loads(memory_path.read_text(encoding="utf-8"))
+    changed_memory["memory_params"]["retrieval_max_planned_queries"] = 2
+    with pytest.raises(ValueError, match="developmental retrieval treatment changed"):
+        validation.validate_developmental_retrieval_config(
+            changed_memory,
+            name="Candidate web runtime memory config",
+        )
+
+    receipt_path = run_dirs["web"] / "longmemeval_v2_official_receipt.json"
+    changed_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    changed_receipt["accounting"]["planner"]["tracking_complete"] = False
+    receipt_path.write_text(json.dumps(changed_receipt), encoding="utf-8")
+    with pytest.raises(ValueError, match="planner accounting is incomplete"):
+        validation.evaluate_candidate(
+            manifest,
+            run_dirs=run_dirs,
+            questions_path=questions_path,
+            require_pinned_sources=False,
+            developmental_replay=True,
+        )
+
+
+def test_developmental_replay_cli_succeeds_without_promoting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = tmp_path / "manifest.json"
+    output_path = tmp_path / "report.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+
+    def evaluate(*_args: Any, **kwargs: Any) -> dict[str, Any]:
+        assert kwargs["developmental_replay"] is True
+        return {
+            "status": "PASS",
+            "decision": {
+                "outcome": "DEVELOPMENTAL",
+                "full_run_allowed": False,
+            },
+        }
+
+    monkeypatch.setattr(validation, "evaluate_candidate", evaluate)
+
+    assert (
+        validation.main(
+            [
+                "evaluate",
+                "--manifest",
+                str(manifest_path),
+                "--questions",
+                str(tmp_path / "questions.jsonl"),
+                "--run",
+                f"web={tmp_path / 'web'}",
+                "--run",
+                f"enterprise={tmp_path / 'enterprise'}",
+                "--developmental-replay",
+                "--output",
+                str(output_path),
+            ]
+        )
+        == 0
+    )
+    assert json.loads(output_path.read_text(encoding="utf-8"))["decision"] == {
+        "outcome": "DEVELOPMENTAL",
+        "full_run_allowed": False,
+    }
+
 
 def test_successor_evaluation_rejects_semantic_and_completeness_drift(tmp_path: Path) -> None:
     questions_path, manifest = _write_synthetic_manifest(tmp_path)
@@ -334,7 +450,12 @@ def _write_baseline_runs(tmp_path: Path) -> dict[str, Path]:
     return result
 
 
-def _write_candidate_runs(tmp_path: Path, *, manifest: dict[str, Any]) -> dict[str, Path]:
+def _write_candidate_runs(
+    tmp_path: Path,
+    *,
+    manifest: dict[str, Any],
+    retrieval_mode: str | None = None,
+) -> dict[str, Path]:
     result = {}
     for domain in validation.DOMAINS:
         run_dir = tmp_path / f"candidate-{domain}"
@@ -354,7 +475,22 @@ def _write_candidate_runs(tmp_path: Path, *, manifest: dict[str, Any]) -> dict[s
                         "question_id": question_id,
                         "score_bool": scores[question_id],
                         "memory_post_query_metadata": {
-                            "api_runtime": {"sibyl_commit": sibyl_commit}
+                            "api_runtime": {"sibyl_commit": sibyl_commit},
+                            **(
+                                {
+                                    "retrieval_mode": "accurate",
+                                    "search_metadata": {
+                                        "planner_status": "success",
+                                        "planner_usage": {
+                                            "requests": 1,
+                                            "input_tokens": 1,
+                                            "output_tokens": 1,
+                                        },
+                                    },
+                                }
+                                if retrieval_mode == "accurate"
+                                else {}
+                            ),
                         },
                     }
                 )
@@ -391,6 +527,13 @@ def _write_candidate_runs(tmp_path: Path, *, manifest: dict[str, Any]) -> dict[s
                 ],
             },
         }
+        if retrieval_mode is not None:
+            memory_config["memory_params"].update(
+                {
+                    "retrieval_mode": retrieval_mode,
+                    "retrieval_max_planned_queries": 3,
+                }
+            )
         memory_path = runtime_dir / "memory_config.json"
         memory_path.write_text(json.dumps(memory_config), encoding="utf-8")
         (run_dir / "run_args.json").write_text(
@@ -433,12 +576,13 @@ def _write_candidate_runs(tmp_path: Path, *, manifest: dict[str, Any]) -> dict[s
             web_output_dir=None,
             enterprise_output_dir=None,
         )
+        source_run_records = official.load_receipt_source_runs(
+            args=source_args,
+            output_dir=run_dir,
+        )
         source_runs = official.build_source_runs_receipt(
             args=source_args,
-            source_runs=official.load_receipt_source_runs(
-                args=source_args,
-                output_dir=run_dir,
-            ),
+            source_runs=source_run_records,
         )
         assert source_runs["complete"] is True
         assert source_runs["integrity_complete"] is True
@@ -448,6 +592,12 @@ def _write_candidate_runs(tmp_path: Path, *, manifest: dict[str, Any]) -> dict[s
             selected=selected,
             sibyl_commit=sibyl_commit,
             source_runs=source_runs,
+            accounting=official.build_receipt_accounting(
+                metrics={},
+                aggregated_metrics={},
+                per_question_rows=source_run_records[0]["per_question_rows"],
+                source_runs=source_run_records,
+            ),
         )
         (run_dir / "longmemeval_v2_official_receipt.json").write_text(
             json.dumps(receipt),
@@ -463,6 +613,7 @@ def _candidate_receipt(
     selected: list[str],
     sibyl_commit: str,
     source_runs: dict[str, Any],
+    accounting: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "schema_version": "sibyl-longmemeval-v2-official-receipt-v1",
@@ -488,6 +639,7 @@ def _candidate_receipt(
             "git_status": "clean",
         },
         "sibyl_commit": sibyl_commit,
+        "accounting": accounting,
         "checks": [
             {"name": name, "status": status} for name, status in v1.RECEIPT_CHECK_STATUSES.items()
         ],

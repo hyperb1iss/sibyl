@@ -71,6 +71,10 @@ SELECTED_QUESTION_IMAGES = {
         "sha256": "sha256:551d6faa51fd82d3ba1529a6cc3944742b9f3318dded3275ba3431eb7c1ab0d8",
     },
 }
+DEVELOPMENTAL_REPLAY_TREATMENT = {
+    "retrieval_mode": "accurate",
+    "retrieval_max_planned_queries": 3,
+}
 
 
 def build_validation_slice(
@@ -425,6 +429,7 @@ def evaluate_candidate(
     run_dirs: dict[str, Path],
     questions_path: Path,
     require_pinned_sources: bool = True,
+    developmental_replay: bool = False,
 ) -> dict[str, Any]:
     validate_frozen_manifest(
         manifest,
@@ -445,11 +450,62 @@ def evaluate_candidate(
         ):
             raise ValueError(f"Candidate {domain} context budget changed")
         validate_candidate_artifact_bindings(run_dir, domain=domain)
-    return v1.evaluate_candidate(
+        runtime_memory_config = v1.load_json(run_dir / "runtime_inputs" / "memory_config.json")
+        receipt = v1.load_json(run_dir / "longmemeval_v2_official_receipt.json")
+        effective_memory_config = receipt["source_runs"]["domains"][domain][
+            "effective_memory_config"
+        ]
+        if developmental_replay:
+            validate_developmental_retrieval_config(
+                runtime_memory_config,
+                name=f"Candidate {domain} runtime memory config",
+            )
+            validate_developmental_retrieval_config(
+                effective_memory_config,
+                name=f"Candidate {domain} effective memory config",
+            )
+            validate_developmental_planner_accounting(
+                receipt,
+                expected_question_count=len(
+                    manifest["selection"]["question_ids_by_domain"][domain]
+                ),
+                name=f"Candidate {domain}",
+            )
+        else:
+            validate_frozen_retrieval_config(
+                runtime_memory_config,
+                name=f"Candidate {domain} runtime memory config",
+            )
+            validate_frozen_retrieval_config(
+                effective_memory_config,
+                name=f"Candidate {domain} effective memory config",
+            )
+    report = v1.evaluate_candidate(
         manifest,
         run_dirs=run_dirs,
         require_pinned_baseline=False,
     )
+    if not developmental_replay:
+        return report
+
+    frozen_decision = report["decision"]
+    report["schema_version"] = "sibyl-longmemeval-v2-developmental-replay-v1"
+    report["status"] = "PASS"
+    report["evaluation_context"] = {
+        "claim_level": "adaptive developmental replay on a previously scored sample",
+        "candidate_scores_previously_observed": True,
+        "promotion_decision_allowed": False,
+        "question_selection_changed": False,
+        "treatment": DEVELOPMENTAL_REPLAY_TREATMENT,
+    }
+    report["decision"] = {
+        "outcome": "DEVELOPMENTAL",
+        "full_run_allowed": False,
+        "promotion_decision": False,
+        "would_pass_frozen_rule": frozen_decision["full_run_allowed"],
+        "informational_checks": frozen_decision["checks"],
+    }
+    return report
 
 
 def validate_candidate_artifact_bindings(run_dir: Path, *, domain: str) -> None:
@@ -638,6 +694,42 @@ def validate_candidate_memory_config(raw: Any, *, name: str) -> None:
         raise ValueError(f"{name} changed")
 
 
+def validate_developmental_retrieval_config(raw: Any, *, name: str) -> None:
+    params = raw.get("memory_params") if isinstance(raw, dict) else None
+    if not isinstance(params, dict) or any(
+        params.get(key) != value for key, value in DEVELOPMENTAL_REPLAY_TREATMENT.items()
+    ):
+        raise ValueError(f"{name} developmental retrieval treatment changed")
+
+
+def validate_frozen_retrieval_config(raw: Any, *, name: str) -> None:
+    params = raw.get("memory_params") if isinstance(raw, dict) else None
+    if not isinstance(params, dict) or params.get("retrieval_mode", "fast") != "fast":
+        raise ValueError(f"{name} frozen retrieval mode changed")
+
+
+def validate_developmental_planner_accounting(
+    receipt: dict[str, Any],
+    *,
+    expected_question_count: int,
+    name: str,
+) -> None:
+    accounting = receipt.get("accounting")
+    planner = accounting.get("planner") if isinstance(accounting, dict) else None
+    if not isinstance(planner, dict) or {
+        "tracking_complete": planner.get("tracking_complete"),
+        "expected_question_count": planner.get("expected_question_count"),
+        "recorded_question_count": planner.get("recorded_question_count"),
+    } != {
+        "tracking_complete": True,
+        "expected_question_count": expected_question_count,
+        "recorded_question_count": expected_question_count,
+    }:
+        raise ValueError(f"{name} planner accounting is incomplete")
+    if int(planner.get("requests") or 0) < expected_question_count:
+        raise ValueError(f"{name} planner accounting is incomplete")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -667,6 +759,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     evaluate.add_argument("--manifest", required=True)
     evaluate.add_argument("--questions", required=True)
     evaluate.add_argument("--run", action="append", required=True, metavar="DOMAIN=DIR")
+    evaluate.add_argument("--developmental-replay", action="store_true")
     evaluate.add_argument("--output", required=True)
     return parser.parse_args(argv)
 
@@ -709,8 +802,9 @@ def main(argv: list[str] | None = None) -> int:
             v1.load_json(Path(args.manifest)),
             run_dirs=v1.parse_domain_paths(args.run, option="--run"),
             questions_path=Path(args.questions),
+            developmental_replay=args.developmental_replay,
         )
-        exit_code = 0 if payload["decision"]["full_run_allowed"] else 1
+        exit_code = 0 if args.developmental_replay or payload["decision"]["full_run_allowed"] else 1
     else:
         raise RuntimeError(f"Unknown command: {args.command}")
     output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -142,7 +142,7 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     assert '--evidence-composition-mode "$EVIDENCE_COMPOSITION_MODE"' in workflow
     assert "args+=(--source-evidence-bundling)" in workflow
     assert "Verify frozen validation slice" in workflow
-    assert "Evaluate frozen validation slice" in workflow
+    assert "Evaluate validation evidence" in workflow
     assert "official_limit cannot be combined with a frozen validation slice." in workflow
     assert "Screenshots are disabled by the frozen validation slice." in workflow
     assert "official_reader_base_url must exactly match the frozen validation slice." in workflow
@@ -162,7 +162,7 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     assert 'moon run "$VALIDATION_TASK" -- "${args[@]}"' in workflow
     assert "bench-longmemeval-v2-validation-slice-v2" in workflow
     assert 'args+=(--max-context-total-chars "$MAX_CONTEXT_TOTAL_CHARS")' in workflow
-    assert 'if [[ "$OFFICIAL_VALIDATION_SLICE" == "composition-v2" ]]; then' in workflow
+    assert 'if [[ "$OFFICIAL_VALIDATION_SLICE" == composition-v2* ]]; then' in workflow
     assert 'args+=(--questions "$DATA_ROOT/questions.jsonl")' in workflow
     assert 'args+=(--question-ids "$official_question_ids")' in workflow
     assert 'rm -rf "$domain_output"' in workflow
@@ -181,6 +181,19 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     assert "build_submission_step_2_build_package.py" in workflow
     assert "--receipt-only" in workflow
     assert "--profile longmemeval-v2" in workflow
+
+
+def test_longmemeval_v2_workflow_labels_accurate_replay_as_developmental() -> None:
+    workflow = (
+        Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "composition-v2-developmental-accurate" in workflow
+    assert (
+        "Developmental replay requires accurate retrieval with three planned queries." in workflow
+    )
+    assert "Existing frozen validation slices require retrieval_mode=fast." in workflow
+    assert "--developmental-replay" in workflow
 
 
 def test_longmemeval_v2_full_moon_task_installs_official_harness_deps() -> None:

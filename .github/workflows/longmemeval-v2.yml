@@ -89,12 +89,13 @@ on:
         type: string
         default: ""
       official_validation_slice:
-        description: "Optional tracked validation preregistration"
+        description: "Tracked validation or explicitly developmental replay"
         type: choice
         options:
           - none
           - composition-v1
           - composition-v2
+          - composition-v2-developmental-accurate
         default: none
       official_dataset_revision:
         description: "Optional Hugging Face dataset revision"
@@ -132,7 +133,7 @@ on:
         type: boolean
         default: false
       official_retrieval_mode:
-        description: "Evidence retrieval controller; frozen validation slices require fast"
+        description: "Evidence retrieval controller; frozen screens require fast"
         type: choice
         options:
           - fast
@@ -270,11 +271,11 @@ jobs:
       OFFICIAL_LIMIT: ${{ inputs.official_limit || '' }}
       OFFICIAL_VALIDATION_SLICE: ${{ inputs.official_validation_slice || 'none' }}
       VALIDATION_MANIFEST:
-        ${{ inputs.official_validation_slice == 'composition-v2' &&
+        ${{ startsWith(inputs.official_validation_slice, 'composition-v2') &&
         'benchmarks/longmemeval_v2_composition_validation_v2.json' ||
         'benchmarks/longmemeval_v2_composition_validation.json' }}
       VALIDATION_TASK:
-        ${{ inputs.official_validation_slice == 'composition-v2' &&
+        ${{ startsWith(inputs.official_validation_slice, 'composition-v2') &&
         'bench-longmemeval-v2-validation-slice-v2' ||
         'bench-longmemeval-v2-validation-slice' }}
       MAX_CONTEXT_TOTAL_CHARS: "60000"
@@ -333,7 +334,12 @@ jobs:
             echo "::error::Screenshots are disabled by the frozen validation slice."
             exit 1
           fi
-          if [[ "$OFFICIAL_VALIDATION_SLICE" != "none" && "$RETRIEVAL_MODE" != "fast" ]]; then
+          if [[ "$OFFICIAL_VALIDATION_SLICE" == "composition-v2-developmental-accurate" ]]; then
+            if [[ "$RETRIEVAL_MODE" != "accurate" || "$RETRIEVAL_MAX_PLANNED_QUERIES" != "3" ]]; then
+              echo "::error::Developmental replay requires accurate retrieval with three planned queries."
+              exit 1
+            fi
+          elif [[ "$OFFICIAL_VALIDATION_SLICE" != "none" && "$RETRIEVAL_MODE" != "fast" ]]; then
             echo "::error::Existing frozen validation slices require retrieval_mode=fast."
             exit 1
           fi
@@ -453,7 +459,7 @@ jobs:
           if [[ "$OFFICIAL_INCLUDE_SCREENSHOTS" == "true" ]]; then
             args+=(--include-screenshot-refs)
           fi
-          if [[ "$OFFICIAL_VALIDATION_SLICE" == "composition-v2" ]]; then
+          if [[ "$OFFICIAL_VALIDATION_SLICE" == composition-v2* ]]; then
             args+=(--max-context-total-chars "$MAX_CONTEXT_TOTAL_CHARS")
           fi
           moon run "$VALIDATION_TASK" -- "${args[@]}"
@@ -493,7 +499,7 @@ jobs:
           if [[ "$SOURCE_EVIDENCE_BUNDLING" == "true" ]]; then
             args+=(--source-evidence-bundling)
           fi
-          if [[ "$OFFICIAL_VALIDATION_SLICE" == "composition-v2" ]]; then
+          if [[ "$OFFICIAL_VALIDATION_SLICE" == composition-v2* ]]; then
             args+=(--max-context-total-chars "$MAX_CONTEXT_TOTAL_CHARS")
           fi
           moon run bench-longmemeval-v2-official-full -- \
@@ -544,11 +550,11 @@ jobs:
       OFFICIAL_TIER: ${{ inputs.official_tier || 'small' }}
       OFFICIAL_VALIDATION_SLICE: ${{ inputs.official_validation_slice || 'none' }}
       VALIDATION_MANIFEST:
-        ${{ inputs.official_validation_slice == 'composition-v2' &&
+        ${{ startsWith(inputs.official_validation_slice, 'composition-v2') &&
         'benchmarks/longmemeval_v2_composition_validation_v2.json' ||
         'benchmarks/longmemeval_v2_composition_validation.json' }}
       VALIDATION_TASK:
-        ${{ inputs.official_validation_slice == 'composition-v2' &&
+        ${{ startsWith(inputs.official_validation_slice, 'composition-v2') &&
         'bench-longmemeval-v2-validation-slice-v2' ||
         'bench-longmemeval-v2-validation-slice' }}
       OFFICIAL_DATASET_REVISION: ${{ inputs.official_dataset_revision || '' }}
@@ -607,7 +613,7 @@ jobs:
           fi
           moon run bench-longmemeval-v2-download -- "${args[@]}"
 
-      - name: Evaluate frozen validation slice
+      - name: Evaluate validation evidence
         if: inputs.official_validation_slice != 'none'
         run: |
           args=(
@@ -617,8 +623,11 @@ jobs:
             --run "enterprise=$OUTPUT_ROOT/enterprise_${OFFICIAL_TIER}" \
             --output "$OUTPUT_ROOT/composition_validation_report.json"
           )
-          if [[ "$OFFICIAL_VALIDATION_SLICE" == "composition-v2" ]]; then
+          if [[ "$OFFICIAL_VALIDATION_SLICE" == composition-v2* ]]; then
             args+=(--questions "$DATA_ROOT/questions.jsonl")
+          fi
+          if [[ "$OFFICIAL_VALIDATION_SLICE" == "composition-v2-developmental-accurate" ]]; then
+            args+=(--developmental-replay)
           fi
           moon run "$VALIDATION_TASK" -- "${args[@]}"
 
