@@ -6,6 +6,28 @@ from pydantic import BaseModel, Field
 
 from sibyl_core.models.context import ContextFacet, ContextIntent, ContextLayer
 
+from .search import SearchResponse
+
+
+class ContextEvidenceRequest(BaseModel):
+    """Optional enhanced evidence search bundled with a context pack."""
+
+    types: list[str] = Field(
+        default_factory=lambda: ["session"],
+        description="Entity types to include in the evidence pool",
+    )
+    limit: int = Field(default=24, ge=1, le=50, description="Maximum evidence results")
+    content_max_chars: int = Field(
+        default=500,
+        ge=0,
+        le=50_000,
+        description="Maximum content characters returned per evidence result",
+    )
+    include_retrieval_diagnostics: bool = Field(
+        default=False,
+        description="Include authorized evidence ranking diagnostics",
+    )
+
 
 class ContextPackRequest(BaseModel):
     """Request for compiling a structured agent context pack."""
@@ -35,6 +57,10 @@ class ContextPackRequest(BaseModel):
         ge=100,
         le=8000,
         description="Cap rendered markdown at roughly this many tokens",
+    )
+    evidence: ContextEvidenceRequest | None = Field(
+        default=None,
+        description="Run enhanced source-evidence retrieval alongside context compilation",
     )
 
 
@@ -102,4 +128,8 @@ class ContextPackResponse(BaseModel):
     markdown: str | None = Field(
         default=None,
         description="Compact Markdown rendering for agent prompt injection",
+    )
+    evidence: SearchResponse | None = Field(
+        default=None,
+        description="Enhanced evidence retrieved concurrently with the context pack",
     )

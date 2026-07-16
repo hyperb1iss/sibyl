@@ -1,5 +1,6 @@
 """Agent context pack endpoints."""
 
+import asyncio
 import time
 from typing import cast
 
@@ -16,6 +17,8 @@ from sibyl.api.schemas import (
     ContextPackResponse,
     ReflectionRequest,
     ReflectionResponse,
+    SearchRequest,
+    SearchResponse,
 )
 from sibyl.auth.authorization import ProjectAuthorizationError, verify_entity_project_access
 from sibyl.auth.context import AuthContext
@@ -23,6 +26,8 @@ from sibyl.auth.dependencies import get_auth_context, get_current_organization, 
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
+from sibyl_core.embeddings.providers import capture_embedding_usage, configured_embedding_provider
+from sibyl_core.models.context import ContextPack
 from sibyl_core.observability import elapsed_ms, telemetry_registry
 
 log = structlog.get_logger()
@@ -39,6 +44,28 @@ router = APIRouter(
     dependencies=[Depends(require_org_role(*_READ_ROLES))],
 )
 _REQUEST_AUTO_INJECT_SENTINEL: Request = cast("Request", None)
+
+
+async def _execute_context_evidence_search(
+    request: SearchRequest,
+    *,
+    org: AuthOrganization,
+    ctx: AuthContext,
+    embedding_usage: dict[str, str | int | float],
+) -> SearchResponse:
+    from sibyl.api.routes.search import execute_search_request
+
+    try:
+        return await execute_search_request(
+            request,
+            org=org,
+            ctx=ctx,
+            embedding_usage=embedding_usage,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise RuntimeError("context evidence retrieval failed") from exc
 
 
 def _append_unique_ids(existing: list[str] | None, additions: list[str] | None) -> list[str] | None:
@@ -128,30 +155,74 @@ async def context_pack(
             project=request.project,
         )
 
-        pack = await compile_context(
-            goal=request.goal,
-            intent=request.intent,
-            layer=request.layer,
-            domain=request.domain,
-            project=request.project,
-            accessible_projects=accessible_projects,
-            principal_id=ctx.user_id,
-            agent_id=request.agent_id,
-            organization_id=str(org.id),
-            limit=request.limit,
-            include_related=request.include_related,
-            related_limit=request.related_limit,
-            audit=request.audit,
-            record_exposure=request.record_exposure,
-            allowed_memory_scope_keys=set(ctx.api_key_memory_scope_keys)
-            if ctx.api_key_memory_scope_keys is not None
-            else None,
-        )
+        async def compile_pack() -> ContextPack:
+            return await compile_context(
+                goal=request.goal,
+                intent=request.intent,
+                layer=request.layer,
+                domain=request.domain,
+                project=request.project,
+                accessible_projects=accessible_projects,
+                principal_id=ctx.user_id,
+                agent_id=request.agent_id,
+                organization_id=str(org.id),
+                limit=request.limit,
+                include_related=request.include_related,
+                related_limit=request.related_limit,
+                audit=request.audit,
+                record_exposure=request.record_exposure,
+                allowed_memory_scope_keys=set(ctx.api_key_memory_scope_keys)
+                if ctx.api_key_memory_scope_keys is not None
+                else None,
+            )
+
+        evidence_response = None
+        if request.evidence is None:
+            pack = await compile_pack()
+        else:
+            evidence_request = SearchRequest(
+                query=request.goal,
+                types=request.evidence.types,
+                project=request.project,
+                limit=request.evidence.limit,
+                include_content=True,
+                content_max_chars=request.evidence.content_max_chars,
+                include_documents=False,
+                include_graph=True,
+                include_raw_memory=True,
+                use_enhanced=True,
+                boost_recent=False,
+                include_retrieval_diagnostics=request.evidence.include_retrieval_diagnostics,
+                record_exposure=request.record_exposure,
+            )
+            try:
+                embedding_provider = configured_embedding_provider()
+            except ValueError as exc:
+                raise RuntimeError("context evidence embedding configuration failed") from exc
+            with capture_embedding_usage(embedding_provider) as embedding_usage:
+                pack_task = asyncio.create_task(compile_pack())
+                evidence_task = asyncio.create_task(
+                    _execute_context_evidence_search(
+                        evidence_request,
+                        org=org,
+                        ctx=ctx,
+                        embedding_usage=embedding_usage,
+                    )
+                )
+                try:
+                    pack, evidence_response = await asyncio.gather(pack_task, evidence_task)
+                except BaseException:
+                    pack_task.cancel()
+                    evidence_task.cancel()
+                    await asyncio.gather(pack_task, evidence_task, return_exceptions=True)
+                    raise
+            evidence_response.filters["embedding_usage"] = dict(embedding_usage)
         payload = context_pack_to_dict(pack)
         payload["markdown"] = context_pack_to_markdown(
             pack,
             token_budget=request.markdown_token_budget,
         )
+        payload["evidence"] = evidence_response
         response = ContextPackResponse.model_validate(payload)
         await log_context_pack_audit(
             user_id=ctx.user_id,

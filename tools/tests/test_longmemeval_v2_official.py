@@ -136,23 +136,27 @@ def _finalize_request_handler(
                     }
                 }
             }
-        if path == "/search":
-            assert json is not None
-            assert json["include_retrieval_diagnostics"] is True
-            assert json["record_exposure"] is False
-            return {
-                "results": [],
-                "filters": {
-                    "retrieval_mode": "native",
-                    "stage_timings_ms": {"total": 12.5},
-                },
-            }
         if path == "/context/pack":
             assert json is not None
             assert json["record_exposure"] is False
             assert json["audit"] is True
             assert json["project"] == "project_lme"
-            return {"sections": []}
+            assert json["evidence"] == {
+                "types": ["session"],
+                "limit": 12,
+                "content_max_chars": TEST_CONTEXT_MAX_CHARS,
+                "include_retrieval_diagnostics": True,
+            }
+            return {
+                "sections": [],
+                "evidence": {
+                    "results": [],
+                    "filters": {
+                        "retrieval_mode": "native",
+                        "stage_timings_ms": {"total": 12.5},
+                    },
+                },
+            }
         raise AssertionError(f"unexpected path: {path}")
 
     return fake_request
@@ -1965,6 +1969,24 @@ def test_context_pack_conversion_bundles_query_ranked_source_evidence() -> None:
     assert results[0]["metadata"]["source_support_entity_id"] == "session-source"
 
 
+@pytest.mark.parametrize(
+    ("response", "message"),
+    [
+        ({"sections": []}, "missing required enhanced evidence"),
+        ({"evidence": {"results": {}, "filters": {}}}, "results have an invalid shape"),
+        ({"evidence": {"results": [], "filters": []}}, "filters have an invalid shape"),
+    ],
+)
+def test_context_pack_evidence_contract_fails_closed(
+    response: dict[str, object],
+    message: str,
+) -> None:
+    module = _load_memory_module()
+
+    with pytest.raises(RuntimeError, match=message):
+        module._required_context_evidence(response)
+
+
 def test_operational_evidence_set_ranks_typed_and_raw_on_shared_relevance() -> None:
     module = _load_memory_module()
     typed = [
@@ -2600,7 +2622,6 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
         "/jobs/status",
         "/jobs/status",
         "/context/pack",
-        "/search",
     ]
     assert metadata is not None
     assert metadata["search_metadata"] == {

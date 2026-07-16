@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
+from fastapi import HTTPException
 
 from sibyl.api.routes.context import context_pack
-from sibyl.api.schemas import ContextPackRequest, ReflectionRequest
+from sibyl.api.schemas import ContextPackRequest, ReflectionRequest, SearchResponse
 from sibyl.auth.authorization import ProjectAuthorizationError
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl_core.auth import ProjectRole
+from sibyl_core.embeddings.providers import (
+    CachedEmbeddingProvider,
+    EmbeddingMetadata,
+    OpenAIEmbeddingProvider,
+)
 from sibyl_core.models.context import (
     ContextFacet,
     ContextIntent,
@@ -186,6 +193,243 @@ class TestContextPackRoute:
             )
 
         assert compile_context.await_args.kwargs["record_exposure"] is False
+
+    @pytest.mark.asyncio
+    async def test_context_pack_retrieves_evidence_concurrently(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        started: set[str] = set()
+        both_started = asyncio.Event()
+
+        async def compile_pack(**_kwargs: object) -> ContextPack:
+            started.add("context")
+            if len(started) == 2:
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), timeout=1)
+            return _pack()
+
+        async def retrieve_evidence(*_args: object, **_kwargs: object) -> SearchResponse:
+            started.add("evidence")
+            if len(started) == 2:
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), timeout=1)
+            return SearchResponse(
+                results=[],
+                total=0,
+                query="ship faster",
+                filters={"stage_timings_ms": {"total": 12.5}},
+            )
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", side_effect=compile_pack),
+            patch(
+                "sibyl.api.routes.search.execute_search_request",
+                side_effect=retrieve_evidence,
+            ) as execute_search,
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    evidence={
+                        "types": ["session"],
+                        "limit": 12,
+                        "content_max_chars": 18_000,
+                        "include_retrieval_diagnostics": True,
+                    },
+                    record_exposure=False,
+                ),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        assert started == {"context", "evidence"}
+        assert response.evidence is not None
+        assert response.evidence.filters["stage_timings_ms"] == {"total": 12.5}
+        evidence_request = execute_search.call_args.args[0]
+        assert evidence_request.types == ["session"]
+        assert evidence_request.limit == 12
+        assert evidence_request.content_max_chars == 18_000
+        assert evidence_request.include_retrieval_diagnostics is True
+        assert evidence_request.record_exposure is False
+
+    @pytest.mark.asyncio
+    async def test_context_pack_combines_concurrent_embedding_usage(self) -> None:
+        class Embeddings:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def create(self, **kwargs: object) -> SimpleNamespace:
+                self.calls += 1
+                inputs = kwargs["input"]
+                assert isinstance(inputs, list)
+                await asyncio.sleep(0)
+                return SimpleNamespace(
+                    data=[SimpleNamespace(embedding=[0.1, 0.2]) for _ in inputs],
+                    usage=SimpleNamespace(prompt_tokens=7, total_tokens=7, cost=0.0001),
+                )
+
+        embeddings = Embeddings()
+        provider = CachedEmbeddingProvider(
+            OpenAIEmbeddingProvider(
+                metadata=EmbeddingMetadata(
+                    provider="openai",
+                    model="text-embedding-test",
+                    dimensions=2,
+                    cache_namespace="context-route-test",
+                    tokenizer_estimate_method="test",
+                ),
+                client=SimpleNamespace(embeddings=embeddings),
+            )
+        )
+
+        async def compile_pack(**_kwargs: object) -> ContextPack:
+            await provider.embed_texts(["ship faster"], input_kind="query")
+            return _pack()
+
+        async def retrieve_evidence(*_args: object, **_kwargs: object) -> SearchResponse:
+            await provider.embed_texts(["ship faster"], input_kind="query")
+            return SearchResponse(results=[], total=0, query="ship faster", filters={})
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", side_effect=compile_pack),
+            patch(
+                "sibyl.api.routes.search.execute_search_request",
+                side_effect=retrieve_evidence,
+            ),
+            patch(
+                "sibyl.api.routes.context.configured_embedding_provider",
+                return_value=provider,
+            ),
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(goal="ship faster", evidence={}),
+                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
+                ctx=_ctx(),
+            )
+
+        assert embeddings.calls == 1
+        assert response.evidence is not None
+        assert response.evidence.filters["embedding_usage"] == {
+            "provider": "openai",
+            "model": "text-embedding-test",
+            "requests": 1,
+            "inputs": 1,
+            "prompt_tokens": 7,
+            "total_tokens": 7,
+            "cost_reported_requests": 1,
+            "cost_usd": 0.0001,
+        }
+
+    @pytest.mark.asyncio
+    async def test_context_pack_cancels_evidence_when_context_fails(self) -> None:
+        both_started = asyncio.Event()
+        evidence_cancelled = asyncio.Event()
+
+        async def compile_pack(**_kwargs: object) -> ContextPack:
+            both_started.set()
+            raise ValueError("invalid context request")
+
+        async def retrieve_evidence(*_args: object, **_kwargs: object) -> SearchResponse:
+            await both_started.wait()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                evidence_cancelled.set()
+            raise AssertionError("unreachable")
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", side_effect=compile_pack),
+            patch(
+                "sibyl.api.routes.search.execute_search_request",
+                side_effect=retrieve_evidence,
+            ),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await context_pack(
+                request=ContextPackRequest(goal="ship faster", evidence={}),
+                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
+                ctx=_ctx(),
+            )
+
+        assert exc_info.value.status_code == 400
+        assert evidence_cancelled.is_set()
+
+    @pytest.mark.asyncio
+    async def test_context_pack_cancels_context_and_returns_500_when_evidence_fails(self) -> None:
+        context_started = asyncio.Event()
+        context_cancelled = asyncio.Event()
+
+        async def compile_pack(**_kwargs: object) -> ContextPack:
+            context_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                context_cancelled.set()
+            raise AssertionError("unreachable")
+
+        async def retrieve_evidence(*_args: object, **_kwargs: object) -> SearchResponse:
+            await context_started.wait()
+            raise ValueError("invalid embedding configuration")
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", side_effect=compile_pack),
+            patch(
+                "sibyl.api.routes.search.execute_search_request",
+                side_effect=retrieve_evidence,
+            ),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await context_pack(
+                request=ContextPackRequest(goal="ship faster", evidence={}),
+                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
+                ctx=_ctx(),
+            )
+
+        assert exc_info.value.status_code == 500
+        assert context_cancelled.is_set()
+
+    @pytest.mark.asyncio
+    async def test_context_pack_returns_500_when_evidence_provider_is_misconfigured(self) -> None:
+        compile_context = AsyncMock(return_value=_pack())
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", compile_context),
+            patch(
+                "sibyl.api.routes.context.configured_embedding_provider",
+                side_effect=ValueError("unsupported provider"),
+            ),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await context_pack(
+                request=ContextPackRequest(goal="ship faster", evidence={}),
+                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
+                ctx=_ctx(),
+            )
+
+        assert exc_info.value.status_code == 500
+        compile_context.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_context_pack_forwards_api_key_memory_scope_keys(self) -> None:

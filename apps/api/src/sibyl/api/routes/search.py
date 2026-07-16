@@ -7,6 +7,7 @@ edge metadata for point-in-time queries and conflict detection.
 
 import time
 from dataclasses import asdict
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
@@ -107,6 +108,99 @@ def _authorize_raw_memory_search(
         raise HTTPException(status_code=403, detail="api_key_memory_space_denied")
 
 
+async def execute_search_request(
+    request: SearchRequest,
+    *,
+    org: AuthOrganization,
+    ctx: AuthContext,
+    embedding_usage: dict[str, str | int | float] | None = None,
+) -> SearchResponse:
+    """Execute an authorized search for API surfaces that compose retrieval."""
+    from sibyl_core.tools.core import search as core_search
+
+    embedding_provider = configured_embedding_provider()
+    group_id = str(org.id)
+
+    project_filter = request.project
+    if project_filter:
+        await verify_entity_project_access(
+            None,
+            ctx,
+            project_filter,
+            required_role=ProjectRole.VIEWER,
+            require_existing_project=True,
+        )
+        accessible_projects = None
+    else:
+        accessible_projects = await list_accessible_project_graph_ids(ctx)
+
+    api_key_memory_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+    include_raw_memory = bool(request.include_raw_memory and getattr(ctx, "user_id", None))
+    if include_raw_memory:
+        raw_accessible_projects = (
+            {project_filter}
+            if project_filter and accessible_projects is None
+            else accessible_projects
+        )
+        _authorize_raw_memory_search(
+            request=request,
+            ctx=ctx,
+            accessible_projects=raw_accessible_projects,
+        )
+
+    async def run_core_search() -> Any:
+        return await core_search(
+            query=request.query,
+            types=request.types,
+            language=request.language,
+            category=request.category,
+            status=request.status,
+            project=project_filter,
+            accessible_projects=accessible_projects,
+            source=request.source,
+            source_id=request.source_id,
+            source_name=request.source_name,
+            assignee=request.assignee,
+            since=request.since,
+            reference_time=request.reference_time,
+            as_of=request.as_of,
+            limit=request.limit,
+            offset=request.offset,
+            include_content=request.include_content,
+            content_max_chars=request.content_max_chars,
+            include_documents=request.include_documents,
+            include_graph=request.include_graph,
+            include_raw_memory=include_raw_memory,
+            memory_scope=request.memory_scope,
+            scope_key=request.scope_key,
+            participants=request.participants,
+            labels=request.labels,
+            thread_id=request.thread_id,
+            occurred_after=request.occurred_after,
+            occurred_before=request.occurred_before,
+            use_enhanced=request.use_enhanced,
+            boost_recent=request.boost_recent,
+            organization_id=group_id,
+            principal_id=getattr(ctx, "user_id", None),
+            allowed_memory_scope_keys=(
+                set(api_key_memory_scope_keys) if api_key_memory_scope_keys is not None else None
+            ),
+            record_exposure=request.record_exposure,
+            include_retrieval_diagnostics=request.include_retrieval_diagnostics,
+        )
+
+    if embedding_usage is None:
+        with capture_embedding_usage(embedding_provider) as captured_embedding_usage:
+            result = await run_core_search()
+        embedding_usage = captured_embedding_usage
+    else:
+        result = await run_core_search()
+
+    response = SearchResponse(**asdict(result))
+    response.filters["embedding_usage"] = embedding_usage
+    return response
+
+
 @router.post("", response_model=SearchResponse)
 async def search(
     request: SearchRequest,
@@ -129,85 +223,7 @@ async def search(
     """
     started_at = time.perf_counter()
     try:
-        from sibyl_core.tools.core import search as core_search
-
-        embedding_provider = configured_embedding_provider()
-        group_id = str(org.id)
-
-        project_filter = request.project
-        if project_filter:
-            await verify_entity_project_access(
-                None,
-                ctx,
-                project_filter,
-                required_role=ProjectRole.VIEWER,
-                require_existing_project=True,
-            )
-            accessible_projects = None
-        else:
-            accessible_projects = await list_accessible_project_graph_ids(ctx)
-
-        api_key_memory_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
-        include_raw_memory = bool(request.include_raw_memory and getattr(ctx, "user_id", None))
-        if include_raw_memory:
-            raw_accessible_projects = (
-                {project_filter}
-                if project_filter and accessible_projects is None
-                else accessible_projects
-            )
-            _authorize_raw_memory_search(
-                request=request,
-                ctx=ctx,
-                accessible_projects=raw_accessible_projects,
-            )
-
-        # Pass accessible projects to filter results
-        # If a specific project is requested, use that; otherwise use accessible set
-        with capture_embedding_usage(embedding_provider) as embedding_usage:
-            result = await core_search(
-                query=request.query,
-                types=request.types,
-                language=request.language,
-                category=request.category,
-                status=request.status,
-                project=project_filter,
-                accessible_projects=accessible_projects,
-                source=request.source,
-                source_id=request.source_id,
-                source_name=request.source_name,
-                assignee=request.assignee,
-                since=request.since,
-                reference_time=request.reference_time,
-                as_of=request.as_of,
-                limit=request.limit,
-                offset=request.offset,
-                include_content=request.include_content,
-                content_max_chars=request.content_max_chars,
-                include_documents=request.include_documents,
-                include_graph=request.include_graph,
-                include_raw_memory=include_raw_memory,
-                memory_scope=request.memory_scope,
-                scope_key=request.scope_key,
-                participants=request.participants,
-                labels=request.labels,
-                thread_id=request.thread_id,
-                occurred_after=request.occurred_after,
-                occurred_before=request.occurred_before,
-                use_enhanced=request.use_enhanced,
-                boost_recent=request.boost_recent,
-                organization_id=group_id,
-                principal_id=getattr(ctx, "user_id", None),
-                allowed_memory_scope_keys=(
-                    set(api_key_memory_scope_keys)
-                    if api_key_memory_scope_keys is not None
-                    else None
-                ),
-                record_exposure=request.record_exposure,
-                include_retrieval_diagnostics=request.include_retrieval_diagnostics,
-            )
-
-        response = SearchResponse(**asdict(result))
-        response.filters["embedding_usage"] = embedding_usage
+        response = await execute_search_request(request, org=org, ctx=ctx)
         telemetry_registry().record_search_operation(
             surface="search",
             status="ok",

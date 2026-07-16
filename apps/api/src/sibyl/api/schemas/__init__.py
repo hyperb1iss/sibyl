@@ -37,6 +37,7 @@ from .common import (
     MutationReceipt,
 )
 from .context import (
+    ContextEvidenceRequest,
     ContextPackItem,
     ContextPackItemQuality,
     ContextPackRelatedItem,
@@ -210,6 +211,7 @@ __all__ = [
     "CodeExampleRequest",
     "CodeExampleResponse",
     "CodeExampleResult",
+    "ContextEvidenceRequest",
     "ContextPackItem",
     "ContextPackItemQuality",
     "ContextPackRelatedItem",

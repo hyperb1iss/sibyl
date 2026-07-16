@@ -348,6 +348,24 @@ def context_pack_to_search_results(
     )
 
 
+def _required_context_evidence(
+    response: dict[str, object],
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    evidence = response.get("evidence")
+    if not isinstance(evidence, dict):
+        raise RuntimeError("context pack response is missing required enhanced evidence")
+    results = evidence.get("results")
+    filters = evidence.get("filters")
+    if not isinstance(results, list) or not all(isinstance(item, dict) for item in results):
+        raise RuntimeError("context pack evidence results have an invalid shape")
+    if not isinstance(filters, dict):
+        raise RuntimeError("context pack evidence filters have an invalid shape")
+    return (
+        [_string_key_dict(item) for item in results],
+        _string_key_dict(filters),
+    )
+
+
 def _best_source_support(
     item: dict[str, object],
     *,
@@ -1444,6 +1462,12 @@ class SibylLiveApiMemory(Memory):
                 "related_limit": 3,
                 "audit": True,
                 "record_exposure": False,
+                "evidence": {
+                    "types": ["session"],
+                    "limit": min(max(self.search_limit, self.max_context_items), 50),
+                    "content_max_chars": self.max_context_chars_per_item,
+                    "include_retrieval_diagnostics": True,
+                },
             },
         )
         typed_results = context_pack_to_search_results(
@@ -1455,31 +1479,8 @@ class SibylLiveApiMemory(Memory):
                 DEFAULT_SOURCE_EVIDENCE_BUNDLING,
             ),
         )
-        payload = {
-            "query": query,
-            "types": ["session"],
-            "project": self.project_id,
-            "include_documents": False,
-            "include_graph": True,
-            "include_content": True,
-            "content_max_chars": self.max_context_chars_per_item,
-            "use_enhanced": True,
-            "boost_recent": False,
-            "include_retrieval_diagnostics": True,
-            "record_exposure": False,
-            "limit": min(max(self.search_limit, self.max_context_items), 50),
-        }
-        response = self._request_json("POST", "/search", json=payload)
-        filters = response.get("filters")
-        self._query_local.search_metadata = (
-            dict(filters) if isinstance(filters, dict) else {}
-        )
-        raw_results = response.get("results")
-        results = (
-            [_string_key_dict(item) for item in raw_results if isinstance(item, dict)]
-            if isinstance(raw_results, list)
-            else []
-        )
+        results, search_metadata = _required_context_evidence(context_response)
+        self._query_local.search_metadata = search_metadata
         results = _flatten_operational_result_metadata(results)
         assembled_results, assembly_metadata = assemble_context_results(
             results,
