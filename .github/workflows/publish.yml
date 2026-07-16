@@ -14,7 +14,13 @@ on:
         default: false
 
 env:
-  REGISTRY: ghcr.io
+  GHCR_REGISTRY: ghcr.io
+  DOCKERHUB_REGISTRY: docker.io
+  DOCKERHUB_NAMESPACE: hyperb1iss
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
 
 jobs:
   # =========================================================================
@@ -60,6 +66,47 @@ jobs:
 
       - name: "◇ Run RC gate bundle"
         run: moon run :check
+
+  # =========================================================================
+  # Registry preflight: fail before native builds when live publishing is not ready
+  # =========================================================================
+  registry-preflight:
+    name: "◇ Docker: Registry preflight"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: "◇ Verify Docker Hub publishing contract"
+        if: ${{ !inputs.dry_run }}
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DOCKERHUB_USERNAME:-}" ]]; then
+            echo "::error::DOCKERHUB_USERNAME repository variable is not configured."
+            exit 1
+          fi
+          if [[ -z "${DOCKERHUB_TOKEN:-}" ]]; then
+            echo "::error::DOCKERHUB_TOKEN repository secret is not configured."
+            exit 1
+          fi
+          for image in api web; do
+            url="https://hub.docker.com/v2/repositories/${DOCKERHUB_NAMESPACE}/sibyl-${image}/"
+            if ! curl --fail --silent --show-error "$url" >/dev/null; then
+              echo "::error::Public Docker Hub repository is unavailable: ${DOCKERHUB_NAMESPACE}/sibyl-${image}"
+              exit 1
+            fi
+          done
+
+      - name: "◇ Login to Docker Hub"
+        if: ${{ !inputs.dry_run }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.DOCKERHUB_REGISTRY }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
   # =========================================================================
   # Python: build + publish to PyPI
@@ -311,7 +358,7 @@ jobs:
   # =========================================================================
   docker-build:
     name: "△ Docker: ${{ matrix.image }} (${{ matrix.platform }})"
-    needs: rc-gate
+    needs: [rc-gate, registry-preflight]
     runs-on: ${{ matrix.platform == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 30
     permissions:
@@ -335,9 +382,17 @@ jobs:
         if: ${{ !inputs.dry_run }}
         uses: docker/login-action@v4
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "◇ Login to Docker Hub"
+        if: ${{ !inputs.dry_run }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.DOCKERHUB_REGISTRY }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: "△ Build & push by digest"
         id: build
@@ -347,8 +402,9 @@ jobs:
           file: apps/${{ matrix.image }}/Dockerfile
           platforms: linux/${{ matrix.platform }}
           outputs: >-
-            type=image,name=${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-${{
-            matrix.image }},push-by-digest=true,name-canonical=true,push=${{ !inputs.dry_run }}
+            type=image,"name=${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/sibyl-${{
+            matrix.image }},${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_NAMESPACE }}/sibyl-${{
+            matrix.image }}",push-by-digest=true,name-canonical=true,push=${{ !inputs.dry_run }}
           cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.platform }}
 
@@ -403,31 +459,52 @@ jobs:
       - name: "◇ Login to GHCR"
         uses: docker/login-action@v4
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "◇ Login to Docker Hub"
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.DOCKERHUB_REGISTRY }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: "► Create manifest list"
         working-directory: /tmp/digests
         env:
-          REPO: ${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}
+          GHCR_REPO:
+            ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}
+          DOCKERHUB_REPO:
+            ${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_NAMESPACE }}/sibyl-${{ matrix.image }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          refs=()
-          for digest in *; do
-            refs+=("${REPO}@sha256:${digest}")
+          for repo in "$GHCR_REPO" "$DOCKERHUB_REPO"; do
+            refs=()
+            for digest in *; do
+              refs+=("${repo}@sha256:${digest}")
+            done
+            docker buildx imagetools create \
+              -t "${repo}:latest" \
+              -t "${repo}:${VERSION}" \
+              "${refs[@]}"
           done
-          docker buildx imagetools create \
-            -t "${REPO}:latest" \
-            -t "${REPO}:${VERSION}" \
-            "${refs[@]}"
 
-      - name: "△ Inspect image"
+      - name: "△ Verify registry manifest parity"
         env:
-          REPO: ${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}
+          GHCR_REPO:
+            ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}
+          DOCKERHUB_REPO:
+            ${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_NAMESPACE }}/sibyl-${{ matrix.image }}
           VERSION: ${{ steps.version.outputs.version }}
-        run: docker buildx imagetools inspect "${REPO}:${VERSION}"
+        run: |
+          set -euo pipefail
+          ghcr_digest="$(docker buildx imagetools inspect "${GHCR_REPO}:${VERSION}" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          dockerhub_digest="$(docker buildx imagetools inspect "${DOCKERHUB_REPO}:${VERSION}" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          test -n "$ghcr_digest"
+          test "$ghcr_digest" = "$dockerhub_digest"
+          echo "Shared manifest digest: $ghcr_digest"
 
   # =========================================================================
   # Docker: generate SBOMs and fail on high/critical CVEs before signing
@@ -455,7 +532,7 @@ jobs:
       - name: "◇ Login to GHCR"
         uses: docker/login-action@v4
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -463,7 +540,7 @@ jobs:
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: >-
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}:${{
+            ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}:${{
             steps.version.outputs.version }}
           format: cyclonedx
           output: sibyl-${{ matrix.image }}-${{ steps.version.outputs.version }}.cdx.json
@@ -481,7 +558,7 @@ jobs:
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: >-
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}:${{
+            ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}:${{
             steps.version.outputs.version }}
           format: table
           exit-code: "1"
@@ -521,40 +598,71 @@ jobs:
       - name: "◇ Login to GHCR"
         uses: docker/login-action@v4
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: "◇ Login to Docker Hub"
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.DOCKERHUB_REGISTRY }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: "◆ Sign image digest"
         env:
-          REPO: ${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}
+          GHCR_REPO:
+            ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}
+          DOCKERHUB_REPO:
+            ${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_NAMESPACE }}/sibyl-${{ matrix.image }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          digest="$(
-            docker buildx imagetools inspect "${REPO}:${VERSION}" \
+          ghcr_digest="$(
+            docker buildx imagetools inspect "${GHCR_REPO}:${VERSION}" \
               --format '{{json .Manifest.Digest}}' \
               | tr -d '"'
           )"
-          test -n "$digest"
-          image_ref="${REPO}@${digest}"
-          cosign sign --yes "${image_ref}"
+          dockerhub_digest="$(
+            docker buildx imagetools inspect "${DOCKERHUB_REPO}:${VERSION}" \
+              --format '{{json .Manifest.Digest}}' \
+              | tr -d '"'
+          )"
+          test -n "$ghcr_digest"
+          test "$ghcr_digest" = "$dockerhub_digest"
+          ghcr_ref="${GHCR_REPO}@${ghcr_digest}"
+          dockerhub_ref="${DOCKERHUB_REPO}@${dockerhub_digest}"
+          cosign sign --yes "$ghcr_ref"
+          cosign sign --yes "$dockerhub_ref"
           mkdir -p cosign-receipts
           receipt="cosign-receipts/sibyl-${{ matrix.image }}-${VERSION}-cosign-receipt.json"
-          IMAGE="${{ matrix.image }}" REPO="$REPO" VERSION="$VERSION" DIGEST="$digest" IMAGE_REF="$image_ref" RECEIPT="$receipt" python - <<'PY'
+          IMAGE="${{ matrix.image }}" GHCR_REPO="$GHCR_REPO" DOCKERHUB_REPO="$DOCKERHUB_REPO" VERSION="$VERSION" DIGEST="$ghcr_digest" GHCR_REF="$ghcr_ref" DOCKERHUB_REF="$dockerhub_ref" RECEIPT="$receipt" python - <<'PY'
           import json
           import os
           from datetime import UTC, datetime
           from pathlib import Path
 
           payload = {
+              "schema_version": "sibyl-cosign-receipt-v2",
               "status": "PASS",
               "signer": "github-actions-oidc-keyless",
               "image": os.environ["IMAGE"],
-              "repository": os.environ["REPO"],
+              "repository": os.environ["GHCR_REPO"],
               "version": os.environ["VERSION"],
               "digest": os.environ["DIGEST"],
-              "image_ref": os.environ["IMAGE_REF"],
+              "image_ref": os.environ["GHCR_REF"],
+              "signed_images": [
+                  {
+                      "repository": os.environ["GHCR_REPO"],
+                      "digest": os.environ["DIGEST"],
+                      "image_ref": os.environ["GHCR_REF"],
+                  },
+                  {
+                      "repository": os.environ["DOCKERHUB_REPO"],
+                      "digest": os.environ["DIGEST"],
+                      "image_ref": os.environ["DOCKERHUB_REF"],
+                  },
+              ],
               "workflow_run_id": os.environ["GITHUB_RUN_ID"],
               "workflow_sha": os.environ["GITHUB_SHA"],
               "workflow_ref": os.environ["GITHUB_REF"],
@@ -577,11 +685,122 @@ jobs:
           retention-days: 90
 
   # =========================================================================
+  # Helm: validate and package immutable charts from the tagged checkout
+  # =========================================================================
+  helm-package:
+    name: "△ Helm: Package charts"
+    needs: rc-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: "◆ Checkout"
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: "◇ Setup Helm"
+        uses: azure/setup-helm@v5.0.0
+        with:
+          version: v3.20.2
+
+      - name: "△ Validate and package charts"
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          mkdir -p dist/charts
+          for chart in charts/sibyl charts/surrealdb; do
+            chart_version="$(helm show chart "$chart" | awk '$1 == "version:" { print $2 }' | tail -1)"
+            test "$chart_version" = "$version"
+            helm lint "$chart"
+          done
+          helm dependency list charts/surrealdb | tee /tmp/surrealdb-dependencies.txt
+          grep -Eq '^surrealdb[[:space:]]+0\.4\.0.*[[:space:]]ok[[:space:]]*$' /tmp/surrealdb-dependencies.txt
+          helm package charts/sibyl --destination dist/charts
+          helm package charts/surrealdb --destination dist/charts
+          test -f "dist/charts/sibyl-${version}.tgz"
+          test -f "dist/charts/sibyl-surrealdb-${version}.tgz"
+
+      - name: "► Upload Helm chart artifact"
+        uses: actions/upload-artifact@v7
+        with:
+          name: sibyl-helm-${{ inputs.tag }}
+          path: dist/charts/*.tgz
+          if-no-files-found: error
+          retention-days: 90
+
+  # =========================================================================
+  # Helm: publish immutable packages and merge the raw gh-pages repository index
+  # =========================================================================
+  helm-publish:
+    name: "► Helm: Publish repository"
+    needs: [helm-package, python, homebrew, aur, docker-sign]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: "◆ Checkout Helm repository"
+        uses: actions/checkout@v7
+        with:
+          ref: gh-pages
+          path: helm-repo
+
+      - name: "◇ Setup Helm"
+        uses: azure/setup-helm@v5.0.0
+        with:
+          version: v3.20.2
+
+      - name: "► Download Helm chart artifact"
+        uses: actions/download-artifact@v8
+        with:
+          name: sibyl-helm-${{ inputs.tag }}
+          path: staged-charts
+
+      - name: "► Publish immutable chart packages"
+        run: |
+          set -euo pipefail
+          added=false
+          for package in staged-charts/*.tgz; do
+            destination="helm-repo/$(basename "$package")"
+            if [[ -f "$destination" ]]; then
+              if ! cmp --silent "$package" "$destination"; then
+                echo "::error::Refusing to replace immutable chart: $(basename "$package")"
+                exit 1
+              fi
+              continue
+            fi
+            cp "$package" "$destination"
+            added=true
+          done
+          if [[ "$added" != "true" ]]; then
+            echo "Exact chart packages already published; nothing to do."
+            exit 0
+          fi
+          helm repo index helm-repo \
+            --url https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages \
+            --merge helm-repo/index.yaml
+          git -C helm-repo config user.name github-actions[bot]
+          git -C helm-repo config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git -C helm-repo add index.yaml '*.tgz'
+          git -C helm-repo commit -F - <<'EOF'
+          chore(helm): publish release charts
+
+          Add the immutable Sibyl application and SurrealDB wrapper packages,
+          then merge them into the raw-content Helm repository index.
+          EOF
+          git -C helm-repo push origin HEAD:gh-pages
+
+  # =========================================================================
   # Release: update GitHub release with install instructions
   # =========================================================================
   release:
     name: "◆ Release: Update"
-    needs: [python, homebrew, aur, docker-sign]
+    needs: [python, homebrew, aur, docker-sign, helm-publish]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -619,6 +838,12 @@ jobs:
           pattern: sibyl-*-${{ steps.version.outputs.version }}-*
           merge-multiple: true
 
+      - name: "► Download Helm charts"
+        uses: actions/download-artifact@v8
+        with:
+          name: sibyl-helm-${{ inputs.tag }}
+          path: release-evidence/helm
+
       - name: "◇ Prepare release evidence assets"
         run: |
           set -euo pipefail
@@ -632,6 +857,7 @@ jobs:
             -name "*.whl" -o \
             -name "*.tar.gz" \
           \) -exec cp {} release-assets/ \;
+          find release-evidence/helm -type f -name "*.tgz" -exec cp {} release-assets/ \;
 
           formula="$(find release-evidence/homebrew -type f -name "sibyl.rb" -print -quit)"
           pkgbuild="$(find release-evidence/aur -type f -name "PKGBUILD" -print -quit)"
@@ -644,6 +870,7 @@ jobs:
           test "$(find release-assets -maxdepth 1 -type f -name '*-cosign-receipt.json' | wc -l)" -eq 2
           test "$(find release-assets -maxdepth 1 -type f -name '*.whl' | wc -l)" -eq 3
           test "$(find release-assets -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 3
+          test "$(find release-assets -maxdepth 1 -type f -name '*.tgz' | wc -l)" -eq 2
           test -f "release-assets/sibyl-homebrew-${version}.rb"
           test -f "release-assets/sibyl-${version}-PKGBUILD"
 
@@ -699,11 +926,19 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --version ${{ steps.version.outputs.version }} --no-open
           ```
 
+          **Kubernetes (Helm)**
+          ```bash
+          helm repo add sibyl https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages
+          helm repo update sibyl
+          helm upgrade --install sibyl sibyl/sibyl --version ${{ steps.version.outputs.version }}
+          ```
+
           ## Artifacts
 
           This release includes Python wheels and sdists, the generated
-          Homebrew formula, the generated AUR PKGBUILD, Docker SBOMs,
-          cosign receipts, and a SHA256 checksum manifest.
+          Homebrew formula, the generated AUR PKGBUILD, Helm charts, Docker
+          SBOMs, aggregate dual-registry cosign receipts, and a SHA256 checksum
+          manifest.
           EOF
 
       - name: "◆ Update release with install instructions"
@@ -731,4 +966,11 @@ jobs:
             echo "### Docker Images (multi-arch: linux/amd64, linux/arm64)"
             echo "- \`ghcr.io/hyperb1iss/sibyl-api:${{ steps.version.outputs.version }}\`"
             echo "- \`ghcr.io/hyperb1iss/sibyl-web:${{ steps.version.outputs.version }}\`"
+            echo "- \`docker.io/hyperb1iss/sibyl-api:${{ steps.version.outputs.version }}\`"
+            echo "- \`docker.io/hyperb1iss/sibyl-web:${{ steps.version.outputs.version }}\`"
+            echo ""
+            echo "### Helm Charts"
+            echo "- Repository: https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages"
+            echo "- \`sibyl/sibyl --version ${{ steps.version.outputs.version }}\`"
+            echo "- \`sibyl/sibyl-surrealdb --version ${{ steps.version.outputs.version }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -103,6 +103,42 @@ def _cosign_receipt(image: str) -> str:
     )
 
 
+def _cosign_receipt_v2(image: str) -> str:
+    payload = json.loads(_cosign_receipt(image))
+    digest = payload["digest"]
+    repositories = [
+        f"ghcr.io/hyperb1iss/sibyl-{image}",
+        f"docker.io/hyperb1iss/sibyl-{image}",
+    ]
+    payload["schema_version"] = "sibyl-cosign-receipt-v2"
+    payload["signed_images"] = [
+        {
+            "repository": repository,
+            "digest": digest,
+            "image_ref": f"{repository}@{digest}",
+        }
+        for repository in repositories
+    ]
+    return json.dumps(payload)
+
+
+def test_validate_cosign_receipt_accepts_dual_registry_v2(tmp_path: Path) -> None:
+    receipt = tmp_path / "sibyl-api-1.2.3-cosign-receipt.json"
+    receipt.write_text(_cosign_receipt_v2("api"), encoding="utf-8")
+
+    evidence._validate_cosign_receipt(receipt, image="api")
+
+
+def test_validate_cosign_receipt_rejects_v2_without_docker_hub(tmp_path: Path) -> None:
+    payload = json.loads(_cosign_receipt_v2("api"))
+    payload["signed_images"] = payload["signed_images"][:1]
+    receipt = tmp_path / "sibyl-api-1.2.3-cosign-receipt.json"
+    receipt.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(evidence.EvidenceFailure, match="both registry signatures"):
+        evidence._validate_cosign_receipt(receipt, image="api")
+
+
 def test_required_evidence_covers_external_acceptance_gates() -> None:
     keys = {requirement.key for requirement in evidence.REQUIRED_EVIDENCE}
 
@@ -686,6 +722,8 @@ def test_capture_rendered_helm_manifests_updates_manifest(
 ) -> None:
     def fake_helm_output(args: list[str]) -> str:
         if args[2] == "charts/sibyl":
+            assert "oidc.providers[0].organization_slug=enterprise" in args
+            assert "bootstrap.organization.slug=enterprise" in args
             return """
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

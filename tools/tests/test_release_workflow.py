@@ -231,7 +231,7 @@ def test_publish_workflow_keeps_install_instructions_current() -> None:
 def test_publish_workflow_attaches_docker_and_release_evidence() -> None:
     workflow = _publish_workflow()
 
-    assert "needs: [python, homebrew, aur, docker-sign]" in workflow
+    assert "needs: [python, homebrew, aur, docker-sign, helm-publish]" in workflow
     assert "docker-security:" in workflow
     assert "fail-fast: false" in workflow
     assert "docker-sign:" in workflow
@@ -259,6 +259,45 @@ def test_publish_workflow_attaches_docker_and_release_evidence() -> None:
     assert "append_body:" not in workflow
     assert "release-assets/*" in workflow
     assert "fail_on_unmatched_files: true" in workflow
+
+
+def test_publish_workflow_dual_publishes_identical_signed_images() -> None:
+    workflow = _publish_workflow()
+
+    assert "registry-preflight:" in workflow
+    assert "DOCKERHUB_USERNAME" in workflow
+    assert "DOCKERHUB_TOKEN" in workflow
+    assert "hub.docker.com/v2/repositories/${DOCKERHUB_NAMESPACE}/sibyl-${image}" in workflow
+    assert "needs: [rc-gate, registry-preflight]" in workflow
+    assert "GHCR_REPO" in workflow
+    assert "DOCKERHUB_REPO" in workflow
+    assert 'type=image,"name=${{ env.GHCR_REGISTRY }}' in workflow
+    assert 'test "$ghcr_digest" = "$dockerhub_digest"' in workflow
+    assert workflow.count('cosign sign --yes "$ghcr_ref"') == 1
+    assert workflow.count('cosign sign --yes "$dockerhub_ref"') == 1
+    assert '"schema_version": "sibyl-cosign-receipt-v2"' in workflow
+    assert '"signed_images": [' in workflow
+    assert workflow.count("Upload Cosign receipt") == 1
+
+
+def test_publish_workflow_packages_and_publishes_immutable_helm_charts() -> None:
+    workflow = _publish_workflow()
+
+    assert "helm-package:" in workflow
+    assert "helm-publish:" in workflow
+    assert "azure/setup-helm@v5.0.0" in workflow
+    assert "version: v3.20.2" in workflow
+    assert "helm dependency list charts/surrealdb" in workflow
+    assert "helm package charts/sibyl" in workflow
+    assert "helm package charts/surrealdb" in workflow
+    assert "Refusing to replace immutable chart" in workflow
+    assert "helm repo index helm-repo" in workflow
+    assert "--merge helm-repo/index.yaml" in workflow
+    assert "https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages" in workflow
+    assert "git -C helm-repo push origin HEAD:gh-pages" in workflow
+    assert "sibyl-helm-${{ inputs.tag }}" in workflow
+    assert "Download Helm charts" in workflow
+    assert "-name '*.tgz'" in workflow
 
 
 def test_publish_workflow_summary_links_all_package_channels() -> None:
