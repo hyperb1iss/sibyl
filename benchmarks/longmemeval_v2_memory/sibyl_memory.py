@@ -510,7 +510,7 @@ def compile_operational_evidence_set(
         raw_candidates,
         pool="raw",
     )
-    typed_reservation = min(len(ranked_typed), max(1, max_items // 3))
+    typed_reservation = min(len(ranked_typed), max(1, math.ceil(max_items * 3 / 8)))
     raw_budget = min(len(ranked_raw), max_items - typed_reservation)
     selected_raw = _select_role_complete_raw_evidence(ranked_raw, budget=raw_budget)
     selected = [*ranked_typed[:typed_reservation], *selected_raw]

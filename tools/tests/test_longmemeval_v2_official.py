@@ -2182,7 +2182,7 @@ def test_operational_evidence_set_calibrates_typed_and_raw_score_pools() -> None
     assert [item["type"] for item in selected] == [
         "procedure",
         "procedure",
-        "session",
+        "procedure",
         "session",
         "session",
         "session",
@@ -2197,11 +2197,11 @@ def test_operational_evidence_set_calibrates_typed_and_raw_score_pools() -> None
         "ranking_applied": True,
         "ranking_changed": False,
         "pool_calibration": "independent_query_coverage",
-        "typed_reservation": 2,
+        "typed_reservation": 3,
         "selected_typed_overflow_count": 0,
         "selected_raw_support_count": 0,
-        "selected_typed_count": 2,
-        "selected_raw_count": 6,
+        "selected_typed_count": 3,
+        "selected_raw_count": 5,
     }
 
 
@@ -2210,9 +2210,9 @@ def test_operational_evidence_set_calibrates_typed_and_raw_score_pools() -> None
     [
         (1, 8, 1, 0, 0),
         (2, 8, 1, 1, 0),
-        (3, 8, 1, 2, 0),
-        (8, 8, 2, 6, 0),
-        (8, 1, 7, 1, 5),
+        (3, 8, 2, 1, 0),
+        (8, 8, 3, 5, 0),
+        (8, 1, 7, 1, 4),
     ],
 )
 def test_shared_relevance_reserves_typed_slots_then_fills_raw(
