@@ -36,6 +36,8 @@ DEFAULT_GITHUB_REPO = "hyperb1iss/sibyl"
 DEFAULT_GITHUB_WORKFLOW = "publish.yml"
 GITHUB_RELEASE_IMAGES = ("api", "web")
 COSIGN_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+COSIGN_RECEIPT_V2 = "sibyl-cosign-receipt-v2"
+COSIGN_V2_SIGNATURE_COUNT = 2
 LOCAL_KUBERNETES_CONTEXTS = (
     "orbstack",
     "docker-desktop",
@@ -103,6 +105,10 @@ SIBYL_HELM_RENDER_ARGS = (
     "oidc.providers[0].client_id=sibyl-client",
     "--set",
     "oidc.providers[0].client_secret_env=SIBYL_OIDC_ENTRA_CLIENT_SECRET",
+    "--set",
+    "oidc.providers[0].organization_slug=enterprise",
+    "--set",
+    "bootstrap.organization.slug=enterprise",
 )
 SURREALDB_HELM_RENDER_ARGS = (
     "template",
@@ -2827,6 +2833,50 @@ def _validate_cosign_receipt(path: Path, *, image: str) -> None:
     signer = payload.get("signer")
     if not isinstance(signer, str) or not signer.strip():
         msg = f"Cosign receipt for {image} must include signer metadata: {path.name}"
+        raise EvidenceFailure(msg)
+
+    schema_version = payload.get("schema_version")
+    if schema_version is None:
+        return
+    if schema_version != COSIGN_RECEIPT_V2:
+        msg = f"Cosign receipt for {image} has unsupported schema: {path.name}"
+        raise EvidenceFailure(msg)
+    _validate_dual_registry_cosign_receipt(payload, path=path, image=image, digest=digest)
+
+
+def _validate_dual_registry_cosign_receipt(
+    payload: Mapping[str, object],
+    *,
+    path: Path,
+    image: str,
+    digest: str,
+) -> None:
+    signed_images = payload.get("signed_images")
+    if not isinstance(signed_images, list) or len(signed_images) != COSIGN_V2_SIGNATURE_COUNT:
+        msg = f"Cosign receipt for {image} must include both registry signatures: {path.name}"
+        raise EvidenceFailure(msg)
+    expected_repositories = {
+        f"ghcr.io/hyperb1iss/sibyl-{image}",
+        f"docker.io/hyperb1iss/sibyl-{image}",
+    }
+    repositories: set[str] = set()
+    for signed_image in signed_images:
+        if not isinstance(signed_image, Mapping):
+            msg = f"Cosign receipt for {image} has invalid signed image metadata: {path.name}"
+            raise EvidenceFailure(msg)
+        repository = signed_image.get("repository")
+        signed_digest = signed_image.get("digest")
+        signed_ref = signed_image.get("image_ref")
+        if (
+            not isinstance(repository, str)
+            or signed_digest != digest
+            or signed_ref != f"{repository}@{digest}"
+        ):
+            msg = f"Cosign receipt for {image} has mismatched registry digest: {path.name}"
+            raise EvidenceFailure(msg)
+        repositories.add(repository)
+    if repositories != expected_repositories:
+        msg = f"Cosign receipt for {image} must sign GHCR and Docker Hub: {path.name}"
         raise EvidenceFailure(msg)
 
 
