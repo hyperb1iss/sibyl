@@ -34,6 +34,8 @@ def main(argv: list[str] | None = None) -> int:
         api_url=args.api_url,
         run_id=args.run_id or f"lme-v2-smoke-{uuid4().hex[:12]}",
         timeout_seconds=args.timeout_seconds,
+        retrieval_mode=args.retrieval_mode,
+        max_planned_queries=args.max_planned_queries,
     )
     output = Path(args.output).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -50,9 +52,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output", required=True)
     parser.add_argument("--run-id", default="")
     parser.add_argument("--timeout-seconds", type=float, default=600.0)
+    parser.add_argument("--retrieval-mode", choices=("fast", "accurate"), default="fast")
+    parser.add_argument("--max-planned-queries", type=int, default=3)
     args = parser.parse_args(argv)
     if args.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be positive")
+    if not 1 <= args.max_planned_queries <= 4:
+        parser.error("--max-planned-queries must be between 1 and 4")
     return args
 
 
@@ -74,6 +80,8 @@ def run_live_smoke(
     api_url: str,
     run_id: str,
     timeout_seconds: float,
+    retrieval_mode: str,
+    max_planned_queries: int,
 ) -> dict[str, Any]:
     memory = SibylLiveApiMemory(
         {
@@ -86,6 +94,8 @@ def run_live_smoke(
             "embedding_job_wait_timeout_seconds": timeout_seconds,
             "max_context_items": 8,
             "search_limit": 12,
+            "retrieval_mode": retrieval_mode,
+            "retrieval_max_planned_queries": max_planned_queries,
         }
     )
     try:
@@ -147,6 +157,7 @@ def run_live_smoke(
                 "seconds": query_seconds,
                 "context_items": len(context),
                 "selection_origins": origins,
+                "retrieval_mode": retrieval_mode,
                 "receipt": query_receipt,
             },
             "replay": replay,
@@ -168,7 +179,7 @@ def evaluate_smoke_report(report: dict[str, Any]) -> dict[str, bool]:
     relationship_ids = (
         write_receipt.get("relationship_ids") if isinstance(write_receipt, dict) else None
     )
-    return {
+    checks = {
         "api_healthy": isinstance(runtime, dict) and runtime.get("status") == "healthy",
         "fresh_write_created_entities": (
             isinstance(ingest, dict) and int(ingest.get("written_entities") or 0) > 0
@@ -203,6 +214,42 @@ def evaluate_smoke_report(report: dict[str, Any]) -> dict[str, bool]:
             and not replay.get("background_jobs")
         ),
     }
+    if isinstance(query, dict) and query.get("retrieval_mode") == "accurate":
+        receipt = query.get("receipt")
+        search_metadata = (
+            receipt.get("search_metadata") if isinstance(receipt, dict) else None
+        )
+        planner_usage = (
+            search_metadata.get("planner_usage")
+            if isinstance(search_metadata, dict)
+            else None
+        )
+        planned_queries = (
+            search_metadata.get("planned_queries")
+            if isinstance(search_metadata, dict)
+            else None
+        )
+        checks.update(
+            {
+                "accurate_planner_succeeded": (
+                    isinstance(search_metadata, dict)
+                    and search_metadata.get("planner_status") == "success"
+                ),
+                "accurate_query_fanout_bounded": (
+                    isinstance(planned_queries, list)
+                    and 0 < len(planned_queries) <= 4
+                    and search_metadata.get("query_count") == len(planned_queries) + 1
+                ),
+                "accurate_planner_usage_recorded": (
+                    isinstance(planner_usage, dict)
+                    and planner_usage.get("requests") == 1
+                    and int(planner_usage.get("total_tokens") or 0) > 0
+                    and bool(planner_usage.get("provider"))
+                    and bool(planner_usage.get("model"))
+                ),
+            }
+        )
+    return checks
 
 
 if __name__ == "__main__":

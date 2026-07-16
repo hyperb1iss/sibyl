@@ -73,6 +73,90 @@ def test_evaluate_smoke_report_requires_live_write_retrieval_and_replay() -> Non
     assert all(module.evaluate_smoke_report(report).values())
 
 
+def test_evaluate_smoke_report_requires_accurate_planner_receipt() -> None:
+    module = _load_module()
+    report = {
+        "api_runtime": {"status": "healthy"},
+        "ingest": {
+            "written_entities": 6,
+            "pending_embedding_jobs": 0,
+            "pending_projection_jobs": 0,
+            "write_receipt": {
+                "written_relationships": 4,
+                "relationship_ids": ["r1", "r2", "r3", "r4"],
+            },
+        },
+        "query": {
+            "context_items": 3,
+            "selection_origins": ["context_pack:procedural", "search"],
+            "retrieval_mode": "accurate",
+            "receipt": {
+                "search_metadata": {
+                    "planner_status": "success",
+                    "planned_queries": ["exact workflow", "final outcome"],
+                    "query_count": 3,
+                    "planner_usage": {
+                        "provider": "openai",
+                        "model": "gpt-5.4-nano",
+                        "requests": 1,
+                        "total_tokens": 212,
+                    },
+                }
+            },
+        },
+        "replay": {
+            "written_entities": 0,
+            "written_relationships": 0,
+            "deleted_entities": 0,
+            "deleted_relationships": 0,
+            "background_jobs": {},
+        },
+    }
+
+    assert all(module.evaluate_smoke_report(report).values())
+
+
+def test_evaluate_smoke_report_rejects_accurate_planner_fallback() -> None:
+    module = _load_module()
+    report = {
+        "api_runtime": {"status": "healthy"},
+        "ingest": {
+            "written_entities": 6,
+            "pending_embedding_jobs": 0,
+            "pending_projection_jobs": 0,
+            "write_receipt": {
+                "written_relationships": 4,
+                "relationship_ids": ["r1", "r2", "r3", "r4"],
+            },
+        },
+        "query": {
+            "context_items": 3,
+            "selection_origins": ["context_pack:procedural", "search"],
+            "retrieval_mode": "accurate",
+            "receipt": {
+                "search_metadata": {
+                    "planner_status": "fallback",
+                    "planned_queries": [],
+                    "query_count": 1,
+                }
+            },
+        },
+        "replay": {
+            "written_entities": 0,
+            "written_relationships": 0,
+            "deleted_entities": 0,
+            "deleted_relationships": 0,
+            "background_jobs": {},
+        },
+    }
+
+    checks = module.evaluate_smoke_report(report)
+
+    assert checks["accurate_planner_succeeded"] is False
+    assert checks["accurate_query_fanout_bounded"] is False
+    assert checks["accurate_planner_usage_recorded"] is False
+
+
 def test_evaluate_smoke_report_rejects_missing_typed_evidence() -> None:
     module = _load_module()
     report = {
