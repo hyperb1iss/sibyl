@@ -166,6 +166,9 @@ async def _ensure_oidc_organization_membership_record(
             },
         )
     elif _role_value(membership.get("role")) != role.value:
+        # The verified IdP claim is authoritative here, unlike operator-driven role
+        # changes: demoting the last owner is allowed, and ownership returns with the
+        # next login that carries an owner claim.
         write_result = await client.execute_query(
             """
                 UPDATE organization_members

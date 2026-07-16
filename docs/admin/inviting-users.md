@@ -61,6 +61,10 @@ identity binding on the provider subject and only stores safe profile data.
 Sibyl never chooses the oldest or first organization membership and never changes the user's other
 organization memberships during OIDC login.
 
+The role claim is authoritative for the bound organization. Unlike in-app role management, an OIDC
+login carrying a lower role can demote the organization's last owner; grant the owner role in the
+identity provider and ownership is restored on that user's next login.
+
 ## Giving Access
 
 Grant access in the identity provider:
