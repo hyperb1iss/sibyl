@@ -106,41 +106,85 @@ async def _upsert_identity_provider(
     await repo.replace_record("identity_provider", uuid=provider_id, record=record)
 
 
+async def _resolve_oidc_organization_record(
+    client: QueryClient,
+    *,
+    organization_slug: str,
+) -> SurrealRecord:
+    slug = organization_slug.strip()
+    if not slug:
+        msg = "OIDC organization slug is required"
+        raise ValueError(msg)
+    organization = await _SurrealRepository(client).select_one(
+        """
+            SELECT * FROM organizations
+            WHERE slug = $slug AND is_personal = false
+            LIMIT 1;
+        """,
+        slug=slug,
+    )
+    if organization is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "oidc_organization_unavailable",
+                "message": "OIDC organization is not configured",
+            },
+        )
+    return organization
+
+
 async def _ensure_oidc_organization_membership_record(
     client: QueryClient,
     *,
     user_id: UUID,
-    user_name: str,
+    organization: SurrealRecord,
+    role: OrganizationRole,
 ) -> SurrealRecord:
     repo = _SurrealRepository(client)
-    # SECURITY: OIDC JIT provisioning must never auto-join global organizations.
-    # Require an existing membership and keep the existing role assignment.
+    organization_id = _coerce_uuid(organization.get("uuid"), field_name="organization.uuid")
     membership = await repo.select_one(
         """
-            SELECT *
-            FROM organization_members
-            WHERE user_id = $user_id
-              AND organization_id IN (
-                  SELECT VALUE uuid FROM organizations WHERE is_personal = false
-              )
-            ORDER BY created_at ASC
+            SELECT * FROM organization_members
+            WHERE organization_id = $organization_id AND user_id = $user_id
             LIMIT 1;
         """,
+        organization_id=str(organization_id),
         user_id=str(user_id),
     )
+    now = _utcnow()
     if membership is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "oidc_membership_required", "message": "OIDC membership required"},
+        write_result = await client.execute_query(
+            "CREATE organization_members CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "organization_id": str(organization_id),
+                "user_id": str(user_id),
+                "role": role.value,
+                "created_at": now,
+                "updated_at": now,
+            },
         )
-    organization_id = _coerce_uuid(membership.get("organization_id"), field_name="organization_id")
-    organization = await repo.select_one(
-        "SELECT * FROM organizations WHERE uuid = $uuid LIMIT 1;",
-        uuid=str(organization_id),
-    )
-    if organization is None:
-        msg = f"Failed to resolve OIDC organization for {user_name or user_id}"
-        raise RuntimeError(msg)
+    elif _role_value(membership.get("role")) != role.value:
+        write_result = await client.execute_query(
+            """
+                UPDATE organization_members
+                SET role = $role, updated_at = $updated_at
+                WHERE uuid = $uuid;
+            """,
+            uuid=str(_coerce_uuid(membership.get("uuid"), field_name="membership.uuid")),
+            role=role.value,
+            updated_at=now,
+        )
+    else:
+        write_result = None
+    if write_result is not None:
+        error = _query_error(write_result)
+        if error is not None:
+            raise RuntimeError(error)
+        if not _normalize_records(write_result):
+            msg = "Failed to write OIDC organization membership"
+            raise RuntimeError(msg)
     return organization
 
 
@@ -148,6 +192,7 @@ async def login_oidc_identity(
     *,
     provider_name: str,
     issuer: str,
+    organization_slug: str,
     client_id: str | None = None,
     scopes: list[str] | None = None,
     role_claim: str | None = None,
@@ -172,6 +217,10 @@ async def login_oidc_identity(
         _auth_client_scope() as client,
     ):
         repo = _SurrealRepository(client)
+        oidc_organization = await _resolve_oidc_organization_record(
+            client,
+            organization_slug=organization_slug,
+        )
         await _upsert_identity_provider(
             client,
             provider_name=provider,
@@ -291,7 +340,8 @@ async def login_oidc_identity(
                 await _ensure_oidc_organization_membership_record(
                     client,
                     user_id=user_id,
-                    user_name=display_name,
+                    organization=oidc_organization,
+                    role=org_role,
                 )
             ),
             label="organization",

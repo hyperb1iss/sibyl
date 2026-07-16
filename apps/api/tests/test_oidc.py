@@ -33,6 +33,7 @@ def _provider() -> OIDCProviderSettings:
         issuer="https://login.microsoftonline.com/tenant/v2.0",
         client_id="sibyl-client",
         client_secret_env="SIBYL_OIDC_ENTRA_CLIENT_SECRET",
+        organization_slug="acme",
     )
 
 
@@ -71,6 +72,19 @@ def test_oidc_role_claim_supports_dotted_paths(monkeypatch: pytest.MonkeyPatch) 
     )
 
     assert role is OrganizationRole.MEMBER
+
+
+@pytest.mark.parametrize(
+    "claims",
+    [
+        ["Sibyl.Member", "Sibyl.Admin"],
+        ["Sibyl.Admin", "Sibyl.Member"],
+    ],
+)
+def test_oidc_role_claim_uses_deterministic_privilege_precedence(claims: list[str]) -> None:
+    role = oidc.extract_sibyl_role({"roles": claims}, provider=_provider())
+
+    assert role is OrganizationRole.ADMIN
 
 
 def test_oidc_stable_subject_uses_entra_tenant_object_id() -> None:

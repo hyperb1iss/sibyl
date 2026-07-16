@@ -21,6 +21,7 @@ async def provision_oidc_user(
         client_id=identity.provider.client_id,
         scopes=list(identity.provider.scopes),
         role_claim=identity.provider.role_claim_override,
+        organization_slug=identity.provider.organization_slug,
         subject=identity.subject,
         subject_key=identity.subject_key,
         email=_optional_str(claims.get("email")),

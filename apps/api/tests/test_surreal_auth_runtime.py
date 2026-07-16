@@ -2054,62 +2054,145 @@ async def test_list_user_org_records_batches_organization_reads() -> None:
 
 
 @pytest.mark.asyncio
-async def test_oidc_membership_lookup_uses_surrealql_without_table_alias() -> None:
-    user_id = uuid4()
+async def test_oidc_organization_binding_resolves_exact_non_personal_slug() -> None:
     organization_id = uuid4()
     client = _SequenceAuthClient(
         [
             [
                 {
-                    "uuid": str(uuid4()),
-                    "user_id": str(user_id),
-                    "organization_id": str(organization_id),
-                    "role": "member",
-                }
-            ],
-            [
-                {
                     "uuid": str(organization_id),
-                    "name": "Team Org",
-                    "slug": "team-org",
+                    "name": "Acme",
+                    "slug": "acme",
                     "is_personal": False,
                 }
-            ],
+            ]
         ]
     )
 
-    organization = await auth_login._ensure_oidc_organization_membership_record(
+    organization = await auth_login._resolve_oidc_organization_record(
         client,
-        user_id=user_id,
-        user_name="Bliss",
+        organization_slug="acme",
     )
 
+    assert organization is not None
     assert organization["uuid"] == str(organization_id)
     query, params = client.calls[0]
-    assert "FROM organization_members" in query
-    assert "FROM organization_members om" not in query
-    assert "om." not in query
-    assert params == {"user_id": str(user_id)}
+    assert "slug = $slug AND is_personal = false" in query
+    assert params == {"slug": "acme"}
 
 
 @pytest.mark.asyncio
-async def test_oidc_membership_lookup_requires_existing_non_personal_membership() -> None:
-    user_id = uuid4()
+async def test_oidc_organization_binding_fails_closed_when_slug_is_missing() -> None:
     client = _SequenceAuthClient([[]])
 
     with pytest.raises(HTTPException) as exc_info:
-        await auth_login._ensure_oidc_organization_membership_record(
+        await auth_login._resolve_oidc_organization_record(
             client,
-            user_id=user_id,
-            user_name="Bliss",
+            organization_slug="missing",
         )
 
-    assert exc_info.value.status_code == 403
-    assert exc_info.value.detail["code"] == "oidc_membership_required"
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["code"] == "oidc_organization_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_oidc_login_resolves_binding_before_persisting_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _SequenceAuthClient([[]])
+    monkeypatch.setattr(
+        auth_login,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(client),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_login.login_oidc_identity(
+            provider_name="entra",
+            issuer="https://login.microsoftonline.com/tenant/v2.0",
+            organization_slug="missing",
+            subject="subject",
+            subject_key="entra:tenant:object",
+            email="bliss@example.com",
+            name="Bliss",
+            avatar_url=None,
+            role=OrganizationRole.MEMBER,
+            claims={"roles": ["Sibyl.Member"]},
+            request=SimpleNamespace(),
+        )
+
+    assert exc_info.value.detail["code"] == "oidc_organization_unavailable"
     assert len(client.calls) == 1
+    assert "FROM organizations" in client.calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_oidc_organization_binding_creates_claim_role_membership() -> None:
+    user_id = uuid4()
+    organization_id = uuid4()
+    organization = {
+        "uuid": str(organization_id),
+        "name": "Acme",
+        "slug": "acme",
+        "is_personal": False,
+    }
+    client = _SequenceAuthClient([[], [{"uuid": str(uuid4())}]])
+
+    result = await auth_login._ensure_oidc_organization_membership_record(
+        client,
+        user_id=user_id,
+        organization=organization,
+        role=OrganizationRole.ADMIN,
+    )
+
+    assert result == organization
     query, params = client.calls[0]
-    assert "is_personal = false" in query
-    assert params == {"user_id": str(user_id)}
+    assert "organization_id = $organization_id AND user_id = $user_id" in query
+    assert params == {
+        "organization_id": str(organization_id),
+        "user_id": str(user_id),
+    }
+    create_query, create_params = client.calls[1]
+    assert "CREATE organization_members CONTENT $record" in create_query
+    assert create_params["record"]["role"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_oidc_organization_binding_updates_claim_role_membership() -> None:
+    user_id = uuid4()
+    organization_id = uuid4()
+    membership_id = uuid4()
+    organization = {
+        "uuid": str(organization_id),
+        "name": "Acme",
+        "slug": "acme",
+        "is_personal": False,
+    }
+    client = _SequenceAuthClient(
+        [
+            [
+                {
+                    "uuid": str(membership_id),
+                    "organization_id": str(organization_id),
+                    "user_id": str(user_id),
+                    "role": "owner",
+                }
+            ],
+            [{"uuid": str(membership_id), "role": "member"}],
+        ]
+    )
+
+    await auth_login._ensure_oidc_organization_membership_record(
+        client,
+        user_id=user_id,
+        organization=organization,
+        role=OrganizationRole.MEMBER,
+    )
+
+    update_query, update_params = client.calls[1]
+    assert "UPDATE organization_members" in update_query
+    assert update_params["uuid"] == str(membership_id)
+    assert update_params["role"] == "member"
 
 
 @pytest.mark.asyncio

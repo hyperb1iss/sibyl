@@ -13,6 +13,7 @@ def _oidc_provider(**overrides) -> dict[str, object]:
         "issuer": "https://login.microsoftonline.com/tenant/v2.0",
         "client_id": "sibyl-client",
         "client_secret_env": "SIBYL_OIDC_ENTRA_CLIENT_SECRET",
+        "organization_slug": "acme",
     }
     provider.update(overrides)
     return provider
@@ -339,9 +340,31 @@ def test_settings_oidc_accepts_corporate_provider_config() -> None:
     assert provider.name == "entra"
     assert provider.scopes == ["openid", "profile", "email", "groups"]
     assert provider.role_claim_override is None
+    assert provider.organization_slug == "acme"
     assert s.oidc.role_claim == "resource_access.sibyl.roles"
     assert s.oidc.redirect_uri_base == "https://sibyl.example.com/"
     assert s.oidc.session_minutes == 45
+
+
+def test_settings_oidc_requires_provider_organization_binding() -> None:
+    provider = _oidc_provider()
+    provider.pop("organization_slug")
+
+    with pytest.raises(ValidationError, match="organization_slug"):
+        Settings(_env_file=None, oidc={"providers": [provider]})
+
+
+def test_settings_oidc_rejects_duplicate_provider_names() -> None:
+    with pytest.raises(ValidationError, match="provider names must be unique"):
+        Settings(
+            _env_file=None,
+            oidc={
+                "providers": [
+                    _oidc_provider(name="entra"),
+                    _oidc_provider(name="ENTRA", organization_slug="other"),
+                ]
+            },
+        )
 
 
 def test_settings_oidc_parses_json_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -355,7 +378,8 @@ def test_settings_oidc_parses_json_env(monkeypatch: pytest.MonkeyPatch) -> None:
               "issuer": "https://example.okta.com/oauth2/default",
               "client_id": "sibyl-client",
               "client_secret_env": "SIBYL_OIDC_OKTA_CLIENT_SECRET",
-              "role_claim_override": "groups"
+              "role_claim_override": "groups",
+              "organization_slug": "  acme  "
             }
           ],
           "role_claim": "groups"
@@ -368,6 +392,7 @@ def test_settings_oidc_parses_json_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.oidc.providers[0].name == "okta"
     assert s.oidc.providers[0].scopes == ["openid", "profile", "email"]
     assert s.oidc.providers[0].role_claim_override == "groups"
+    assert s.oidc.providers[0].organization_slug == "acme"
     assert s.oidc.role_claim == "groups"
 
 

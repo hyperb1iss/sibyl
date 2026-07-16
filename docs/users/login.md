@@ -31,11 +31,14 @@ a role claim, then Sibyl issues its own short-lived session for the web app.
    access.
 4. The browser returns to Sibyl with an ID token.
 5. Sibyl verifies the token signature, issuer, audience, expiry, nonce, and role claim.
-6. If the role claim contains a Sibyl role, Sibyl creates or updates your user record and signs you
-   in.
+6. If the role claim contains a Sibyl role, Sibyl creates or updates your membership in the
+   provider-bound organization and signs you in.
 
 Sibyl does not use your email address as the identity key. Email is only a profile field for display
 and audit readability.
+
+Operators bind each provider to one non-personal organization with `organization_slug`. Login never
+selects an organization from your other memberships.
 
 ## Role Claims
 

@@ -42,7 +42,8 @@ link. See [Installing Sibyl](installing.md#transactional-email).
 
 ## JIT Provisioning (Enterprise SSO)
 
-Enterprise Sibyl uses just-in-time provisioning. Users do not need pre-created Sibyl accounts when
+Enterprise Sibyl uses just-in-time provisioning. Each OIDC provider is bound to one exact
+non-personal organization by `organization_slug`. Users do not need pre-created Sibyl accounts when
 the identity provider sends a valid stable subject and a Sibyl role claim.
 
 On first OIDC login, Sibyl:
@@ -51,11 +52,14 @@ On first OIDC login, Sibyl:
 2. Reads the stable subject key.
 3. Reads the configured role claim.
 4. Creates a User record if the subject has not been seen before.
-5. Creates or updates the Organization membership from the role claim.
+5. Creates or updates membership in the provider-bound organization from the role claim.
 6. Records an audit event for the login.
 
 Email is not used to find the user. If an email address collides with another user, Sibyl keeps
 identity binding on the provider subject and only stores safe profile data.
+
+Sibyl never chooses the oldest or first organization membership and never changes the user's other
+organization memberships during OIDC login.
 
 ## Giving Access
 

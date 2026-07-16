@@ -248,16 +248,17 @@ def _role_from_claim(value: object) -> OrganizationRole | None:
         values = list(value)
     else:
         values = [value]
-    for item in values:
-        role = {
-            "Sibyl.Owner": OrganizationRole.OWNER,
-            "Sibyl.Admin": OrganizationRole.ADMIN,
-            "Sibyl.Member": OrganizationRole.MEMBER,
-            "owner": OrganizationRole.OWNER,
-            "admin": OrganizationRole.ADMIN,
-            "member": OrganizationRole.MEMBER,
-        }.get(str(item))
-        if role is not None:
+    role_map = {
+        "Sibyl.Owner": OrganizationRole.OWNER,
+        "Sibyl.Admin": OrganizationRole.ADMIN,
+        "Sibyl.Member": OrganizationRole.MEMBER,
+        "owner": OrganizationRole.OWNER,
+        "admin": OrganizationRole.ADMIN,
+        "member": OrganizationRole.MEMBER,
+    }
+    roles = {role_map[str(item)] for item in values if str(item) in role_map}
+    for role in (OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.MEMBER):
+        if role in roles:
             return role
     return None
 
