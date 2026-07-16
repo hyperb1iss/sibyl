@@ -31,7 +31,7 @@ from sibyl_core.embeddings.providers import capture_embedding_usage, configured_
 from sibyl_core.models.context import ContextPack
 from sibyl_core.observability import elapsed_ms, telemetry_registry
 from sibyl_core.retrieval.fusion import rrf_merge_with_metadata
-from sibyl_core.retrieval.query_planning import plan_evidence_queries
+from sibyl_core.retrieval.query_planning import plan_evidence_queries_with_usage
 
 log = structlog.get_logger()
 _READ_ROLES = (
@@ -106,6 +106,7 @@ def _fuse_context_evidence(
     responses: list[SearchResponse],
     limit: int,
     failures: list[dict[str, str | int]],
+    planner_usage: dict[str, str | int | float | bool | None],
 ) -> SearchResponse:
     result_lists = [
         [(result, result.score) for result in response.results] for response in responses
@@ -157,6 +158,7 @@ def _fuse_context_evidence(
         filters={
             "retrieval_mode": "accurate",
             "planner_status": "success",
+            "planner_usage": planner_usage,
             "planned_queries": planned_queries,
             "query_count": 1 + len(planned_queries),
             "successful_query_count": len(responses),
@@ -192,10 +194,11 @@ async def _execute_accurate_context_evidence_search(
     )
     try:
         try:
-            plan = await plan_evidence_queries(
+            planning = await plan_evidence_queries_with_usage(
                 request.goal,
                 max_queries=request.evidence.max_planned_queries,
             )
+            plan = planning.plan
         except Exception as exc:
             response = await original_task
             response.filters.update(
@@ -262,6 +265,7 @@ async def _execute_accurate_context_evidence_search(
             responses=responses,
             limit=request.evidence.limit,
             failures=failures,
+            planner_usage=planning.usage.model_dump() if planning.usage is not None else {},
         )
     except BaseException:
         if not original_task.done():

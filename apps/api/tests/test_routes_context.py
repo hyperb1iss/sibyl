@@ -25,6 +25,7 @@ from sibyl_core.embeddings.providers import (
     EmbeddingMetadata,
     OpenAIEmbeddingProvider,
 )
+from sibyl_core.ai.llm.extractor import ExtractionUsage
 from sibyl_core.models.context import (
     ContextFacet,
     ContextIntent,
@@ -43,6 +44,7 @@ from sibyl_core.models.reflection import (
     ReflectionRelationshipRecord,
 )
 from sibyl_core.retrieval.query_planning import (
+    EvidencePlanningReceipt,
     EvidenceQuery,
     EvidenceQueryFacet,
     EvidenceQueryPlan,
@@ -405,8 +407,22 @@ class TestContextPackRoute:
             ),
             patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
             patch(
-                "sibyl.api.routes.context.plan_evidence_queries",
-                AsyncMock(return_value=plan),
+                "sibyl.api.routes.context.plan_evidence_queries_with_usage",
+                AsyncMock(
+                    return_value=EvidencePlanningReceipt(
+                        plan=plan,
+                        usage=ExtractionUsage(
+                            provider="openai",
+                            model="gpt-5.4-nano",
+                            requests=1,
+                            input_tokens=42,
+                            output_tokens=18,
+                            total_tokens=60,
+                            cost_usd=0.00002,
+                            cost_complete=True,
+                        ),
+                    )
+                ),
             ) as planner,
             patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve) as search,
             patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
@@ -430,6 +446,16 @@ class TestContextPackRoute:
             "original-only",
         ]
         assert response.evidence.filters["planner_status"] == "success"
+        assert response.evidence.filters["planner_usage"] == {
+            "provider": "openai",
+            "model": "gpt-5.4-nano",
+            "requests": 1,
+            "input_tokens": 42,
+            "output_tokens": 18,
+            "total_tokens": 60,
+            "cost_usd": 0.00002,
+            "cost_complete": True,
+        }
         assert response.evidence.filters["query_count"] == 3
         assert response.evidence.filters["successful_query_count"] == 3
         assert response.evidence.filters["query_failures"] == []
@@ -454,7 +480,7 @@ class TestContextPackRoute:
             ),
             patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
             patch(
-                "sibyl.api.routes.context.plan_evidence_queries",
+                "sibyl.api.routes.context.plan_evidence_queries_with_usage",
                 AsyncMock(side_effect=RuntimeError("planner unavailable")),
             ),
             patch("sibyl.api.routes.search.execute_search_request", search),
@@ -500,8 +526,8 @@ class TestContextPackRoute:
             ),
             patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
             patch(
-                "sibyl.api.routes.context.plan_evidence_queries",
-                AsyncMock(return_value=plan),
+                "sibyl.api.routes.context.plan_evidence_queries_with_usage",
+                AsyncMock(return_value=EvidencePlanningReceipt(plan=plan)),
             ),
             patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve),
             patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),

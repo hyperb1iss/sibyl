@@ -9,7 +9,7 @@ from typing import Protocol
 from pydantic import BaseModel, Field
 
 from sibyl_core.ai.llm.config import LLMSurface
-from sibyl_core.ai.llm.extractor import Extractor
+from sibyl_core.ai.llm.extractor import ExtractionResult, ExtractionUsage, Extractor
 
 MAX_SUPPLEMENTAL_QUERIES = 4
 
@@ -43,6 +43,11 @@ class EvidenceQueryPlan(BaseModel):
     queries: list[EvidenceQuery] = Field(default_factory=list, max_length=MAX_SUPPLEMENTAL_QUERIES)
 
 
+class EvidencePlanningReceipt(BaseModel):
+    plan: EvidenceQueryPlan
+    usage: ExtractionUsage | None = None
+
+
 class EvidencePlanExtractor(Protocol):
     async def extract(self, prompt: str) -> EvidenceQueryPlan: ...
 
@@ -53,23 +58,45 @@ async def plan_evidence_queries(
     max_queries: int = 3,
     extractor: EvidencePlanExtractor | None = None,
 ) -> EvidenceQueryPlan:
+    receipt = await plan_evidence_queries_with_usage(
+        question,
+        max_queries=max_queries,
+        extractor=extractor,
+    )
+    return receipt.plan
+
+
+async def plan_evidence_queries_with_usage(
+    question: str,
+    *,
+    max_queries: int = 3,
+    extractor: EvidencePlanExtractor | None = None,
+) -> EvidencePlanningReceipt:
     question = " ".join(question.split())
     if not question:
         raise ValueError("question must not be empty")
     if not 1 <= max_queries <= MAX_SUPPLEMENTAL_QUERIES:
         raise ValueError(f"max_queries must be between 1 and {MAX_SUPPLEMENTAL_QUERIES}")
 
+    prompt = (
+        "Plan supplemental evidence searches for this question JSON:\n"
+        f"{json.dumps(question, ensure_ascii=True)}"
+    )
+    usage = None
     if extractor is None:
-        extractor = Extractor(
+        default_extractor = Extractor(
             EvidenceQueryPlan,
             surface=LLMSurface.MEMORY,
             system_prompt=_SYSTEM_PROMPT,
             max_tokens=800,
         )
-    planned = await extractor.extract(
-        "Plan supplemental evidence searches for this question JSON:\n"
-        f"{json.dumps(question, ensure_ascii=True)}"
-    )
+        extraction: ExtractionResult[
+            EvidenceQueryPlan
+        ] = await default_extractor.extract_with_usage(prompt)
+        planned = extraction.output
+        usage = extraction.usage
+    else:
+        planned = await extractor.extract(prompt)
 
     original_key = question.casefold()
     seen = {original_key}
@@ -83,14 +110,19 @@ async def plan_evidence_queries(
         queries.append(item.model_copy(update={"query": query}))
         if len(queries) >= max_queries:
             break
-    return EvidenceQueryPlan(queries=queries)
+    return EvidencePlanningReceipt(
+        plan=EvidenceQueryPlan(queries=queries),
+        usage=usage,
+    )
 
 
 __all__ = [
     "MAX_SUPPLEMENTAL_QUERIES",
     "EvidencePlanExtractor",
+    "EvidencePlanningReceipt",
     "EvidenceQuery",
     "EvidenceQueryFacet",
     "EvidenceQueryPlan",
     "plan_evidence_queries",
+    "plan_evidence_queries_with_usage",
 ]
