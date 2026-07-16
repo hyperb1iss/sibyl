@@ -94,7 +94,7 @@ jobs:
           fi
           for image in api web; do
             url="https://hub.docker.com/v2/repositories/${DOCKERHUB_NAMESPACE}/sibyl-${image}/"
-            if ! curl --fail --silent --show-error "$url" >/dev/null; then
+            if ! curl --fail --silent --show-error --retry 3 "$url" >/dev/null; then
               echo "::error::Public Docker Hub repository is unavailable: ${DOCKERHUB_NAMESPACE}/sibyl-${image}"
               exit 1
             fi
@@ -764,26 +764,44 @@ jobs:
       - name: "► Publish immutable chart packages"
         run: |
           set -euo pipefail
+          same_chart_contents() {
+            local staged="$1" published="$2" workdir result=0
+            workdir="$(mktemp -d)"
+            mkdir "$workdir/staged" "$workdir/published"
+            tar -xzf "$staged" -C "$workdir/staged"
+            tar -xzf "$published" -C "$workdir/published"
+            diff -r "$workdir/staged" "$workdir/published" >/dev/null || result=1
+            rm -rf "$workdir"
+            return "$result"
+          }
+          mkdir -p new-packages
           added=false
           for package in staged-charts/*.tgz; do
-            destination="helm-repo/$(basename "$package")"
+            name="$(basename "$package")"
+            destination="helm-repo/${name}"
             if [[ -f "$destination" ]]; then
-              if ! cmp --silent "$package" "$destination"; then
-                echo "::error::Refusing to replace immutable chart: $(basename "$package")"
+              # helm package archives are not byte-reproducible across checkouts,
+              # so tag re-runs must compare chart contents rather than bytes.
+              if ! same_chart_contents "$package" "$destination"; then
+                echo "::error::Refusing to replace immutable chart: ${name}"
                 exit 1
               fi
               continue
             fi
-            cp "$package" "$destination"
+            cp "$package" "new-packages/${name}"
             added=true
           done
           if [[ "$added" != "true" ]]; then
             echo "Exact chart packages already published; nothing to do."
             exit 0
           fi
-          helm repo index helm-repo \
+          # Index only the new packages so previously published entries keep
+          # their original created timestamps and archive digests.
+          helm repo index new-packages \
             --url https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages \
             --merge helm-repo/index.yaml
+          cp new-packages/*.tgz helm-repo/
+          mv new-packages/index.yaml helm-repo/index.yaml
           git -C helm-repo config user.name github-actions[bot]
           git -C helm-repo config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git -C helm-repo add index.yaml '*.tgz'

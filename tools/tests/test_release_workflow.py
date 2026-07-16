@@ -291,7 +291,8 @@ def test_publish_workflow_packages_and_publishes_immutable_helm_charts() -> None
     assert "helm package charts/sibyl" in workflow
     assert "helm package charts/surrealdb" in workflow
     assert "Refusing to replace immutable chart" in workflow
-    assert "helm repo index helm-repo" in workflow
+    assert "same_chart_contents" in workflow
+    assert "helm repo index new-packages" in workflow
     assert "--merge helm-repo/index.yaml" in workflow
     assert "https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages" in workflow
     assert "git -C helm-repo push origin HEAD:gh-pages" in workflow
