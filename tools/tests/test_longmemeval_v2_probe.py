@@ -161,7 +161,13 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     assert 'args+=(--question-ids "$official_question_ids")' in workflow
     assert 'rm -rf "$domain_output"' in workflow
     assert '--output-dir "$domain_output"' in workflow
+    assert "--save-memory" in workflow
+    assert '--checkpoint-dir "$domain_output/ingest_checkpoint"' in workflow
+    assert 'rm -rf "$domain_output/ingest_checkpoint"' in workflow
     assert workflow.index('rm -rf "$domain_output"') < workflow.index(
+        "moon run bench-longmemeval-v2-official-full"
+    )
+    assert workflow.index('rm -rf "$domain_output/ingest_checkpoint"') > workflow.index(
         "moon run bench-longmemeval-v2-official-full"
     )
     assert "https://openrouter.ai/api/v1" in workflow

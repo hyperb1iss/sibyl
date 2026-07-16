@@ -452,6 +452,8 @@ jobs:
             --domain "${{ matrix.domain }}" \
             --tier "$OFFICIAL_TIER" \
             --output-dir "$domain_output" \
+            --save-memory \
+            --checkpoint-dir "$domain_output/ingest_checkpoint" \
             --api-url http://127.0.0.1:3334/api \
             --allow-localhost \
             --reader-base-url "$READER_BASE_URL" \
@@ -462,6 +464,7 @@ jobs:
             --evaluator-model "$EVALUATOR_MODEL" \
             --evaluator-api-key-env OPENAI_API_KEY \
             "${args[@]}"
+          rm -rf "$domain_output/ingest_checkpoint"
 
       - name: Upload official domain artifact
         if: always()
