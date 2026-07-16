@@ -129,12 +129,12 @@ def test_install_surfaces_default_to_local_first_auth() -> None:
 
 
 def test_helm_runtime_secret_requires_stable_settings_key() -> None:
-    backend = (
-        REPO_ROOT / "charts/sibyl/templates/backend-deployment.yaml"
-    ).read_text(encoding="utf-8")
-    worker = (
-        REPO_ROOT / "charts/sibyl/templates/worker-deployment.yaml"
-    ).read_text(encoding="utf-8")
+    backend = (REPO_ROOT / "charts/sibyl/templates/backend-deployment.yaml").read_text(
+        encoding="utf-8"
+    )
+    worker = (REPO_ROOT / "charts/sibyl/templates/worker-deployment.yaml").read_text(
+        encoding="utf-8"
+    )
 
     assert "key: SIBYL_SETTINGS_KEY" in backend
     assert "key: SIBYL_SETTINGS_KEY" in worker
