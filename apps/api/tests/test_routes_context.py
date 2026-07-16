@@ -19,13 +19,13 @@ from sibyl.api.schemas import (
 )
 from sibyl.auth.authorization import ProjectAuthorizationError
 from sibyl.auth.errors import ProjectAccessDeniedError
+from sibyl_core.ai.llm.extractor import ExtractionUsage
 from sibyl_core.auth import ProjectRole
 from sibyl_core.embeddings.providers import (
     CachedEmbeddingProvider,
     EmbeddingMetadata,
     OpenAIEmbeddingProvider,
 )
-from sibyl_core.ai.llm.extractor import ExtractionUsage
 from sibyl_core.models.context import (
     ContextFacet,
     ContextIntent,
