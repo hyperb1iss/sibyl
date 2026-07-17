@@ -142,6 +142,7 @@ INTENT_FACETS = {
         ContextFacet.RECENT_MEMORY,
         ContextFacet.DOMAIN,
         ContextFacet.PROCEDURES,
+        ContextFacet.GOTCHAS,
         ContextFacet.DECISIONS,
     ],
     ContextIntent.GENERAL: [
@@ -647,28 +648,59 @@ def _dedupe_lineage(sections: list[ContextSection]) -> list[ContextSection]:
     return deduped
 
 
-def _dedupe_sections(sections: list[ContextSection], limit: int) -> list[ContextSection]:
+def _dedupe_sections(
+    sections: list[ContextSection],
+    limit: int,
+    *,
+    per_facet_limit: int,
+) -> list[ContextSection]:
     seen: set[str] = set()
-    remaining = limit
-    deduped: list[ContextSection] = []
-
+    unique_sections: list[ContextSection] = []
     for section in sections:
         items: list[ContextItem] = []
         for item in sorted(section.items, key=_item_sort_key):
-            if remaining <= 0:
-                break
             key = item.id or f"{item.type}:{item.name}"
             if key in seen:
                 continue
             seen.add(key)
             items.append(item)
-            remaining -= 1
         if items:
-            deduped.append(ContextSection(facet=section.facet, title=section.title, items=items))
+            unique_sections.append(replace(section, items=items))
+
+    selected: list[list[ContextItem]] = [[] for _ in unique_sections]
+    selected_ids: set[int] = set()
+    remaining = limit
+    for item_index in range(per_facet_limit):
+        for section_index, section in enumerate(unique_sections):
+            if remaining <= 0:
+                break
+            if item_index >= len(section.items):
+                continue
+            item = section.items[item_index]
+            selected[section_index].append(item)
+            selected_ids.add(id(item))
+            remaining -= 1
         if remaining <= 0:
             break
 
-    return deduped
+    if remaining > 0:
+        overflow = [
+            (*_item_sort_key(item), section_index, item_index, item)
+            for section_index, section in enumerate(unique_sections)
+            for item_index, item in enumerate(section.items)
+            if id(item) not in selected_ids
+        ]
+        for _, _, section_index, _, item in sorted(overflow, key=lambda entry: entry[:-1]):
+            if remaining <= 0:
+                break
+            selected[section_index].append(item)
+            remaining -= 1
+
+    return [
+        replace(section, items=items)
+        for section, items in zip(unique_sections, selected, strict=True)
+        if items
+    ]
 
 
 def _compact_text(value: str, max_chars: int) -> str:
@@ -1296,7 +1328,7 @@ async def compile_context(
         sections = _merge_active_work(sections, active_items, facets)
 
     sections = _dedupe_lineage(sections)
-    sections = _dedupe_sections(sections, limit)
+    sections = _dedupe_sections(sections, limit, per_facet_limit=per_facet_limit)
     if not sections and retrieval_failed:
         sections = _dedupe_sections(
             await _compile_fallback_sections(
@@ -1311,6 +1343,7 @@ async def compile_context(
                 audit=audit,
             ),
             limit,
+            per_facet_limit=per_facet_limit,
         )
     if include_related and normalized_layer is not ContextLayer.WAKE:
         related_projects = (

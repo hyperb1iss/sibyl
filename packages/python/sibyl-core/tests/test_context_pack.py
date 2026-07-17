@@ -320,6 +320,87 @@ async def test_compile_context_supports_review_intent(
 
 
 @pytest.mark.asyncio
+async def test_compile_context_learn_balances_operational_facets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    responses = {
+        ContextFacet.RECENT_MEMORY: [
+            _result(f"note-{index}", "note", f"Recent memory {index}", score=1.0)
+            for index in range(5)
+        ],
+        ContextFacet.DOMAIN: [_result("topic-1", "topic", "Domain topic", score=0.2)],
+        ContextFacet.PROCEDURES: [
+            _result("procedure-1", "procedure", "Recovery procedure", score=0.2)
+        ],
+        ContextFacet.GOTCHAS: [_result("error-1", "error_pattern", "Recovery failure", score=0.1)],
+        ContextFacet.DECISIONS: [_result("decision-1", "decision", "Recovery choice", score=0.2)],
+    }
+    monkeypatch.setattr(
+        context_module,
+        "context_search",
+        _facet_native_search(responses, calls=calls),
+    )
+
+    pack = await compile_context(
+        "learn from recovery failures",
+        intent="learn",
+        organization_id="org-123",
+        limit=5,
+    )
+
+    assert [section.facet for section in pack.sections] == [
+        ContextFacet.RECENT_MEMORY,
+        ContextFacet.DOMAIN,
+        ContextFacet.PROCEDURES,
+        ContextFacet.GOTCHAS,
+        ContextFacet.DECISIONS,
+    ]
+    assert [item.id for item in pack.items] == [
+        "note-0",
+        "topic-1",
+        "procedure-1",
+        "error-1",
+        "decision-1",
+    ]
+    assert len(calls) == 1
+    assert "error_pattern" in calls[0]["types"]
+
+
+@pytest.mark.asyncio
+async def test_compile_context_fills_facet_overflow_by_global_relevance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = {
+        ContextFacet.RECENT_MEMORY: [
+            _result(f"note-{index}", "note", f"Recent memory {index}", score=score)
+            for index, score in enumerate([1.0, 0.9, 0.2, 0.1])
+        ],
+        ContextFacet.DOMAIN: [
+            _result(f"topic-{index}", "topic", f"Domain topic {index}", score=score)
+            for index, score in enumerate([0.8, 0.7, 0.6, 0.5])
+        ],
+        ContextFacet.PROCEDURES: [
+            _result("procedure-1", "procedure", "Recovery procedure", score=0.4)
+        ],
+        ContextFacet.GOTCHAS: [_result("error-1", "error_pattern", "Recovery failure", score=0.3)],
+        ContextFacet.DECISIONS: [_result("decision-1", "decision", "Recovery choice", score=0.25)],
+    }
+    monkeypatch.setattr(context_module, "context_search", _facet_native_search(responses))
+
+    pack = await compile_context(
+        "learn from recovery failures",
+        intent="learn",
+        organization_id="org-123",
+        limit=10,
+    )
+
+    assert pack.total_items == 10
+    assert "topic-3" in {item.id for item in pack.items}
+    assert "note-3" not in {item.id for item in pack.items}
+
+
+@pytest.mark.asyncio
 async def test_compile_context_batches_native_facet_searches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -550,6 +631,7 @@ async def test_compile_context_wake_layer_caps_items_and_skips_related(
         ContextFacet.ACTIVE_WORK,
         ContextFacet.DECISIONS,
         ContextFacet.GOTCHAS,
+        ContextFacet.PROCEDURES,
     ]
     assert all(not item.related for item in pack.items)
     assert related_calls == []
