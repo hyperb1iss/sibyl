@@ -125,9 +125,9 @@ on:
         description: "Memory evidence composition strategy"
         type: choice
         options:
-          - reserved_support
           - shared_relevance
-        default: reserved_support
+          - reserved_support
+        default: shared_relevance
       official_source_evidence_bundling:
         description: "Bundle policy-safe operational source evidence into typed items"
         type: boolean
@@ -287,7 +287,7 @@ jobs:
       READER_MAX_CONCURRENT_REQUESTS: ${{ inputs.official_reader_max_concurrent_requests || '16' }}
       READER_RETRY_ATTEMPTS: ${{ inputs.official_reader_retry_attempts || '4' }}
       EVIDENCE_COMPOSITION_MODE:
-        ${{ inputs.official_evidence_composition_mode || 'reserved_support' }}
+        ${{ inputs.official_evidence_composition_mode || 'shared_relevance' }}
       SOURCE_EVIDENCE_BUNDLING: ${{ inputs.official_source_evidence_bundling || false }}
       RETRIEVAL_MODE: ${{ inputs.official_retrieval_mode || 'accurate' }}
       RETRIEVAL_MAX_PLANNED_QUERIES:

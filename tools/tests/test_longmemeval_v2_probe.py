@@ -183,6 +183,15 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     assert "--profile longmemeval-v2" in workflow
 
 
+def test_longmemeval_v2_workflow_defaults_to_shared_relevance() -> None:
+    workflow = (
+        Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "default: shared_relevance" in workflow
+    assert "${{ inputs.official_evidence_composition_mode || 'shared_relevance' }}" in workflow
+
+
 def test_longmemeval_v2_workflow_labels_accurate_replay_as_developmental() -> None:
     workflow = (
         Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"

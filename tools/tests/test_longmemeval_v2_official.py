@@ -57,6 +57,8 @@ EXPECTED_OPERATIONAL_EVIDENCE_ITEMS = 8
 EXPECTED_OPERATIONAL_RAW_ITEMS = 6
 EXPECTED_OPERATIONAL_TYPED_ITEMS = 2
 EXPECTED_OPERATIONAL_SUPPORT_ITEMS = 3
+EXPECTED_SHARED_RELEVANCE_TYPED_ITEMS = 3
+EXPECTED_SHARED_RELEVANCE_RAW_ITEMS = 5
 EXPECTED_PLANNER_REQUESTS = 2
 EXPECTED_PLANNER_INPUT_TOKENS = 84
 EXPECTED_PLANNER_OUTPUT_TOKENS = 22
@@ -323,7 +325,7 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(
             "include_screenshot_refs",
         )
     } == {
-        "evidence_composition_mode": "reserved_support",
+        "evidence_composition_mode": "shared_relevance",
         "source_evidence_bundling": False,
         "include_screenshot_refs": False,
     }
@@ -2446,7 +2448,52 @@ def test_shared_relevance_reserves_typed_slots_then_fills_raw(
     assert metadata["selected_typed_overflow_count"] == typed_overflow
 
 
-def test_operational_evidence_set_preserves_reserved_support_by_default() -> None:
+def test_operational_evidence_set_preserves_reserved_support_when_selected() -> None:
+    module = _load_memory_module()
+    typed = [
+        {
+            "id": f"procedure-{index}",
+            "type": "procedure",
+            "content": "Typed projection",
+            "_selection_origin": "context_pack:procedures",
+            "metadata": {"longmemeval_v2_trajectory_id": f"t{index}"},
+        }
+        for index in range(4)
+    ]
+    raw = [
+        {
+            "id": f"session-{index}",
+            "type": "session",
+            "content": "Raw support",
+            "_selection_origin": "search",
+        }
+        for index in range(8)
+    ]
+
+    selected, metadata = module.compile_operational_evidence_set(
+        query="anything",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=8,
+        mode="reserved_support",
+    )
+
+    assert [item["id"] for item in selected] == [
+        "procedure-0",
+        "procedure-1",
+        "session-0",
+        "session-1",
+        "session-2",
+        "session-3",
+        "session-4",
+        "session-5",
+    ]
+    assert metadata["mode"] == "reserved_support"
+    assert metadata["selected_typed_count"] == EXPECTED_OPERATIONAL_TYPED_ITEMS
+    assert metadata["selected_raw_count"] == EXPECTED_OPERATIONAL_RAW_ITEMS
+
+
+def test_operational_evidence_set_uses_shared_relevance_by_default() -> None:
     module = _load_memory_module()
     typed = [
         {
@@ -2475,19 +2522,10 @@ def test_operational_evidence_set_preserves_reserved_support_by_default() -> Non
         max_items=8,
     )
 
-    assert [item["id"] for item in selected] == [
-        "procedure-0",
-        "procedure-1",
-        "session-0",
-        "session-1",
-        "session-2",
-        "session-3",
-        "session-4",
-        "session-5",
-    ]
-    assert metadata["mode"] == "reserved_support"
-    assert metadata["selected_typed_count"] == EXPECTED_OPERATIONAL_TYPED_ITEMS
-    assert metadata["selected_raw_count"] == EXPECTED_OPERATIONAL_RAW_ITEMS
+    assert len(selected) == EXPECTED_OPERATIONAL_EVIDENCE_ITEMS
+    assert metadata["mode"] == "shared_relevance"
+    assert metadata["selected_typed_count"] == EXPECTED_SHARED_RELEVANCE_TYPED_ITEMS
+    assert metadata["selected_raw_count"] == EXPECTED_SHARED_RELEVANCE_RAW_ITEMS
 
 
 @pytest.mark.parametrize(
@@ -3420,12 +3458,15 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
             "typed_context_candidate_count": 0,
             "typed_context_selected_count": 0,
             "evidence_composition": {
-                "mode": "reserved_support",
+                "mode": "shared_relevance",
                 "candidate_count": 0,
                 "typed_candidate_count": 0,
                 "raw_candidate_count": 0,
                 "ranking_applied": False,
                 "ranking_changed": False,
+                "pool_calibration": "independent_query_coverage",
+                "typed_reservation": 0,
+                "selected_typed_overflow_count": 0,
                 "selected_raw_support_count": 0,
                 "selected_typed_count": 0,
                 "selected_raw_count": 0,

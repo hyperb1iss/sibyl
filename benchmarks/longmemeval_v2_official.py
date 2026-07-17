@@ -430,7 +430,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument(
         "--evidence-composition-mode",
         choices=["reserved_support", "shared_relevance"],
-        default="reserved_support",
+        default="shared_relevance",
     )
     parser.add_argument("--source-evidence-bundling", action="store_true")
     parser.add_argument(

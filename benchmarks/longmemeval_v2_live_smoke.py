@@ -16,6 +16,8 @@ if str(BENCHMARKS_ROOT) not in sys.path:
     sys.path.insert(0, str(BENCHMARKS_ROOT))
 
 from longmemeval_v2_memory.sibyl_memory import (  # noqa: E402
+    DEFAULT_EVIDENCE_COMPOSITION_MODE,
+    EVIDENCE_COMPOSITION_MODES,
     SibylLiveApiMemory,
     build_operational_experience_payload,
 )
@@ -38,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
         timeout_seconds=args.timeout_seconds,
         retrieval_mode=args.retrieval_mode,
         max_planned_queries=args.max_planned_queries,
+        evidence_composition_mode=args.evidence_composition_mode,
     )
     output = Path(args.output).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -56,6 +59,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--timeout-seconds", type=float, default=600.0)
     parser.add_argument("--retrieval-mode", choices=("fast", "accurate"), default="fast")
     parser.add_argument("--max-planned-queries", type=int, default=3)
+    parser.add_argument(
+        "--evidence-composition-mode",
+        choices=sorted(EVIDENCE_COMPOSITION_MODES),
+        default=DEFAULT_EVIDENCE_COMPOSITION_MODE,
+    )
     args = parser.parse_args(argv)
     if args.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be positive")
@@ -84,6 +92,7 @@ def run_live_smoke(
     timeout_seconds: float,
     retrieval_mode: str,
     max_planned_queries: int,
+    evidence_composition_mode: str,
 ) -> dict[str, Any]:
     memory = SibylLiveApiMemory(
         {
@@ -98,6 +107,7 @@ def run_live_smoke(
             "search_limit": 12,
             "retrieval_mode": retrieval_mode,
             "retrieval_max_planned_queries": max_planned_queries,
+            "evidence_composition_mode": evidence_composition_mode,
         }
     )
     try:
@@ -160,6 +170,7 @@ def run_live_smoke(
                 "context_items": len(context),
                 "selection_origins": origins,
                 "retrieval_mode": retrieval_mode,
+                "evidence_composition_mode": evidence_composition_mode,
                 "receipt": query_receipt,
             },
             "replay": replay,

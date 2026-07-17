@@ -44,6 +44,42 @@ def test_load_trajectory_rejects_missing_id(tmp_path: Path) -> None:
         module.load_trajectory(source, "missing")
 
 
+def test_parse_args_defaults_to_shared_relevance() -> None:
+    module = _load_module()
+
+    args = module.parse_args(
+        [
+            "--trajectories",
+            "trajectories.jsonl",
+            "--trajectory-id",
+            "trajectory-1",
+            "--output",
+            "report.json",
+        ]
+    )
+
+    assert args.evidence_composition_mode == "shared_relevance"
+
+
+def test_parse_args_accepts_reserved_support_override() -> None:
+    module = _load_module()
+
+    args = module.parse_args(
+        [
+            "--trajectories",
+            "trajectories.jsonl",
+            "--trajectory-id",
+            "trajectory-1",
+            "--output",
+            "report.json",
+            "--evidence-composition-mode",
+            "reserved_support",
+        ]
+    )
+
+    assert args.evidence_composition_mode == "reserved_support"
+
+
 def test_evaluate_smoke_report_requires_live_write_retrieval_and_replay() -> None:
     module = _load_module()
     report = {
