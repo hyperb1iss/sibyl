@@ -12,9 +12,12 @@ from typing import Any
 
 import pytest
 from benchmarks import longmemeval_v2_reader_replay as replay
+from benchmarks import longmemeval_v2_reader_replay_replication as replication
 
 EXPECTED_READER_CONCURRENCY = 3
 EXPECTED_READER_INPUT_COUNT = 2
+EXPECTED_REPLICATION_RUN_COUNT = 12
+EXPECTED_NEW_REPLICATION_RUN_COUNT = 8
 
 
 def _prompt_row(
@@ -165,6 +168,10 @@ def _write_source(source_dir: Path, rows: list[dict[str, Any]]) -> None:
         encoding="utf-8",
     )
     receipt = _receipt([row["question_id"] for row in rows])
+    receipt["accounting"] = {
+        "reader": {"provider_reported_cost_usd": 0.1},
+        "judge": {"provider_reported_cost_usd": 0.0},
+    }
     receipt["artifacts"] = {
         receipt_key: {"sha256": replay.sha256_file(source_dir / filename)}
         for receipt_key, filename in replay.SOURCE_RECEIPT_BINDINGS.items()
@@ -683,3 +690,489 @@ def test_question_set_selection_uses_reference_order() -> None:
     assert [row["question_id"] for row in prompts] == ["q3", "q1"]
     assert [row["question_id"] for row in reader_rows] == ["q3", "q1"]
     assert all(set(row) == {"question_id", "messages"} for row in reader_rows)
+
+
+def _replication_fixture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[argparse.Namespace, dict[str, dict[str, Path]]]:
+    paths: dict[str, dict[str, Path]] = {
+        configuration: {} for configuration in replication.CONFIGURATIONS
+    }
+    rows = [_prompt_row("q1"), _prompt_row("q2")]
+    for configuration in replication.CONFIGURATIONS:
+        for domain in replication.DOMAINS:
+            path = tmp_path / "sources" / configuration / domain
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _write_source(path, rows)
+            _set_source_scores(path, score=configuration == "candidate")
+            paths[configuration][domain] = path
+    key_file = tmp_path / "openrouter.key"
+    key_file.write_text("test-key\n", encoding="utf-8")
+    official_repo = tmp_path / "official"
+    official_repo.mkdir()
+    monkeypatch.setattr(
+        replication,
+        "verify_official_repo",
+        lambda *_args: "official-commit",
+    )
+    args = argparse.Namespace(
+        command="plan",
+        frozen_baseline_web=str(paths["frozen_baseline"]["web"]),
+        frozen_baseline_enterprise=str(paths["frozen_baseline"]["enterprise"]),
+        candidate_web=str(paths["candidate"]["web"]),
+        candidate_enterprise=str(paths["candidate"]["enterprise"]),
+        official_repo=str(official_repo),
+        data_root=str(tmp_path / "dataset"),
+        reader_api_key_file=str(key_file),
+        evaluator_api_key_env="TEST_OPENAI_API_KEY",
+        output_root=str(tmp_path / "replication"),
+        plan_path=str(tmp_path / "replication" / "plan.json"),
+    )
+    return args, paths
+
+
+def _set_source_scores(source_dir: Path, *, score: bool) -> None:
+    score_path = source_dir / "per_question.jsonl"
+    rows = replay.load_jsonl(score_path)
+    for row in rows:
+        row["score_bool"] = score
+        row["score"] = float(score)
+    score_path.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    receipt_path = source_dir / "longmemeval_v2_official_receipt.json"
+    receipt = replay.load_json(receipt_path)
+    receipt["artifacts"]["per_question"]["sha256"] = replay.sha256_file(score_path)
+    receipt_path.write_text(json.dumps(receipt) + "\n", encoding="utf-8")
+
+
+def _write_replication_plan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[dict[str, Any], Path]:
+    args, _ = _replication_fixture(tmp_path, monkeypatch)
+    plan = replication.build_plan(args)
+    plan_path = Path(args.plan_path)
+    plan_path.parent.mkdir(parents=True)
+    replication.write_json(plan_path, plan)
+    return plan, plan_path
+
+
+def _write_completed_replay(
+    plan: dict[str, Any],
+    run: dict[str, Any],
+    *,
+    score: bool,
+    cost: float = 0.01,
+) -> None:
+    output_dir = Path(run["output_dir"])
+    output_dir.mkdir(parents=True)
+    question_ids = replication.selected_question_ids(plan, run["domain"])
+    per_question_path = output_dir / "per_question.jsonl"
+    per_question_path.write_text(
+        "".join(
+            json.dumps(
+                {
+                    "question_id": question_id,
+                    "question_type": "static-environment",
+                    "score_bool": score,
+                    "score": float(score),
+                }
+            )
+            + "\n"
+            for question_id in question_ids
+        ),
+        encoding="utf-8",
+    )
+    metrics_path = output_dir / "aggregated_metrics.json"
+    metrics_path.write_text("{}\n", encoding="utf-8")
+    source = plan["sources"][run["configuration"]][run["domain"]]
+    receipt = {
+        "schema_version": replay.SCHEMA_VERSION,
+        "status": "PASS",
+        "source": {
+            "artifacts": source["artifacts"],
+            "official_commit": source["official_commit"],
+        },
+        "reader_inputs": {
+            "question_count": len(question_ids),
+            "question_ids_sha256": replay.sha256_question_ids(question_ids),
+            "image_integrity": {
+                "embedded_image_count": 0,
+                "verified_image_count": 0,
+            },
+        },
+        "outputs": {
+            "per_question": {
+                "path": str(per_question_path),
+                "sha256": replay.sha256_file(per_question_path),
+            },
+            "aggregated_metrics": {
+                "path": str(metrics_path),
+                "sha256": replay.sha256_file(metrics_path),
+            },
+        },
+        "accounting": {
+            "provider_reported_cost_usd": cost,
+            "cost_coverage_complete": True,
+        },
+    }
+    replication.write_json(
+        output_dir / "longmemeval_v2_reader_replay_receipt.json",
+        receipt,
+    )
+    replication.write_json(
+        output_dir / "run_args.json",
+        {"question_order_seed": run["question_order_seed"]},
+    )
+
+
+def test_replication_plan_freezes_paired_matrix_and_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan, plan_path = _write_replication_plan(tmp_path, monkeypatch)
+
+    runs = replication.require_plan(plan, plan_path=plan_path)
+
+    assert len(runs) == EXPECTED_REPLICATION_RUN_COUNT
+    assert sum(not run["existing"] for run in runs) == EXPECTED_NEW_REPLICATION_RUN_COUNT
+    assert plan["cost_budget"]["estimated_incremental_cost_usd"] == pytest.approx(0.8)
+    assert all(
+        run["command"][:4] == list(replication.COMMAND_PREFIX)
+        for run in runs
+        if not run["existing"]
+    )
+
+
+def test_replication_plan_rejects_command_tampering(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan, plan_path = _write_replication_plan(tmp_path, monkeypatch)
+    plan["runs"][4]["command"].append("--temperature")
+    plan["runs"][4]["command"].append("0")
+    replication.write_json(plan_path, plan)
+
+    with pytest.raises(ValueError, match="command changed"):
+        replication.require_plan(plan, plan_path=plan_path)
+
+
+def test_replication_runner_resumes_valid_receipts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan, plan_path = _write_replication_plan(tmp_path, monkeypatch)
+    for run in plan["runs"]:
+        if not run["existing"]:
+            _write_completed_replay(plan, run, score=run["configuration"] == "candidate")
+    monkeypatch.setenv("TEST_OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        replication,
+        "execute_wave",
+        lambda *_args, **_kwargs: pytest.fail("valid receipts should be resumed"),
+    )
+
+    receipt = replication.run_plan(
+        plan,
+        plan_path=plan_path,
+        max_workers=replication.DEFAULT_MAX_WORKERS,
+    )
+
+    assert receipt["status"] == "PASS"
+    assert len(receipt["skipped"]) == EXPECTED_NEW_REPLICATION_RUN_COUNT
+    assert receipt["incremental_provider_reported_cost_usd"] == pytest.approx(0.08)
+
+
+def test_replication_report_uses_paired_question_bootstrap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan, plan_path = _write_replication_plan(tmp_path, monkeypatch)
+    for run in plan["runs"]:
+        if not run["existing"]:
+            _write_completed_replay(plan, run, score=run["configuration"] == "candidate")
+
+    report = replication.build_report(plan, plan_path=plan_path)
+
+    assert report["status"] == "PASS"
+    assert report["comparison"]["cluster_bootstrap"]["mean_accuracy_delta"] == 1.0
+    assert report["comparison"]["decision"]["outcome"] == "GO"
+    assert report["comparison"]["domain_mean_accuracy_deltas"] == {
+        "web": 1.0,
+        "enterprise": 1.0,
+    }
+    assert report["costs"]["incremental_provider_reported_cost_usd"] == pytest.approx(0.08)
+
+
+def test_replication_scores_reject_duplicate_questions(tmp_path: Path) -> None:
+    path = tmp_path / "scores.jsonl"
+    path.write_text(
+        '{"question_id":"q1","score_bool":true}\n{"question_id":"q1","score_bool":false}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Duplicate scored replay question"):
+        replication.load_scores(path)
+
+
+def test_replication_existing_scores_require_boolean(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan, plan_path = _write_replication_plan(tmp_path, monkeypatch)
+    run = next(
+        run
+        for run in replication.require_plan(plan, plan_path=plan_path)
+        if run["existing"] and run["configuration"] == "candidate"
+    )
+    score_path = Path(run["output_dir"]) / "per_question.jsonl"
+    rows = replay.load_jsonl(score_path)
+    rows[0]["score_bool"] = "false"
+    score_path.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TypeError, match="Invalid scored replay row"):
+        replication.existing_summary(plan, run)
+
+
+def test_replication_receipt_rejects_output_path_escape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan, _ = _write_replication_plan(tmp_path, monkeypatch)
+    run = next(run for run in plan["runs"] if not run["existing"])
+    _write_completed_replay(plan, run, score=True)
+    output_dir = Path(run["output_dir"])
+    receipt_path = output_dir / "longmemeval_v2_reader_replay_receipt.json"
+    receipt = replay.load_json(receipt_path)
+    escaped_path = tmp_path / "escaped.jsonl"
+    escaped_path.write_text(
+        (output_dir / "per_question.jsonl").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    receipt["outputs"]["per_question"] = {
+        "path": str(escaped_path),
+        "sha256": replay.sha256_file(escaped_path),
+    }
+    replication.write_json(receipt_path, receipt)
+
+    assert replication.completed_replay_summary(plan, run) is None
+
+
+def test_replication_plan_rejects_source_metadata_tampering(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan, plan_path = _write_replication_plan(tmp_path, monkeypatch)
+    plan["sources"]["candidate"]["web"]["official_commit"] = "other-commit"
+    replication.write_json(plan_path, plan)
+
+    with pytest.raises(ValueError, match="source metadata changed"):
+        replication.require_plan(plan, plan_path=plan_path)
+
+
+def test_replication_runner_refuses_more_spend_after_cost_overrun(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan, plan_path = _write_replication_plan(tmp_path, monkeypatch)
+    pass_two = [run for run in plan["runs"] if run["pass_id"] == replication.PASS_IDS[1]]
+    for run in pass_two:
+        _write_completed_replay(plan, run, score=True, cost=0.4)
+    monkeypatch.setenv("TEST_OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        replication,
+        "execute_wave",
+        lambda *_args, **_kwargs: pytest.fail("cost guard must stop before another wave"),
+    )
+
+    receipt = replication.run_plan(
+        plan,
+        plan_path=plan_path,
+        max_workers=replication.DEFAULT_MAX_WORKERS,
+    )
+
+    assert receipt["status"] == "FAIL"
+    assert receipt["failures"] == [
+        {
+            "cost_budget_preflight_failed": True,
+            "projected_incremental_cost_usd": pytest.approx(1.6),
+        }
+    ]
+
+
+def test_replication_runner_archives_partial_attempt_and_counts_its_spend(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan, plan_path = _write_replication_plan(tmp_path, monkeypatch)
+    partial_run = next(run for run in plan["runs"] if not run["existing"])
+    partial_dir = Path(partial_run["output_dir"])
+    partial_dir.mkdir(parents=True)
+    replication.write_json(
+        partial_dir / "run_args.json",
+        {"provider_usage_run_id": "partial-run"},
+    )
+    usage_dir = partial_dir / "provider_usage"
+    usage_dir.mkdir()
+    usage_dir.joinpath("reader.jsonl").write_text(
+        json.dumps(
+            {
+                "run_id": "partial-run",
+                "requested_model": "reader",
+                "usage": {"cost_usd": 0.2},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TEST_OPENAI_API_KEY", "test-key")
+
+    def complete_wave(
+        _plan: dict[str, Any],
+        runs: list[dict[str, Any]],
+        *,
+        max_workers: int,
+    ) -> list[tuple[dict[str, Any], int]]:
+        assert max_workers == replication.DEFAULT_MAX_WORKERS
+        for run in runs:
+            _write_completed_replay(_plan, run, score=True)
+        return [(run, 0) for run in runs]
+
+    monkeypatch.setattr(replication, "execute_wave", complete_wave)
+
+    receipt = replication.run_plan(
+        plan,
+        plan_path=plan_path,
+        max_workers=replication.DEFAULT_MAX_WORKERS,
+    )
+
+    assert receipt["status"] == "PASS"
+    assert receipt["incremental_provider_reported_cost_usd"] == pytest.approx(0.28)
+    assert receipt["archived_attempts"] == [
+        {
+            "run": replication.run_key(partial_run),
+            "path": str(partial_dir.with_name(f"{partial_dir.name}.attempt-01")),
+            "receipt_sha256": None,
+            "requests": 1,
+            "priced_requests": 1,
+            "cost_usd": pytest.approx(0.2),
+            "cost_coverage_complete": True,
+        }
+    ]
+    assert Path(receipt["archived_attempts"][0]["path"]).is_dir()
+    assert replication.completed_replay_summary(plan, partial_run) is not None
+
+
+def test_replication_decision_uses_only_fresh_passes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan, plan_path = _write_replication_plan(tmp_path, monkeypatch)
+    for run in plan["runs"]:
+        if not run["existing"]:
+            _write_completed_replay(plan, run, score=False)
+
+    report = replication.build_report(plan, plan_path=plan_path)
+
+    comparison = report["comparison"]
+    assert comparison["per_pass_accuracy_deltas"]["pass_01"] == 1.0
+    assert comparison["all_passes_mean_accuracy_delta"] == pytest.approx(1 / 3)
+    assert comparison["cluster_bootstrap"]["mean_accuracy_delta"] == 0.0
+    assert comparison["decision_passes"] == ["pass_02", "pass_03"]
+    assert comparison["decision"]["outcome"] == "RESEARCH-MORE"
+
+
+def test_replication_source_cost_requires_provider_accounting() -> None:
+    with pytest.raises(TypeError, match="no provider accounting"):
+        replication.official_source_cost({})
+
+
+def test_replication_plan_rejects_estimate_over_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args, _ = _replication_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(replication, "MAX_INCREMENTAL_COST_USD", 0.5)
+
+    with pytest.raises(ValueError, match="Estimated replay cost exceeds"):
+        replication.build_plan(args)
+
+
+def test_replication_runner_detects_post_wave_cost_overrun(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan, plan_path = _write_replication_plan(tmp_path, monkeypatch)
+    monkeypatch.setenv("TEST_OPENAI_API_KEY", "test-key")
+
+    def expensive_wave(
+        _plan: dict[str, Any],
+        runs: list[dict[str, Any]],
+        *,
+        max_workers: int,
+    ) -> list[tuple[dict[str, Any], int]]:
+        assert max_workers == replication.DEFAULT_MAX_WORKERS
+        for run in runs:
+            _write_completed_replay(_plan, run, score=True, cost=0.4)
+        return [(run, 0) for run in runs]
+
+    monkeypatch.setattr(replication, "execute_wave", expensive_wave)
+
+    receipt = replication.run_plan(
+        plan,
+        plan_path=plan_path,
+        max_workers=replication.DEFAULT_MAX_WORKERS,
+    )
+
+    assert receipt["status"] == "FAIL"
+    assert receipt["incremental_provider_reported_cost_usd"] == pytest.approx(1.6)
+    assert receipt["failures"] == [
+        {"cost_budget_exceeded": True, "incremental_cost_usd": pytest.approx(1.6)}
+    ]
+
+
+def test_replication_report_fails_when_completed_cost_exceeds_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan, plan_path = _write_replication_plan(tmp_path, monkeypatch)
+    for run in plan["runs"]:
+        if not run["existing"]:
+            _write_completed_replay(plan, run, score=True, cost=0.2)
+
+    report = replication.build_report(plan, plan_path=plan_path)
+
+    assert report["status"] == "FAIL"
+    assert report["costs"]["within_budget"] is False
+    assert report["costs"]["incremental_provider_reported_cost_usd"] == pytest.approx(1.6)
+
+
+@pytest.mark.parametrize(
+    ("mean_delta", "lower", "upper", "domain_delta", "outcome"),
+    [
+        (0.03, 0.001, 0.06, -0.02, "GO"),
+        (-0.03, -0.06, 0.0, 0.0, "NO-GO"),
+        (-0.01, -0.02, -0.001, 0.0, "NO-GO"),
+        (0.02, -0.01, 0.05, 0.0, "RESEARCH-MORE"),
+    ],
+)
+def test_replication_decision_boundaries(
+    mean_delta: float,
+    lower: float,
+    upper: float,
+    domain_delta: float,
+    outcome: str,
+) -> None:
+    decision = replication.replication_decision(
+        mean_delta=mean_delta,
+        confidence_interval={"lower": lower, "upper": upper},
+        domain_deltas=dict.fromkeys(replication.DOMAINS, domain_delta),
+    )
+
+    assert decision["outcome"] == outcome
