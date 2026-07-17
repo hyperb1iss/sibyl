@@ -32,6 +32,7 @@ from sibyl_core.models.context import ContextPack
 from sibyl_core.observability import elapsed_ms, telemetry_registry
 from sibyl_core.retrieval.fusion import rrf_merge_with_metadata
 from sibyl_core.retrieval.refinement import (
+    MAX_FEEDBACK_DOCUMENTS,
     RetrievalFeedbackDocument,
     plan_deterministic_refinement_queries,
 )
@@ -52,7 +53,7 @@ router = APIRouter(
 _REQUEST_AUTO_INJECT_SENTINEL: Request = cast("Request", None)
 _DETERMINISTIC_REFINEMENT_USAGE: dict[str, str | int | float | bool | None] = {
     "provider": "deterministic",
-    "model": "pseudo_relevance_feedback_v1",
+    "model": "pseudo_relevance_feedback_v2",
     "requests": 0,
     "input_tokens": 0,
     "output_tokens": 0,
@@ -109,6 +110,26 @@ def _context_evidence_request(
 
 def _result_key(result: SearchResult) -> str:
     return f"{result.result_origin}:{result.id}"
+
+
+def _feedback_source_id(result: SearchResult) -> str:
+    value = result.metadata.get("operational_source_id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return _result_key(result)
+
+
+def _refinement_frontier(
+    responses: list[SearchResponse],
+    *,
+    limit: int = MAX_FEEDBACK_DOCUMENTS,
+) -> list[SearchResult]:
+    fused = rrf_merge_with_metadata(
+        [[(result, result.score) for result in response.results] for response in responses],
+        dedup_key=_result_key,
+        limit=limit,
+    )
+    return [result for result, _score, _metadata in fused]
 
 
 def _fuse_context_evidence(
@@ -188,7 +209,7 @@ def _fuse_context_evidence(
         filters={
             "retrieval_mode": "accurate",
             "planner_status": planner_status,
-            "planner_strategy": "deterministic_refinement_v1",
+            "planner_strategy": "deterministic_refinement_v2",
             "planner_usage": planner_usage,
             "planned_queries": planned_queries,
             "query_count": 1 + len(planned_queries),
@@ -309,6 +330,7 @@ async def _execute_accurate_context_evidence_search(
                     RetrievalFeedbackDocument(
                         id=_result_key(result),
                         text=f"{result.name}\n{result.content}",
+                        source_id=_feedback_source_id(result),
                         raw_observation_projection=(
                             result.metadata.get("projection_kind") == "raw_observation"
                         ),
@@ -360,13 +382,13 @@ async def _execute_accurate_context_evidence_search(
 
         remaining_queries -= len(round_specs)
         refinement_novel_result_counts.append(len(novel_results))
-        frontier = novel_results
         if not successful:
             refinement_stop_reason = "all_queries_failed"
             break
-        if not frontier:
+        if not novel_results:
             refinement_stop_reason = "no_new_results"
             break
+        frontier = _refinement_frontier(responses)
 
     if refinement_stop_reason is None:
         refinement_stop_reason = (

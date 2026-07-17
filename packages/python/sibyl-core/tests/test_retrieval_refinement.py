@@ -8,12 +8,14 @@ def _document(
     document_id: str,
     text: str,
     *,
+    source_id: str | None = None,
     raw_observation_projection: bool = False,
     evidence_content_type: str | None = None,
 ) -> RetrievalFeedbackDocument:
     return RetrievalFeedbackDocument(
         id=document_id,
         text=text,
+        source_id=source_id,
         raw_observation_projection=raw_observation_projection,
         evidence_content_type=evidence_content_type,
     )
@@ -28,6 +30,31 @@ def test_refinement_starts_with_a_focused_query() -> None:
 
     assert [query.query for query in planned] == ["deployment workflow release team"]
     assert planned[0].facet == "focus"
+
+
+def test_refinement_strips_answer_formatting_and_focuses_explicit_anchors() -> None:
+    planned = plan_deterministic_refinement_queries(
+        "Which column is between `Store` and `Results`? Your final answer should be wrapped in "
+        r"\boxed{}.",
+        [],
+        max_queries=2,
+    )
+
+    assert [query.facet for query in planned] == ["anchor", "focus"]
+    assert planned[0].query == '"store" "result"'
+    assert planned[0].added_terms == ("store", "result")
+    assert planned[1].query == "column store result"
+    assert all("boxed" not in query.query for query in planned)
+
+
+def test_refinement_preserves_question_after_prefix_answer_formatting() -> None:
+    planned = plan_deterministic_refinement_queries(
+        r"Provide the final answer in \boxed{}. Which column changed?",
+        [],
+        max_queries=1,
+    )
+
+    assert planned[0].query == "column changed"
 
 
 def test_refinement_uses_consensus_terms_from_retrieved_evidence() -> None:
@@ -47,7 +74,53 @@ def test_refinement_uses_consensus_terms_from_retrieved_evidence() -> None:
     assert feedback.query.endswith("canary promotion validation")
 
 
-def test_refinement_can_diversify_from_distinctive_top_result_terms() -> None:
+def test_refinement_excludes_corpus_scaffolding_from_consensus_terms() -> None:
+    documents = [
+        _document(
+            str(index),
+            "Workarena success configuration item routing table"
+            if index < 3
+            else "Workarena success unrelated catalog entry",
+        )
+        for index in range(8)
+    ]
+
+    planned = plan_deterministic_refinement_queries(
+        "Which routing detail changed?",
+        documents,
+        max_queries=2,
+    )
+
+    assert planned[1].facet == "corroboration"
+    assert {"configuration", "item", "table"} <= set(planned[1].added_terms)
+    assert not {"workarena", "success"} & set(planned[1].added_terms)
+
+
+def test_refinement_excludes_terms_present_in_all_three_sources() -> None:
+    planned = plan_deterministic_refinement_queries(
+        "Which detail changed?",
+        [
+            _document("one", "Workarena routing configuration"),
+            _document("two", "Workarena routing table"),
+            _document("three", "Workarena catalog item"),
+        ],
+        max_queries=2,
+    )
+
+    assert planned[1].added_terms == ("routing",)
+
+
+def test_refinement_rejects_numeric_and_opaque_feedback_terms() -> None:
+    planned = plan_deterministic_refinement_queries(
+        "Which field changed?",
+        [_document("one", "a47 115 notice-w8sgtt3 meaningful configuration")],
+        max_queries=2,
+    )
+
+    assert planned[1].added_terms == ("meaningful", "configuration")
+
+
+def test_refinement_does_not_expand_from_uncorroborated_multi_source_terms() -> None:
     planned = plan_deterministic_refinement_queries(
         "What failed during deployment?",
         [
@@ -57,9 +130,58 @@ def test_refinement_can_diversify_from_distinctive_top_result_terms() -> None:
         max_queries=3,
     )
 
-    assert [query.facet for query in planned] == ["focus", "feedback"]
-    assert "buildkite" in planned[1].added_terms
-    assert planned[1].source_result_ids == ("one",)
+    assert [query.facet for query in planned] == ["focus"]
+
+
+def test_refinement_counts_repeated_chunks_as_one_feedback_source() -> None:
+    planned = plan_deterministic_refinement_queries(
+        "Which incident filter changed?",
+        [
+            _document(
+                "chunk-one",
+                "Activity stream created follow-up entry",
+                source_id="trajectory-one",
+            ),
+            _document(
+                "chunk-two",
+                "Activity stream created another entry",
+                source_id="trajectory-one",
+            ),
+            _document(
+                "chunk-three",
+                "Mobile portal option labels",
+                source_id="trajectory-two",
+            ),
+        ],
+        max_queries=3,
+    )
+
+    assert [query.facet for query in planned] == ["focus"]
+
+
+def test_refinement_receipts_include_unique_sources_beyond_eight_chunks() -> None:
+    planned = plan_deterministic_refinement_queries(
+        "Which deployment detail changed?",
+        [
+            _document(
+                f"first-{index}",
+                "Nebula promotion receipt",
+                source_id="trajectory-one",
+            )
+            for index in range(8)
+        ]
+        + [
+            _document(
+                "second-source",
+                "Nebula rollout evidence",
+                source_id="trajectory-two",
+            )
+        ],
+        max_queries=2,
+    )
+
+    assert planned[1].added_terms == ("nebula",)
+    assert planned[1].source_result_ids == ("first-0", "second-source")
 
 
 def test_refinement_does_not_repeat_seen_queries_or_question_terms() -> None:

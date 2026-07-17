@@ -828,7 +828,7 @@ def test_planner_accounting_accepts_zero_cost_deterministic_refinement() -> None
                         "planner_status": "success",
                         "planner_usage": {
                             "provider": "deterministic",
-                            "model": "pseudo_relevance_feedback_v1",
+                            "model": "pseudo_relevance_feedback_v2",
                             "requests": 0,
                             "input_tokens": 0,
                             "output_tokens": 0,
@@ -846,7 +846,7 @@ def test_planner_accounting_accepts_zero_cost_deterministic_refinement() -> None
 
     assert accounting["requests"] == 0
     assert accounting["providers"] == ["deterministic"]
-    assert accounting["models"] == ["pseudo_relevance_feedback_v1"]
+    assert accounting["models"] == ["pseudo_relevance_feedback_v2"]
     assert accounting["recorded_question_count"] == 1
     assert accounting["tracking_complete"] is True
     assert accounting["cost_coverage_complete"] is True
@@ -863,7 +863,7 @@ def test_planner_accounting_accepts_complete_partial_refinement_usage() -> None:
                         "planner_status": "partial",
                         "planner_usage": {
                             "provider": "deterministic",
-                            "model": "pseudo_relevance_feedback_v1",
+                            "model": "pseudo_relevance_feedback_v2",
                             "requests": 0,
                             "input_tokens": 0,
                             "output_tokens": 0,

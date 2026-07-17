@@ -133,7 +133,7 @@ def test_evaluate_smoke_report_requires_accurate_planner_receipt() -> None:
                     "query_count": 3,
                     "planner_usage": {
                         "provider": "deterministic",
-                        "model": "pseudo_relevance_feedback_v1",
+                        "model": "pseudo_relevance_feedback_v2",
                         "requests": 0,
                         "total_tokens": 0,
                         "cost_usd": 0.0,
@@ -220,7 +220,7 @@ def test_evaluate_smoke_report_accepts_saturated_accurate_refinement() -> None:
                     "refinement_stop_reason": "no_refinement_terms",
                     "planner_usage": {
                         "provider": "deterministic",
-                        "model": "pseudo_relevance_feedback_v1",
+                        "model": "pseudo_relevance_feedback_v2",
                         "requests": 0,
                         "total_tokens": 0,
                         "cost_usd": 0.0,

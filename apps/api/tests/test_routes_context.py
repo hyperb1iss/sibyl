@@ -466,6 +466,11 @@ class TestContextPackRoute:
                 ("outcome", 0.92),
             ),
         }
+        responses["ship faster"].results[0].metadata["operational_source_id"] = "source-one"
+        responses["ship faster"].results[1].metadata["operational_source_id"] = "source-one"
+        responses["deployment workflow state"].results[1].metadata["operational_source_id"] = (
+            "source-two"
+        )
 
         async def retrieve(request: SearchRequest, **_kwargs: object) -> SearchResponse:
             await asyncio.sleep(0)
@@ -501,7 +506,18 @@ class TestContextPackRoute:
             "graph:original-only",
         ]
         assert [document.id for document in second_documents] == [
+            "graph:shared",
+            "graph:original-only",
             "graph:state",
+        ]
+        assert [document.source_id for document in first_documents] == [
+            "source-one",
+            "source-one",
+        ]
+        assert [document.source_id for document in second_documents] == [
+            "source-one",
+            "source-one",
+            "source-two",
         ]
         assert all(isinstance(document, RetrievalFeedbackDocument) for document in first_documents)
         assert {call.args[0].query for call in search.call_args_list} == set(responses)
@@ -515,7 +531,7 @@ class TestContextPackRoute:
         assert response.evidence.filters["planner_status"] == "success"
         assert response.evidence.filters["planner_usage"] == {
             "provider": "deterministic",
-            "model": "pseudo_relevance_feedback_v1",
+            "model": "pseudo_relevance_feedback_v2",
             "requests": 0,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -523,7 +539,7 @@ class TestContextPackRoute:
             "cost_usd": 0.0,
             "cost_complete": True,
         }
-        assert response.evidence.filters["planner_strategy"] == "deterministic_refinement_v1"
+        assert response.evidence.filters["planner_strategy"] == "deterministic_refinement_v2"
         assert response.evidence.filters["refinement_rounds"] == 2
         assert response.evidence.filters["refinement_novel_result_counts"] == [1, 2]
         assert response.evidence.filters["refinement_stop_reason"] == "query_budget_exhausted"
