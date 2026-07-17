@@ -13,7 +13,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-DIAGNOSTIC_SCHEMA_VERSION = "sibyl-longmemeval-v2-diagnostics-v1"
+DIAGNOSTIC_SCHEMA_VERSION = "sibyl-longmemeval-v2-diagnostics-v2"
 SLICE_SCHEMA_VERSION = "sibyl-longmemeval-v2-diagnostic-slice-v1"
 DEFAULT_MAX_RANK = 10
 DEFAULT_SLICE_SIZE_PER_DOMAIN = 16
@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.slice:
         slice_record = load_json(Path(args.slice).expanduser().resolve())
-        validate_slice_sources(slice_record, source_artifacts)
+        validate_slice_sources(slice_record, source_artifacts, trace_rows)
         selected_ids = {
             str(case["question_id"])
             for case in slice_record.get("cases", [])
@@ -216,12 +216,18 @@ def build_question_trace(
         if item.get("trajectory_id")
         for state_index in item["state_indices"]
     }
+    lexical_source_state_pairs = retrieved_state_pairs | {
+        (str(support["trajectory_id"]), int(support["state_index"]))
+        for item in ranked
+        for support in item["source_support_states"]
+    }
     gold_state_pairs = {
         (str(item["trajectory_id"]), int(item["state_index"])) for item in evidence_states
     }
     trajectory_hit = bool(retrieved_trajectory_ids & set(evidence_trajectories))
     matched_state_count = len(retrieved_state_pairs & gold_state_pairs)
     state_hit = matched_state_count > 0
+    lexical_source_hit = bool(lexical_source_state_pairs & gold_state_pairs)
     visible_hit = any(
         normalized_answer and normalized_answer in normalize_text(str(item["state_content"]))
         for item in ranked
@@ -250,6 +256,7 @@ def build_question_trace(
         "metrics": {
             "trajectory_recall_at_k": trajectory_hit,
             "state_recall_at_k": state_hit,
+            "lexical_source_reachability_at_k": lexical_source_hit,
             "exact_context_recall_at_k": visible_hit,
             "evidence_state_count": len(gold_state_pairs),
             "matched_evidence_state_count": matched_state_count,
@@ -304,6 +311,8 @@ def parse_context_items(contexts: Any) -> list[dict[str, Any]]:
                 "trajectory_id": regex_string(_TRAJECTORY_PATTERN, value),
                 "chunk_index": regex_int(_CHUNK_PATTERN, value),
                 "state_indices": [int(item) for item in _STATE_PATTERN.findall(value)],
+                "source_support_state_indices": [],
+                "source_support_states": [],
                 "score": regex_float(_SCORE_PATTERN, value),
                 "content_chars": len(value),
                 "state_content": context_state_content(value),
@@ -316,6 +325,12 @@ def normalize_structured_retrieval(item: dict[str, Any]) -> dict[str, Any]:
     state_indices = item.get("state_indices")
     if not isinstance(state_indices, list):
         state_indices = []
+    source_support_state_indices = item.get("source_support_state_indices")
+    if not isinstance(source_support_state_indices, list):
+        source_support_state_indices = []
+    source_support_states = item.get("source_support_states")
+    if not isinstance(source_support_states, list):
+        source_support_states = []
     return {
         "rank": int(finite_number(item.get("rank")) or 0),
         "entity_id": item.get("entity_id"),
@@ -324,9 +339,31 @@ def normalize_structured_retrieval(item: dict[str, Any]) -> dict[str, Any]:
         "state_indices": [
             int(value) for value in state_indices if finite_number(value) is not None
         ],
+        "source_support_state_indices": [
+            int(value) for value in source_support_state_indices if finite_number(value) is not None
+        ],
+        "source_support_states": [
+            normalized
+            for value in source_support_states
+            if isinstance(value, dict)
+            and (normalized := normalize_source_support_state(value)) is not None
+        ],
         "score": finite_number(item.get("score")),
         "content_chars": int(finite_number(item.get("content_chars")) or 0),
         "state_content": str(item.get("state_content") or item.get("content") or ""),
+    }
+
+
+def normalize_source_support_state(item: dict[str, Any]) -> dict[str, Any] | None:
+    trajectory_id = str(item.get("trajectory_id") or "").strip()
+    state_index = item.get("state_index")
+    if not trajectory_id or isinstance(state_index, bool) or finite_number(state_index) is None:
+        return None
+    return {
+        "entity_id": item.get("entity_id"),
+        "operational_source_id": item.get("operational_source_id"),
+        "trajectory_id": trajectory_id,
+        "state_index": int(state_index),
     }
 
 
@@ -485,6 +522,7 @@ def build_diagnostic_slice(
 def validate_slice_sources(
     slice_record: dict[str, Any],
     source_artifacts: dict[str, dict[str, Any]],
+    trace_rows: list[dict[str, Any]],
 ) -> None:
     if slice_record.get("schema_version") != SLICE_SCHEMA_VERSION:
         msg = f"Diagnostic slice schema must be {SLICE_SCHEMA_VERSION!r}"
@@ -498,7 +536,27 @@ def validate_slice_sources(
         if not isinstance(expected, dict) or current is None:
             msg = f"Diagnostic slice source domain {domain!r} is unavailable"
             raise ValueError(msg)
-        if expected.get("slice_haystack_sha256") != current.get("evaluated_haystack_sha256"):
+        selected_ids = {
+            str(case["question_id"])
+            for case in slice_record.get("cases", [])
+            if isinstance(case, dict) and case.get("domain") == domain and case.get("question_id")
+        }
+        found_ids = {
+            str(row["question_id"])
+            for row in trace_rows
+            if row.get("domain") == domain and row.get("question_id") in selected_ids
+        }
+        if missing_ids := selected_ids - found_ids:
+            msg = f"Diagnostic slice questions missing for {domain}: {sorted(missing_ids)}"
+            raise ValueError(msg)
+        current_slice_sha256 = sha256_json(
+            {
+                str(row["question_id"]): row["haystack_entry_sha256"]
+                for row in trace_rows
+                if row.get("domain") == domain and row.get("question_id") in selected_ids
+            }
+        )
+        if expected.get("slice_haystack_sha256") != current_slice_sha256:
             msg = f"Diagnostic slice haystack hash mismatch for {domain}"
             raise ValueError(msg)
 
@@ -575,6 +633,14 @@ def build_diagnostic_report(
         "question_count": len(trace_rows),
         "exact_evidence_eligible_count": len(eligible),
         "multi_state_evidence_count": len(multi_state),
+        "evidence_reference": {
+            "source": "exact_answer_occurrence_proxy",
+            "official_state_labels_available": False,
+            "semantic_evidence_recall_supported": False,
+            "legacy_multi_state_metric": (
+                "normalized substring occurrence coverage; not semantic evidence coverage"
+            ),
+        },
         "metrics": summarize_metrics(eligible, multi_state=multi_state),
         "by_domain": {
             domain: summarize_metrics(
@@ -597,6 +663,10 @@ def summarize_metrics(
         "eligible_count": len(rows),
         "trajectory_recall_at_10": mean_bool(rows, "trajectory_recall_at_k"),
         "state_recall_at_10": mean_bool(rows, "state_recall_at_k"),
+        "lexical_source_reachability_at_10": mean_bool(
+            rows,
+            "lexical_source_reachability_at_k",
+        ),
         "exact_context_recall_at_10": mean_bool(rows, "exact_context_recall_at_k"),
         "multi_state_eligible_count": len(multi_state),
         "multi_state_evidence_coverage_at_10": mean_number(

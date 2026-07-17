@@ -785,7 +785,14 @@ async def test_compile_context_batches_default_related_items(
         entity_type=SimpleNamespace(value="task"),
         name="Related task",
         content="source evidence",
-        metadata={"operational_source_id": "experience-1", "project_id": "project-1"},
+        metadata={
+            "operational_source_id": "experience-1",
+            "project_id": "project-1",
+            "source_observation_id": "state-4",
+            "observation_ordinal": 4,
+            "evidence_part_id": "chunk-7",
+            "private_detail": "must not be exposed",
+        },
     )
     relationship = SimpleNamespace(
         source_id="decision-1",
@@ -817,6 +824,12 @@ async def test_compile_context_batches_default_related_items(
     relationship_manager.get_related_entities.assert_not_awaited()
     assert pack.items[0].related[0].id == "task-1"
     assert pack.items[0].related[0].content == "source evidence"
+    assert pack.items[0].related[0].metadata == {
+        "operational_source_id": "experience-1",
+        "source_observation_id": "state-4",
+        "observation_ordinal": 4,
+        "evidence_part_id": "chunk-7",
+    }
 
 
 def test_related_source_content_rejects_non_operational_lineage() -> None:

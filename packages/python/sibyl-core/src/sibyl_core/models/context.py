@@ -49,6 +49,7 @@ class ContextRelatedItem:
     direction: str
     distance: int = 1
     content: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

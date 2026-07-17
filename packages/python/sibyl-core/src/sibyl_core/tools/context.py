@@ -374,6 +374,24 @@ def _related_source_content(entity: Any, relationship: Any, *, seed_id: str) -> 
     return content[:MAX_RELATED_SUPPORT_CHARS] or None
 
 
+def _related_source_metadata(entity: Any, relationship: Any, *, seed_id: str) -> dict[str, Any]:
+    if _related_source_content(entity, relationship, seed_id=seed_id) is None:
+        return {}
+    entity_metadata = getattr(entity, "metadata", None)
+    if not isinstance(entity_metadata, dict):
+        return {}
+    return {
+        key: entity_metadata[key]
+        for key in (
+            "operational_source_id",
+            "source_observation_id",
+            "observation_ordinal",
+            "evidence_part_id",
+        )
+        if entity_metadata.get(key) is not None
+    }
+
+
 async def _default_related_items(
     *,
     entity_id: str,
@@ -403,6 +421,11 @@ async def _default_related_items(
                 relationship=str(relationship.relationship_type.value),
                 direction="outgoing" if relationship.source_id == entity_id else "incoming",
                 content=_related_source_content(
+                    entity,
+                    relationship,
+                    seed_id=entity_id,
+                ),
+                metadata=_related_source_metadata(
                     entity,
                     relationship,
                     seed_id=entity_id,
@@ -468,6 +491,11 @@ async def _default_related_items_batch(
                     relationship=_relationship_value(relationship.relationship_type),
                     direction="outgoing" if source_id == seed_id else "incoming",
                     content=support_content,
+                    metadata=_related_source_metadata(
+                        entity,
+                        relationship,
+                        seed_id=str(seed_id),
+                    ),
                 )
             )
             if len(related) >= limit:

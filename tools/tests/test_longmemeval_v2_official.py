@@ -1333,6 +1333,17 @@ def test_sibyl_memory_context_formats_retrieved_content() -> None:
                     "longmemeval_v2_trajectory_id": "t1",
                     "longmemeval_v2_chunk_index": 0,
                     "longmemeval_v2_chunk_count": 2,
+                    "source_support_entity_id": "session-source",
+                    "source_support_operational_source_id": "longmemeval-v2:run:t1",
+                    "source_support_state_indices": [2],
+                    "source_support_states": [
+                        {
+                            "entity_id": "session-source",
+                            "operational_source_id": "longmemeval-v2:run:t1",
+                            "trajectory_id": "t1",
+                            "state_index": 2,
+                        }
+                    ],
                 },
             }
         ],
@@ -1347,6 +1358,17 @@ def test_sibyl_memory_context_formats_retrieved_content() -> None:
             "chunk_index": 0,
             "chunk_count": 2,
             "state_indices": [3],
+            "source_support_entity_id": "session-source",
+            "source_support_operational_source_id": "longmemeval-v2:run:t1",
+            "source_support_state_indices": [2],
+            "source_support_states": [
+                {
+                    "entity_id": "session-source",
+                    "operational_source_id": "longmemeval-v2:run:t1",
+                    "trajectory_id": "t1",
+                    "state_index": 2,
+                }
+            ],
             "score": 0.875,
             "selection_pool": None,
             "selection_pool_rank": None,
@@ -2248,7 +2270,33 @@ def test_context_pack_conversion_keeps_only_typed_operational_memory() -> None:
                                     "relationship": "DERIVED_FROM",
                                     "direction": "outgoing",
                                     "content": "hidden unless explicitly enabled",
-                                }
+                                    "metadata": {
+                                        "operational_source_id": "longmemeval-v2:run:t1",
+                                        "source_observation_id": "state-2",
+                                        "observation_ordinal": 2,
+                                        "evidence_part_id": "chunk-4",
+                                    },
+                                },
+                                {
+                                    "id": "session-source-2",
+                                    "relationship": "DERIVED_FROM",
+                                    "direction": "outgoing",
+                                    "content": "another source state",
+                                    "metadata": {
+                                        "operational_source_id": "longmemeval-v2:run:t2",
+                                        "observation_ordinal": 4,
+                                    },
+                                },
+                                {
+                                    "id": "session-invalid",
+                                    "relationship": "DERIVED_FROM",
+                                    "direction": "outgoing",
+                                    "content": "invalid bool ordinal",
+                                    "metadata": {
+                                        "operational_source_id": "longmemeval-v2:run:t3",
+                                        "observation_ordinal": True,
+                                    },
+                                },
                             ],
                         },
                         {
@@ -2273,6 +2321,22 @@ def test_context_pack_conversion_keeps_only_typed_operational_memory() -> None:
     assert [result["id"] for result in results] == ["procedure-1", "event-1"]
     assert all(result["_selection_origin"] == "context_pack:procedures" for result in results)
     assert results[0]["content"] == "1. click Priority"
+    assert results[0]["metadata"]["source_support_entity_id"] == "session-source"
+    assert results[0]["metadata"]["source_support_state_indices"] == [2]
+    assert results[0]["metadata"]["source_support_states"] == [
+        {
+            "entity_id": "session-source",
+            "operational_source_id": "longmemeval-v2:run:t1",
+            "trajectory_id": "t1",
+            "state_index": 2,
+        },
+        {
+            "entity_id": "session-source-2",
+            "operational_source_id": "longmemeval-v2:run:t2",
+            "trajectory_id": "t2",
+            "state_index": 4,
+        },
+    ]
 
 
 def test_context_pack_conversion_bundles_query_ranked_source_evidence() -> None:

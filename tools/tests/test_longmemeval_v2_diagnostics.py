@@ -8,6 +8,7 @@ from types import ModuleType
 import pytest
 
 EXPECTED_EXACT_CONTEXT_RECALL = 0.5
+EXPECTED_LEXICAL_SOURCE_REACHABILITY = 0.5
 
 
 def _load_module() -> ModuleType:
@@ -85,9 +86,22 @@ def test_diagnostics_separate_selection_exposure_and_reader_failures(tmp_path: P
     assert by_id["q-reader"]["failure_class"] == "reader_or_scoring_miss"
     assert by_id["q-reader"]["metrics"]["trajectory_recall_at_k"] is True
     assert by_id["q-reader"]["metrics"]["state_recall_at_k"] is True
+    assert by_id["q-reader"]["metrics"]["lexical_source_reachability_at_k"] is True
     assert by_id["q-reader"]["metrics"]["exact_context_recall_at_k"] is True
     assert by_id["q-selection"]["failure_class"] == "trajectory_selection_miss"
     assert report["metrics"]["exact_context_recall_at_10"] == EXPECTED_EXACT_CONTEXT_RECALL
+    assert (
+        report["metrics"]["lexical_source_reachability_at_10"]
+        == EXPECTED_LEXICAL_SOURCE_REACHABILITY
+    )
+    assert report["evidence_reference"] == {
+        "source": "exact_answer_occurrence_proxy",
+        "official_state_labels_available": False,
+        "semantic_evidence_recall_supported": False,
+        "legacy_multi_state_metric": (
+            "normalized substring occurrence coverage; not semantic evidence coverage"
+        ),
+    }
     assert {case["question_id"] for case in slice_record["cases"]} == {
         "q-reader",
         "q-selection",
@@ -101,7 +115,7 @@ def test_diagnostics_separate_selection_exposure_and_reader_failures(tmp_path: P
         },
     }
     with pytest.raises(ValueError, match="haystack hash mismatch"):
-        module.validate_slice_sources(mismatched_slice, sources)
+        module.validate_slice_sources(mismatched_slice, sources, rows)
 
 
 def test_frozen_slice_accepts_matching_candidate_haystack_subset(tmp_path: Path) -> None:
@@ -161,14 +175,121 @@ def test_frozen_slice_accepts_matching_candidate_haystack_subset(tmp_path: Path)
             for question_id in selected_ids
         ],
     )
-    _, candidate_sources = module.build_trace_rows(
+    candidate_rows, candidate_sources = module.build_trace_rows(
         runs={"web": candidate_run},
         questions=question_index,
         trajectories=trajectory_index,
         max_rank=10,
     )
 
-    module.validate_slice_sources(slice_record, candidate_sources)
+    module.validate_slice_sources(slice_record, candidate_sources, candidate_rows)
+    module.validate_slice_sources(slice_record, sources, rows)
+
+    missing_rows = [row for row in candidate_rows if row["question_id"] != next(iter(selected_ids))]
+    with pytest.raises(ValueError, match="questions missing"):
+        module.validate_slice_sources(slice_record, candidate_sources, missing_rows)
+
+
+def test_diagnostics_counts_typed_source_support_without_direct_state_hit() -> None:
+    module = _load_module()
+    question = _question("q-support")
+    trajectories = {
+        "t-evidence": _trajectory("t-evidence", tree="The priority filter is selected."),
+        "t-typed": _trajectory("t-typed", tree="No matching answer here."),
+    }
+    result = {
+        "question_id": "q-support",
+        "score_bool": False,
+        "memory_context": [{"type": "text", "value": "Typed operational evidence"}],
+        "memory_post_query_metadata": {
+            "retrieval_trace": [
+                {
+                    "rank": 1,
+                    "entity_id": "procedure-1",
+                    "trajectory_id": "t-typed",
+                    "state_indices": [],
+                    "source_support_states": [
+                        {
+                            "entity_id": "session-source",
+                            "operational_source_id": "longmemeval-v2:run:t-evidence",
+                            "trajectory_id": "t-evidence",
+                            "state_index": 0,
+                        },
+                        {
+                            "trajectory_id": "t-typed",
+                            "state_index": True,
+                        },
+                    ],
+                    "content_chars": 28,
+                }
+            ]
+        },
+    }
+
+    row = module.build_question_trace(
+        domain="web",
+        result=result,
+        question=question,
+        haystack_ids=["t-evidence"],
+        state_text_index=module.build_state_text_index(trajectories),
+        max_rank=10,
+    )
+
+    assert row["metrics"]["state_recall_at_k"] is False
+    assert row["metrics"]["lexical_source_reachability_at_k"] is True
+    assert row["retrieved"][0]["source_support_states"] == [
+        {
+            "entity_id": "session-source",
+            "operational_source_id": "longmemeval-v2:run:t-evidence",
+            "trajectory_id": "t-evidence",
+            "state_index": 0,
+        }
+    ]
+
+
+def test_diagnostics_does_not_assign_bare_support_ordinal_to_typed_trajectory() -> None:
+    module = _load_module()
+    question = _question("q-foreign-support")
+    trajectories = {
+        "t-evidence": _trajectory("t-evidence", tree="The priority filter is selected."),
+        "t-other": _trajectory("t-other", tree="No matching answer here."),
+    }
+    result = {
+        "question_id": "q-foreign-support",
+        "score_bool": False,
+        "memory_context": [{"type": "text", "value": "Typed operational evidence"}],
+        "memory_post_query_metadata": {
+            "retrieval_trace": [
+                {
+                    "rank": 1,
+                    "entity_id": "procedure-foreign",
+                    "trajectory_id": "t-evidence",
+                    "state_indices": [],
+                    "source_support_state_indices": [0],
+                    "source_support_states": [
+                        {
+                            "operational_source_id": "longmemeval-v2:run:t-other",
+                            "trajectory_id": "t-other",
+                            "state_index": 0,
+                        }
+                    ],
+                    "content_chars": 28,
+                }
+            ]
+        },
+    }
+
+    row = module.build_question_trace(
+        domain="web",
+        result=result,
+        question=question,
+        haystack_ids=["t-evidence", "t-other"],
+        state_text_index=module.build_state_text_index(trajectories),
+        max_rank=10,
+    )
+
+    assert row["metrics"]["state_recall_at_k"] is False
+    assert row["metrics"]["lexical_source_reachability_at_k"] is False
 
 
 def _question(question_id: str) -> dict[str, object]:

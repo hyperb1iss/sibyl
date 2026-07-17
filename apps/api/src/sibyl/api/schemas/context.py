@@ -84,6 +84,7 @@ class ContextPackRelatedItem(BaseModel):
     direction: str
     distance: int = 1
     content: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ContextPackItemQuality(BaseModel):

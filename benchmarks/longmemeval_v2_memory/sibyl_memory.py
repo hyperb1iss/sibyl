@@ -329,19 +329,36 @@ def context_pack_to_search_results(
             if item_type not in {"procedure", "error_pattern", "event"}:
                 continue
             candidate = _string_key_dict(item)
-            support = _best_source_support(item, query=query) if include_source_support else None
+            supports = _source_supports(item)
+            support = _best_source_support(supports, query=query)
             if support is not None:
                 source_content = _stripped_str(support.get("content"))
                 typed_content = _stripped_str(candidate.get("content"))
-                candidate["content"] = _clean_evidence_bundle(
-                    typed_content=typed_content,
-                    source_content=source_content,
-                )
+                if include_source_support:
+                    candidate["content"] = _clean_evidence_bundle(
+                        typed_content=typed_content,
+                        source_content=source_content,
+                    )
                 metadata = _string_key_dict(candidate.get("metadata"))
                 metadata["source_support_entity_id"] = _stripped_str(support.get("id"))
                 metadata["source_support_relationship"] = _stripped_str(
                     support.get("relationship")
                 )
+                support_metadata = _string_key_dict(support.get("metadata"))
+                support_ordinal = support_metadata.get("observation_ordinal")
+                if isinstance(support_ordinal, int) and not isinstance(support_ordinal, bool):
+                    metadata["source_support_state_indices"] = [support_ordinal]
+                for key in ("operational_source_id", "source_observation_id", "evidence_part_id"):
+                    value = support_metadata.get(key)
+                    if value is not None:
+                        metadata[f"source_support_{key}"] = value
+                source_support_states = [
+                    pointer
+                    for source in supports
+                    if (pointer := _source_support_state(source)) is not None
+                ]
+                if source_support_states:
+                    metadata["source_support_states"] = source_support_states
                 candidate["metadata"] = metadata
             candidate["_selection_origin"] = f"context_pack:{facet}"
             candidates.append(candidate)
@@ -374,15 +391,11 @@ def _required_context_evidence(
     )
 
 
-def _best_source_support(
-    item: dict[str, object],
-    *,
-    query: str,
-) -> dict[str, object] | None:
+def _source_supports(item: dict[str, object]) -> list[dict[str, object]]:
     related = item.get("related")
     if not isinstance(related, list):
-        return None
-    supports = [
+        return []
+    return [
         _string_key_dict(candidate)
         for candidate in related
         if isinstance(candidate, dict)
@@ -390,6 +403,13 @@ def _best_source_support(
         and _stripped_str(candidate.get("direction")) == "outgoing"
         and _stripped_str(candidate.get("content"))
     ]
+
+
+def _best_source_support(
+    supports: list[dict[str, object]],
+    *,
+    query: str,
+) -> dict[str, object] | None:
     if not supports:
         return None
     ranking = rank_by_query_coverage(
@@ -414,6 +434,27 @@ def _best_source_support(
         ),
     )
     return dict(best.item)
+
+
+def _source_support_state(support: dict[str, object]) -> dict[str, object] | None:
+    metadata = _string_key_dict(support.get("metadata"))
+    operational_source_id = _stripped_str(metadata.get("operational_source_id"))
+    observation_ordinal = metadata.get("observation_ordinal")
+    if (
+        not operational_source_id
+        or not isinstance(observation_ordinal, int)
+        or isinstance(observation_ordinal, bool)
+    ):
+        return None
+    _, separator, trajectory_id = operational_source_id.rpartition(":")
+    if not separator or not trajectory_id:
+        return None
+    return {
+        "entity_id": _stripped_str(support.get("id")),
+        "operational_source_id": operational_source_id,
+        "trajectory_id": trajectory_id,
+        "state_index": observation_ordinal,
+    }
 
 
 def _clean_evidence_bundle(*, typed_content: str, source_content: str) -> str:
@@ -886,6 +927,22 @@ def build_retrieval_trace(
                 for value in re.findall(r"^State\s+(\d+)\b", content, re.MULTILINE)
             ]
         )
+        source_support_state_indices = metadata.get("source_support_state_indices")
+        support_state_indices = (
+            [
+                int(value)
+                for value in source_support_state_indices
+                if isinstance(value, int) and not isinstance(value, bool)
+            ]
+            if isinstance(source_support_state_indices, list)
+            else []
+        )
+        source_support_states = metadata.get("source_support_states")
+        normalized_source_support_states = (
+            [dict(value) for value in source_support_states if isinstance(value, dict)]
+            if isinstance(source_support_states, list)
+            else []
+        )
         trace.append(
             {
                 "rank": rank,
@@ -897,6 +954,12 @@ def build_retrieval_trace(
                 "chunk_index": metadata.get("longmemeval_v2_chunk_index"),
                 "chunk_count": metadata.get("longmemeval_v2_chunk_count"),
                 "state_indices": state_indices,
+                "source_support_entity_id": metadata.get("source_support_entity_id"),
+                "source_support_operational_source_id": metadata.get(
+                    "source_support_operational_source_id"
+                ),
+                "source_support_state_indices": support_state_indices,
+                "source_support_states": normalized_source_support_states,
                 "score": result.get("score"),
                 "selection_pool": result.get("_evidence_selection_pool"),
                 "selection_pool_rank": result.get("_evidence_pool_rank"),
