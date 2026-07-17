@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from typing import cast
+from typing import Any, cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -31,7 +31,10 @@ from sibyl_core.embeddings.providers import capture_embedding_usage, configured_
 from sibyl_core.models.context import ContextPack
 from sibyl_core.observability import elapsed_ms, telemetry_registry
 from sibyl_core.retrieval.fusion import rrf_merge_with_metadata
-from sibyl_core.retrieval.query_planning import plan_evidence_queries_with_usage
+from sibyl_core.retrieval.refinement import (
+    RetrievalFeedbackDocument,
+    plan_deterministic_refinement_queries,
+)
 
 log = structlog.get_logger()
 _READ_ROLES = (
@@ -47,6 +50,16 @@ router = APIRouter(
     dependencies=[Depends(require_org_role(*_READ_ROLES))],
 )
 _REQUEST_AUTO_INJECT_SENTINEL: Request = cast("Request", None)
+_DETERMINISTIC_REFINEMENT_USAGE: dict[str, str | int | float | bool | None] = {
+    "provider": "deterministic",
+    "model": "pseudo_relevance_feedback_v1",
+    "requests": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0,
+    "cost_usd": 0.0,
+    "cost_complete": True,
+}
 
 
 async def _execute_context_evidence_search(
@@ -101,12 +114,16 @@ def _result_key(result: SearchResult) -> str:
 def _fuse_context_evidence(
     *,
     question: str,
-    query_specs: list[dict[str, str]],
-    planned_queries: list[dict[str, str]],
+    query_specs: list[dict[str, Any]],
+    planned_queries: list[dict[str, Any]],
     responses: list[SearchResponse],
     limit: int,
     failures: list[dict[str, str | int]],
     planner_usage: dict[str, str | int | float | bool | None],
+    planner_status: str = "success",
+    refinement_rounds: int = 0,
+    refinement_novel_result_counts: list[int] | None = None,
+    refinement_stop_reason: str | None = None,
 ) -> SearchResponse:
     result_lists = [
         [(result, result.score) for result in response.results] for response in responses
@@ -170,12 +187,16 @@ def _fuse_context_evidence(
         query=question,
         filters={
             "retrieval_mode": "accurate",
-            "planner_status": "success",
+            "planner_status": planner_status,
+            "planner_strategy": "deterministic_refinement_v1",
             "planner_usage": planner_usage,
             "planned_queries": planned_queries,
             "query_count": 1 + len(planned_queries),
             "successful_query_count": len(responses),
             "query_failures": failures,
+            "refinement_rounds": refinement_rounds,
+            "refinement_novel_result_counts": refinement_novel_result_counts or [],
+            "refinement_stop_reason": refinement_stop_reason,
             "original_reservation_target": original_reservation_target,
             "original_reserved_count": original_reserved_count,
             "supplemental_reserved_count": supplemental_reserved_count,
@@ -196,6 +217,57 @@ def _fuse_context_evidence(
     )
 
 
+async def _execute_context_refinement_round(
+    request: ContextPackRequest,
+    *,
+    round_specs: list[dict[str, Any]],
+    org: AuthOrganization,
+    ctx: AuthContext,
+    embedding_usage: dict[str, str | int | float],
+    seen_result_keys: set[str],
+) -> tuple[
+    list[tuple[dict[str, Any], SearchResponse]],
+    list[dict[str, str | int]],
+    list[SearchResult],
+]:
+    tasks = [
+        asyncio.create_task(
+            _execute_context_evidence_search(
+                _context_evidence_request(request, query=spec["query"]),
+                org=org,
+                ctx=ctx,
+                embedding_usage=embedding_usage,
+            )
+        )
+        for spec in round_specs
+    ]
+    outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+    successful: list[tuple[dict[str, Any], SearchResponse]] = []
+    failures: list[dict[str, str | int]] = []
+    novel_results: list[SearchResult] = []
+    for spec, outcome in zip(round_specs, outcomes, strict=True):
+        if isinstance(outcome, Exception):
+            failures.append(
+                {
+                    "query_index": int(spec["name"].removeprefix("supplemental_")),
+                    "query": spec["query"],
+                    "facet": spec["facet"],
+                    "error_type": type(outcome).__name__,
+                }
+            )
+            continue
+        if isinstance(outcome, BaseException):
+            raise outcome
+        successful.append((spec, outcome))
+        for result in outcome.results:
+            key = _result_key(result)
+            if key in seen_result_keys:
+                continue
+            seen_result_keys.add(key)
+            novel_results.append(result)
+    return successful, failures, novel_results
+
+
 async def _execute_accurate_context_evidence_search(
     request: ContextPackRequest,
     *,
@@ -204,94 +276,122 @@ async def _execute_accurate_context_evidence_search(
     embedding_usage: dict[str, str | int | float],
 ) -> SearchResponse:
     assert request.evidence is not None
-    original_task = asyncio.create_task(
-        _execute_context_evidence_search(
-            _context_evidence_request(request, query=request.goal),
+    original_response = await _execute_context_evidence_search(
+        _context_evidence_request(request, query=request.goal),
+        org=org,
+        ctx=ctx,
+        embedding_usage=embedding_usage,
+    )
+
+    responses = [original_response]
+    query_specs: list[dict[str, Any]] = [
+        {"name": "original", "query": request.goal, "facet": "original", "round": 0}
+    ]
+    planned_queries: list[dict[str, Any]] = []
+    failures: list[dict[str, str | int]] = []
+    seen_queries = [request.goal]
+    seen_result_keys = {_result_key(result) for result in original_response.results}
+    frontier = list(original_response.results)
+    remaining_queries = request.evidence.max_planned_queries
+    refinement_novel_result_counts: list[int] = []
+    refinement_stop_reason: str | None = None
+    planner_error_type: str | None = None
+
+    for round_index in range(1, 3):
+        if remaining_queries <= 0:
+            refinement_stop_reason = "query_budget_exhausted"
+            break
+        round_query_limit = min(1 if round_index == 1 else 2, remaining_queries)
+        try:
+            round_plan = plan_deterministic_refinement_queries(
+                request.goal,
+                [
+                    RetrievalFeedbackDocument(
+                        id=_result_key(result),
+                        text=f"{result.name}\n{result.content}",
+                        raw_observation_projection=(
+                            result.metadata.get("projection_kind") == "raw_observation"
+                        ),
+                        evidence_content_type=(
+                            str(content_type)
+                            if (content_type := result.metadata.get("evidence_content_type"))
+                            else None
+                        ),
+                    )
+                    for result in frontier
+                ],
+                max_queries=round_query_limit,
+                seen_queries=seen_queries,
+            )
+        except Exception as exc:
+            planner_error_type = type(exc).__name__
+            refinement_stop_reason = "planner_error"
+            break
+        if not round_plan:
+            refinement_stop_reason = "no_refinement_terms"
+            break
+
+        round_specs: list[dict[str, Any]] = []
+        for item in round_plan:
+            query_index = len(planned_queries) + 1
+            spec = {
+                "name": f"supplemental_{query_index}",
+                "query": item.query,
+                "facet": item.facet,
+                "round": round_index,
+                "source_result_ids": list(item.source_result_ids),
+                "added_terms": list(item.added_terms),
+            }
+            planned_queries.append(spec)
+            round_specs.append(spec)
+            seen_queries.append(item.query)
+        successful, round_failures, novel_results = await _execute_context_refinement_round(
+            request,
+            round_specs=round_specs,
             org=org,
             ctx=ctx,
             embedding_usage=embedding_usage,
+            seen_result_keys=seen_result_keys,
         )
-    )
-    try:
-        try:
-            planning = await plan_evidence_queries_with_usage(
-                request.goal,
-                max_queries=request.evidence.max_planned_queries,
-            )
-            plan = planning.plan
-        except Exception as exc:
-            response = await original_task
-            response.filters.update(
-                {
-                    "retrieval_mode": "accurate",
-                    "planner_status": "fallback",
-                    "planner_error_type": type(exc).__name__,
-                    "planned_queries": [],
-                    "query_count": 1,
-                }
-            )
-            return response
-
-        supplemental_tasks = [
-            asyncio.create_task(
-                _execute_context_evidence_search(
-                    _context_evidence_request(request, query=item.query),
-                    org=org,
-                    ctx=ctx,
-                    embedding_usage=embedding_usage,
-                )
-            )
-            for item in plan.queries
-        ]
-        outcomes = await asyncio.gather(
-            original_task,
-            *supplemental_tasks,
-            return_exceptions=True,
-        )
-        if isinstance(outcomes[0], BaseException):
-            raise outcomes[0]
-
-        responses = [outcomes[0]]
-        query_specs = [{"name": "original", "query": request.goal, "facet": "original"}]
-        planned_queries = [
-            {
-                "name": f"supplemental_{index}",
-                "query": item.query,
-                "facet": item.facet.value,
-            }
-            for index, item in enumerate(plan.queries, start=1)
-        ]
-        failures: list[dict[str, str | int]] = []
-        for spec, outcome in zip(planned_queries, outcomes[1:], strict=True):
-            if isinstance(outcome, Exception):
-                failures.append(
-                    {
-                        "query_index": int(spec["name"].removeprefix("supplemental_")),
-                        "query": spec["query"],
-                        "facet": spec["facet"],
-                        "error_type": type(outcome).__name__,
-                    }
-                )
-                continue
-            if isinstance(outcome, BaseException):
-                raise outcome
-            responses.append(outcome)
+        failures.extend(round_failures)
+        for spec, response in successful:
+            responses.append(response)
             query_specs.append(spec)
 
-        return _fuse_context_evidence(
-            question=request.goal,
-            query_specs=query_specs,
-            planned_queries=planned_queries,
-            responses=responses,
-            limit=request.evidence.limit,
-            failures=failures,
-            planner_usage=planning.usage.model_dump() if planning.usage is not None else {},
+        remaining_queries -= len(round_specs)
+        refinement_novel_result_counts.append(len(novel_results))
+        frontier = novel_results
+        if not successful:
+            refinement_stop_reason = "all_queries_failed"
+            break
+        if not frontier:
+            refinement_stop_reason = "no_new_results"
+            break
+
+    if refinement_stop_reason is None:
+        refinement_stop_reason = (
+            "query_budget_exhausted" if remaining_queries <= 0 else "round_limit_reached"
         )
-    except BaseException:
-        if not original_task.done():
-            original_task.cancel()
-            await asyncio.gather(original_task, return_exceptions=True)
-        raise
+
+    planner_status = "success"
+    if planner_error_type is not None:
+        planner_status = "partial" if len(responses) > 1 else "fallback"
+    fused = _fuse_context_evidence(
+        question=request.goal,
+        query_specs=query_specs,
+        planned_queries=planned_queries,
+        responses=responses,
+        limit=request.evidence.limit,
+        failures=failures,
+        planner_usage=dict(_DETERMINISTIC_REFINEMENT_USAGE),
+        planner_status=planner_status,
+        refinement_rounds=len(refinement_novel_result_counts),
+        refinement_novel_result_counts=refinement_novel_result_counts,
+        refinement_stop_reason=refinement_stop_reason,
+    )
+    if planner_error_type is not None:
+        fused.filters["planner_error_type"] = planner_error_type
+    return fused
 
 
 def _append_unique_ids(existing: list[str] | None, additions: list[str] | None) -> list[str] | None:

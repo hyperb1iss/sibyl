@@ -62,7 +62,7 @@ EXPECTED_SHARED_RELEVANCE_RAW_ITEMS = 5
 EXPECTED_PLANNER_REQUESTS = 2
 EXPECTED_PLANNER_INPUT_TOKENS = 84
 EXPECTED_PLANNER_OUTPUT_TOKENS = 22
-EXPECTED_RETRIEVAL_MAX_PLANNED_QUERIES = 4
+EXPECTED_RETRIEVAL_MAX_PLANNED_QUERIES = 3
 EXPECTED_WHITESPACE_EXPOSURE_CHARS = 2
 OPERATIONAL_EVIDENCE_MAX_CHARS = 4_000
 TEST_CONTENT_MAX_CHARS = 420
@@ -813,6 +813,73 @@ def test_planner_accounting_requires_complete_accurate_query_usage() -> None:
     assert accounting["estimated_output_tokens"] == EXPECTED_PLANNER_OUTPUT_TOKENS
     assert accounting["provider_reported_cost_usd"] == pytest.approx(0.00003)
     assert accounting["recorded_question_count"] == EXPECTED_PLANNER_REQUESTS
+    assert accounting["tracking_complete"] is True
+    assert accounting["cost_coverage_complete"] is True
+
+
+def test_planner_accounting_accepts_zero_cost_deterministic_refinement() -> None:
+    module = _load_runner_module()
+    source_run = {
+        "memory_config": {"memory_params": {"retrieval_mode": "accurate"}},
+        "per_question_rows": [
+            {
+                "memory_post_query_metadata": {
+                    "search_metadata": {
+                        "planner_status": "success",
+                        "planner_usage": {
+                            "provider": "deterministic",
+                            "model": "pseudo_relevance_feedback_v1",
+                            "requests": 0,
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "total_tokens": 0,
+                            "cost_usd": 0.0,
+                            "cost_complete": True,
+                        },
+                    }
+                }
+            }
+        ],
+    }
+
+    accounting = module._planner_accounting([source_run])
+
+    assert accounting["requests"] == 0
+    assert accounting["providers"] == ["deterministic"]
+    assert accounting["models"] == ["pseudo_relevance_feedback_v1"]
+    assert accounting["recorded_question_count"] == 1
+    assert accounting["tracking_complete"] is True
+    assert accounting["cost_coverage_complete"] is True
+
+
+def test_planner_accounting_accepts_complete_partial_refinement_usage() -> None:
+    module = _load_runner_module()
+    source_run = {
+        "memory_config": {"memory_params": {"retrieval_mode": "accurate"}},
+        "per_question_rows": [
+            {
+                "memory_post_query_metadata": {
+                    "search_metadata": {
+                        "planner_status": "partial",
+                        "planner_usage": {
+                            "provider": "deterministic",
+                            "model": "pseudo_relevance_feedback_v1",
+                            "requests": 0,
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "total_tokens": 0,
+                            "cost_usd": 0.0,
+                            "cost_complete": True,
+                        },
+                    }
+                }
+            }
+        ],
+    }
+
+    accounting = module._planner_accounting([source_run])
+
+    assert accounting["recorded_question_count"] == 1
     assert accounting["tracking_complete"] is True
     assert accounting["cost_coverage_complete"] is True
 
@@ -1980,7 +2047,7 @@ def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
             "neighbor_stitch_items": 2,
             "context_expansion_max_ratio": EXPECTED_CONTEXT_EXPANSION_MAX_RATIO,
             "retrieval_mode": "accurate",
-            "retrieval_max_planned_queries": 4,
+            "retrieval_max_planned_queries": 3,
         },
     }
 
@@ -2134,7 +2201,7 @@ def test_official_runner_checkpoint_restart_reuses_saved_project(tmp_path: Path)
             "--retrieval-mode",
             "accurate",
             "--retrieval-max-planned-queries",
-            "4",
+            "3",
         ]
     )
 
@@ -2205,7 +2272,7 @@ def test_sibyl_memory_accurate_query_rejects_planner_fallback() -> None:
     memory.max_context_items = 8
     memory.max_context_chars_per_item = TEST_CONTEXT_MAX_CHARS
     memory.retrieval_mode = "accurate"
-    memory.retrieval_max_planned_queries = 4
+    memory.retrieval_max_planned_queries = 3
     memory._pending_embedding_job_ids = set()
     memory._pending_projection_job_ids = set()
     memory._ingest_finalized = True
@@ -2220,7 +2287,7 @@ def test_sibyl_memory_accurate_query_rejects_planner_fallback() -> None:
         "content_max_chars": TEST_CONTEXT_MAX_CHARS,
         "include_retrieval_diagnostics": True,
         "retrieval_mode": "accurate",
-        "max_planned_queries": 4,
+        "max_planned_queries": 3,
     }
 
 

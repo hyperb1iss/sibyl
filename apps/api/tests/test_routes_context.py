@@ -19,7 +19,6 @@ from sibyl.api.schemas import (
 )
 from sibyl.auth.authorization import ProjectAuthorizationError
 from sibyl.auth.errors import ProjectAccessDeniedError
-from sibyl_core.ai.llm.extractor import ExtractionUsage
 from sibyl_core.auth import ProjectRole
 from sibyl_core.embeddings.providers import (
     CachedEmbeddingProvider,
@@ -43,11 +42,9 @@ from sibyl_core.models.reflection import (
     ReflectionPack,
     ReflectionRelationshipRecord,
 )
-from sibyl_core.retrieval.query_planning import (
-    EvidencePlanningReceipt,
-    EvidenceQuery,
-    EvidenceQueryFacet,
-    EvidenceQueryPlan,
+from sibyl_core.retrieval.refinement import (
+    DeterministicRefinementQuery,
+    RetrievalFeedbackDocument,
 )
 
 
@@ -425,18 +422,30 @@ class TestContextPackRoute:
 
     @pytest.mark.asyncio
     async def test_context_pack_accurate_evidence_preserves_query_coverage(self) -> None:
-        plan = EvidenceQueryPlan(
-            queries=[
-                EvidenceQuery(
+        round_plans = [
+            [
+                DeterministicRefinementQuery(
                     query="deployment workflow state",
-                    facet=EvidenceQueryFacet.STATE,
+                    facet="feedback",
+                    source_result_ids=("graph:shared",),
+                    added_terms=("deployment", "workflow", "state"),
+                )
+            ],
+            [
+                DeterministicRefinementQuery(
+                    query="release validation receipt",
+                    facet="corroboration",
+                    source_result_ids=("graph:state",),
+                    added_terms=("release", "validation", "receipt"),
                 ),
-                EvidenceQuery(
+                DeterministicRefinementQuery(
                     query="deployment final outcome",
-                    facet=EvidenceQueryFacet.OUTCOME,
+                    facet="feedback",
+                    source_result_ids=("graph:state",),
+                    added_terms=("deployment", "final", "outcome"),
                 ),
-            ]
-        )
+            ],
+        ]
         responses = {
             "ship faster": _search_response(
                 "ship faster",
@@ -447,6 +456,10 @@ class TestContextPackRoute:
                 "deployment workflow state",
                 ("shared", 0.99),
                 ("state", 0.9),
+            ),
+            "release validation receipt": _search_response(
+                "release validation receipt",
+                ("validation", 0.91),
             ),
             "deployment final outcome": _search_response(
                 "deployment final outcome",
@@ -465,22 +478,8 @@ class TestContextPackRoute:
             ),
             patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
             patch(
-                "sibyl.api.routes.context.plan_evidence_queries_with_usage",
-                AsyncMock(
-                    return_value=EvidencePlanningReceipt(
-                        plan=plan,
-                        usage=ExtractionUsage(
-                            provider="openai",
-                            model="gpt-5.4-nano",
-                            requests=1,
-                            input_tokens=42,
-                            output_tokens=18,
-                            total_tokens=60,
-                            cost_usd=0.00002,
-                            cost_complete=True,
-                        ),
-                    )
-                ),
+                "sibyl.api.routes.context.plan_deterministic_refinement_queries",
+                side_effect=round_plans,
             ) as planner,
             patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve) as search,
             patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
@@ -494,28 +493,42 @@ class TestContextPackRoute:
                 ctx=_ctx(),
             )
 
-        planner.assert_awaited_once_with("ship faster", max_queries=3)
+        assert planner.call_count == 2
+        first_documents = planner.call_args_list[0].args[1]
+        second_documents = planner.call_args_list[1].args[1]
+        assert [document.id for document in first_documents] == [
+            "graph:shared",
+            "graph:original-only",
+        ]
+        assert [document.id for document in second_documents] == [
+            "graph:state",
+        ]
+        assert all(isinstance(document, RetrievalFeedbackDocument) for document in first_documents)
         assert {call.args[0].query for call in search.call_args_list} == set(responses)
         assert response.evidence is not None
         assert [result.id for result in response.evidence.results] == [
             "shared",
             "original-only",
             "state",
-            "outcome",
+            "validation",
         ]
         assert response.evidence.filters["planner_status"] == "success"
         assert response.evidence.filters["planner_usage"] == {
-            "provider": "openai",
-            "model": "gpt-5.4-nano",
-            "requests": 1,
-            "input_tokens": 42,
-            "output_tokens": 18,
-            "total_tokens": 60,
-            "cost_usd": 0.00002,
+            "provider": "deterministic",
+            "model": "pseudo_relevance_feedback_v1",
+            "requests": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "cost_usd": 0.0,
             "cost_complete": True,
         }
-        assert response.evidence.filters["query_count"] == 3
-        assert response.evidence.filters["successful_query_count"] == 3
+        assert response.evidence.filters["planner_strategy"] == "deterministic_refinement_v1"
+        assert response.evidence.filters["refinement_rounds"] == 2
+        assert response.evidence.filters["refinement_novel_result_counts"] == [1, 2]
+        assert response.evidence.filters["refinement_stop_reason"] == "query_budget_exhausted"
+        assert response.evidence.filters["query_count"] == 4
+        assert response.evidence.filters["successful_query_count"] == 4
         assert response.evidence.filters["query_failures"] == []
         assert response.evidence.filters["original_reservation_target"] == 2
         assert response.evidence.filters["original_reserved_count"] == 2
@@ -523,7 +536,8 @@ class TestContextPackRoute:
         assert response.evidence.filters["query_filters"] == {
             "original": {"source_query": "ship faster"},
             "supplemental_1": {"source_query": "deployment workflow state"},
-            "supplemental_2": {"source_query": "deployment final outcome"},
+            "supplemental_2": {"source_query": "release validation receipt"},
+            "supplemental_3": {"source_query": "deployment final outcome"},
         }
         assert response.evidence.results[0].metadata["retrieval_fusion"]["sources"] == [
             "original",
@@ -534,14 +548,15 @@ class TestContextPackRoute:
     async def test_context_pack_accurate_evidence_preserves_provenance_after_empty_query(
         self,
     ) -> None:
-        plan = EvidenceQueryPlan(
-            queries=[
-                EvidenceQuery(
+        round_plans = [
+            [
+                DeterministicRefinementQuery(
                     query="deployment final outcome",
-                    facet=EvidenceQueryFacet.OUTCOME,
+                    facet="feedback",
                 )
-            ]
-        )
+            ],
+            [],
+        ]
         responses = {
             "ship faster": _search_response("ship faster"),
             "deployment final outcome": _search_response(
@@ -560,8 +575,8 @@ class TestContextPackRoute:
             ),
             patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
             patch(
-                "sibyl.api.routes.context.plan_evidence_queries_with_usage",
-                AsyncMock(return_value=EvidencePlanningReceipt(plan=plan)),
+                "sibyl.api.routes.context.plan_deterministic_refinement_queries",
+                side_effect=round_plans,
             ),
             patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve),
             patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
@@ -583,6 +598,53 @@ class TestContextPackRoute:
         }
 
     @pytest.mark.asyncio
+    async def test_context_pack_accurate_evidence_stops_when_results_saturate(self) -> None:
+        plan = [
+            DeterministicRefinementQuery(
+                query="deployment workflow state",
+                facet="feedback",
+            )
+        ]
+        responses = {
+            "ship faster": _search_response("ship faster", ("shared", 0.9)),
+            "deployment workflow state": _search_response(
+                "deployment workflow state",
+                ("shared", 0.95),
+            ),
+        }
+
+        async def retrieve(request: SearchRequest, **_kwargs: object) -> SearchResponse:
+            return responses[request.query]
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+            patch(
+                "sibyl.api.routes.context.plan_deterministic_refinement_queries",
+                return_value=plan,
+            ) as planner,
+            patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    evidence={"retrieval_mode": "accurate"},
+                ),
+                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
+                ctx=_ctx(),
+            )
+
+        planner.assert_called_once()
+        assert response.evidence is not None
+        assert response.evidence.filters["refinement_rounds"] == 1
+        assert response.evidence.filters["refinement_novel_result_counts"] == [0]
+        assert response.evidence.filters["refinement_stop_reason"] == "no_new_results"
+
+    @pytest.mark.asyncio
     async def test_context_pack_accurate_evidence_falls_back_when_planner_fails(self) -> None:
         search = AsyncMock(return_value=_search_response("ship faster", ("original", 0.9)))
 
@@ -593,8 +655,8 @@ class TestContextPackRoute:
             ),
             patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
             patch(
-                "sibyl.api.routes.context.plan_evidence_queries_with_usage",
-                AsyncMock(side_effect=RuntimeError("planner unavailable")),
+                "sibyl.api.routes.context.plan_deterministic_refinement_queries",
+                side_effect=RuntimeError("planner unavailable"),
             ),
             patch("sibyl.api.routes.search.execute_search_request", search),
             patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
@@ -617,15 +679,61 @@ class TestContextPackRoute:
         assert response.evidence.filters["query_count"] == 1
 
     @pytest.mark.asyncio
+    async def test_context_pack_accurate_evidence_reports_late_planner_failure(self) -> None:
+        plan = [
+            DeterministicRefinementQuery(
+                query="deployment workflow state",
+                facet="focus",
+            )
+        ]
+        responses = {
+            "ship faster": _search_response("ship faster", ("original", 0.9)),
+            "deployment workflow state": _search_response(
+                "deployment workflow state",
+                ("novel", 0.8),
+            ),
+        }
+
+        async def retrieve(request: SearchRequest, **_kwargs: object) -> SearchResponse:
+            return responses[request.query]
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+            patch(
+                "sibyl.api.routes.context.plan_deterministic_refinement_queries",
+                side_effect=[plan, RuntimeError("late planner failure")],
+            ),
+            patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    evidence={"retrieval_mode": "accurate"},
+                ),
+                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
+                ctx=_ctx(),
+            )
+
+        assert response.evidence is not None
+        assert response.evidence.filters["planner_status"] == "partial"
+        assert response.evidence.filters["planner_error_type"] == "RuntimeError"
+        assert response.evidence.filters["refinement_stop_reason"] == "planner_error"
+        assert response.evidence.filters["refinement_rounds"] == 1
+        assert response.evidence.filters["query_count"] == 2
+
+    @pytest.mark.asyncio
     async def test_context_pack_accurate_evidence_keeps_partial_results(self) -> None:
-        plan = EvidenceQueryPlan(
-            queries=[
-                EvidenceQuery(
-                    query="deployment workflow state",
-                    facet=EvidenceQueryFacet.STATE,
-                )
-            ]
-        )
+        plan = [
+            DeterministicRefinementQuery(
+                query="deployment workflow state",
+                facet="feedback",
+            )
+        ]
 
         async def retrieve(request: SearchRequest, **_kwargs: object) -> SearchResponse:
             if request.query != "ship faster":
@@ -639,8 +747,8 @@ class TestContextPackRoute:
             ),
             patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
             patch(
-                "sibyl.api.routes.context.plan_evidence_queries_with_usage",
-                AsyncMock(return_value=EvidencePlanningReceipt(plan=plan)),
+                "sibyl.api.routes.context.plan_deterministic_refinement_queries",
+                return_value=plan,
             ),
             patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve),
             patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
@@ -662,10 +770,11 @@ class TestContextPackRoute:
             {
                 "query_index": 1,
                 "query": "deployment workflow state",
-                "facet": "state",
+                "facet": "feedback",
                 "error_type": "RuntimeError",
             }
         ]
+        assert response.evidence.filters["refinement_stop_reason"] == "all_queries_failed"
 
     @pytest.mark.asyncio
     async def test_context_pack_cancels_evidence_when_context_fails(self) -> None:

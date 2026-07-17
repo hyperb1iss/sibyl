@@ -43,6 +43,7 @@ from sibyl_core.evals.longmemeval_v2 import (  # noqa: E402
     load_longmemeval_v2_questions,
     summarize_longmemeval_v2_inputs,
 )
+from sibyl_core.retrieval.refinement import MAX_REFINEMENT_QUERIES  # noqa: E402
 
 PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-plan-v1"
 RECEIPT_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-receipt-v1"
@@ -518,8 +519,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--state-part-completion-items must be non-negative")
     if args.max_context_total_chars < 1:
         parser.error("--max-context-total-chars must be positive")
-    if not 1 <= args.retrieval_max_planned_queries <= 4:
-        parser.error("--retrieval-max-planned-queries must be between 1 and 4")
+    if not 1 <= args.retrieval_max_planned_queries <= MAX_REFINEMENT_QUERIES:
+        parser.error(
+            "--retrieval-max-planned-queries must be between "
+            f"1 and {MAX_REFINEMENT_QUERIES}"
+        )
     args.provider_usage_run_id = f"lme-v2-usage-{uuid4().hex[:12]}"
     return args
 
@@ -1628,7 +1632,7 @@ def _planner_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
             if row_mode != "accurate":
                 continue
             expected_rows += 1
-            if status == "success" and isinstance(usage, dict) and usage:
+            if status in {"success", "partial"} and isinstance(usage, dict) and usage:
                 records.append(usage)
             else:
                 tracking_complete = False
@@ -1683,7 +1687,7 @@ def _planner_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
         "tracking_complete": coverage_complete,
         "expected_question_count": expected_rows,
         "recorded_question_count": len(records),
-        "cost_basis": "Sibyl structured query planner provider response usage",
+        "cost_basis": "Sibyl structured query planner usage receipt",
     }
 
 

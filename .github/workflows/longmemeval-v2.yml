@@ -146,7 +146,6 @@ on:
           - "1"
           - "2"
           - "3"
-          - "4"
         default: "3"
       official_evaluator_model:
         description: "Official evaluator model"

@@ -726,7 +726,9 @@ def validate_developmental_planner_accounting(
         "recorded_question_count": expected_question_count,
     }:
         raise ValueError(f"{name} planner accounting is incomplete")
-    if int(planner.get("requests") or 0) < expected_question_count:
+    providers = planner.get("providers")
+    deterministic = providers == ["deterministic"] and int(planner.get("requests") or 0) == 0
+    if not deterministic and int(planner.get("requests") or 0) < expected_question_count:
         raise ValueError(f"{name} planner accounting is incomplete")
 
 

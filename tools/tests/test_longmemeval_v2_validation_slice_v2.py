@@ -339,6 +339,24 @@ def test_developmental_replay_cli_succeeds_without_promoting(
     }
 
 
+def test_developmental_planner_accounting_accepts_deterministic_refinement() -> None:
+    validation.validate_developmental_planner_accounting(
+        {
+            "accounting": {
+                "planner": {
+                    "tracking_complete": True,
+                    "expected_question_count": 3,
+                    "recorded_question_count": 3,
+                    "requests": 0,
+                    "providers": ["deterministic"],
+                }
+            }
+        },
+        expected_question_count=3,
+        name="Candidate web receipt",
+    )
+
+
 def test_successor_evaluation_rejects_semantic_and_completeness_drift(tmp_path: Path) -> None:
     questions_path, manifest = _write_synthetic_manifest(tmp_path)
     run_dirs = _write_candidate_runs(tmp_path, manifest=manifest)

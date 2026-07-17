@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from sibyl_core.models.context import ContextFacet, ContextIntent, ContextLayer
+from sibyl_core.retrieval.refinement import MAX_REFINEMENT_QUERIES
 
 from .search import SearchResponse
 
@@ -29,13 +30,13 @@ class ContextEvidenceRequest(BaseModel):
     )
     retrieval_mode: Literal["fast", "accurate"] = Field(
         default="fast",
-        description="Use one search or planned multi-query evidence retrieval",
+        description="Use one search or deterministic multi-step evidence refinement",
     )
     max_planned_queries: int = Field(
         default=3,
         ge=1,
-        le=4,
-        description="Maximum supplemental searches in accurate mode",
+        le=MAX_REFINEMENT_QUERIES,
+        description="Maximum feedback searches across two accurate-mode refinement rounds",
     )
 
 

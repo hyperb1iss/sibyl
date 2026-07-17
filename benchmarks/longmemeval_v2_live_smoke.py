@@ -22,7 +22,7 @@ from longmemeval_v2_memory.sibyl_memory import (  # noqa: E402
     build_operational_experience_payload,
 )
 
-from sibyl_core.retrieval.query_planning import MAX_SUPPLEMENTAL_QUERIES  # noqa: E402
+from sibyl_core.retrieval.refinement import MAX_REFINEMENT_QUERIES  # noqa: E402
 
 SMOKE_SCHEMA_VERSION = "sibyl-longmemeval-v2-live-smoke-v1"
 
@@ -67,8 +67,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be positive")
-    if not 1 <= args.max_planned_queries <= MAX_SUPPLEMENTAL_QUERIES:
-        parser.error(f"--max-planned-queries must be between 1 and {MAX_SUPPLEMENTAL_QUERIES}")
+    if not 1 <= args.max_planned_queries <= MAX_REFINEMENT_QUERIES:
+        parser.error(f"--max-planned-queries must be between 1 and {MAX_REFINEMENT_QUERIES}")
     return args
 
 
@@ -236,6 +236,22 @@ def evaluate_smoke_report(report: dict[str, Any]) -> dict[str, bool]:
         planned_queries = (
             search_metadata.get("planned_queries") if isinstance(search_metadata, dict) else None
         )
+        deterministic_planner_usage = (
+            isinstance(planner_usage, dict)
+            and planner_usage.get("provider") == "deterministic"
+            and int(planner_usage.get("requests") or 0) == 0
+            and int(planner_usage.get("total_tokens") or 0) == 0
+            and float(planner_usage.get("cost_usd") or 0.0) == 0.0
+            and planner_usage.get("cost_complete") is True
+            and bool(planner_usage.get("model"))
+        )
+        model_planner_usage = (
+            isinstance(planner_usage, dict)
+            and int(planner_usage.get("requests") or 0) >= 1
+            and int(planner_usage.get("total_tokens") or 0) > 0
+            and bool(planner_usage.get("provider"))
+            and bool(planner_usage.get("model"))
+        )
         checks.update(
             {
                 "accurate_planner_succeeded": (
@@ -244,15 +260,15 @@ def evaluate_smoke_report(report: dict[str, Any]) -> dict[str, bool]:
                 ),
                 "accurate_query_fanout_bounded": (
                     isinstance(planned_queries, list)
-                    and 0 < len(planned_queries) <= MAX_SUPPLEMENTAL_QUERIES
+                    and len(planned_queries) <= MAX_REFINEMENT_QUERIES
                     and search_metadata.get("query_count") == len(planned_queries) + 1
+                    and (
+                        bool(planned_queries)
+                        or search_metadata.get("refinement_stop_reason") == "no_refinement_terms"
+                    )
                 ),
                 "accurate_planner_usage_recorded": (
-                    isinstance(planner_usage, dict)
-                    and int(planner_usage.get("requests") or 0) >= 1
-                    and int(planner_usage.get("total_tokens") or 0) > 0
-                    and bool(planner_usage.get("provider"))
-                    and bool(planner_usage.get("model"))
+                    deterministic_planner_usage or model_planner_usage
                 ),
             }
         )

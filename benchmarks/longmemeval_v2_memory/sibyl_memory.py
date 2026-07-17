@@ -38,6 +38,7 @@ from sibyl_core.retrieval.query_ranking import (  # noqa: E402
     QueryCoverageResult,
     rank_by_query_coverage,
 )
+from sibyl_core.retrieval.refinement import MAX_REFINEMENT_QUERIES  # noqa: E402
 
 try:
     from memory_modules.memory import Memory, MemoryContextItem, register_memory
@@ -1625,8 +1626,11 @@ class SibylLiveApiMemory(Memory):
             DEFAULT_RETRIEVAL_MAX_PLANNED_QUERIES,
             minimum=1,
         )
-        if self.retrieval_max_planned_queries > 4:
-            raise ValueError("retrieval_max_planned_queries must be at most 4")
+        if self.retrieval_max_planned_queries > MAX_REFINEMENT_QUERIES:
+            raise ValueError(
+                "retrieval_max_planned_queries must be at most "
+                f"{MAX_REFINEMENT_QUERIES}"
+            )
         self.max_context_total_chars = max(
             1,
             _param_int(
