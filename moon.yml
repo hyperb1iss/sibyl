@@ -453,6 +453,7 @@ tasks:
       benchmarks/longmemeval_v2_reader_report.py
       benchmarks/longmemeval_v2_reader_replication.py
       benchmarks/longmemeval_v2_reader_replication_report.py
+      benchmarks/longmemeval_v2_reader_replay.py
       benchmarks/longmemeval_v2_reader_holdout.py
       benchmarks/longmemeval_v2_reader_holdout_report.py
       benchmarks/longmemeval_v2_causal_ablation.py
@@ -465,6 +466,7 @@ tasks:
       benchmarks/longmemeval_v2_ablations.py benchmarks/longmemeval_v2_reader_report.py
       benchmarks/longmemeval_v2_reader_replication.py
       benchmarks/longmemeval_v2_reader_replication_report.py
+      benchmarks/longmemeval_v2_reader_replay.py
       benchmarks/longmemeval_v2_reader_holdout.py benchmarks/longmemeval_v2_reader_holdout_report.py
       benchmarks/longmemeval_v2_causal_ablation.py
       benchmarks/longmemeval_v2_causal_ablation_report.py
@@ -479,6 +481,7 @@ tasks:
       - benchmarks/longmemeval_v2_reader_report.py
       - benchmarks/longmemeval_v2_reader_replication.py
       - benchmarks/longmemeval_v2_reader_replication_report.py
+      - benchmarks/longmemeval_v2_reader_replay.py
       - benchmarks/longmemeval_v2_reader_holdout.py
       - benchmarks/longmemeval_v2_reader_holdout_report.py
       - benchmarks/longmemeval_v2_causal_ablation.py
@@ -498,6 +501,7 @@ tasks:
       benchmarks/longmemeval_v2_diagnostics.py benchmarks/longmemeval_v2_ablations.py
       benchmarks/longmemeval_v2_reader_report.py benchmarks/longmemeval_v2_reader_replication.py
       benchmarks/longmemeval_v2_reader_replication_report.py
+      benchmarks/longmemeval_v2_reader_replay.py
       benchmarks/longmemeval_v2_reader_holdout.py benchmarks/longmemeval_v2_reader_holdout_report.py
       benchmarks/longmemeval_v2_causal_ablation.py
       benchmarks/longmemeval_v2_causal_ablation_report.py
@@ -512,6 +516,7 @@ tasks:
       - benchmarks/longmemeval_v2_reader_report.py
       - benchmarks/longmemeval_v2_reader_replication.py
       - benchmarks/longmemeval_v2_reader_replication_report.py
+      - benchmarks/longmemeval_v2_reader_replay.py
       - benchmarks/longmemeval_v2_reader_holdout.py
       - benchmarks/longmemeval_v2_reader_holdout_report.py
       - benchmarks/longmemeval_v2_causal_ablation.py
@@ -528,7 +533,8 @@ tasks:
 
   inventory-typecheck:
     command:
-      uv run ty check tools benchmarks/longmemeval_v2_reader_holdout.py
+      uv run ty check tools benchmarks/longmemeval_v2_reader_replay.py
+      benchmarks/longmemeval_v2_reader_holdout.py
       benchmarks/longmemeval_v2_reader_holdout_report.py
       benchmarks/longmemeval_v2_causal_ablation.py
       benchmarks/longmemeval_v2_causal_ablation_report.py
@@ -536,6 +542,9 @@ tasks:
       benchmarks/longmemeval_v2_validation_slice_v2.py
     inputs:
       - tools/**/*.py
+      - benchmarks/git_provenance.py
+      - benchmarks/longmemeval_v2_official.py
+      - benchmarks/longmemeval_v2_reader_replay.py
       - benchmarks/longmemeval_v2_reader_holdout.py
       - benchmarks/longmemeval_v2_reader_holdout_report.py
       - benchmarks/longmemeval_v2_causal_ablation.py
@@ -549,9 +558,12 @@ tasks:
   inventory-test:
     command:
       uv run pytest tools/tests/test_runtime_surface.py tools/tests/test_retrieval_mode_history.py
-      -v
+      tools/tests/test_longmemeval_v2_reader_replay.py -v
     inputs:
       - tools/**/*.py
+      - benchmarks/git_provenance.py
+      - benchmarks/longmemeval_v2_official.py
+      - benchmarks/longmemeval_v2_reader_replay.py
       - docs/_archive/SURREALDB_GRAPHITI_EXIT_INVENTORY.md
       - docs/research/rust-port/INVENTORY.md
       - README.md
@@ -1419,6 +1431,19 @@ tasks:
       uv run --with huggingface-hub --with numpy --with openai --with openai-agents --with pillow
       --with tqdm --with transformers --with torch --with torchvision python
       benchmarks/longmemeval_v2_official.py
+    options:
+      cache: false
+
+  bench-longmemeval-v2-reader-replay:
+    command:
+      uv run --with huggingface-hub --with numpy --with openai --with openai-agents --with pillow
+      --with tqdm --with transformers --with torch --with torchvision python
+      benchmarks/longmemeval_v2_reader_replay.py
+    options:
+      cache: false
+
+  bench-longmemeval-v2-reader-replay-test:
+    command: uv run pytest tools/tests/test_longmemeval_v2_reader_replay.py -v
     options:
       cache: false
 
