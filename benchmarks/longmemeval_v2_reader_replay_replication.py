@@ -37,7 +37,7 @@ from benchmarks.longmemeval_v2_reader_replay import (  # noqa: E402
 )
 
 PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-reader-replay-replication-plan-v1"
-REPORT_SCHEMA_VERSION = "sibyl-longmemeval-v2-reader-replay-replication-report-v1"
+REPORT_SCHEMA_VERSION = "sibyl-longmemeval-v2-reader-replay-replication-report-v2"
 RUNNER_SCHEMA_VERSION = "sibyl-longmemeval-v2-reader-replay-replication-runner-v1"
 CONFIGURATIONS = ("frozen_baseline", "candidate")
 DOMAINS = ("web", "enterprise")
@@ -542,14 +542,24 @@ def load_scores(path: Path) -> dict[str, dict[str, Any]]:
     scores = {}
     for row in load_jsonl(path):
         question_id = row.get("question_id")
+        question_type = row.get("question_type")
+        eval_function = row.get("eval_function")
         score = row.get("score_bool")
-        if not isinstance(question_id, str) or not isinstance(score, bool):
+        if (
+            not isinstance(question_id, str)
+            or not isinstance(question_type, str)
+            or not question_type
+            or not isinstance(eval_function, str)
+            or not eval_function
+            or not isinstance(score, bool)
+        ):
             raise TypeError(f"Invalid scored replay row: {path}")
         if question_id in scores:
             raise ValueError(f"Duplicate scored replay question: {question_id}")
         scores[question_id] = {
             "score_bool": score,
-            "question_type": row.get("question_type"),
+            "question_type": question_type,
+            "eval_function": eval_function,
         }
     return scores
 
@@ -896,6 +906,17 @@ def compare_configurations(
             ):
                 raise ValueError("Replication passes differ in question coverage")
         for question_id in sorted(baseline_ids):
+            question_descriptors = {
+                (
+                    loaded[configuration][pass_id][domain][question_id]["question_type"],
+                    loaded[configuration][pass_id][domain][question_id]["eval_function"],
+                )
+                for configuration in CONFIGURATIONS
+                for pass_id in PASS_IDS
+            }
+            if len(question_descriptors) != 1:
+                raise ValueError("Replication runs disagree on question metadata")
+            question_type, eval_function = question_descriptors.pop()
             baseline_scores = [
                 int(loaded["frozen_baseline"][pass_id][domain][question_id]["score_bool"])
                 for pass_id in decision_passes
@@ -911,6 +932,9 @@ def compare_configurations(
                 {
                     "domain": domain,
                     "question_id": question_id,
+                    "question_type": question_type,
+                    "eval_function": eval_function,
+                    "evaluator": eval_function.partition("|")[0],
                     "baseline_success_rate": mean(baseline_scores),
                     "candidate_success_rate": mean(candidate_scores),
                     "accuracy_effect": accuracy_effect,
@@ -918,6 +942,18 @@ def compare_configurations(
             )
     bootstrap = cluster_bootstrap(effect_values)
     domain_deltas = {domain: mean(domain_effects[domain]) for domain in DOMAINS}
+    question_type_effects = {
+        question_type: summarize_question_effects(
+            [effect for effect in effects if effect["question_type"] == question_type]
+        )
+        for question_type in sorted({effect["question_type"] for effect in effects})
+    }
+    evaluator_effects = {
+        evaluator: summarize_question_effects(
+            [effect for effect in effects if effect["evaluator"] == evaluator]
+        )
+        for evaluator in sorted({effect["evaluator"] for effect in effects})
+    }
     return {
         "candidate": "candidate",
         "baseline": "frozen_baseline",
@@ -925,6 +961,9 @@ def compare_configurations(
         "per_pass_accuracy_deltas": per_pass,
         "all_passes_mean_accuracy_delta": mean(per_pass.values()),
         "domain_mean_accuracy_deltas": domain_deltas,
+        "question_type_effects": question_type_effects,
+        "evaluator_effects": evaluator_effects,
+        "paired_outcomes": summarize_question_effects(effects),
         "question_effects": effects,
         "cluster_bootstrap": bootstrap,
         "decision": replication_decision(
@@ -932,6 +971,18 @@ def compare_configurations(
             confidence_interval=bootstrap["confidence_interval"],
             domain_deltas=domain_deltas,
         ),
+    }
+
+
+def summarize_question_effects(effects: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "question_count": len(effects),
+        "baseline_mean_accuracy": mean(effect["baseline_success_rate"] for effect in effects),
+        "candidate_mean_accuracy": mean(effect["candidate_success_rate"] for effect in effects),
+        "mean_accuracy_delta": mean(effect["accuracy_effect"] for effect in effects),
+        "improved_question_count": sum(effect["accuracy_effect"] > 0 for effect in effects),
+        "regressed_question_count": sum(effect["accuracy_effect"] < 0 for effect in effects),
+        "unchanged_question_count": sum(effect["accuracy_effect"] == 0 for effect in effects),
     }
 
 

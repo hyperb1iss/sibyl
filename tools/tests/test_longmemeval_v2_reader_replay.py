@@ -18,6 +18,7 @@ EXPECTED_READER_CONCURRENCY = 3
 EXPECTED_READER_INPUT_COUNT = 2
 EXPECTED_REPLICATION_RUN_COUNT = 12
 EXPECTED_NEW_REPLICATION_RUN_COUNT = 8
+EXPECTED_REPLICATION_QUESTION_COUNT = EXPECTED_READER_INPUT_COUNT * len(replication.DOMAINS)
 
 
 def _prompt_row(
@@ -777,6 +778,7 @@ def _write_completed_replay(
                 {
                     "question_id": question_id,
                     "question_type": "static-environment",
+                    "eval_function": "norm_phrase_set_match",
                     "score_bool": score,
                     "score": float(score),
                 }
@@ -904,13 +906,45 @@ def test_replication_report_uses_paired_question_bootstrap(
         "web": 1.0,
         "enterprise": 1.0,
     }
+    assert report["comparison"]["question_type_effects"] == {
+        "static-environment": {
+            "question_count": 4,
+            "baseline_mean_accuracy": 0.0,
+            "candidate_mean_accuracy": 1.0,
+            "mean_accuracy_delta": 1.0,
+            "improved_question_count": 4,
+            "regressed_question_count": 0,
+            "unchanged_question_count": 0,
+        }
+    }
+    assert report["comparison"]["evaluator_effects"] == {
+        "norm_phrase_set_match": {
+            "question_count": 4,
+            "baseline_mean_accuracy": 0.0,
+            "candidate_mean_accuracy": 1.0,
+            "mean_accuracy_delta": 1.0,
+            "improved_question_count": 4,
+            "regressed_question_count": 0,
+            "unchanged_question_count": 0,
+        }
+    }
+    assert (
+        report["comparison"]["paired_outcomes"]["improved_question_count"]
+        == EXPECTED_REPLICATION_QUESTION_COUNT
+    )
+    assert {effect["question_type"] for effect in report["comparison"]["question_effects"]} == {
+        "static-environment"
+    }
     assert report["costs"]["incremental_provider_reported_cost_usd"] == pytest.approx(0.08)
 
 
 def test_replication_scores_reject_duplicate_questions(tmp_path: Path) -> None:
     path = tmp_path / "scores.jsonl"
     path.write_text(
-        '{"question_id":"q1","score_bool":true}\n{"question_id":"q1","score_bool":false}\n',
+        '{"question_id":"q1","question_type":"static-environment",'
+        '"eval_function":"norm_phrase_set_match","score_bool":true}\n'
+        '{"question_id":"q1","question_type":"static-environment",'
+        '"eval_function":"norm_phrase_set_match","score_bool":false}\n',
         encoding="utf-8",
     )
 
