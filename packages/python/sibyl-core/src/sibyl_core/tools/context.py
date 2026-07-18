@@ -1264,6 +1264,7 @@ async def _compile_native_sections(
 async def compile_context(
     goal: str,
     *,
+    retrieval_query: str | None = None,
     intent: str | ContextIntent = ContextIntent.BUILD,
     layer: str | ContextLayer = ContextLayer.RECALL,
     domain: str | None = None,
@@ -1295,7 +1296,7 @@ async def compile_context(
 
     normalized_intent = _coerce_intent(intent)
     normalized_layer = _coerce_layer(layer)
-    query = _query_for(goal, domain)
+    query = _query_for(retrieval_query.strip() if retrieval_query else goal, domain)
     limit = max(1, min(limit, LAYER_LIMITS[normalized_layer]))
     facets = _facets_for_layer(normalized_intent, normalized_layer)
     per_facet_limit = max(2, min(8, (limit + len(facets) - 1) // len(facets)))

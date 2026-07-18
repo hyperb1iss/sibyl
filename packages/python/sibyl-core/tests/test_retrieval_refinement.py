@@ -1,5 +1,6 @@
 from sibyl_core.retrieval.refinement import (
     RetrievalFeedbackDocument,
+    normalize_retrieval_question,
     plan_deterministic_refinement_queries,
 )
 
@@ -11,6 +12,7 @@ def _document(
     source_id: str | None = None,
     raw_observation_projection: bool = False,
     evidence_content_type: str | None = None,
+    projection_kind: str | None = None,
 ) -> RetrievalFeedbackDocument:
     return RetrievalFeedbackDocument(
         id=document_id,
@@ -18,6 +20,7 @@ def _document(
         source_id=source_id,
         raw_observation_projection=raw_observation_projection,
         evidence_content_type=evidence_content_type,
+        projection_kind=projection_kind,
     )
 
 
@@ -55,6 +58,107 @@ def test_refinement_preserves_question_after_prefix_answer_formatting() -> None:
     )
 
     assert planned[0].query == "column changed"
+
+
+def test_refinement_strips_response_contract_sentences() -> None:
+    planned = plan_deterministic_refinement_queries(
+        "I am on the product page and want to summarize reviews by star rating. "
+        r"Say the answer in English (e.g., click, scroll) and wrap the final answer in \boxed{}.",
+        [],
+        max_queries=1,
+    )
+
+    assert planned[0].query == "product page want summarize review star rating"
+
+
+def test_refinement_strips_standalone_answer_shape_instructions() -> None:
+    planned = plan_deterministic_refinement_queries(
+        "Which button opens the shipment form? Please provide your answer in a comma-separated "
+        "list.",
+        [],
+        max_queries=1,
+    )
+
+    assert planned[0].query == "button open shipment form"
+
+
+def test_refinement_strips_ordering_and_boxed_output_contracts() -> None:
+    planned = plan_deterministic_refinement_queries(
+        r"Which labels are selected? Give the labels in this order: users, groups. "
+        r"Put the short phrases in \boxed{} separated by semicolons.",
+        [],
+        max_queries=1,
+    )
+
+    assert planned[0].query == "label selected"
+
+
+def test_normalization_preserves_semantic_parenthetical_examples() -> None:
+    question = "Which alerts (e.g. disk pressure or CPU saturation) fired?"
+
+    assert normalize_retrieval_question(question) == question
+
+
+def test_normalization_preserves_command_style_semantic_queries() -> None:
+    question = "I am debugging fulfillment. List the order states that changed."
+
+    assert normalize_retrieval_question(question) == question
+
+
+def test_normalization_preserves_semantic_final_answer_questions() -> None:
+    question = "We discussed three options. What was your final answer?"
+
+    assert normalize_retrieval_question(question) == question
+
+
+def test_normalization_preserves_semantic_english_labels() -> None:
+    question = "I am localizing the menu. Give the English labels for the selected controls."
+
+    assert normalize_retrieval_question(question) == question
+
+
+def test_normalization_preserves_semantic_status_filters() -> None:
+    question = "We are triaging the backlog. List tasks marked as blocked."
+
+    assert normalize_retrieval_question(question) == question
+
+
+def test_normalization_preserves_semantic_one_word_queries() -> None:
+    question = "We settled on a codename. Give the one word we chose."
+
+    assert normalize_retrieval_question(question) == question
+
+
+def test_normalization_preserves_stored_answer_filters() -> None:
+    question = "We reviewed the quiz. List answers marked as incorrect."
+
+    assert normalize_retrieval_question(question) == question
+
+
+def test_normalization_preserves_semantic_commands_before_output_contracts() -> None:
+    question = "Which workflow was used and list its steps and answer in English."
+
+    assert normalize_retrieval_question(question) == "Which workflow was used and list its steps"
+
+
+def test_normalization_strips_chained_output_contracts() -> None:
+    question = r"Which labels changed and answer in English and wrap the final answer in \boxed{}."
+
+    assert normalize_retrieval_question(question) == "Which labels changed"
+
+
+def test_normalization_strips_inline_output_contract_clauses() -> None:
+    questions = (
+        "Which labels changed; answer in English and wrap the final answer.",
+        "Which labels changed: answer in English and wrap the final answer.",
+        "Which labels changed and answer in English and wrap the final answer.",
+    )
+
+    assert [normalize_retrieval_question(question) for question in questions] == [
+        "Which labels changed",
+        "Which labels changed",
+        "Which labels changed",
+    ]
 
 
 def test_refinement_uses_consensus_terms_from_retrieved_evidence() -> None:
@@ -288,6 +392,22 @@ Navigation planning retained the coastal sequence.
     assert planned[1].added_terms == ("state", "california", "part", "replacement")
 
 
+def test_refinement_preserves_envelope_labels_for_non_operational_projections() -> None:
+    planned = plan_deterministic_refinement_queries(
+        "Which deployment setting changed?",
+        [
+            _document(
+                "one",
+                "State: archived\nReason: migration complete",
+                projection_kind="memory_fact",
+            )
+        ],
+        max_queries=2,
+    )
+
+    assert planned[1].added_terms[:2] == ("state", "archived")
+
+
 def test_refinement_ignores_truncated_raw_observation_headers() -> None:
     planned = plan_deterministic_refinement_queries(
         "Which regional rollout detail changed?",
@@ -307,3 +427,56 @@ Observation: 2
     )
 
     assert [query.facet for query in planned] == ["focus"]
+
+
+def test_refinement_uses_goal_not_envelope_from_procedure_projection() -> None:
+    planned = plan_deterministic_refinement_queries(
+        "Which shipment control changed?",
+        [
+            _document(
+                "one",
+                """Procedure for web workflow part 1/1
+Goal: Update an order with a carrier tracking number
+1. click('1444')
+2. click('754')
+Reported outcome: success
+""",
+                projection_kind="procedure",
+            )
+        ],
+        max_queries=2,
+    )
+
+    assert planned[1].added_terms == ("update", "carrier", "tracking", "number")
+    assert not {"procedure", "web", "part", "click", "success"} & set(planned[1].added_terms)
+
+
+def test_refinement_ignores_raw_operational_envelope_values() -> None:
+    planned = plan_deterministic_refinement_queries(
+        "Which shipment control changed?",
+        [
+            _document(
+                "one",
+                """Operational observation 4 part 1/1
+Evidence:
+Trajectory: abc123
+Domain: web
+Environment: webarena
+Outcome: success
+Goal: Update an order with a carrier tracking number
+State: 4
+Action: click('1444')
+Thought: Open the shipment detail before adding tracking.
+Accessibility tree:
+[1444] link 'View', clickable, visible
+""",
+                raw_observation_projection=True,
+                evidence_content_type="text/plain; profile=accessibility-tree",
+                projection_kind="raw_observation",
+            )
+        ],
+        max_queries=2,
+    )
+
+    assert {"update", "carrier", "tracking", "number"} <= set(planned[1].added_terms)
+    assert not {"web", "webarena", "success", "click"} & set(planned[1].added_terms)

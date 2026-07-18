@@ -163,6 +163,30 @@ async def test_compile_context_groups_build_context_by_agent_facets(
     assert pack.total_items == 7
     assert len(calls) == 1
     assert calls[0]["plan"].organization_id == "org-123"
+
+
+@pytest.mark.asyncio
+async def test_compile_context_preserves_goal_with_separate_retrieval_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        context_module,
+        "context_search",
+        _facet_native_search({}, calls=calls),
+    )
+
+    pack = await compile_context(
+        "Which button opens the shipment form? Please answer in a list.",
+        retrieval_query="button opens shipment form",
+        organization_id="org-123",
+        project="sibyl",
+        record_exposure=False,
+    )
+
+    assert pack.goal == "Which button opens the shipment form? Please answer in a list."
+    assert pack.query == "button opens shipment form"
+    assert calls[0]["plan"].query == "button opens shipment form"
     assert calls[0]["plan"].project == "sibyl"
 
 

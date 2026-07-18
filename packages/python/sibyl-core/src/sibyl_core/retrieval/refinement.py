@@ -18,6 +18,7 @@ _FEEDBACK_STOPWORDS = {
     "assistant",
     "conversation",
     "evidence",
+    "goal",
     "memory",
     "question",
     "session",
@@ -39,10 +40,60 @@ _UNNAMED_ACCESSIBILITY_NODE_PATTERN = re.compile(
 _MIME_TYPE_PATTERN = re.compile(r"^[\w.+-]+/[\w.+-]+(?:\s*;.*)?$", re.I)
 _OPAQUE_IDENTIFIER_PATTERN = re.compile(r"(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9_-]{8,}$")
 _URL_PATTERN = re.compile(r"https?://\S+", re.I)
-_ANSWER_FORMAT_PATTERN = re.compile(
-    r"\b(?:your final answer|(?:put|mark|wrap|provide) (?:your|the) final answer)\b",
+_RESPONSE_COMMAND = (
+    r"(?:answer|format|give|list|mark|provide|put|return|respond|say|separate|wrap|write)"
+)
+_ANSWER_OBJECT = (
+    r"(?:(?:my|our|your)\s+(?:final\s+)?(?:answers?|outputs?|responses?)|"
+    r"(?:the\s+)?final\s+(?:answers?|outputs?|responses?))"
+)
+_UNAMBIGUOUS_OUTPUT_FORMAT = r"(?:\\boxed|\bin\s+(?:this\s+order|the\s+following\s+order)\b)"
+_ANSWER_RELATIVE_FORMAT = (
+    r"(?:(?:comma[- ]separated|semicolon[- ]separated|separat\w+\s+by|"
+    r"\bin\s+(?:english|a\s+list)\b|"
+    r"\b(?:formatted|marked|wrapped)\s+(?:as|in|with)\b)"
+    r"|\b(?:no explanation|one word|short phrases?)\b)"
+)
+_RESPONSE_INSTRUCTION_PATTERN = re.compile(
+    rf"^(?:please\s+)?{_RESPONSE_COMMAND}\b.*{_UNAMBIGUOUS_OUTPUT_FORMAT}"
+    rf"|^(?:please\s+)?(?:answer|respond)\b.*{_ANSWER_RELATIVE_FORMAT}"
+    rf"|^(?:please\s+)?{_RESPONSE_COMMAND}\b.*\b{_ANSWER_OBJECT}\b.*{_ANSWER_RELATIVE_FORMAT}"
+    rf"|^(?:please\s+)?say\s+the\s+answer\b.*{_ANSWER_RELATIVE_FORMAT}"
+    rf"|^(?:your|the) final answers?\b.*(?:{_UNAMBIGUOUS_OUTPUT_FORMAT}|{_ANSWER_RELATIVE_FORMAT})",
     re.I,
 )
+_QUERY_CLAUSE_SPLIT_PATTERN = re.compile(
+    rf"(?<=[.!?])\s+|(?<=[;,:])\s+(?=(?:please\s+)?{_RESPONSE_COMMAND}\b)",
+    re.I,
+)
+_CONJUNCTION_COMMAND_PATTERN = re.compile(
+    rf"\s+and\s+(?=(?:please\s+)?{_RESPONSE_COMMAND}\b)",
+    re.I,
+)
+_OPERATIONAL_PROJECTION_KINDS = {
+    "manifest",
+    "procedure",
+    "raw_observation",
+    "reported_failure",
+    "transition",
+}
+_OPERATIONAL_ENVELOPE_LABELS = {
+    "action",
+    "after uri",
+    "before uri",
+    "domain",
+    "environment",
+    "evidence content type",
+    "final action",
+    "outcome",
+    "reported outcome",
+    "screenshot",
+    "start url",
+    "state",
+    "trajectory",
+    "uri",
+    "url",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +105,7 @@ class RetrievalFeedbackDocument:
     source_id: str | None = None
     raw_observation_projection: bool = False
     evidence_content_type: str | None = None
+    projection_kind: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +126,7 @@ def plan_deterministic_refinement_queries(
     seen_queries: Sequence[str] = (),
 ) -> list[DeterministicRefinementQuery]:
     """Build focused and feedback-expanded searches without a generative model."""
-    question = _retrieval_question(question)
+    question = normalize_retrieval_question(question)
     if not question:
         raise ValueError("question must not be empty")
     if max_queries < 1:
@@ -149,7 +201,7 @@ def plan_deterministic_refinement_queries(
             planned,
             seen,
             DeterministicRefinementQuery(
-                query=_expanded_query(question, terms),
+                query=_expanded_query(focused_query or question, terms),
                 facet=facet,
                 source_result_ids=source_result_ids,
                 added_terms=terms,
@@ -219,6 +271,16 @@ def _feedback_text(document: RetrievalFeedbackDocument) -> str:
         line = raw_line.strip()
         if not line:
             continue
+        label, separator, value = line.partition(":")
+        if (
+            separator
+            and (
+                document.raw_observation_projection
+                or document.projection_kind in _OPERATIONAL_PROJECTION_KINDS
+            )
+            and label.strip().casefold() in _OPERATIONAL_ENVELOPE_LABELS
+        ):
+            continue
         if accessibility_profile:
             node_match = _ACCESSIBILITY_NODE_PATTERN.fullmatch(line)
             if node_match is not None:
@@ -230,7 +292,6 @@ def _feedback_text(document: RetrievalFeedbackDocument) -> str:
             ):
                 continue
             else:
-                _label, separator, value = line.partition(":")
                 if separator:
                     line = value.strip()
                     if not _useful_header_value(line):
@@ -243,7 +304,12 @@ def _feedback_text(document: RetrievalFeedbackDocument) -> str:
 
 def _feedback_lines(document: RetrievalFeedbackDocument) -> list[str]:
     if not document.raw_observation_projection:
-        return document.text.splitlines()
+        lines = document.text.splitlines()
+        if document.projection_kind == "manifest":
+            return []
+        if document.projection_kind == "procedure":
+            return [line for line in lines if line.lstrip().casefold().startswith("goal:")]
+        return lines
 
     _header, separator, evidence = document.text.partition("\nEvidence:\n")
     if not separator:
@@ -251,28 +317,34 @@ def _feedback_lines(document: RetrievalFeedbackDocument) -> list[str]:
     return evidence.splitlines()
 
 
-def _retrieval_question(question: str) -> str:
+def normalize_retrieval_question(question: str) -> str:
     normalized = " ".join(question.split())
-    marker = _ANSWER_FORMAT_PATTERN.search(normalized)
-    if marker is None:
-        return normalized
-
-    sentence_start = max(normalized.rfind(delimiter, 0, marker.start()) for delimiter in ".!?") + 1
-    sentence_end_candidates = [
-        position
-        for delimiter in ".!?"
-        if (position := normalized.find(delimiter, marker.end())) >= 0
+    clauses = _split_query_clauses(normalized)
+    retained = [
+        clause.strip(" ,;:")
+        for clause in clauses
+        if clause.strip(" ,;:") and not _RESPONSE_INSTRUCTION_PATTERN.search(clause)
     ]
-    sentence_end = min(sentence_end_candidates) + 1 if sentence_end_candidates else len(normalized)
-    stripped = " ".join(
-        part
-        for part in (
-            normalized[:sentence_start].strip(),
-            normalized[sentence_end:].strip(),
-        )
-        if part
-    )
-    return stripped or normalized
+    stripped = " ".join(retained)
+    return " ".join(stripped.split()) or normalized
+
+
+def _split_query_clauses(question: str) -> list[str]:
+    clauses: list[str] = []
+    for clause in _QUERY_CLAUSE_SPLIT_PATTERN.split(question):
+        clauses.extend(_split_conjunction_clauses(clause))
+    return clauses
+
+
+def _split_conjunction_clauses(clause: str) -> list[str]:
+    for conjunction in reversed(list(_CONJUNCTION_COMMAND_PATTERN.finditer(clause))):
+        suffix = clause[conjunction.end() :]
+        if _RESPONSE_INSTRUCTION_PATTERN.search(suffix):
+            return [
+                *_split_conjunction_clauses(clause[: conjunction.start()]),
+                suffix,
+            ]
+    return [clause]
 
 
 def _is_feedback_term(term: str) -> bool:
@@ -349,5 +421,6 @@ __all__ = [
     "MAX_REFINEMENT_QUERIES",
     "DeterministicRefinementQuery",
     "RetrievalFeedbackDocument",
+    "normalize_retrieval_question",
     "plan_deterministic_refinement_queries",
 ]

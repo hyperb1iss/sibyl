@@ -255,6 +255,7 @@ class TestContextPackRoute:
         assert response.markdown is not None
         assert response.markdown.startswith("# Sibyl Context Pack")
         assert compile_context.await_args.kwargs["accessible_projects"] == {"proj_1"}
+        assert compile_context.await_args.kwargs["retrieval_query"] == "ship faster"
         assert compile_context.await_args.kwargs["layer"] == ContextLayer.RECALL
         assert compile_context.await_args.kwargs["principal_id"] == "user-123"
         assert compile_context.await_args.kwargs["agent_id"] is None
@@ -467,6 +468,7 @@ class TestContextPackRoute:
             ),
         }
         responses["ship faster"].results[0].metadata["operational_source_id"] = "source-one"
+        responses["ship faster"].results[0].metadata["projection_kind"] = "procedure"
         responses["ship faster"].results[1].metadata["operational_source_id"] = "source-one"
         responses["deployment workflow state"].results[1].metadata["operational_source_id"] = (
             "source-two"
@@ -519,6 +521,10 @@ class TestContextPackRoute:
             "source-one",
             "source-two",
         ]
+        assert [document.projection_kind for document in first_documents] == [
+            "procedure",
+            None,
+        ]
         assert all(isinstance(document, RetrievalFeedbackDocument) for document in first_documents)
         assert {call.args[0].query for call in search.call_args_list} == set(responses)
         assert response.evidence is not None
@@ -531,7 +537,7 @@ class TestContextPackRoute:
         assert response.evidence.filters["planner_status"] == "success"
         assert response.evidence.filters["planner_usage"] == {
             "provider": "deterministic",
-            "model": "pseudo_relevance_feedback_v2",
+            "model": "pseudo_relevance_feedback_v3",
             "requests": 0,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -539,7 +545,7 @@ class TestContextPackRoute:
             "cost_usd": 0.0,
             "cost_complete": True,
         }
-        assert response.evidence.filters["planner_strategy"] == "deterministic_refinement_v2"
+        assert response.evidence.filters["planner_strategy"] == "deterministic_refinement_v3"
         assert response.evidence.filters["refinement_rounds"] == 2
         assert response.evidence.filters["refinement_novel_result_counts"] == [1, 2]
         assert response.evidence.filters["refinement_stop_reason"] == "query_budget_exhausted"

@@ -34,6 +34,7 @@ from sibyl_core.retrieval.fusion import rrf_merge_with_metadata
 from sibyl_core.retrieval.refinement import (
     MAX_FEEDBACK_DOCUMENTS,
     RetrievalFeedbackDocument,
+    normalize_retrieval_question,
     plan_deterministic_refinement_queries,
 )
 
@@ -53,7 +54,7 @@ router = APIRouter(
 _REQUEST_AUTO_INJECT_SENTINEL: Request = cast("Request", None)
 _DETERMINISTIC_REFINEMENT_USAGE: dict[str, str | int | float | bool | None] = {
     "provider": "deterministic",
-    "model": "pseudo_relevance_feedback_v2",
+    "model": "pseudo_relevance_feedback_v3",
     "requests": 0,
     "input_tokens": 0,
     "output_tokens": 0,
@@ -209,7 +210,7 @@ def _fuse_context_evidence(
         filters={
             "retrieval_mode": "accurate",
             "planner_status": planner_status,
-            "planner_strategy": "deterministic_refinement_v2",
+            "planner_strategy": "deterministic_refinement_v3",
             "planner_usage": planner_usage,
             "planned_queries": planned_queries,
             "query_count": 1 + len(planned_queries),
@@ -297,8 +298,9 @@ async def _execute_accurate_context_evidence_search(
     embedding_usage: dict[str, str | int | float],
 ) -> SearchResponse:
     assert request.evidence is not None
+    retrieval_goal = normalize_retrieval_question(request.goal)
     original_response = await _execute_context_evidence_search(
-        _context_evidence_request(request, query=request.goal),
+        _context_evidence_request(request, query=retrieval_goal),
         org=org,
         ctx=ctx,
         embedding_usage=embedding_usage,
@@ -306,11 +308,11 @@ async def _execute_accurate_context_evidence_search(
 
     responses = [original_response]
     query_specs: list[dict[str, Any]] = [
-        {"name": "original", "query": request.goal, "facet": "original", "round": 0}
+        {"name": "original", "query": retrieval_goal, "facet": "original", "round": 0}
     ]
     planned_queries: list[dict[str, Any]] = []
     failures: list[dict[str, str | int]] = []
-    seen_queries = [request.goal]
+    seen_queries = [retrieval_goal]
     seen_result_keys = {_result_key(result) for result in original_response.results}
     frontier = list(original_response.results)
     remaining_queries = request.evidence.max_planned_queries
@@ -325,7 +327,7 @@ async def _execute_accurate_context_evidence_search(
         round_query_limit = min(1 if round_index == 1 else 2, remaining_queries)
         try:
             round_plan = plan_deterministic_refinement_queries(
-                request.goal,
+                retrieval_goal,
                 [
                     RetrievalFeedbackDocument(
                         id=_result_key(result),
@@ -337,6 +339,11 @@ async def _execute_accurate_context_evidence_search(
                         evidence_content_type=(
                             str(content_type)
                             if (content_type := result.metadata.get("evidence_content_type"))
+                            else None
+                        ),
+                        projection_kind=(
+                            str(projection_kind)
+                            if (projection_kind := result.metadata.get("projection_kind"))
                             else None
                         ),
                     )
@@ -502,10 +509,12 @@ async def context_pack(
             ctx=ctx,
             project=request.project,
         )
+        retrieval_goal = normalize_retrieval_question(request.goal)
 
         async def compile_pack() -> ContextPack:
             return await compile_context(
                 goal=request.goal,
+                retrieval_query=retrieval_goal,
                 intent=request.intent,
                 layer=request.layer,
                 domain=request.domain,
@@ -546,7 +555,7 @@ async def context_pack(
                 else:
                     evidence_task = asyncio.create_task(
                         _execute_context_evidence_search(
-                            _context_evidence_request(request, query=request.goal),
+                            _context_evidence_request(request, query=retrieval_goal),
                             org=org,
                             ctx=ctx,
                             embedding_usage=embedding_usage,
