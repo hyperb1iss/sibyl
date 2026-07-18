@@ -12,6 +12,12 @@ from sibyl.api.context_audit import (
     log_denied_render_audit,
     log_reflection_audit,
 )
+from sibyl.api.context_source_expansion import (
+    expand_operational_source_evidence,
+    operational_source_expansion_applicable,
+    source_expansion_not_applicable,
+    source_expansion_unavailable,
+)
 from sibyl.api.schemas import (
     ContextPackRequest,
     ContextPackResponse,
@@ -62,6 +68,12 @@ _DETERMINISTIC_REFINEMENT_USAGE: dict[str, str | int | float | bool | None] = {
     "cost_usd": 0.0,
     "cost_complete": True,
 }
+
+
+async def get_context_graph_runtime(group_id: str):
+    from sibyl.persistence.graph_runtime import get_entity_graph_runtime
+
+    return await get_entity_graph_runtime(group_id)
 
 
 async def _execute_context_evidence_search(
@@ -296,6 +308,7 @@ async def _execute_accurate_context_evidence_search(
     org: AuthOrganization,
     ctx: AuthContext,
     embedding_usage: dict[str, str | int | float],
+    accessible_projects: set[str] | None,
 ) -> SearchResponse:
     assert request.evidence is not None
     retrieval_goal = normalize_retrieval_question(request.goal)
@@ -420,7 +433,29 @@ async def _execute_accurate_context_evidence_search(
     )
     if planner_error_type is not None:
         fused.filters["planner_error_type"] = planner_error_type
-    return fused
+    if not operational_source_expansion_applicable(fused):
+        return source_expansion_not_applicable(fused)
+    try:
+        runtime = await get_context_graph_runtime(str(org.id))
+    except Exception as exc:
+        log.warning(
+            "context_source_expansion_runtime_failed",
+            error_type=type(exc).__name__,
+        )
+        return source_expansion_unavailable(fused, error_type=type(exc).__name__)
+    return await expand_operational_source_evidence(
+        fused,
+        entity_reader=runtime.entity_manager,
+        query=retrieval_goal,
+        organization_id=str(org.id),
+        principal_id=ctx.user_id,
+        allowed_project_ids=accessible_projects,
+        allowed_memory_scope_keys=set(ctx.api_key_memory_scope_keys)
+        if ctx.api_key_memory_scope_keys is not None
+        else None,
+        content_max_chars=request.evidence.content_max_chars,
+        record_exposure=request.record_exposure,
+    )
 
 
 def _append_unique_ids(existing: list[str] | None, additions: list[str] | None) -> list[str] | None:
@@ -550,6 +585,7 @@ async def context_pack(
                             org=org,
                             ctx=ctx,
                             embedding_usage=embedding_usage,
+                            accessible_projects=accessible_projects,
                         )
                     )
                 else:

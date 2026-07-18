@@ -141,6 +141,12 @@ def test_normalization_preserves_semantic_commands_before_output_contracts() -> 
     assert normalize_retrieval_question(question) == "Which workflow was used and list its steps"
 
 
+def test_normalization_preserves_semantic_commands_after_output_contracts() -> None:
+    question = "Which labels changed and answer in English and list its steps."
+
+    assert normalize_retrieval_question(question) == "Which labels changed list its steps."
+
+
 def test_normalization_strips_chained_output_contracts() -> None:
     question = r"Which labels changed and answer in English and wrap the final answer in \boxed{}."
 

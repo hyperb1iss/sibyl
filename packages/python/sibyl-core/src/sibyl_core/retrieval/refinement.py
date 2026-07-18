@@ -58,6 +58,7 @@ _RESPONSE_INSTRUCTION_PATTERN = re.compile(
     rf"^(?:please\s+)?{_RESPONSE_COMMAND}\b.*{_UNAMBIGUOUS_OUTPUT_FORMAT}"
     rf"|^(?:please\s+)?(?:answer|respond)\b.*{_ANSWER_RELATIVE_FORMAT}"
     rf"|^(?:please\s+)?{_RESPONSE_COMMAND}\b.*\b{_ANSWER_OBJECT}\b.*{_ANSWER_RELATIVE_FORMAT}"
+    rf"|^(?:please\s+)?(?:put|wrap)\b.*\b{_ANSWER_OBJECT}\b"
     rf"|^(?:please\s+)?say\s+the\s+answer\b.*{_ANSWER_RELATIVE_FORMAT}"
     rf"|^(?:your|the) final answers?\b.*(?:{_UNAMBIGUOUS_OUTPUT_FORMAT}|{_ANSWER_RELATIVE_FORMAT})",
     re.I,
@@ -337,12 +338,20 @@ def _split_query_clauses(question: str) -> list[str]:
 
 
 def _split_conjunction_clauses(clause: str) -> list[str]:
-    for conjunction in reversed(list(_CONJUNCTION_COMMAND_PATTERN.finditer(clause))):
+    conjunctions = list(_CONJUNCTION_COMMAND_PATTERN.finditer(clause))
+    for conjunction in conjunctions:
+        prefix = clause[: conjunction.start()]
+        if _RESPONSE_INSTRUCTION_PATTERN.search(prefix):
+            return [
+                *_split_conjunction_clauses(prefix),
+                *_split_conjunction_clauses(clause[conjunction.end() :]),
+            ]
+    for conjunction in reversed(conjunctions):
         suffix = clause[conjunction.end() :]
         if _RESPONSE_INSTRUCTION_PATTERN.search(suffix):
             return [
                 *_split_conjunction_clauses(clause[: conjunction.start()]),
-                suffix,
+                *_split_conjunction_clauses(suffix),
             ]
     return [clause]
 

@@ -804,6 +804,38 @@ class TestAddResponse:
 class TestSearchTool:
     """Test search tool function."""
 
+    def test_graph_entity_conversion_preserves_candidate_contract(self) -> None:
+        from sibyl_core.tools.search import graph_entity_to_search_result
+
+        entity = MockEntity(
+            id="session_evidence",
+            entity_type=EntityType.SESSION,
+            name="Evidence",
+            content="ordered evidence",
+            project_id="project_123",
+            metadata={
+                "operational_source_id": "capture-1",
+                "project_id": "project_123",
+                "projection_kind": "raw_observation",
+            },
+        )
+
+        result = graph_entity_to_search_result(
+            entity,
+            organization_id="org_123",
+            principal_id="user_123",
+            score=0.91,
+        )
+
+        assert result.id == entity.id
+        assert result.content == "ordered evidence"
+        assert result.metadata["operational_source_id"] == "capture-1"
+        assert result.metadata["candidate_organization_id"] == "org_123"
+        assert result.metadata["candidate_project_id"] == "project_123"
+        assert result.metadata["candidate_principal_id"] == "user_123"
+        assert result.metadata["candidate_visibility"] == "project"
+        assert result.metadata["candidate_policy_reason"] == "search_scope_verified"
+
     @pytest.mark.asyncio
     async def test_search_requires_organization_id(self) -> None:
         """Search raises error without organization_id."""

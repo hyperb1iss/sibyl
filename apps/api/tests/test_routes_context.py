@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
@@ -34,6 +35,7 @@ from sibyl_core.models.context import (
     ContextPack,
     ContextSection,
 )
+from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.models.reflection import (
     ClaimRecord,
     ReflectionCandidate,
@@ -42,6 +44,7 @@ from sibyl_core.models.reflection import (
     ReflectionPack,
     ReflectionRelationshipRecord,
 )
+from sibyl_core.projection import operational_experience_manifest_id
 from sibyl_core.retrieval.refinement import (
     DeterministicRefinementQuery,
     RetrievalFeedbackDocument,
@@ -167,6 +170,48 @@ def _search_response(
         filters={"source_query": query},
         graph_count=len(results),
         limit=12,
+    )
+
+
+def _operational_observation(entity_id: str, ordinal: int, evidence: str) -> Entity:
+    return Entity(
+        id=entity_id,
+        entity_type=EntityType.SESSION,
+        name=f"Observation {ordinal}",
+        content=(
+            "Goal: update an order\n"
+            "Reported outcome: success\n"
+            f"Observation: {ordinal}\n"
+            f"Action producing this observation: action-{ordinal}\n"
+            f"Reasoning: reasoning-{ordinal}\n"
+            "Evidence:\n"
+            f"{evidence}"
+        ),
+        metadata={
+            "operational_source_id": "capture-1",
+            "project_id": "proj_1",
+            "scope_key": None,
+            "projection_kind": "raw_observation",
+            "observation_ordinal": ordinal,
+            "evidence_part_index": 0,
+        },
+    )
+
+
+def _operational_manifest(observations: list[Entity]) -> Entity:
+    manifest_id = operational_experience_manifest_id("capture-1")
+    return Entity(
+        id=manifest_id,
+        entity_type=EntityType.ARTIFACT,
+        name="Operational source manifest",
+        metadata={
+            "operational_source_id": "capture-1",
+            "project_id": "proj_1",
+            "scope_key": None,
+            "projection_kind": "manifest",
+            "operational_projection_state": "complete",
+            "expected_entity_ids": [*[item.id for item in observations], manifest_id],
+        },
     )
 
 
@@ -478,6 +523,7 @@ class TestContextPackRoute:
             await asyncio.sleep(0)
             return responses[request.query]
 
+        graph_runtime = AsyncMock(side_effect=RuntimeError("graph unavailable"))
         with (
             patch(
                 "sibyl.api.routes.context.list_accessible_project_graph_ids",
@@ -490,6 +536,7 @@ class TestContextPackRoute:
             ) as planner,
             patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve) as search,
             patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+            patch("sibyl.api.routes.context.get_context_graph_runtime", graph_runtime),
         ):
             response = await context_pack(
                 request=ContextPackRequest(
@@ -565,6 +612,158 @@ class TestContextPackRoute:
             "original",
             "supplemental_1",
         ]
+        assert response.evidence.filters["operational_source_expansion"] == {
+            "strategy": "manifest_ordered_span_v1",
+            "status": "unavailable",
+            "error_type": "RuntimeError",
+            "attempted_source_ids": ["source-one", "source-two"],
+            "total_result_budget": 0,
+            "sources": [],
+            "inserted_result_ids": [],
+        }
+        graph_runtime.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_context_pack_accurate_evidence_expands_authorized_ordered_source_span(
+        self,
+    ) -> None:
+        search_response = _search_response(
+            "Which controls view ship and add tracking?",
+            ("procedure", 0.96),
+            ("stale-raw", 0.91),
+            ("unrelated", 0.72),
+        )
+        search_response.results[0].metadata.update(
+            {
+                "operational_source_id": "capture-1",
+                "project_id": "proj_1",
+                "projection_kind": "procedure",
+            }
+        )
+        search_response.results[1].metadata.update(
+            {
+                "operational_source_id": "capture-1",
+                "project_id": "proj_1",
+                "projection_kind": "raw_observation",
+            }
+        )
+        observations = [
+            _operational_observation("raw-1", 1, "Dashboard catalog"),
+            _operational_observation("raw-2", 2, "Open profile"),
+            _operational_observation("raw-3", 3, "View order details"),
+            _operational_observation("raw-4", 4, "Ship the order"),
+            _operational_observation("raw-5", 5, "Add Tracking Number"),
+        ]
+        manifest = _operational_manifest(observations)
+        reader = SimpleNamespace(
+            get=AsyncMock(return_value=manifest),
+            get_many=AsyncMock(return_value=[manifest, *reversed(observations)]),
+        )
+
+        async def record_exposures(results: list[Any], **_kwargs: object) -> dict[str, object]:
+            for result in results:
+                result.metadata["usage_exposure"] = {"status": "stamped"}
+            return {"status": "complete", "stamped_count": len(results)}
+
+        exposure = AsyncMock(side_effect=record_exposures)
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+            patch(
+                "sibyl.api.routes.context.plan_deterministic_refinement_queries",
+                return_value=[],
+            ),
+            patch(
+                "sibyl.api.routes.search.execute_search_request",
+                AsyncMock(return_value=search_response),
+            ),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+            patch(
+                "sibyl.api.routes.context.get_context_graph_runtime",
+                AsyncMock(return_value=SimpleNamespace(entity_manager=reader)),
+            ),
+            patch(
+                "sibyl_core.tools.usage_exposure.annotate_search_result_exposures",
+                exposure,
+            ),
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(
+                    goal="Which controls view ship and add tracking?",
+                    evidence={"retrieval_mode": "accurate", "limit": 6},
+                ),
+                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
+                ctx=_ctx(),
+            )
+
+        assert response.evidence is not None
+        assert [result.id for result in response.evidence.results] == [
+            "procedure",
+            "raw-3",
+            "raw-4",
+            "raw-5",
+            "unrelated",
+        ]
+        receipt = response.evidence.filters["operational_source_expansion"]
+        assert receipt["status"] == "expanded"
+        assert receipt["attempted_source_ids"] == ["capture-1"]
+        assert receipt["inserted_result_ids"] == ["raw-3", "raw-4", "raw-5"]
+        assert receipt["sources"][0]["selected_observation_ordinals"] == [3, 4, 5]
+        assert receipt["sources"][0]["inserted_entity_ids"] == ["raw-3", "raw-4", "raw-5"]
+        assert response.evidence.graph_count == 5
+        assert response.evidence.total == 5
+        assert response.evidence.has_more is False
+        assert response.evidence.results[1].metadata["candidate_project_id"] == "proj_1"
+        assert (
+            response.evidence.results[1].metadata["candidate_policy_reason"]
+            == "manifest_scope_verified"
+        )
+        assert response.evidence.results[1].metadata["usage_exposure"] == {"status": "stamped"}
+        assert [result.id for result in exposure.await_args.args[0]] == [
+            "raw-3",
+            "raw-4",
+            "raw-5",
+        ]
+        reader.get.assert_awaited_once_with(operational_experience_manifest_id("capture-1"))
+        reader.get_many.assert_awaited_once_with(manifest.metadata["expected_entity_ids"])
+
+    @pytest.mark.asyncio
+    async def test_context_pack_skips_source_runtime_without_operational_results(self) -> None:
+        graph_runtime = AsyncMock()
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+            patch(
+                "sibyl.api.routes.context.plan_deterministic_refinement_queries",
+                return_value=[],
+            ),
+            patch(
+                "sibyl.api.routes.search.execute_search_request",
+                AsyncMock(return_value=_search_response("ship faster", ("ordinary", 0.9))),
+            ),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+            patch("sibyl.api.routes.context.get_context_graph_runtime", graph_runtime),
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    evidence={"retrieval_mode": "accurate"},
+                ),
+                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
+                ctx=_ctx(),
+            )
+
+        assert response.evidence is not None
+        assert response.evidence.filters["operational_source_expansion"]["status"] == (
+            "not_applicable"
+        )
+        graph_runtime.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_context_pack_accurate_evidence_preserves_provenance_after_empty_query(

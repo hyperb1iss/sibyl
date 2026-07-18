@@ -94,6 +94,7 @@ async def get_graph_runtime(group_id: str):
 __all__ = [
     "_dedupe_document_rows",
     "_merge_document_results",
+    "graph_entity_to_search_result",
     "search",
 ]
 
@@ -131,6 +132,7 @@ def _graph_candidate_metadata(
     *,
     organization_id: str,
     principal_id: str | None,
+    policy_reason: str,
 ) -> dict[str, Any]:
     metadata = _build_entity_metadata(entity)
     memory_scope = metadata.get("memory_scope")
@@ -148,9 +150,41 @@ def _graph_candidate_metadata(
             if principal_id or metadata.get("principal_id")
             else None,
             visibility=visibility,
-            policy_reason="search_scope_verified",
+            policy_reason=policy_reason,
         ),
         metadata=metadata,
+    )
+
+
+def graph_entity_to_search_result(
+    entity: Any,
+    *,
+    organization_id: str,
+    principal_id: str | None,
+    score: float,
+    include_content: bool = True,
+    content_max_chars: int = DEFAULT_SEARCH_CONTENT_MAX_CHARS,
+    policy_reason: str = "search_scope_verified",
+) -> SearchResult:
+    """Convert an authorized graph entity through the standard search contract."""
+    if include_content:
+        content = (entity.content or entity.description or "")[:content_max_chars]
+    else:
+        content = entity.description[:SEARCH_PREVIEW_MAX_CHARS] if entity.description else ""
+    return SearchResult(
+        id=entity.id,
+        type=entity.entity_type.value,
+        name=entity.name,
+        content=content,
+        score=score,
+        source=entity.source_file,
+        result_origin="graph",
+        metadata=_graph_candidate_metadata(
+            entity,
+            organization_id=organization_id,
+            principal_id=principal_id,
+            policy_reason=policy_reason,
+        ),
     )
 
 
@@ -1179,28 +1213,14 @@ async def search(
                 if not graph_result_allowed(entity):
                     continue
 
-                content = ""
-                if include_content:
-                    content = (entity.content or entity.description or "")[:content_max_chars]
-                else:
-                    content = (
-                        entity.description[:SEARCH_PREVIEW_MAX_CHARS] if entity.description else ""
-                    )
-
                 graph_results.append(
-                    SearchResult(
-                        id=entity.id,
-                        type=entity.entity_type.value,
-                        name=entity.name,
-                        content=content or "",
+                    graph_entity_to_search_result(
+                        entity,
+                        organization_id=organization_id,
+                        principal_id=principal_id,
                         score=score,
-                        source=entity.source_file,
-                        result_origin="graph",
-                        metadata=_graph_candidate_metadata(
-                            entity,
-                            organization_id=organization_id,
-                            principal_id=principal_id,
-                        ),
+                        include_content=include_content,
+                        content_max_chars=content_max_chars,
                     )
                 )
 
