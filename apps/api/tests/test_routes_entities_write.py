@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
@@ -10,6 +11,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from sibyl.api.routes.entities import (
+    _entity_from_bulk_create,
     create_entities_bulk,
     create_entity,
     delete_entity,
@@ -41,6 +43,28 @@ def _org() -> SimpleNamespace:
 
 def _ctx() -> SimpleNamespace:
     return SimpleNamespace(user=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222")))
+
+
+def test_bulk_entity_ids_are_idempotent_within_project_and_isolated_between_projects() -> None:
+    now = datetime.now(UTC)
+
+    def build(project_id: str) -> Entity:
+        return _entity_from_bulk_create(
+            EntityCreate(
+                name="Shared session",
+                content="same source content",
+                entity_type=EntityType.SESSION,
+                skip_conflicts=True,
+                metadata={"project_id": project_id},
+            ),
+            group_id=str(_org().id),
+            now=now,
+        )
+
+    first = build("project_first")
+
+    assert first.id == build("project_first").id
+    assert first.id != build("project_second").id
 
 
 def _project_entity(*, name: str, description: str) -> SimpleNamespace:

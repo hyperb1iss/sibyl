@@ -248,8 +248,12 @@ def _entity_from_bulk_create(
         "organization_id": group_id,
         **dict(entity.metadata or {}),
     }
+    identity_parts = [entity.name, entity.category or "general"]
+    project_id = str(metadata.get("project_id") or "").strip()
+    if project_id:
+        identity_parts.insert(0, project_id)
     return Entity(
-        id=_generate_id(entity.entity_type.value, entity.name, entity.category or "general"),
+        id=_generate_id(entity.entity_type.value, *identity_parts),
         entity_type=entity.entity_type,
         name=entity.name,
         description=entity.description or content[:500],
