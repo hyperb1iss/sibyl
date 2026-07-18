@@ -1926,7 +1926,7 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
             normalized_row.get("summary"),
             metadata.get("description"),
         ),
-        content=_first_text(
+        content=_first_content(
             normalized_row.get("content"),
             metadata.get("content"),
             normalized_row.get("summary"),
@@ -2043,6 +2043,16 @@ def _first_text(*values: object) -> str:
             continue
         text = str(value).strip()
         if text:
+            return text
+    return ""
+
+
+def _first_content(*values: object) -> str:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value)
+        if text.strip():
             return text
     return ""
 
@@ -2701,7 +2711,7 @@ def _persisted_entity_embedding_text(entity: Entity) -> str:
         update={
             "name": entity.name.strip(),
             "description": (entity.description or summary).strip(),
-            "content": (entity.content or summary).strip(),
+            "content": entity.content or summary,
         }
     )
     return entity_embedding_text(persisted)

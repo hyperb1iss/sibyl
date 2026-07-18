@@ -728,6 +728,20 @@ def test_entity_from_surreal_row_preserves_native_policy_metadata() -> None:
     assert "category" not in entity.metadata
 
 
+def test_entity_from_surreal_row_preserves_content_whitespace() -> None:
+    entity = entity_from_surreal_row(
+        {
+            "id": "entity:session_native",
+            "uuid": "session_native",
+            "name": "Native Session",
+            "entity_type": "session",
+            "content": "  verbatim body\n",
+        }
+    )
+
+    assert entity.content == "  verbatim body\n"
+
+
 @pytest.mark.asyncio
 async def test_native_entity_manager_generates_embeddings_with_native_provider() -> None:
     client = _EmbeddingWriteClient()
@@ -1216,7 +1230,7 @@ async def test_native_embedding_backfill_cannot_overwrite_or_resurrect_stale_ent
     assert stale_ids == []
     assert prepared[0].embedding
     assert current_ids == [current.id]
-    assert stored.content == "version two"
+    assert stored.content == "  version two\n"
     assert stored.embedding
     assert deleted_ids == []
 
@@ -1261,7 +1275,7 @@ async def test_native_embedding_backfill_accepts_hydrated_storage_defaults() -> 
 
     assert hydrated.name == "Captured state"
     assert hydrated.description == "Captured state"
-    assert hydrated.content == "exact evidence bytes"
+    assert hydrated.content == "  exact evidence bytes\n"
     assert hydrated_ids == [raw.id]
     assert repeated_ids == [raw.id]
     assert stored.embedding
