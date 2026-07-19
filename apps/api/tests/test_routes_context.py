@@ -238,6 +238,7 @@ def test_accurate_evidence_reservation_receipts_respect_limit() -> None:
             _search_response("deployment workflow state", ("supplemental", 0.95)),
         ],
         limit=1,
+        candidate_limit=2,
         failures=[],
         planner_usage={},
     )
@@ -263,6 +264,7 @@ def test_accurate_evidence_reservation_receipts_report_original_underfill() -> N
             _search_response("final outcome", ("outcome", 0.92)),
         ],
         limit=4,
+        candidate_limit=8,
         failures=[],
         planner_usage={},
     )
@@ -271,6 +273,60 @@ def test_accurate_evidence_reservation_receipts_report_original_underfill() -> N
     assert response.filters["original_reservation_target"] == 2
     assert response.filters["original_reserved_count"] == 1
     assert response.filters["supplemental_reserved_count"] == 2
+
+
+def test_accurate_evidence_prefers_source_diversity_then_backfills() -> None:
+    source_diverse = _search_response(
+        "ship faster",
+        ("source-a-1", 0.99),
+        ("source-a-2", 0.98),
+        ("source-a-3", 0.97),
+        ("source-b-1", 0.96),
+        ("source-c-1", 0.95),
+    )
+    for result, source_id in zip(
+        source_diverse.results,
+        ("source-a", "source-a", "source-a", "source-b", "source-c"),
+        strict=True,
+    ):
+        result.metadata["source_id"] = source_id
+
+    response = _fuse_context_evidence(
+        question="ship faster",
+        query_specs=[{"name": "original", "query": "ship faster", "facet": "original"}],
+        planned_queries=[],
+        responses=[source_diverse],
+        limit=4,
+        candidate_limit=8,
+        max_results_per_source=2,
+        failures=[],
+        planner_usage={},
+    )
+
+    assert [result.id for result in response.results] == [
+        "source-a-1",
+        "source-a-2",
+        "source-b-1",
+        "source-c-1",
+    ]
+    assert response.filters["max_results_per_source"] == 2
+    assert response.filters["source_diversity_selected_count"] == 4
+    assert response.filters["source_diversity_deferred_count"] == 1
+    assert response.filters["source_diversity_backfill_count"] == 0
+
+    backfilled = _fuse_context_evidence(
+        question="ship faster",
+        query_specs=[{"name": "original", "query": "ship faster", "facet": "original"}],
+        planned_queries=[],
+        responses=[source_diverse],
+        limit=5,
+        candidate_limit=10,
+        max_results_per_source=2,
+        failures=[],
+        planner_usage={},
+    )
+    assert len(backfilled.results) == 5
+    assert backfilled.filters["source_diversity_backfill_count"] == 1
 
 
 class TestContextPackRoute:
@@ -574,6 +630,7 @@ class TestContextPackRoute:
         ]
         assert all(isinstance(document, RetrievalFeedbackDocument) for document in first_documents)
         assert {call.args[0].query for call in search.call_args_list} == set(responses)
+        assert {call.args[0].limit for call in search.call_args_list} == {8}
         assert response.evidence is not None
         assert [result.id for result in response.evidence.results] == [
             "shared",
@@ -597,6 +654,8 @@ class TestContextPackRoute:
         assert response.evidence.filters["refinement_novel_result_counts"] == [1, 2]
         assert response.evidence.filters["refinement_stop_reason"] == "query_budget_exhausted"
         assert response.evidence.filters["query_count"] == 4
+        assert response.evidence.filters["candidate_limit"] == 8
+        assert response.evidence.filters["output_limit"] == 4
         assert response.evidence.filters["successful_query_count"] == 4
         assert response.evidence.filters["query_failures"] == []
         assert response.evidence.filters["original_reservation_target"] == 2

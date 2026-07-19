@@ -71,6 +71,22 @@ _CONJUNCTION_COMMAND_PATTERN = re.compile(
     rf"\s+and\s+(?=(?:please\s+)?{_RESPONSE_COMMAND}\b)",
     re.I,
 )
+_ENUMERATED_TARGETS_PATTERN = re.compile(
+    r"\bfor\s+(?:the\s+)?"
+    r"(?P<targets>(?:(?![.!?]).){1,240}?\b(?:lists?|pages?|panes?))"
+    r"(?=[.!?])",
+    re.I,
+)
+_INTERROGATIVE_CLAUSE_PATTERN = re.compile(
+    r"^(?:how|what|when|where|which|who|why)\b",
+    re.I,
+)
+_COORDINATED_TERMS_PATTERN = re.compile(
+    r"\b(?P<left>[A-Za-z][\w-]{2,})(?:\s+(?:and|or)\s+|\s*/\s*)"
+    r"(?P<right>[A-Za-z][\w-]{2,})\b",
+    re.I,
+)
+_TARGET_SUFFIX_PATTERN = re.compile(r"\b(?:lists?|pages?|panes?)$", re.I)
 _OPERATIONAL_PROJECTION_KINDS = {
     "manifest",
     "procedure",
@@ -140,6 +156,14 @@ def plan_deterministic_refinement_queries(
     planned: list[DeterministicRefinementQuery] = []
 
     explicit_anchors = extract_explicit_query_anchors(question)
+    for candidate in _structural_refinement_queries(
+        question,
+        explicit_anchors=explicit_anchors,
+    ):
+        _append_query(planned, seen, candidate, max_queries=max_queries)
+    if len(planned) >= max_queries:
+        return planned
+
     explicit_anchor_terms = tuple(
         dict.fromkeys(term for anchor in explicit_anchors for term in anchor)
     )
@@ -211,6 +235,112 @@ def plan_deterministic_refinement_queries(
         )
 
     return planned
+
+
+def _structural_refinement_queries(
+    question: str,
+    *,
+    explicit_anchors: Sequence[Sequence[str]],
+) -> list[DeterministicRefinementQuery]:
+    targets = _enumerated_targets(question)
+    terminal_clause = _terminal_interrogative_clause(question)
+    candidates: list[DeterministicRefinementQuery] = []
+    if targets:
+        target_terms = set(extract_keywords(" ".join(targets)))
+        intent_terms = [
+            term
+            for term in extract_keywords(terminal_clause or question)
+            if term not in target_terms
+        ]
+        anchor_query = " ".join(f'"{" ".join(anchor)}"' for anchor in explicit_anchors)
+        for target in targets:
+            candidates.append(
+                DeterministicRefinementQuery(
+                    query=_bounded_query(
+                        " ".join(
+                            part
+                            for part in (
+                                anchor_query,
+                                f'"{target}"',
+                                " ".join(intent_terms),
+                            )
+                            if part
+                        )
+                    ),
+                    facet="target",
+                    added_terms=tuple(extract_keywords(target)),
+                )
+            )
+        return candidates
+
+    if terminal_clause and explicit_anchors:
+        terminal_terms = _structural_keywords(terminal_clause)
+        normalized_terminal = terminal_clause.casefold()
+        omitted_anchor = any(
+            " ".join(anchor).casefold() not in normalized_terminal for anchor in explicit_anchors
+        )
+        if omitted_anchor and len(terminal_terms) >= 4:
+            candidates.append(
+                DeterministicRefinementQuery(
+                    query=_bounded_query(" ".join(terminal_terms)),
+                    facet="focus_clause",
+                )
+            )
+    return candidates
+
+
+def _structural_keywords(text: str) -> list[str]:
+    coordinated_terms = {
+        term.casefold()
+        for match in _COORDINATED_TERMS_PATTERN.finditer(text)
+        for term in (match.group("left"), match.group("right"))
+    }
+    terms: list[str] = []
+    for token in re.findall(r"[A-Za-z][\w-]*", text):
+        extracted = extract_keywords(token)
+        if extracted:
+            term = extracted[0]
+        elif token.casefold() in coordinated_terms:
+            term = token.casefold()
+        else:
+            continue
+        if term not in terms:
+            terms.append(term)
+    return terms
+
+
+def _enumerated_targets(question: str) -> tuple[str, ...]:
+    match = _ENUMERATED_TARGETS_PATTERN.search(question)
+    if match is None:
+        return ()
+    raw_targets = re.sub(
+        r"\s*,\s*(?:and|or)\s+",
+        ",",
+        match.group("targets"),
+        flags=re.I,
+    )
+    targets = tuple(
+        " ".join(target.strip(" ,;:").split())
+        for target in re.split(r"\s*,\s*|\s+(?:and|or)\s+", raw_targets, flags=re.I)
+        if target.strip(" ,;:")
+    )
+    if len(targets) < 2 or any(
+        len(target.split()) > 8 or _TARGET_SUFFIX_PATTERN.search(target) is None
+        for target in targets
+    ):
+        return ()
+    return targets
+
+
+def _terminal_interrogative_clause(question: str) -> str:
+    clauses = _split_query_clauses(question)
+    if len(clauses) < 2:
+        return ""
+    for clause in reversed(clauses):
+        normalized = clause.strip(" ,;:")
+        if _INTERROGATIVE_CLAUSE_PATTERN.match(normalized):
+            return normalized
+    return ""
 
 
 def _rank_feedback_terms(

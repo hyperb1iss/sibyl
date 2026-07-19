@@ -50,6 +50,49 @@ def test_refinement_strips_answer_formatting_and_focuses_explicit_anchors() -> N
     assert all("boxed" not in query.query for query in planned)
 
 
+def test_refinement_decomposes_enumerated_targets_across_rounds() -> None:
+    question = (
+        "In `Layout Settings`, inspect the default `Pinned` pane for the "
+        "North list, South list, and West list. Which footer label appears "
+        "on each page?"
+    )
+
+    first_round = plan_deterministic_refinement_queries(
+        question,
+        [],
+        max_queries=1,
+    )
+    second_round = plan_deterministic_refinement_queries(
+        question,
+        [],
+        max_queries=2,
+        seen_queries=[first_round[0].query],
+    )
+
+    assert [item.facet for item in [*first_round, *second_round]] == [
+        "target",
+        "target",
+        "target",
+    ]
+    assert [item.query for item in [*first_round, *second_round]] == [
+        '"layout setting" "pinned" "North list" footer label appear each page',
+        '"layout setting" "pinned" "South list" footer label appear each page',
+        '"layout setting" "pinned" "West list" footer label appear each page',
+    ]
+
+
+def test_refinement_isolates_specific_terminal_question_from_quoted_example() -> None:
+    planned = plan_deterministic_refinement_queries(
+        "In Catalog, product links begin with `Product card #...`. "
+        "What prefix is used for archive/review dashboard links?",
+        [],
+        max_queries=1,
+    )
+
+    assert planned[0].facet == "focus_clause"
+    assert planned[0].query == "prefix used archive review dashboard link"
+
+
 def test_refinement_preserves_question_after_prefix_answer_formatting() -> None:
     planned = plan_deterministic_refinement_queries(
         r"Provide the final answer in \boxed{}. Which column changed?",

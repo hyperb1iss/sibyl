@@ -68,6 +68,8 @@ _DETERMINISTIC_REFINEMENT_USAGE: dict[str, str | int | float | bool | None] = {
     "cost_usd": 0.0,
     "cost_complete": True,
 }
+_ACCURATE_EVIDENCE_OVERSAMPLE_FACTOR = 2
+_MAX_SEARCH_RESULTS = 50
 
 
 async def get_context_graph_runtime(group_id: str):
@@ -102,13 +104,14 @@ def _context_evidence_request(
     request: ContextPackRequest,
     *,
     query: str,
+    candidate_limit: int | None = None,
 ) -> SearchRequest:
     assert request.evidence is not None
     return SearchRequest(
         query=query,
         types=request.evidence.types,
         project=request.project,
-        limit=request.evidence.limit,
+        limit=candidate_limit or request.evidence.limit,
         include_content=True,
         content_max_chars=request.evidence.content_max_chars,
         include_documents=False,
@@ -126,9 +129,12 @@ def _result_key(result: SearchResult) -> str:
 
 
 def _feedback_source_id(result: SearchResult) -> str:
-    value = result.metadata.get("operational_source_id")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
+    for key in ("operational_source_id", "source_id"):
+        value = result.metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    if isinstance(result.source, str) and result.source.strip():
+        return result.source.strip()
     return _result_key(result)
 
 
@@ -152,6 +158,8 @@ def _fuse_context_evidence(
     planned_queries: list[dict[str, Any]],
     responses: list[SearchResponse],
     limit: int,
+    candidate_limit: int,
+    max_results_per_source: int | None = None,
     failures: list[dict[str, str | int]],
     planner_usage: dict[str, str | int | float | bool | None],
     planner_status: str = "success",
@@ -173,14 +181,33 @@ def _fuse_context_evidence(
 
     ordered_keys: list[str] = []
     seen: set[str] = set()
+    source_counts: dict[str, int] = {}
+    deferred_keys: list[str] = []
+    deferred_seen: set[str] = set()
+
+    def reserve_result(result: SearchResult, *, allow_source_overflow: bool = False) -> bool:
+        key = _result_key(result)
+        if key in seen:
+            return False
+        source_id = _feedback_source_id(result)
+        if (
+            not allow_source_overflow
+            and max_results_per_source is not None
+            and source_counts.get(source_id, 0) >= max_results_per_source
+        ):
+            if key not in deferred_seen:
+                deferred_keys.append(key)
+                deferred_seen.add(key)
+            return False
+        ordered_keys.append(key)
+        seen.add(key)
+        source_counts[source_id] = source_counts.get(source_id, 0) + 1
+        return True
 
     def reserve_unique(response: SearchResponse, count: int) -> int:
         reserved = 0
         for result in response.results:
-            key = _result_key(result)
-            if key not in seen:
-                ordered_keys.append(key)
-                seen.add(key)
+            if reserve_result(result):
                 reserved += 1
                 if reserved >= count:
                     break
@@ -194,10 +221,16 @@ def _fuse_context_evidence(
             break
         supplemental_reserved_count += reserve_unique(response, 1)
     for result, _score, _metadata in fused:
-        key = _result_key(result)
-        if key not in seen:
-            ordered_keys.append(key)
-            seen.add(key)
+        reserve_result(result)
+
+    source_diversity_selected_count = min(len(ordered_keys), limit)
+    source_diversity_backfill_count = 0
+    for key in deferred_keys:
+        if len(ordered_keys) >= limit:
+            break
+        result, _score, _metadata = fused_by_key[key]
+        if reserve_result(result, allow_source_overflow=True):
+            source_diversity_backfill_count += 1
 
     selected: list[SearchResult] = []
     for key in ordered_keys[:limit]:
@@ -226,6 +259,12 @@ def _fuse_context_evidence(
             "planner_usage": planner_usage,
             "planned_queries": planned_queries,
             "query_count": 1 + len(planned_queries),
+            "candidate_limit": candidate_limit,
+            "output_limit": limit,
+            "max_results_per_source": max_results_per_source,
+            "source_diversity_selected_count": source_diversity_selected_count,
+            "source_diversity_deferred_count": len(deferred_keys),
+            "source_diversity_backfill_count": source_diversity_backfill_count,
             "successful_query_count": len(responses),
             "query_failures": failures,
             "refinement_rounds": refinement_rounds,
@@ -259,6 +298,7 @@ async def _execute_context_refinement_round(
     ctx: AuthContext,
     embedding_usage: dict[str, str | int | float],
     seen_result_keys: set[str],
+    candidate_limit: int,
 ) -> tuple[
     list[tuple[dict[str, Any], SearchResponse]],
     list[dict[str, str | int]],
@@ -267,7 +307,11 @@ async def _execute_context_refinement_round(
     tasks = [
         asyncio.create_task(
             _execute_context_evidence_search(
-                _context_evidence_request(request, query=spec["query"]),
+                _context_evidence_request(
+                    request,
+                    query=spec["query"],
+                    candidate_limit=candidate_limit,
+                ),
                 org=org,
                 ctx=ctx,
                 embedding_usage=embedding_usage,
@@ -312,8 +356,16 @@ async def _execute_accurate_context_evidence_search(
 ) -> SearchResponse:
     assert request.evidence is not None
     retrieval_goal = normalize_retrieval_question(request.goal)
+    candidate_limit = min(
+        _MAX_SEARCH_RESULTS,
+        request.evidence.limit * _ACCURATE_EVIDENCE_OVERSAMPLE_FACTOR,
+    )
     original_response = await _execute_context_evidence_search(
-        _context_evidence_request(request, query=retrieval_goal),
+        _context_evidence_request(
+            request,
+            query=retrieval_goal,
+            candidate_limit=candidate_limit,
+        ),
         org=org,
         ctx=ctx,
         embedding_usage=embedding_usage,
@@ -394,6 +446,7 @@ async def _execute_accurate_context_evidence_search(
             ctx=ctx,
             embedding_usage=embedding_usage,
             seen_result_keys=seen_result_keys,
+            candidate_limit=candidate_limit,
         )
         failures.extend(round_failures)
         for spec, response in successful:
@@ -424,6 +477,8 @@ async def _execute_accurate_context_evidence_search(
         planned_queries=planned_queries,
         responses=responses,
         limit=request.evidence.limit,
+        candidate_limit=candidate_limit,
+        max_results_per_source=request.evidence.max_results_per_source,
         failures=failures,
         planner_usage=dict(_DETERMINISTIC_REFINEMENT_USAGE),
         planner_status=planner_status,
