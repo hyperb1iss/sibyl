@@ -64,11 +64,19 @@ EXPECTED_PLANNER_INPUT_TOKENS = 84
 EXPECTED_PLANNER_OUTPUT_TOKENS = 22
 EXPECTED_RETRIEVAL_MAX_PLANNED_QUERIES = 3
 EXPECTED_WHITESPACE_EXPOSURE_CHARS = 2
+EXPECTED_SELECTED_WINDOW_COUNT = 2
+EXPECTED_ASSEMBLED_RESULT_COUNT = 5
+EXPECTED_ASSEMBLED_SEED_COUNT = 4
+EXPECTED_RESTORED_SCORE = 0.9
+EXPECTED_REFINEMENT_SOURCE_CHUNK = 3
+EXPECTED_SHA256_HEX_LENGTH = 64
+EXPECTED_CREDENTIAL_FILE_MODE = 0o600
 OPERATIONAL_EVIDENCE_MAX_CHARS = 4_000
 TEST_CONTENT_MAX_CHARS = 420
 TEST_CONTEXT_MAX_CHARS = 800
 TEST_CONTEXT_TOTAL_CHARS = 700
 TEST_CREDENTIAL = "fresh-credential"
+ROTATED_CREDENTIAL = f"rotated-{TEST_CREDENTIAL}"
 TEST_EMAIL = "eval@example.test"
 
 
@@ -155,6 +163,7 @@ def _finalize_request_handler(
             assert json["evidence"] == {
                 "types": ["session"],
                 "limit": 12,
+                "max_results_per_source": EXPECTED_MAX_CHUNKS_PER_TRAJECTORY,
                 "content_max_chars": TEST_CONTEXT_MAX_CHARS,
                 "include_retrieval_diagnostics": True,
                 "retrieval_mode": "fast",
@@ -208,7 +217,7 @@ def test_longmemeval_v2_download_patterns_default_to_text_context() -> None:
     assert "trajectory_screenshots/*.tar.gz" in full_patterns
 
 
-def test_official_runner_plan_materializes_honest_runtime_inputs(
+def test_official_runner_plan_materializes_honest_runtime_inputs(  # noqa: PLR0915
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -218,6 +227,11 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(
     monkeypatch.setenv("LME_SIBYL_PASSWORD", "before-test")
     data_root = tmp_path / "data"
     output_dir = tmp_path / "out"
+    credentials_path = tmp_path / "credentials.json"
+    credentials_path.write_text(
+        json.dumps({"access_token": "access", "refresh_token": "refresh"}),
+        encoding="utf-8",
+    )
     _write_dataset(data_root)
 
     assert (
@@ -235,8 +249,13 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(
                 "1",
                 "--plan-only",
                 "--allow-localhost",
+                "--project-id",
+                "project-existing",
+                "--reuse-existing-project",
                 "--api-token",
                 TEST_CREDENTIAL,
+                "--api-credentials-file",
+                str(credentials_path),
                 "--email",
                 TEST_EMAIL,
                 "--password",
@@ -265,7 +284,10 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(
     assert runtime_haystack == {"q-enterprise": ["t1", "t2"]}
     assert memory_config["memory_type"] == "sibyl_live_api"
     _assert_credentials_stay_process_local(memory_config)
+    assert os.environ["SIBYL_API_CREDENTIALS_FILE"] == str(credentials_path)
     assert memory_config["memory_params"]["allow_localhost"] is True
+    assert memory_config["memory_params"]["project_id"] == "project-existing"
+    assert memory_config["memory_params"]["reuse_existing_project"] is True
     assert memory_config["memory_params"]["defer_embeddings"] is True
     assert (
         memory_config["memory_params"]["content_max_chars"],
@@ -313,6 +335,7 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(
     assert plan["memory_api_timeout_seconds"] == EXPECTED_MEMORY_API_TIMEOUT_SECONDS
     assert plan["memory_api_retry_attempts"] == EXPECTED_MEMORY_API_RETRY_ATTEMPTS
     assert plan["chunking_mode"] == "state"
+    assert plan["reuse_existing_project"] is True
     assert plan["max_chunks_per_trajectory"] == EXPECTED_MAX_CHUNKS_PER_TRAJECTORY
     assert plan["neighbor_stitch_items"] == EXPECTED_NEIGHBOR_STITCH_ITEMS
     assert plan["neighbor_stitch_span"] == EXPECTED_NEIGHBOR_STITCH_SPAN
@@ -365,6 +388,23 @@ def test_official_runner_refuses_existing_provider_usage_before_work(tmp_path: P
         )
 
     assert not (output_dir / "runtime_inputs").exists()
+
+
+def test_official_runner_requires_project_id_for_reuse(tmp_path: Path) -> None:
+    module = _load_runner_module()
+
+    with pytest.raises(SystemExit):
+        module.parse_args(
+            [
+                "--data-root",
+                str(tmp_path / "data"),
+                "--domain",
+                "enterprise",
+                "--output-dir",
+                str(tmp_path / "output"),
+                "--reuse-existing-project",
+            ]
+        )
 
 
 def _assert_question_id_hash_propagates(
@@ -980,12 +1020,16 @@ def test_longmemeval_v2_receipt_redacts_sensitive_command_args() -> None:
         [
             "--api-token",
             "sibyl-secret-token",
+            "--api-credentials-file",
+            "credentials.json",
             "--password=hunter2",
             "--domain",
             "web",
         ]
     ) == [
         "--api-token",
+        "<redacted>",
+        "--api-credentials-file",
         "<redacted>",
         "--password=<redacted>",
         "--domain",
@@ -1265,6 +1309,84 @@ def test_sibyl_memory_request_retries_transient_timeout(capsys) -> None:
     assert "retrying attempt 2/2" in capsys.readouterr().err
 
 
+def test_sibyl_memory_refresh_persists_rotated_credentials_bundle(tmp_path: Path) -> None:
+    module = _load_memory_module()
+    credentials_path = tmp_path / "credentials.json"
+    credentials_path.write_text(
+        json.dumps(
+            {
+                "access_token": TEST_CREDENTIAL,
+                "refresh_token": TEST_CREDENTIAL,
+                "organization": {"id": "org-test"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.headers: dict[str, str] = {}
+
+        def post(self, path: str, *, json: dict[str, object]) -> httpx.Response:
+            assert path == "/auth/refresh"
+            assert json == {"refresh_token": TEST_CREDENTIAL}
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": ROTATED_CREDENTIAL,
+                    "refresh_token": ROTATED_CREDENTIAL,
+                    "expires_in": 900,
+                },
+            )
+
+    memory._client = FakeClient()
+    memory._refresh_token = TEST_CREDENTIAL
+    memory._api_credentials_path = credentials_path
+    memory._cli_auth = {}
+
+    assert memory._refresh_access_token() is True
+    assert memory._refresh_token == ROTATED_CREDENTIAL
+    assert memory._client.headers["Authorization"] == f"Bearer {ROTATED_CREDENTIAL}"
+    assert json.loads(credentials_path.read_text(encoding="utf-8")) == {
+        "access_token": ROTATED_CREDENTIAL,
+        "refresh_token": ROTATED_CREDENTIAL,
+        "expires_in": 900,
+        "organization": {"id": "org-test"},
+    }
+    assert credentials_path.stat().st_mode & 0o777 == EXPECTED_CREDENTIAL_FILE_MODE
+
+
+def test_sibyl_memory_auth_loads_refreshable_credentials_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_memory_module()
+    credentials_path = tmp_path / "credentials.json"
+    credentials_path.write_text(
+        json.dumps(
+            {
+                "access_token": TEST_CREDENTIAL,
+                "refresh_token": TEST_CREDENTIAL,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SIBYL_API_CREDENTIALS_FILE", str(credentials_path))
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    memory.api_url = "http://127.0.0.1:3434/api"
+    memory.allow_localhost = True
+    memory._client = SimpleNamespace(headers={})
+
+    memory._authenticate({})
+
+    assert memory._api_credentials_path == credentials_path
+    assert memory._refresh_token == TEST_CREDENTIAL
+    assert memory._client.headers["Authorization"] == f"Bearer {TEST_CREDENTIAL}"
+
+
 def test_sibyl_memory_payloads_chunk_trajectory_by_state() -> None:
     module = _load_memory_module()
 
@@ -1281,6 +1403,7 @@ def test_sibyl_memory_payloads_chunk_trajectory_by_state() -> None:
     assert all(payload["skip_conflicts"] is True for payload in payloads)
     assert all(len(str(payload["content"])) <= TEST_CONTENT_MAX_CHARS for payload in payloads)
     assert payloads[0]["metadata"]["project_id"] == "project_lme"
+    assert payloads[0]["metadata"]["source_id"] == "longmemeval-v2:run_lme:t1"
     assert payloads[0]["metadata"]["longmemeval_v2_trajectory_id"] == "t1"
     assert all(
         payload["metadata"]["longmemeval_v2_state_indices"]
@@ -1446,6 +1569,7 @@ def test_sibyl_memory_context_formats_retrieved_content() -> None:
             "result_origin": "graph",
             "selection_origin": "search",
             "search_rank": None,
+            "trajectory_refined_from_chunk": None,
             "state_part_of_search_rank": None,
             "state_part_refined_from_chunk": None,
             "neighbor_of_search_rank": None,
@@ -1492,6 +1616,360 @@ def test_sibyl_memory_context_budget_fairly_preserves_selected_evidence() -> Non
     assert [item["exposed_chars"] for item in trace] == [
         item["exposed_content_chars"] for item in metadata["items"]
     ]
+
+
+def test_sibyl_memory_context_selects_late_query_evidence_windows() -> None:
+    module = _load_memory_module()
+    content = "".join(
+        [
+            "Trajectory: t1\n",
+            "Domain: enterprise\n",
+            "Goal: review policy\n",
+            "\n",
+            "State 7\n",
+            "URL: https://example.test/policy\n",
+            "Action: inspect policy\n",
+            "Accessibility tree:\n",
+            *(f"\tStaticText 'irrelevant row {index}'\n" for index in range(45)),
+            "\tStaticText 'Refund window: 30 days'\n",
+            *(f"\tStaticText 'middle row {index}'\n" for index in range(30)),
+            "\tStaticText 'Shipping carrier: Northern Express'\n",
+            *(f"\tStaticText 'tail row {index}'\n" for index in range(20)),
+        ]
+    )
+    result = {
+        "id": "entity-t1",
+        "type": "session",
+        "content": content,
+        "metadata": {
+            "longmemeval_v2_trajectory_id": "t1",
+            "longmemeval_v2_chunk_index": 0,
+        },
+    }
+    max_content_chars = 900
+    header_chars = len(module._memory_context_header(1, result)) + 2
+
+    context, metadata = module.render_memory_context(
+        [result],
+        query="Which shipping carrier handled it and how long was the refund window?",
+        max_items=1,
+        max_chars_per_item=max_content_chars,
+        max_total_chars=header_chars + max_content_chars,
+    )
+
+    rendered = context[0]["value"]
+    compaction = metadata["items"][0]["compaction"]
+    assert "Refund window: 30 days" in rendered
+    assert "Shipping carrier: Northern Express" in rendered
+    assert "State 7" in rendered
+    assert "[Source slice: lines" in rendered
+    assert "[Omitted source lines" in rendered
+    assert compaction["mode"] == "query_slices"
+    assert compaction["ranking_applied"] is True
+    assert compaction["selected_window_count"] == EXPECTED_SELECTED_WINDOW_COUNT
+    assert len(rendered) <= header_chars + max_content_chars
+    trace = module.build_retrieval_trace(
+        [result],
+        max_items=1,
+        max_chars_per_item=max_content_chars,
+        context_budget=metadata,
+    )
+    assert trace[0]["content_compaction"] == compaction
+
+
+def test_sibyl_memory_context_reserves_structured_option_evidence() -> None:
+    module = _load_memory_module()
+    query = (
+        'Open the "Filters" dropdown, excluding "Edit personal filters" and '
+        '"-- None --". Which option labels contain "Incident"?'
+    )
+    content = "".join(
+        [
+            "Trajectory: t1\n",
+            "Domain: enterprise\n",
+            "\n",
+            "State 9\n",
+            "URL: https://example.test/incidents\n",
+            "Accessibility tree:\n",
+            "\tbutton 'Filters'\n",
+            *(f"\tStaticText 'generic incident row {index}'\n" for index in range(60)),
+            "\tmenuitem 'Incident Mobile'\n",
+            "\tmenuitem 'Incident Portal'\n",
+            "\tmenuitem 'My Open Incidents'\n",
+            *(f"\tStaticText 'tail row {index}'\n" for index in range(20)),
+        ]
+    )
+
+    exposed, metadata = module.compact_content_for_query(query, content, max_chars=800)
+
+    assert module._query_focus_phrases(query) == ("Filters", "Incident")
+    assert "Incident Mobile" in exposed
+    assert "Incident Portal" in exposed
+    assert "My Open Incidents" in exposed
+    assert metadata["mode"] == "query_slices"
+    assert metadata["structured_selected_window_count"] >= 1
+
+
+def test_sibyl_memory_context_selects_interactive_entries_below_section_heading() -> None:
+    module = _load_memory_module()
+    query = (
+        "On the `Data Management Delete Job` form, what are the two entries under `Related Links`?"
+    )
+    content = "".join(
+        [
+            "Trajectory: t1\n",
+            "Domain: enterprise\n",
+            "\n",
+            "State 66\n",
+            "URL: https://example.test/delete-job\n",
+            "Accessibility tree:\n",
+            "\tRootWebArea 'Data Management Delete Job'\n",
+            "\tlink 'Back'\n",
+            *(f"\tStaticText 'generic form row {index}'\n" for index in range(60)),
+            "\tregion 'Related Links'\n",
+            "\t\theading 'Related Links'\n",
+            "\t\tlist\n",
+            "\t\t\tlistitem\n",
+            "\t\t\t\tbutton 'Preview Cascade'\n",
+            "\t\t\tlistitem\n",
+            "\t\t\t\tbutton 'Execute Now'\n",
+            *(f"\tStaticText 'tail row {index}'\n" for index in range(20)),
+        ]
+    )
+
+    exposed, metadata = module.compact_content_for_query(query, content, max_chars=800)
+
+    assert "Preview Cascade" in exposed
+    assert "Execute Now" in exposed
+    assert metadata["mode"] == "query_slices"
+    assert metadata["structured_selected_window_count"] >= 1
+
+
+def test_sibyl_memory_context_infers_unquoted_choice_section_focus() -> None:
+    module = _load_memory_module()
+    query = (
+        "Compare the `Standard Laptop` and `Sales Laptop` pages. Which optional "
+        "software choices appear only on the latter?"
+    )
+    content = "".join(
+        [
+            "Trajectory: t1\n",
+            "Domain: enterprise\n",
+            "\n",
+            "State 69\n",
+            "URL: https://example.test/sales-laptop\n",
+            "Accessibility tree:\n",
+            "\tRootWebArea 'Sales Laptop'\n",
+            *(f"\tStaticText 'generic product row {index}'\n" for index in range(60)),
+            "\theading 'Optional Software'\n",
+            "\t\tLayoutTable\n",
+            "\t\t\tcheckbox 'Presentation Suite'\n",
+            "\t\tLayoutTable\n",
+            "\t\t\tcheckbox 'Project Planner'\n",
+            "\t\tLayoutTable\n",
+            "\t\t\tcheckbox 'Diagram Editor'\n",
+            "\t\tLayoutTable\n",
+            "\t\t\tcheckbox 'CRM Client'\n",
+            "\theading 'Additional Requirements'\n",
+            *(f"\tStaticText 'tail row {index}'\n" for index in range(20)),
+        ]
+    )
+
+    exposed, metadata = module.compact_content_for_query(query, content, max_chars=800)
+
+    assert module._query_focus_phrases(query) == (
+        "Standard Laptop",
+        "Sales Laptop",
+        "optional software",
+    )
+    assert module._query_ui_roles(query) == ("option", "checkbox", "radio")
+    assert "Presentation Suite" in exposed
+    assert "CRM Client" in exposed
+    assert metadata["structured_selected_window_count"] >= 1
+
+
+def test_sibyl_memory_context_focuses_terminal_clause_over_quoted_example() -> None:
+    module = _load_memory_module()
+    query = (
+        'The report starts from an "Incident with hashtag" example. '
+        "What prefix was used for the inventory/order dashboard report link?"
+    )
+
+    assert module._query_focus_phrases(query) == (
+        "Incident with hashtag",
+        "prefix",
+        "used",
+        "inventory",
+        "order",
+        "dashboard",
+        "report",
+    )
+
+
+def test_sibyl_memory_context_focuses_each_enumerated_target() -> None:
+    module = _load_memory_module()
+    query = (
+        "In `Personalize List Columns`, look at the default `Selected` pane for "
+        "the Assets list, Users list, and Catalog Items list. What is the "
+        "bottom-most selected label on each page?"
+    )
+
+    assert module._query_focus_phrases(query) == (
+        "Personalize List Columns",
+        "Selected",
+        "is the bottom-most selected",
+        "asset",
+        "user",
+        "catalog",
+        "item",
+    )
+    assert module._query_ui_roles(query) == ("option", "columnheader")
+
+
+def test_sibyl_memory_context_keeps_labeled_listbox_options() -> None:
+    module = _load_memory_module()
+    query = (
+        "In `Personalize List Columns`, look at the default `Selected` pane for "
+        "the Assets list. What is the bottom-most selected label?"
+    )
+    content = "".join(
+        [
+            "Trajectory: t1\n",
+            "Domain: enterprise\n",
+            "\n",
+            "State 1\n",
+            "URL: https://example.test/assets\n",
+            "Accessibility tree:\n",
+            "\tRootWebArea 'Assets list'\n",
+            *(f"\tStaticText 'generic row {index}'\n" for index in range(50)),
+            "\tLabelText ''\n",
+            "\t\tStaticText 'Selected'\n",
+            "\tlistbox 'Selected'\n",
+            "\t\toption 'Alpha'\n",
+            "\t\toption 'Beta'\n",
+            "\t\toption 'Gamma'\n",
+            *(f"\tStaticText 'tail row {index}'\n" for index in range(20)),
+        ]
+    )
+
+    exposed, metadata = module.compact_content_for_query(query, content, max_chars=800)
+
+    assert "option 'Alpha'" in exposed
+    assert "option 'Gamma'" in exposed
+    assert metadata["structured_selected_window_count"] >= 1
+
+
+def test_sibyl_memory_context_keeps_successor_state_after_tail_match() -> None:
+    module = _load_memory_module()
+    query = (
+        'The report starts from an "Incident with hashtag" example. '
+        "What prefix was used for the inventory/order dashboard report link?"
+    )
+    content = "".join(
+        [
+            "Trajectory: t1\n",
+            "Domain: enterprise\n",
+            "\n",
+            "State 1\n",
+            "Accessibility tree:\n",
+            *(f"\tStaticText 'generic row {index}'\n" for index in range(40)),
+            "\tlink 'Inventory order dashboard report'\n",
+            "\n",
+            "State 2\n",
+            "Accessibility tree:\n",
+            "\tStaticText 'Prefix value appears after navigation'\n",
+            *(f"\tStaticText 'successor row {index}'\n" for index in range(20)),
+        ]
+    )
+
+    exposed, metadata = module.compact_content_for_query(query, content, max_chars=900)
+
+    assert "State 2" in exposed
+    assert "Prefix value appears after navigation" in exposed
+    assert metadata["version"] == "query-aware-source-windows-v4"
+    assert metadata["mode"] == "query_slices"
+
+
+def test_sibyl_memory_structured_section_keeps_successor_state() -> None:
+    module = _load_memory_module()
+    query = (
+        'The report starts from an "Incident with hashtag" example. '
+        "What prefix was used for the inventory/order dashboard report link?"
+    )
+    content = "".join(
+        [
+            "Trajectory: t1\n",
+            "Domain: enterprise\n",
+            "\n",
+            "State 1\n",
+            "Accessibility tree:\n",
+            *(f"\tStaticText 'generic row {index}'\n" for index in range(40)),
+            "\theading 'Inventory order dashboard report'\n",
+            "\t\tlink 'Open report'\n",
+            "\n",
+            "State 2\n",
+            "Accessibility tree:\n",
+            "\tStaticText 'Prefix value appears after navigation'\n",
+            *(f"\tStaticText 'successor row {index}'\n" for index in range(20)),
+        ]
+    )
+
+    exposed, metadata = module.compact_content_for_query(query, content, max_chars=900)
+
+    assert metadata["structured_selected_window_count"] >= 1
+    assert "State 2" in exposed
+    assert "Prefix value appears after navigation" in exposed
+
+
+def test_sibyl_memory_near_tail_match_crosses_blank_state_separator() -> None:
+    module = _load_memory_module()
+    query = (
+        'The report starts from an "Incident with hashtag" example. '
+        "What prefix was used for the inventory/order dashboard report link?"
+    )
+    content = "".join(
+        [
+            "Trajectory: t1\n",
+            "Domain: enterprise\n",
+            "\n",
+            "State 1\n",
+            "Accessibility tree:\n",
+            *(f"\tStaticText 'generic row {index}'\n" for index in range(30)),
+            "\tbutton 'Inventory order dashboard report'\n",
+            *(f"\tStaticText 'trailing row {index}'\n" for index in range(6)),
+            "\n",
+            "State 2\n",
+            "Accessibility tree:\n",
+            "\tStaticText 'Prefix value appears after navigation'\n",
+            *(f"\tStaticText 'successor row {index}'\n" for index in range(20)),
+        ]
+    )
+
+    exposed, _metadata = module.compact_content_for_query(query, content, max_chars=900)
+
+    assert "State 2" in exposed
+    assert "Prefix value appears after navigation" in exposed
+
+
+def test_sibyl_memory_slice_overlap_detects_cross_state_successor_lines() -> None:
+    module = _load_memory_module()
+
+    assert module._query_slice_windows_overlap(
+        {
+            "state_start_line": 10,
+            "window_start_line": 20,
+            "window_end_line": 40,
+            "window_start_char": 200,
+            "window_end_char": 400,
+        },
+        {
+            "state_start_line": 35,
+            "window_start_line": 35,
+            "window_end_line": 50,
+            "window_start_char": 350,
+            "window_end_char": 500,
+        },
+    )
 
 
 def test_sibyl_memory_context_budget_reports_fully_dropped_rows() -> None:
@@ -1696,6 +2174,134 @@ def test_sibyl_memory_assembles_diverse_seeds_with_neighbors() -> None:
     assert assembled[-1]["metadata"]["longmemeval_v2_chunk_index"] == 0
     assert metadata["selected_search_seed_count"] == len(assembled) - 1
     assert metadata["stitched_neighbor_count"] == 1
+
+
+def test_sibyl_memory_expansion_candidates_do_not_consume_seed_budget() -> None:
+    module = _load_memory_module()
+    query = "inventory order dashboard prefix"
+    first = _search_result("t1", chunk_index=1, state_index=1, score=1.0)
+    neighbor = _search_result("t1", chunk_index=0, state_index=0, score=0.0)
+    neighbor["content"] = (
+        "Goal: inventory order dashboard prefix\n\n"
+        "State 0\nAccessibility tree:\nunrelated neighboring state"
+    )
+    results = [
+        first,
+        _search_result("t2", chunk_index=0, state_index=0, score=0.9),
+        _search_result("t3", chunk_index=0, state_index=0, score=0.8),
+        _search_result("target", chunk_index=0, state_index=0, score=0.7),
+    ]
+    results[-1]["content"] = query
+    candidate_limit = module.context_assembly_candidate_limit(
+        max_items=4,
+        neighbor_stitch_items=1,
+        state_part_completion_items=0,
+        has_chunk_catalog=True,
+    )
+
+    assembled, metadata = module.assemble_context_results(
+        results,
+        chunk_catalog={"t1": {0: neighbor, 1: first}},
+        max_items=candidate_limit,
+        max_chunks_per_trajectory=2,
+        neighbor_stitch_items=1,
+        neighbor_stitch_span=1,
+        query=query,
+    )
+    selected, composition = module.compile_operational_evidence_set(
+        query=query,
+        typed_results=[],
+        raw_results=assembled,
+        max_items=4,
+    )
+
+    assert candidate_limit == EXPECTED_ASSEMBLED_RESULT_COUNT
+    assert metadata["selected_search_seed_count"] == EXPECTED_ASSEMBLED_SEED_COUNT
+    assert metadata["stitched_neighbor_count"] == 1
+    assert len(assembled) == EXPECTED_ASSEMBLED_RESULT_COUNT
+    assert any(
+        result["metadata"]["longmemeval_v2_trajectory_id"] == "target" for result in selected
+    )
+    assert composition["candidate_count"] == EXPECTED_ASSEMBLED_RESULT_COUNT
+    assert composition["selected_raw_support_count"] == 0
+
+
+def test_sibyl_memory_restores_transport_truncated_search_content() -> None:
+    module = _load_memory_module()
+    search_result = _search_result("t1", chunk_index=1, state_index=1, score=0.9)
+    search_result["id"] = "entity:search-result"
+    search_result["content"] = "Trajectory: t1\n\nState 1\ntruncated"
+    catalog_result = _search_result("t1", chunk_index=1, state_index=1, score=0.0)
+    catalog_result["content"] = (
+        "Trajectory: t1\n\nState 1\nAccessibility tree:\n" + "full source evidence " * 100
+    )
+
+    assembled, metadata = module.assemble_context_results(
+        [search_result],
+        chunk_catalog={"t1": {1: catalog_result}},
+        max_items=1,
+        max_chunks_per_trajectory=1,
+        neighbor_stitch_items=0,
+        neighbor_stitch_span=0,
+    )
+
+    assert assembled[0]["id"] == "entity:search-result"
+    assert assembled[0]["score"] == EXPECTED_RESTORED_SCORE
+    assert assembled[0]["content"] == catalog_result["content"]
+    assert assembled[0]["_source_content_restored"] is True
+    assert assembled[0]["_transport_content_chars"] == len(search_result["content"])
+    assert assembled[0]["_source_content_chars"] == len(catalog_result["content"])
+    assert metadata["restored_search_result_count"] == 1
+    assert metadata["restored_transport_content_chars"] == len(search_result["content"])
+    assert metadata["restored_source_content_chars"] == len(catalog_result["content"])
+
+
+def test_sibyl_memory_refines_retrieved_trajectory_to_structured_query_evidence() -> None:
+    module = _load_memory_module()
+    query = (
+        'Open the "Filters" dropdown, excluding "Edit personal filters" and '
+        '"-- None --". Which option labels contain "Incident"?'
+    )
+    seed = _search_result("t1", chunk_index=3, state_index=3, score=0.9)
+    seed["content"] = "State 3\nAccessibility tree:\nbutton 'Incidents'"
+    excluded = _search_result("t1", chunk_index=2, state_index=2, score=0.0)
+    excluded["content"] = "State 2\nAccessibility tree:\noption 'Edit personal filters'"
+    target = _search_result("t1", chunk_index=1, state_index=1, score=0.0)
+    target["content"] = "\n".join(
+        (
+            "State 1",
+            "Accessibility tree:",
+            "menuitem 'Incident Mobile'",
+            "menuitem 'Incident Portal'",
+            "menuitem 'My Open Incidents'",
+        )
+    )
+
+    assembled, metadata = module.assemble_context_results(
+        [seed],
+        chunk_catalog={"t1": {1: target, 2: excluded, 3: seed}},
+        max_items=1,
+        max_chunks_per_trajectory=1,
+        neighbor_stitch_items=0,
+        neighbor_stitch_span=0,
+        query=query,
+    )
+
+    assert [module._result_chunk_key(result) for result in assembled] == [("t1", 1)]
+    assert assembled[0]["_selection_origin"] == "trajectory_refinement"
+    assert assembled[0]["_trajectory_refined_from_chunk"] == EXPECTED_REFINEMENT_SOURCE_CHUNK
+    refinement = metadata["trajectory_refinement"]
+    assert refinement["query_focus_phrases"] == ["Filters", "Incident"]
+    assert refinement["query_ui_roles"] == ["menuitem", "option"]
+    assert len(refinement["replacements"]) == 1
+    replacement = refinement["replacements"][0]
+    assert replacement["search_rank"] == 1
+    assert replacement["trajectory_id"] == "t1"
+    assert replacement["from_chunk_key"] == ["t1", 3]
+    assert replacement["to_chunk_key"] == ["t1", 1]
+    assert replacement["from_signal"] == [0, 0, 0, 0, 0]
+    assert replacement["to_signal"][0] > 0
+    assert replacement["to_signal"][1] == 1
 
 
 def test_sibyl_memory_expansion_budget_drops_whole_tail_items() -> None:
@@ -2109,6 +2715,404 @@ def test_sibyl_memory_constructor_preserves_disabled_neighbor_stitching(
         memory._client.close()
 
 
+def test_sibyl_memory_attaches_existing_project_for_query_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_memory_module()
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_authenticate", lambda *args: None)
+    trajectory = _trajectory("trajectory_test")
+    payloads = module.build_entity_payloads_for_trajectory(
+        trajectory,
+        project_id="project_test",
+        run_id="run_test",
+    )
+    stored_payloads = [
+        {**payload, "id": f"session_{index}"} for index, payload in enumerate(payloads)
+    ]
+
+    def fake_request(
+        _self: object,
+        method: str,
+        path: str,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        if path == "/health":
+            return {"status": "healthy"}
+        if path == "/entities":
+            assert kwargs["params"] == {
+                "entity_type": "session",
+                "project_ids": "project_test",
+                "page": 1,
+                "page_size": 200,
+            }
+            return {
+                "entities": stored_payloads,
+                "has_more": False,
+            }
+        if path.startswith("/entities/session_"):
+            index = int(path.removeprefix("/entities/session_"))
+            return stored_payloads[index]
+        assert method == "GET"
+        assert path == "/entities/project_test"
+        return {"id": "project_test", "entity_type": "project"}
+
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_request_json", fake_request)
+
+    memory = module.SibylLiveApiMemory.attach_existing(
+        {
+            "allow_localhost": True,
+            "project_id": "project_test",
+            "run_id": "run_test",
+        },
+        expected_trajectory_ids={"trajectory_test"},
+        trajectories=[trajectory],
+    )
+    try:
+        assert memory.reuse_existing_project is True
+        assert memory._ingest_finalized is True
+        receipt = memory.attached_project_receipt
+        assert {
+            key: receipt[key]
+            for key in (
+                "project_id",
+                "run_id",
+                "session_entity_count",
+                "expected_session_entity_count",
+                "expected_trajectory_count",
+                "observed_trajectory_count",
+                "extra_trajectory_count",
+                "catalog_trajectory_count",
+                "catalog_entity_count",
+                "missing_chunk_count",
+                "unexpected_chunk_count",
+                "duplicate_chunk_count",
+                "catalog_mismatch_count",
+                "source_metadata_mismatch_count",
+                "storage_shapes",
+                "pages",
+            )
+        } == {
+            "project_id": "project_test",
+            "run_id": "run_test",
+            "session_entity_count": len(payloads),
+            "expected_session_entity_count": len(payloads),
+            "expected_trajectory_count": 1,
+            "observed_trajectory_count": 1,
+            "extra_trajectory_count": 0,
+            "catalog_trajectory_count": 1,
+            "catalog_entity_count": len(payloads),
+            "missing_chunk_count": 0,
+            "unexpected_chunk_count": 0,
+            "duplicate_chunk_count": 0,
+            "catalog_mismatch_count": 0,
+            "source_metadata_mismatch_count": 0,
+            "storage_shapes": ["legacy"],
+            "pages": 1,
+        }
+        assert receipt["content_audit"]["status"] == "verified"
+        assert receipt["content_audit"]["entity_count"] == len(payloads)
+        memory.insert(trajectory)
+        assert memory._ingest_finalized is False
+    finally:
+        memory._client.close()
+
+
+def test_sibyl_memory_attaches_current_operational_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_memory_module()
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_authenticate", lambda *args: None)
+    trajectory = _trajectory("trajectory_test")
+    payloads = module.build_operational_session_payloads_for_trajectory(
+        trajectory,
+        project_id="project_test",
+        run_id="run_test",
+    )
+    stored_by_id = {str(payload["id"]): payload for payload in payloads}
+
+    def fake_request(
+        _self: object,
+        method: str,
+        path: str,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        if path == "/health":
+            return {"status": "healthy"}
+        if path == "/entities":
+            return {"entities": payloads, "has_more": False}
+        if path.startswith("/entities/") and path.removeprefix("/entities/") in stored_by_id:
+            return stored_by_id[path.removeprefix("/entities/")]
+        assert method == "GET"
+        assert path == "/entities/project_test"
+        return {"id": "project_test", "entity_type": "project"}
+
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_request_json", fake_request)
+
+    memory = module.SibylLiveApiMemory.attach_existing(
+        {
+            "allow_localhost": True,
+            "project_id": "project_test",
+            "run_id": "run_test",
+        },
+        expected_trajectory_ids={"trajectory_test"},
+        trajectories=[trajectory],
+    )
+    try:
+        assert memory.attached_project_receipt["storage_shapes"] == ["operational"]
+        assert memory.attached_project_receipt["content_audit"]["status"] == "verified"
+        assert memory.attached_project_receipt["content_audit"]["entity_count"] == len(payloads)
+    finally:
+        memory._client.close()
+
+
+def test_sibyl_memory_repair_audit_rejects_content_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_memory_module()
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_authenticate", lambda *args: None)
+    trajectory = _trajectory("trajectory_test")
+    payloads = module.build_entity_payloads_for_trajectory(
+        trajectory,
+        project_id="project_test",
+        run_id="run_test",
+    )
+
+    def fake_request(
+        _self: object,
+        method: str,
+        path: str,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        if path == "/health":
+            return {"status": "healthy"}
+        if path == "/entities":
+            return {
+                "entities": [
+                    {
+                        "id": f"session_{index}",
+                        "name": payload["name"],
+                        "metadata": payload["metadata"],
+                    }
+                    for index, payload in enumerate(payloads)
+                ],
+                "has_more": False,
+            }
+        if path.startswith("/entities/session_"):
+            index = int(path.removeprefix("/entities/session_"))
+            return {**payloads[index], "id": f"session_{index}", "content": "drifted"}
+        assert method == "GET"
+        assert path == "/entities/project_test"
+        return {"id": "project_test", "entity_type": "project"}
+
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_request_json", fake_request)
+
+    memory = module.SibylLiveApiMemory.prepare_existing(
+        {
+            "allow_localhost": True,
+            "project_id": "project_test",
+            "run_id": "run_test",
+        },
+        expected_trajectory_ids={"trajectory_test"},
+        trajectories=[trajectory],
+    )
+    try:
+        dry_run = memory.repair_attached_project(apply=False)
+        assert dry_run["repairable"] is False
+        assert dry_run["non_repairable_reasons"] == ["content_mismatch"]
+        assert dry_run["before"]["content_audit"]["status"] == "mismatch"
+        with pytest.raises(RuntimeError, match="content_mismatch"):
+            memory.repair_attached_project(apply=True)
+    finally:
+        memory._client.close()
+
+
+def test_sibyl_memory_repair_dry_run_reports_structural_damage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_memory_module()
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_authenticate", lambda *args: None)
+    trajectory = _trajectory("trajectory_test")
+    payloads = module.build_entity_payloads_for_trajectory(
+        trajectory,
+        project_id="project_test",
+        run_id="run_test",
+    )
+    stored = [{**payload, "id": f"session_{index}"} for index, payload in enumerate(payloads)]
+    stored[0]["name"] = "damaged name"
+
+    def fake_request(
+        _self: object,
+        method: str,
+        path: str,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        if path == "/health":
+            return {"status": "healthy"}
+        if path == "/entities":
+            return {"entities": stored, "has_more": False}
+        assert method == "GET"
+        assert path == "/entities/project_test"
+        return {"id": "project_test", "entity_type": "project"}
+
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_request_json", fake_request)
+    memory = module.SibylLiveApiMemory.prepare_existing(
+        {
+            "allow_localhost": True,
+            "project_id": "project_test",
+            "run_id": "run_test",
+        },
+        expected_trajectory_ids={"trajectory_test"},
+        trajectories=[trajectory],
+    )
+    try:
+        dry_run = memory.repair_attached_project(apply=False)
+        assert dry_run["repairable"] is False
+        assert dry_run["non_repairable_reasons"] == ["catalog_mismatches"]
+        assert dry_run["before"]["content_audit"]["status"] == ("blocked_by_inventory_damage")
+    finally:
+        memory._client.close()
+
+
+def test_sibyl_memory_attach_existing_requires_project_id() -> None:
+    module = _load_memory_module()
+
+    with pytest.raises(ValueError, match="requires project_id"):
+        module.SibylLiveApiMemory.attach_existing(
+            {},
+            expected_trajectory_ids={"trajectory_test"},
+            trajectories=[],
+        )
+
+
+def test_official_runner_rejects_reuse_with_checkpoint_dir(tmp_path: Path) -> None:
+    module = _load_runner_module()
+
+    with pytest.raises(SystemExit):
+        module.parse_args(
+            [
+                "--data-root",
+                str(tmp_path),
+                "--domain",
+                "web",
+                "--output-dir",
+                str(tmp_path / "output"),
+                "--project-id",
+                "project_test",
+                "--reuse-existing-project",
+                "--checkpoint-dir",
+                str(tmp_path / "checkpoint"),
+            ]
+        )
+
+
+def test_sibyl_memory_repairs_only_missing_attached_project_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_memory_module()
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_authenticate", lambda *args: None)
+    trajectory = _trajectory("trajectory_test")
+    payloads = module.build_entity_payloads_for_trajectory(
+        trajectory,
+        project_id="project_test",
+        run_id="run_test",
+    )
+    existing_payload = {
+        **payloads[0],
+        "id": "session_existing_0",
+        "metadata": {
+            key: value for key, value in payloads[0]["metadata"].items() if key != "source_id"
+        },
+    }
+    stored_payloads = [existing_payload]
+    repaired_entities: dict[str, dict[str, object]] = {"session_existing_0": existing_payload}
+    posted_batches: list[list[dict[str, object]]] = []
+
+    def fake_request(
+        _self: object,
+        method: str,
+        path: str,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        if path == "/health":
+            return {"status": "healthy"}
+        if path == "/entities" and method == "GET":
+            return {
+                "entities": [
+                    {
+                        "id": payload.get("id"),
+                        "name": payload["name"],
+                        "content": payload["content"],
+                        "metadata": payload["metadata"],
+                    }
+                    for payload in stored_payloads
+                ],
+                "has_more": False,
+            }
+        if path == "/entities/session_existing_0" and method == "PATCH":
+            request_json = cast(dict[str, object], kwargs["json"])
+            metadata = cast(dict[str, object], request_json["metadata"])
+            existing_payload["metadata"] = {
+                **cast(dict[str, object], existing_payload["metadata"]),
+                **metadata,
+            }
+            return existing_payload
+        if path == "/entities/bulk" and method == "POST":
+            request_json = cast(dict[str, object], kwargs["json"])
+            batch = cast(list[dict[str, object]], request_json["entities"])
+            posted_batches.append(batch)
+            response_entities: list[dict[str, object]] = []
+            for index, payload in enumerate(batch):
+                entity_id = f"session_repaired_{index}"
+                stored: dict[str, object] = {**payload, "id": entity_id}
+                stored_payloads.append(stored)
+                repaired_entities[entity_id] = stored
+                response_entities.append({"id": entity_id})
+            return {
+                "created": len(batch),
+                "entities": response_entities,
+                "background_jobs": {},
+            }
+        if path.startswith("/entities/session_") and method == "GET":
+            return repaired_entities[path.removeprefix("/entities/")]
+        assert method == "GET"
+        assert path == "/entities/project_test"
+        return {"id": "project_test", "entity_type": "project"}
+
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_request_json", fake_request)
+    memory = module.SibylLiveApiMemory.prepare_existing(
+        {
+            "allow_localhost": True,
+            "project_id": "project_test",
+            "run_id": "run_test",
+            "defer_embeddings": False,
+        },
+        expected_trajectory_ids={"trajectory_test"},
+        trajectories=[trajectory],
+    )
+    try:
+        dry_run = memory.repair_attached_project(apply=False)
+
+        assert (dry_run["applied"], dry_run["repairable"]) == (False, True)
+        assert dry_run["before"]["missing_chunk_count"] == 1
+        assert dry_run["before"]["source_metadata_mismatch_count"] == 1
+        assert posted_batches == []
+
+        applied = memory.repair_attached_project(apply=True)
+
+        assert applied["applied"] is True
+        assert applied["created_entity_count"] == 1
+        assert applied["updated_entity_count"] == 1
+        assert applied["verified_entity_count"] == 1
+        assert len(applied["verified_content_sha256"]) == EXPECTED_SHA256_HEX_LENGTH
+        assert len(applied["verified_source_metadata_sha256"]) == EXPECTED_SHA256_HEX_LENGTH
+        assert applied["after"]["missing_chunk_count"] == 0
+        assert applied["after"]["source_metadata_mismatch_count"] == 0
+        assert posted_batches == [[payloads[1]]]
+        assert memory._ingest_finalized is True
+    finally:
+        memory._client.close()
+
+
 def test_sibyl_memory_rejects_invisible_saved_project() -> None:
     module = _load_memory_module()
     memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
@@ -2284,6 +3288,7 @@ def test_sibyl_memory_accurate_query_rejects_planner_fallback() -> None:
     assert request_payloads[0]["evidence"] == {
         "types": ["session"],
         "limit": 12,
+        "max_results_per_source": EXPECTED_MAX_CHUNKS_PER_TRAJECTORY,
         "content_max_chars": TEST_CONTEXT_MAX_CHARS,
         "include_retrieval_diagnostics": True,
         "retrieval_mode": "accurate",
@@ -2699,7 +3704,7 @@ def test_shared_relevance_preserves_linked_raw_support(
     )
 
     selected, metadata = module.compile_operational_evidence_set(
-        query="anything",
+        query="Which linked raw support was recorded?",
         typed_results=typed,
         raw_results=raw,
         max_items=8,
@@ -2820,6 +3825,46 @@ def test_operational_evidence_set_admits_relevant_typed_memory() -> None:
     assert metadata["selected_raw_count"] == 1
 
 
+def test_shared_relevance_preserves_upstream_raw_order() -> None:
+    module = _load_memory_module()
+    raw = [
+        {
+            "id": "header-only",
+            "type": "session",
+            "content": (
+                "Goal: inventory order dashboard prefix\n\n"
+                "State 1\nAccessibility tree:\nUnrelated incident list"
+            ),
+            "score": 1.0,
+            "_selection_origin": "search",
+            "_search_rank": 1,
+        },
+        {
+            "id": "state-match",
+            "type": "session",
+            "content": (
+                "Goal: unrelated task\n\n"
+                "State 2\nAccessibility tree:\ninventory order dashboard prefix"
+            ),
+            "score": 0.5,
+            "_selection_origin": "search",
+            "_search_rank": 2,
+        },
+    ]
+
+    selected, metadata = module.compile_operational_evidence_set(
+        query="inventory order dashboard prefix",
+        typed_results=[],
+        raw_results=raw,
+        max_items=1,
+        mode="shared_relevance",
+    )
+
+    assert [item["id"] for item in selected] == ["header-only"]
+    assert metadata["ranking_applied"] is True
+    assert metadata["ranking_changed"] is False
+
+
 def test_shared_relevance_selects_support_with_its_parent_seed() -> None:
     module = _load_memory_module()
     typed = [
@@ -2833,6 +3878,13 @@ def test_shared_relevance_selects_support_with_its_parent_seed() -> None:
     ]
     raw = [
         {
+            "id": "support-1",
+            "type": "session",
+            "content": "The value shown for the Deployment Ring is Critical",
+            "_selection_origin": "neighbor",
+            "_neighbor_of_search_rank": 1,
+        },
+        {
             "id": "parent-1",
             "type": "session",
             "content": "Deployment settings overview",
@@ -2845,13 +3897,6 @@ def test_shared_relevance_selects_support_with_its_parent_seed() -> None:
             "content": "Deployment Ring overview",
             "_selection_origin": "search",
             "_search_rank": 2,
-        },
-        {
-            "id": "support-1",
-            "type": "session",
-            "content": "Deployment Ring: Critical",
-            "_selection_origin": "neighbor",
-            "_neighbor_of_search_rank": 1,
         },
     ]
 
@@ -2883,7 +3928,7 @@ def test_shared_relevance_preserves_multiple_support_pairs() -> None:
         {
             "id": f"support-{index}",
             "type": "session",
-            "content": "Deployment settings",
+            "content": "Deployment region value settings",
             "_selection_origin": "neighbor",
             "_neighbor_of_search_rank": index,
         }
@@ -2891,7 +3936,7 @@ def test_shared_relevance_preserves_multiple_support_pairs() -> None:
     )
 
     selected, metadata = module.compile_operational_evidence_set(
-        query="Which deployment settings are shown?",
+        query="Which deployment region value settings are shown?",
         typed_results=[],
         raw_results=raw,
         max_items=6,
@@ -2926,36 +3971,36 @@ def test_shared_relevance_diversifies_grouped_support() -> None:
             {
                 "id": "support-1a",
                 "type": "session",
-                "content": "Deployment settings",
+                "content": "Deployment region value settings",
                 "_selection_origin": "neighbor",
                 "_neighbor_of_search_rank": 1,
             },
             {
-                "id": "support-1b",
-                "type": "session",
-                "content": "Deployment settings",
-                "_selection_origin": "state_part",
-                "_state_part_of_search_rank": 1,
-            },
-            {
                 "id": "support-2",
                 "type": "session",
-                "content": "Deployment settings",
+                "content": "Deployment region value settings",
                 "_selection_origin": "neighbor",
                 "_neighbor_of_search_rank": 2,
             },
             {
                 "id": "support-3",
                 "type": "session",
-                "content": "Deployment settings",
+                "content": "Deployment region value settings",
                 "_selection_origin": "neighbor",
                 "_neighbor_of_search_rank": 3,
+            },
+            {
+                "id": "support-1b",
+                "type": "session",
+                "content": "Deployment region value settings",
+                "_selection_origin": "state_part",
+                "_state_part_of_search_rank": 1,
             },
         ]
     )
 
     selected, metadata = module.compile_operational_evidence_set(
-        query="Which deployment settings are shown?",
+        query="Which deployment region value settings are shown?",
         typed_results=[],
         raw_results=raw,
         max_items=6,
@@ -3551,6 +4596,9 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
         "stage_timings_ms": {"total": 12.5},
         "adapter_assembly": {
             "input_result_count": 0,
+            "restored_search_result_count": 0,
+            "restored_transport_content_chars": 0,
+            "restored_source_content_chars": 0,
             "selected_search_seed_count": 0,
             "completed_state_part_count": 0,
             "stitched_neighbor_count": 0,
@@ -3563,6 +4611,14 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
                 "candidate_count": 0,
                 "ranking_applied": False,
                 "admitted_chunk_keys": [],
+            },
+            "trajectory_refinement": {
+                "enabled": False,
+                "query_focus_phrases": [],
+                "query_ui_roles": [],
+                "inspected_trajectory_count": 0,
+                "candidate_count": 0,
+                "replacements": [],
             },
             "state_part_refinement": {
                 "enabled": False,

@@ -9,6 +9,7 @@ import pytest
 
 EXPECTED_EXACT_CONTEXT_RECALL = 0.5
 EXPECTED_LEXICAL_SOURCE_REACHABILITY = 0.5
+EXPECTED_ANSWER_PHRASE_COUNT = 3
 
 
 def _load_module() -> ModuleType:
@@ -95,11 +96,11 @@ def test_diagnostics_separate_selection_exposure_and_reader_failures(tmp_path: P
         == EXPECTED_LEXICAL_SOURCE_REACHABILITY
     )
     assert report["evidence_reference"] == {
-        "source": "exact_answer_occurrence_proxy",
+        "source": "exact_answer_phrase_occurrence_proxy",
         "official_state_labels_available": False,
         "semantic_evidence_recall_supported": False,
         "legacy_multi_state_metric": (
-            "normalized substring occurrence coverage; not semantic evidence coverage"
+            "normalized answer-phrase occurrence coverage; not semantic evidence coverage"
         ),
     }
     assert {case["question_id"] for case in slice_record["cases"]} == {
@@ -290,6 +291,62 @@ def test_diagnostics_does_not_assign_bare_support_ordinal_to_typed_trajectory() 
 
     assert row["metrics"]["state_recall_at_k"] is False
     assert row["metrics"]["lexical_source_reachability_at_k"] is False
+
+
+def test_diagnostics_requires_all_phrase_set_answers_in_rendered_context() -> None:
+    module = _load_module()
+    question = {
+        **_question("q-phrase-set"),
+        "answer": "Incident Mobile, Incident Portal, My Open Incidents",
+        "eval_function": (
+            "norm_phrase_set_match|lower=true|normalize_hyphen=true|"
+            "strip_punct=true|separators=,;|require_non_empty=true"
+        ),
+    }
+    trajectories = {
+        "t-evidence": _trajectory(
+            "t-evidence",
+            tree="Incident Mobile\nIncident Portal\nMy Open Incidents",
+        )
+    }
+    full_result = _result(
+        "q-phrase-set",
+        trajectory_id="t-evidence",
+        content="Incident Mobile\nIncident Portal\nMy Open Incidents",
+    )
+    partial_result = _result(
+        "q-phrase-set",
+        trajectory_id="t-evidence",
+        content="Incident Mobile\nIncident Portal",
+    )
+
+    full_row = module.build_question_trace(
+        domain="enterprise",
+        result=full_result,
+        question=question,
+        haystack_ids=["t-evidence"],
+        state_text_index=module.build_state_text_index(trajectories),
+        max_rank=10,
+    )
+    partial_row = module.build_question_trace(
+        domain="enterprise",
+        result=partial_result,
+        question=question,
+        haystack_ids=["t-evidence"],
+        state_text_index=module.build_state_text_index(trajectories),
+        max_rank=10,
+    )
+
+    assert full_row["exact_evidence_eligible"] is True
+    assert full_row["exact_evidence_source_complete"] is True
+    assert full_row["metrics"]["answer_phrase_count"] == EXPECTED_ANSWER_PHRASE_COUNT
+    assert full_row["metrics"]["exact_context_recall_at_k"] is True
+    assert full_row["metrics"]["context_answer_phrase_coverage_at_k"] == 1.0
+    assert partial_row["failure_class"] == "evidence_exposure_miss"
+    assert partial_row["metrics"]["exact_context_recall_at_k"] is False
+    assert partial_row["metrics"]["context_answer_phrase_coverage_at_k"] == pytest.approx(2 / 3)
+    assert "Incident Mobile" not in json.dumps(full_row)
+    assert "My Open Incidents" not in json.dumps(full_row)
 
 
 def _question(question_id: str) -> dict[str, object]:

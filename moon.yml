@@ -461,6 +461,8 @@ tasks:
       benchmarks/longmemeval_v2_causal_ablation_report.py
       benchmarks/longmemeval_v2_validation_slice.py
       benchmarks/longmemeval_v2_validation_slice_v2.py
+      benchmarks/longmemeval_v2_live_retrieval.py
+      benchmarks/longmemeval_v2_repair_project.py
       benchmarks/longmemeval_v2_live_smoke.py
       benchmarks/longmemeval_v2_projection_audit.py && uv run ruff format --check tools
       benchmarks/provider_usage.py benchmarks/longmemeval_v2_diagnostics.py
@@ -474,6 +476,9 @@ tasks:
       benchmarks/longmemeval_v2_causal_ablation_report.py
       benchmarks/longmemeval_v2_validation_slice.py
       benchmarks/longmemeval_v2_validation_slice_v2.py
+      benchmarks/longmemeval_v2_live_retrieval.py
+      benchmarks/longmemeval_v2_repair_project.py
+      benchmarks/longmemeval_v2_memory
       benchmarks/longmemeval_v2_live_smoke.py benchmarks/longmemeval_v2_projection_audit.py
     inputs:
       - tools/**/*.py
@@ -491,6 +496,9 @@ tasks:
       - benchmarks/longmemeval_v2_causal_ablation_report.py
       - benchmarks/longmemeval_v2_validation_slice.py
       - benchmarks/longmemeval_v2_validation_slice_v2.py
+      - benchmarks/longmemeval_v2_live_retrieval.py
+      - benchmarks/longmemeval_v2_repair_project.py
+      - benchmarks/longmemeval_v2_memory/**/*.py
       - benchmarks/longmemeval_v2_composition_validation.json
       - benchmarks/longmemeval_v2_composition_validation_v2.json
       - benchmarks/longmemeval_v2_live_smoke.py
@@ -511,6 +519,9 @@ tasks:
       benchmarks/longmemeval_v2_causal_ablation_report.py
       benchmarks/longmemeval_v2_validation_slice.py
       benchmarks/longmemeval_v2_validation_slice_v2.py
+      benchmarks/longmemeval_v2_live_retrieval.py
+      benchmarks/longmemeval_v2_repair_project.py
+      benchmarks/longmemeval_v2_memory
       benchmarks/longmemeval_v2_live_smoke.py benchmarks/longmemeval_v2_projection_audit.py
     inputs:
       - tools/**/*.py
@@ -528,6 +539,7 @@ tasks:
       - benchmarks/longmemeval_v2_causal_ablation_report.py
       - benchmarks/longmemeval_v2_validation_slice.py
       - benchmarks/longmemeval_v2_validation_slice_v2.py
+      - benchmarks/longmemeval_v2_live_retrieval.py
       - benchmarks/longmemeval_v2_composition_validation.json
       - benchmarks/longmemeval_v2_composition_validation_v2.json
       - benchmarks/longmemeval_v2_live_smoke.py
@@ -546,6 +558,7 @@ tasks:
       benchmarks/longmemeval_v2_causal_ablation_report.py
       benchmarks/longmemeval_v2_validation_slice.py
       benchmarks/longmemeval_v2_validation_slice_v2.py
+      benchmarks/longmemeval_v2_live_retrieval.py
     inputs:
       - tools/**/*.py
       - benchmarks/git_provenance.py
@@ -558,6 +571,7 @@ tasks:
       - benchmarks/longmemeval_v2_causal_ablation_report.py
       - benchmarks/longmemeval_v2_validation_slice.py
       - benchmarks/longmemeval_v2_validation_slice_v2.py
+      - benchmarks/longmemeval_v2_live_retrieval.py
       - benchmarks/longmemeval_v2_composition_validation.json
       - benchmarks/longmemeval_v2_composition_validation_v2.json
       - pyproject.toml
@@ -783,6 +797,8 @@ tasks:
       tools/tests/test_longmemeval_v2_probe.py tools/tests/test_longmemeval_v2_official.py
       tools/tests/test_longmemeval_v2_composition_replay.py
       tools/tests/test_longmemeval_v2_diagnostics.py
+      tools/tests/test_longmemeval_v2_live_retrieval.py
+      tools/tests/test_longmemeval_v2_repair_project.py
       tools/tests/test_longmemeval_v2_live_smoke.py
       tools/tests/test_longmemeval_v2_projection_audit.py
       tools/tests/test_longmemeval_v2_ablations.py
@@ -803,6 +819,8 @@ tasks:
       - benchmarks/longmemeval_v2_official.py
       - benchmarks/longmemeval_v2_composition_replay.py
       - benchmarks/longmemeval_v2_diagnostics.py
+      - benchmarks/longmemeval_v2_live_retrieval.py
+      - benchmarks/longmemeval_v2_repair_project.py
       - benchmarks/longmemeval_v2_live_smoke.py
       - benchmarks/longmemeval_v2_projection_audit.py
       - benchmarks/longmemeval_v2_ablations.py
@@ -1410,9 +1428,21 @@ tasks:
     options:
       cache: false
 
+  bench-longmemeval-v2-live-retrieval:
+    command: uv run python benchmarks/longmemeval_v2_live_retrieval.py
+    options:
+      cache: false
+
+  bench-longmemeval-v2-repair-project:
+    command: uv run python benchmarks/longmemeval_v2_repair_project.py
+    options:
+      cache: false
+
   bench-longmemeval-v2-operational-test:
     command:
-      uv run pytest tools/tests/test_longmemeval_v2_live_smoke.py
+      uv run pytest tools/tests/test_longmemeval_v2_live_retrieval.py
+      tools/tests/test_longmemeval_v2_repair_project.py
+      tools/tests/test_longmemeval_v2_live_smoke.py
       tools/tests/test_longmemeval_v2_projection_audit.py -v
     options:
       cache: false

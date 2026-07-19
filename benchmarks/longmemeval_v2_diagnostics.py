@@ -13,7 +13,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-DIAGNOSTIC_SCHEMA_VERSION = "sibyl-longmemeval-v2-diagnostics-v2"
+DIAGNOSTIC_SCHEMA_VERSION = "sibyl-longmemeval-v2-diagnostics-v3"
 SLICE_SCHEMA_VERSION = "sibyl-longmemeval-v2-diagnostic-slice-v1"
 DEFAULT_MAX_RANK = 10
 DEFAULT_SLICE_SIZE_PER_DOMAIN = 16
@@ -25,6 +25,7 @@ _CHUNK_PATTERN = re.compile(r"^Chunk:\s*(\d+)", re.MULTILINE)
 _STATE_PATTERN = re.compile(r"^State\s+(\d+)\b", re.MULTILINE)
 _RANK_PATTERN = re.compile(r"^Retrieved evidence rank\s+(\d+)", re.MULTILINE)
 _SCORE_PATTERN = re.compile(r"^Score:\s*([^\n]+)", re.MULTILINE)
+_PHRASE_SEPARATORS_PATTERN = re.compile(r"(?:^|\|)separators=([^|]*)")
 _JSONL_ID_PREFIX_PATTERN = re.compile(r'^\s*\{\s*"id"\s*:\s*"([^"]+)"')
 _FAILURE_PRIORITY = (
     "trajectory_selection_miss",
@@ -193,11 +194,13 @@ def build_question_trace(
     max_rank: int,
 ) -> dict[str, Any]:
     answer = str(question.get("answer") or "")
-    normalized_answer = normalize_text(answer)
-    evidence_eligible = is_exact_evidence_eligible(normalized_answer)
+    answer_phrases = answer_evidence_phrases(question)
+    evidence_eligible = bool(answer_phrases) and all(
+        is_exact_evidence_eligible(phrase) for phrase in answer_phrases
+    )
     evidence_states = (
         find_exact_evidence_states(
-            normalized_answer,
+            answer_phrases,
             haystack_ids=haystack_ids,
             state_text_index=state_text_index,
         )
@@ -224,18 +227,35 @@ def build_question_trace(
     gold_state_pairs = {
         (str(item["trajectory_id"]), int(item["state_index"])) for item in evidence_states
     }
-    trajectory_hit = bool(retrieved_trajectory_ids & set(evidence_trajectories))
-    matched_state_count = len(retrieved_state_pairs & gold_state_pairs)
-    state_hit = matched_state_count > 0
-    lexical_source_hit = bool(lexical_source_state_pairs & gold_state_pairs)
-    visible_hit = any(
-        normalized_answer and normalized_answer in normalize_text(str(item["state_content"]))
-        for item in ranked
+    source_phrase_indices = evidence_phrase_indices(evidence_states)
+    source_complete = len(source_phrase_indices) == len(answer_phrases)
+    trajectory_phrase_indices = evidence_phrase_indices(
+        item for item in evidence_states if str(item["trajectory_id"]) in retrieved_trajectory_ids
     )
+    trajectory_hit = len(trajectory_phrase_indices) == len(answer_phrases)
+    matched_state_count = len(retrieved_state_pairs & gold_state_pairs)
+    state_phrase_indices = evidence_phrase_indices(
+        item
+        for item in evidence_states
+        if (str(item["trajectory_id"]), int(item["state_index"])) in retrieved_state_pairs
+    )
+    state_hit = len(state_phrase_indices) == len(answer_phrases)
+    lexical_source_phrase_indices = evidence_phrase_indices(
+        item
+        for item in evidence_states
+        if (str(item["trajectory_id"]), int(item["state_index"])) in lexical_source_state_pairs
+    )
+    lexical_source_hit = len(lexical_source_phrase_indices) == len(answer_phrases)
+    visible_phrase_indices = matching_phrase_indices(
+        answer_phrases,
+        (str(item["state_content"]) for item in ranked),
+    )
+    visible_hit = len(visible_phrase_indices) == len(answer_phrases)
     score_bool = result.get("score_bool")
     failure_class = classify_failure(
         evidence_eligible=evidence_eligible,
         evidence_states=evidence_states,
+        source_complete=source_complete,
         trajectory_hit=trajectory_hit,
         state_hit=state_hit,
         visible_hit=visible_hit,
@@ -248,16 +268,40 @@ def build_question_trace(
         "baseline_score_bool": score_bool if isinstance(score_bool, bool) else None,
         "answer_sha256": sha256_text(answer),
         "answer_length": len(answer),
+        "answer_phrase_sha256": [sha256_text(phrase) for phrase in answer_phrases],
+        "answer_phrase_lengths": [len(phrase) for phrase in answer_phrases],
         "haystack_entry_sha256": sha256_json(haystack_ids),
         "exact_evidence_eligible": evidence_eligible,
+        "exact_evidence_source_complete": source_complete,
         "exact_evidence_trajectory_ids": evidence_trajectories,
         "exact_evidence_states": evidence_states,
-        "retrieved": ranked,
+        "retrieved": [redact_retrieved_item(item) for item in ranked],
         "metrics": {
             "trajectory_recall_at_k": trajectory_hit,
             "state_recall_at_k": state_hit,
             "lexical_source_reachability_at_k": lexical_source_hit,
             "exact_context_recall_at_k": visible_hit,
+            "answer_phrase_count": len(answer_phrases),
+            "source_answer_phrase_coverage": phrase_coverage(
+                source_phrase_indices,
+                answer_phrases,
+            ),
+            "trajectory_answer_phrase_coverage_at_k": phrase_coverage(
+                trajectory_phrase_indices,
+                answer_phrases,
+            ),
+            "state_answer_phrase_coverage_at_k": phrase_coverage(
+                state_phrase_indices,
+                answer_phrases,
+            ),
+            "lexical_source_answer_phrase_coverage_at_k": phrase_coverage(
+                lexical_source_phrase_indices,
+                answer_phrases,
+            ),
+            "context_answer_phrase_coverage_at_k": phrase_coverage(
+                visible_phrase_indices,
+                answer_phrases,
+            ),
             "evidence_state_count": len(gold_state_pairs),
             "matched_evidence_state_count": matched_state_count,
             "multi_state_evidence_coverage_at_k": (
@@ -368,7 +412,7 @@ def normalize_source_support_state(item: dict[str, Any]) -> dict[str, Any] | Non
 
 
 def find_exact_evidence_states(
-    normalized_answer: str,
+    answer_phrases: tuple[str, ...],
     *,
     haystack_ids: list[str],
     state_text_index: dict[str, list[tuple[int, str]]],
@@ -376,15 +420,66 @@ def find_exact_evidence_states(
     evidence: list[dict[str, Any]] = []
     for trajectory_id in haystack_ids:
         for state_index, normalized_state in state_text_index.get(trajectory_id, []):
-            if normalized_answer not in normalized_state:
+            matched_phrase_indices = matching_phrase_indices(
+                answer_phrases,
+                (normalized_state,),
+                normalized=True,
+            )
+            if not matched_phrase_indices:
                 continue
             evidence.append(
                 {
                     "trajectory_id": trajectory_id,
                     "state_index": state_index,
+                    "matched_phrase_indices": sorted(matched_phrase_indices),
                 }
             )
     return evidence
+
+
+def answer_evidence_phrases(question: dict[str, Any]) -> tuple[str, ...]:
+    answer = str(question.get("answer") or "")
+    eval_function = str(question.get("eval_function") or "")
+    raw_phrases = [answer]
+    if eval_function.startswith("norm_phrase_set_match"):
+        separator_match = _PHRASE_SEPARATORS_PATTERN.search(eval_function)
+        separators = separator_match.group(1) if separator_match else ""
+        if separators:
+            raw_phrases = re.split(f"[{re.escape(separators)}]", answer)
+    normalized_phrases: list[str] = []
+    for raw_phrase in raw_phrases:
+        normalized_phrase = normalize_text(raw_phrase)
+        if normalized_phrase and normalized_phrase not in normalized_phrases:
+            normalized_phrases.append(normalized_phrase)
+    return tuple(normalized_phrases)
+
+
+def matching_phrase_indices(
+    answer_phrases: tuple[str, ...],
+    texts: Any,
+    *,
+    normalized: bool = False,
+) -> set[int]:
+    normalized_texts = [str(text) if normalized else normalize_text(str(text)) for text in texts]
+    return {
+        index
+        for index, phrase in enumerate(answer_phrases)
+        if any(phrase in text for text in normalized_texts)
+    }
+
+
+def evidence_phrase_indices(evidence_states: Any) -> set[int]:
+    return {
+        int(index) for state in evidence_states for index in state.get("matched_phrase_indices", [])
+    }
+
+
+def phrase_coverage(matched_indices: set[int], answer_phrases: tuple[str, ...]) -> float | None:
+    return len(matched_indices) / len(answer_phrases) if answer_phrases else None
+
+
+def redact_retrieved_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in item.items() if key != "state_content"}
 
 
 def build_state_text_index(
@@ -424,12 +519,13 @@ def classify_failure(
     *,
     evidence_eligible: bool,
     evidence_states: list[dict[str, Any]],
+    source_complete: bool,
     trajectory_hit: bool,
     state_hit: bool,
     visible_hit: bool,
     score_bool: Any,
 ) -> str:
-    if not evidence_eligible or not evidence_states:
+    if not evidence_eligible or not evidence_states or not source_complete:
         return "unlabeled_exact_evidence"
     if not trajectory_hit:
         return "trajectory_selection_miss"
@@ -618,7 +714,11 @@ def build_diagnostic_report(
     slice_record: dict[str, Any],
 ) -> dict[str, Any]:
     eligible = [
-        row for row in trace_rows if row["exact_evidence_eligible"] and row["exact_evidence_states"]
+        row
+        for row in trace_rows
+        if row["exact_evidence_eligible"]
+        and row["exact_evidence_states"]
+        and row["exact_evidence_source_complete"]
     ]
     multi_state = [
         row
@@ -634,11 +734,11 @@ def build_diagnostic_report(
         "exact_evidence_eligible_count": len(eligible),
         "multi_state_evidence_count": len(multi_state),
         "evidence_reference": {
-            "source": "exact_answer_occurrence_proxy",
+            "source": "exact_answer_phrase_occurrence_proxy",
             "official_state_labels_available": False,
             "semantic_evidence_recall_supported": False,
             "legacy_multi_state_metric": (
-                "normalized substring occurrence coverage; not semantic evidence coverage"
+                "normalized answer-phrase occurrence coverage; not semantic evidence coverage"
             ),
         },
         "metrics": summarize_metrics(eligible, multi_state=multi_state),
@@ -668,6 +768,18 @@ def summarize_metrics(
             "lexical_source_reachability_at_k",
         ),
         "exact_context_recall_at_10": mean_bool(rows, "exact_context_recall_at_k"),
+        "answer_phrase_trajectory_coverage_at_10": mean_number(
+            rows,
+            "trajectory_answer_phrase_coverage_at_k",
+        ),
+        "answer_phrase_state_coverage_at_10": mean_number(
+            rows,
+            "state_answer_phrase_coverage_at_k",
+        ),
+        "answer_phrase_context_coverage_at_10": mean_number(
+            rows,
+            "context_answer_phrase_coverage_at_k",
+        ),
         "multi_state_eligible_count": len(multi_state),
         "multi_state_evidence_coverage_at_10": mean_number(
             multi_state,

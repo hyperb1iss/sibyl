@@ -14,8 +14,10 @@ import sys
 import threading
 import time
 from collections import Counter
+from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Callable
+from typing import TypeVar
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -33,15 +35,22 @@ from sibyl_core.evals.longmemeval_v2 import (  # noqa: E402
     LongMemEvalV2State,
     LongMemEvalV2Trajectory,
 )
+from sibyl_core.models import EntityType, OperationalExperience  # noqa: E402
+from sibyl_core.projection import project_operational_experience  # noqa: E402
 from sibyl_core.retrieval.query_ranking import (  # noqa: E402
     QueryCoverageCandidate,
+    QueryCoverageRankedCandidate,
     QueryCoverageResult,
     rank_by_query_coverage,
 )
-from sibyl_core.retrieval.refinement import MAX_REFINEMENT_QUERIES  # noqa: E402
+from sibyl_core.retrieval.refinement import (  # noqa: E402
+    MAX_REFINEMENT_QUERIES,
+    plan_deterministic_refinement_queries,
+)
 
 try:
-    from memory_modules.memory import Memory, MemoryContextItem, register_memory
+    from memory_modules.memory import Memory, MemoryContextItem
+    from memory_modules.memory import register_memory as _register_memory
 except ModuleNotFoundError:
     MemoryContextItem = dict[str, str]  # type: ignore[misc,assignment]
 
@@ -61,8 +70,16 @@ except ModuleNotFoundError:
         def get_query_context(self) -> dict[str, object]:
             return dict(self._query_context)
 
-    def register_memory(memory_cls: type[Memory]) -> type[Memory]:
+    def _register_memory(memory_cls: type[Memory]) -> type[Memory]:
         return memory_cls
+
+
+MemoryT = TypeVar("MemoryT", bound=Memory)
+
+
+def register_memory(memory_cls: type[MemoryT]) -> type[MemoryT]:
+    _register_memory(memory_cls)
+    return memory_cls
 
 
 DEFAULT_API_URL = "http://127.0.0.1:3334/api"
@@ -71,6 +88,17 @@ DEFAULT_SEARCH_LIMIT = 12
 DEFAULT_CONTEXT_ITEMS = 8
 DEFAULT_CONTEXT_CHARS_PER_ITEM = 18_000
 DEFAULT_CONTEXT_TOTAL_CHARS = 60_000
+QUERY_SLICE_RENDERING_VERSION = "query-aware-source-windows-v4"
+QUERY_SLICE_WINDOW_LINES = 8
+QUERY_SLICE_WINDOW_STRIDE_LINES = 4
+QUERY_SLICE_SUCCESSOR_LINES = 8
+QUERY_SLICE_MAX_WINDOWS = 4
+QUERY_SLICE_STRUCTURED_WINDOWS = 2
+QUERY_SLICE_STRUCTURED_RADIUS_LINES = 6
+QUERY_SLICE_STRUCTURED_SECTION_LINES = 48
+QUERY_SLICE_STRUCTURED_TRAILING_LINES = 0
+QUERY_SLICE_DESCENDANT_ROLE_WEIGHT = 2
+QUERY_SLICE_MIN_EXCERPT_CHARS = 160
 MAX_BUNDLED_SOURCE_CHARS = 12_000
 DEFAULT_EVIDENCE_COMPOSITION_MODE = "shared_relevance"
 EVIDENCE_COMPOSITION_MODES = frozenset({"reserved_support", "shared_relevance"})
@@ -106,7 +134,9 @@ CHECKPOINT_CATALOG_FILENAME = "checkpoint_catalog.jsonl"
 CHECKPOINT_MANIFEST_FILENAME = "checkpoint_manifest.json"
 CHECKPOINT_SCHEMA_VERSION = "sibyl-longmemeval-v2-ingest-checkpoint-v1"
 RETRYABLE_HTTP_STATUS_CODES = frozenset({408, 409, 425, 429})
-SAVED_MEMORY_SECRET_KEYS = frozenset({"api_token", "email", "password"})
+SAVED_MEMORY_SECRET_KEYS = frozenset(
+    {"api_token", "api_credentials_path", "refresh_token", "email", "password"}
+)
 LOADED_MEMORY_RUNTIME_KEYS = frozenset(
     {
         *SAVED_MEMORY_SECRET_KEYS,
@@ -148,6 +178,73 @@ SAVED_MEMORY_IDENTITY_KEYS = frozenset(
 _AUTH_CACHE: dict[tuple[str, str, str], dict[str, str]] = {}
 _AUTH_LOCK = threading.Lock()
 _INSTANCE_COUNTER = itertools.count(1)
+
+_QUERY_EXCLUSION_PATTERN = re.compile(
+    r"\b(?:excluding|except(?:\s+for)?|other\s+than)\b.*?"
+    r"(?=,\s*(?:which|what|who|where|when|how)\b|[?.!]|$)",
+    re.IGNORECASE | re.DOTALL,
+)
+_QUERY_QUOTED_PHRASE_PATTERN = re.compile(
+    r"`(?P<backtick>[^`\n]{1,160})`"
+    r'|"(?P<double>[^"\n]{1,160})"'
+    r"|(?<!\w)'(?P<single>[^'\n]{2,160})'(?!\w)"
+)
+_QUERY_TARGET_FOCUS_PATTERN = re.compile(
+    r"\b(?:which|what)\s+"
+    r"(?P<phrase>(?:[\w-]+\s+){1,5}?)"
+    r"(?:choices?|options?|labels?|fields?|entries?|columns?|buttons?|links?|tabs?|"
+    r"checkboxes?|rows?|records?)\b",
+    re.IGNORECASE,
+)
+_QUERY_FOCUS_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "are",
+        "button",
+        "checkbox",
+        "choice",
+        "column",
+        "entry",
+        "field",
+        "five",
+        "four",
+        "is",
+        "label",
+        "link",
+        "one",
+        "option",
+        "record",
+        "row",
+        "tab",
+        "the",
+        "these",
+        "those",
+        "three",
+        "two",
+        "what",
+        "which",
+    }
+)
+_QUERY_UI_ROLE_PATTERNS = (
+    (
+        re.compile(r"\b(?:drop[ -]?down|menu\s+items?|menuitems?|options?)\b"),
+        ("menuitem", "option"),
+    ),
+    (re.compile(r"\bchoices?\b"), ("option", "checkbox", "radio")),
+    (re.compile(r"\bselected\s+(?:pane|list|labels?)\b"), ("option",)),
+    (re.compile(r"\bbuttons?\b"), ("button",)),
+    (re.compile(r"\blinks?\b"), ("link", "button")),
+    (re.compile(r"\btabs?\b"), ("tab",)),
+    (re.compile(r"\bcolumns?\b"), ("columnheader",)),
+    (re.compile(r"\b(?:rows?|records?)\b"), ("row", "gridcell")),
+    (re.compile(r"\bcheckbox(?:es)?\b"), ("checkbox",)),
+    (re.compile(r"\bradio(?:\s+buttons?)?\b"), ("radio",)),
+    (
+        re.compile(r"\b(?:fields?|inputs?|textboxes?|comboboxes?|searchboxes?)\b"),
+        ("textbox", "combobox", "searchbox"),
+    ),
+)
 _CONTEXT_PROCESSOR_LOCAL = threading.local()
 
 
@@ -182,6 +279,26 @@ def _string_key_dict(value: object) -> dict[str, object]:
     return {str(key): item for key, item in value.items()}
 
 
+def _trajectory_source_id(run_id: str, trajectory_id: str) -> str:
+    return f"longmemeval-v2:{run_id}:{trajectory_id}"
+
+
+def _source_metadata_mismatch_receipt(
+    mismatches: Iterable[tuple[str, str]],
+) -> dict[str, object]:
+    ordered = list(mismatches)
+    digest = hashlib.sha256()
+    for entity_id, source_id in ordered:
+        digest.update(entity_id.encode())
+        digest.update(b"\0")
+        digest.update(source_id.encode())
+        digest.update(b"\0")
+    return {
+        "source_metadata_mismatch_sample": [entity_id for entity_id, _ in ordered[:20]],
+        "source_metadata_mismatches_sha256": digest.hexdigest(),
+    }
+
+
 def build_entity_payloads_for_trajectory(
     trajectory_raw: dict[str, object],
     *,
@@ -195,7 +312,9 @@ def build_entity_payloads_for_trajectory(
     if chunking_mode not in CHUNKING_MODES:
         msg = f"Unknown chunking_mode {chunking_mode!r}; expected one of {sorted(CHUNKING_MODES)}"
         raise ValueError(msg)
-    chunk_builder = _grouped_trajectory_chunks if chunking_mode == "trajectory" else _trajectory_chunks
+    chunk_builder = (
+        _grouped_trajectory_chunks if chunking_mode == "trajectory" else _trajectory_chunks
+    )
     chunks = chunk_builder(
         trajectory,
         max_chars=content_max_chars,
@@ -224,6 +343,7 @@ def build_entity_payloads_for_trajectory(
                     "longmemeval_v2_environment": trajectory.environment,
                     "longmemeval_v2_goal": trajectory.goal,
                     "longmemeval_v2_outcome": trajectory.outcome,
+                    "source_id": _trajectory_source_id(run_id, trajectory.id),
                     "capture_surface": "longmemeval-v2-official",
                     "longmemeval_v2_chunking_mode": chunking_mode,
                     "entity_content_projection_policy": (
@@ -289,7 +409,7 @@ def build_operational_experience_payload(
         )
     return {
         "experience": {
-            "source_id": f"longmemeval-v2:{run_id}:{trajectory.id}",
+            "source_id": _trajectory_source_id(run_id, trajectory.id),
             "goal": trajectory.goal,
             "outcome": trajectory.outcome,
             "start_uri": trajectory.start_url,
@@ -304,6 +424,30 @@ def build_operational_experience_payload(
             },
         }
     }
+
+
+def build_operational_session_payloads_for_trajectory(
+    trajectory_raw: dict[str, object],
+    *,
+    project_id: str,
+    run_id: str,
+    content_max_chars: int = DEFAULT_CONTENT_MAX_CHARS,
+    include_screenshot_refs: bool = False,
+) -> list[dict[str, object]]:
+    payload = build_operational_experience_payload(
+        trajectory_raw,
+        project_id=project_id,
+        run_id=run_id,
+        content_max_chars=content_max_chars,
+        include_screenshot_refs=include_screenshot_refs,
+    )
+    experience = OperationalExperience.model_validate(payload["experience"])
+    projection = project_operational_experience(experience)
+    return [
+        entity.model_dump(mode="json", exclude_none=True)
+        for entity in projection.entities
+        if entity.entity_type is EntityType.SESSION
+    ]
 
 
 def context_pack_to_search_results(
@@ -342,9 +486,7 @@ def context_pack_to_search_results(
                     )
                 metadata = _string_key_dict(candidate.get("metadata"))
                 metadata["source_support_entity_id"] = _stripped_str(support.get("id"))
-                metadata["source_support_relationship"] = _stripped_str(
-                    support.get("relationship")
-                )
+                metadata["source_support_relationship"] = _stripped_str(support.get("relationship"))
                 support_metadata = _string_key_dict(support.get("metadata"))
                 support_ordinal = support_metadata.get("observation_ordinal")
                 if isinstance(support_ordinal, int) and not isinstance(support_ordinal, bool):
@@ -473,16 +615,20 @@ def _flatten_operational_result_metadata(
     flattened: list[dict[str, object]] = []
     for result in results:
         candidate = dict(result)
-        metadata = _string_key_dict(candidate.get("metadata"))
-        for nested_key in ("source_metadata", "evidence_metadata"):
-            nested = metadata.get(nested_key)
-            if not isinstance(nested, dict):
-                continue
-            for key, value in nested.items():
-                metadata.setdefault(str(key), value)
-        candidate["metadata"] = metadata
+        candidate["metadata"] = _flatten_operational_metadata(candidate.get("metadata"))
         flattened.append(candidate)
     return flattened
+
+
+def _flatten_operational_metadata(value: object) -> dict[str, object]:
+    metadata = _string_key_dict(value)
+    for nested_key in ("source_metadata", "evidence_metadata"):
+        nested = metadata.get(nested_key)
+        if not isinstance(nested, dict):
+            continue
+        for key, nested_value in nested.items():
+            metadata.setdefault(str(key), nested_value)
+    return metadata
 
 
 def compile_operational_evidence_set(
@@ -563,9 +709,7 @@ def compile_operational_evidence_set(
     selected = [*ranked_typed[:typed_reservation], *selected_raw]
     if len(selected) < max_items:
         selected.extend(
-            ranked_typed[
-                typed_reservation : typed_reservation + max_items - len(selected)
-            ]
+            ranked_typed[typed_reservation : typed_reservation + max_items - len(selected)]
         )
     for selection_rank, candidate in enumerate(selected, start=1):
         candidate["_evidence_selection_rank"] = selection_rank
@@ -605,22 +749,48 @@ def _rank_operational_evidence_pool(
             QueryCoverageCandidate(
                 item=candidate,
                 stable_id=_result_stable_id(candidate),
-                text=_stripped_str(candidate.get("content")),
+                text=_evidence_ranking_text(candidate),
                 prior_score=_numeric_score(candidate.get("score")),
                 original_rank=index,
             )
             for index, candidate in enumerate(candidates, start=1)
         ],
     )
+    ranked_by_id = {candidate.stable_id: candidate for candidate in ranking.ranked}
+    ordered_candidates = candidates if pool == "raw" else [row.item for row in ranking.ranked]
     ranked_candidates: list[dict[str, object]] = []
-    for pool_rank, ranked in enumerate(ranking.ranked, start=1):
-        candidate = dict(ranked.item)
+    ordered_ranking: list[QueryCoverageRankedCandidate[dict[str, object]]] = []
+    for pool_rank, item in enumerate(ordered_candidates, start=1):
+        stable_id = _result_stable_id(item)
+        ranked = ranked_by_id[stable_id]
+        candidate = dict(item)
         candidate["_evidence_selection_pool"] = pool
         candidate["_evidence_pool_rank"] = pool_rank
         candidate["_evidence_selection_score"] = ranked.score
         candidate["_evidence_selection_overlap"] = ranked.overlap
         ranked_candidates.append(candidate)
-    return ranked_candidates, ranking
+        ordered_ranking.append(
+            QueryCoverageRankedCandidate(
+                item=candidate,
+                stable_id=stable_id,
+                score=ranked.score,
+                original_rank=ranked.original_rank,
+                overlap=ranked.overlap,
+            )
+        )
+    return ranked_candidates, QueryCoverageResult(
+        ranked=ordered_ranking,
+        applied=ranking.applied,
+        changed=ranking.changed if pool != "raw" else False,
+    )
+
+
+def _evidence_ranking_text(candidate: dict[str, object]) -> str:
+    content = _stripped_str(candidate.get("content"))
+    if _stripped_str(candidate.get("type")) != "session":
+        return content
+    state_match = re.search(r"(?m)^State\s+\d+\b", content)
+    return content[state_match.start() :] if state_match else content
 
 
 def _select_role_complete_raw_evidence(
@@ -630,11 +800,7 @@ def _select_role_complete_raw_evidence(
 ) -> list[dict[str, object]]:
     if budget <= 0:
         return []
-    primary = [
-        candidate
-        for candidate in candidates
-        if not _is_support_candidate(candidate)
-    ]
+    primary = [candidate for candidate in candidates if not _is_support_candidate(candidate)]
     primary_by_search_rank: dict[int, dict[str, object]] = {}
     for candidate in primary:
         search_rank = _optional_positive_int(candidate.get("_search_rank"))
@@ -645,6 +811,7 @@ def _select_role_complete_raw_evidence(
         for candidate in candidates
         if _is_support_candidate(candidate)
         and (parent_rank := _support_parent_search_rank(candidate)) in primary_by_search_rank
+        and _support_adds_query_coverage(candidate, primary_by_search_rank[parent_rank])
     ]
     selected_links = _select_diverse_support_links(linked_support, limit=budget // 2)
     selected_support = [support for support, _parent in selected_links]
@@ -679,6 +846,17 @@ def _select_role_complete_raw_evidence(
         selected.append(candidate)
         selected.extend(support_by_parent_id.get(id(candidate), []))
     return selected
+
+
+def _support_adds_query_coverage(
+    support: dict[str, object],
+    parent: dict[str, object],
+) -> bool:
+    if _stripped_str(support.get("_selection_origin")) == "state_part":
+        return True
+    return _numeric_score(support.get("_evidence_selection_overlap")) > _numeric_score(
+        parent.get("_evidence_selection_overlap")
+    )
 
 
 def _select_diverse_support_links(
@@ -729,12 +907,14 @@ def _optional_positive_int(value: object) -> int | None:
 def search_results_to_memory_context(
     results: list[dict[str, object]],
     *,
+    query: str = "",
     max_items: int = DEFAULT_CONTEXT_ITEMS,
     max_chars_per_item: int = DEFAULT_CONTEXT_CHARS_PER_ITEM,
     max_total_chars: int = DEFAULT_CONTEXT_TOTAL_CHARS,
 ) -> list[MemoryContextItem]:
     context, _metadata = render_memory_context(
         results,
+        query=query,
         max_items=max_items,
         max_chars_per_item=max_chars_per_item,
         max_total_chars=max_total_chars,
@@ -745,6 +925,7 @@ def search_results_to_memory_context(
 def render_memory_context(
     results: list[dict[str, object]],
     *,
+    query: str = "",
     max_items: int = DEFAULT_CONTEXT_ITEMS,
     max_chars_per_item: int = DEFAULT_CONTEXT_CHARS_PER_ITEM,
     max_total_chars: int = DEFAULT_CONTEXT_TOTAL_CHARS,
@@ -765,7 +946,9 @@ def render_memory_context(
         for _rank, _result, header, content in candidate_rows
     )
     dropped: list[tuple[int, dict[str, object], str, str]] = []
-    while rows and sum(len(header) + 3 for _rank, _result, header, _content in rows) > max_total_chars:
+    while (
+        rows and sum(len(header) + 3 for _rank, _result, header, _content in rows) > max_total_chars
+    ):
         dropped.append(rows.pop())
 
     context: list[MemoryContextItem] = []
@@ -782,7 +965,11 @@ def render_memory_context(
         content_allocations,
         strict=True,
     ):
-        exposed_content = content[:allocation]
+        exposed_content, compaction = compact_content_for_query(
+            query,
+            content,
+            max_chars=allocation,
+        )
         context.append(
             {
                 "type": "text",
@@ -797,6 +984,7 @@ def render_memory_context(
                 "exposed_content_chars": len(exposed_content),
                 "truncated": len(exposed_content) < len(content),
                 "dropped": False,
+                "compaction": compaction,
             }
         )
     budget_items.extend(
@@ -851,6 +1039,578 @@ def _allocate_context_chars(capacities: list[int], *, budget: int) -> list[int]:
     return allocations
 
 
+def compact_content_for_query(
+    query: str,
+    content: str,
+    *,
+    max_chars: int,
+) -> tuple[str, dict[str, object]]:
+    max_chars = max(0, max_chars)
+    base_metadata: dict[str, object] = {
+        "version": QUERY_SLICE_RENDERING_VERSION,
+        "source_content_chars": len(content),
+        "max_chars": max_chars,
+        "query_focus_phrases": list(_query_focus_phrases(query)),
+        "query_ui_roles": list(_query_ui_roles(query)),
+        "candidate_window_count": 0,
+        "selected_window_count": 0,
+        "structured_selected_window_count": 0,
+        "ranking_applied": False,
+        "selected_source_ranges": [],
+    }
+    if len(content) <= max_chars:
+        return content, {**base_metadata, "mode": "full", "omitted_source_chars": 0}
+    if not query.strip() or max_chars < QUERY_SLICE_MIN_EXCERPT_CHARS:
+        return content[:max_chars], {
+            **base_metadata,
+            "mode": "prefix",
+            "omitted_source_chars": len(content) - max_chars,
+        }
+
+    lines = content.splitlines(keepends=True)
+    line_starts = _line_start_offsets(lines)
+    candidates, envelope_end_line = _query_slice_candidates(
+        lines,
+        line_starts,
+        query=query,
+    )
+    base_metadata["candidate_window_count"] = len(candidates)
+    if len(candidates) < 2:
+        return content[:max_chars], {
+            **base_metadata,
+            "mode": "prefix",
+            "omitted_source_chars": len(content) - max_chars,
+        }
+
+    ranking = rank_by_query_coverage(
+        query,
+        [
+            QueryCoverageCandidate(
+                item=candidate,
+                stable_id=str(candidate["stable_id"]),
+                text=str(candidate["ranking_text"]),
+                prior_score=0.0,
+                original_rank=index,
+            )
+            for index, candidate in enumerate(candidates, start=1)
+        ],
+    )
+    base_metadata["ranking_applied"] = ranking.applied
+    if not ranking.applied or not any(
+        ranked.score > 0.0 or ranked.overlap > 0.0 for ranked in ranking.ranked
+    ):
+        return content[:max_chars], {
+            **base_metadata,
+            "mode": "prefix",
+            "omitted_source_chars": len(content) - max_chars,
+        }
+
+    covered = [ranked for ranked in ranking.ranked if ranked.overlap > 0.0]
+    selection_order = covered or ranking.ranked
+    selected: list[dict[str, object]] = []
+    structured_order = sorted(
+        ranking.ranked,
+        key=lambda ranked: (
+            _query_structured_candidate_rank(query, ranked.item),
+            ranked.score,
+            -ranked.original_rank,
+        ),
+        reverse=True,
+    )
+    structured_selected = 0
+    for ranked in structured_order:
+        signal = _query_structured_signal(query, str(ranked.item["ranking_text"]))
+        if signal[0] <= 0:
+            break
+        candidate = dict(ranked.item)
+        candidate["ranking_score"] = ranked.score
+        candidate["ranking_overlap"] = ranked.overlap
+        candidate["structured_signal"] = list(signal)
+        if int(candidate["window_end_char"]) - int(candidate["window_start_char"]) >= max_chars:
+            continue
+        if (
+            _render_query_slices(
+                content,
+                lines=lines,
+                line_starts=line_starts,
+                envelope_end_line=envelope_end_line,
+                selected=[candidate],
+                max_chars=max_chars,
+            )
+            is None
+        ):
+            continue
+        if any(_query_slice_windows_overlap(candidate, existing) for existing in selected):
+            continue
+        selected.append(candidate)
+        structured_selected += 1
+        if structured_selected >= QUERY_SLICE_STRUCTURED_WINDOWS:
+            break
+    for ranked in selection_order:
+        candidate = dict(ranked.item)
+        if any(_query_slice_windows_overlap(candidate, existing) for existing in selected):
+            continue
+        candidate["ranking_score"] = ranked.score
+        candidate["ranking_overlap"] = ranked.overlap
+        selected.append(candidate)
+        if len(selected) >= QUERY_SLICE_MAX_WINDOWS:
+            break
+
+    while selected:
+        rendered = _render_query_slices(
+            content,
+            lines=lines,
+            line_starts=line_starts,
+            envelope_end_line=envelope_end_line,
+            selected=selected,
+            max_chars=max_chars,
+        )
+        if rendered is not None:
+            exposed, ranges, covered_chars = rendered
+            return exposed, {
+                **base_metadata,
+                "mode": "query_slices",
+                "selected_window_count": len(ranges),
+                "structured_selected_window_count": structured_selected,
+                "selected_source_ranges": ranges,
+                "omitted_source_chars": max(0, len(content) - covered_chars),
+            }
+        selected.pop()
+
+    return content[:max_chars], {
+        **base_metadata,
+        "mode": "prefix",
+        "omitted_source_chars": len(content) - max_chars,
+    }
+
+
+def _line_start_offsets(lines: list[str]) -> list[int]:
+    starts = [0]
+    for line in lines:
+        starts.append(starts[-1] + len(line))
+    return starts
+
+
+def _query_focus_phrases(query: str) -> tuple[str, ...]:
+    focused_query = _QUERY_EXCLUSION_PATTERN.sub(" ", query)
+    if not any(character.isalnum() for character in focused_query):
+        return ()
+    phrases: list[str] = []
+    seen: set[str] = set()
+    target_focus_added = False
+
+    def add_phrase(raw_phrase: str) -> None:
+        phrase = " ".join(raw_phrase.split())
+        normalized = phrase.casefold()
+        if not any(character.isalnum() for character in phrase) or normalized in seen:
+            return
+        phrases.append(phrase)
+        seen.add(normalized)
+
+    for match in _QUERY_QUOTED_PHRASE_PATTERN.finditer(focused_query):
+        add_phrase(next(group for group in match.groups() if group is not None))
+    for match in _QUERY_TARGET_FOCUS_PATTERN.finditer(focused_query):
+        phrase = str(match.group("phrase") or "").strip()
+        tokens = re.findall(r"[\w-]+", phrase.casefold())
+        if not tokens or all(token in _QUERY_FOCUS_STOPWORDS for token in tokens):
+            continue
+        phrase_count = len(phrases)
+        add_phrase(phrase)
+        target_focus_added = target_focus_added or len(phrases) > phrase_count
+    structural_queries = plan_deterministic_refinement_queries(
+        focused_query,
+        [],
+        max_queries=MAX_REFINEMENT_QUERIES,
+    )
+    target_queries = [query for query in structural_queries if query.facet == "target"]
+    for structural_query in target_queries:
+        for term in structural_query.added_terms:
+            if term.casefold() in {*_QUERY_FOCUS_STOPWORDS, "list", "page"}:
+                continue
+            add_phrase(term)
+    if not target_focus_added and not target_queries:
+        for structural_query in structural_queries:
+            if structural_query.facet != "focus_clause":
+                continue
+            structural_terms = [
+                token
+                for token in re.findall(r"[A-Za-z][\w-]*", structural_query.query)
+                if token.casefold() not in _QUERY_FOCUS_STOPWORDS and token.casefold() not in seen
+            ]
+            if len(structural_terms) < 2:
+                continue
+            for term in structural_terms:
+                add_phrase(term)
+    return tuple(phrases)
+
+
+def _query_ui_roles(query: str) -> tuple[str, ...]:
+    normalized = query.casefold()
+    roles: list[str] = []
+    for pattern, markers in _QUERY_UI_ROLE_PATTERNS:
+        if not pattern.search(normalized):
+            continue
+        roles.extend(marker for marker in markers if marker not in roles)
+    return tuple(roles)
+
+
+def _query_structured_signal(query: str, text: str) -> tuple[int, int, int, int, int]:
+    focus_phrases = tuple(phrase.casefold() for phrase in _query_focus_phrases(query))
+    roles = _query_ui_roles(query)
+    if not focus_phrases or not roles:
+        return 0, 0, 0, 0, 0
+    lines = text.casefold().splitlines()
+    role_line_indices = {
+        index
+        for index, line in enumerate(lines)
+        if any(re.search(rf"\b{re.escape(role)}\b", line) for role in roles)
+    }
+    weighted_proximity = 0
+    proximity = 0
+    matched_phrases: set[str] = set()
+    matched_phrase_priority = 0
+    for phrase_index, phrase in enumerate(focus_phrases, start=1):
+        phrase_line_indices = {
+            line_index for line_index, line in enumerate(lines) if phrase in line
+        }
+        nearby_role_lines = {
+            role_line_index
+            for role_line_index in role_line_indices
+            if any(
+                abs(role_line_index - phrase_line_index) <= QUERY_SLICE_STRUCTURED_RADIUS_LINES
+                for phrase_line_index in phrase_line_indices
+            )
+        }
+        for role_line_index in nearby_role_lines:
+            strength = max(
+                (QUERY_SLICE_STRUCTURED_RADIUS_LINES + 1 - abs(role_line_index - phrase_line_index))
+                * (
+                    QUERY_SLICE_DESCENDANT_ROLE_WEIGHT
+                    if role_line_index >= phrase_line_index
+                    else 1
+                )
+                for phrase_line_index in phrase_line_indices
+            )
+            proximity += strength
+            weighted_proximity += phrase_index * strength
+        if nearby_role_lines:
+            matched_phrases.add(phrase)
+            matched_phrase_priority = max(matched_phrase_priority, phrase_index)
+    return (
+        weighted_proximity,
+        len(matched_phrases),
+        proximity,
+        len(role_line_indices),
+        matched_phrase_priority,
+    )
+
+
+def _query_structured_rank(
+    signal: tuple[int, int, int, int, int],
+) -> tuple[int, int, int, int, int]:
+    return signal[1], signal[4], signal[0], signal[2], -signal[3]
+
+
+def _query_structured_candidate_rank(
+    query: str,
+    candidate: dict[str, object],
+) -> tuple[int, int, int, int, int, int]:
+    rank = _query_structured_rank(_query_structured_signal(query, str(candidate["ranking_text"])))
+    return rank[:2] + (int(bool(candidate.get("structured_section"))),) + rank[2:]
+
+
+def _query_slice_candidates(
+    lines: list[str],
+    line_starts: list[int],
+    *,
+    query: str,
+) -> tuple[list[dict[str, object]], int]:
+    state_starts = [
+        index for index, line in enumerate(lines) if re.match(r"^State\s+\d+\s*$", line.rstrip())
+    ]
+    if not state_starts:
+        return [], 0
+    candidates: list[dict[str, object]] = []
+    focus_phrases = tuple(phrase.casefold() for phrase in _query_focus_phrases(query))
+    roles = _query_ui_roles(query)
+    state_ends = [*state_starts[1:], len(lines)]
+    for state_start, state_end in zip(state_starts, state_ends, strict=True):
+        body_start = next(
+            (
+                index + 1
+                for index in range(state_start, state_end)
+                if lines[index].rstrip().startswith("Accessibility tree:")
+            ),
+            min(state_start + 5, state_end),
+        )
+        if body_start >= state_end:
+            continue
+        window_starts = set(range(body_start, state_end, QUERY_SLICE_WINDOW_STRIDE_LINES))
+        for line_index in range(body_start, state_end):
+            line = lines[line_index].casefold()
+            if not any(phrase in line for phrase in focus_phrases):
+                continue
+            anchored_start = max(
+                body_start,
+                min(
+                    line_index - 1,
+                    max(body_start, state_end - QUERY_SLICE_WINDOW_LINES),
+                ),
+            )
+            window_starts.add(anchored_start)
+        final_start = max(body_start, state_end - QUERY_SLICE_WINDOW_LINES)
+        window_starts.add(final_start)
+        for window_start in sorted(window_starts):
+            window_end = min(state_end, window_start + QUERY_SLICE_WINDOW_LINES)
+            window_end = _query_slice_successor_end(
+                lines,
+                window_end=window_end,
+                state_end=state_end,
+            )
+            candidates.append(
+                {
+                    "stable_id": f"{state_start}:{window_start}:{window_end}",
+                    "state_start_line": state_start,
+                    "body_start_line": body_start,
+                    "window_start_line": window_start,
+                    "window_end_line": window_end,
+                    "window_start_char": line_starts[window_start],
+                    "window_end_char": line_starts[window_end],
+                    "ranking_text": "".join(lines[window_start:window_end]),
+                }
+            )
+        candidates.extend(
+            _query_structured_section_candidates(
+                lines,
+                line_starts,
+                body_start=body_start,
+                state_start=state_start,
+                state_end=state_end,
+                focus_phrases=focus_phrases,
+                roles=roles,
+            )
+        )
+    return candidates, state_starts[0]
+
+
+def _query_structured_section_candidates(
+    lines: list[str],
+    line_starts: list[int],
+    *,
+    body_start: int,
+    state_start: int,
+    state_end: int,
+    focus_phrases: tuple[str, ...],
+    roles: tuple[str, ...],
+) -> list[dict[str, object]]:
+    if not focus_phrases or not roles:
+        return []
+    candidates: list[dict[str, object]] = []
+    for focus_line in range(body_start, state_end):
+        normalized_line = lines[focus_line].casefold()
+        if not any(phrase in normalized_line for phrase in focus_phrases):
+            continue
+        section_marker = re.search(
+            r"\b(?:button|group|heading|legend|list|menu|region|tablist)\b",
+            normalized_line,
+        )
+        labeled_text = (
+            "statictext" in normalized_line
+            and focus_line > body_start
+            and "labeltext" in lines[focus_line - 1].casefold()
+        )
+        if not section_marker and not labeled_text:
+            continue
+        if any(re.search(rf"\b{re.escape(role)}\b", normalized_line) for role in roles):
+            continue
+        role_lines: list[int] = []
+        section_limit = min(
+            state_end,
+            focus_line + QUERY_SLICE_STRUCTURED_SECTION_LINES,
+        )
+        focus_indent = _line_indent(lines[focus_line])
+        for line_index in range(focus_line + 1, section_limit):
+            line = lines[line_index]
+            normalized = line.casefold()
+            if (
+                role_lines
+                and _line_indent(line) <= focus_indent
+                and re.search(r"\b(?:heading|legend|region)\b", normalized)
+            ):
+                break
+            if any(re.search(rf"\b{re.escape(role)}\b", normalized) for role in roles):
+                role_lines.append(line_index)
+        if not role_lines:
+            continue
+        window_start = max(body_start, focus_line - 1)
+        window_end = min(
+            state_end,
+            role_lines[-1] + QUERY_SLICE_STRUCTURED_TRAILING_LINES + 1,
+        )
+        window_end = _query_slice_successor_end(
+            lines,
+            window_end=window_end,
+            state_end=state_end,
+        )
+        candidates.append(
+            {
+                "stable_id": (f"structured:{state_start}:{window_start}:{window_end}"),
+                "state_start_line": state_start,
+                "body_start_line": body_start,
+                "window_start_line": window_start,
+                "window_end_line": window_end,
+                "window_start_char": line_starts[window_start],
+                "window_end_char": line_starts[window_end],
+                "ranking_text": "".join(lines[window_start:window_end]),
+                "structured_section": True,
+            }
+        )
+    return candidates
+
+
+def _query_slice_successor_end(
+    lines: list[str],
+    *,
+    window_end: int,
+    state_end: int,
+) -> int:
+    if state_end >= len(lines) or any(line.strip() for line in lines[window_end:state_end]):
+        return window_end
+    return min(len(lines), state_end + QUERY_SLICE_SUCCESSOR_LINES)
+
+
+def _line_indent(line: str) -> int:
+    expanded = line.expandtabs(4)
+    return len(expanded) - len(expanded.lstrip())
+
+
+def _query_slice_windows_overlap(
+    left: dict[str, object],
+    right: dict[str, object],
+) -> bool:
+    return bool(
+        int(left["window_start_char"]) < int(right["window_end_char"])
+        and int(right["window_start_char"]) < int(left["window_end_char"])
+    )
+
+
+def _render_query_slices(
+    content: str,
+    *,
+    lines: list[str],
+    line_starts: list[int],
+    envelope_end_line: int,
+    selected: list[dict[str, object]],
+    max_chars: int,
+) -> tuple[str, list[dict[str, object]], int] | None:
+    source_order = sorted(selected, key=lambda item: int(item["window_start_line"]))
+    static_parts: list[str] = []
+    if envelope_end_line:
+        static_parts.append("".join(lines[:envelope_end_line]).rstrip())
+    cursor_line = envelope_end_line
+    ranges: list[dict[str, object]] = []
+    excerpt_capacities: list[int] = []
+    excerpt_minimums: list[int] = []
+    excerpt_slots: list[int] = []
+    covered_intervals: list[tuple[int, int]] = [(0, line_starts[envelope_end_line])]
+    for candidate in source_order:
+        state_start = int(candidate["state_start_line"])
+        body_start = int(candidate["body_start_line"])
+        window_start = int(candidate["window_start_line"])
+        window_end = int(candidate["window_end_line"])
+        window_start_char = int(candidate["window_start_char"])
+        window_end_char = int(candidate["window_end_char"])
+        omission_start = cursor_line
+        if state_start >= cursor_line:
+            if state_start > cursor_line:
+                static_parts.append(f"[Omitted source lines {cursor_line + 1}-{state_start}]")
+            omission_start = body_start
+        if window_start > omission_start:
+            static_parts.append(f"[Omitted source lines {omission_start + 1}-{window_start}]")
+        static_parts.append(
+            "[Source slice: "
+            f"lines {window_start + 1}-{window_end}, "
+            f"chars {window_start_char}-{window_end_char}]"
+        )
+        identity = "".join(lines[state_start:body_start]).rstrip()
+        if identity:
+            static_parts.append(identity)
+        excerpt_slots.append(len(static_parts))
+        static_parts.append("")
+        excerpt_capacity = window_end_char - window_start_char
+        excerpt_capacities.append(excerpt_capacity)
+        excerpt_minimums.append(
+            excerpt_capacity
+            if candidate.get("structured_signal")
+            else min(excerpt_capacity, QUERY_SLICE_MIN_EXCERPT_CHARS)
+        )
+        ranges.append(
+            {
+                "start_line": window_start + 1,
+                "end_line": window_end,
+                "start_char": window_start_char,
+                "end_char": window_end_char,
+                "ranking_score": candidate.get("ranking_score"),
+                "ranking_overlap": candidate.get("ranking_overlap"),
+                "structured_signal": candidate.get("structured_signal"),
+            }
+        )
+        covered_intervals.extend(
+            (
+                (line_starts[state_start], line_starts[body_start]),
+                (window_start_char, window_end_char),
+            )
+        )
+        cursor_line = window_end
+    if cursor_line < len(lines):
+        static_parts.append(f"[Omitted source lines {cursor_line + 1}-{len(lines)}]")
+
+    fixed_chars = sum(len(part) for part in static_parts) + max(0, len(static_parts) - 1) * 2
+    available_chars = max_chars - fixed_chars
+    minimum_needed = sum(excerpt_minimums)
+    if available_chars < minimum_needed:
+        return None
+    extra_allocations = _allocate_context_chars(
+        [
+            capacity - minimum
+            for capacity, minimum in zip(
+                excerpt_capacities,
+                excerpt_minimums,
+                strict=True,
+            )
+        ],
+        budget=available_chars - minimum_needed,
+    )
+    allocations = [
+        minimum + extra for minimum, extra in zip(excerpt_minimums, extra_allocations, strict=True)
+    ]
+    for slot, allocation, source_range in zip(
+        excerpt_slots,
+        allocations,
+        ranges,
+        strict=True,
+    ):
+        static_parts[slot] = content[
+            int(source_range["start_char"]) : int(source_range["start_char"]) + allocation
+        ]
+        source_range["exposed_chars"] = allocation
+    rendered = "\n\n".join(static_parts)
+    if len(rendered) > max_chars:
+        raise RuntimeError("query-aware source rendering exceeded its character budget")
+    return rendered, ranges, _merged_interval_chars(covered_intervals)
+
+
+def _merged_interval_chars(intervals: list[tuple[int, int]]) -> int:
+    total = 0
+    merged_end = 0
+    for start, end in sorted(intervals):
+        if end <= merged_end:
+            continue
+        total += end - max(start, merged_end)
+        merged_end = end
+    return total
+
+
 def _memory_context_header(rank: int, result: dict[str, object]) -> str:
     metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
     trajectory_id = _stripped_str(metadata.get("longmemeval_v2_trajectory_id"))
@@ -897,20 +1657,40 @@ def build_retrieval_trace(
     context_budget: dict[str, object] | None = None,
 ) -> list[dict[str, object]]:
     budget_items = context_budget.get("items") if isinstance(context_budget, dict) else None
-    exposed_chars_by_rank = {
-        item["rank"]: item["exposed_content_chars"]
-        for item in budget_items
-        if isinstance(item, dict)
-        and isinstance(item.get("rank"), int)
-        and isinstance(item.get("exposed_content_chars"), int)
-    } if isinstance(budget_items, list) else {}
-    dropped_ranks = {
-        item["rank"]
-        for item in budget_items
-        if isinstance(item, dict)
-        and item.get("dropped") is True
-        and isinstance(item.get("rank"), int)
-    } if isinstance(budget_items, list) else set()
+    exposed_chars_by_rank = (
+        {
+            item["rank"]: item["exposed_content_chars"]
+            for item in budget_items
+            if isinstance(item, dict)
+            and isinstance(item.get("rank"), int)
+            and isinstance(item.get("exposed_content_chars"), int)
+        }
+        if isinstance(budget_items, list)
+        else {}
+    )
+    compaction_by_rank = (
+        {
+            item["rank"]: dict(item["compaction"])
+            for item in budget_items
+            if isinstance(item, dict)
+            and isinstance(item.get("rank"), int)
+            and isinstance(item.get("compaction"), dict)
+            and item["compaction"].get("mode") == "query_slices"
+        }
+        if isinstance(budget_items, list)
+        else {}
+    )
+    dropped_ranks = (
+        {
+            item["rank"]
+            for item in budget_items
+            if isinstance(item, dict)
+            and item.get("dropped") is True
+            and isinstance(item.get("rank"), int)
+        }
+        if isinstance(budget_items, list)
+        else set()
+    )
     trace: list[dict[str, object]] = []
     for rank, result in enumerate(results[:max_items], start=1):
         if rank in dropped_ranks:
@@ -923,10 +1703,7 @@ def build_retrieval_trace(
         state_indices = (
             [int(value) for value in metadata_state_indices if isinstance(value, int)]
             if isinstance(metadata_state_indices, list)
-            else [
-                int(value)
-                for value in re.findall(r"^State\s+(\d+)\b", content, re.MULTILINE)
-            ]
+            else [int(value) for value in re.findall(r"^State\s+(\d+)\b", content, re.MULTILINE)]
         )
         source_support_state_indices = metadata.get("source_support_state_indices")
         support_state_indices = (
@@ -944,46 +1721,56 @@ def build_retrieval_trace(
             if isinstance(source_support_states, list)
             else []
         )
-        trace.append(
-            {
-                "rank": rank,
-                "entity_id": _stripped_str(result.get("id")),
-                "entity_type": _stripped_str(result.get("type")),
-                "trajectory_id": _stripped_str(
-                    metadata.get("longmemeval_v2_trajectory_id")
-                ),
-                "chunk_index": metadata.get("longmemeval_v2_chunk_index"),
-                "chunk_count": metadata.get("longmemeval_v2_chunk_count"),
-                "state_indices": state_indices,
-                "source_support_entity_id": metadata.get("source_support_entity_id"),
-                "source_support_operational_source_id": metadata.get(
-                    "source_support_operational_source_id"
-                ),
-                "source_support_state_indices": support_state_indices,
-                "source_support_states": normalized_source_support_states,
-                "score": result.get("score"),
-                "selection_pool": result.get("_evidence_selection_pool"),
-                "selection_pool_rank": result.get("_evidence_pool_rank"),
-                "selection_score": result.get("_evidence_selection_score"),
-                "selection_overlap": result.get("_evidence_selection_overlap"),
-                "content_chars": len(content),
-                "exposed_chars": exposed_chars_by_rank.get(
-                    rank,
-                    min(len(content), max_chars_per_item),
-                ),
-                "result_origin": _stripped_str(result.get("result_origin")),
-                "selection_origin": _stripped_str(result.get("_selection_origin"))
-                or "search",
-                "search_rank": result.get("_search_rank"),
-                "state_part_of_search_rank": result.get("_state_part_of_search_rank"),
-                "state_part_refined_from_chunk": result.get(
-                    "_state_part_refined_from_chunk"
-                ),
-                "neighbor_of_search_rank": result.get("_neighbor_of_search_rank"),
-                "neighbor_distance": result.get("_neighbor_distance"),
-            }
-        )
+        trace_item = {
+            "rank": rank,
+            "entity_id": _stripped_str(result.get("id")),
+            "entity_type": _stripped_str(result.get("type")),
+            "trajectory_id": _stripped_str(metadata.get("longmemeval_v2_trajectory_id")),
+            "chunk_index": metadata.get("longmemeval_v2_chunk_index"),
+            "chunk_count": metadata.get("longmemeval_v2_chunk_count"),
+            "state_indices": state_indices,
+            "source_support_entity_id": metadata.get("source_support_entity_id"),
+            "source_support_operational_source_id": metadata.get(
+                "source_support_operational_source_id"
+            ),
+            "source_support_state_indices": support_state_indices,
+            "source_support_states": normalized_source_support_states,
+            "score": result.get("score"),
+            "selection_pool": result.get("_evidence_selection_pool"),
+            "selection_pool_rank": result.get("_evidence_pool_rank"),
+            "selection_score": result.get("_evidence_selection_score"),
+            "selection_overlap": result.get("_evidence_selection_overlap"),
+            "content_chars": len(content),
+            "exposed_chars": exposed_chars_by_rank.get(
+                rank,
+                min(len(content), max_chars_per_item),
+            ),
+            "result_origin": _stripped_str(result.get("result_origin")),
+            "selection_origin": _stripped_str(result.get("_selection_origin")) or "search",
+            "search_rank": result.get("_search_rank"),
+            "trajectory_refined_from_chunk": result.get("_trajectory_refined_from_chunk"),
+            "state_part_of_search_rank": result.get("_state_part_of_search_rank"),
+            "state_part_refined_from_chunk": result.get("_state_part_refined_from_chunk"),
+            "neighbor_of_search_rank": result.get("_neighbor_of_search_rank"),
+            "neighbor_distance": result.get("_neighbor_distance"),
+        }
+        if rank in compaction_by_rank:
+            trace_item["content_compaction"] = compaction_by_rank[rank]
+        trace.append(trace_item)
     return trace
+
+
+def context_assembly_candidate_limit(
+    *,
+    max_items: int,
+    neighbor_stitch_items: int,
+    state_part_completion_items: int,
+    has_chunk_catalog: bool,
+) -> int:
+    max_items = max(1, max_items)
+    if not has_chunk_catalog:
+        return max_items
+    return max_items + max(0, neighbor_stitch_items) + max(0, state_part_completion_items)
 
 
 def assemble_context_results(
@@ -1018,10 +1805,18 @@ def assemble_context_results(
     if context_expansion_max_ratio > 0.0 and context_token_counter is None:
         raise ValueError("context_token_counter is required when expansion budgeting is enabled")
     ranked = []
+    restored_search_result_count = 0
+    transport_content_chars = 0
+    restored_content_chars = 0
     for search_rank, result in enumerate(results, start=1):
         candidate = dict(result)
         candidate["_selection_origin"] = "search"
         candidate["_search_rank"] = search_rank
+        candidate, restored = _restore_catalog_content(candidate, chunk_catalog)
+        if restored:
+            restored_search_result_count += 1
+            transport_content_chars += int(candidate["_transport_content_chars"])
+            restored_content_chars += int(candidate["_source_content_chars"])
         ranked.append(candidate)
 
     neighbor_budget = neighbor_stitch_items if chunk_catalog and neighbor_stitch_span else 0
@@ -1032,9 +1827,14 @@ def assemble_context_results(
         limit=seed_limit,
         max_chunks_per_trajectory=max_chunks_per_trajectory,
     )
-    refined_seeds, state_part_refinement_metadata = _refine_state_parts(
+    trajectory_refined_seeds, trajectory_refinement_metadata = _refine_trajectory_chunks(
         query,
         seeds,
+        chunk_catalog=chunk_catalog,
+    )
+    refined_seeds, state_part_refinement_metadata = _refine_state_parts(
+        query,
+        trajectory_refined_seeds,
         chunk_catalog=chunk_catalog,
         enabled=state_part_refinement,
     )
@@ -1078,14 +1878,16 @@ def assemble_context_results(
         token_counter=context_token_counter,
     )
     retained_state_parts = sum(
-        _stripped_str(result.get("_selection_origin")) == "state_part"
-        for result in selected
+        _stripped_str(result.get("_selection_origin")) == "state_part" for result in selected
     )
     retained_neighbors = sum(
         _stripped_str(result.get("_selection_origin")) == "neighbor" for result in selected
     )
     return selected, {
         "input_result_count": len(results),
+        "restored_search_result_count": restored_search_result_count,
+        "restored_transport_content_chars": transport_content_chars,
+        "restored_source_content_chars": restored_content_chars,
         "selected_search_seed_count": len(seeds),
         "completed_state_part_count": retained_state_parts,
         "stitched_neighbor_count": retained_neighbors,
@@ -1094,6 +1896,7 @@ def assemble_context_results(
         "neighbor_stitch_items": neighbor_stitch_items,
         "neighbor_stitch_span": neighbor_stitch_span,
         "state_part_completion": state_part_metadata,
+        "trajectory_refinement": trajectory_refinement_metadata,
         "state_part_refinement": state_part_refinement_metadata,
         "context_expansion_budget": expansion_budget,
     }
@@ -1149,6 +1952,85 @@ def _apply_context_expansion_budget(
         }
     )
     return bounded, metadata
+
+
+def _refine_trajectory_chunks(
+    query: str,
+    seeds: list[dict[str, object]],
+    *,
+    chunk_catalog: dict[str, dict[int, dict[str, object]]],
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    focus_phrases = _query_focus_phrases(query)
+    ui_roles = _query_ui_roles(query)
+    metadata: dict[str, object] = {
+        "enabled": bool(query and chunk_catalog and focus_phrases and ui_roles),
+        "query_focus_phrases": list(focus_phrases),
+        "query_ui_roles": list(ui_roles),
+        "inspected_trajectory_count": 0,
+        "candidate_count": 0,
+        "replacements": [],
+    }
+    if not metadata["enabled"]:
+        return seeds, metadata
+
+    refined: list[dict[str, object]] = []
+    replacements: list[dict[str, object]] = []
+    inspected_trajectories: set[str] = set()
+    reserved_keys = {_result_chunk_key(seed) for seed in seeds}
+    for seed in seeds:
+        trajectory_id, seed_chunk_index = _result_chunk_key(seed)
+        if trajectory_id in inspected_trajectories:
+            refined.append(seed)
+            continue
+        inspected_trajectories.add(trajectory_id)
+        trajectory_catalog = chunk_catalog.get(trajectory_id, {})
+        metadata["candidate_count"] = int(metadata["candidate_count"]) + len(trajectory_catalog)
+        if not trajectory_catalog:
+            refined.append(seed)
+            continue
+        seed_signal = _query_structured_signal(query, _stripped_str(seed.get("content")))
+        best_chunk_index, best = max(
+            trajectory_catalog.items(),
+            key=lambda item: (
+                _query_structured_rank(
+                    _query_structured_signal(
+                        query,
+                        _stripped_str(item[1].get("content")),
+                    )
+                ),
+                -abs(item[0] - seed_chunk_index) if isinstance(seed_chunk_index, int) else 0,
+                -item[0],
+            ),
+        )
+        best_key = (trajectory_id, best_chunk_index)
+        best_signal = _query_structured_signal(query, _stripped_str(best.get("content")))
+        if (
+            best_signal[0] <= 0
+            or _query_structured_rank(best_signal) <= _query_structured_rank(seed_signal)
+            or best_key in reserved_keys
+        ):
+            refined.append(seed)
+            continue
+        replacement = dict(best)
+        replacement["score"] = seed.get("score")
+        replacement["_selection_origin"] = "trajectory_refinement"
+        replacement["_search_rank"] = seed.get("_search_rank")
+        replacement["_trajectory_refined_from_chunk"] = seed_chunk_index
+        refined.append(replacement)
+        reserved_keys.add(best_key)
+        replacements.append(
+            {
+                "search_rank": seed.get("_search_rank"),
+                "trajectory_id": trajectory_id,
+                "from_chunk_key": list(_result_chunk_key(seed)),
+                "to_chunk_key": list(best_key),
+                "from_signal": list(seed_signal),
+                "to_signal": list(best_signal),
+            }
+        )
+    metadata["inspected_trajectory_count"] = len(inspected_trajectories)
+    metadata["replacements"] = replacements
+    return refined, metadata
 
 
 def _refine_state_parts(
@@ -1291,9 +2173,7 @@ def _state_part_results(
         candidate["score"] = ranked.score
         admitted.append(candidate)
         selected_keys.add(_result_chunk_key(candidate))
-    metadata["admitted_chunk_keys"] = [
-        list(_result_chunk_key(candidate)) for candidate in admitted
-    ]
+    metadata["admitted_chunk_keys"] = [list(_result_chunk_key(candidate)) for candidate in admitted]
     return admitted, metadata
 
 
@@ -1424,6 +2304,30 @@ def _result_chunk_key(result: dict[str, object]) -> tuple[str, int | str]:
     return trajectory_id, chunk_key
 
 
+def _restore_catalog_content(
+    result: dict[str, object],
+    chunk_catalog: dict[str, dict[int, dict[str, object]]],
+) -> tuple[dict[str, object], bool]:
+    trajectory_id, chunk_index = _result_chunk_key(result)
+    if not isinstance(chunk_index, int):
+        return result, False
+    catalog_result = chunk_catalog.get(trajectory_id, {}).get(chunk_index)
+    if catalog_result is None:
+        return result, False
+    source_content = catalog_result.get("content")
+    transport_content = result.get("content")
+    if not isinstance(source_content, str) or source_content == transport_content:
+        return result, False
+    restored = dict(result)
+    restored["content"] = source_content
+    restored["_source_content_restored"] = True
+    restored["_transport_content_chars"] = (
+        len(transport_content) if isinstance(transport_content, str) else 0
+    )
+    restored["_source_content_chars"] = len(source_content)
+    return restored, True
+
+
 def _catalog_results(
     payloads: list[dict[str, object]],
 ) -> dict[str, dict[int, dict[str, object]]]:
@@ -1446,6 +2350,20 @@ def _catalog_results(
     return catalog
 
 
+def _catalog_entity_payloads(
+    payloads: list[dict[str, object]],
+) -> dict[str, dict[int, dict[str, object]]]:
+    catalog: dict[str, dict[int, dict[str, object]]] = {}
+    for payload in payloads:
+        metadata = _flatten_operational_metadata(payload.get("metadata"))
+        trajectory_id = _stripped_str(metadata.get("longmemeval_v2_trajectory_id"))
+        chunk_index = metadata.get("longmemeval_v2_chunk_index")
+        if not trajectory_id or not isinstance(chunk_index, int):
+            continue
+        catalog.setdefault(trajectory_id, {})[chunk_index] = dict(payload)
+    return catalog
+
+
 def _memory_config_params(
     config: dict[str, object],
     *,
@@ -1460,9 +2378,71 @@ def _memory_config_params(
     return dict(memory_params)
 
 
+def load_api_credentials_file(path: Path) -> dict[str, str]:
+    raw = path.read_text(encoding="utf-8").strip()
+    if not raw:
+        raise ValueError(f"API credentials file is empty: {path}")
+    try:
+        payload = json_module.loads(raw)
+    except json_module.JSONDecodeError:
+        return {"api_token": raw}
+    if not isinstance(payload, dict):
+        raise ValueError(f"API credentials JSON must be an object: {path}")
+    access_token = _stripped_str(payload.get("access_token"))
+    if not access_token:
+        raise ValueError(f"API credentials JSON is missing access_token: {path}")
+    credentials = {
+        "api_token": access_token,
+        "api_credentials_path": str(path),
+    }
+    refresh_token = _stripped_str(payload.get("refresh_token"))
+    if refresh_token:
+        credentials["refresh_token"] = refresh_token
+    return credentials
+
+
 @register_memory
 class SibylLiveApiMemory(Memory):
     memory_type = "sibyl_live_api"
+
+    @classmethod
+    def attach_existing(
+        cls,
+        memory_params: dict[str, object],
+        *,
+        expected_trajectory_ids: Iterable[str],
+        trajectories: Iterable[dict[str, object]],
+    ) -> SibylLiveApiMemory:
+        memory = cls.prepare_existing(
+            memory_params,
+            expected_trajectory_ids=expected_trajectory_ids,
+            trajectories=trajectories,
+        )
+        memory.finalize_ingest()
+        return memory
+
+    @classmethod
+    def prepare_existing(
+        cls,
+        memory_params: dict[str, object],
+        *,
+        expected_trajectory_ids: Iterable[str],
+        trajectories: Iterable[dict[str, object]],
+    ) -> SibylLiveApiMemory:
+        project_id = _param_str(memory_params, "project_id", "")
+        if not project_id:
+            raise ValueError("prepare_existing requires project_id")
+        effective_params = dict(memory_params)
+        effective_params["reuse_existing_project"] = True
+        memory = cls(effective_params)
+        memory._attached_expected_trajectory_ids.update(
+            str(trajectory_id).strip()
+            for trajectory_id in expected_trajectory_ids
+            if str(trajectory_id).strip()
+        )
+        for trajectory in trajectories:
+            memory.insert(trajectory)
+        return memory
 
     @property
     def memory_config(self) -> dict[str, object]:
@@ -1519,13 +2499,25 @@ class SibylLiveApiMemory(Memory):
         self.api_url = _normalize_api_url(_param_str(memory_params, "api_url", DEFAULT_API_URL))
         self.run_id = _param_str(memory_params, "run_id", f"lme-v2-{uuid4().hex[:12]}")
         self.allow_localhost = _param_bool(memory_params, "allow_localhost", False)
+        self.project_id = _param_str(memory_params, "project_id", "")
+        self.reuse_existing_project = _param_bool(
+            memory_params,
+            "reuse_existing_project",
+            False,
+        )
+        if self.reuse_existing_project and not self.project_id:
+            raise ValueError("reuse_existing_project requires project_id")
         self.content_max_chars = _param_int(
             memory_params,
             "content_max_chars",
             DEFAULT_CONTENT_MAX_CHARS,
         )
         checkpoint_dir = _param_str(memory_params, "checkpoint_dir", "")
-        self.checkpoint_dir = Path(checkpoint_dir).expanduser().resolve() if checkpoint_dir else None
+        self.checkpoint_dir = (
+            Path(checkpoint_dir).expanduser().resolve() if checkpoint_dir else None
+        )
+        if self.reuse_existing_project and self.checkpoint_dir is not None:
+            raise ValueError("reuse_existing_project cannot be combined with checkpoint_dir")
         self.chunking_mode = _param_str(
             memory_params,
             "chunking_mode",
@@ -1537,7 +2529,7 @@ class SibylLiveApiMemory(Memory):
                 f"expected one of {sorted(CHUNKING_MODES)}"
             )
             raise ValueError(msg)
-        if self.chunking_mode != DEFAULT_CHUNKING_MODE:
+        if self.chunking_mode != DEFAULT_CHUNKING_MODE and not self.reuse_existing_project:
             raise ValueError(
                 "trajectory chunking is incompatible with operational experience; "
                 "use chunking_mode='state'"
@@ -1628,8 +2620,7 @@ class SibylLiveApiMemory(Memory):
         )
         if self.retrieval_max_planned_queries > MAX_REFINEMENT_QUERIES:
             raise ValueError(
-                "retrieval_max_planned_queries must be at most "
-                f"{MAX_REFINEMENT_QUERIES}"
+                f"retrieval_max_planned_queries must be at most {MAX_REFINEMENT_QUERIES}"
             )
         self.max_context_total_chars = max(
             1,
@@ -1708,10 +2699,11 @@ class SibylLiveApiMemory(Memory):
                 DEFAULT_EMBEDDING_BACKFILL_MAX_PENDING_JOBS,
             ),
         )
-        self.project_id = _param_str(memory_params, "project_id", "")
         self.inserted_trajectories = 0
         self.created_entities = 0
         self.last_experience_write_receipt: dict[str, object] = {}
+        self.attached_project_receipt: dict[str, object] = {}
+        self._attached_expected_trajectory_ids: set[str] = set()
         self._pending_embedding_job_ids: set[str] = set()
         self._pending_projection_job_ids: set[str] = set()
         self._pending_job_entity_ids: dict[str, list[str]] = {}
@@ -1721,6 +2713,8 @@ class SibylLiveApiMemory(Memory):
         self._ingest_finalized = False
         self._query_local = threading.local()
         self._chunk_catalog: dict[str, dict[int, dict[str, object]]] = {}
+        self._chunk_payload_catalog: dict[str, dict[int, dict[str, object]]] = {}
+        self._operational_chunk_catalog: dict[str, dict[int, dict[str, object]]] = {}
         self._completed_trajectory_ids: set[str] = set()
         self._operational_trajectory_ids: set[str] = set()
         self._client = _new_http_client(
@@ -1729,6 +2723,7 @@ class SibylLiveApiMemory(Memory):
         )
         self._closed = False
         self._refresh_token = ""
+        self._api_credentials_path: Path | None = None
         self._cli_auth: dict[str, str] = {}
         self._authenticate(memory_params)
         self.api_runtime = self._request_json("GET", "/health")
@@ -1738,9 +2733,10 @@ class SibylLiveApiMemory(Memory):
         else:
             self._verify_project_visibility()
         self.memory_params["project_id"] = self.project_id
-        if self.checkpoint_dir is not None and (
-            self.checkpoint_dir / CHECKPOINT_MANIFEST_FILENAME
-        ).is_file():
+        if (
+            self.checkpoint_dir is not None
+            and (self.checkpoint_dir / CHECKPOINT_MANIFEST_FILENAME).is_file()
+        ):
             self._load_checkpoint(self.checkpoint_dir)
 
     def set_query_context(self, **kwargs: object) -> None:
@@ -1753,6 +2749,41 @@ class SibylLiveApiMemory(Memory):
 
     def insert(self, trajectory: dict[str, object]) -> None:
         trajectory_id = _stripped_str(trajectory.get("id"))
+        if getattr(self, "reuse_existing_project", False):
+            if not trajectory_id:
+                raise ValueError("attached existing project requires trajectory ids")
+            payloads = build_entity_payloads_for_trajectory(
+                trajectory,
+                project_id=self.project_id,
+                run_id=self.run_id,
+                content_max_chars=self.content_max_chars,
+                chunking_mode=self.chunking_mode,
+                include_screenshot_refs=self.include_screenshot_refs,
+            )
+            self._chunk_catalog.update(_catalog_results(payloads))
+            operational_payloads = build_operational_session_payloads_for_trajectory(
+                trajectory,
+                project_id=self.project_id,
+                run_id=self.run_id,
+                content_max_chars=self.content_max_chars,
+                include_screenshot_refs=self.include_screenshot_refs,
+            )
+            self._operational_chunk_catalog.update(_catalog_entity_payloads(operational_payloads))
+            for payload in payloads:
+                metadata = payload.get("metadata")
+                if not isinstance(metadata, dict):
+                    continue
+                payload_trajectory_id = _stripped_str(metadata.get("longmemeval_v2_trajectory_id"))
+                chunk_index = metadata.get("longmemeval_v2_chunk_index")
+                if payload_trajectory_id and isinstance(chunk_index, int):
+                    self._chunk_payload_catalog.setdefault(payload_trajectory_id, {})[
+                        chunk_index
+                    ] = dict(payload)
+            self._attached_expected_trajectory_ids.add(trajectory_id)
+            self.inserted_trajectories = len(self._attached_expected_trajectory_ids)
+            self.created_entities = sum(len(chunks) for chunks in self._chunk_catalog.values())
+            self._ingest_finalized = False
+            return
         completed_trajectory_ids = getattr(self, "_completed_trajectory_ids", None)
         if completed_trajectory_ids is None:
             completed_trajectory_ids = set()
@@ -1811,16 +2842,512 @@ class SibylLiveApiMemory(Memory):
         with self._finalize_lock:
             if self._ingest_finalized:
                 return
+            if getattr(self, "reuse_existing_project", False):
+                self.attached_project_receipt = self._verify_attached_project()
+                self._ingest_finalized = True
+                return
             self._drain_embedding_backfills()
             self._drain_memory_projections()
             self._ingest_finalized = True
             if getattr(self, "checkpoint_dir", None) is not None:
                 self._write_checkpoint_manifest(finalized=True)
 
-    def query(self, query: str, query_image: str | None = None) -> list[MemoryContextItem]:
-        pending_jobs = len(self._pending_embedding_job_ids) + len(
-            self._pending_projection_job_ids
+    def _verify_attached_project(self) -> dict[str, object]:
+        inventory = self._attached_project_inventory()
+        self._assert_attached_project_identity(inventory)
+        missing_chunk_keys = inventory["missing_chunk_keys"]
+        unexpected_chunk_keys = inventory["unexpected_chunk_keys"]
+        duplicate_chunk_keys = inventory["duplicate_chunk_keys"]
+        catalog_mismatches = inventory["catalog_mismatches"]
+        source_metadata_mismatches = inventory["source_metadata_mismatches"]
+        if (
+            missing_chunk_keys
+            or unexpected_chunk_keys
+            or duplicate_chunk_keys
+            or catalog_mismatches
+            or source_metadata_mismatches
+        ):
+            receipt = inventory["receipt"]
+            raise RuntimeError(
+                "attached project catalog does not match stored session inventory: "
+                f"stored={receipt['expected_session_entity_count']}, "
+                f"catalog={receipt['catalog_entity_count']}, "
+                f"missing={len(missing_chunk_keys)}, "
+                f"unexpected={len(unexpected_chunk_keys)}, "
+                f"duplicates={len(duplicate_chunk_keys)}, "
+                f"mismatches={list(catalog_mismatches)[:5]}, "
+                f"source_metadata_mismatches={len(source_metadata_mismatches)}"
+            )
+        receipt = dict(inventory["receipt"])
+        receipt["content_audit"] = self._verify_attached_project_contents(inventory)
+        return receipt
+
+    def audit_attached_project(self) -> dict[str, object]:
+        inventory = self._attached_project_inventory()
+        self._assert_attached_project_identity(inventory)
+        return {
+            **dict(inventory["receipt"]),
+            "missing_chunks": [
+                f"{trajectory_id}:{chunk_index}"
+                for trajectory_id, chunk_index in inventory["missing_chunk_keys"]
+            ],
+            "unexpected_chunks": [
+                f"{trajectory_id}:{chunk_index}"
+                for trajectory_id, chunk_index in inventory["unexpected_chunk_keys"]
+            ],
+            "duplicate_chunks": [
+                f"{trajectory_id}:{chunk_index}"
+                for trajectory_id, chunk_index in inventory["duplicate_chunk_keys"]
+            ],
+            "catalog_mismatches": list(inventory["catalog_mismatches"]),
+            **_source_metadata_mismatch_receipt(inventory["source_metadata_mismatches"]),
+        }
+
+    def repair_attached_project(self, *, apply: bool) -> dict[str, object]:
+        inventory = self._attached_project_inventory()
+        self._assert_attached_project_identity(inventory)
+        unexpected = inventory["unexpected_chunk_keys"]
+        duplicates = inventory["duplicate_chunk_keys"]
+        mismatches = inventory["catalog_mismatches"]
+        missing = list(inventory["missing_chunk_keys"])
+        source_metadata_mismatches = list(inventory["source_metadata_mismatches"])
+        storage_shapes = set(inventory["receipt"]["storage_shapes"])
+        non_repairable_reasons: list[str] = []
+        if unexpected:
+            non_repairable_reasons.append("unexpected_chunks")
+        if duplicates:
+            non_repairable_reasons.append("duplicate_chunks")
+        if mismatches:
+            non_repairable_reasons.append("catalog_mismatches")
+        if len(storage_shapes) > 1:
+            non_repairable_reasons.append("mixed_storage_shapes")
+        if missing and storage_shapes != {"legacy"}:
+            non_repairable_reasons.append("missing_chunks_require_legacy_storage")
+        before = {
+            **dict(inventory["receipt"]),
+            "missing_chunks": [
+                f"{trajectory_id}:{chunk_index}" for trajectory_id, chunk_index in missing
+            ],
+            **_source_metadata_mismatch_receipt(source_metadata_mismatches),
+        }
+        content_audit_blockers = unexpected or duplicates or mismatches or missing
+        if content_audit_blockers:
+            before["content_audit"] = {"status": "blocked_by_inventory_damage"}
+        else:
+            try:
+                before["content_audit"] = self._verify_attached_project_contents(inventory)
+            except RuntimeError as exc:
+                before["content_audit"] = {"status": "mismatch", "error": str(exc)}
+                non_repairable_reasons.append("content_mismatch")
+        repairable = not non_repairable_reasons
+        if not apply:
+            return {
+                "applied": False,
+                "repairable": repairable,
+                "non_repairable_reasons": non_repairable_reasons,
+                "created_entity_count": 0,
+                "updated_entity_count": 0,
+                "before": before,
+                "after": (
+                    dict(inventory["receipt"])
+                    if repairable and not missing and not source_metadata_mismatches
+                    else None
+                ),
+            }
+        if non_repairable_reasons:
+            raise RuntimeError(
+                "attached project damage is not safely repairable: "
+                + ", ".join(non_repairable_reasons)
+            )
+        if not missing and not source_metadata_mismatches:
+            return {
+                "applied": False,
+                "repairable": True,
+                "non_repairable_reasons": [],
+                "created_entity_count": 0,
+                "updated_entity_count": 0,
+                "before": before,
+                "after": dict(inventory["receipt"]),
+            }
+
+        payloads: list[dict[str, object]] = []
+        for trajectory_id, chunk_index in missing:
+            payload = self._chunk_payload_catalog.get(trajectory_id, {}).get(chunk_index)
+            if not isinstance(payload, dict):
+                raise RuntimeError(
+                    "attached project repair is missing reconstructed payload "
+                    f"{trajectory_id}:{chunk_index}"
+                )
+            payloads.append(dict(payload))
+
+        created: list[tuple[str, dict[str, object]]] = []
+        for batch in _payload_batches(
+            payloads,
+            max_entities=self.bulk_max_entities,
+            max_content_chars=self.bulk_max_content_chars,
+        ):
+            response = self._request_json(
+                "POST",
+                "/entities/bulk",
+                json={"entities": batch, "defer_embeddings": self.defer_embeddings},
+            )
+            created_ids = _response_entity_ids(response)
+            if _created_count(response) != len(batch) or len(created_ids) != len(batch):
+                raise RuntimeError(
+                    "attached project repair received a partial bulk-create receipt: "
+                    f"requested={len(batch)}, created={_created_count(response)}, "
+                    f"entity_ids={len(created_ids)}"
+                )
+            created.extend(zip(created_ids, batch, strict=True))
+            self.created_entities += len(created_ids)
+            self._remember_embedding_backfill_jobs(response)
+            self._remember_memory_projection_jobs(response)
+            if len(self._pending_embedding_job_ids) >= self.embedding_backfill_max_pending_jobs:
+                self._drain_embedding_backfills()
+
+        self._drain_embedding_backfills()
+        self._drain_memory_projections()
+        updated_entity_count = 0
+        metadata_receipt = hashlib.sha256()
+
+        def synchronize_source_metadata(item: tuple[str, str]) -> tuple[str, str]:
+            entity_id, source_id = item
+            updated = self._request_json(
+                "PATCH",
+                f"/entities/{entity_id}",
+                json={"metadata": {"source_id": source_id}},
+            )
+            updated_metadata = updated.get("metadata")
+            if (
+                not isinstance(updated_metadata, dict)
+                or updated_metadata.get("source_id") != source_id
+            ):
+                raise RuntimeError(f"repaired entity {entity_id} did not preserve source metadata")
+            return entity_id, source_id
+
+        metadata_repair_worker_count = min(16, len(source_metadata_mismatches))
+        with ThreadPoolExecutor(max_workers=max(metadata_repair_worker_count, 1)) as executor:
+            synchronized = executor.map(synchronize_source_metadata, source_metadata_mismatches)
+            for entity_id, source_id in synchronized:
+                metadata_receipt.update(entity_id.encode())
+                metadata_receipt.update(b"\0")
+                metadata_receipt.update(source_id.encode())
+                metadata_receipt.update(b"\0")
+                updated_entity_count += 1
+
+        content_receipt = hashlib.sha256()
+        for entity_id, payload in created:
+            stored = self._request_json("GET", f"/entities/{entity_id}")
+            self._verify_repaired_entity(stored, payload, entity_id=entity_id)
+            content_receipt.update(entity_id.encode())
+            content_receipt.update(b"\0")
+            content_receipt.update(str(stored.get("content") or "").encode())
+            content_receipt.update(b"\0")
+
+        after_inventory = self._attached_project_inventory()
+        self._assert_attached_project_identity(after_inventory)
+        self.attached_project_receipt = self._complete_attached_project_receipt(after_inventory)
+        self.attached_project_receipt["content_audit"] = self._verify_attached_project_contents(
+            after_inventory
         )
+        self._ingest_finalized = True
+        return {
+            "applied": True,
+            "repairable": True,
+            "non_repairable_reasons": [],
+            "created_entity_count": len(created),
+            "verified_entity_count": len(created),
+            "verified_content_sha256": content_receipt.hexdigest(),
+            "updated_entity_count": updated_entity_count,
+            "metadata_repair_worker_count": metadata_repair_worker_count,
+            "verified_source_metadata_sha256": metadata_receipt.hexdigest(),
+            "before": before,
+            "after": dict(self.attached_project_receipt),
+        }
+
+    def _attached_project_inventory(self) -> dict[str, object]:
+        expected = set(self._attached_expected_trajectory_ids)
+        if not expected:
+            raise RuntimeError("attached existing project has no expected trajectories")
+        catalog_trajectories = set(self._chunk_catalog)
+        missing_catalog = sorted(expected - catalog_trajectories)
+        if missing_catalog:
+            raise RuntimeError(
+                "attached project catalog is missing "
+                f"{len(missing_catalog)} expected trajectories: {missing_catalog[:5]}"
+            )
+        observed: set[str] = set()
+        run_ids: set[str] = set()
+        observed_chunk_counts: Counter[tuple[str, int]] = Counter()
+        entity_count = 0
+        expected_entity_count = 0
+        catalog_mismatches: list[str] = []
+        source_metadata_mismatches: list[tuple[str, str]] = []
+        entity_chunk_keys: list[tuple[str, str, int, str]] = []
+        storage_shapes: set[str] = set()
+        page = 1
+        while True:
+            response = self._request_json(
+                "GET",
+                "/entities",
+                params={
+                    "entity_type": "session",
+                    "project_ids": self.project_id,
+                    "page": page,
+                    "page_size": 200,
+                },
+            )
+            entities = response.get("entities")
+            if not isinstance(entities, list):
+                raise RuntimeError("attached project inventory returned invalid entities")
+            for entity in entities:
+                raw_metadata = entity.get("metadata") if isinstance(entity, dict) else None
+                metadata = _flatten_operational_metadata(raw_metadata)
+                trajectory_id = _stripped_str(metadata.get("longmemeval_v2_trajectory_id"))
+                run_id = _stripped_str(metadata.get("longmemeval_v2_run_id"))
+                if not trajectory_id or not run_id:
+                    raise RuntimeError("attached project contains unbound session entities")
+                observed.add(trajectory_id)
+                run_ids.add(run_id)
+                entity_count += 1
+                if trajectory_id in expected:
+                    expected_entity_count += 1
+                    chunk_index = metadata.get("longmemeval_v2_chunk_index")
+                    projection_kind = _stripped_str(metadata.get("projection_kind"))
+                    storage_shape = (
+                        "operational"
+                        if projection_kind == "raw_observation"
+                        else "legacy"
+                        if not projection_kind
+                        else "unknown"
+                    )
+                    storage_shapes.add(storage_shape)
+                    if isinstance(chunk_index, int):
+                        observed_chunk_counts[(trajectory_id, chunk_index)] += 1
+                        entity_id = _stripped_str(entity.get("id"))
+                        if entity_id:
+                            entity_chunk_keys.append(
+                                (entity_id, trajectory_id, chunk_index, storage_shape)
+                            )
+                    expected_catalog = (
+                        self._operational_chunk_catalog
+                        if storage_shape == "operational"
+                        else self._chunk_catalog
+                    )
+                    catalog_entry = (
+                        expected_catalog.get(trajectory_id, {}).get(chunk_index)
+                        if isinstance(chunk_index, int)
+                        else None
+                    )
+                    catalog_metadata = _flatten_operational_metadata(
+                        catalog_entry.get("metadata") if isinstance(catalog_entry, dict) else None
+                    )
+                    required_metadata_keys = (
+                        (
+                            "project_id",
+                            "longmemeval_v2_run_id",
+                            "longmemeval_v2_trajectory_id",
+                            "longmemeval_v2_chunk_index",
+                            "longmemeval_v2_state_index",
+                            "longmemeval_v2_state_part_index",
+                            "longmemeval_v2_state_part_count",
+                            "operational_source_id",
+                            "projection_kind",
+                            "observation_ordinal",
+                            "evidence_part_index",
+                            "evidence_part_count",
+                        )
+                        if storage_shape == "operational"
+                        else (
+                            "project_id",
+                            "longmemeval_v2_run_id",
+                            "longmemeval_v2_trajectory_id",
+                            "longmemeval_v2_chunk_index",
+                            "longmemeval_v2_chunk_count",
+                            "entity_content_projection_policy",
+                        )
+                    )
+                    if (
+                        storage_shape == "unknown"
+                        or not isinstance(catalog_entry, dict)
+                        or entity.get("name") != catalog_entry.get("name")
+                        or any(
+                            metadata.get(key) != catalog_metadata.get(key)
+                            for key in required_metadata_keys
+                        )
+                    ):
+                        catalog_mismatches.append(f"{trajectory_id}:{chunk_index}")
+                    elif storage_shape == "legacy" and metadata.get(
+                        "source_id"
+                    ) != catalog_metadata.get("source_id"):
+                        entity_id = _stripped_str(entity.get("id"))
+                        expected_source_id = _stripped_str(catalog_metadata.get("source_id"))
+                        if not entity_id or not expected_source_id:
+                            catalog_mismatches.append(f"{trajectory_id}:{chunk_index}")
+                        else:
+                            source_metadata_mismatches.append((entity_id, expected_source_id))
+            if not response.get("has_more"):
+                break
+            if not entities or page >= 1_000:
+                raise RuntimeError("attached project inventory pagination did not converge")
+            page += 1
+        catalog_keys = {
+            (trajectory_id, chunk_index)
+            for trajectory_id in expected
+            for chunk_index in self._chunk_catalog[trajectory_id]
+        }
+        observed_keys = set(observed_chunk_counts)
+        missing_chunk_keys = tuple(sorted(catalog_keys - observed_keys))
+        unexpected_chunk_keys = tuple(sorted(observed_keys - catalog_keys))
+        duplicate_chunk_keys = tuple(
+            sorted(key for key, count in observed_chunk_counts.items() if count > 1)
+        )
+        receipt = {
+            "project_id": self.project_id,
+            "run_id": self.run_id,
+            "session_entity_count": entity_count,
+            "expected_session_entity_count": expected_entity_count,
+            "expected_trajectory_count": len(expected),
+            "observed_trajectory_count": len(observed),
+            "extra_trajectory_count": len(observed - expected),
+            "catalog_trajectory_count": len(catalog_trajectories),
+            "catalog_entity_count": len(catalog_keys),
+            "missing_chunk_count": len(missing_chunk_keys),
+            "unexpected_chunk_count": len(unexpected_chunk_keys),
+            "duplicate_chunk_count": len(duplicate_chunk_keys),
+            "catalog_mismatch_count": len(catalog_mismatches),
+            "source_metadata_mismatch_count": len(source_metadata_mismatches),
+            "storage_shapes": sorted(storage_shapes),
+            "pages": page,
+        }
+        return {
+            "receipt": receipt,
+            "expected": expected,
+            "observed": observed,
+            "run_ids": run_ids,
+            "missing_chunk_keys": missing_chunk_keys,
+            "unexpected_chunk_keys": unexpected_chunk_keys,
+            "duplicate_chunk_keys": duplicate_chunk_keys,
+            "catalog_mismatches": tuple(catalog_mismatches),
+            "source_metadata_mismatches": tuple(source_metadata_mismatches),
+            "entity_chunk_keys": tuple(entity_chunk_keys),
+        }
+
+    def _verify_attached_project_contents(
+        self,
+        inventory: dict[str, object],
+    ) -> dict[str, object]:
+        entity_chunk_keys = sorted(inventory["entity_chunk_keys"])
+        expected_count = int(inventory["receipt"]["expected_session_entity_count"])
+        if len(entity_chunk_keys) != expected_count:
+            raise RuntimeError(
+                "attached project content audit cannot bind every session entity: "
+                f"expected={expected_count}, bound={len(entity_chunk_keys)}"
+            )
+
+        def read_and_verify(item: tuple[str, str, int, str]) -> tuple[str, str]:
+            entity_id, trajectory_id, chunk_index, storage_shape = item
+            stored = self._request_json("GET", f"/entities/{entity_id}")
+            expected_catalog = (
+                self._operational_chunk_catalog
+                if storage_shape == "operational"
+                else self._chunk_catalog
+            )
+            expected = expected_catalog[trajectory_id][chunk_index]
+            stored_content = stored.get("content")
+            expected_content = expected.get("content")
+            if stored_content != expected_content:
+                raise RuntimeError(
+                    "attached project content does not match reconstructed source: "
+                    f"{trajectory_id}:{chunk_index}"
+                )
+            return entity_id, str(stored_content or "")
+
+        worker_count = min(16, len(entity_chunk_keys))
+        digest = hashlib.sha256()
+        with ThreadPoolExecutor(max_workers=max(worker_count, 1)) as executor:
+            verified = executor.map(read_and_verify, entity_chunk_keys)
+            verified_count = 0
+            for entity_id, content in verified:
+                digest.update(entity_id.encode())
+                digest.update(b"\0")
+                digest.update(content.encode())
+                digest.update(b"\0")
+                verified_count += 1
+        return {
+            "status": "verified",
+            "entity_count": verified_count,
+            "sha256": digest.hexdigest(),
+            "worker_count": worker_count,
+        }
+
+    def _assert_attached_project_identity(self, inventory: dict[str, object]) -> None:
+        expected = set(inventory["expected"])
+        observed = set(inventory["observed"])
+        missing = sorted(expected - observed)
+        if missing:
+            raise RuntimeError(
+                f"attached project is missing {len(missing)} expected trajectories: {missing[:5]}"
+            )
+        extra = sorted(observed - expected)
+        if extra:
+            raise RuntimeError(
+                f"attached project contains {len(extra)} uncatalogued trajectories: {extra[:5]}"
+            )
+        run_ids = set(inventory["run_ids"])
+        if run_ids != {self.run_id}:
+            raise RuntimeError(
+                f"attached project run identity mismatch: expected {self.run_id!r}, "
+                f"found {sorted(run_ids)}"
+            )
+
+    def _complete_attached_project_receipt(
+        self,
+        inventory: dict[str, object],
+    ) -> dict[str, object]:
+        missing = inventory["missing_chunk_keys"]
+        unexpected = inventory["unexpected_chunk_keys"]
+        duplicates = inventory["duplicate_chunk_keys"]
+        mismatches = inventory["catalog_mismatches"]
+        source_metadata_mismatches = inventory["source_metadata_mismatches"]
+        if missing or unexpected or duplicates or mismatches or source_metadata_mismatches:
+            receipt = inventory["receipt"]
+            raise RuntimeError(
+                "attached project catalog does not match stored session inventory: "
+                f"stored={receipt['expected_session_entity_count']}, "
+                f"catalog={receipt['catalog_entity_count']}, "
+                f"missing={len(missing)}, unexpected={len(unexpected)}, "
+                f"duplicates={len(duplicates)}, mismatches={list(mismatches)[:5]}, "
+                f"source_metadata_mismatches={len(source_metadata_mismatches)}"
+            )
+        return dict(inventory["receipt"])
+
+    @staticmethod
+    def _verify_repaired_entity(
+        stored: dict[str, object],
+        expected: dict[str, object],
+        *,
+        entity_id: str,
+    ) -> None:
+        if stored.get("id") != entity_id:
+            raise RuntimeError(f"repaired entity {entity_id} read back with a different id")
+        for field in ("name", "description", "content", "entity_type"):
+            if stored.get(field) != expected.get(field):
+                raise RuntimeError(
+                    f"repaired entity {entity_id} does not match source payload field {field}"
+                )
+        stored_metadata = stored.get("metadata")
+        expected_metadata = expected.get("metadata")
+        if not isinstance(stored_metadata, dict) or not isinstance(expected_metadata, dict):
+            raise RuntimeError(f"repaired entity {entity_id} returned invalid metadata")
+        for key, value in expected_metadata.items():
+            if stored_metadata.get(key) != value:
+                raise RuntimeError(
+                    f"repaired entity {entity_id} does not match source metadata field {key}"
+                )
+
+    def query(self, query: str, query_image: str | None = None) -> list[MemoryContextItem]:
+        pending_jobs = len(self._pending_embedding_job_ids) + len(self._pending_projection_job_ids)
         if pending_jobs or not self._ingest_finalized:
             msg = f"memory ingestion has {pending_jobs} pending jobs; call finalize_ingest first"
             raise RuntimeError(msg)
@@ -1840,6 +3367,11 @@ class SibylLiveApiMemory(Memory):
                 "evidence": {
                     "types": ["session"],
                     "limit": min(max(self.search_limit, self.max_context_items), 50),
+                    "max_results_per_source": getattr(
+                        self,
+                        "max_chunks_per_trajectory",
+                        DEFAULT_MAX_CHUNKS_PER_TRAJECTORY,
+                    ),
                     "content_max_chars": self.max_context_chars_per_item,
                     "include_retrieval_diagnostics": True,
                     "retrieval_mode": getattr(
@@ -1876,31 +3408,39 @@ class SibylLiveApiMemory(Memory):
             )
         self._query_local.search_metadata = search_metadata
         results = _flatten_operational_result_metadata(results)
+        chunk_catalog = getattr(self, "_chunk_catalog", {})
+        neighbor_stitch_items = getattr(
+            self,
+            "neighbor_stitch_items",
+            DEFAULT_NEIGHBOR_STITCH_ITEMS,
+        )
+        state_part_completion_items = getattr(
+            self,
+            "state_part_completion_items",
+            DEFAULT_STATE_PART_COMPLETION_ITEMS,
+        )
         assembled_results, assembly_metadata = assemble_context_results(
             results,
-            chunk_catalog=getattr(self, "_chunk_catalog", {}),
-            max_items=self.max_context_items,
+            chunk_catalog=chunk_catalog,
+            max_items=context_assembly_candidate_limit(
+                max_items=self.max_context_items,
+                neighbor_stitch_items=neighbor_stitch_items,
+                state_part_completion_items=state_part_completion_items,
+                has_chunk_catalog=bool(chunk_catalog),
+            ),
             max_chunks_per_trajectory=getattr(
                 self,
                 "max_chunks_per_trajectory",
                 DEFAULT_MAX_CHUNKS_PER_TRAJECTORY,
             ),
-            neighbor_stitch_items=getattr(
-                self,
-                "neighbor_stitch_items",
-                DEFAULT_NEIGHBOR_STITCH_ITEMS,
-            ),
+            neighbor_stitch_items=neighbor_stitch_items,
             neighbor_stitch_span=getattr(
                 self,
                 "neighbor_stitch_span",
                 DEFAULT_NEIGHBOR_STITCH_SPAN,
             ),
             query=query,
-            state_part_completion_items=getattr(
-                self,
-                "state_part_completion_items",
-                DEFAULT_STATE_PART_COMPLETION_ITEMS,
-            ),
+            state_part_completion_items=state_part_completion_items,
             state_part_refinement=getattr(
                 self,
                 "state_part_refinement",
@@ -1911,7 +3451,10 @@ class SibylLiveApiMemory(Memory):
                 "context_expansion_max_ratio",
                 DEFAULT_CONTEXT_EXPANSION_MAX_RATIO,
             ),
-            context_token_counter=self._count_context_result_tokens,
+            context_token_counter=lambda selected: self._count_context_result_tokens(
+                selected,
+                query=query,
+            ),
         )
         evidence_set, evidence_composition = compile_operational_evidence_set(
             query=query,
@@ -1933,6 +3476,7 @@ class SibylLiveApiMemory(Memory):
         self._query_local.search_metadata["adapter_assembly"] = assembly_metadata
         memory_context, context_budget = render_memory_context(
             evidence_set,
+            query=query,
             max_items=self.max_context_items,
             max_chars_per_item=self.max_context_chars_per_item,
             max_total_chars=getattr(
@@ -1950,10 +3494,16 @@ class SibylLiveApiMemory(Memory):
         )
         return memory_context
 
-    def _count_context_result_tokens(self, results: list[dict[str, object]]) -> int:
+    def _count_context_result_tokens(
+        self,
+        results: list[dict[str, object]],
+        *,
+        query: str = "",
+    ) -> int:
         return count_memory_context_tokens(
             search_results_to_memory_context(
                 results,
+                query=query,
                 max_items=self.max_context_items,
                 max_chars_per_item=self.max_context_chars_per_item,
                 max_total_chars=getattr(
@@ -2026,7 +3576,10 @@ class SibylLiveApiMemory(Memory):
             msg = f"Missing saved memory manifest: {manifest_path}"
             raise RuntimeError(msg)
         manifest = json_module.loads(manifest_path.read_text(encoding="utf-8"))
-        if not isinstance(manifest, dict) or manifest.get("schema_version") != MEMORY_MANIFEST_SCHEMA_VERSION:
+        if (
+            not isinstance(manifest, dict)
+            or manifest.get("schema_version") != MEMORY_MANIFEST_SCHEMA_VERSION
+        ):
             raise RuntimeError(f"Invalid saved memory manifest: {manifest_path}")
         expected_catalog_hash = manifest.get("chunk_catalog_sha256")
         if expected_catalog_hash != _sha256_file(catalog_path):
@@ -2043,13 +3596,9 @@ class SibylLiveApiMemory(Memory):
                 if not isinstance(loaded, dict):
                     continue
                 metadata = (
-                    loaded.get("metadata")
-                    if isinstance(loaded.get("metadata"), dict)
-                    else {}
+                    loaded.get("metadata") if isinstance(loaded.get("metadata"), dict) else {}
                 )
-                trajectory_id = _stripped_str(
-                    metadata.get("longmemeval_v2_trajectory_id")
-                )
+                trajectory_id = _stripped_str(metadata.get("longmemeval_v2_trajectory_id"))
                 chunk_index = metadata.get("longmemeval_v2_chunk_index")
                 if trajectory_id and isinstance(chunk_index, int):
                     catalog.setdefault(trajectory_id, {})[chunk_index] = loaded
@@ -2059,11 +3608,7 @@ class SibylLiveApiMemory(Memory):
         self._completed_trajectory_ids = set(catalog)
         operational_ids = manifest.get("operational_trajectory_ids")
         self._operational_trajectory_ids = (
-            {
-                str(value)
-                for value in operational_ids
-                if isinstance(value, str) and value in catalog
-            }
+            {str(value) for value in operational_ids if isinstance(value, str) and value in catalog}
             if isinstance(operational_ids, list)
             else set()
         )
@@ -2157,16 +3702,14 @@ class SibylLiveApiMemory(Memory):
             "pending_job_entity_ids": {
                 job_id: entity_ids
                 for job_id, entity_ids in sorted(self._pending_job_entity_ids.items())
-                if job_id
-                in self._pending_embedding_job_ids | self._pending_projection_job_ids
+                if job_id in self._pending_embedding_job_ids | self._pending_projection_job_ids
             },
             "pending_job_manifest_ids": {
                 job_id: manifest_id
                 for job_id, manifest_id in sorted(
                     getattr(self, "_pending_job_manifest_ids", {}).items()
                 )
-                if job_id
-                in self._pending_embedding_job_ids | self._pending_projection_job_ids
+                if job_id in self._pending_embedding_job_ids | self._pending_projection_job_ids
             },
             "ingest_embedding_usage": dict(self.ingest_embedding_usage),
             "ingest_api_runtime": dict(self.ingest_api_runtime),
@@ -2182,7 +3725,10 @@ class SibylLiveApiMemory(Memory):
     def _load_checkpoint(self, checkpoint_dir: Path) -> None:
         manifest_path = checkpoint_dir / CHECKPOINT_MANIFEST_FILENAME
         manifest = json_module.loads(manifest_path.read_text(encoding="utf-8"))
-        if not isinstance(manifest, dict) or manifest.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
+        if (
+            not isinstance(manifest, dict)
+            or manifest.get("schema_version") != CHECKPOINT_SCHEMA_VERSION
+        ):
             raise RuntimeError(f"Invalid ingest checkpoint manifest: {manifest_path}")
         config_path = checkpoint_dir / "memory_config.json"
         if manifest.get("memory_config_sha256") != _sha256_file(config_path):
@@ -2266,9 +3812,7 @@ class SibylLiveApiMemory(Memory):
             {
                 str(job_id): str(manifest_id)
                 for job_id, manifest_id in pending_job_manifest_ids.items()
-                if isinstance(job_id, str)
-                and isinstance(manifest_id, str)
-                and manifest_id
+                if isinstance(job_id, str) and isinstance(manifest_id, str) and manifest_id
             }
             if isinstance(pending_job_manifest_ids, dict)
             else {}
@@ -2301,6 +3845,8 @@ class SibylLiveApiMemory(Memory):
             "run_id": self.run_id,
             "inserted_trajectories": self.inserted_trajectories,
             "created_entities": self.created_entities,
+            "reuse_existing_project": getattr(self, "reuse_existing_project", False),
+            "attached_project_receipt": dict(getattr(self, "attached_project_receipt", {})),
             "defer_embeddings": self.defer_embeddings,
             "pending_embedding_backfill_jobs": len(self._pending_embedding_job_ids),
             "pending_memory_projection_jobs": len(self._pending_projection_job_ids),
@@ -2317,12 +3863,8 @@ class SibylLiveApiMemory(Memory):
                 "retrieval_max_planned_queries",
                 DEFAULT_RETRIEVAL_MAX_PLANNED_QUERIES,
             ),
-            "search_metadata": dict(
-                getattr(self._query_local, "search_metadata", {})
-            ),
-            "retrieval_trace": list(
-                getattr(self._query_local, "retrieval_trace", [])
-            ),
+            "search_metadata": dict(getattr(self._query_local, "search_metadata", {})),
+            "retrieval_trace": list(getattr(self._query_local, "retrieval_trace", [])),
         }
 
     def _remember_embedding_backfill_jobs(self, response: dict[str, object]) -> None:
@@ -2330,9 +3872,7 @@ class SibylLiveApiMemory(Memory):
             return
         background_jobs = response.get("background_jobs")
         embedding_job = (
-            background_jobs.get("embedding_backfill")
-            if isinstance(background_jobs, dict)
-            else None
+            background_jobs.get("embedding_backfill") if isinstance(background_jobs, dict) else None
         )
         if isinstance(embedding_job, dict) and embedding_job.get("status") == "degraded":
             error = _stripped_str(embedding_job.get("error")) or "unknown error"
@@ -2487,8 +4027,7 @@ class SibylLiveApiMemory(Memory):
                 break
             if time.monotonic() >= stall_deadline:
                 statuses = ", ".join(
-                    f"{job_id}={last_statuses.get(job_id, 'unknown')}"
-                    for job_id in sorted(pending)
+                    f"{job_id}={last_statuses.get(job_id, 'unknown')}" for job_id in sorted(pending)
                 )
                 msg = (
                     f"timed out after {self.embedding_job_wait_timeout_seconds:g}s "
@@ -2503,9 +4042,7 @@ class SibylLiveApiMemory(Memory):
         entity_ids = self._pending_job_entity_ids.get(job_id, [])
         pending_job_manifest_ids = getattr(self, "_pending_job_manifest_ids", {})
         manifest_id = (
-            pending_job_manifest_ids.get(job_id)
-            if job_kind == "embedding_backfill"
-            else None
+            pending_job_manifest_ids.get(job_id) if job_kind == "embedding_backfill" else None
         )
         if (
             not manifest_id
@@ -2547,8 +4084,28 @@ class SibylLiveApiMemory(Memory):
         if _is_loopback_url(self.api_url) and not self.allow_localhost:
             msg = "Refusing to mutate localhost without allow_localhost=true"
             raise RuntimeError(msg)
-        token = _param_str(memory_params, "api_token", "") or os.environ.get("SIBYL_API_TOKEN", "")
+        credentials_path = _param_str(
+            memory_params,
+            "api_credentials_path",
+            os.environ.get("SIBYL_API_CREDENTIALS_FILE", ""),
+        )
+        self._api_credentials_path = (
+            Path(credentials_path).expanduser().resolve() if credentials_path else None
+        )
+        file_credentials = (
+            load_api_credentials_file(self._api_credentials_path)
+            if self._api_credentials_path is not None
+            else {}
+        )
+        token = (
+            _param_str(memory_params, "api_token", "")
+            or file_credentials.get("api_token", "")
+            or os.environ.get("SIBYL_API_TOKEN", "")
+        )
         if token:
+            self._refresh_token = _param_str(
+                memory_params, "refresh_token", ""
+            ) or file_credentials.get("refresh_token", "")
             self._client.headers.update({"Authorization": f"Bearer {token}"})
             return
         cli_auth = _load_cli_auth(self.api_url)
@@ -2736,8 +4293,46 @@ class SibylLiveApiMemory(Memory):
         refresh_token = str(body.get("refresh_token") or self._refresh_token)
         self._refresh_token = refresh_token
         self._client.headers.update({"Authorization": f"Bearer {access_token}"})
+        if self._api_credentials_path is not None:
+            _store_api_credentials_file(
+                self._api_credentials_path,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                expires_in=body.get("expires_in"),
+            )
         _store_cli_auth(self._cli_auth, access_token, refresh_token, body.get("expires_in"))
         return True
+
+
+def _store_api_credentials_file(
+    path: Path,
+    *,
+    access_token: str,
+    refresh_token: str,
+    expires_in: object,
+) -> None:
+    try:
+        payload = json_module.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json_module.JSONDecodeError):
+        return
+    if not isinstance(payload, dict):
+        return
+    payload["access_token"] = access_token
+    payload["refresh_token"] = refresh_token
+    if isinstance(expires_in, int | float) and not isinstance(expires_in, bool):
+        payload["expires_in"] = expires_in
+    temporary_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    descriptor = os.open(temporary_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json_module.dump(payload, handle, separators=(",", ":"))
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
 
 
 def _trajectory_text_chunks(
@@ -2747,7 +4342,9 @@ def _trajectory_text_chunks(
     include_screenshot_refs: bool,
     chunking_mode: str = DEFAULT_CHUNKING_MODE,
 ) -> list[str]:
-    chunk_builder = _grouped_trajectory_chunks if chunking_mode == "trajectory" else _trajectory_chunks
+    chunk_builder = (
+        _grouped_trajectory_chunks if chunking_mode == "trajectory" else _trajectory_chunks
+    )
     return [
         chunk.content
         for chunk in chunk_builder(
@@ -2950,8 +4547,7 @@ def _split_text_lines(value: str, *, max_chars: int) -> list[str]:
                 pieces.append(current)
                 current = ""
             pieces.extend(
-                line[index : index + max_chars]
-                for index in range(0, len(line), max_chars)
+                line[index : index + max_chars] for index in range(0, len(line), max_chars)
             )
             continue
         if current and len(current) + len(line) > max_chars:
@@ -3046,8 +4642,7 @@ def _response_entity_ids(response: dict[str, object]) -> list[str]:
         return [
             entity_id
             for entity in entities
-            if isinstance(entity, dict)
-            and (entity_id := _stripped_str(entity.get("id")))
+            if isinstance(entity, dict) and (entity_id := _stripped_str(entity.get("id")))
         ]
     entity_id = _stripped_str(response.get("id"))
     return [entity_id] if entity_id else []
@@ -3064,8 +4659,7 @@ def _report_background_job_progress(
         f"{status}={count}" for status, count in sorted(pending_counts.items())
     )
     print(
-        f"{label}: {total - len(pending)}/{total} complete; "
-        f"pending {pending_summary or 'none'}.",
+        f"{label}: {total - len(pending)}/{total} complete; pending {pending_summary or 'none'}.",
         file=sys.stderr,
         flush=True,
     )
@@ -3198,7 +4792,9 @@ def _store_cli_auth(
         from sibyl_cli.auth_store import set_tokens
     except Exception:
         return
-    expires = expires_in if isinstance(expires_in, int) and not isinstance(expires_in, bool) else None
+    expires = (
+        expires_in if isinstance(expires_in, int) and not isinstance(expires_in, bool) else None
+    )
     try:
         set_tokens(
             cli_auth["api_url"],
@@ -3256,9 +4852,7 @@ def _param_float(params: dict[str, object], key: str, default: float) -> float:
     return default
 
 
-def _param_context_expansion_ratio(
-    params: dict[str, object], key: str, default: float
-) -> float:
+def _param_context_expansion_ratio(params: dict[str, object], key: str, default: float) -> float:
     value = params.get(key, default)
     if isinstance(value, bool):
         raise TypeError(f"{key} must be numeric")

@@ -92,6 +92,7 @@ TRANSIENT_READER_EXCEPTION_NAMES = frozenset(
 _SENSITIVE_COMMAND_FLAGS = frozenset(
     {
         "--api-token",
+        "--api-credentials-file",
         "--password",
         "--reader-api-key",
         "--evaluator-api-key",
@@ -404,9 +405,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         "--api-url", default=os.getenv("SIBYL_API_URL", "http://127.0.0.1:3334/api")
     )
     parser.add_argument("--api-token", default=os.getenv("SIBYL_API_TOKEN", ""))
+    parser.add_argument(
+        "--api-credentials-file",
+        default=os.getenv("SIBYL_API_CREDENTIALS_FILE", ""),
+    )
     parser.add_argument("--email", default=os.getenv("LME_SIBYL_EMAIL", ""))
     parser.add_argument("--password", default=os.getenv("LME_SIBYL_PASSWORD", ""))
     parser.add_argument("--project-id", default="")
+    parser.add_argument("--reuse-existing-project", action="store_true")
     parser.add_argument(
         "--run-id", default=os.getenv("LME_V2_RUN_ID", f"lme-v2-{uuid4().hex[:12]}")
     )
@@ -486,6 +492,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--domain combined is only valid with --receipt-only")
     if args.load_memory_dir and args.checkpoint_dir:
         parser.error("--load-memory-dir cannot be combined with --checkpoint-dir")
+    if args.reuse_existing_project and not args.project_id:
+        parser.error("--reuse-existing-project requires --project-id")
+    if args.reuse_existing_project and args.checkpoint_dir:
+        parser.error("--reuse-existing-project cannot be combined with --checkpoint-dir")
     if args.reader_retry_attempts < 1:
         parser.error("--reader-retry-attempts must be positive")
     if args.reader_retry_base_delay_seconds < 0:
@@ -613,6 +623,7 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "api_url": args.api_url,
         "project_id": args.project_id,
         "run_id": args.run_id,
+        "reuse_existing_project": args.reuse_existing_project,
         "allow_localhost": args.allow_localhost,
         "allow_signup": not args.no_signup,
         "content_max_chars": args.content_max_chars,
@@ -663,6 +674,7 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
 def install_memory_credentials(args: argparse.Namespace) -> None:
     for environment_key, value in (
         ("SIBYL_API_TOKEN", args.api_token),
+        ("SIBYL_API_CREDENTIALS_FILE", args.api_credentials_file),
         ("LME_SIBYL_EMAIL", args.email),
         ("LME_SIBYL_PASSWORD", args.password),
     ):
@@ -741,6 +753,7 @@ def build_run_plan(
         "skip_evaluation": args.skip_evaluation,
         "load_memory_dir": args.load_memory_dir,
         "checkpoint_dir": args.checkpoint_dir,
+        "reuse_existing_project": args.reuse_existing_project,
         "trajectory_path": str(data_root / "trajectories.jsonl"),
         "trajectory_path_exists": (data_root / "trajectories.jsonl").exists(),
         "question_count": len(selected_questions),
