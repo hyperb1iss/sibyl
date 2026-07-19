@@ -88,9 +88,11 @@ DEFAULT_SEARCH_LIMIT = 12
 DEFAULT_CONTEXT_ITEMS = 8
 DEFAULT_CONTEXT_CHARS_PER_ITEM = 18_000
 DEFAULT_CONTEXT_TOTAL_CHARS = 60_000
-QUERY_SLICE_RENDERING_VERSION = "query-aware-source-windows-v4"
+QUERY_SLICE_RENDERING_VERSION = "query-aware-source-windows-v5"
 QUERY_SLICE_WINDOW_LINES = 8
 QUERY_SLICE_WINDOW_STRIDE_LINES = 4
+QUERY_SLICE_COMPACT_THRESHOLD_CHARS = 2400
+QUERY_SLICE_COMPACT_WINDOW_LINES = 4
 QUERY_SLICE_SUCCESSOR_LINES = 8
 QUERY_SLICE_MAX_WINDOWS = 4
 QUERY_SLICE_STRUCTURED_WINDOWS = 2
@@ -1069,36 +1071,25 @@ def compact_content_for_query(
 
     lines = content.splitlines(keepends=True)
     line_starts = _line_start_offsets(lines)
-    candidates, envelope_end_line = _query_slice_candidates(
+    window_lines, stride_lines, max_windows = _window_geometry(max_chars)
+    base_metadata["window_lines"] = window_lines
+    candidates, envelope_end_line = _windowed_candidates(
         lines,
         line_starts,
         query=query,
+        window_lines=window_lines,
+        stride_lines=stride_lines,
+        base_metadata=base_metadata,
     )
-    base_metadata["candidate_window_count"] = len(candidates)
-    if len(candidates) < 2:
+    if candidates is None:
         return content[:max_chars], {
             **base_metadata,
             "mode": "prefix",
             "omitted_source_chars": len(content) - max_chars,
         }
 
-    ranking = rank_by_query_coverage(
-        query,
-        [
-            QueryCoverageCandidate(
-                item=candidate,
-                stable_id=str(candidate["stable_id"]),
-                text=str(candidate["ranking_text"]),
-                prior_score=0.0,
-                original_rank=index,
-            )
-            for index, candidate in enumerate(candidates, start=1)
-        ],
-    )
-    base_metadata["ranking_applied"] = ranking.applied
-    if not ranking.applied or not any(
-        ranked.score > 0.0 or ranked.overlap > 0.0 for ranked in ranking.ranked
-    ):
+    ranking = _coverage_ranking_with_fallback(query, candidates, base_metadata)
+    if ranking is None:
         return content[:max_chars], {
             **base_metadata,
             "mode": "prefix",
@@ -1153,7 +1144,7 @@ def compact_content_for_query(
         candidate["ranking_score"] = ranked.score
         candidate["ranking_overlap"] = ranked.overlap
         selected.append(candidate)
-        if len(selected) >= QUERY_SLICE_MAX_WINDOWS:
+        if len(selected) >= max_windows:
             break
 
     while selected:
@@ -1319,11 +1310,186 @@ def _query_structured_candidate_rank(
     return rank[:2] + (int(bool(candidate.get("structured_section"))),) + rank[2:]
 
 
+_TOKEN_OVERLAP_STOPWORDS = frozenset(
+    (
+        "the",
+        "and",
+        "for",
+        "was",
+        "were",
+        "with",
+        "what",
+        "which",
+        "when",
+        "where",
+        "that",
+        "this",
+        "from",
+        "have",
+        "has",
+        "had",
+        "you",
+        "your",
+        "are",
+        "is",
+        "not",
+        "but",
+        "all",
+        "any",
+        "can",
+        "could",
+        "would",
+        "should",
+        "does",
+        "did",
+    )
+)
+QUERY_SLICE_MIN_CANDIDATES = 2
+
+
+def _window_geometry(max_chars: int) -> tuple[int, int, int]:
+    compact_allocation = max_chars < QUERY_SLICE_COMPACT_THRESHOLD_CHARS
+    window_lines = (
+        QUERY_SLICE_COMPACT_WINDOW_LINES if compact_allocation else QUERY_SLICE_WINDOW_LINES
+    )
+    stride_lines = max(1, window_lines // 2)
+    max_windows = QUERY_SLICE_MAX_WINDOWS * (2 if compact_allocation else 1)
+    return window_lines, stride_lines, max_windows
+
+
+def _windowed_candidates(
+    lines: list[str],
+    line_starts: list[int],
+    *,
+    query: str,
+    window_lines: int,
+    stride_lines: int,
+    base_metadata: dict[str, object],
+) -> tuple[list[dict[str, object]] | None, int]:
+    candidates, envelope_end_line = _query_slice_candidates(
+        lines,
+        line_starts,
+        query=query,
+        window_lines=window_lines,
+        stride_lines=stride_lines,
+    )
+    if len(candidates) < QUERY_SLICE_MIN_CANDIDATES:
+        candidates = _stride_window_candidates(
+            lines,
+            line_starts,
+            window_lines=window_lines,
+            stride_lines=stride_lines,
+        )
+        envelope_end_line = 0
+        base_metadata["stride_window_fallback"] = True
+    base_metadata["candidate_window_count"] = len(candidates)
+    if len(candidates) < QUERY_SLICE_MIN_CANDIDATES:
+        return None, 0
+    return candidates, envelope_end_line
+
+
+def _coverage_ranking_with_fallback(
+    query: str,
+    candidates: list[dict[str, object]],
+    base_metadata: dict[str, object],
+) -> QueryCoverageResult[dict[str, object]] | None:
+    ranking = rank_by_query_coverage(
+        query,
+        [
+            QueryCoverageCandidate(
+                item=candidate,
+                stable_id=str(candidate["stable_id"]),
+                text=str(candidate["ranking_text"]),
+                prior_score=0.0,
+                original_rank=index,
+            )
+            for index, candidate in enumerate(candidates, start=1)
+        ],
+    )
+    base_metadata["ranking_applied"] = ranking.applied
+    if ranking.applied and any(
+        ranked.score > 0.0 or ranked.overlap > 0.0 for ranked in ranking.ranked
+    ):
+        return ranking
+    fallback_ranked = _token_overlap_ranking(query, candidates)
+    if fallback_ranked is None:
+        return None
+    base_metadata["ranking_applied"] = True
+    base_metadata["token_overlap_fallback"] = True
+    return QueryCoverageResult(ranked=fallback_ranked, applied=True, changed=True)
+
+
+def _token_overlap_terms(text: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]{3,}", text.casefold())
+        if token not in _TOKEN_OVERLAP_STOPWORDS
+    }
+
+
+def _token_overlap_ranking(
+    query: str,
+    candidates: list[dict[str, object]],
+) -> list[QueryCoverageRankedCandidate[dict[str, object]]] | None:
+    query_terms = _token_overlap_terms(query)
+    if not query_terms:
+        return None
+    scored: list[tuple[float, int, dict[str, object]]] = []
+    for index, candidate in enumerate(candidates, start=1):
+        window_terms = _token_overlap_terms(str(candidate["ranking_text"]))
+        score = len(query_terms & window_terms) / len(query_terms)
+        scored.append((score, index, candidate))
+    if not any(score > 0.0 for score, _index, _candidate in scored):
+        return None
+    scored.sort(key=lambda row: (-row[0], row[1]))
+    return [
+        QueryCoverageRankedCandidate(
+            item=candidate,
+            stable_id=str(candidate["stable_id"]),
+            score=score,
+            original_rank=index,
+            overlap=score,
+        )
+        for score, index, candidate in scored
+    ]
+
+
+def _stride_window_candidates(
+    lines: list[str],
+    line_starts: list[int],
+    *,
+    window_lines: int = QUERY_SLICE_WINDOW_LINES,
+    stride_lines: int = QUERY_SLICE_WINDOW_STRIDE_LINES,
+) -> list[dict[str, object]]:
+    if not lines:
+        return []
+    candidates: list[dict[str, object]] = []
+    for window_start in range(0, len(lines), stride_lines):
+        window_end = min(len(lines), window_start + window_lines)
+        candidates.append(
+            {
+                "stable_id": f"stride:{window_start}:{window_end}",
+                "state_start_line": window_start,
+                "body_start_line": window_start,
+                "window_start_line": window_start,
+                "window_end_line": window_end,
+                "window_start_char": line_starts[window_start],
+                "window_end_char": line_starts[window_end],
+                "ranking_text": "".join(lines[window_start:window_end]),
+            }
+        )
+        if window_end >= len(lines):
+            break
+    return candidates
+
+
 def _query_slice_candidates(
     lines: list[str],
     line_starts: list[int],
     *,
     query: str,
+    window_lines: int = QUERY_SLICE_WINDOW_LINES,
+    stride_lines: int = QUERY_SLICE_WINDOW_STRIDE_LINES,
 ) -> tuple[list[dict[str, object]], int]:
     state_starts = [
         index for index, line in enumerate(lines) if re.match(r"^State\s+\d+\s*$", line.rstrip())
@@ -1345,7 +1511,7 @@ def _query_slice_candidates(
         )
         if body_start >= state_end:
             continue
-        window_starts = set(range(body_start, state_end, QUERY_SLICE_WINDOW_STRIDE_LINES))
+        window_starts = set(range(body_start, state_end, stride_lines))
         for line_index in range(body_start, state_end):
             line = lines[line_index].casefold()
             if not any(phrase in line for phrase in focus_phrases):
@@ -1354,14 +1520,14 @@ def _query_slice_candidates(
                 body_start,
                 min(
                     line_index - 1,
-                    max(body_start, state_end - QUERY_SLICE_WINDOW_LINES),
+                    max(body_start, state_end - window_lines),
                 ),
             )
             window_starts.add(anchored_start)
-        final_start = max(body_start, state_end - QUERY_SLICE_WINDOW_LINES)
+        final_start = max(body_start, state_end - window_lines)
         window_starts.add(final_start)
         for window_start in sorted(window_starts):
-            window_end = min(state_end, window_start + QUERY_SLICE_WINDOW_LINES)
+            window_end = min(state_end, window_start + window_lines)
             window_end = _query_slice_successor_end(
                 lines,
                 window_end=window_end,

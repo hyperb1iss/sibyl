@@ -1859,6 +1859,70 @@ def test_sibyl_memory_context_keeps_labeled_listbox_options() -> None:
     assert metadata["structured_selected_window_count"] >= 1
 
 
+def test_compact_content_windows_unstructured_content() -> None:
+    module = _load_memory_module()
+    filler = "".join(f"line {index} filler text about nothing much here\n" for index in range(40))
+    tail = "".join(f"tail {index} more filler\n" for index in range(40))
+    content = (
+        filler + "The secret entry is Launch Dependency Assessment under Related Links\n" + tail
+    )
+
+    exposed, metadata = module.compact_content_for_query(
+        "What is the entry under Related Links on the Report page?",
+        content,
+        max_chars=600,
+    )
+
+    assert metadata["mode"] == "query_slices"
+    assert metadata["stride_window_fallback"] is True
+    assert "Launch Dependency Assessment" in exposed
+    assert len(exposed) <= 600
+
+
+def test_compact_content_token_fallback_when_focus_phrases_miss() -> None:
+    module = _load_memory_module()
+    module_focus = module._query_focus_phrases("Which agent has the highest incident total?")
+    content = "".join(
+        [
+            "State 1\n",
+            "Accessibility tree:\n",
+            *(f"\tStaticText 'padding row {index}'\n" for index in range(30)),
+            "\tStaticText 'incident totals by agent shown below'\n",
+            "\tStaticText 'agent Beth Anglin highest total 12'\n",
+            "\n",
+            "State 2\n",
+            "Accessibility tree:\n",
+            *(f"\tStaticText 'unrelated row {index}'\n" for index in range(30)),
+        ]
+    )
+
+    exposed, metadata = module.compact_content_for_query(
+        "Which agent has the highest incident total?",
+        content,
+        max_chars=700,
+    )
+
+    assert metadata["mode"] == "query_slices"
+    if metadata.get("token_overlap_fallback"):
+        assert metadata["ranking_applied"] is True
+    assert "highest total 12" in exposed
+    assert module_focus is not None
+
+
+def test_compact_content_zero_overlap_still_prefixes() -> None:
+    module = _load_memory_module()
+    content = "".join(f"row {index} lorem ipsum dolor\n" for index in range(80))
+
+    exposed, metadata = module.compact_content_for_query(
+        "xylophone quandary zeppelin",
+        content,
+        max_chars=500,
+    )
+
+    assert metadata["mode"] == "prefix"
+    assert exposed == content[:500]
+
+
 def test_sibyl_memory_context_keeps_successor_state_after_tail_match() -> None:
     module = _load_memory_module()
     query = (
@@ -1886,7 +1950,7 @@ def test_sibyl_memory_context_keeps_successor_state_after_tail_match() -> None:
 
     assert "State 2" in exposed
     assert "Prefix value appears after navigation" in exposed
-    assert metadata["version"] == "query-aware-source-windows-v4"
+    assert metadata["version"] == "query-aware-source-windows-v5"
     assert metadata["mode"] == "query_slices"
 
 
