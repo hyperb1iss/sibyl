@@ -27,6 +27,9 @@ _PRIORITY_DECAY_ENTITY_TYPES = (
     EntityType.PLAN,
     EntityType.NOTE,
 )
+_CONSOLIDATION_ENTITY_TYPES = tuple(
+    entity_type for entity_type in EntityType if entity_type is not EntityType.SESSION
+)
 
 
 class PriorityDecayCandidate:
@@ -107,7 +110,9 @@ async def consolidate_org(
             config=config,
         )
 
-        pairs = await deduplicator.find_duplicates()
+        pairs = await deduplicator.find_duplicates(
+            entity_types=[entity_type.value for entity_type in _CONSOLIDATION_ENTITY_TYPES]
+        )
 
         merges_completed = 0
         merges_failed = 0

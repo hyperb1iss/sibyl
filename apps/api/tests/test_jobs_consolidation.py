@@ -95,7 +95,11 @@ async def test_consolidate_org_wires_config_and_respects_merge_cap(
         entity_manager=entity_manager,
         config=config,
     )
-    deduplicator.find_duplicates.assert_awaited_once_with()
+    deduplicator.find_duplicates.assert_awaited_once_with(
+        entity_types=[
+            entity_type.value for entity_type in EntityType if entity_type is not EntityType.SESSION
+        ]
+    )
     assert deduplicator.merge_entities.await_args_list == [
         call(keep_id="keep-1", remove_id="remove-1", merge_metadata=True),
         call(keep_id="keep-2", remove_id="remove-2", merge_metadata=True),
@@ -134,7 +138,11 @@ async def test_consolidate_org_returns_zeroes_when_no_duplicates(
         "merges_failed": 0,
         "merges_skipped": 0,
     }
-    deduplicator.find_duplicates.assert_awaited_once_with()
+    deduplicator.find_duplicates.assert_awaited_once_with(
+        entity_types=[
+            entity_type.value for entity_type in EntityType if entity_type is not EntityType.SESSION
+        ]
+    )
     deduplicator.merge_entities.assert_not_awaited()
 
 
@@ -172,7 +180,11 @@ async def test_consolidate_org_counts_merge_exceptions_as_failures(
         "merges_failed": 1,
         "merges_skipped": 0,
     }
-    deduplicator.find_duplicates.assert_awaited_once_with()
+    deduplicator.find_duplicates.assert_awaited_once_with(
+        entity_types=[
+            entity_type.value for entity_type in EntityType if entity_type is not EntityType.SESSION
+        ]
+    )
     deduplicator.merge_entities.assert_awaited_once_with(
         keep_id="keep-1",
         remove_id="remove-1",
