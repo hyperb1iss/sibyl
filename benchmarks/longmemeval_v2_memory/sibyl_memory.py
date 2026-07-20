@@ -107,6 +107,9 @@ EVIDENCE_COMPOSITION_MODES = frozenset({"reserved_support", "shared_relevance"})
 DEFAULT_SOURCE_EVIDENCE_BUNDLING = False
 DEFAULT_RETRIEVAL_MODE = "fast"
 RETRIEVAL_MODES = frozenset({"accurate", "fast"})
+DEFAULT_TYPED_STREAM_RETRIEVAL = False
+DEFAULT_TYPED_STREAM_LIMIT = 8
+TYPED_STREAM_TYPES = ("event", "procedure", "error_pattern")
 DEFAULT_RETRIEVAL_MAX_PLANNED_QUERIES = 3
 DEFAULT_API_TIMEOUT_SECONDS = 600.0
 DEFAULT_API_RETRY_ATTEMPTS = 3
@@ -516,6 +519,22 @@ def context_pack_to_search_results(
             _stripped_str(item.get("id")),
         ),
     )
+
+
+def merge_typed_stream_results(
+    pack_typed: list[dict[str, object]],
+    stream_typed: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    seen = {item_id for item in pack_typed if (item_id := _stripped_str(item.get("id")))}
+    merged = list(pack_typed)
+    for item in stream_typed:
+        item_id = _stripped_str(item.get("id"))
+        if item_id and item_id in seen:
+            continue
+        merged.append(item)
+        if item_id:
+            seen.add(item_id)
+    return merged
 
 
 def _required_context_evidence(
@@ -2788,6 +2807,17 @@ class SibylLiveApiMemory(Memory):
             raise ValueError(
                 f"retrieval_max_planned_queries must be at most {MAX_REFINEMENT_QUERIES}"
             )
+        self.typed_stream_retrieval = _param_bool(
+            memory_params,
+            "typed_stream_retrieval",
+            DEFAULT_TYPED_STREAM_RETRIEVAL,
+        )
+        self.typed_stream_limit = _param_int(
+            memory_params,
+            "typed_stream_limit",
+            DEFAULT_TYPED_STREAM_LIMIT,
+            minimum=1,
+        )
         self.max_context_total_chars = max(
             1,
             _param_int(
@@ -3512,6 +3542,48 @@ class SibylLiveApiMemory(Memory):
                     f"repaired entity {entity_id} does not match source metadata field {key}"
                 )
 
+    def _typed_stream_results(
+        self,
+        query: str,
+    ) -> tuple[list[dict[str, object]], dict[str, object]]:
+        response = self._request_json(
+            "POST",
+            "/context/pack",
+            json={
+                "goal": query,
+                "intent": "learn",
+                "layer": "deep_search",
+                "project": self.project_id,
+                "limit": self.typed_stream_limit,
+                "include_related": True,
+                "related_limit": 3,
+                "audit": True,
+                "record_exposure": False,
+                "evidence": {
+                    "types": list(TYPED_STREAM_TYPES),
+                    "limit": self.typed_stream_limit,
+                    "content_max_chars": self.max_context_chars_per_item,
+                    "include_retrieval_diagnostics": False,
+                    "retrieval_mode": "fast",
+                    "max_planned_queries": 1,
+                },
+            },
+        )
+        results, filters = _required_context_evidence(response)
+        stream_results: list[dict[str, object]] = []
+        for item in results:
+            if _stripped_str(item.get("type")) not in TYPED_STREAM_TYPES:
+                continue
+            candidate = _string_key_dict(item)
+            candidate["_selection_origin"] = "context_pack:typed_stream"
+            stream_results.append(candidate)
+        return stream_results, {
+            "requested_types": list(TYPED_STREAM_TYPES),
+            "limit": self.typed_stream_limit,
+            "result_count": len(stream_results),
+            "filters": filters,
+        }
+
     def query(self, query: str, query_image: str | None = None) -> list[MemoryContextItem]:
         pending_jobs = len(self._pending_embedding_job_ids) + len(self._pending_projection_job_ids)
         if pending_jobs or not self._ingest_finalized:
@@ -3563,6 +3635,10 @@ class SibylLiveApiMemory(Memory):
             ),
         )
         results, search_metadata = _required_context_evidence(context_response)
+        if getattr(self, "typed_stream_retrieval", DEFAULT_TYPED_STREAM_RETRIEVAL):
+            stream_results, stream_metadata = self._typed_stream_results(query)
+            typed_results = merge_typed_stream_results(typed_results, stream_results)
+            search_metadata["typed_stream"] = stream_metadata
         if (
             getattr(self, "retrieval_mode", DEFAULT_RETRIEVAL_MODE) == "accurate"
             and search_metadata.get("planner_status") != "success"

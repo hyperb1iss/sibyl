@@ -73,6 +73,8 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "context_expansion_max_ratio",
         "evidence_composition_mode",
         "source_evidence_bundling",
+        "typed_stream_retrieval",
+        "typed_stream_limit",
         "retrieval_mode",
         "retrieval_max_planned_queries",
         "checkpoint_dir",
@@ -440,6 +442,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         default="shared_relevance",
     )
     parser.add_argument("--source-evidence-bundling", action="store_true")
+    parser.add_argument("--typed-stream-retrieval", action="store_true")
+    parser.add_argument("--typed-stream-limit", type=int, default=8)
     parser.add_argument(
         "--retrieval-mode",
         choices=["fast", "accurate"],
@@ -531,8 +535,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--max-context-total-chars must be positive")
     if not 1 <= args.retrieval_max_planned_queries <= MAX_REFINEMENT_QUERIES:
         parser.error(
-            "--retrieval-max-planned-queries must be between "
-            f"1 and {MAX_REFINEMENT_QUERIES}"
+            f"--retrieval-max-planned-queries must be between 1 and {MAX_REFINEMENT_QUERIES}"
         )
     args.provider_usage_run_id = f"lme-v2-usage-{uuid4().hex[:12]}"
     return args
@@ -641,6 +644,8 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "context_expansion_max_ratio": args.context_expansion_max_ratio,
         "evidence_composition_mode": args.evidence_composition_mode,
         "source_evidence_bundling": args.source_evidence_bundling,
+        "typed_stream_retrieval": args.typed_stream_retrieval,
+        "typed_stream_limit": args.typed_stream_limit,
         "retrieval_mode": args.retrieval_mode,
         "retrieval_max_planned_queries": args.retrieval_max_planned_queries,
         "include_screenshot_refs": args.include_screenshot_refs,
@@ -780,6 +785,8 @@ def build_run_plan(
         "max_context_total_chars": args.max_context_total_chars,
         "evidence_composition_mode": args.evidence_composition_mode,
         "source_evidence_bundling": args.source_evidence_bundling,
+        "typed_stream_retrieval": args.typed_stream_retrieval,
+        "typed_stream_limit": args.typed_stream_limit,
         "retrieval_mode": args.retrieval_mode,
         "retrieval_max_planned_queries": args.retrieval_max_planned_queries,
         "include_screenshot_refs": args.include_screenshot_refs,
@@ -1142,15 +1149,11 @@ def load_receipt_source_runs(
                 "reader_usage_events": reader_usage_log["events"],
                 "reader_usage_invalid_lines": reader_usage_log["invalid_lines"],
                 "reader_usage_run_ids": reader_usage_log["run_ids"],
-                "reader_usage_foreign_event_count": reader_usage_log[
-                    "foreign_event_count"
-                ],
+                "reader_usage_foreign_event_count": reader_usage_log["foreign_event_count"],
                 "judge_usage_events": judge_usage_log["events"],
                 "judge_usage_invalid_lines": judge_usage_log["invalid_lines"],
                 "judge_usage_run_ids": judge_usage_log["run_ids"],
-                "judge_usage_foreign_event_count": judge_usage_log[
-                    "foreign_event_count"
-                ],
+                "judge_usage_foreign_event_count": judge_usage_log["foreign_event_count"],
                 "expected_usage_run_id": expected_run_id,
             }
         )
@@ -1167,9 +1170,7 @@ def build_source_runs_receipt(
         domain = str(source_run["domain"])
         run_args = source_run["run_args"]
         output_dir = source_run["output_dir"]
-        api_runtime, api_runtime_consistent = _source_api_runtime(
-            source_run["per_question_rows"]
-        )
+        api_runtime, api_runtime_consistent = _source_api_runtime(source_run["per_question_rows"])
         domains[domain] = {
             "output_dir": str(output_dir),
             "plan": artifact_path_record(source_run["plan_path"]),
@@ -1188,9 +1189,7 @@ def build_source_runs_receipt(
                     "invalid_line_count": source_run["reader_usage_invalid_lines"],
                     "run_ids": source_run["reader_usage_run_ids"],
                     "expected_run_id": source_run["expected_usage_run_id"],
-                    "foreign_event_count": source_run[
-                        "reader_usage_foreign_event_count"
-                    ],
+                    "foreign_event_count": source_run["reader_usage_foreign_event_count"],
                     "attempt_count": len(source_run["reader_usage_run_ids"]),
                 },
                 "judge": {
@@ -1199,9 +1198,7 @@ def build_source_runs_receipt(
                     "invalid_line_count": source_run["judge_usage_invalid_lines"],
                     "run_ids": source_run["judge_usage_run_ids"],
                     "expected_run_id": source_run["expected_usage_run_id"],
-                    "foreign_event_count": source_run[
-                        "judge_usage_foreign_event_count"
-                    ],
+                    "foreign_event_count": source_run["judge_usage_foreign_event_count"],
                     "attempt_count": len(source_run["judge_usage_run_ids"]),
                 },
             },
@@ -1226,10 +1223,7 @@ def build_source_runs_receipt(
     integrity_complete = all(
         domain in domains
         and domains[domain]["plan"]["exists"]
-        and all(
-            record["exists"]
-            for record in domains[domain]["runtime_inputs"].values()
-        )
+        and all(record["exists"] for record in domains[domain]["runtime_inputs"].values())
         and all(
             record["exists"]
             and record["event_count"] > 0
@@ -1503,8 +1497,7 @@ def build_receipt_accounting(
         for section in (embedding, planner, reader, judge)
     )
     cost_coverage_complete = all(
-        bool(section["cost_coverage_complete"])
-        for section in (embedding, planner, reader, judge)
+        bool(section["cost_coverage_complete"]) for section in (embedding, planner, reader, judge)
     )
 
     return {
@@ -1578,9 +1571,7 @@ def _embedding_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
     ingest = _summarize_embedding_usage(ingest_records)
     query = _summarize_embedding_usage(query_records)
     requests = int(ingest["requests"] + query["requests"])
-    priced_requests = int(
-        ingest["cost_reported_requests"] + query["cost_reported_requests"]
-    )
+    priced_requests = int(ingest["cost_reported_requests"] + query["cost_reported_requests"])
     provider_reported_cost_usd = float(
         ingest["provider_reported_cost_usd"] + query["provider_reported_cost_usd"]
     )
@@ -1651,12 +1642,8 @@ def _planner_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
                 tracking_complete = False
 
     requests = int(sum(_number_from(record, ("requests",)) or 0 for record in records))
-    input_tokens = sum(
-        _number_from(record, ("input_tokens",)) or 0.0 for record in records
-    )
-    output_tokens = sum(
-        _number_from(record, ("output_tokens",)) or 0.0 for record in records
-    )
+    input_tokens = sum(_number_from(record, ("input_tokens",)) or 0.0 for record in records)
+    output_tokens = sum(_number_from(record, ("output_tokens",)) or 0.0 for record in records)
     priced_requests = int(
         sum(
             (_number_from(record, ("requests",)) or 0)
@@ -1677,11 +1664,7 @@ def _planner_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
         }
     )
     models = sorted(
-        {
-            model
-            for record in records
-            if isinstance(model := record.get("model"), str) and model
-        }
+        {model for record in records if isinstance(model := record.get("model"), str) and model}
     )
     coverage_complete = tracking_complete and len(records) == expected_rows
     return {
@@ -1709,14 +1692,10 @@ def _summarize_embedding_usage(records: list[dict[str, Any]]) -> dict[str, Any]:
         "requests": int(sum(_number_from(record, ("requests",)) or 0 for record in records)),
         "inputs": int(sum(_number_from(record, ("inputs",)) or 0 for record in records)),
         "input_tokens": sum(
-            _number_from(record, ("prompt_tokens",), ("total_tokens",)) or 0.0
-            for record in records
+            _number_from(record, ("prompt_tokens",), ("total_tokens",)) or 0.0 for record in records
         ),
         "cost_reported_requests": int(
-            sum(
-                _number_from(record, ("cost_reported_requests",)) or 0
-                for record in records
-            )
+            sum(_number_from(record, ("cost_reported_requests",)) or 0 for record in records)
         ),
         "provider_reported_cost_usd": sum(
             _number_from(record, ("cost_usd",)) or 0.0 for record in records
@@ -1729,11 +1708,7 @@ def _summarize_embedding_usage(records: list[dict[str, Any]]) -> dict[str, Any]:
             }
         ),
         "models": sorted(
-            {
-                model
-                for record in records
-                if isinstance(model := record.get("model"), str) and model
-            }
+            {model for record in records if isinstance(model := record.get("model"), str) and model}
         ),
     }
 
@@ -1756,16 +1731,12 @@ def _provider_accounting(
         and bool(source_run[event_key])
         for source_run in source_runs
     )
-    input_tokens = sum(
-        _number_from(event, ("usage", "prompt_tokens")) or 0.0 for event in events
-    )
+    input_tokens = sum(_number_from(event, ("usage", "prompt_tokens")) or 0.0 for event in events)
     output_tokens = sum(
         _number_from(event, ("usage", "completion_tokens")) or 0.0 for event in events
     )
     costs = [
-        cost
-        for event in events
-        if (cost := _number_from(event, ("usage", "cost_usd"))) is not None
+        cost for event in events if (cost := _number_from(event, ("usage", "cost_usd"))) is not None
     ]
     request_count = len(events)
     priced_requests = len(costs)
@@ -1853,9 +1824,7 @@ def build_dataset_receipt(
         "haystack_sha256": sha256_file(haystack),
         "question_count": _coerce_integral_number(recorded_question_count),
         "selected_question_ids_sha256": plan.get("selected_question_ids_sha256"),
-        "required_trajectory_count": _coerce_integral_number(
-            recorded_required_trajectory_count
-        ),
+        "required_trajectory_count": _coerce_integral_number(recorded_required_trajectory_count),
     }
     if dataset_record["question_count"] is None:
         dataset_record["question_count"] = question_count

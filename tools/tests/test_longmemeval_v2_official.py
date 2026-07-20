@@ -2740,6 +2740,84 @@ def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
         module.SibylLiveApiMemory.reconcile_loaded_memory_config(saved, requested)
 
 
+def test_merge_typed_stream_results_dedupes_by_id() -> None:
+    module = _load_memory_module()
+    pack = [
+        {"id": "procedure_1", "type": "procedure"},
+        {"id": "event_1", "type": "event"},
+    ]
+    stream = [
+        {"id": "event_1", "type": "event"},
+        {"id": "event_2", "type": "event", "_selection_origin": "context_pack:typed_stream"},
+        {"id": "error_pattern_1", "type": "error_pattern"},
+    ]
+
+    merged = module.merge_typed_stream_results(pack, stream)
+
+    assert [item["id"] for item in merged] == [
+        "procedure_1",
+        "event_1",
+        "event_2",
+        "error_pattern_1",
+    ]
+
+
+def test_typed_stream_results_filters_and_marks_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_memory_module()
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_authenticate", lambda *args: None)
+    captured: list[dict[str, object]] = []
+
+    def fake_request(
+        _self: object,
+        method: str,
+        path: str,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        if path == "/health":
+            return {"status": "healthy"}
+        if method == "GET":
+            return {"id": "project_test", "entity_type": "project"}
+        captured.append(kwargs.get("json") or {})
+        return {
+            "evidence": {
+                "results": [
+                    {"id": "event_9", "type": "event", "content": "state changed"},
+                    {"id": "session_9", "type": "session", "content": "raw slice"},
+                    {"id": "procedure_9", "type": "procedure", "content": "steps"},
+                ],
+                "filters": {"types": ["event", "procedure", "error_pattern"]},
+            }
+        }
+
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_request_json", fake_request)
+    memory = module.SibylLiveApiMemory(
+        {
+            "allow_localhost": True,
+            "project_id": "project_test",
+            "typed_stream_retrieval": True,
+            "typed_stream_limit": 5,
+        }
+    )
+    try:
+        results, metadata = memory._typed_stream_results("what changed?")
+    finally:
+        memory._client.close()
+
+    assert [item["id"] for item in results] == ["event_9", "procedure_9"]
+    assert all(
+        item["_selection_origin"] == "context_pack:typed_stream" for item in results
+    )
+    assert metadata["result_count"] == 2
+    request = captured[-1]
+    evidence = request["evidence"]
+    assert evidence["types"] == ["event", "procedure", "error_pattern"]
+    assert evidence["retrieval_mode"] == "fast"
+    assert evidence["limit"] == 5
+    assert request["record_exposure"] is False
+
+
 def test_sibyl_memory_constructor_preserves_disabled_neighbor_stitching(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

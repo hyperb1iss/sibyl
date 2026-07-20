@@ -65,6 +65,8 @@ def main(argv: list[str] | None = None) -> int:
             "retrieval_max_planned_queries": args.max_planned_queries,
             "evidence_composition_mode": args.evidence_composition_mode,
             "source_evidence_bundling": args.source_evidence_bundling,
+            "typed_stream_retrieval": args.typed_stream_retrieval,
+            "typed_stream_limit": args.typed_stream_limit,
         },
         expected_trajectory_ids=expected_trajectory_ids,
         trajectories=trajectories,
@@ -131,6 +133,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
     )
+    parser.add_argument("--typed-stream-retrieval", action="store_true")
+    parser.add_argument("--typed-stream-limit", type=int, default=8)
     args = parser.parse_args(argv)
     if args.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be positive")
@@ -247,6 +251,8 @@ def build_run_config(
         "max_context_total_chars": args.max_context_total_chars,
         "evidence_composition_mode": args.evidence_composition_mode,
         "source_evidence_bundling": args.source_evidence_bundling,
+        "typed_stream_retrieval": args.typed_stream_retrieval,
+        "typed_stream_limit": args.typed_stream_limit,
     }
 
 
