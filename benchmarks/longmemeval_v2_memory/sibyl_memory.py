@@ -943,6 +943,30 @@ def search_results_to_memory_context(
     return context
 
 
+_UI_INVENTORY_HEADER = "Observed UI inventory:"
+
+
+def annotate_inventory_completeness(content: str, metadata: object) -> str:
+    if _UI_INVENTORY_HEADER not in content or not isinstance(metadata, dict):
+        return content
+    item_count = metadata.get("ui_inventory_item_count")
+    if not isinstance(item_count, int) or isinstance(item_count, bool) or item_count <= 0:
+        return content
+    if metadata.get("ui_inventory_truncated"):
+        replacement = (
+            f"Partial UI element inventory for this page state (first {item_count} "
+            "elements; the full page had more, so absence of an element cannot be "
+            "inferred from this list):"
+        )
+    else:
+        replacement = (
+            f"Complete UI element inventory for this page state ({item_count} "
+            "elements; an element absent from this list was not present on this "
+            "page):"
+        )
+    return content.replace(_UI_INVENTORY_HEADER, replacement, 1)
+
+
 def render_memory_context(
     results: list[dict[str, object]],
     *,
@@ -959,6 +983,7 @@ def render_memory_context(
         content = _stripped_str(result.get("content"))
         if not content:
             continue
+        content = annotate_inventory_completeness(content, result.get("metadata"))
         rows.append((rank, result, _memory_context_header(rank, result), content))
 
     candidate_rows = list(rows)

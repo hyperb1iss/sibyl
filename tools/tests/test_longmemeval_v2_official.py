@@ -2740,6 +2740,31 @@ def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
         module.SibylLiveApiMemory.reconcile_loaded_memory_config(saved, requested)
 
 
+def test_annotate_inventory_completeness_branches() -> None:
+    module = _load_memory_module()
+    content = "Goal: something\nObserved UI inventory:\n- link: Home"
+
+    complete = module.annotate_inventory_completeness(
+        content, {"ui_inventory_item_count": 42, "ui_inventory_truncated": False}
+    )
+    assert "Complete UI element inventory" in complete
+    assert "42 elements" in complete
+    assert "was not present" in complete
+
+    partial = module.annotate_inventory_completeness(
+        content, {"ui_inventory_item_count": 157, "ui_inventory_truncated": True}
+    )
+    assert "Partial UI element inventory" in partial
+    assert "cannot be inferred" in partial
+
+    assert module.annotate_inventory_completeness(content, None) == content
+    assert module.annotate_inventory_completeness(content, {}) == content
+    assert (
+        module.annotate_inventory_completeness("no inventory here", {"ui_inventory_item_count": 3})
+        == "no inventory here"
+    )
+
+
 def test_merge_typed_stream_results_dedupes_by_id() -> None:
     module = _load_memory_module()
     pack = [
@@ -2806,9 +2831,7 @@ def test_typed_stream_results_filters_and_marks_origin(
         memory._client.close()
 
     assert [item["id"] for item in results] == ["event_9", "procedure_9"]
-    assert all(
-        item["_selection_origin"] == "context_pack:typed_stream" for item in results
-    )
+    assert all(item["_selection_origin"] == "context_pack:typed_stream" for item in results)
     assert metadata["result_count"] == 2
     request = captured[-1]
     evidence = request["evidence"]
