@@ -3589,6 +3589,11 @@ class SibylLiveApiMemory(Memory):
         if pending_jobs or not self._ingest_finalized:
             msg = f"memory ingestion has {pending_jobs} pending jobs; call finalize_ingest first"
             raise RuntimeError(msg)
+        stream_future = None
+        stream_executor: ThreadPoolExecutor | None = None
+        if getattr(self, "typed_stream_retrieval", DEFAULT_TYPED_STREAM_RETRIEVAL):
+            stream_executor = ThreadPoolExecutor(max_workers=1)
+            stream_future = stream_executor.submit(self._typed_stream_results, query)
         context_response = self._request_json(
             "POST",
             "/context/pack",
@@ -3635,8 +3640,11 @@ class SibylLiveApiMemory(Memory):
             ),
         )
         results, search_metadata = _required_context_evidence(context_response)
-        if getattr(self, "typed_stream_retrieval", DEFAULT_TYPED_STREAM_RETRIEVAL):
-            stream_results, stream_metadata = self._typed_stream_results(query)
+        if stream_future is not None and stream_executor is not None:
+            try:
+                stream_results, stream_metadata = stream_future.result()
+            finally:
+                stream_executor.shutdown(wait=False)
             typed_results = merge_typed_stream_results(typed_results, stream_results)
             search_metadata["typed_stream"] = stream_metadata
         if (
