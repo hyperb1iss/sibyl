@@ -1826,14 +1826,29 @@ def _memory_context_header(rank: int, result: dict[str, object]) -> str:
     trajectory_id = _stripped_str(metadata.get("longmemeval_v2_trajectory_id"))
     chunk_index = metadata.get("longmemeval_v2_chunk_index")
     selection_origin = _stripped_str(result.get("_selection_origin")) or "search"
-    return "\n".join(
-        [
-            f"Retrieved evidence rank {rank}",
-            f"Retrieval: {selection_origin}",
-            f"Trajectory: {trajectory_id or 'unknown'}",
-            f"Chunk: {chunk_index if isinstance(chunk_index, int) else 'unknown'}",
-        ]
-    )
+    lines = [
+        f"Retrieved evidence rank {rank}",
+        f"Retrieval: {selection_origin}",
+        f"Trajectory: {trajectory_id or 'unknown'}",
+        f"Chunk: {chunk_index if isinstance(chunk_index, int) else 'unknown'}",
+    ]
+    inventory_count = metadata.get("ui_inventory_item_count")
+    if (
+        isinstance(inventory_count, int)
+        and not isinstance(inventory_count, bool)
+        and inventory_count > 0
+    ):
+        if metadata.get("ui_inventory_truncated"):
+            lines.append(
+                f"UI inventory: partial ({inventory_count} elements shown; "
+                "absence of an element cannot be inferred)"
+            )
+        else:
+            lines.append(
+                f"UI inventory: complete ({inventory_count} elements; an element "
+                "not listed was not present on this page)"
+            )
+    return "\n".join(lines)
 
 
 def count_memory_context_tokens(memory_context: list[MemoryContextItem]) -> int:
