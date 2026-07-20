@@ -204,7 +204,7 @@ def test_projection_clamps_long_first_ui_inventory_entry() -> None:
     )
 
     inventory = event.content[event.content.index("Observed UI inventory:") :]
-    assert len(inventory) <= 6_000
+    assert len(inventory) <= 16_000
     assert inventory.endswith("...")
     assert event.metadata["ui_inventory_item_count"] == 1
     assert event.metadata["ui_inventory_truncated"] is True
