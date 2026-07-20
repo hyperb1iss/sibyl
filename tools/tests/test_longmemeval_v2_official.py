@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 from collections.abc import Awaitable, Callable
+import time
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, Protocol, TypedDict, cast
@@ -2740,6 +2741,173 @@ def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
         module.SibylLiveApiMemory.reconcile_loaded_memory_config(saved, requested)
 
 
+def _load_note_distillation_module() -> ModuleType:
+    return _load_module(
+        Path(__file__).parents[2] / "benchmarks" / "longmemeval_v2_memory" / "note_distillation.py",
+        "note_distillation",
+    )
+
+
+def test_parse_distillation_output_strips_fences_and_validates() -> None:
+    module = _load_note_distillation_module()
+    fenced = '```json\n{"workflow": "click New", "facts": [" Label A "], "gotchas": []}\n```'
+
+    notes = module.parse_distillation_output(fenced)
+
+    assert notes["workflow"] == "click New"
+    assert notes["facts"] == ["Label A"]
+    assert notes["gotchas"] == []
+
+    with pytest.raises(ValueError, match="no notes"):
+        module.parse_distillation_output('{"workflow": "", "facts": [], "gotchas": []}')
+
+
+def test_build_trajectory_digest_bounds_length() -> None:
+    module = _load_note_distillation_module()
+    trajectory = {
+        "id": "t1",
+        "goal": "do the thing",
+        "outcome": "success",
+        "states": [
+            {"action": f"click('{index}')", "reasoning": "x" * 400, "uri": "https://e/x"}
+            for index in range(400)
+        ],
+    }
+
+    digest = module.build_trajectory_digest(trajectory, max_chars=10_000)
+
+    assert len(digest) <= 10_000
+    assert digest.startswith("Goal: do the thing")
+    assert "digest truncated" in digest
+
+
+def test_build_note_entity_payloads_shape() -> None:
+    module = _load_note_distillation_module()
+    payloads = module.build_note_entity_payloads(
+        {"workflow": "step 1", "facts": ["fact"], "gotchas": []},
+        trajectory={"id": "t9", "goal": "g", "outcome": "success"},
+        project_id="project_x",
+        run_id="run_y",
+        model="gpt-5.4-nano",
+    )
+
+    assert [p["metadata"]["note_kind"] for p in payloads] == ["workflow", "facts"]
+    for payload in payloads:
+        assert payload["entity_type"] == "note"
+        metadata = payload["metadata"]
+        assert metadata["longmemeval_v2_trajectory_id"] == "t9"
+        assert metadata["longmemeval_v2_run_id"] == "run_y"
+        assert metadata["projection_kind"] == "distilled_note"
+        assert str(payload["content"]).startswith("Trajectory: t9")
+
+
+def test_note_distillation_insert_does_not_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_memory_module()
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_authenticate", lambda *args: None)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    bulk_calls: list[dict[str, object]] = []
+
+    def fake_request(
+        _self: object,
+        method: str,
+        path: str,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        if path == "/health":
+            return {"status": "healthy"}
+        if method == "GET":
+            return {"id": "project_test", "entity_type": "project"}
+        if path == "/entities/bulk":
+            bulk_calls.append(kwargs.get("json") or {})
+            return {"created": 2, "background_jobs": {}}
+        return {"created": 0, "background_jobs": {}}
+
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_request_json", fake_request)
+
+    import threading as threading_module
+
+    gate = threading_module.Event()
+
+    def slow_distill(*_args: object, **_kwargs: object) -> dict[str, object]:
+        gate.wait(timeout=10)
+        return {"workflow": "step", "facts": [], "gotchas": []}
+
+    monkeypatch.setattr(module, "distill_trajectory_notes", slow_distill)
+
+    memory = module.SibylLiveApiMemory(
+        {
+            "allow_localhost": True,
+            "project_id": "project_test",
+            "note_distillation": True,
+            "defer_embeddings": False,
+        }
+    )
+    try:
+        memory._submit_note_distillation({"id": "t1", "goal": "g", "outcome": "success"})
+        started = time.monotonic()
+        memory._harvest_note_futures(block=False)
+        elapsed = time.monotonic() - started
+        assert elapsed < 1.0, "non-blocking harvest must not wait on pending futures"
+        assert not bulk_calls, "no notes written while distillation pending"
+
+        gate.set()
+        memory._harvest_note_futures(block=True)
+        assert len(bulk_calls) == 1
+        entities = bulk_calls[0]["entities"]
+        assert entities[0]["entity_type"] == "note"
+        assert memory.note_distillation_written == 1
+    finally:
+        if memory._note_executor is not None:
+            memory._note_executor.shutdown(wait=False)
+        memory._client.close()
+
+
+def test_note_distillation_finalize_raises_on_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_memory_module()
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_authenticate", lambda *args: None)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    def fake_request(
+        _self: object,
+        method: str,
+        path: str,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        if path == "/health":
+            return {"status": "healthy"}
+        if method == "GET":
+            return {"id": "project_test", "entity_type": "project"}
+        return {"created": 0, "background_jobs": {}}
+
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_request_json", fake_request)
+
+    def failing_distill(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("model unavailable")
+
+    monkeypatch.setattr(module, "distill_trajectory_notes", failing_distill)
+
+    memory = module.SibylLiveApiMemory(
+        {
+            "allow_localhost": True,
+            "project_id": "project_test",
+            "note_distillation": True,
+        }
+    )
+    try:
+        memory._submit_note_distillation({"id": "t2", "goal": "g", "outcome": "failure"})
+        with pytest.raises(RuntimeError, match="note distillation failed for 1 trajectories"):
+            memory.finalize_ingest()
+    finally:
+        if memory._note_executor is not None:
+            memory._note_executor.shutdown(wait=False)
+        memory._client.close()
+
+
 def test_annotate_inventory_completeness_branches() -> None:
     module = _load_memory_module()
     content = "Goal: something\nObserved UI inventory:\n- link: Home"
@@ -2835,7 +3003,7 @@ def test_typed_stream_results_filters_and_marks_origin(
     assert metadata["result_count"] == 2
     request = captured[-1]
     evidence = request["evidence"]
-    assert evidence["types"] == ["event", "procedure", "error_pattern"]
+    assert evidence["types"] == ["note", "event", "procedure", "error_pattern"]
     assert evidence["retrieval_mode"] == "fast"
     assert evidence["limit"] == 5
     assert request["record_exposure"] is False

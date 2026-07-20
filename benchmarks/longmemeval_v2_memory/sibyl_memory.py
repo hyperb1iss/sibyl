@@ -15,7 +15,7 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Iterable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import TypeVar
 from urllib.parse import urlparse
@@ -46,6 +46,15 @@ from sibyl_core.retrieval.query_ranking import (  # noqa: E402
 from sibyl_core.retrieval.refinement import (  # noqa: E402
     MAX_REFINEMENT_QUERIES,
     plan_deterministic_refinement_queries,
+)
+
+_BENCHMARKS_ROOT = str(Path(__file__).resolve().parent.parent)
+if _BENCHMARKS_ROOT not in sys.path:
+    sys.path.insert(0, _BENCHMARKS_ROOT)
+from longmemeval_v2_memory.note_distillation import (  # noqa: E402
+    DEFAULT_NOTE_DISTILLATION_MODEL,
+    build_note_entity_payloads,
+    distill_trajectory_notes,
 )
 
 try:
@@ -109,7 +118,7 @@ DEFAULT_RETRIEVAL_MODE = "fast"
 RETRIEVAL_MODES = frozenset({"accurate", "fast"})
 DEFAULT_TYPED_STREAM_RETRIEVAL = False
 DEFAULT_TYPED_STREAM_LIMIT = 8
-TYPED_STREAM_TYPES = ("event", "procedure", "error_pattern")
+TYPED_STREAM_TYPES = ("note", "event", "procedure", "error_pattern")
 DEFAULT_RETRIEVAL_MAX_PLANNED_QUERIES = 3
 DEFAULT_API_TIMEOUT_SECONDS = 600.0
 DEFAULT_API_RETRY_ATTEMPTS = 3
@@ -476,7 +485,7 @@ def context_pack_to_search_results(
             if not isinstance(item, dict):
                 continue
             item_type = _stripped_str(item.get("type"))
-            if item_type not in {"procedure", "error_pattern", "event"}:
+            if item_type not in {"note", "procedure", "error_pattern", "event"}:
                 continue
             candidate = _string_key_dict(item)
             supports = _source_supports(item)
@@ -510,7 +519,7 @@ def context_pack_to_search_results(
                 candidate["metadata"] = metadata
             candidate["_selection_origin"] = f"context_pack:{facet}"
             candidates.append(candidate)
-    type_order = {"procedure": 0, "error_pattern": 1, "event": 2}
+    type_order = {"note": 0, "procedure": 1, "error_pattern": 2, "event": 3}
     return sorted(
         candidates,
         key=lambda item: (
@@ -2858,6 +2867,22 @@ class SibylLiveApiMemory(Memory):
             DEFAULT_TYPED_STREAM_LIMIT,
             minimum=1,
         )
+        self.note_distillation = _param_bool(
+            memory_params,
+            "note_distillation",
+            False,
+        )
+        self.note_distillation_model = _param_str(
+            memory_params,
+            "note_distillation_model",
+            DEFAULT_NOTE_DISTILLATION_MODEL,
+        )
+        self.note_distillation_max_workers = _param_int(
+            memory_params,
+            "note_distillation_max_workers",
+            4,
+            minimum=1,
+        )
         self.max_context_total_chars = max(
             1,
             _param_int(
@@ -2945,6 +2970,11 @@ class SibylLiveApiMemory(Memory):
         self._pending_job_entity_ids: dict[str, list[str]] = {}
         self._pending_job_manifest_ids: dict[str, str] = {}
         self.ingest_embedding_usage: dict[str, object] = {}
+        self._note_executor: ThreadPoolExecutor | None = None
+        self._note_futures: list[tuple[str, Future[dict[str, object]], dict[str, object]]] = []
+        self._openai_note_client: object | None = None
+        self.note_distillation_written = 0
+        self.note_distillation_failures: list[tuple[str, str]] = []
         self._finalize_lock = threading.Lock()
         self._ingest_finalized = False
         self._query_local = threading.local()
@@ -3064,6 +3094,9 @@ class SibylLiveApiMemory(Memory):
         self._remember_embedding_backfill_jobs(created)
         if len(self._pending_embedding_job_ids) >= self.embedding_backfill_max_pending_jobs:
             self._drain_embedding_backfills()
+        if getattr(self, "note_distillation", False):
+            self._submit_note_distillation(trajectory)
+            self._harvest_note_futures(block=False)
         if trajectory_id:
             completed_trajectory_ids.add(trajectory_id)
             operational_trajectory_ids.add(trajectory_id)
@@ -3074,6 +3107,92 @@ class SibylLiveApiMemory(Memory):
             else:
                 self._append_checkpoint(payloads)
 
+    def _note_client(self) -> object:
+        if self._openai_note_client is None:
+            from openai import OpenAI
+
+            api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("SIBYL_OPENAI_API_KEY", "")
+            if not api_key:
+                raise RuntimeError(
+                    "note distillation requires OPENAI_API_KEY or SIBYL_OPENAI_API_KEY"
+                )
+            self._openai_note_client = OpenAI(api_key=api_key, timeout=120.0, max_retries=2)
+        return self._openai_note_client
+
+    def _submit_note_distillation(self, trajectory: dict[str, object]) -> None:
+        if getattr(self, "reuse_existing_project", False):
+            return
+        if self._note_executor is None:
+            self._note_executor = ThreadPoolExecutor(
+                max_workers=self.note_distillation_max_workers,
+                thread_name_prefix="note-distill",
+            )
+        client = self._note_client()
+        trajectory_id = _stripped_str(trajectory.get("id"))
+        future = self._note_executor.submit(
+            distill_trajectory_notes,
+            client,
+            model=self.note_distillation_model,
+            trajectory=trajectory,
+        )
+        self._note_futures.append((trajectory_id, future, dict(trajectory)))
+
+    def _harvest_note_futures(self, *, block: bool) -> None:
+        """Main-thread only: write payloads for completed distillations."""
+        note_futures = getattr(self, "_note_futures", None)
+        if not note_futures:
+            return
+        remaining: list[tuple[str, Future[dict[str, object]], dict[str, object]]] = []
+        pending_total = len(note_futures)
+        harvested = 0
+        for trajectory_id, future, trajectory in note_futures:
+            if not block and not future.done():
+                remaining.append((trajectory_id, future, trajectory))
+                continue
+            try:
+                notes = future.result()
+            except Exception as exc:
+                self.note_distillation_failures.append((trajectory_id, str(exc)))
+                continue
+            payloads = build_note_entity_payloads(
+                notes,
+                trajectory=trajectory,
+                project_id=self.project_id,
+                run_id=self.run_id,
+                model=self.note_distillation_model,
+            )
+            if payloads:
+                response = self._request_json(
+                    "POST",
+                    "/entities/bulk",
+                    json={"entities": payloads, "defer_embeddings": self.defer_embeddings},
+                )
+                self._remember_embedding_backfill_jobs(response)
+                self.created_entities += _created_count(response)
+                self.note_distillation_written += len(payloads)
+            harvested += 1
+        self._note_futures = remaining
+        if block and harvested:
+            print(  # noqa: T201
+                f"Note distillation: wrote {self.note_distillation_written} notes"
+                f" ({harvested}/{pending_total} pending futures resolved,"
+                f" {len(self.note_distillation_failures)} failures)",
+                file=sys.stderr,
+            )
+
+    def _finalize_note_distillation(self) -> None:
+        self._harvest_note_futures(block=True)
+        note_executor = getattr(self, "_note_executor", None)
+        if note_executor is not None:
+            note_executor.shutdown(wait=False)
+            self._note_executor = None
+        note_failures = getattr(self, "note_distillation_failures", [])
+        if note_failures:
+            failed = sorted({trajectory_id for trajectory_id, _ in note_failures})
+            raise RuntimeError(
+                f"note distillation failed for {len(failed)} trajectories: {failed[:5]}"
+            )
+
     def finalize_ingest(self) -> None:
         with self._finalize_lock:
             if self._ingest_finalized:
@@ -3082,6 +3201,7 @@ class SibylLiveApiMemory(Memory):
                 self.attached_project_receipt = self._verify_attached_project()
                 self._ingest_finalized = True
                 return
+            self._finalize_note_distillation()
             self._drain_embedding_backfills()
             self._drain_memory_projections()
             self._ingest_finalized = True

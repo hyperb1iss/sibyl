@@ -75,6 +75,8 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "source_evidence_bundling",
         "typed_stream_retrieval",
         "typed_stream_limit",
+        "note_distillation",
+        "note_distillation_model",
         "retrieval_mode",
         "retrieval_max_planned_queries",
         "checkpoint_dir",
@@ -444,6 +446,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--source-evidence-bundling", action="store_true")
     parser.add_argument("--typed-stream-retrieval", action="store_true")
     parser.add_argument("--typed-stream-limit", type=int, default=8)
+    parser.add_argument("--note-distillation", action="store_true")
+    parser.add_argument("--note-distillation-model", default="gpt-5.4-nano")
     parser.add_argument(
         "--retrieval-mode",
         choices=["fast", "accurate"],
@@ -646,6 +650,8 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "source_evidence_bundling": args.source_evidence_bundling,
         "typed_stream_retrieval": args.typed_stream_retrieval,
         "typed_stream_limit": args.typed_stream_limit,
+        "note_distillation": args.note_distillation,
+        "note_distillation_model": args.note_distillation_model,
         "retrieval_mode": args.retrieval_mode,
         "retrieval_max_planned_queries": args.retrieval_max_planned_queries,
         "include_screenshot_refs": args.include_screenshot_refs,
@@ -787,6 +793,8 @@ def build_run_plan(
         "source_evidence_bundling": args.source_evidence_bundling,
         "typed_stream_retrieval": args.typed_stream_retrieval,
         "typed_stream_limit": args.typed_stream_limit,
+        "note_distillation": args.note_distillation,
+        "note_distillation_model": args.note_distillation_model,
         "retrieval_mode": args.retrieval_mode,
         "retrieval_max_planned_queries": args.retrieval_max_planned_queries,
         "include_screenshot_refs": args.include_screenshot_refs,
