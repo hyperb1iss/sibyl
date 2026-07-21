@@ -2822,6 +2822,33 @@ def test_build_trajectory_digest_includes_salient_page_content() -> None:
     assert 0 < len(content_lines) <= module.MAX_CONTENT_LINES_PER_STATE
 
 
+def test_build_trajectory_digest_reads_raw_trajectory_shape() -> None:
+    module = _load_note_distillation_module()
+    trajectory = {
+        "id": "t8",
+        "goal": "find the top post",
+        "outcome": "success",
+        "states": [
+            {
+                "action": "click('12')",
+                "thought": "I should open the most commented post",
+                "url": "http://forum.local/top",
+                "accessibility_tree": (
+                    "RootWebArea 'Forum — Top'\n"
+                    "\t[3] heading 'Weekly thread'\n"
+                    "\t[4] gridcell 'Comments: 347'\n"
+                ),
+            }
+        ],
+    }
+
+    digest = module.build_trajectory_digest(trajectory)
+
+    assert "Reasoning: I should open the most commented post" in digest
+    assert "Page: Forum — Top" in digest
+    assert "gridcell: Comments: 347" in digest
+
+
 def test_build_note_entity_payloads_shape() -> None:
     module = _load_note_distillation_module()
     payloads = module.build_note_entity_payloads(

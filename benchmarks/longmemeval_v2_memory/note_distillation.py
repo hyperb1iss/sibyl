@@ -87,7 +87,7 @@ def build_trajectory_digest(
             continue
         parts = [f"State {index}"]
         action = _clean(str(state.get("action") or ""))
-        reasoning = _clean(str(state.get("reasoning") or ""))
+        reasoning = _clean(str(state.get("reasoning") or state.get("thought") or ""))
         uri = _clean(str(state.get("uri") or state.get("url") or ""))
         title = _page_title(state)
         if uri:
@@ -231,15 +231,13 @@ def _salient_content_lines(
     if budget <= 0:
         return []
     scored: list[tuple[int, str]] = []
-    for evidence in state.get("evidence") or []:
-        if not isinstance(evidence, dict):
-            continue
-        if "accessibility-tree" not in str(evidence.get("content_type") or "").casefold():
-            continue
-        for match in _CONTENT_NODE_RE.finditer(str(evidence.get("content") or "")):
+    for tree in _state_axtrees(state):
+        for match in _CONTENT_NODE_RE.finditer(tree):
             role, name = match.group(1), _clean(match.group(2))
             weight = _CONTENT_ROLES.get(role)
             if weight is None or len(name) < MIN_CONTENT_NAME_CHARS:
+                continue
+            if not re.search(r"[A-Za-z0-9]{2}", name):
                 continue
             if _CONTENT_NOISE_RE.search(name):
                 continue
@@ -253,16 +251,26 @@ def _salient_content_lines(
     return [line for _score, line in scored[: min(MAX_CONTENT_LINES_PER_STATE, budget)]]
 
 
+def _state_axtrees(state: dict[str, Any]) -> list[str]:
+    trees: list[str] = []
+    for evidence in state.get("evidence") or []:
+        if not isinstance(evidence, dict):
+            continue
+        if "accessibility-tree" in str(evidence.get("content_type") or "").casefold():
+            trees.append(str(evidence.get("content") or ""))
+    raw_tree = state.get("accessibility_tree")
+    if raw_tree:
+        trees.append(str(raw_tree))
+    return trees
+
+
 def _clean(value: str) -> str:
     return " ".join(value.split())
 
 
 def _page_title(state: dict[str, Any]) -> str:
-    for evidence in state.get("evidence") or []:
-        if not isinstance(evidence, dict):
-            continue
-        content = str(evidence.get("content") or "")
-        match = re.search(r"(?m)^\s*RootWebArea '([^']{1,120})'", content)
+    for tree in _state_axtrees(state):
+        match = re.search(r"(?m)^\s*RootWebArea '([^']{1,120})'", tree)
         if match:
             return match.group(1)
     title = state.get("title")
