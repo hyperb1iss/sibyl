@@ -326,6 +326,8 @@ def install_memory_finalize(official_harness: Any) -> None:
 def is_transient_reader_exception(exc: Exception) -> bool:
     if isinstance(exc, json.JSONDecodeError):
         return True
+    if isinstance(exc, TypeError) and "not subscriptable" in str(exc):
+        return True
     if exc.__class__.__name__ in TRANSIENT_READER_EXCEPTION_NAMES:
         return True
     status_code = getattr(exc, "status_code", None)

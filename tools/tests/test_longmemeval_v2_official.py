@@ -2781,6 +2781,47 @@ def test_build_trajectory_digest_bounds_length() -> None:
     assert "digest truncated" in digest
 
 
+def test_build_trajectory_digest_includes_salient_page_content() -> None:
+    module = _load_note_distillation_module()
+    axtree = "\n".join(
+        [
+            "RootWebArea 'Forum — Most Commented'",
+            "\t[a1] navigation 'Global skip links'",
+            "\t[a2] link 'Skip to main content'",
+            "\t[a3] heading 'Weekly discussion thread'",
+            "\t[a4] gridcell 'Comments: 347'",
+            "\t[a5] StaticText 'Posted by chronos_admin'",
+            "\t[a6] link 'Open accessibility preferences'",
+        ]
+    )
+    trajectory = {
+        "id": "t7",
+        "goal": "find the most commented post",
+        "outcome": "success",
+        "states": [
+            {
+                "action": "click('a3')",
+                "uri": "https://forum.example/top",
+                "evidence": [
+                    {
+                        "content_type": "text/plain; profile=accessibility-tree",
+                        "content": axtree,
+                    }
+                ],
+            }
+        ],
+    }
+
+    digest = module.build_trajectory_digest(trajectory)
+
+    assert "heading: Weekly discussion thread" in digest
+    assert "gridcell: Comments: 347" in digest
+    assert "Skip to main content" not in digest
+    assert "accessibility preferences" not in digest
+    content_lines = [line for line in digest.splitlines() if line.startswith("  · ")]
+    assert 0 < len(content_lines) <= module.MAX_CONTENT_LINES_PER_STATE
+
+
 def test_build_note_entity_payloads_shape() -> None:
     module = _load_note_distillation_module()
     payloads = module.build_note_entity_payloads(

@@ -13,12 +13,35 @@ import json
 import re
 from typing import Any
 
-NOTE_DISTILLATION_SCHEMA_VERSION = "sibyl-lme-note-distillation-v1"
+NOTE_DISTILLATION_SCHEMA_VERSION = "sibyl-lme-note-distillation-v2"
 DEFAULT_NOTE_DISTILLATION_MODEL = "gpt-5.4-nano"
 MAX_DIGEST_CHARS = 40_000
 MAX_NOTE_CHARS = 1_600
 MAX_FACT_ITEMS = 10
 MAX_GOTCHA_ITEMS = 5
+MAX_CONTENT_LINES_PER_STATE = 8
+MAX_CONTENT_LINES_TOTAL = 160
+MAX_CONTENT_LINE_CHARS = 140
+MIN_CONTENT_NAME_CHARS = 4
+
+_CONTENT_NODE_RE = re.compile(r"(?:\[\w+\]\s+)?([A-Za-z]+)\s+'([^']{4,200})'")
+_CONTENT_ROLES = {
+    "heading": 3,
+    "cell": 2,
+    "gridcell": 2,
+    "columnheader": 2,
+    "rowheader": 2,
+    "StaticText": 1,
+    "link": 1,
+    "option": 1,
+    "listitem": 1,
+    "article": 1,
+}
+_CONTENT_NOISE_RE = re.compile(
+    r"skip to|accessibility preference|announcements displayed|global skip|"
+    r"^navigation$|^primary$|unpinned|^menu$|^toolbar$|jump to",
+    re.IGNORECASE,
+)
 
 NOTE_DISTILLATION_SYSTEM_PROMPT = (
     "You distill browser-agent trajectories into reusable operational memory "
@@ -56,6 +79,8 @@ def build_trajectory_digest(
     goal = _clean(str(trajectory.get("goal") or ""))
     outcome = _clean(str(trajectory.get("outcome") or ""))
     lines = [f"Goal: {goal}", f"Outcome: {outcome}", ""]
+    seen_content: set[str] = set()
+    content_line_count = 0
     states = trajectory.get("states")
     for index, state in enumerate(states if isinstance(states, list) else []):
         if not isinstance(state, dict):
@@ -74,6 +99,13 @@ def build_trajectory_digest(
         if reasoning:
             parts.append(f"Reasoning: {reasoning}")
         lines.append(" | ".join(parts))
+        for content_line in _salient_content_lines(
+            state,
+            seen=seen_content,
+            budget=MAX_CONTENT_LINES_TOTAL - content_line_count,
+        ):
+            lines.append(f"  · {content_line}")
+            content_line_count += 1
     digest = "\n".join(lines)
     if len(digest) > max_chars:
         head_budget = int(max_chars * 0.7)
@@ -182,6 +214,43 @@ def build_note_entity_payloads(
             }
         )
     return payloads
+
+
+def _salient_content_lines(
+    state: dict[str, Any],
+    *,
+    seen: set[str],
+    budget: int,
+) -> list[str]:
+    """Extract page-content lines (headings, cells, values) from a11y evidence.
+
+    Web questions ask about page content, not workflow structure; without
+    these lines the distiller cannot produce notes that carry content
+    literals (the web-gate NO-GO mechanism).
+    """
+    if budget <= 0:
+        return []
+    scored: list[tuple[int, str]] = []
+    for evidence in state.get("evidence") or []:
+        if not isinstance(evidence, dict):
+            continue
+        if "accessibility-tree" not in str(evidence.get("content_type") or "").casefold():
+            continue
+        for match in _CONTENT_NODE_RE.finditer(str(evidence.get("content") or "")):
+            role, name = match.group(1), _clean(match.group(2))
+            weight = _CONTENT_ROLES.get(role)
+            if weight is None or len(name) < MIN_CONTENT_NAME_CHARS:
+                continue
+            if _CONTENT_NOISE_RE.search(name):
+                continue
+            key = f"{role}:{name}".casefold()
+            if key in seen:
+                continue
+            score = weight + (2 if any(ch.isdigit() for ch in name) else 0)
+            scored.append((score, f"{role}: {name[:MAX_CONTENT_LINE_CHARS]}"))
+            seen.add(key)
+    scored.sort(key=lambda row: -row[0])
+    return [line for _score, line in scored[: min(MAX_CONTENT_LINES_PER_STATE, budget)]]
 
 
 def _clean(value: str) -> str:
