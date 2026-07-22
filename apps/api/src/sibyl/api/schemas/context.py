@@ -46,6 +46,10 @@ class ContextEvidenceRequest(BaseModel):
         le=MAX_REFINEMENT_QUERIES,
         description="Maximum feedback searches across two accurate-mode refinement rounds",
     )
+    reserve_distilled_notes: bool = Field(
+        default=True,
+        description="Reserve a typed lane for distilled operational notes",
+    )
 
 
 class ContextPackRequest(BaseModel):

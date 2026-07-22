@@ -392,20 +392,23 @@ class TestContextPackRoute:
     async def test_context_pack_retrieves_evidence_concurrently(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         started: set[str] = set()
-        both_started = asyncio.Event()
+        all_started = asyncio.Event()
 
         async def compile_pack(**_kwargs: object) -> ContextPack:
             started.add("context")
-            if len(started) == 2:
-                both_started.set()
-            await asyncio.wait_for(both_started.wait(), timeout=1)
+            if len(started) == 3:
+                all_started.set()
+            await asyncio.wait_for(all_started.wait(), timeout=1)
             return _pack()
 
-        async def retrieve_evidence(*_args: object, **_kwargs: object) -> SearchResponse:
-            started.add("evidence")
-            if len(started) == 2:
-                both_started.set()
-            await asyncio.wait_for(both_started.wait(), timeout=1)
+        async def retrieve_evidence(
+            search_request: SearchRequest,
+            **_kwargs: object,
+        ) -> SearchResponse:
+            started.add("typed" if search_request.types == ["note"] else "raw")
+            if len(started) == 3:
+                all_started.set()
+            await asyncio.wait_for(all_started.wait(), timeout=1)
             return SearchResponse(
                 results=[],
                 total=0,
@@ -440,15 +443,150 @@ class TestContextPackRoute:
                 ctx=_ctx(),
             )
 
-        assert started == {"context", "evidence"}
+        assert started == {"context", "raw", "typed"}
         assert response.evidence is not None
         assert response.evidence.filters["stage_timings_ms"] == {"total": 12.5}
-        evidence_request = execute_search.call_args.args[0]
-        assert evidence_request.types == ["session"]
-        assert evidence_request.limit == 12
-        assert evidence_request.content_max_chars == 18_000
-        assert evidence_request.include_retrieval_diagnostics is True
-        assert evidence_request.record_exposure is False
+        evidence_requests = [call.args[0] for call in execute_search.call_args_list]
+        raw_request = next(item for item in evidence_requests if item.types == ["session"])
+        typed_request = next(item for item in evidence_requests if item.types == ["note"])
+        assert raw_request.limit == 12
+        assert raw_request.content_max_chars == 18_000
+        assert raw_request.include_retrieval_diagnostics is True
+        assert raw_request.record_exposure is False
+        assert typed_request.category == "operational_distillation"
+        assert typed_request.include_raw_memory is False
+        assert typed_request.record_exposure is False
+
+    @pytest.mark.asyncio
+    async def test_context_pack_reserves_three_of_eight_slots_for_distilled_notes(self) -> None:
+        raw_response = _search_response(
+            "ship faster",
+            *((f"raw-{index}", 1.0 - index / 100) for index in range(8)),
+        )
+        typed_response = SearchResponse(
+            results=[
+                SearchResult(
+                    id=f"note-{index}",
+                    type="note",
+                    name=f"note-{index}",
+                    content=f"distilled evidence {index}",
+                    score=1.0 - index / 100,
+                    metadata={
+                        "projection_kind": "distilled_note",
+                        "operational_source_id": f"capture-{index}",
+                    },
+                )
+                for index in range(4)
+            ],
+            total=4,
+            query="ship faster",
+            filters={"typed": True},
+            graph_count=4,
+            limit=8,
+        )
+
+        async def retrieve(
+            search_request: SearchRequest,
+            **_kwargs: object,
+        ) -> SearchResponse:
+            return typed_response if search_request.types == ["note"] else raw_response
+
+        async def record_exposures(
+            results: list[SearchResult],
+            **_kwargs: object,
+        ) -> dict[str, object]:
+            for result in results:
+                result.metadata["usage_exposure"] = {"status": "stamped"}
+            return {"stamped_count": len(results), "coverage_complete": True}
+
+        exposure = AsyncMock(side_effect=record_exposures)
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+            patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve) as search,
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+            patch(
+                "sibyl_core.tools.usage_exposure.annotate_search_result_exposures",
+                exposure,
+            ),
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    evidence={"types": ["session"], "limit": 8},
+                ),
+                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
+                ctx=_ctx(),
+            )
+
+        assert response.evidence is not None
+        assert [result.id for result in response.evidence.results] == [
+            "note-0",
+            "note-1",
+            "note-2",
+            "raw-0",
+            "raw-1",
+            "raw-2",
+            "raw-3",
+            "raw-4",
+        ]
+        receipt = response.evidence.filters["evidence_composition"]
+        assert receipt["typed_reservation"] == 3
+        assert receipt["selected_typed_count"] == 3
+        assert receipt["selected_raw_count"] == 5
+        assert receipt["typed_search_status"] == "success"
+        assert response.evidence.filters["usage_exposure"] == {
+            "stamped_count": 8,
+            "coverage_complete": True,
+        }
+        assert [result.id for result in exposure.await_args.args[0]] == [
+            result.id for result in response.evidence.results
+        ]
+        assert all(call.args[0].record_exposure is False for call in search.call_args_list)
+
+    @pytest.mark.asyncio
+    async def test_context_pack_degrades_to_raw_when_distilled_search_fails(self) -> None:
+        raw_response = _search_response(
+            "ship faster",
+            ("raw-0", 0.9),
+            ("raw-1", 0.8),
+        )
+
+        async def retrieve(
+            search_request: SearchRequest,
+            **_kwargs: object,
+        ) -> SearchResponse:
+            if search_request.types == ["note"]:
+                raise RuntimeError("typed search unavailable")
+            return raw_response
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+            patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    evidence={"types": ["session"], "limit": 8},
+                    record_exposure=False,
+                ),
+                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
+                ctx=_ctx(),
+            )
+
+        assert response.evidence is not None
+        assert [result.id for result in response.evidence.results] == ["raw-0", "raw-1"]
+        receipt = response.evidence.filters["evidence_composition"]
+        assert receipt["typed_search_status"] == "degraded"
+        assert receipt["typed_search_error_type"] == "RuntimeError"
 
     @pytest.mark.asyncio
     async def test_context_pack_combines_concurrent_embedding_usage(self) -> None:
@@ -597,7 +735,11 @@ class TestContextPackRoute:
             response = await context_pack(
                 request=ContextPackRequest(
                     goal="ship faster",
-                    evidence={"retrieval_mode": "accurate", "limit": 4},
+                    evidence={
+                        "retrieval_mode": "accurate",
+                        "limit": 4,
+                        "reserve_distilled_notes": False,
+                    },
                 ),
                 org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
                 ctx=_ctx(),
@@ -738,7 +880,7 @@ class TestContextPackRoute:
             patch(
                 "sibyl.api.routes.search.execute_search_request",
                 AsyncMock(return_value=search_response),
-            ),
+            ) as search,
             patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
             patch(
                 "sibyl.api.routes.context.get_context_graph_runtime",
@@ -752,7 +894,10 @@ class TestContextPackRoute:
             response = await context_pack(
                 request=ContextPackRequest(
                     goal="Which controls view ship and add tracking?",
-                    evidence={"retrieval_mode": "accurate", "limit": 6},
+                    evidence={
+                        "retrieval_mode": "accurate",
+                        "limit": 6,
+                    },
                 ),
                 org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
                 ctx=_ctx(),
@@ -772,6 +917,10 @@ class TestContextPackRoute:
         assert receipt["inserted_result_ids"] == ["raw-3", "raw-4", "raw-5"]
         assert receipt["sources"][0]["selected_observation_ordinals"] == [3, 4, 5]
         assert receipt["sources"][0]["inserted_entity_ids"] == ["raw-3", "raw-4", "raw-5"]
+        composition = response.evidence.filters["evidence_composition"]
+        assert composition["typed_search_status"] == "success"
+        assert composition["selected_typed_count"] == 0
+        assert composition["selected_raw_count"] == 5
         assert response.evidence.graph_count == 5
         assert response.evidence.total == 5
         assert response.evidence.has_more is False
@@ -782,10 +931,14 @@ class TestContextPackRoute:
         )
         assert response.evidence.results[1].metadata["usage_exposure"] == {"status": "stamped"}
         assert [result.id for result in exposure.await_args.args[0]] == [
+            "procedure",
             "raw-3",
             "raw-4",
             "raw-5",
+            "unrelated",
         ]
+        exposure.assert_awaited_once()
+        assert all(call.args[0].record_exposure is False for call in search.call_args_list)
         reader.get.assert_awaited_once_with(operational_experience_manifest_id("capture-1"))
         reader.get_many.assert_awaited_once_with(manifest.metadata["expected_entity_ids"])
 
@@ -812,7 +965,10 @@ class TestContextPackRoute:
             response = await context_pack(
                 request=ContextPackRequest(
                     goal="ship faster",
-                    evidence={"retrieval_mode": "accurate"},
+                    evidence={
+                        "retrieval_mode": "accurate",
+                        "reserve_distilled_notes": False,
+                    },
                 ),
                 org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
                 ctx=_ctx(),
@@ -912,7 +1068,10 @@ class TestContextPackRoute:
             response = await context_pack(
                 request=ContextPackRequest(
                     goal="ship faster",
-                    evidence={"retrieval_mode": "accurate"},
+                    evidence={
+                        "retrieval_mode": "accurate",
+                        "reserve_distilled_notes": False,
+                    },
                 ),
                 org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
                 ctx=_ctx(),
@@ -944,7 +1103,10 @@ class TestContextPackRoute:
             response = await context_pack(
                 request=ContextPackRequest(
                     goal="ship faster",
-                    evidence={"retrieval_mode": "accurate"},
+                    evidence={
+                        "retrieval_mode": "accurate",
+                        "reserve_distilled_notes": False,
+                    },
                 ),
                 org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
                 ctx=_ctx(),

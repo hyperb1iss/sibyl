@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 import structlog
@@ -32,11 +33,13 @@ from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
+from sibyl_core.ai.operational_distillation import OPERATIONAL_NOTE_CATEGORY
 from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 from sibyl_core.embeddings.providers import capture_embedding_usage, configured_embedding_provider
 from sibyl_core.models.context import ContextPack
 from sibyl_core.observability import elapsed_ms, telemetry_registry
 from sibyl_core.retrieval.fusion import rrf_merge_with_metadata
+from sibyl_core.retrieval.operational_evidence import compose_operational_evidence
 from sibyl_core.retrieval.refinement import (
     MAX_FEEDBACK_DOCUMENTS,
     RetrievalFeedbackDocument,
@@ -120,7 +123,97 @@ def _context_evidence_request(
         use_enhanced=True,
         boost_recent=False,
         include_retrieval_diagnostics=request.evidence.include_retrieval_diagnostics,
-        record_exposure=request.record_exposure,
+        record_exposure=(request.record_exposure and not request.evidence.reserve_distilled_notes),
+    )
+
+
+def _distilled_context_evidence_request(
+    request: ContextPackRequest,
+    *,
+    query: str,
+) -> SearchRequest:
+    assert request.evidence is not None
+    return SearchRequest(
+        query=query,
+        types=["note"],
+        category=OPERATIONAL_NOTE_CATEGORY,
+        project=request.project,
+        limit=request.evidence.limit,
+        include_content=True,
+        content_max_chars=request.evidence.content_max_chars,
+        include_documents=False,
+        include_graph=True,
+        include_raw_memory=False,
+        use_enhanced=True,
+        boost_recent=False,
+        include_retrieval_diagnostics=request.evidence.include_retrieval_diagnostics,
+        record_exposure=False,
+    )
+
+
+async def _execute_distilled_context_evidence_search(
+    request: ContextPackRequest,
+    *,
+    query: str,
+    org: AuthOrganization,
+    ctx: AuthContext,
+    embedding_usage: dict[str, str | int | float],
+) -> tuple[SearchResponse | None, str | None]:
+    try:
+        response = await _execute_context_evidence_search(
+            _distilled_context_evidence_request(request, query=query),
+            org=org,
+            ctx=ctx,
+            embedding_usage=embedding_usage,
+        )
+    except Exception as exc:
+        log.warning(
+            "context_distilled_evidence_unavailable",
+            error_type=type(exc).__name__,
+        )
+        return None, type(exc).__name__
+    return response, None
+
+
+def _compose_context_evidence_response(
+    raw_response: SearchResponse,
+    typed_response: SearchResponse | None,
+    *,
+    limit: int,
+    typed_error: str | None,
+) -> SearchResponse:
+    typed_results = typed_response.results if typed_response is not None else []
+    selected, receipt = compose_operational_evidence(
+        typed_results=typed_results,
+        raw_results=raw_response.results,
+        limit=limit,
+    )
+    receipt.update(
+        {
+            "typed_search_status": "degraded" if typed_error else "success",
+            "typed_search_error_type": typed_error,
+            "typed_query_filters": typed_response.filters if typed_response is not None else {},
+        }
+    )
+    total = raw_response.total + int(receipt["typed_candidate_count"])
+    return SearchResponse(
+        results=selected,
+        total=total,
+        query=raw_response.query,
+        filters={
+            **raw_response.filters,
+            "evidence_composition": receipt,
+        },
+        graph_count=sum(result.result_origin == "graph" for result in selected),
+        document_count=sum(result.result_origin == "document" for result in selected),
+        raw_memory_count=sum(result.result_origin == "raw_memory" for result in selected),
+        limit=limit,
+        offset=raw_response.offset,
+        has_more=(
+            raw_response.has_more
+            or bool(typed_response and typed_response.has_more)
+            or total > len(selected)
+        ),
     )
 
 
@@ -509,7 +602,7 @@ async def _execute_accurate_context_evidence_search(
         if ctx.api_key_memory_scope_keys is not None
         else None,
         content_max_chars=request.evidence.content_max_chars,
-        record_exposure=request.record_exposure,
+        record_exposure=(request.record_exposure and not request.evidence.reserve_distilled_notes),
     )
 
 
@@ -579,6 +672,107 @@ async def _resolve_reflection_links(
     return _append_unique_ids(links, [str(task_id)])
 
 
+async def _compile_context_with_evidence(
+    request: ContextPackRequest,
+    *,
+    retrieval_goal: str,
+    org: AuthOrganization,
+    ctx: AuthContext,
+    accessible_projects: set[str] | None,
+    compile_pack: Callable[[], Awaitable[ContextPack]],
+) -> tuple[ContextPack, SearchResponse]:
+    assert request.evidence is not None
+    try:
+        embedding_provider = configured_embedding_provider()
+    except ValueError as exc:
+        raise RuntimeError("context evidence embedding configuration failed") from exc
+
+    typed_outcome: tuple[SearchResponse | None, str | None] = (None, None)
+    with capture_embedding_usage(embedding_provider) as embedding_usage:
+        pack_task = asyncio.create_task(compile_pack())
+        if request.evidence.retrieval_mode == "accurate":
+            evidence_task = asyncio.create_task(
+                _execute_accurate_context_evidence_search(
+                    request,
+                    org=org,
+                    ctx=ctx,
+                    embedding_usage=embedding_usage,
+                    accessible_projects=accessible_projects,
+                )
+            )
+        else:
+            evidence_task = asyncio.create_task(
+                _execute_context_evidence_search(
+                    _context_evidence_request(request, query=retrieval_goal),
+                    org=org,
+                    ctx=ctx,
+                    embedding_usage=embedding_usage,
+                )
+            )
+        typed_task = (
+            asyncio.create_task(
+                _execute_distilled_context_evidence_search(
+                    request,
+                    query=retrieval_goal,
+                    org=org,
+                    ctx=ctx,
+                    embedding_usage=embedding_usage,
+                )
+            )
+            if request.evidence.reserve_distilled_notes
+            else None
+        )
+        try:
+            if typed_task is None:
+                pack, evidence_response = await asyncio.gather(pack_task, evidence_task)
+            else:
+                pack, evidence_response, typed_outcome = await asyncio.gather(
+                    pack_task,
+                    evidence_task,
+                    typed_task,
+                )
+        except BaseException:
+            pending_tasks = [pack_task, evidence_task]
+            if typed_task is not None:
+                pending_tasks.append(typed_task)
+            for task in pending_tasks:
+                task.cancel()
+            await asyncio.gather(*pending_tasks, return_exceptions=True)
+            raise
+
+    if request.evidence.retrieval_mode == "fast":
+        evidence_response.filters.update(
+            {
+                "retrieval_mode": "fast",
+                "planner_status": "not_requested",
+                "planned_queries": [],
+                "query_count": 1,
+            }
+        )
+    if typed_task is not None:
+        typed_response, typed_error = typed_outcome
+        evidence_response = _compose_context_evidence_response(
+            evidence_response,
+            typed_response,
+            limit=request.evidence.limit,
+            typed_error=typed_error,
+        )
+        if request.record_exposure:
+            from sibyl_core.tools.usage_exposure import annotate_search_result_exposures
+
+            exposure_summary = await annotate_search_result_exposures(
+                evidence_response.results,
+                organization_id=str(org.id),
+                principal_id=ctx.user_id,
+                project_id=request.project,
+                source_surface="context_pack_evidence",
+                request_metadata={"agent_id": request.agent_id} if request.agent_id else None,
+            )
+            evidence_response.filters["usage_exposure"] = exposure_summary
+    evidence_response.filters["embedding_usage"] = dict(embedding_usage)
+    return pack, evidence_response
+
+
 @router.post("/pack", response_model=ContextPackResponse)
 async def context_pack(
     request: ContextPackRequest,
@@ -627,48 +821,14 @@ async def context_pack(
         if request.evidence is None:
             pack = await compile_pack()
         else:
-            try:
-                embedding_provider = configured_embedding_provider()
-            except ValueError as exc:
-                raise RuntimeError("context evidence embedding configuration failed") from exc
-            with capture_embedding_usage(embedding_provider) as embedding_usage:
-                pack_task = asyncio.create_task(compile_pack())
-                if request.evidence.retrieval_mode == "accurate":
-                    evidence_task = asyncio.create_task(
-                        _execute_accurate_context_evidence_search(
-                            request,
-                            org=org,
-                            ctx=ctx,
-                            embedding_usage=embedding_usage,
-                            accessible_projects=accessible_projects,
-                        )
-                    )
-                else:
-                    evidence_task = asyncio.create_task(
-                        _execute_context_evidence_search(
-                            _context_evidence_request(request, query=retrieval_goal),
-                            org=org,
-                            ctx=ctx,
-                            embedding_usage=embedding_usage,
-                        )
-                    )
-                try:
-                    pack, evidence_response = await asyncio.gather(pack_task, evidence_task)
-                except BaseException:
-                    pack_task.cancel()
-                    evidence_task.cancel()
-                    await asyncio.gather(pack_task, evidence_task, return_exceptions=True)
-                    raise
-            if request.evidence.retrieval_mode == "fast":
-                evidence_response.filters.update(
-                    {
-                        "retrieval_mode": "fast",
-                        "planner_status": "not_requested",
-                        "planned_queries": [],
-                        "query_count": 1,
-                    }
-                )
-            evidence_response.filters["embedding_usage"] = dict(embedding_usage)
+            pack, evidence_response = await _compile_context_with_evidence(
+                request,
+                retrieval_goal=retrieval_goal,
+                org=org,
+                ctx=ctx,
+                accessible_projects=accessible_projects,
+                compile_pack=compile_pack,
+            )
         payload = context_pack_to_dict(pack)
         payload["markdown"] = context_pack_to_markdown(
             pack,
