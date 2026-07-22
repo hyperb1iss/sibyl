@@ -7,8 +7,8 @@ import shutil
 import subprocess
 import sys
 import threading
-from collections.abc import Awaitable, Callable
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, Protocol, TypedDict, cast
@@ -1862,6 +1862,7 @@ def test_sibyl_memory_context_keeps_labeled_listbox_options() -> None:
 
 def test_compact_content_windows_unstructured_content() -> None:
     module = _load_memory_module()
+    max_chars = 600
     filler = "".join(f"line {index} filler text about nothing much here\n" for index in range(40))
     tail = "".join(f"tail {index} more filler\n" for index in range(40))
     content = (
@@ -1871,13 +1872,13 @@ def test_compact_content_windows_unstructured_content() -> None:
     exposed, metadata = module.compact_content_for_query(
         "What is the entry under Related Links on the Report page?",
         content,
-        max_chars=600,
+        max_chars=max_chars,
     )
 
     assert metadata["mode"] == "query_slices"
     assert metadata["stride_window_fallback"] is True
     assert "Launch Dependency Assessment" in exposed
-    assert len(exposed) <= 600
+    assert len(exposed) <= max_chars
 
 
 def test_compact_content_token_fallback_when_focus_phrases_miss() -> None:
@@ -2764,6 +2765,7 @@ def test_parse_distillation_output_strips_fences_and_validates() -> None:
 
 def test_build_trajectory_digest_bounds_length() -> None:
     module = _load_note_distillation_module()
+    max_chars = 10_000
     trajectory = {
         "id": "t1",
         "goal": "do the thing",
@@ -2774,9 +2776,9 @@ def test_build_trajectory_digest_bounds_length() -> None:
         ],
     }
 
-    digest = module.build_trajectory_digest(trajectory, max_chars=10_000)
+    digest = module.build_trajectory_digest(trajectory, max_chars=max_chars)
 
-    assert len(digest) <= 10_000
+    assert len(digest) <= max_chars
     assert digest.startswith("Goal: do the thing")
     assert "digest truncated" in digest
 
@@ -2889,15 +2891,15 @@ def test_note_distillation_insert_does_not_block(
         if method == "GET":
             return {"id": "project_test", "entity_type": "project"}
         if path == "/entities/bulk":
-            bulk_calls.append(kwargs.get("json") or {})
+            payload = kwargs.get("json")
+            assert isinstance(payload, dict)
+            bulk_calls.append(cast(dict[str, object], payload))
             return {"created": 2, "background_jobs": {}}
         return {"created": 0, "background_jobs": {}}
 
     monkeypatch.setattr(module.SibylLiveApiMemory, "_request_json", fake_request)
 
-    import threading as threading_module
-
-    gate = threading_module.Event()
+    gate = threading.Event()
 
     def slow_distill(*_args: object, **_kwargs: object) -> dict[str, object]:
         gate.wait(timeout=10)
@@ -2925,7 +2927,11 @@ def test_note_distillation_insert_does_not_block(
         memory._harvest_note_futures(block=True)
         assert len(bulk_calls) == 1
         entities = bulk_calls[0]["entities"]
-        assert entities[0]["entity_type"] == "note"
+        assert isinstance(entities, list)
+        first_entity = entities[0]
+        assert isinstance(first_entity, dict)
+        first_entity_payload = cast(dict[str, object], first_entity)
+        assert first_entity_payload["entity_type"] == "note"
         assert memory.note_distillation_written == 1
     finally:
         if memory._note_executor is not None:
@@ -3003,6 +3009,10 @@ def test_annotate_inventory_completeness_branches() -> None:
 
 def test_compile_evidence_honors_typed_reservation_override() -> None:
     module = _load_memory_module()
+    default_reservation = 3
+    boosted_reservation = 5
+    capped_reservation = 6
+    max_items = 8
     typed = [
         {
             "id": f"note_{i}",
@@ -3015,36 +3025,36 @@ def test_compile_evidence_honors_typed_reservation_override() -> None:
     ]
     raw = [{"id": f"session_{i}", "type": "session", "content": f"raw slice {i}"} for i in range(8)]
 
-    default_set, default_meta = module.compile_operational_evidence_set(
+    _, default_meta = module.compile_operational_evidence_set(
         query="find the field",
         typed_results=typed,
         raw_results=raw,
-        max_items=8,
+        max_items=max_items,
         mode="shared_relevance",
     )
     boosted_set, boosted_meta = module.compile_operational_evidence_set(
         query="find the field",
         typed_results=typed,
         raw_results=raw,
-        max_items=8,
+        max_items=max_items,
         mode="shared_relevance",
-        typed_reservation_items=5,
+        typed_reservation_items=boosted_reservation,
     )
 
-    assert default_meta["typed_reservation"] == 3
-    assert boosted_meta["typed_reservation"] == 5
-    assert boosted_meta["selected_typed_count"] >= 5
-    assert len(boosted_set) == 8
+    assert default_meta["typed_reservation"] == default_reservation
+    assert boosted_meta["typed_reservation"] == boosted_reservation
+    assert boosted_meta["selected_typed_count"] >= boosted_reservation
+    assert len(boosted_set) == max_items
     capped_set, capped_meta = module.compile_operational_evidence_set(
         query="find the field",
         typed_results=typed,
         raw_results=raw,
-        max_items=8,
+        max_items=max_items,
         mode="shared_relevance",
         typed_reservation_items=99,
     )
-    assert capped_meta["typed_reservation"] == 6
-    assert len(capped_set) == 8
+    assert capped_meta["typed_reservation"] == capped_reservation
+    assert len(capped_set) == max_items
 
 
 def test_entity_overlap_downranks_mismatched_notes() -> None:
@@ -3106,6 +3116,7 @@ def test_typed_stream_results_filters_and_marks_origin(
     module = _load_memory_module()
     monkeypatch.setattr(module.SibylLiveApiMemory, "_authenticate", lambda *args: None)
     captured: list[dict[str, object]] = []
+    typed_stream_limit = 5
 
     def fake_request(
         _self: object,
@@ -3117,7 +3128,9 @@ def test_typed_stream_results_filters_and_marks_origin(
             return {"status": "healthy"}
         if method == "GET":
             return {"id": "project_test", "entity_type": "project"}
-        captured.append(kwargs.get("json") or {})
+        payload = kwargs.get("json")
+        assert isinstance(payload, dict)
+        captured.append(cast(dict[str, object], payload))
         return {
             "evidence": {
                 "results": [
@@ -3135,7 +3148,7 @@ def test_typed_stream_results_filters_and_marks_origin(
             "allow_localhost": True,
             "project_id": "project_test",
             "typed_stream_retrieval": True,
-            "typed_stream_limit": 5,
+            "typed_stream_limit": typed_stream_limit,
         }
     )
     try:
@@ -3143,14 +3156,17 @@ def test_typed_stream_results_filters_and_marks_origin(
     finally:
         memory._client.close()
 
-    assert [item["id"] for item in results] == ["event_9", "procedure_9"]
+    expected_result_ids = ["event_9", "procedure_9"]
+    assert [item["id"] for item in results] == expected_result_ids
     assert all(item["_selection_origin"] == "context_pack:typed_stream" for item in results)
-    assert metadata["result_count"] == 2
+    assert metadata["result_count"] == len(expected_result_ids)
     request = captured[-1]
     evidence = request["evidence"]
-    assert evidence["types"] == ["note", "event", "procedure", "error_pattern"]
-    assert evidence["retrieval_mode"] == "fast"
-    assert evidence["limit"] == 5
+    assert isinstance(evidence, dict)
+    evidence_payload = cast(dict[str, object], evidence)
+    assert evidence_payload["types"] == ["note", "event", "procedure", "error_pattern"]
+    assert evidence_payload["retrieval_mode"] == "fast"
+    assert evidence_payload["limit"] == typed_stream_limit
     assert request["record_exposure"] is False
 
 
