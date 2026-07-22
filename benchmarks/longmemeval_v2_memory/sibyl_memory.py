@@ -668,6 +668,7 @@ def compile_operational_evidence_set(
     raw_results: list[dict[str, object]],
     max_items: int,
     mode: str = DEFAULT_EVIDENCE_COMPOSITION_MODE,
+    typed_reservation_items: int | None = None,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
     if mode not in EVIDENCE_COMPOSITION_MODES:
         msg = f"Unknown evidence composition mode {mode!r}; expected {sorted(EVIDENCE_COMPOSITION_MODES)}"
@@ -733,7 +734,11 @@ def compile_operational_evidence_set(
         raw_candidates,
         pool="raw",
     )
-    typed_reservation = min(len(ranked_typed), max(1, math.ceil(max_items * 3 / 8)))
+    default_reservation = max(1, math.ceil(max_items * 3 / 8))
+    requested_reservation = (
+        typed_reservation_items if typed_reservation_items is not None else default_reservation
+    )
+    typed_reservation = min(len(ranked_typed), max(1, min(requested_reservation, max_items - 1)))
     raw_budget = min(len(ranked_raw), max_items - typed_reservation)
     selected_raw = _select_role_complete_raw_evidence(ranked_raw, budget=raw_budget)
     selected = [*ranked_typed[:typed_reservation], *selected_raw]
@@ -767,6 +772,72 @@ def compile_operational_evidence_set(
     }
 
 
+_ENTITY_TOKEN_RE = re.compile(r"\b[A-Z][a-zA-Z0-9]+(?:[-'][A-Z][a-zA-Z0-9]+)*\b")
+_ENTITY_STOPWORDS = frozenset(
+    {
+        "The",
+        "What",
+        "Which",
+        "When",
+        "Where",
+        "How",
+        "Who",
+        "Why",
+        "State",
+        "URI",
+        "URL",
+        "Goal",
+        "Action",
+        "Page",
+        "Answer",
+        "Mark",
+        "Please",
+        "ServiceNow",
+        "I",
+        "In",
+        "On",
+        "At",
+        "For",
+        "From",
+        "After",
+        "Before",
+    }
+)
+
+
+def _entity_tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in _ENTITY_TOKEN_RE.findall(text)
+        if token not in _ENTITY_STOPWORDS and len(token) >= 3
+    }
+
+
+def _entity_overlap_ordered(
+    query: str,
+    ranked: list[QueryCoverageRankedCandidate[dict[str, object]]],
+) -> list[dict[str, object]]:
+    """Down-rank typed items naming other entities than the query names.
+
+    Near-miss notes (same task shape, different subject entity) score high on
+    task vocabulary yet seed entity confusion; when the query names concrete
+    entities and a note names only different ones, it sorts behind matches.
+    """
+    query_entities = _entity_tokens(query)
+    if not query_entities:
+        return [row.item for row in ranked]
+
+    def sort_key(
+        indexed: tuple[int, QueryCoverageRankedCandidate[dict[str, object]]],
+    ) -> tuple[int, int]:
+        coverage_rank, row = indexed
+        item_entities = _entity_tokens(str(row.item.get("content") or ""))
+        mismatch = 1 if item_entities and not (item_entities & query_entities) else 0
+        return (mismatch, coverage_rank)
+
+    return [row.item for _, row in sorted(enumerate(ranked), key=sort_key)]
+
+
 def _rank_operational_evidence_pool(
     query: str,
     candidates: list[dict[str, object]],
@@ -787,7 +858,12 @@ def _rank_operational_evidence_pool(
         ],
     )
     ranked_by_id = {candidate.stable_id: candidate for candidate in ranking.ranked}
-    ordered_candidates = candidates if pool == "raw" else [row.item for row in ranking.ranked]
+    if pool == "typed":
+        ordered_candidates = _entity_overlap_ordered(query, ranking.ranked)
+    elif pool == "raw":
+        ordered_candidates = candidates
+    else:
+        ordered_candidates = [row.item for row in ranking.ranked]
     ranked_candidates: list[dict[str, object]] = []
     ordered_ranking: list[QueryCoverageRankedCandidate[dict[str, object]]] = []
     for pool_rank, item in enumerate(ordered_candidates, start=1):
@@ -2883,6 +2959,12 @@ class SibylLiveApiMemory(Memory):
             4,
             minimum=1,
         )
+        raw_reservation = memory_params.get("typed_reservation_items")
+        self.typed_reservation_items = (
+            _param_int(memory_params, "typed_reservation_items", 0, minimum=1)
+            if raw_reservation is not None
+            else None
+        )
         self.max_context_total_chars = max(
             1,
             _param_int(
@@ -3876,6 +3958,7 @@ class SibylLiveApiMemory(Memory):
                 "evidence_composition_mode",
                 DEFAULT_EVIDENCE_COMPOSITION_MODE,
             ),
+            typed_reservation_items=getattr(self, "typed_reservation_items", None),
         )
         assembly_metadata["typed_context_candidate_count"] = len(typed_results)
         assembly_metadata["typed_context_selected_count"] = sum(

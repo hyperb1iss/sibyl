@@ -3001,6 +3001,83 @@ def test_annotate_inventory_completeness_branches() -> None:
     )
 
 
+def test_compile_evidence_honors_typed_reservation_override() -> None:
+    module = _load_memory_module()
+    typed = [
+        {
+            "id": f"note_{i}",
+            "type": "note",
+            "content": f"note {i}",
+            "_selection_origin": "context_pack:typed_stream",
+            "metadata": {"longmemeval_v2_trajectory_id": f"t{i}"},
+        }
+        for i in range(6)
+    ]
+    raw = [{"id": f"session_{i}", "type": "session", "content": f"raw slice {i}"} for i in range(8)]
+
+    default_set, default_meta = module.compile_operational_evidence_set(
+        query="find the field",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=8,
+        mode="shared_relevance",
+    )
+    boosted_set, boosted_meta = module.compile_operational_evidence_set(
+        query="find the field",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=8,
+        mode="shared_relevance",
+        typed_reservation_items=5,
+    )
+
+    assert default_meta["typed_reservation"] == 3
+    assert boosted_meta["typed_reservation"] == 5
+    assert boosted_meta["selected_typed_count"] >= 5
+    assert len(boosted_set) == 8
+    capped_set, capped_meta = module.compile_operational_evidence_set(
+        query="find the field",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=8,
+        mode="shared_relevance",
+        typed_reservation_items=99,
+    )
+    assert capped_meta["typed_reservation"] == 6
+    assert len(capped_set) == 8
+
+
+def test_entity_overlap_downranks_mismatched_notes() -> None:
+    module = _load_memory_module()
+    query = "Find the warranty expiration for Chelsea-Cynthia Tran-Dyer's laptop"
+    matching = {
+        "id": "note_match",
+        "type": "note",
+        "content": "Trajectory: t1\nGoal: warranty lookup\n- Chelsea-Cynthia Tran-Dyer laptop warranty shown in Hardware list",
+        "metadata": {"longmemeval_v2_trajectory_id": "t1"},
+    }
+    mismatched = {
+        "id": "note_miss",
+        "type": "note",
+        "content": "Trajectory: t2\nGoal: warranty lookup\n- Kelly-Ronald Schwartz-King laptop warranty shown in Hardware list",
+        "metadata": {"longmemeval_v2_trajectory_id": "t2"},
+    }
+    neutral = {
+        "id": "note_neutral",
+        "type": "note",
+        "content": "list header search uses a default comparison operator",
+        "metadata": {"longmemeval_v2_trajectory_id": "t3"},
+    }
+
+    ranked, _ranking = module._rank_operational_evidence_pool(
+        query, [mismatched, matching, neutral], pool="typed"
+    )
+    ids = [item["id"] for item in ranked]
+
+    assert ids.index("note_miss") > ids.index("note_match")
+    assert ids.index("note_miss") > ids.index("note_neutral")
+
+
 def test_merge_typed_stream_results_dedupes_by_id() -> None:
     module = _load_memory_module()
     pack = [
