@@ -858,7 +858,7 @@ def _rank_operational_evidence_pool(
         ],
     )
     ranked_by_id = {candidate.stable_id: candidate for candidate in ranking.ranked}
-    if pool == "typed":
+    if pool == "typed_entity_overlap":
         ordered_candidates = _entity_overlap_ordered(query, ranking.ranked)
     elif pool == "raw":
         ordered_candidates = candidates

@@ -3070,7 +3070,7 @@ def test_entity_overlap_downranks_mismatched_notes() -> None:
     }
 
     ranked, _ranking = module._rank_operational_evidence_pool(
-        query, [mismatched, matching, neutral], pool="typed"
+        query, [mismatched, matching, neutral], pool="typed_entity_overlap"
     )
     ids = [item["id"] for item in ranked]
 
