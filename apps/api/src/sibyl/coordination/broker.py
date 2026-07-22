@@ -24,6 +24,7 @@ _JOB_ORG_ARGUMENT_INDEX = {
     "backfill_entity_embeddings": 1,
     "project_memory_batch": 1,
     "extract_memory_entities": 1,
+    "distill_operational_experience_notes": 1,
     "consolidate_org": 0,
     "priority_decay": 0,
     "run_reflection_dream_cycle": 0,
@@ -96,6 +97,26 @@ def memory_extraction_job_id(
         source_ids = [str(source.get("id") or "") for source in sources_data]
     digest = sha256("|".join([group_id, *source_ids]).encode()).hexdigest()[:16]
     return f"extract_memory:{digest}"
+
+
+def operational_note_distillation_job_id(
+    experience_data: dict[str, Any],
+    group_id: str,
+    *,
+    content_hash: str,
+) -> str:
+    source_id = str(experience_data.get("source_id") or "")
+    payload = json.dumps(
+        {
+            "group_id": group_id,
+            "source_id": source_id,
+            "content_hash": content_hash,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = sha256(payload.encode()).hexdigest()[:16]
+    return f"distill_operational_experience:{digest}"
 
 
 def entity_embedding_job_id(
@@ -246,6 +267,16 @@ class QueueBroker(Protocol):
         max_source_chars: int = 12_000,
         max_concurrent: int = 2,
         max_tokens: int = 8192,
+    ) -> str: ...
+
+    async def enqueue_operational_note_distillation(
+        self,
+        experience_data: dict[str, Any],
+        group_id: str,
+        *,
+        content_hash: str,
+        created_by: str | None,
+        max_tokens: int = 2_048,
     ) -> str: ...
 
     async def enqueue_entity_embedding_backfill(

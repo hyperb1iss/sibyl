@@ -26,6 +26,7 @@ from sibyl.coordination.broker import (
     job_organization_id,
     memory_extraction_job_id,
     memory_projection_job_id,
+    operational_note_distillation_job_id,
     raw_capture_changefeed_job_id,
     raw_promotion_job_id,
 )
@@ -319,6 +320,40 @@ class RedisQueueBroker:
             "Enqueued memory extraction job",
             job_id=result.job_id,
             sources=len(sources_data),
+        )
+        return result.job_id
+
+    async def enqueue_operational_note_distillation(
+        self,
+        experience_data: dict[str, Any],
+        group_id: str,
+        *,
+        content_hash: str,
+        created_by: str | None,
+        max_tokens: int = 2_048,
+    ) -> str:
+        """Enqueue LLM distillation for one operational experience."""
+        job_id = operational_note_distillation_job_id(
+            experience_data,
+            group_id,
+            content_hash=content_hash,
+        )
+        result = await self._enqueue_unique(
+            "distill_operational_experience_notes",
+            experience_data,
+            group_id,
+            job_id=job_id,
+            content_hash=content_hash,
+            created_by=created_by,
+            max_tokens=max_tokens,
+        )
+        if not result.created:
+            log.info("Operational note distillation job already exists", job_id=job_id)
+            return result.job_id
+        log.info(
+            "Enqueued operational note distillation job",
+            job_id=result.job_id,
+            source_id=experience_data.get("source_id"),
         )
         return result.job_id
 

@@ -661,6 +661,12 @@ class Settings(BaseSettings):
         le=8192,
         description="Maximum output tokens for one memory extraction LLM call",
     )
+    operational_note_distillation_max_tokens: int = Field(
+        default=2048,
+        ge=256,
+        le=8192,
+        description="Maximum output tokens for one operational note distillation call",
+    )
     raw_capture_changefeed_poll_enabled: bool = Field(
         default=True,
         description="Poll raw_captures CHANGEFEED and enqueue incremental promotion",

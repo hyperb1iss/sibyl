@@ -24,6 +24,7 @@ from sibyl.coordination.broker import (
     entity_embedding_job_id,
     memory_extraction_job_id,
     memory_projection_job_id,
+    operational_note_distillation_job_id,
     raw_capture_changefeed_job_id,
     raw_promotion_job_id,
 )
@@ -350,6 +351,32 @@ class LocalQueueBroker:
             max_entities_per_source=max_entities_per_source,
             max_source_chars=max_source_chars,
             max_concurrent=max_concurrent,
+            max_tokens=max_tokens,
+        )
+        return result.job_id
+
+    async def enqueue_operational_note_distillation(
+        self,
+        experience_data: dict[str, Any],
+        group_id: str,
+        *,
+        content_hash: str,
+        created_by: str | None,
+        max_tokens: int = 2_048,
+    ) -> str:
+        job_id = operational_note_distillation_job_id(
+            experience_data,
+            group_id,
+            content_hash=content_hash,
+        )
+        result = await self._enqueue_unique(
+            "distill_operational_experience_notes",
+            experience_data,
+            group_id,
+            job_id=job_id,
+            queue_priority=_DERIVED_QUEUE_PRIORITY,
+            content_hash=content_hash,
+            created_by=created_by,
             max_tokens=max_tokens,
         )
         return result.job_id

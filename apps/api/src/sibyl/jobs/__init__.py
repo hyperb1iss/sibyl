@@ -30,6 +30,7 @@ from sibyl.jobs.memory_extraction import (
     enqueue_memory_extraction_batches,
     extract_memory_entities,
 )
+from sibyl.jobs.operational_distillation import distill_operational_experience_notes
 from sibyl.jobs.pending import (
     clear_pending,
     clear_pending_operations,
@@ -51,6 +52,7 @@ from sibyl.jobs.queue import (
     enqueue_entity_embedding_backfill,
     enqueue_memory_extraction,
     enqueue_memory_projection,
+    enqueue_operational_note_distillation,
     enqueue_priority_decay,
     enqueue_raw_capture_changefeed_poll,
     enqueue_raw_promotion,
@@ -90,6 +92,7 @@ __all__ = [
     "enqueue_memory_extraction",
     "enqueue_memory_extraction_batches",
     "enqueue_memory_projection",
+    "enqueue_operational_note_distillation",
     "enqueue_update_entity",
     "enqueue_update_task",
     # Pending entity registry
@@ -123,6 +126,7 @@ __all__ = [
     "create_learning_episode",
     "create_learning_procedure",
     "extract_memory_entities",
+    "distill_operational_experience_notes",
     "project_memory_batch",
     "update_entity",
     "update_task",

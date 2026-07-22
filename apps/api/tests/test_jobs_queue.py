@@ -16,6 +16,7 @@ from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_LIMIT,
     JobInfo,
     JobStatus,
+    operational_note_distillation_job_id,
     raw_capture_changefeed_job_id,
     raw_promotion_job_id,
 )
@@ -501,6 +502,36 @@ async def test_enqueue_memory_extraction_uses_source_scoped_job_id() -> None:
     metadata_key, metadata_json = pool.set.await_args.args
     assert metadata_key == f"{JOB_METADATA_KEY_PREFIX}{job_id}"
     assert pool.set.await_args.kwargs == {"ex": JOB_METADATA_TTL_SECONDS}
+    assert json.loads(metadata_json)["organization_id"] == "org-123"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_operational_distillation_uses_content_scoped_job_id() -> None:
+    pool = RecordingEnqueuePool()
+    broker = make_broker(pool)
+    experience = {"source_id": "capture-1", "goal": "Close the incident"}
+
+    job_id = await broker.enqueue_operational_note_distillation(
+        experience,
+        "org-123",
+        content_hash="hash-1",
+        created_by="user-1",
+        max_tokens=512,
+    )
+
+    assert job_id == operational_note_distillation_job_id(
+        experience,
+        "org-123",
+        content_hash="hash-1",
+    )
+    assert pool.calls[0][0] == "distill_operational_experience_notes"
+    assert pool.calls[0][1] == experience
+    assert pool.extra_args[0] == ("org-123",)
+    assert pool.calls[0][2]["content_hash"] == "hash-1"
+    assert pool.calls[0][2]["created_by"] == "user-1"
+    assert pool.calls[0][2]["max_tokens"] == 512
+    metadata_key, metadata_json = pool.set.await_args.args
+    assert metadata_key == f"{JOB_METADATA_KEY_PREFIX}{job_id}"
     assert json.loads(metadata_json)["organization_id"] == "org-123"
 
 

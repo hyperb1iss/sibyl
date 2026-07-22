@@ -32,6 +32,16 @@ def _lock_operational_source(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(experience_routes, "entity_lock", _acquired_lock)
 
 
+@pytest.fixture(autouse=True)
+def queue_note_distillation(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    enqueue = AsyncMock(return_value="distill-1")
+    monkeypatch.setattr(
+        "sibyl.jobs.queue.enqueue_operational_note_distillation",
+        enqueue,
+    )
+    return enqueue
+
+
 def _runtime(existing_manifest: object | None = None) -> SimpleNamespace:
     get = (
         AsyncMock(return_value=existing_manifest)
@@ -84,7 +94,9 @@ def _request(*, project_id: str | None = "project-1") -> OperationalExperienceCa
 
 
 @pytest.mark.asyncio
-async def test_capture_persists_authorized_experience_and_queues_embeddings() -> None:
+async def test_capture_persists_authorized_experience_and_queues_embeddings(
+    queue_note_distillation: AsyncMock,
+) -> None:
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     ctx = SimpleNamespace(user_id="user-1")
     projection = project_operational_experience(
@@ -145,6 +157,15 @@ async def test_capture_persists_authorized_experience_and_queues_embeddings() ->
     assert response.entity_ids == list(projection.manifest.entity_ids)
     assert response.relationship_ids == list(projection.manifest.relationship_ids)
     assert response.background_jobs["embedding_backfill"]["job_ids"] == ["embed-1"]
+    assert response.background_jobs["note_distillation"] == {
+        "status": "queued",
+        "job_ids": ["distill-1"],
+        "queued_sources": 1,
+    }
+    assert queue_note_distillation.await_args.kwargs["content_hash"] == (
+        projection.manifest.content_hash
+    )
+    assert queue_note_distillation.await_args.kwargs["created_by"] == "user-1"
     completion_manifest = enqueue.await_args.kwargs["completion_manifest"]
     assert completion_manifest["metadata"]["operational_projection_state"] == "complete"
     runtime.entity_manager.create_direct_bulk.assert_not_awaited()
@@ -192,7 +213,7 @@ async def test_capture_can_embed_synchronously_without_background_job() -> None:
     verify_project.assert_awaited_once()
     assert persist.await_args.kwargs["generate_embeddings"] is True
     enqueue.assert_not_awaited()
-    assert response.background_jobs == {}
+    assert response.background_jobs["note_distillation"]["job_ids"] == ["distill-1"]
 
 
 @pytest.mark.asyncio
@@ -236,7 +257,7 @@ async def test_capture_unchanged_replay_does_not_requeue_embeddings() -> None:
     enqueue.assert_not_awaited()
     assert response.written_entities == 0
     assert response.entity_ids == list(projection.manifest.entity_ids)
-    assert response.background_jobs == {}
+    assert response.background_jobs["note_distillation"]["job_ids"] == ["distill-1"]
 
 
 @pytest.mark.asyncio

@@ -34,6 +34,7 @@ __all__ = [
     "enqueue_create_learning_procedure",
     "enqueue_memory_extraction",
     "enqueue_memory_projection",
+    "enqueue_operational_note_distillation",
     "enqueue_priority_decay",
     "enqueue_raw_capture_changefeed_poll",
     "enqueue_raw_promotion",
@@ -159,6 +160,24 @@ async def enqueue_memory_extraction(
         max_entities_per_source=max_entities_per_source,
         max_source_chars=max_source_chars,
         max_concurrent=max_concurrent,
+        max_tokens=max_tokens,
+    )
+
+
+async def enqueue_operational_note_distillation(
+    experience_data: dict[str, Any],
+    group_id: str,
+    *,
+    content_hash: str,
+    created_by: str | None,
+    max_tokens: int = 2_048,
+) -> str:
+    """Enqueue distilled-note generation for an operational capture."""
+    return await get_queue().enqueue_operational_note_distillation(
+        experience_data,
+        group_id,
+        content_hash=content_hash,
+        created_by=created_by,
         max_tokens=max_tokens,
     )
 

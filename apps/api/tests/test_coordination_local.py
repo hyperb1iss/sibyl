@@ -12,7 +12,12 @@ from sibyl.coordination._local.broker import LOCAL_BROKER_ERROR, LocalQueueBroke
 from sibyl.coordination._local.events import LocalEventBus
 from sibyl.coordination._local.locks import LocalLockManager
 from sibyl.coordination._local.pending import LocalPendingRegistry
-from sibyl.coordination.broker import JobInfo, JobStatus, entity_embedding_job_id
+from sibyl.coordination.broker import (
+    JobInfo,
+    JobStatus,
+    entity_embedding_job_id,
+    operational_note_distillation_job_id,
+)
 
 
 def test_embedding_job_identity_tracks_content_and_ignores_input_order() -> None:
@@ -37,6 +42,83 @@ def test_embedding_job_identity_tracks_content_and_ignores_input_order() -> None
     assert reordered == original
     assert changed != original
     assert changed_manifest != original
+
+
+def test_distillation_job_identity_tracks_org_source_and_content() -> None:
+    experience = {"source_id": "capture-1", "goal": "Close the incident"}
+    original = operational_note_distillation_job_id(
+        experience,
+        "org-1",
+        content_hash="hash-1",
+    )
+
+    assert (
+        operational_note_distillation_job_id(
+            {**experience, "goal": "A rewritten goal"},
+            "org-1",
+            content_hash="hash-1",
+        )
+        == original
+    )
+    assert (
+        operational_note_distillation_job_id(
+            experience,
+            "org-2",
+            content_hash="hash-1",
+        )
+        != original
+    )
+    assert (
+        operational_note_distillation_job_id(
+            experience,
+            "org-1",
+            content_hash="hash-2",
+        )
+        != original
+    )
+
+
+@pytest.mark.asyncio
+async def test_local_queue_broker_executes_operational_note_distillation() -> None:
+    calls: list[tuple[dict[str, object], str, dict[str, object]]] = []
+
+    async def distill_operational_experience_notes(
+        _ctx: dict[str, object],
+        experience_data: dict[str, object],
+        group_id: str,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        calls.append((experience_data, group_id, kwargs))
+        return {"status": "complete"}
+
+    broker = LocalQueueBroker(
+        functions={
+            "distill_operational_experience_notes": distill_operational_experience_notes,
+        },
+        max_concurrency=1,
+        result_ttl_seconds=60,
+    )
+    experience = {"source_id": "capture-1", "goal": "Close the incident"}
+
+    await broker.startup()
+    job_id = await broker.enqueue_operational_note_distillation(
+        experience,
+        "org-1",
+        content_hash="hash-1",
+        created_by="user-1",
+        max_tokens=512,
+    )
+    info = await _wait_for_job_status(broker, job_id, JobStatus.COMPLETE)
+    await broker.shutdown()
+
+    assert info.result == {"status": "complete"}
+    assert calls == [
+        (
+            experience,
+            "org-1",
+            {"content_hash": "hash-1", "created_by": "user-1", "max_tokens": 512},
+        )
+    ]
 
 
 @pytest.mark.asyncio

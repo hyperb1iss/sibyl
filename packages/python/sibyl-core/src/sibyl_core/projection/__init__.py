@@ -2,6 +2,7 @@
 
 from sibyl_core.projection.experience import (
     MANIFEST_STATE_COMPLETE,
+    MANIFEST_STATE_EMBEDDING_PENDING,
     OPERATIONAL_EXPERIENCE_SCHEMA_VERSION,
     operational_experience_manifest_id,
     operational_experience_manifest_with_state,
@@ -23,6 +24,7 @@ from sibyl_core.projection.memory import (
 
 __all__ = [
     "MANIFEST_STATE_COMPLETE",
+    "MANIFEST_STATE_EMBEDDING_PENDING",
     "OPERATIONAL_EXPERIENCE_SCHEMA_VERSION",
     "MemoryProjectionBatchResult",
     "MemoryProjectionResult",

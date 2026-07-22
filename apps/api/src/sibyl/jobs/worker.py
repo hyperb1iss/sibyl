@@ -38,6 +38,7 @@ from sibyl.jobs.entities import (
     update_task,
 )
 from sibyl.jobs.memory_extraction import extract_memory_entities
+from sibyl.jobs.operational_distillation import distill_operational_experience_notes
 from sibyl.jobs.privacy import purge_due_deleted_personal_memories
 from sibyl.jobs.raw_changefeed import (
     poll_all_raw_capture_changefeeds,
@@ -286,6 +287,7 @@ class WorkerSettings:
         backfill_entity_embeddings,
         project_memory_batch,
         extract_memory_entities,
+        distill_operational_experience_notes,
         create_learning_episode,
         create_learning_procedure,
         update_entity,
