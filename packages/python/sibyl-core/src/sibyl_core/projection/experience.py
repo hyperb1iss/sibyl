@@ -6,12 +6,13 @@ import hashlib
 import json
 import re
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from itertools import pairwise
 from typing import Any, Literal, Protocol
 
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.experience import (
+    OperationalEvidencePart,
     OperationalExperience,
     OperationalExperienceManifest,
     OperationalExperienceProjection,
@@ -19,10 +20,14 @@ from sibyl_core.models.experience import (
     OperationalObservation,
 )
 
-OPERATIONAL_EXPERIENCE_SCHEMA_VERSION = 4
+OPERATIONAL_EXPERIENCE_SCHEMA_VERSION = 5
 MAX_TYPED_ENTITY_CONTENT_CHARS = 18_000
 MAX_UI_INVENTORY_CHARS = 16_000
 MAX_UI_INVENTORY_ITEMS = 160
+MAX_RAW_OBSERVATION_DESCRIPTION_CHARS = 2_000
+MAX_RAW_OBSERVATION_DESCRIPTION_ITEMS = 24
+MAX_RAW_OBSERVATION_DESCRIPTION_FIELD_CHARS = 320
+MAX_RAW_OBSERVATION_DESCRIPTION_ENTRY_CHARS = 160
 MANIFEST_STATE_PENDING = "pending"
 MANIFEST_STATE_EMBEDDING_PENDING = "embedding_pending"
 MANIFEST_STATE_COMPLETE = "complete"
@@ -191,6 +196,73 @@ def _ui_state_attributes(raw_attributes: str) -> str:
     return ", ".join(selected)
 
 
+def _bounded_lines(lines: Iterable[str | None], *, max_chars: int) -> str:
+    selected: list[str] = []
+    used_chars = 0
+    for value in lines:
+        line = value.strip() if value else ""
+        if not line:
+            continue
+        separator_chars = 1 if selected else 0
+        remaining = max_chars - used_chars - separator_chars
+        if remaining <= 0:
+            break
+        if len(line) > remaining:
+            line = (
+                line[: max(0, remaining - 3)].rstrip() + "..." if remaining > 3 else "." * remaining
+            )
+        selected.append(line)
+        used_chars += separator_chars + len(line)
+        if used_chars >= max_chars:
+            break
+    return "\n".join(selected)
+
+
+def _raw_observation_description(
+    observation: OperationalObservation,
+    *,
+    evidence_index: int,
+) -> str:
+    evidence = observation.evidence[evidence_index]
+    lines: list[str | None] = [
+        _bounded_lines(
+            [f"URI: {observation.uri}"],
+            max_chars=MAX_RAW_OBSERVATION_DESCRIPTION_FIELD_CHARS,
+        )
+        if observation.uri
+        else None,
+        _bounded_lines(
+            [f"Action: {observation.action}"],
+            max_chars=MAX_RAW_OBSERVATION_DESCRIPTION_FIELD_CHARS,
+        )
+        if observation.action
+        else None,
+        _bounded_lines(
+            [f"Reasoning: {observation.reasoning}"],
+            max_chars=MAX_RAW_OBSERVATION_DESCRIPTION_FIELD_CHARS,
+        )
+        if observation.reasoning
+        else None,
+    ]
+    if "profile=accessibility-tree" in evidence.content_type.casefold():
+        for evidence_items, (role, name, attributes) in enumerate(
+            _accessibility_entries((evidence,)),
+            start=1,
+        ):
+            entry = f"{role}: {name}"
+            if attributes:
+                entry += f" [{attributes}]"
+            lines.append(
+                _bounded_lines(
+                    [entry],
+                    max_chars=MAX_RAW_OBSERVATION_DESCRIPTION_ENTRY_CHARS,
+                )
+            )
+            if evidence_items >= MAX_RAW_OBSERVATION_DESCRIPTION_ITEMS:
+                break
+    return _bounded_lines(lines, max_chars=MAX_RAW_OBSERVATION_DESCRIPTION_CHARS)
+
+
 def _split_accessibility_attributes(value: str) -> list[str]:
     attributes: list[str] = []
     current: list[str] = []
@@ -216,6 +288,29 @@ def _split_accessibility_attributes(value: str) -> list[str]:
     return attributes
 
 
+def _accessibility_entries(
+    evidence_parts: Iterable[OperationalEvidencePart],
+) -> Iterator[tuple[str, str, str]]:
+    seen: set[tuple[str, str, str]] = set()
+    for evidence in evidence_parts:
+        if "profile=accessibility-tree" not in evidence.content_type.casefold():
+            continue
+        for raw_line in evidence.content.splitlines():
+            match = _ACCESSIBILITY_NODE_PATTERN.fullmatch(raw_line.strip())
+            if match is None:
+                continue
+            name = _clean_accessibility_name(match.group("name"))
+            if not name:
+                continue
+            role = _UI_ROLE_NAMES.get(match.group("role"), match.group("role").casefold())
+            attributes = _ui_state_attributes(match.group("attributes") or "")
+            key = (role, name, attributes)
+            if key in seen:
+                continue
+            seen.add(key)
+            yield key
+
+
 def _accessibility_inventory(
     observation: OperationalObservation,
     *,
@@ -231,42 +326,24 @@ def _accessibility_inventory(
         return None, 0, has_accessibility_evidence
     available_chars = effective_max_chars - len(prefix) - 1
     inventory: list[str] = []
-    seen: set[tuple[str, str, str]] = set()
     truncated = False
     used_chars = 0
-    for evidence in observation.evidence:
-        if "profile=accessibility-tree" not in evidence.content_type.casefold():
-            continue
-        for raw_line in evidence.content.splitlines():
-            match = _ACCESSIBILITY_NODE_PATTERN.fullmatch(raw_line.strip())
-            if match is None:
-                continue
-            name = _clean_accessibility_name(match.group("name"))
-            if not name:
-                continue
-            role = _UI_ROLE_NAMES.get(match.group("role"), match.group("role").casefold())
-            attributes = _ui_state_attributes(match.group("attributes") or "")
-            key = (role, name, attributes)
-            if key in seen:
-                continue
-            entry = f"- {role}: {name}"
-            if attributes:
-                entry += f" [{attributes}]"
-            entry_budget = available_chars - used_chars - 1
-            if len(inventory) >= MAX_UI_INVENTORY_ITEMS or entry_budget <= 0:
-                truncated = True
-                break
-            if len(entry) > entry_budget:
-                if entry_budget <= 3:
-                    entry = "." * entry_budget
-                else:
-                    entry = entry[: entry_budget - 3].rstrip() + "..."
-                truncated = True
-            inventory.append(entry)
-            seen.add(key)
-            used_chars += len(entry) + 1
-            if truncated:
-                break
+    for role, name, attributes in _accessibility_entries(observation.evidence):
+        entry = f"- {role}: {name}"
+        if attributes:
+            entry += f" [{attributes}]"
+        entry_budget = available_chars - used_chars - 1
+        if len(inventory) >= MAX_UI_INVENTORY_ITEMS or entry_budget <= 0:
+            truncated = True
+            break
+        if len(entry) > entry_budget:
+            if entry_budget <= 3:
+                entry = "." * entry_budget
+            else:
+                entry = entry[: entry_budget - 3].rstrip() + "..."
+            truncated = True
+        inventory.append(entry)
+        used_chars += len(entry) + 1
         if truncated:
             break
     if not inventory:
@@ -384,6 +461,10 @@ def project_operational_experience(
                     name=(
                         f"Operational observation {observation.ordinal} "
                         f"part {evidence_index + 1}/{len(observation.evidence)}"
+                    ),
+                    description=_raw_observation_description(
+                        observation,
+                        evidence_index=evidence_index,
                     ),
                     content=_observation_content(
                         experience,

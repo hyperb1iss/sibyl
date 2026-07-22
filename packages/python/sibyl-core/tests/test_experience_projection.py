@@ -25,6 +25,7 @@ from sibyl_core.projection import (
 from sibyl_core.projection.experience import (
     MANIFEST_STATE_EMBEDDING_PENDING,
     MANIFEST_STATE_PENDING,
+    MAX_RAW_OBSERVATION_DESCRIPTION_CHARS,
 )
 
 
@@ -130,6 +131,82 @@ def test_projection_preserves_evidence_bytes_including_surrounding_whitespace() 
     )
 
     assert raw.content.endswith("Evidence:\n  exact source bytes\n\n")
+
+
+def test_projection_adds_bounded_state_local_retrieval_descriptions() -> None:
+    experience = _experience()
+    evidence = (
+        OperationalEvidencePart(
+            id="tree-0",
+            content="[10] button 'Ship Order', clickable, visible",
+            content_type="text/plain; profile=accessibility-tree",
+        ),
+        OperationalEvidencePart(
+            id="tree-1",
+            content=(
+                "[11] textbox 'Carrier Tracking Number', required=True\n"
+                "[12] button 'Save Tracking', disabled"
+            ),
+            content_type="text/plain; profile=accessibility-tree",
+        ),
+    )
+    observation = experience.observations[1].model_copy(update={"evidence": evidence})
+    projected_experience = experience.model_copy(
+        update={"observations": (experience.observations[0], observation)}
+    )
+
+    projection = project_operational_experience(projected_experience)
+    repeated_projection = project_operational_experience(projected_experience)
+    raw = [
+        entity
+        for entity in projection.entities
+        if entity.metadata.get("source_observation_id") == observation.id
+    ]
+    repeated_raw = [
+        entity
+        for entity in repeated_projection.entities
+        if entity.metadata.get("source_observation_id") == observation.id
+    ]
+
+    assert [entity.description for entity in raw] == [entity.description for entity in repeated_raw]
+    assert "button: Ship Order" in raw[0].description
+    assert "Carrier Tracking Number" not in raw[0].description
+    assert "textbox: Carrier Tracking Number [required=True]" in raw[1].description
+    assert "button: Save Tracking [disabled]" in raw[1].description
+    assert all("Goal:" not in entity.description for entity in raw)
+    assert all("Reported outcome:" not in entity.description for entity in raw)
+    assert all(len(entity.description) <= MAX_RAW_OBSERVATION_DESCRIPTION_CHARS for entity in raw)
+    assert raw[0].content.endswith("Evidence:\n" + evidence[0].content)
+    assert raw[1].content.endswith("Evidence:\n" + evidence[1].content)
+
+
+def test_retrieval_description_reserves_space_for_bounded_ui_entries() -> None:
+    experience = _experience()
+    evidence = OperationalEvidencePart(
+        id="tree-0",
+        content="\n".join(
+            f"[{index}] button 'Control {index}', clickable, visible" for index in range(30)
+        ),
+        content_type="text/plain; profile=accessibility-tree",
+    )
+    observation = experience.observations[1].model_copy(
+        update={
+            "uri": "https://example.test/" + "u" * 1_000,
+            "action": "a" * 5_000,
+            "reasoning": "r" * 5_000,
+            "evidence": (evidence,),
+        }
+    )
+    projection = project_operational_experience(
+        experience.model_copy(update={"observations": (observation,)})
+    )
+    raw = next(entity for entity in projection.entities if entity.entity_type is EntityType.SESSION)
+
+    assert len(raw.description) <= MAX_RAW_OBSERVATION_DESCRIPTION_CHARS
+    assert raw.description.count("...") == 3
+    assert "button: Control 0" in raw.description
+    assert "button: Control 23" in raw.description
+    assert "button: Control 24" not in raw.description
 
 
 def test_projection_adds_bounded_source_derived_ui_inventory_to_events() -> None:
@@ -580,6 +657,49 @@ async def test_persistence_skips_unchanged_committed_manifest() -> None:
     relationship_manager.create_direct_bulk.assert_not_awaited()
     entity_manager.delete.assert_not_awaited()
     relationship_manager.delete_bulk.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persistence_reprojects_an_older_operational_schema() -> None:
+    experience = _experience()
+    projection = project_operational_experience(experience)
+    committed_manifest = next(
+        entity
+        for entity in projection.entities
+        if entity.id == projection.manifest.manifest_entity_id
+    )
+    older_manifest = committed_manifest.model_copy(
+        update={
+            "metadata": {
+                **committed_manifest.metadata,
+                "operational_schema_version": projection.manifest.schema_version - 1,
+            }
+        }
+    )
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(return_value=older_manifest),
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda entities, **_: [entity.id for entity in entities]
+        ),
+        delete=AsyncMock(return_value=True),
+    )
+    relationship_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda relationships, **_: [item.id for item in relationships]
+        ),
+        delete_bulk=AsyncMock(return_value=0),
+    )
+
+    result = await persist_operational_experience(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        experience=experience,
+        organization_id="org-1",
+    )
+
+    assert result.written_entity_ids == projection.manifest.entity_ids
+    assert result.written_relationship_ids == projection.manifest.relationship_ids
+    assert entity_manager.create_direct_bulk.await_count == 3
 
 
 @pytest.mark.asyncio
