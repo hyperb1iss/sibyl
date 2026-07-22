@@ -147,6 +147,34 @@ on:
           - "2"
           - "3"
         default: "3"
+      official_max_context_chars_per_item:
+        description: "Maximum characters retained per retrieved context item"
+        type: string
+        default: "18000"
+      official_typed_stream_retrieval:
+        description: "Retrieve distilled notes alongside raw evidence"
+        type: boolean
+        default: false
+      official_typed_stream_limit:
+        description: "Maximum distilled-note candidates per retrieval"
+        type: string
+        default: "8"
+      official_note_distillation:
+        description: "Distill typed retrieval notes during fresh ingestion"
+        type: boolean
+        default: false
+      official_note_distillation_model:
+        description: "Memory model used to distill typed retrieval notes"
+        type: string
+        default: "gpt-5.4-nano"
+      official_api_retry_attempts:
+        description: "Attempts per Sibyl API request"
+        type: string
+        default: "3"
+      official_prompt_build_max_workers:
+        description: "Concurrent official prompt builders"
+        type: string
+        default: "1"
       official_evaluator_model:
         description: "Official evaluator model"
         type: string
@@ -291,6 +319,14 @@ jobs:
       RETRIEVAL_MODE: ${{ inputs.official_retrieval_mode || 'accurate' }}
       RETRIEVAL_MAX_PLANNED_QUERIES:
         ${{ inputs.official_retrieval_max_planned_queries || '3' }}
+      MAX_CONTEXT_CHARS_PER_ITEM:
+        ${{ inputs.official_max_context_chars_per_item || '18000' }}
+      TYPED_STREAM_RETRIEVAL: ${{ inputs.official_typed_stream_retrieval || false }}
+      TYPED_STREAM_LIMIT: ${{ inputs.official_typed_stream_limit || '8' }}
+      NOTE_DISTILLATION: ${{ inputs.official_note_distillation || false }}
+      NOTE_DISTILLATION_MODEL: ${{ inputs.official_note_distillation_model || 'gpt-5.4-nano' }}
+      API_RETRY_ATTEMPTS: ${{ inputs.official_api_retry_attempts || '3' }}
+      PROMPT_BUILD_MAX_WORKERS: ${{ inputs.official_prompt_build_max_workers || '1' }}
       EVALUATOR_MODEL: ${{ inputs.official_evaluator_model || 'gpt-5.2' }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -495,6 +531,17 @@ jobs:
           args+=(--evidence-composition-mode "$EVIDENCE_COMPOSITION_MODE")
           args+=(--retrieval-mode "$RETRIEVAL_MODE")
           args+=(--retrieval-max-planned-queries "$RETRIEVAL_MAX_PLANNED_QUERIES")
+          args+=(--max-context-chars-per-item "$MAX_CONTEXT_CHARS_PER_ITEM")
+          args+=(--typed-stream-limit "$TYPED_STREAM_LIMIT")
+          args+=(--note-distillation-model "$NOTE_DISTILLATION_MODEL")
+          args+=(--api-retry-attempts "$API_RETRY_ATTEMPTS")
+          args+=(--prompt-build-max-workers "$PROMPT_BUILD_MAX_WORKERS")
+          if [[ "$TYPED_STREAM_RETRIEVAL" == "true" ]]; then
+            args+=(--typed-stream-retrieval)
+          fi
+          if [[ "$NOTE_DISTILLATION" == "true" ]]; then
+            args+=(--note-distillation)
+          fi
           if [[ "$SOURCE_EVIDENCE_BUNDLING" == "true" ]]; then
             args+=(--source-evidence-bundling)
           fi

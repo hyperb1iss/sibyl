@@ -183,6 +183,27 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     assert "--profile longmemeval-v2" in workflow
 
 
+def test_longmemeval_v2_workflow_forwards_frozen_operating_point() -> None:
+    workflow = (
+        Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "official_max_context_chars_per_item:" in workflow
+    assert "official_typed_stream_retrieval:" in workflow
+    assert "official_typed_stream_limit:" in workflow
+    assert "official_note_distillation:" in workflow
+    assert "official_note_distillation_model:" in workflow
+    assert "official_api_retry_attempts:" in workflow
+    assert "official_prompt_build_max_workers:" in workflow
+    assert '--max-context-chars-per-item "$MAX_CONTEXT_CHARS_PER_ITEM"' in workflow
+    assert '--typed-stream-limit "$TYPED_STREAM_LIMIT"' in workflow
+    assert '--note-distillation-model "$NOTE_DISTILLATION_MODEL"' in workflow
+    assert '--api-retry-attempts "$API_RETRY_ATTEMPTS"' in workflow
+    assert '--prompt-build-max-workers "$PROMPT_BUILD_MAX_WORKERS"' in workflow
+    assert "args+=(--typed-stream-retrieval)" in workflow
+    assert "args+=(--note-distillation)" in workflow
+
+
 def test_longmemeval_v2_workflow_defaults_to_shared_relevance() -> None:
     workflow = (
         Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
