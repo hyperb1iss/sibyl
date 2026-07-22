@@ -124,6 +124,10 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     ).read_text(encoding="utf-8")
 
     assert "run_official_full:" in workflow
+    assert "official_domain:" in workflow
+    assert "inputs.official_domain == 'web'" in workflow
+    assert "inputs.official_domain == 'enterprise'" in workflow
+    assert "(inputs.official_domain || 'both') == 'both'" in workflow
     assert "if: github.event_name == 'workflow_dispatch' && inputs.run_official_full" in workflow
     assert "'official-full' || 'standard'" in workflow
     assert "github.event_name != 'workflow_dispatch' || !inputs.run_official_full" in workflow
@@ -181,6 +185,9 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     assert "build_submission_step_2_build_package.py" in workflow
     assert "--receipt-only" in workflow
     assert "--profile longmemeval-v2" in workflow
+    assert "Upload service diagnostics" in workflow
+    assert "/tmp/sibyld.log" in workflow
+    assert "/tmp/sibyl-worker.log" in workflow
 
 
 def test_longmemeval_v2_workflow_forwards_frozen_operating_point() -> None:

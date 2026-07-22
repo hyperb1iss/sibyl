@@ -84,6 +84,14 @@ on:
           - small
           - medium
         default: small
+      official_domain:
+        description: "Official domain selection; single-domain runs skip combined packaging"
+        type: choice
+        options:
+          - both
+          - web
+          - enterprise
+        default: both
       official_limit:
         description: "Optional question limit per domain; blank means full domain"
         type: string
@@ -288,7 +296,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        domain: [web, enterprise]
+        domain:
+          ${{ fromJSON(inputs.official_domain == 'web' && '["web"]' ||
+          inputs.official_domain == 'enterprise' && '["enterprise"]' ||
+          '["web","enterprise"]') }}
     env:
       COMPOSE_PROJECT_NAME: sibyl-longmemeval-v2
       DATA_ROOT: .moon/cache/benchmarks/longmemeval-v2-official
@@ -580,9 +591,23 @@ jobs:
             || 'small' }}
           if-no-files-found: error
 
+      - name: Upload service diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name:
+            longmemeval-v2-${{ matrix.domain }}-${{ inputs.official_tier || 'small'
+            }}-service-diagnostics-${{ github.sha }}
+          path: |
+            /tmp/sibyld.log
+            /tmp/sibyl-worker.log
+          if-no-files-found: warn
+
   official-package:
     name: Official combined receipt
-    if: github.event_name == 'workflow_dispatch' && inputs.run_official_full
+    if:
+      github.event_name == 'workflow_dispatch' && inputs.run_official_full &&
+      (inputs.official_domain || 'both') == 'both'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: official-full
