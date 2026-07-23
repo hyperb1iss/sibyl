@@ -351,6 +351,7 @@ jobs:
       SIBYL_SURREAL_URL: ws://localhost:8000/rpc
       SIBYL_SURREAL_USERNAME: sibyl_ci
       SIBYL_SURREAL_PASSWORD: sibyl_ci_password
+      SIBYL_SURREAL_PATH: rocksdb:///data/sibyl-longmemeval-v2.db
       SIBYL_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SIBYL_LLM_MEMORY_PROVIDER: openai
       SIBYL_LLM_MEMORY_MODEL: gpt-5.4-nano
@@ -591,6 +592,23 @@ jobs:
             || 'small' }}
           if-no-files-found: error
 
+      - name: Capture service diagnostics
+        if: always()
+        run: |
+          set +e
+          docker compose --env-file /dev/null ps --all \
+            > /tmp/surrealdb-compose-ps.txt 2>&1
+          surrealdb_id="$(docker compose --env-file /dev/null ps -q surrealdb)"
+          if [[ -n "$surrealdb_id" ]]; then
+            docker inspect "$surrealdb_id" > /tmp/surrealdb-inspect.json 2>&1
+          fi
+          docker compose --env-file /dev/null logs --no-color surrealdb \
+            > /tmp/surrealdb.log 2>&1
+          free -h > /tmp/runner-memory.txt 2>&1
+          df -h > /tmp/runner-disk.txt 2>&1
+          ps -eo pid,ppid,stat,%mem,rss,cmd --sort=-rss \
+            > /tmp/runner-processes.txt 2>&1
+
       - name: Upload service diagnostics
         if: always()
         uses: actions/upload-artifact@v7
@@ -601,6 +619,12 @@ jobs:
           path: |
             /tmp/sibyld.log
             /tmp/sibyl-worker.log
+            /tmp/surrealdb-compose-ps.txt
+            /tmp/surrealdb-inspect.json
+            /tmp/surrealdb.log
+            /tmp/runner-memory.txt
+            /tmp/runner-disk.txt
+            /tmp/runner-processes.txt
           if-no-files-found: warn
 
   official-package:

@@ -1343,6 +1343,7 @@ def test_sibyl_memory_refresh_persists_rotated_credentials_bundle(tmp_path: Path
             )
 
     memory._client = FakeClient()
+    memory._auth_refresh_lock = threading.Lock()
     memory._refresh_token = TEST_CREDENTIAL
     memory._api_credentials_path = credentials_path
     memory._cli_auth = {}
@@ -1357,6 +1358,41 @@ def test_sibyl_memory_refresh_persists_rotated_credentials_bundle(tmp_path: Path
         "organization": {"id": "org-test"},
     }
     assert credentials_path.stat().st_mode & 0o777 == EXPECTED_CREDENTIAL_FILE_MODE
+
+
+def test_sibyl_memory_refresh_is_single_flight_after_stale_401() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.headers = {"Authorization": f"Bearer {TEST_CREDENTIAL}"}
+            self.request_count = 0
+            self.refresh_count = 0
+
+        def request(self, *_args: object, **_kwargs: object) -> httpx.Response:
+            self.request_count += 1
+            if self.request_count == 1:
+                self.headers["Authorization"] = f"Bearer {ROTATED_CREDENTIAL}"
+                return httpx.Response(401)
+            return httpx.Response(200, json={"ok": True})
+
+        def post(self, *_args: object, **_kwargs: object) -> httpx.Response:
+            self.refresh_count += 1
+            return httpx.Response(500)
+
+    client = FakeClient()
+    memory._client = client
+    memory._auth_refresh_lock = threading.Lock()
+    memory._refresh_token = ROTATED_CREDENTIAL
+    memory._api_credentials_path = None
+    memory._cli_auth = {}
+    memory.api_retry_attempts = 1
+
+    assert memory._request_json("GET", "/entities") == {"ok": True}
+    assert client.request_count == EXPECTED_MEMORY_API_RETRY_CALLS
+    assert client.refresh_count == 0
 
 
 def test_sibyl_memory_auth_loads_refreshable_credentials_file(

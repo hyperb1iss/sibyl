@@ -3070,6 +3070,7 @@ class SibylLiveApiMemory(Memory):
             timeout_seconds=self.api_timeout_seconds,
         )
         self._closed = False
+        self._auth_refresh_lock = threading.Lock()
         self._refresh_token = ""
         self._api_credentials_path: Path | None = None
         self._cli_auth: dict[str, str] = {}
@@ -4727,11 +4728,16 @@ class SibylLiveApiMemory(Memory):
         response: httpx.Response | None = None
         for attempt in range(1, self.api_retry_attempts + 1):
             try:
+                request_authorization = (
+                    self._client.headers.get("Authorization") if self._refresh_token else None
+                )
                 response = self._client.request(method, path, json=json, params=params)
                 if (
                     response.status_code == 401
                     and self._refresh_token
-                    and self._refresh_access_token()
+                    and self._refresh_access_token(
+                        stale_authorization=request_authorization,
+                    )
                 ):
                     response = self._client.request(method, path, json=json, params=params)
             except httpx.HTTPError as exc:
@@ -4775,26 +4781,38 @@ class SibylLiveApiMemory(Memory):
         )
         time.sleep(delay)
 
-    def _refresh_access_token(self) -> bool:
-        response = self._client.post("/auth/refresh", json={"refresh_token": self._refresh_token})
-        if response.status_code != 200:
-            return False
-        body = response.json()
-        if not isinstance(body, dict) or not body.get("access_token"):
-            return False
-        access_token = str(body["access_token"])
-        refresh_token = str(body.get("refresh_token") or self._refresh_token)
-        self._refresh_token = refresh_token
-        self._client.headers.update({"Authorization": f"Bearer {access_token}"})
-        if self._api_credentials_path is not None:
-            _store_api_credentials_file(
-                self._api_credentials_path,
-                access_token=access_token,
-                refresh_token=refresh_token,
-                expires_in=body.get("expires_in"),
+    def _refresh_access_token(self, *, stale_authorization: str | None = None) -> bool:
+        with self._auth_refresh_lock:
+            current_authorization = self._client.headers.get("Authorization")
+            if stale_authorization and current_authorization != stale_authorization:
+                return True
+            response = self._client.post(
+                "/auth/refresh",
+                json={"refresh_token": self._refresh_token},
             )
-        _store_cli_auth(self._cli_auth, access_token, refresh_token, body.get("expires_in"))
-        return True
+            if response.status_code != 200:
+                return False
+            body = response.json()
+            if not isinstance(body, dict) or not body.get("access_token"):
+                return False
+            access_token = str(body["access_token"])
+            refresh_token = str(body.get("refresh_token") or self._refresh_token)
+            self._refresh_token = refresh_token
+            self._client.headers.update({"Authorization": f"Bearer {access_token}"})
+            if self._api_credentials_path is not None:
+                _store_api_credentials_file(
+                    self._api_credentials_path,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    expires_in=body.get("expires_in"),
+                )
+            _store_cli_auth(
+                self._cli_auth,
+                access_token,
+                refresh_token,
+                body.get("expires_in"),
+            )
+            return True
 
 
 def _store_api_credentials_file(

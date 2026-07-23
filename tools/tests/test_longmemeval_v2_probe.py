@@ -181,13 +181,25 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
         "moon run bench-longmemeval-v2-official-full"
     )
     assert "https://openrouter.ai/api/v1" in workflow
+
+
+def test_longmemeval_v2_workflow_packages_receipts_and_diagnostics() -> None:
+    workflow = (
+        Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
+    ).read_text(encoding="utf-8")
+
     assert "build_submission_step_1_single_operating_point.py" in workflow
     assert "build_submission_step_2_build_package.py" in workflow
     assert "--receipt-only" in workflow
     assert "--profile longmemeval-v2" in workflow
     assert "Upload service diagnostics" in workflow
-    assert "/tmp/sibyld.log" in workflow
-    assert "/tmp/sibyl-worker.log" in workflow
+    assert "SIBYL_SURREAL_PATH: rocksdb:///data/sibyl-longmemeval-v2.db" in workflow
+    assert "sibyld.log" in workflow
+    assert "sibyl-worker.log" in workflow
+    assert "Capture service diagnostics" in workflow
+    assert "surrealdb-inspect.json" in workflow
+    assert "surrealdb.log" in workflow
+    assert "runner-memory.txt" in workflow
 
 
 def test_longmemeval_v2_workflow_forwards_frozen_operating_point() -> None:
