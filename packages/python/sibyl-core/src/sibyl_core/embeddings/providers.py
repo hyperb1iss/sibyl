@@ -649,7 +649,7 @@ def configured_embedding_provider() -> EmbeddingProvider | None:
         log.info("graph_embeddings_disabled", provider=provider, reason="missing_key")
         return None
 
-    provider_name = cast(EmbeddingProviderName, provider)
+    provider_name = provider
     cache_entry = _configured_provider_cache_entry(
         provider=provider_name,
         model=model,
