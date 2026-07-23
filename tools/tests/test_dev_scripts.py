@@ -376,3 +376,287 @@ esac
     assert result.returncode == 0, result.stderr
     assert "--pid=container:sibyl-surrealdb" in result.stdout
     assert "-e SAMPLE_SECONDS=1" in result.stdout
+
+
+def _run_surreal_runtime_gate(
+    tmp_path: Path,
+    *,
+    inspect_state: str,
+    restart_counts: tuple[int, int],
+    oom_counts: tuple[int, int] = (0, 0),
+    oom_kill_counts: tuple[int, int] = (0, 0),
+    event: str = "",
+    malformed_sample: bool = False,
+    failure_marker: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${{1:-}}" == "inspect" ]]; then
+  printf '%s\\n' '{inspect_state}'
+  exit 0
+fi
+exit 64
+""",
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+
+    output_dir = tmp_path / "telemetry"
+    output_dir.mkdir()
+    header = [
+        "timestamp",
+        "container_id",
+        "status",
+        "restart_count",
+        "oom_killed",
+        "exit_code",
+        "pid",
+        "started_at",
+        "finished_at",
+        "rss_kib",
+        "hwm_kib",
+        "anon_kib",
+        "file_kib",
+        "swap_kib",
+        "threads",
+        "cgroup_current_bytes",
+        "cgroup_peak_bytes",
+        "cgroup_swap_bytes",
+        "cgroup_oom",
+        "cgroup_oom_kill",
+        "pressure_some_total",
+        "pressure_full_total",
+        "host_available_kib",
+    ]
+    rows = [
+        [
+            "2026-07-23T00:00:00Z",
+            "container-id",
+            "running",
+            str(restart_counts[0]),
+            "false",
+            "0",
+            "101",
+            "start",
+            "finish",
+            "1024",
+            "2048",
+            "900",
+            "124",
+            "0",
+            "20",
+            "1048576",
+            "2097152",
+            "0",
+            str(oom_counts[0]),
+            str(oom_kill_counts[0]),
+            "1",
+            "0",
+            "8000000",
+        ],
+        [
+            "2026-07-23T00:00:05Z",
+            "container-id",
+            "running",
+            str(restart_counts[1]),
+            "false",
+            "0",
+            "101",
+            "start",
+            "finish",
+            "1536",
+            "2560",
+            "1300",
+            "236",
+            "0",
+            "22",
+            "1572864",
+            "2621440",
+            "0",
+            str(oom_counts[1]),
+            str(oom_kill_counts[1]),
+            "2",
+            "0",
+            "7900000",
+        ],
+    ]
+    rows_to_write = (
+        [header, rows[0], ["timestamp", "container-id", "missing"]]
+        if malformed_sample
+        else [header, *rows]
+    )
+    (output_dir / "samples.tsv").write_text(
+        "\n".join("\t".join(row) for row in rows_to_write) + "\n",
+        encoding="utf-8",
+    )
+    (output_dir / "docker-events.jsonl").write_text(event, encoding="utf-8")
+    (output_dir / "docker-events.pid").write_text("999999\n", encoding="utf-8")
+    (output_dir / "monitor-ready").touch()
+    if failure_marker is not None:
+        (output_dir / failure_marker).touch()
+
+    bash = which("bash")
+    assert bash is not None
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+    }
+    return subprocess.run(  # noqa: S603
+        [
+            bash,
+            "tools/dev/surreal-runtime-monitor.sh",
+            "gate",
+            "--container",
+            "container-id",
+            "--output-dir",
+            str(output_dir),
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_surreal_runtime_gate_accepts_complete_clean_telemetry(tmp_path: Path) -> None:
+    result = _run_surreal_runtime_gate(
+        tmp_path,
+        inspect_state="running|0|false|0",
+        restart_counts=(0, 0),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "samples=2" in result.stdout
+    assert "rss_peak_kib=1536" in result.stdout
+    assert "cgroup_reported_peak_bytes=2621440" in result.stdout
+    assert "result=pass" in result.stdout
+
+
+def test_surreal_runtime_gate_rejects_restarts(tmp_path: Path) -> None:
+    result = _run_surreal_runtime_gate(
+        tmp_path,
+        inspect_state="running|1|false|0",
+        restart_counts=(0, 1),
+        event='{"Action":"restart"}\n',
+    )
+
+    assert result.returncode == 1
+    assert "SurrealDB restarted: count=1 delta=1" in result.stderr
+    assert "runtime integrity loss" in result.stderr
+
+
+def test_surreal_runtime_gate_rejects_oom_activity(tmp_path: Path) -> None:
+    result = _run_surreal_runtime_gate(
+        tmp_path,
+        inspect_state="running|0|true|137",
+        restart_counts=(0, 0),
+        oom_counts=(0, 1),
+        oom_kill_counts=(0, 1),
+        event='{"Action":"oom"}\n',
+    )
+
+    assert result.returncode == 1
+    assert "cgroup recorded OOM activity" in result.stderr
+    assert "runtime integrity loss" in result.stderr
+
+
+def test_surreal_runtime_gate_rejects_preexisting_oom_activity(tmp_path: Path) -> None:
+    result = _run_surreal_runtime_gate(
+        tmp_path,
+        inspect_state="running|0|false|0",
+        restart_counts=(0, 0),
+        oom_counts=(1, 1),
+        oom_kill_counts=(1, 1),
+    )
+
+    assert result.returncode == 1
+    assert "cgroup recorded OOM activity" in result.stderr
+
+
+def test_surreal_runtime_gate_rejects_malformed_samples(tmp_path: Path) -> None:
+    result = _run_surreal_runtime_gate(
+        tmp_path,
+        inspect_state="running|0|false|0",
+        restart_counts=(0, 0),
+        malformed_sample=True,
+    )
+
+    assert result.returncode == 1
+    assert "telemetry is incomplete" in result.stderr
+
+
+def test_surreal_runtime_gate_rejects_collector_failure(tmp_path: Path) -> None:
+    result = _run_surreal_runtime_gate(
+        tmp_path,
+        inspect_state="running|0|false|0",
+        restart_counts=(0, 0),
+        failure_marker="docker-events.failed",
+    )
+
+    assert result.returncode == 1
+    assert "telemetry failure marker: docker-events.failed" in result.stderr
+
+
+def test_surreal_runtime_monitor_rejects_collector_exit(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+  inspect)
+    if [[ "$*" == *"container={{.Id}}"* ]]; then
+      printf '%s\\n' \
+        'container=container-id image=surrealdb/surrealdb:v3.2.0 started_at=start'
+    else
+      printf '%s\\n' \
+        'container-id|running|0|false|0|999999|start|finish'
+    fi
+    ;;
+  events)
+    exit 42
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    output_dir = tmp_path / "telemetry"
+    bash = which("bash")
+    assert bash is not None
+
+    result = subprocess.run(  # noqa: S603
+        [
+            bash,
+            "tools/dev/surreal-runtime-monitor.sh",
+            "monitor",
+            "--container",
+            "container-id",
+            "--output-dir",
+            str(output_dir),
+            "--interval",
+            "1",
+        ],
+        cwd=REPO_ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=5,
+    )
+
+    assert result.returncode == 1
+    assert "docker events collector exited unexpectedly" in result.stderr
+    assert (output_dir / "docker-events.failed").exists()

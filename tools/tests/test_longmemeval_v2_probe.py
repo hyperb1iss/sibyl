@@ -200,6 +200,23 @@ def test_longmemeval_v2_workflow_packages_receipts_and_diagnostics() -> None:
     assert "surrealdb-inspect.json" in workflow
     assert "surrealdb.log" in workflow
     assert "runner-memory.txt" in workflow
+    assert workflow.count('"tools/dev/surreal-runtime-monitor.sh"') == EXPECTED_WORKFLOW_OCCURRENCES
+    assert "Start SurrealDB runtime telemetry" in workflow
+    assert "Gate SurrealDB runtime integrity" in workflow
+    assert "${{ runner.temp }}/surrealdb-runtime" in workflow
+    assert "monitor-unexpected-exit" in workflow
+    assert "monitor-force-killed" in workflow
+    assert "docker-events-orphaned" in workflow
+    assert "for _ in {1..70}" in workflow
+    assert workflow.index("Start SurrealDB runtime telemetry") < workflow.index(
+        "Run official LongMemEval-V2 domain"
+    )
+    assert workflow.index("Capture service diagnostics") < workflow.index(
+        "Gate SurrealDB runtime integrity"
+    )
+    assert workflow.index("Gate SurrealDB runtime integrity") < workflow.index(
+        "Upload service diagnostics"
+    )
 
 
 def test_longmemeval_v2_workflow_forwards_frozen_operating_point() -> None:

@@ -33,6 +33,7 @@ on:
       - "tools/tests/test_longmemeval_v2_diagnostics.py"
       - "packages/python/sibyl-core/tests/test_longmemeval_v2.py"
       - "tools/tests/test_longmemeval_v2_probe.py"
+      - "tools/dev/surreal-runtime-monitor.sh"
       - "moon.yml"
       - "pyproject.toml"
       - "uv.lock"
@@ -68,6 +69,7 @@ on:
       - "tools/tests/test_longmemeval_v2_diagnostics.py"
       - "packages/python/sibyl-core/tests/test_longmemeval_v2.py"
       - "tools/tests/test_longmemeval_v2_probe.py"
+      - "tools/dev/surreal-runtime-monitor.sh"
       - "moon.yml"
       - "pyproject.toml"
       - "uv.lock"
@@ -420,6 +422,40 @@ jobs:
       - name: Start SurrealDB
         uses: ./.github/actions/start-surrealdb
 
+      - name: Start SurrealDB runtime telemetry
+        run: |
+          set -euo pipefail
+          telemetry="$RUNNER_TEMP/surrealdb-runtime"
+          surrealdb_id="$(docker compose --env-file /dev/null ps -q surrealdb)"
+          if [[ -z "$surrealdb_id" ]]; then
+            echo "::error::SurrealDB container ID is unavailable."
+            exit 1
+          fi
+          mkdir -p "$telemetry"
+          tools/dev/surreal-runtime-monitor.sh monitor \
+            --container "$surrealdb_id" \
+            --output-dir "$telemetry" \
+            --interval 5 \
+            > "$telemetry/monitor.log" 2>&1 &
+          monitor_pid=$!
+          printf '%s\n' "$monitor_pid" > "$telemetry/monitor.pid"
+          printf '%s\n' "$surrealdb_id" > "$telemetry/container.id"
+          for _ in {1..20}; do
+            if ! kill -0 "$monitor_pid" 2>/dev/null; then
+              cat "$telemetry/monitor.log"
+              exit 1
+            fi
+            if [[ -e "$telemetry/monitor-ready" ]] &&
+              [[ -s "$telemetry/samples.tsv" ]] &&
+              (( $(wc -l < "$telemetry/samples.tsv") >= 2 )); then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::SurrealDB telemetry did not produce its first sample."
+          cat "$telemetry/monitor.log"
+          exit 1
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -596,6 +632,43 @@ jobs:
         if: always()
         run: |
           set +e
+          telemetry="$RUNNER_TEMP/surrealdb-runtime"
+          if [[ -f "$telemetry/docker-events.pid" ]]; then
+            events_pid="$(cat "$telemetry/docker-events.pid")"
+            if ! kill -0 "$events_pid" 2>/dev/null; then
+              : > "$telemetry/docker-events.failed"
+            fi
+          else
+            : > "$telemetry/docker-events.failed"
+          fi
+          if [[ -f "$telemetry/monitor.pid" ]]; then
+            monitor_pid="$(cat "$telemetry/monitor.pid")"
+            if kill -0 "$monitor_pid" 2>/dev/null; then
+              kill "$monitor_pid" 2>/dev/null
+              for _ in {1..70}; do
+                kill -0 "$monitor_pid" 2>/dev/null || break
+                sleep 0.1
+              done
+              if kill -0 "$monitor_pid" 2>/dev/null; then
+                : > "$telemetry/monitor-force-killed"
+                kill -KILL "$monitor_pid" 2>/dev/null
+              fi
+            else
+              : > "$telemetry/monitor-unexpected-exit"
+            fi
+          else
+            : > "$telemetry/monitor-unexpected-exit"
+          fi
+          if [[ -n "${events_pid:-}" ]]; then
+            for _ in {1..20}; do
+              kill -0 "$events_pid" 2>/dev/null || break
+              sleep 0.1
+            done
+            if kill -0 "$events_pid" 2>/dev/null; then
+              : > "$telemetry/docker-events-orphaned"
+              kill "$events_pid" 2>/dev/null
+            fi
+          fi
           docker compose --env-file /dev/null ps --all \
             > /tmp/surrealdb-compose-ps.txt 2>&1
           surrealdb_id="$(docker compose --env-file /dev/null ps -q surrealdb)"
@@ -608,6 +681,22 @@ jobs:
           df -h > /tmp/runner-disk.txt 2>&1
           ps -eo pid,ppid,stat,%mem,rss,cmd --sort=-rss \
             > /tmp/runner-processes.txt 2>&1
+          cat /proc/pressure/memory > "$telemetry/host-memory-pressure.txt" 2>&1
+          sudo dmesg --ctime --color=never 2>&1 \
+            | tee "$telemetry/kernel-dmesg.txt" > /dev/null
+          sudo journalctl --dmesg --no-pager 2>&1 \
+            | tee "$telemetry/kernel-journal.txt" > /dev/null
+
+      - name: Gate SurrealDB runtime integrity
+        if: always()
+        run: |
+          set -euo pipefail
+          telemetry="$RUNNER_TEMP/surrealdb-runtime"
+          surrealdb_id="$(cat "$telemetry/container.id")"
+          tools/dev/surreal-runtime-monitor.sh gate \
+            --container "$surrealdb_id" \
+            --output-dir "$telemetry" \
+            | tee "$telemetry/runtime-gate.log"
 
       - name: Upload service diagnostics
         if: always()
@@ -625,6 +714,7 @@ jobs:
             /tmp/runner-memory.txt
             /tmp/runner-disk.txt
             /tmp/runner-processes.txt
+            ${{ runner.temp }}/surrealdb-runtime
           if-no-files-found: warn
 
   official-package:
