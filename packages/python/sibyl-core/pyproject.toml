@@ -47,7 +47,7 @@ crawler = [
     "mistune>=3.0",
 ]
 embeddings = [
-    "google-genai>=2.8.0",
+    "google-genai>=2.14.0",
 ]
 graph = [
     "surrealdb>=2.0.0,<3.0",
@@ -63,7 +63,7 @@ reranking = [
 ]
 runtime = [
     "crawl4ai>=0.9.0",
-    "google-genai>=2.8.0",
+    "google-genai>=2.14.0",
     "mistune>=3.0",
     "pydantic-ai-slim[anthropic,google,openai]>=2.6.0,<3",
     "python-louvain>=0.16",
