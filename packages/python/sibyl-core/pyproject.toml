@@ -34,7 +34,7 @@ dependencies = [
     # Auth primitives (JWT, password hashing)
     "pyjwt>=2.10",
     # Async & HTTP
-    "anyio>=4.0",
+    "anyio>=4.14.2",
     "httpx>=0.27",
     # Logging
     "structlog>=24.0",
