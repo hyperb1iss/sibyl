@@ -106,7 +106,7 @@ must carry an owner and reason here.
 | `apps/api/pyproject.toml` | `redis` | 2 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
 | `apps/cli/README.md` | `redis` | 1 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
 | `apps/cli/src/sibyl_cli/data/skill-packs/core.md` | `falkor`, `postgres`, `redis` | 10 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
-| `apps/cli/src/sibyl_cli/data/skill-packs/examples.md` | `redis` | 3 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
+| `apps/cli/src/sibyl_cli/data/skill-packs/examples.md` | `redis` | 2 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
 | `apps/cli/src/sibyl_cli/data/skill-packs/migration.md` | `falkor`, `graphiti`, `postgres`, `redis` | 76 | v0.8 packaged docs | Packaged README and skill docs retain migration and optional coordination language. |
 | `charts/sibyl/Chart.yaml` | `valkey` | 1 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
 | `charts/sibyl/templates/backend-deployment.yaml` | `redis` | 6 | v0.8 deployment config | Compose and chart files retain Redis as an explicit coordination profile or chart option. |
@@ -153,7 +153,7 @@ must carry an owner and reason here.
 | `docs/guide/claude-code.md` | `redis` | 2 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/entity-types.md` | `redis` | 1 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/index.md` | `redis` | 2 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
-| `docs/guide/installation.md` | `falkor`, `postgres`, `redis`, `valkey` | 17 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
+| `docs/guide/installation.md` | `falkor`, `postgres`, `redis`, `valkey` | 21 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/knowledge-graph.md` | `falkor`, `graphiti`, `redis` | 5 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/mcp-configuration.md` | `redis`, `valkey` | 5 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/memory-loop.md` | `redis` | 1 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
@@ -162,14 +162,14 @@ must carry an owner and reason here.
 | `docs/guide/setting-up-prompts.md` | `redis`, `valkey` | 3 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/skills.md` | `falkor`, `graphiti` | 2 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/sources.md` | `redis` | 2 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
-| `docs/guide/storage-modes.md` | `falkor`, `postgres`, `redis`, `valkey` | 17 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
+| `docs/guide/storage-modes.md` | `falkor`, `postgres`, `redis`, `valkey` | 19 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/surrealdb-migration-release-notes.md` | `falkor`, `graphiti`, `postgres` | 35 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/task-management.md` | `redis` | 1 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/why-surreal.md` | `falkor`, `graphiti`, `postgres`, `redis` | 18 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/guide/working-with-agents.md` | `redis` | 6 | v0.8 docs | User guides label legacy services as historical migration or explicit coordination opt-in. |
 | `docs/index.md` | `redis` | 2 | v0.8 docs | Top-level docs mention current Surreal default and historical migration context. |
 | `docs/testing/ai-memory-landscape.md` | `falkor`, `graphiti` | 7 | benchmark evidence | Competitive landscape docs name Graphiti only as historical comparison context. |
-| `docs/testing/benchmark-methodology.md` | `falkor`, `graphiti`, `postgres` | 8 | benchmark evidence | Benchmark comparison flow names historical migration rehearsal mode. |
+| `docs/testing/benchmark-methodology.md` | `falkor`, `graphiti`, `postgres` | 9 | benchmark evidence | Benchmark comparison flow names historical migration rehearsal mode. |
 | `docs/users/sharing-memory.md` | `postgres` | 2 | enterprise readiness | Enterprise docs mention legacy services only as migration context or optional coordination. |
 | `infra/local/README.md` | `redis`, `valkey` | 12 | local Kubernetes/Tilt dev | Local Tilt and Helm dev keep Redis/Valkey as explicit coordination while Surreal owns data. |
 | `infra/local/secrets.yaml.example` | `redis`, `valkey` | 2 | dev env templates | Environment templates keep legacy ports, migration knobs, and optional Redis/Valkey secrets. |
