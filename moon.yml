@@ -585,6 +585,8 @@ tasks:
       - benchmarks/git_provenance.py
       - benchmarks/longmemeval_v2_official.py
       - benchmarks/longmemeval_v2_reader_replay.py
+      - apps/api/src/sibyl/api/app.py
+      - docs/**/*.md
       - benchmarks/longmemeval_v2_reader_replay_replication.py
       - docs/_archive/SURREALDB_GRAPHITI_EXIT_INVENTORY.md
       - docs/research/rust-port/INVENTORY.md
@@ -667,6 +669,8 @@ tasks:
     inputs:
       - tools/tests/conftest.py
       - tools/tests/test_release_workflow.py
+      - .github/workflows/release.yml
+      - .github/workflows/publish.yml
       - VERSION
       - apps/api/pyproject.toml
       - apps/cli/pyproject.toml

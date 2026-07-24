@@ -200,7 +200,7 @@ def test_publish_workflow_uploads_python_homebrew_and_aur_artifacts() -> None:
     assert "HOMEBREW_TAP_TOKEN cannot push to hyperb1iss/homebrew-tap" in workflow
     assert "persist-credentials: true" in workflow
     assert (
-        "KSXGitHub/github-actions-deploy-aur@da03e160361ce01bf087e790b6ffd196d7dccff7" in workflow
+        "KSXGitHub/github-actions-deploy-aur@084b0d9b15415bf9cdb65d44dad1efe37a354050" in workflow
     )
     assert all(
         fragment in workflow
@@ -212,7 +212,7 @@ def test_publish_workflow_uploads_python_homebrew_and_aur_artifacts() -> None:
             "sibyl-aur-${{ steps.version.outputs.version }}",
         )
     )
-    assert "# v4.1.3" in workflow
+    assert "# v4.2.0" in workflow
     assert "AUR_SSH_KEY" in workflow
     assert workflow.index("gh-action-pypi-publish") < workflow.index("homebrew_formula.py")
     assert workflow.index("gh-action-pypi-publish") < workflow.index("aur_pkgbuild.py")
@@ -285,7 +285,7 @@ def test_publish_workflow_packages_and_publishes_immutable_helm_charts() -> None
 
     assert "helm-package:" in workflow
     assert "helm-publish:" in workflow
-    assert "azure/setup-helm@v5.0.0" in workflow
+    assert "azure/setup-helm@v5.0.1" in workflow
     assert "version: v3.20.2" in workflow
     assert "helm dependency list charts/surrealdb" in workflow
     assert "helm package charts/sibyl" in workflow

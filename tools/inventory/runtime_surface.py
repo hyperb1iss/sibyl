@@ -315,7 +315,6 @@ API_CLI_LEGACY_TERM_FILES = (
     "docs/cli/project.md",
     "docs/cli/reflect.md",
     "docs/cli/remember.md",
-    "docs/cli/search.md",
     "docs/cli/task-create.md",
     "docs/cli/task-lifecycle.md",
 )
